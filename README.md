@@ -88,7 +88,8 @@ In one pass it produces:
 - **CI gates**, wired into every connected repo and the Product as **GitHub Actions or GitLab CI** —
   spec-link, contract-check, verified-commits, build/test/lint, the feature-thread gates, the advisory
   risk-map check (warns when a code repo's `.sdlc/risk-map` — a risk level per directory, no names — is
-  stale, and says how many approvers a PR asks for: one more when it touches a `high` directory), and the push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
+  stale, says how many approvers a PR asks for — one more when it touches a `high` directory — and names
+  who has worked in that directory in the last 30 days), and the push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
   `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
   under `checks/`.
 - **An agent guardrail** on a verified Product — `hooks/ledger-guard.sh`, a harness hook that refuses an

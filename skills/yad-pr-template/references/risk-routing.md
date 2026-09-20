@@ -71,7 +71,8 @@ Domains touched: backend, mobile
 Risk map (origin/main): low — nothing this change touches is high
 ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)
        Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
-       The risk step is advisory. Ask reviewers who know the touched domains:
+       The risk step is advisory.
+       Ask reviewers who know the touched domains:
   - backend
   - mobile
 ```
@@ -82,9 +83,35 @@ a body that says `low`:
 
 ```
 Risk map (origin/main): high — src/payments/ (guessed)
+  worked there in the last 30 days: Alice (@alice)
 ROUTE: 2 approvers = base 1 + high risk 1 (high on the risk map: src/payments/ (guessed))
        The body says Risk level: low, but the risk map on origin/main marks src/payments/ (guessed) high — the larger counts.
+       Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
+       The risk step is advisory.
+       This change touches src/payments/ (guessed), so it asks for an approval from someone who has
+       committed there in the last 30 days (its own authors left out):
+  - Alice (@alice)
+       Ask reviewers who know the touched domains:
+  (Domains line not filled in — list each touched domain so the right reviewers can be asked.)
 ```
+
+**Proven history (E67).** When a `high` directory is touched, the script also names the people who have
+committed there in the **last 30 days**, read from the base branch's history, with this change's own
+authors left out (an approval has to come from someone else). A robot is never listed. A person is shown
+as their git name, plus `(@login)` only when their commit address is a platform `noreply` one — yadflow
+prints no e-mail addresses. "Recent" is git's `--since`, which uses the **committer** date, so a rebased
+or squashed commit counts from when it landed. Work in a `low` directory *inside* a `high` one is not
+history for the `high` one: the deepest map line decides, and git applies that itself — one query per
+directory, excluding the listed directories below it, so no file name is ever read back out of git.
+
+When a change touches more than one `high` directory, the people are printed as ONE list: someone who
+has worked in any of them meets the ask, and the output does not say who worked where.
+
+Two answers are not a list of people, and both are said plainly:
+
+- `nobody else has committed there in the last 30 days` — the count stands on its own.
+- `who has worked there lately: not read — …` — a shallow clone, or git could not read the history. The
+  ask is unknown, never "nobody".
 
 The CI `risk-map` job prints the map's part on every PR as a `COUNT [risk-map]:` line. It does not read
 the body, so `risk-route.sh` is where the two meet. `yad open-pr` prints the same joined count once the

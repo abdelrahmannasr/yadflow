@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# risk-map check (E65, E66). Reads this repo's `.sdlc/risk-map` — one line per directory giving it a
+# risk-map check (E65, E66, E67). Reads this repo's `.sdlc/risk-map` — one line per directory giving it a
 # risk level (high / medium / low), no names — and WARNS when the map has gone stale for the change in
 # front of it. It never fails the build: a warning is how a team keeps the map true. No AI and no Node:
 # the same map and the same diff give the same output on every run.
@@ -11,6 +11,12 @@
 # an `unset` line and an uncovered directory add nothing. The change's files for the count include
 # deleted and moved-away files — deleting code in a `high` directory is a `high` change.
 #
+# It also names WHO can meet that ask (E67): everyone who committed in a `high` directory the change
+# touches in the last 30 days, from the BASE branch's history, this change's own authors left out. With
+# two `high` directories it is one list — someone who worked in any of them meets the ask. Git is asked
+# one directory at a time, through pathspecs that carry the map's cover rule, and answers with author
+# records only: no file name is ever read back out of git.
+#
 #   risk-map-check.sh [<base>]           the warnings, then the count (CI runs this on every PR)
 #   risk-map-check.sh --level [<base>]   the count only, as machine lines, for checks/risk-route.sh:
 #                                          BASE <ref>
@@ -19,6 +25,9 @@
 #                                          FILES <n>          how many files the change touches
 #                                          LEVEL <high|medium|low|none>
 #                                          DIR <dir> <level> <guessed|confirmed>   one per touched line
+#                                          WHO <login|-> <name>   who committed lately in a high one
+#                                          HISTNONE               that history was read, and held nobody
+#                                          HISTUNKNOWN <why>      that history could not be read
 #
 # It warns about:
 #   uncovered   a file this change adds or edits that no line covers — names the directory to add
@@ -63,6 +72,9 @@ LEVEL_ONLY=0
 if [ "${1:-}" = "--level" ]; then LEVEL_ONLY=1; shift; fi
 
 MAP=".sdlc/risk-map"
+# E67's window (Part 3: expertise is a fixed, tight 30 days), in git's own words. Git filters on the
+# COMMITTER date, so a rebased or squashed commit counts from when it landed.
+HISTORY_WINDOW="30 days ago"
 # Advisory means exit 0 on every input — outside a git repo too, where `set -e` would stop at git.
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [ "$LEVEL_ONLY" = 1 ]; then echo "UNKNOWN not inside a git repo"; exit 0; fi
@@ -168,9 +180,51 @@ FILENAME == mapf {
   ne++; ed[ne] = dir; el[ne] = level; es[ne] = (level == "unset") ? "" : state
   next
 }
+FILENAME == logf {
+  # Author records only: `<name>\037<address>`, newest first, one run per `high` directory in map order.
+  # No file name is ever read back from git: the pathspecs already applied the cover rule of the map.
+  if ($0 == "") next
+  nl++; split($0, lf, "\037"); lan[nl] = lf[1]; lae[nl] = lf[2]
+  next
+}
+FILENAME == exclf { if ($0 != "") excl[tolower($0)] = 1; next }
 FILENAME == filesf { na++; fa[na] = $0; next }
 FILENAME == changedf { nc++; fc[nc] = $0; next }
 function rank(l) { return (l == "high") ? 3 : (l == "medium") ? 2 : (l == "low") ? 1 : 0 }
+# E67. The login a noreply address carries, else "" — the twin of `loginFromEmail` in cli/riskmap.mjs.
+# The address is never printed. Matched on the lower-cased domain (a login is case-insensitive) and
+# returned as written, because mawk has no case-insensitive flag.
+function loginof(e,   at, local, domain) {
+  at = index(e, "@")
+  if (at == 0) return ""
+  local = substr(e, 1, at - 1); domain = tolower(substr(e, at + 1))
+  if (domain == "users.noreply.github.com") {
+    sub(/^[0-9]+\+/, "", local)
+    return (local ~ /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$/) ? local : ""
+  }
+  if (domain == "users.noreply.gitlab.com") {
+    if (local !~ /^[0-9]+-/) return ""
+    sub(/^[0-9]+-/, "", local)
+    return (local ~ /^[A-Za-z0-9._-]+$/) ? local : ""
+  }
+  return ""
+}
+# A robot, not a person: an approval can never come from one, and `dependabot[bot]` has no login.
+function isbot(n, e) { return (tolower(trim(n)) ~ /\[bot\]$/ || tolower(e) ~ /\[bot\]@/) }
+# E67, the --level mode`s second pass: the people to name, from the author records the per-directory
+# queries returned. One row per person, in the order git printed them, deduped by address, the change`s
+# own authors and every robot left out.
+function who_out(   j, key) {
+  for (j = 1; j <= nl; j++) {
+    key = tolower(lae[j])
+    if ((key in seenau) || (key in excl) || isbot(lan[j], lae[j])) continue
+    seenau[key] = 1
+    printf "WHO %s %s\n", (loginof(lae[j]) == "") ? "-" : loginof(lae[j]), lan[j]
+  }
+}
+# Every directory the base`s map lists, in map order — the shell turns them into the include/exclude
+# pathspecs that make git apply the cover rule.
+function dirs_out(   i) { for (i = 1; i <= ne; i++) print "ENTRY " ed[i] }
 # E66, the --level mode: the level this change takes from the map (the twin of `changeLevel` in
 # cli/riskmap.mjs). The highest level among the lines that decide the changed files; `unset` and an
 # uncovered file add nothing; `guessed` counts as `confirmed`. Parse problems add nothing either.
@@ -185,6 +239,8 @@ function level_out(   j, k, i, best) {
 }
 END {
   if (mode == "level") { level_out(); exit }
+  if (mode == "who") { who_out(); exit }
+  if (mode == "dirs") { dirs_out(); exit }
   if (unsupported) {
     warn("version", "v" badv, "written for risk-map v" badv "; this release reads v1 — nothing in it was read")
   } else {
@@ -239,7 +295,57 @@ base_level() {
   if ! git diff --name-only -z --no-renames "$RANGE" | tr '\0' '\n' > "$tmp/all-changed"; then
     echo "UNKNOWN git could not list the files this change touches"; return
   fi
-  awk -v mode=level -v mapf="$tmp/basemap" -v filesf=/dev/null -v changedf="$tmp/all-changed" "$RISK_MAP_AWK" "$tmp/basemap" /dev/null "$tmp/all-changed"
+  _lv="$(awk -v mode=level -v mapf="$tmp/basemap" -v filesf=/dev/null -v changedf="$tmp/all-changed" "$RISK_MAP_AWK" "$tmp/basemap" /dev/null "$tmp/all-changed")"
+  printf '%s\n' "$_lv"
+  base_history "$_lv"
+}
+
+# E67 — who has committed lately in the `high` directories this change touches, from the BASE branch's
+# history (a change cannot add its own). Prints `WHO <login|-> <name>` per person, newest first, or
+# `HISTUNKNOWN <why>` — never silence for a history it could not read: a shallow clone holds only the
+# newest commits, and reading that as "nobody has worked here" would drop the ask instead of raising it.
+base_history() {
+  _lvl="$1"
+  _high="$(printf '%s\n' "$_lvl" | awk '$1 == "DIR" && $3 == "high" { print $2 }')"
+  [ -n "$_high" ] || return 0
+  _shallow="$(git rev-parse --is-shallow-repository 2>/dev/null)" || _shallow=""
+  if [ "$_shallow" = true ]; then
+    echo "HISTUNKNOWN this is a shallow clone — it does not hold the history of those directories"; return
+  fi
+  # Every directory the base's map lists, so each query can exclude the ones below the one it asks about.
+  _all="$(awk -v mode=dirs -v mapf="$tmp/basemap" "$RISK_MAP_AWK" "$tmp/basemap" | sed -n 's/^ENTRY //p')"
+  : > "$tmp/log"
+  # ONE QUERY PER `high` DIRECTORY, in map order, and git is asked for author records only — no file
+  # name is ever read back. The pathspecs say what the MAP means by that directory: itself, minus every
+  # listed directory below it, because the deepest listed line decides and each of those answers for
+  # itself in its own query (an exclude beats a later include, so they cannot share one query). `./` is
+  # the files AT the root: `:(glob)*` matches a top-level entry only, because `*` never spans `/`.
+  # --no-merges: a merge commit is nobody's work here. --no-renames: a file moved OUT of the directory is
+  # work in it, counted where it was (E66). --full-history: without it git simplifies a path-filtered log
+  # and hides a side branch whose merge kept the other side.
+  # shellcheck disable=SC2086  # a map directory holds no space or tab (`validdir`), so the split is safe
+  for _d in $_high; do
+    if [ "$_d" = "./" ]; then
+      set -- ':(glob)*'
+    else
+      # Every path built from a MAP NAME is `:(literal)` (`./`, just above, names no directory and is
+      # `:(glob)*`): a name may legally start with `:`, and git reads that as pathspec MAGIC —
+      # `:weird/` would answer about `weird/`, and `:/` about the whole repo.
+      set -- ":(literal)${_d}"
+      for _e in $_all; do
+        case "$_e" in "$_d"?*) set -- "$@" ":(exclude,literal)${_e}" ;; esac
+      done
+    fi
+    git log "$BASE" --no-merges --no-renames --full-history --since="$HISTORY_WINDOW" --format='%an%x1f%ae' -- "$@" >> "$tmp/log" \
+      || { echo "HISTUNKNOWN git could not read the history of '${_d}' on '${BASE}'"; return; }
+  done
+  git log "${BASE}..HEAD" --no-merges --format='%ae' > "$tmp/own" \
+    || { echo "HISTUNKNOWN git could not read this change's own authors"; return; }
+  # HISTNONE is printed when the history WAS read and held nobody. Without that positive marker a
+  # reader could not tell it from a check too old to answer at all, and would call that "nobody".
+  _who="$(awk -v mode=who -v mapf="$tmp/basemap" -v logf="$tmp/log" -v exclf="$tmp/own" \
+    "$RISK_MAP_AWK" "$tmp/basemap" "$tmp/log" "$tmp/own")"
+  if [ -n "$_who" ]; then printf '%s\n' "$_who"; else echo "HISTNONE"; fi
 }
 
 if [ "$LEVEL_ONLY" = 1 ]; then base_level; exit 0; fi
@@ -262,6 +368,19 @@ NOMAP "*)
       echo "COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on ${BASE}."
     fi
     [ -z "$medium" ] || echo "  medium on ${BASE} (reported only, adds nothing): ${medium}"
+    # E67 — and who can meet the ask: an approval from someone who has worked there lately.
+    if [ -n "$high" ]; then
+      # `$1 = ""` would rebuild the line with one space between fields and squash a name's own spacing.
+      who="$(printf '%s\n' "$lv" | sed -n 's/^WHO //p' | awk '{ login = $1; name = $0; sub(/^[^ ]* /, "", name); printf "%s%s%s", sep, name, (login == "-") ? "" : " (@" login ")"; sep = ", " }')"
+      unknown_hist="$(printf '%s\n' "$lv" | sed -n 's/^HISTUNKNOWN //p')"
+      if [ -n "$unknown_hist" ]; then
+        echo "  who has worked there lately: not read — ${unknown_hist}."
+      elif [ -n "$who" ]; then
+        echo "  ask one of these (committed there in the last 30 days, this change's own authors left out): ${who}"
+      else
+        echo "  nobody else has committed there in the last 30 days — the count above still stands."
+      fi
+    fi
     ;;
 esac
 

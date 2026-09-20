@@ -304,7 +304,8 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2
    (`risk-route.sh` prints it and the touched domains to ask), the same arithmetic as the gate. A change
    touching a directory the base branch's `.sdlc/risk-map` marks `high` adds 1 too, even when the body
-   says `low` — the larger step wins.
+   says `low` — the larger step wins. That directory also asks for an approval from someone who has
+   committed there in the last 30 days, and the same scripts name who that is.
 5. **AI review → engineer review → merge** — `yad-engineer-review`: CodeRabbit is an advisory first pass
    (never the authority); a human engineer approves (one approver holds the merge; risk raises the reported count); on
    merge the ship is recorded in the build ledger — as a shard under `.sdlc/build-log/`, which readers

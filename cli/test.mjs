@@ -17831,3 +17831,107 @@ test('escalate by count: open-pr prints the count — the larger of body and map
     assert.equal(git(r.T, 'status', '--porcelain').toString(), '', 'nothing is written');
   } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
 });
+
+// ---- E67: escalate by proven history -------------------------------------------------------------
+// A change to a `high` directory asks for an approval from someone who has committed there in the last
+// 30 days. Read from the BASE branch, reported only. The bash twin is compared in cli/test-checks.mjs.
+
+test('proven history: the login comes only from a noreply address, and it is the same rule usage.mjs had', async () => {
+  const { loginFromEmail } = await import('./riskmap.mjs');
+  const usage = await import('./usage.mjs');
+  assert.equal(usage.loginFromEmail, loginFromEmail, 'usage.mjs re-exports the one rule (rule 3)');
+  assert.equal(loginFromEmail('12345+octocat@users.noreply.github.com'), 'octocat');
+  assert.equal(loginFromEmail('Octocat@users.noreply.github.com'), 'Octocat', 'shown as written');
+  assert.equal(loginFromEmail('12345-tanuki@users.noreply.gitlab.com'), 'tanuki');
+  assert.equal(loginFromEmail('tanuki@users.noreply.gitlab.com'), null, 'GitLab writes the id first');
+  assert.equal(loginFromEmail('alice@corp.io'), null, 'a work address names no login');
+  assert.equal(loginFromEmail('49699333+dependabot[bot]@users.noreply.github.com'), null);
+});
+
+test('proven history: which directories are asked about, and who drops out of the answer', async () => {
+  const { parseRiskMap, recentAuthors, highTouched, pathspecsFor } = await import('./riskmap.mjs');
+  const { entries } = parseRiskMap([
+    '# yad-risk-map v1', './ low confirmed', 'src/ low confirmed', 'src/payments/ high confirmed',
+    'src/payments/legacy/ low confirmed', 'src/catalog/ medium confirmed',
+  ].join('\n'));
+  // WHICH directories git is asked about — the cover rule, as pathspecs git applies itself.
+  assert.deepEqual(highTouched(entries, ['src/catalog/c.js', 'README.md']), [], 'nothing high: no query at all');
+  assert.deepEqual(highTouched(entries, ['src/payments/pay.js']).map((e) => e.dir), ['src/payments/']);
+  // The deepest listed line decides, so a `low` child is cut out of its parent's query and answers for
+  // itself in its own — an exclude beats a later include, so they can never share one query.
+  // Every path is `:(literal)`: a map may list a directory whose name starts with `:`, and git would
+  // read that as pathspec magic — `:weird/` answers about `weird/`, `:/` about the whole repo.
+  assert.deepEqual(pathspecsFor(entries, 'src/payments/'), [':(literal)src/payments/', ':(exclude,literal)src/payments/legacy/']);
+  assert.deepEqual(pathspecsFor(entries, './'), [':(glob)*'], '`./` is the files AT the root');
+
+  // WHO drops out of what those queries returned.
+  const commits = [
+    { name: 'Bob', email: 'bob@corp.io' },                                            // the change's own author
+    { name: 'dependabot[bot]', email: '1+dependabot[bot]@users.noreply.github.com' }, // a robot
+    { name: 'Alice', email: '12345+alice@users.noreply.github.com' },
+    { name: 'Alice again', email: 'ALICE@corp.io' },                                  // a second address is a second row
+    { name: 'Alice', email: '12345+alice@users.noreply.github.com' },                 // already listed
+  ];
+  assert.deepEqual(recentAuthors(commits, ['BOB@corp.io']), [
+    { name: 'Alice', login: 'alice' },
+    { name: 'Alice again', login: null },
+  ], 'git\'s order, deduped by address, the change\'s own author left out whatever its case');
+});
+
+test('proven history: a shallow clone or a failing git is "not read", never "nobody"', async () => {
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const r = repoWithBaseMap('# yad-risk-map v1\nsrc/payments/ high confirmed\n', { 'src/payments/pay.js': 'x' });
+  try {
+    r.put({ 'src/payments/pay.js': 'y' });
+    r.commit('feat: pay');
+    const args = { entries: parseRiskMap('# yad-risk-map v1\nsrc/payments/ high confirmed\n').entries, changed: ['src/payments/pay.js'] };
+    const ok = recentAuthorsFor(r.T, 'origin/main', args);
+    assert.equal(ok.unknown, undefined, 'a full clone reads the history');
+    assert.ok(Array.isArray(ok.authors));
+    assert.match(recentAuthorsFor(r.T, 'origin/nope', args).unknown, /git could not read the history/);
+    // A shallow clone holds only the newest commits, so "nobody" would be a guess.
+    const C = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e67shallow-'));
+    execFileSync('git', ['clone', '-q', '--depth', '1', `file://${r.T}`, C], { stdio: 'pipe' });
+    assert.match(recentAuthorsFor(C, 'HEAD', args).unknown, /shallow clone/);
+    fs.rmSync(C, { recursive: true, force: true });
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});
+
+test('proven history: the JS reader sees a quoted path and a move out, exactly as the bash twin does', async () => {
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const MAP = '# yad-risk-map v1\nsrc/ low confirmed\nsrc/payments/ high confirmed\n';
+  const r = repoWithBaseMap(MAP, { 'src/payments/plain.js': 'x' });
+  const at = (d) => new Date(Date.now() - d * 86400e3).toISOString();
+  const as = (name, email, date, files, msg) => {
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(r.T, rel)), { recursive: true });
+      fs.writeFileSync(path.join(r.T, rel), text);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: r.T, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-q', '-m', msg], {
+      cwd: r.T,
+      stdio: 'pipe',
+      env: { ...process.env, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_AUTHOR_DATE: at(date), GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email, GIT_COMMITTER_DATE: at(date) },
+    });
+  };
+  try {
+    git(r.T, 'checkout', '-q', 'main');
+    // git quotes this path unless it is asked for NUL-separated output; a quoted path covers no line.
+    // The old commit goes FIRST: git's date-limited walk stops at the first commit older than the
+    // window on a chain, so an old one in the middle would hide everything behind it (a stated limit).
+    as('Mover', 'mover@corp.io', 200, { 'src/payments/moved.js': 'x' }, 'feat: park it');
+    as('Cafe Writer', 'cafe@corp.io', 2, { 'src/payments/café.js': 'x' }, 'feat: odd name');
+    execFileSync('git', ['mv', 'src/payments/moved.js', 'src/moved.js'], { cwd: r.T, stdio: 'pipe' });
+    as('Mover', 'mover@corp.io', 1, {}, 'refactor: move out of payments');
+    git(r.T, 'update-ref', 'refs/remotes/origin/main', 'main');
+    git(r.T, 'checkout', '-q', 'feat/x');
+    git(r.T, 'rebase', '-q', 'main');
+    r.put({ 'src/payments/plain.js': 'y' });
+    r.commit('feat: the change');
+    const got = recentAuthorsFor(r.T, 'origin/main', { entries: parseRiskMap(MAP).entries, changed: ['src/payments/plain.js'] });
+    assert.deepEqual(got.authors.map((a) => a.name), ['Mover', 'Cafe Writer'],
+      'a move OUT of payments is work in payments, and a quoted path never drops its author');
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});

@@ -762,10 +762,32 @@ Three places print it, and none of them writes it anywhere:
   body and the map, and says when the body's level is lower than the map's.
 - `yad open-pr` prints the same count once the PR is open. The PR body keeps the level its author gave.
 
+**Who can meet the ask: proven history (E67).** A `high` directory asks for one more approver, and the
+same three places name the people who can be that approver: whoever has **committed in one of those
+directories in the last 30 days**. Two `high` directories give one list, not one list each: working in
+any of them meets the ask.
+
+| Rule | Why |
+|---|---|
+| The history is the **base branch's**, and this change's own authors are left out. | A change cannot add its own history, and an approval has to come from someone else. |
+| Git itself applies the map's **cover rule**, through one query per `high` directory: work in a `low` directory inside a `high` one is not history for the `high` one. | The deepest map line decides, as everywhere else — and nothing has to read a list of file names back out of git, where an odd name could name the wrong person. |
+| A person is shown as their git **name**, plus `(@login)` only when their commit address is a platform `noreply` one. | yadflow prints no e-mail addresses. A work address names no login. |
+| A robot (`dependabot[bot]`) is never listed. | An approval can never come from one. |
+| Nobody with recent work is said plainly, and the count stands. | A new or dormant directory can never make a change unreviewable. |
+| A history that could not be read (a **shallow clone**) says "not read", never "nobody". | Reading it as "nobody" would drop the ask instead of raising it. |
+
+"Recent" is git's `--since`, which uses the **committer** date, so a rebased or squashed commit counts
+from when it landed. Nothing is stored: the query runs each time, and no name reaches a file.
+
+`yad-engineer-review` reports it in three states, in this order: **met** when a recorded approver's login
+is one of the named people (compared without case); **could not confirm** when the history was not read,
+or when no approver matches and a named person has no login to compare against (an approval records a
+platform login; git history records a name); and **short** only when no approver matches and every named
+person does have a login. It never blocks.
+
 The Shape gate (`yad gate status`, `gate sync`, the review-PR body) does not read the map. It reviews
 Product files, not a code change, so its count still comes from each step's `risk_tags`. `yad doctor`
-prints no count either: a count belongs to one change. E67 will ask who has committed to the `high`
-directories a change touches.
+prints no count either: a count belongs to one change.
 
 ## File shape: `schemaVersion`
 

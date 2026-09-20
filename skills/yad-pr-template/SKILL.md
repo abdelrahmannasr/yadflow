@@ -90,6 +90,9 @@ PR description's Impact & Risk block, read the base branch's risk map, and print
 - a change touching a directory the **base branch's** `.sdlc/risk-map` marks `high` → +1 as well (E66),
   even when the body says `low`: the larger step wins, and the script says the two disagree. A `guessed`
   level counts. When the map cannot be read, it says so and counts the body alone.
+- that same `high` directory asks for an approval from someone who **committed there in the last 30
+  days** (E67). The script names them from the base branch's history, without this change's own authors,
+  as one list across every `high` directory touched; "nobody" and "not read" are said apart.
 
 When the count is raised, the script adds that only the base holds the merge until the capacity cap
 (1 approval from someone other than the author), that the risk step is advisory, and lists the touched

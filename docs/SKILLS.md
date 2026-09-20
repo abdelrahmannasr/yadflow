@@ -172,7 +172,8 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   and the **pattern gates** — **commit-message** (Conventional subject + trailer order), **pr-title**,
   and **pr-template** (the PR/MR body uses the template), plus the advisory **risk-map** check (warns,
   never fails, when the repo's `.sdlc/risk-map` is stale for the change, and prints the approver count:
-  a change touching a directory the base branch's map marks `high` asks for one more — E66). Also wires **yad-update-guard** — a
+  a change touching a directory the base branch's map marks `high` asks for one more — E66 — and names
+  who has committed there in the last 30 days, the people who can meet that ask — E67). Also wires **yad-update-guard** — a
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
   with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
   both code repos and the Product. CI-agnostic bash for GitHub Actions and GitLab CI. Also

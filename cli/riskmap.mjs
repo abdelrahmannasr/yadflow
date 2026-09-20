@@ -154,6 +154,67 @@ export function changeLevel(parsed, changed = []) {
   return { level, step: level ? LEVEL_STEP[level] : 0, dirs };
 }
 
+// E67 — ESCALATE BY PROVEN HISTORY. Who has worked in the `high` directories a change touches, lately.
+//
+// The platform login a noreply commit address carries — `12345+octocat@users.noreply.github.com`,
+// `octocat@users.noreply.github.com`, `12345-tanuki@users.noreply.gitlab.com` — else null. The address
+// itself is never emitted; only the login, which the ledgers already record. The login keeps the case
+// the address carries. It lives here, not in cli/usage.mjs (which re-exports it), because the awk twin
+// in `checks/risk-map-check.sh` derives the same login and a test compares the two.
+export function loginFromEmail(email) {
+  const e = String(email || '');
+  const gh = e.match(/^(?:\d+\+)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)@users\.noreply\.github\.com$/i);
+  if (gh) return gh[1];
+  const gl = e.match(/^\d+-([a-z0-9._-]+)@users\.noreply\.gitlab\.com$/i);
+  return gl ? gl[1] : null;
+}
+
+// A commit whose author is a robot, not a person: an approval can never come from one. GitHub writes
+// `dependabot[bot]` as the name and `…[bot]@users.noreply.github.com` as the address; the `[` also makes
+// the login rule above reject it, so without this it would be listed by name as if it could approve.
+const isBot = (name, email) => /\[bot\]$/i.test(String(name || '').trim()) || /\[bot\]@/i.test(String(email || ''));
+
+// The `high` directories this change touches, in map order. One git query runs per directory.
+export function highTouched(entries, changed) {
+  const hit = new Set();
+  for (const f of changed) { const e = coverOf(entries, f); if (e && e.level === 'high') hit.add(e); }
+  return entries.filter((e) => hit.has(e));
+}
+
+// The git pathspecs that mean "this directory, as the MAP sees it". Git then applies the map's cover
+// rule itself, and nothing has to read a list of file names back out of git — which is what made a
+// quoted path, a path holding a newline, or a merge's simplified path list able to name the wrong
+// person. Every listed directory strictly below `dir` is excluded, whatever its level: the deepest
+// listed line decides, so each of those directories answers for itself in its own query (git lets an
+// exclude beat a later include, so they cannot share one).
+// `./` is the files AT the root: `:(glob)*` matches a top-level entry only, because `*` never spans `/`.
+// Every path built FROM A MAP NAME is `:(literal)` (`./` is the exception: it names no directory, and
+// becomes `:(glob)*`). A directory name may legally start with `:` (`validDir` allows it), and git reads
+// a leading `:` as pathspec MAGIC — `:weird/` would answer about `weird/`, and `:/` about the whole
+// repo. A map name must describe a directory to git, never tell git what to do.
+export function pathspecsFor(entries, dir) {
+  if (dir === './') return [':(glob)*'];
+  return [`:(literal)${dir}`, ...entries.filter((e) => e.dir !== dir && e.dir.startsWith(dir)).map((e) => `:(exclude,literal)${e.dir}`)];
+}
+
+// The people to name, from the author records those queries returned: `commits` is [{ name, email }] in
+// the order git printed them (newest first, one run per directory in map order), and `excludeEmails` the
+// authors of the change itself — an approval has to come from someone else, so their own work never
+// counts. A robot is never a person who can approve. Deduped by address; the address itself never leaves
+// this function (nor does `yad` ever print one).
+export function recentAuthors(commits, excludeEmails = []) {
+  const skip = new Set(excludeEmails.map((e) => String(e).toLowerCase()));
+  const seen = new Set();
+  const out = [];
+  for (const cm of commits) {
+    const key = String(cm.email || '').toLowerCase();
+    if (seen.has(key) || skip.has(key) || isBot(cm.name, cm.email)) continue;
+    seen.add(key);
+    out.push({ name: cm.name, login: loginFromEmail(cm.email) });
+  }
+  return out;
+}
+
 // The directory to add for a file no line covers. Walk down from the root while some listed line sits
 // deeper under the current directory; the first directory with none below it is the one to add. A file
 // directly inside a directory that only has deeper lines asks for that directory itself. A directory a

@@ -36,7 +36,7 @@ const GROUPS = [
       'yad ship --type <t> -m <subject> — commit AND open the PR/MR in one step',
       'yad repo list / yad repo refresh [name] — fresh/stale code-context',
       'yad repo refresh [name] --push — publish refreshed code-maps + the registry to the Product default branch (chore(hub): sync code-context [skip ci])',
-      'yad risk-map check|draft [repo] — a code repo\'s .sdlc/risk-map: a risk level per directory (high / medium / low), no names. draft adds unset lines and never changes one; check warns where the map is stale (advisory). A PR touching a directory the base branch\'s map marks high asks for one more approver (reported, not enforced)',
+      'yad risk-map check|draft [repo] — a code repo\'s .sdlc/risk-map: a risk level per directory (high / medium / low), no names. draft adds unset lines and never changes one; check warns where the map is stale (advisory). A PR touching a directory the base branch\'s map marks high asks for one more approver (reported, not enforced); the CI check, risk-route.sh and yad open-pr — not this command — also name who committed there in the last 30 days',
     ],
   },
 ];

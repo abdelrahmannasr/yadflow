@@ -378,14 +378,47 @@ COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on
   shares no history with HEAD, or holds a map for a newer version: **no COUNT line**, and a note that the
   count is unknown, not zero.
 
+**Who can meet the ask (E67).** Under the count, the check names the people who have committed in the
+last 30 days in the `high` directories this change touches. With two such directories it is ONE list:
+someone who has worked in any of them meets the ask, and the output never says who worked where.
+
+```
+  ask one of these (committed there in the last 30 days, this change's own authors left out): Alice (@alice)
+  nobody else has committed there in the last 30 days — the count above still stands.
+  who has worked there lately: not read — this is a shallow clone — it does not hold the history of those directories.
+```
+
+- The history is the **base branch's** (`git log <base> --since='30 days ago' --no-merges`), so a change
+  cannot add its own; git filters on the **committer** date. The change's own authors are left out,
+  because an approval has to come from someone else, and a robot (`…[bot]`) is never listed.
+- **Git applies the map, and no file name is ever read back.** One query runs per `high` directory, in
+  map order, carrying pathspecs that say what the map means by it: the directory, minus every listed
+  directory below it — the deepest line decides, and each of those answers for itself in its own query
+  (an exclude beats a later include, so they cannot share one). `./` is the files AT the root
+  (`:(glob)*`, because `*` never spans `/`). Git then returns author records only. Reading a list of
+  file names back was what let a quoted path, a name holding a newline, or a merge's simplified path
+  list name the wrong person; there is no list to misread now.
+- A person is their git **name**, plus `(@login)` only when the commit address is a platform `noreply`
+  one. No e-mail address is ever printed.
+- A **shallow clone** says "not read", never "nobody": it holds only the newest commits, and reading
+  that as "nobody has worked here" would drop the ask instead of raising it. Wired CI checks out the
+  full history (`fetch-depth: 0`, `GIT_DEPTH: 0`), so this is a local or host-overridden case.
+- A side branch whose merge kept the other side still counts (`--full-history`): git otherwise simplifies
+  a path-filtered log and hides it.
+- **Known limit:** git's date-limited walk stops at the first commit older than the window on a chain,
+  so a repo whose commit dates run out of order (a wrong clock, an imported history) can hide people
+  behind that commit. It under-lists, so the printed people are always real ones.
+
 `risk-map-check.sh --level [<base>]` prints the same result as machine lines (`BASE`, `UNKNOWN`, `NOMAP`,
-`FILES`, `LEVEL`, `DIR <dir> <level> <state>`) for `checks/risk-route.sh`, which joins it with the PR
+`FILES`, `LEVEL`, `DIR <dir> <level> <state>`, `WHO <login|-> <name>`, `HISTNONE` — the history was read
+and held nobody — and `HISTUNKNOWN <why>`) for `checks/risk-route.sh`, which joins it with the PR
 body. One awk program serves both the warnings and the count. Its twin is `changeLevel` in
 `cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** like every check here, the
 script runs from the PR's own checkout, so a PR can edit the script itself; that matters once the count
 is enforced (E72), not while it is only reported. And, as for the warnings, a path holding a newline is
 split in two here but kept whole by `changeLevel`, so the bash count can read its second half as a file
-at the root; the error can only raise the count, never lower it. If git itself fails, each step of the
+at the root; the error can only raise the count, never lower it. (The E67 history is free of that class:
+it reads no file names at all.) If git itself fails, each step of the
 count says "not counted"; the E65 warnings half is not guarded the same way, so a failing `git diff` or
 `git ls-files` there can still end the script with git's exit code.
 
