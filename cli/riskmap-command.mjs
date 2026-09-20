@@ -110,26 +110,39 @@ export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window =
   // -z: without it git quotes a path holding a non-ASCII byte, a `"`, a `\\` or a tab, and no map line
   // could ever cover the quoted spelling — the person who wrote it would drop out of the list.
   // --no-renames: a file moved OUT of a high directory is work in it, counted where it was (E66).
-  const log = git(['log', baseRef, '--no-merges', '--no-renames', `--since=${window}`, '--format=%x01%an%x1f%ae', '--name-only', '-z']);
+  // --full-history changes nothing here (it only matters with a pathspec, which the bash twin uses to
+  // narrow the log); it is passed so both twins ask git the same question.
+  const log = git(['log', baseRef, '--no-merges', '--no-renames', '--full-history', `--since=${window}`, '--format=%x01%an%x1f%ae', '--name-only', '-z']);
   const own = git(['log', `${baseRef}..HEAD`, '--no-merges', '--format=%ae']);
   if (log.status !== 0 || own.status !== 0) return { unknown: `git could not read the history of '${baseRef}'` };
-  return { authors: recentAuthors(entries, changed, parseGitLog(log.stdout), own.stdout.split('\n').filter(Boolean)) };
+  const commits = parseGitLog(log.stdout);
+  if (commits.pathNewline) return { unknown: 'a file name in this history holds a newline — it cannot be read safely' };
+  return { authors: recentAuthors(entries, changed, commits, own.stdout.split('\n').filter(Boolean)) };
 }
 
 // `git log --format=%x01%an%x1f%ae --name-only` into [{ name, email, files }], newest first. A path is
 // every other non-empty line; git prints no path for a commit that changed none.
+// Newline to \x02 first, then NUL to newline — byte for byte what the bash twin does, so both read a
+// path the same way. git separates a commit's header from its paths with a newline, so without the swap
+// a path that HOLDS one would split in two and its second half could be read as a file somewhere else.
+// `pathNewline` says that happened; a caller must then treat the history as unknown, never as a shorter
+// list of people.
 export function parseGitLog(stdout) {
   const commits = [];
   let cur = null;
-  // NUL to newline, as the bash twin does: `-z` gives raw paths, and a path holding a newline is the
-  // one case both twins read differently (E65's own known limit).
-  for (const line of String(stdout || '').replace(/\0/g, '\n').split('\n')) {
+  let pathNewline = false;
+  for (const line of String(stdout || '').replace(/\n/g, '\x02').replace(/\0/g, '\n').split('\n')) {
     if (line.startsWith('\x01')) {
       const [name, email] = line.slice(1).split('\x1f');
       cur = { name, email, files: [] };
       commits.push(cur);
-    } else if (line && cur) cur.files.push(line);
+    } else if (line && cur) {
+      const p = line.replace(/^\x02/, '');
+      if (p.includes('\x02')) pathNewline = true;
+      else cur.files.push(p);
+    }
   }
+  commits.pathNewline = pathNewline;
   return commits;
 }
 

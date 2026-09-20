@@ -107,6 +107,7 @@ ask for, and the count stands on its own. That line, and `not read`, are printed
 
 **One list, not one per directory.** When a change touches two `high` directories, the people are printed
 as one list: someone who has worked in ANY of them meets the ask. Nothing says which person worked where.
+
 Record `engagement: verified` when the engineer reviewed through the companion (else `none` for a bare
 approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto the ship record from the
 platform (mutating the ship's shard where it lives, or its folded entry if already tidied). Soft by default (both count; a bare approve draws `yad review nudge`); only gates when

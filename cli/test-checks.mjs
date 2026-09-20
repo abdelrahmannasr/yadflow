@@ -3390,8 +3390,8 @@ test('proven history: nobody with recent work is said plainly, and a shallow clo
 });
 
 test('proven history: bash and cli/riskmap.mjs name the same people, in the same order', async () => {
-  const { parseRiskMap, recentAuthors } = await import('./riskmap.mjs');
-  const { parseGitLog } = await import('./riskmap-command.mjs');
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
   const T = historyRepo();
   // A second address for Alice (a person can have two), one more high directory, and a name git quotes.
   commitAs(T, { name: 'Alice', email: 'alice@corp.io', date: days(1) }, 'fix: payments again', { 'src/payments/pay.js': 'q' });
@@ -3405,10 +3405,9 @@ test('proven history: bash and cli/riskmap.mjs name the same people, in the same
     assert.equal(r.code, 0, r.out);
     const map = git(T, 'show', 'main:.sdlc/risk-map').toString();
     const changed = git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean);
-    const log = git(T, 'log', 'main', '--no-merges', '--since=30 days ago', '--format=%x01%an%x1f%ae', '--name-only').toString();
-    const own = git(T, 'log', 'main..HEAD', '--no-merges', '--format=%ae').toString().split('\n').filter(Boolean);
-    const js = recentAuthors(parseRiskMap(map).entries, changed, parseGitLog(log), own)
-      .map((a) => `${a.login || '-'} ${a.name}`);
+    const got = recentAuthorsFor(T, 'main', { entries: parseRiskMap(map).entries, changed });
+    assert.equal(got.unknown, undefined, `change #${i}: ${got.unknown}`);
+    const js = got.authors.map((a) => `${a.login || '-'} ${a.name}`);
     assert.deepEqual(whoLines(r.out), js, `change #${i} — bash and JS disagree`);
   }
   fs.rmSync(T, { recursive: true, force: true });
@@ -3435,8 +3434,8 @@ test('proven history: a path git would quote still counts — and its author is 
 });
 
 test('proven history: a move OUT of a high directory is work in it, in both twins', async () => {
-  const { parseRiskMap, recentAuthors } = await import('./riskmap.mjs');
-  const { parseGitLog } = await import('./riskmap-command.mjs');
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
   const T = historyRepo({ aliceRecent: false });
   git(T, 'checkout', '-q', 'main');
   // The file is created LONG ago, so the move is the mover's only commit inside the window: without
@@ -3447,11 +3446,10 @@ test('proven history: a move OUT of a high directory is work in it, in both twin
   git(T, 'checkout', '-q', 'pr'); git(T, 'rebase', '-q', 'main');
   const r = runGate(RISK_MAP, T, ['--level', 'main']);
   assert.deepEqual(whoLines(r.out), ['- Mover'], r.out);
-  const log = git(T, 'log', 'main', '--no-merges', '--no-renames', '--since=30 days ago', '--format=%x01%an%x1f%ae', '--name-only', '-z').toString();
-  const own = git(T, 'log', 'main..HEAD', '--no-merges', '--format=%ae').toString().split('\n').filter(Boolean);
-  const js = recentAuthors(parseRiskMap(git(T, 'show', 'main:.sdlc/risk-map').toString()).entries,
-    git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean),
-    parseGitLog(log), own).map((a) => `${a.login || '-'} ${a.name}`);
+  const js = recentAuthorsFor(T, 'main', {
+    entries: parseRiskMap(git(T, 'show', 'main:.sdlc/risk-map').toString()).entries,
+    changed: git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean),
+  }).authors.map((a) => `${a.login || '-'} ${a.name}`);
   assert.deepEqual(whoLines(r.out), js, 'bash and JS see the same move');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -3492,5 +3490,54 @@ test('risk-route: a risk-map check that predates E67 is "not counted", never rea
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /who has worked there lately: not read — checks\/risk-map-check\.sh cannot answer this yet \(it predates E67\)/, r.out);
   assert.doesNotMatch(r.out, /nobody else has committed/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('proven history: a file name holding a newline is "not read" — it never names someone who was elsewhere', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const T = historyRepo({ aliceRecent: false });
+  git(T, 'checkout', '-q', 'main');
+  // One file, whose NAME holds a newline, inside the `low` child of a `high` directory. Split on that
+  // newline, its second half reads as `src/payments/ghost.js` — work in the `high` one, by someone who
+  // never touched it.
+  const dir = path.join(T, 'src/payments/legacy/oops\nsrc/payments');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'ghost.js'), 'x');
+  commitAs(T, { name: 'Eve', email: 'eve@corp.io', date: days(1) }, 'chore: an odd name');
+  git(T, 'checkout', '-q', 'pr'); git(T, 'rebase', '-q', 'main');
+  const r = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(whoLines(r.out), [], r.out);
+  assert.match(r.out, /^HISTUNKNOWN a file name in this history holds a newline/m, r.out);
+  const js = recentAuthorsFor(T, 'main', {
+    entries: parseRiskMap(git(T, 'show', 'main:.sdlc/risk-map').toString()).entries,
+    changed: ['src/payments/pay.js'],
+  });
+  assert.match(js.unknown, /holds a newline/, 'both twins refuse, rather than disagree');
+  assert.equal(js.authors, undefined);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('proven history: a side branch whose merge kept the other side still counts, in both twins', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const T = historyRepo({ aliceRecent: false });
+  git(T, 'checkout', '-q', 'main');
+  git(T, 'checkout', '-q', '-b', 'side');
+  commitAs(T, { name: 'Sid', email: 'sid@corp.io', date: days(2) }, 'fix: payments, on a side branch', { 'src/payments/sid.js': 'sid' });
+  git(T, 'checkout', '-q', 'main');
+  commitAs(T, { name: 'Mai', email: 'mai@corp.io', date: days(2) }, 'fix: payments, on main', { 'src/payments/mai.js': 'mai' });
+  // The merge keeps main's file, so the merged tree equals the first parent's: git's history
+  // simplification then hides Sid's commit from a path-filtered log unless --full-history is given.
+  git(T, 'merge', '-q', '--no-ff', '-s', 'ours', 'side', '-m', 'merge: keep main');
+  git(T, 'checkout', '-q', 'pr'); git(T, 'rebase', '-q', 'main');
+  const r = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.deepEqual(whoLines(r.out).sort(), ['- Mai', '- Sid'], r.out);
+  const js = recentAuthorsFor(T, 'main', {
+    entries: parseRiskMap(git(T, 'show', 'main:.sdlc/risk-map').toString()).entries,
+    changed: git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean),
+  });
+  assert.deepEqual(js.authors.map((a) => a.name).sort(), ['Mai', 'Sid'], 'the JS reader sees the same');
   fs.rmSync(T, { recursive: true, force: true });
 });

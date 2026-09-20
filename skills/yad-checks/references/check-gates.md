@@ -399,13 +399,18 @@ someone who has worked in any of them meets the ask, and the output never says w
 - A **shallow clone** says "not read", never "nobody": it holds only the newest commits, and reading
   that as "nobody has worked here" would drop the ask instead of raising it. Wired CI checks out the
   full history (`fetch-depth: 0`, `GIT_DEPTH: 0`), so this is a local or host-overridden case.
+- A file **name holding a newline** makes the whole history "not read": git separates a commit's header
+  from its paths with a newline, so such a name would split in two and its second half could be read as
+  a file somewhere else — naming someone who never worked there. Both twins refuse instead.
+- A side branch whose merge kept the other side still counts (`--full-history`): git otherwise simplifies
+  a path-filtered log and hides it.
 - **Known limit:** git's date-limited walk stops at the first commit older than the window on a chain,
   so a repo whose commit dates run out of order (a wrong clock, an imported history) can hide people
   behind that commit. It under-lists, so the printed people are always real ones.
 
 `risk-map-check.sh --level [<base>]` prints the same result as machine lines (`BASE`, `UNKNOWN`, `NOMAP`,
-`FILES`, `LEVEL`, `DIR <dir> <level> <state>`, `WHO <login|-> <name>`, `HISTUNKNOWN <why>`) for
-`checks/risk-route.sh`, which joins it with the PR
+`FILES`, `LEVEL`, `DIR <dir> <level> <state>`, `WHO <login|-> <name>`, `HISTNONE` — the history was read
+and held nobody — and `HISTUNKNOWN <why>`) for `checks/risk-route.sh`, which joins it with the PR
 body. One awk program serves both the warnings and the count. Its twin is `changeLevel` in
 `cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** like every check here, the
 script runs from the PR's own checkout, so a PR can edit the script itself; that matters once the count
