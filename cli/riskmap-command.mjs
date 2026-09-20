@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok, readJSONStrict, run, warn } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { changeLevel, draftRiskMap, parseRiskMap, RISK_MAP_FILE, riskMapFindings } from './riskmap.mjs';
+import { changeLevel, draftRiskMap, parseRiskMap, recentAuthors, RISK_MAP_FILE, riskMapFindings } from './riskmap.mjs';
 
 // Every file in a code repo, as the map sees it: tracked files plus new files git does not ignore, so a
 // directory someone has just created is asked about before it is committed. null when it is not a git repo.
@@ -83,9 +83,49 @@ export function baseChangeLevel(repoRoot, baseRef) {
   const diff = git(['diff', '--name-only', '-z', '--no-renames', `${baseRef}...HEAD`]);
   if (text.status !== 0 || diff.status !== 0) return { base, unknown: `git could not read ${baseRef}` };
   const files = diff.stdout.split('\0').filter(Boolean);
-  const got = changeLevel(parseRiskMap(text.stdout), files);
+  const parsed = parseRiskMap(text.stdout);
+  const got = changeLevel(parsed, files);
   if (got.unsupported) return { base, unknown: `the map on ${baseRef} is written for a newer risk-map version` };
-  return { base, files: files.length, ...got };
+  // `entries` and `changed` are what E67's history query needs next, and reading the map twice could read
+  // two different maps (the base can move between the calls).
+  return { base, files: files.length, entries: parsed.entries, changed: files, ...got };
+}
+
+// Git's own words for E67's window (Part 3: expertise is a fixed, tight 30 days).
+export const HISTORY_WINDOW = '30 days ago';
+
+// E67 — the people with recent commits in the `high` directories this change touches, read from the BASE
+// branch's history so a change cannot add its own. `window` is handed to git as written (`--since`), and
+// git filters on the COMMITTER date, so a rebased or squashed commit counts from when it landed.
+// Returns { authors: [{ name, login }] }, or { unknown: why } — never an empty list for a history it
+// could not read: a shallow clone holds only the newest commits, and reading that as "nobody has worked
+// here" would drop the ask instead of raising it. The twin is `--level` in checks/risk-map-check.sh.
+export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window = HISTORY_WINDOW } = {}) {
+  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  if (/true/.test(git(['rev-parse', '--is-shallow-repository']).stdout || '')) {
+    return { unknown: 'this is a shallow clone — it does not hold the history of those directories' };
+  }
+  // \x01 starts a commit, \x1f separates its fields: NUL cannot be used, because an awk that reads C
+  // strings (the twin's) would cut the line there. --no-merges: a merge commit is nobody's work here.
+  const log = git(['log', baseRef, '--no-merges', `--since=${window}`, '--format=%x01%an%x1f%ae', '--name-only']);
+  const own = git(['log', `${baseRef}..HEAD`, '--no-merges', '--format=%ae']);
+  if (log.status !== 0 || own.status !== 0) return { unknown: `git could not read the history of '${baseRef}'` };
+  return { authors: recentAuthors(entries, changed, parseGitLog(log.stdout), own.stdout.split('\n').filter(Boolean)) };
+}
+
+// `git log --format=%x01%an%x1f%ae --name-only` into [{ name, email, files }], newest first. A path is
+// every other non-empty line; git prints no path for a commit that changed none.
+export function parseGitLog(stdout) {
+  const commits = [];
+  let cur = null;
+  for (const line of String(stdout || '').split('\n')) {
+    if (line.startsWith('\x01')) {
+      const [name, email] = line.slice(1).split('\x1f');
+      cur = { name, email, files: [] };
+      commits.push(cur);
+    } else if (line && cur) cur.files.push(line);
+  }
+  return commits;
 }
 
 export function checkRepo(repoRoot) {

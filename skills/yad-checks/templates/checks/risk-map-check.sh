@@ -63,6 +63,9 @@ LEVEL_ONLY=0
 if [ "${1:-}" = "--level" ]; then LEVEL_ONLY=1; shift; fi
 
 MAP=".sdlc/risk-map"
+# E67's window (Part 3: expertise is a fixed, tight 30 days), in git's own words. Git filters on the
+# COMMITTER date, so a rebased or squashed commit counts from when it landed.
+HISTORY_WINDOW="30 days ago"
 # Advisory means exit 0 on every input — outside a git repo too, where `set -e` would stop at git.
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [ "$LEVEL_ONLY" = 1 ]; then echo "UNKNOWN not inside a git repo"; exit 0; fi
@@ -168,9 +171,51 @@ FILENAME == mapf {
   ne++; ed[ne] = dir; el[ne] = level; es[ne] = (level == "unset") ? "" : state
   next
 }
+FILENAME == logf {
+  if (substr($0, 1, 1) == "\001") { nl++; split(substr($0, 2), lf, "\037"); lan[nl] = lf[1]; lae[nl] = lf[2] }
+  else if ($0 != "" && nl) { lfc[nl]++; lfl[nl, lfc[nl]] = $0 }
+  next
+}
+FILENAME == exclf { if ($0 != "") excl[tolower($0)] = 1; next }
 FILENAME == filesf { na++; fa[na] = $0; next }
 FILENAME == changedf { nc++; fc[nc] = $0; next }
 function rank(l) { return (l == "high") ? 3 : (l == "medium") ? 2 : (l == "low") ? 1 : 0 }
+# E67. The login a noreply address carries, else "" — the twin of `loginFromEmail` in cli/riskmap.mjs.
+# The address is never printed. Matched on the lower-cased domain (a login is case-insensitive) and
+# returned as written, because mawk has no case-insensitive flag.
+function loginof(e,   at, local, domain) {
+  at = index(e, "@")
+  if (at == 0) return ""
+  local = substr(e, 1, at - 1); domain = tolower(substr(e, at + 1))
+  if (domain == "users.noreply.github.com") {
+    sub(/^[0-9]+\+/, "", local)
+    return (local ~ /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$/) ? local : ""
+  }
+  if (domain == "users.noreply.gitlab.com") {
+    if (local !~ /^[0-9]+-/) return ""
+    sub(/^[0-9]+-/, "", local)
+    return (local ~ /^[A-Za-z0-9._-]+$/) ? local : ""
+  }
+  return ""
+}
+# A robot, not a person: an approval can never come from one, and `dependabot[bot]` has no login.
+function isbot(n, e) { return (tolower(trim(n)) ~ /\[bot\]$/ || tolower(e) ~ /\[bot\]@/) }
+# E67, the --level mode`s second pass: who committed lately in the `high` directories this change
+# touches. A commit counts by the map`s COVER rule, not by a path prefix — with `src/payments/ high`
+# and `src/payments/legacy/ low`, work in `legacy/` is not payments history. One row per person, in
+# git`s order (newest first), deduped by address, the change`s own authors left out.
+function who_out(   j, i, k, hit, key) {
+  for (j = 1; j <= nc; j++) { k = cover(fc[j]); if (k && el[k] == "high") ht[k] = 1 }
+  for (j = 1; j <= nl; j++) {
+    key = tolower(lae[j])
+    if ((key in seenau) || (key in excl) || isbot(lan[j], lae[j])) continue
+    hit = 0
+    for (i = 1; i <= lfc[j]; i++) { k = cover(lfl[j, i]); if (k && (k in ht)) { hit = 1; break } }
+    if (!hit) continue
+    seenau[key] = 1
+    printf "WHO %s %s\n", (loginof(lae[j]) == "") ? "-" : loginof(lae[j]), lan[j]
+  }
+}
 # E66, the --level mode: the level this change takes from the map (the twin of `changeLevel` in
 # cli/riskmap.mjs). The highest level among the lines that decide the changed files; `unset` and an
 # uncovered file add nothing; `guessed` counts as `confirmed`. Parse problems add nothing either.
@@ -185,6 +230,7 @@ function level_out(   j, k, i, best) {
 }
 END {
   if (mode == "level") { level_out(); exit }
+  if (mode == "who") { who_out(); exit }
   if (unsupported) {
     warn("version", "v" badv, "written for risk-map v" badv "; this release reads v1 — nothing in it was read")
   } else {
@@ -239,7 +285,32 @@ base_level() {
   if ! git diff --name-only -z --no-renames "$RANGE" | tr '\0' '\n' > "$tmp/all-changed"; then
     echo "UNKNOWN git could not list the files this change touches"; return
   fi
-  awk -v mode=level -v mapf="$tmp/basemap" -v filesf=/dev/null -v changedf="$tmp/all-changed" "$RISK_MAP_AWK" "$tmp/basemap" /dev/null "$tmp/all-changed"
+  _lv="$(awk -v mode=level -v mapf="$tmp/basemap" -v filesf=/dev/null -v changedf="$tmp/all-changed" "$RISK_MAP_AWK" "$tmp/basemap" /dev/null "$tmp/all-changed")"
+  printf '%s\n' "$_lv"
+  base_history "$_lv"
+}
+
+# E67 — who has committed lately in the `high` directories this change touches, from the BASE branch's
+# history (a change cannot add its own). Prints `WHO <login|-> <name>` per person, newest first, or
+# `HISTUNKNOWN <why>` — never silence for a history it could not read: a shallow clone holds only the
+# newest commits, and reading that as "nobody has worked here" would drop the ask instead of raising it.
+base_history() {
+  _high="$(printf '%s\n' "$1" | awk '$1 == "DIR" && $3 == "high" { print $2 }')"
+  [ -n "$_high" ] || return 0
+  _shallow="$(git rev-parse --is-shallow-repository 2>/dev/null)" || _shallow=""
+  if [ "$_shallow" = true ]; then
+    echo "HISTUNKNOWN this is a shallow clone — it does not hold the history of those directories"; return
+  fi
+  # The high directories are a PREFILTER only; the awk pass above decides by the map's cover rule.
+  # \001 starts a commit and \037 separates its fields: a NUL would cut the line in an awk that reads
+  # C strings. --no-merges: a merge commit is nobody's work in these directories.
+  # shellcheck disable=SC2086  # a map directory holds no space or tab (`validdir`), so the split is safe
+  git log "$BASE" --no-merges --since="$HISTORY_WINDOW" --format='%x01%an%x1f%ae' --name-only -- $_high > "$tmp/log" \
+    || { echo "HISTUNKNOWN git could not read the history of '${BASE}'"; return; }
+  git log "${BASE}..HEAD" --no-merges --format='%ae' > "$tmp/own" \
+    || { echo "HISTUNKNOWN git could not read this change's own authors"; return; }
+  awk -v mode=who -v mapf="$tmp/basemap" -v changedf="$tmp/all-changed" -v logf="$tmp/log" -v exclf="$tmp/own" \
+    "$RISK_MAP_AWK" "$tmp/basemap" "$tmp/all-changed" "$tmp/log" "$tmp/own"
 }
 
 if [ "$LEVEL_ONLY" = 1 ]; then base_level; exit 0; fi
@@ -262,6 +333,18 @@ NOMAP "*)
       echo "COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on ${BASE}."
     fi
     [ -z "$medium" ] || echo "  medium on ${BASE} (reported only, adds nothing): ${medium}"
+    # E67 — and who can meet the ask: an approval from someone who has worked there lately.
+    if [ -n "$high" ]; then
+      who="$(printf '%s\n' "$lv" | sed -n 's/^WHO \([^ ]*\) /\1 /p' | awk '{ login = $1; $1 = ""; sub(/^ /, ""); printf "%s%s%s", sep, $0, (login == "-") ? "" : " (@" login ")"; sep = ", " }')"
+      unknown_hist="$(printf '%s\n' "$lv" | sed -n 's/^HISTUNKNOWN //p')"
+      if [ -n "$unknown_hist" ]; then
+        echo "  who has worked there lately: not read — ${unknown_hist}."
+      elif [ -n "$who" ]; then
+        echo "  ask one of these (committed there in the last 30 days, this change's own authors left out): ${who}"
+      else
+        echo "  nobody else has committed there in the last 30 days — the count above still stands."
+      fi
+    fi
     ;;
 esac
 

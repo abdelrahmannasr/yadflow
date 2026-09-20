@@ -57,6 +57,8 @@ if [ -z "$(line_of UNKNOWN)$(line_of NOMAP)$(line_of LEVEL)" ]; then
 fi
 map_base="$(line_of BASE)"
 map_high=""
+# E67 — the people the check found with recent commits in those `high` directories: `WHO <login|-> <name>`.
+who_list() { printf '%s\n' "$lv" | sed -n 's/^WHO \([^ ]*\) /\1 /p' | awk '{ login = $1; $1 = ""; sub(/^ /, ""); printf "%s%s%s", sep, $0, (login == "-") ? "" : " (@" login ")"; sep = ", " }'; }
 if [ -n "$(line_of UNKNOWN)" ]; then
   echo "Risk map: not counted — $(line_of UNKNOWN). Only the body is counted."
 elif [ -n "$(line_of NOMAP)" ]; then
@@ -72,6 +74,16 @@ else
     echo "Risk map (${map_base}): $(line_of LEVEL) — nothing this change touches is high"
   fi
   [ -z "$map_medium" ] || echo "  medium (reported only, adds nothing): ${map_medium}"
+  if [ -n "$map_high" ]; then
+    hist_unknown="$(line_of HISTUNKNOWN)"; who="$(who_list)"
+    if [ -n "$hist_unknown" ]; then
+      echo "  who has worked there lately: not read — ${hist_unknown}"
+    elif [ -n "$who" ]; then
+      echo "  worked there in the last 30 days: ${who}"
+    else
+      echo "  nobody else has committed there in the last 30 days"
+    fi
+  fi
 fi
 
 step=0
@@ -91,7 +103,19 @@ if [ "$step" -gt 0 ]; then
     echo "       The body says Risk level: ${risk:-unspecified}, but the risk map on ${map_base} marks ${map_high} high — the larger counts."
   fi
   echo "       Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do)."
-  echo "       The risk step is advisory. Ask reviewers who know the touched domains:"
+  echo "       The risk step is advisory."
+  # E67 — a change to a `high` directory asks for an approval from someone who has worked there in the
+  # last 30 days. Reported, like the count: it names who can meet it and blocks nothing. With nobody to
+  # name (or a history that could not be read), the touched domains stay the only hint.
+  if [ -n "$map_high" ] && [ -n "$(who_list)" ]; then
+    echo "       This change touches ${map_high}, so it asks for an approval from someone who has"
+    echo "       committed there in the last 30 days (its own authors left out):"
+    printf '%s\n' "$lv" | sed -n 's/^WHO \([^ ]*\) /\1 /p' | while IFS= read -r row; do
+      login="${row%% *}"; name="${row#* }"
+      if [ "$login" = "-" ]; then echo "  - ${name}"; else echo "  - ${name} (@${login})"; fi
+    done
+  fi
+  echo "       Ask reviewers who know the touched domains:"
   case "$domains" in
     ""|*"<"*|*"…"*|*"|"*)
       echo "  (Domains line not filled in — list each touched domain so the right reviewers can be asked.)" ;;

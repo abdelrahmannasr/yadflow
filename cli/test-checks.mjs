@@ -3305,3 +3305,111 @@ test('risk-map count: a git step that fails is "not counted", never a false zero
   fs.rmSync(bin, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---------- E67: escalate by proven history ----------
+// The `high` directories a change touches also ask for an approval from someone who has COMMITTED there
+// in the last 30 days, read from the BASE branch's history. Reported, never enforced. The rule has the
+// same twin discipline as the count: awk here, `recentAuthors` in cli/riskmap.mjs.
+const HIST_MAP = [
+  '# yad-risk-map v1', './ low confirmed', 'src/ low confirmed', 'src/payments/ high confirmed',
+  'src/payments/legacy/ low confirmed', 'src/catalog/ medium confirmed', '',
+].join('\n');
+// A commit by one person, at one date, so a 30-day window can be tested at all.
+function commitAs(T, { name, email, date }, msg, files = {}) {
+  for (const [rel, content] of Object.entries(files)) {
+    const p = path.join(T, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+  }
+  execFileSync('git', ['add', '-A'], { cwd: T, stdio: 'pipe', env: GIT_ENV });
+  execFileSync('git', ['commit', '-q', '-m', msg], {
+    cwd: T,
+    stdio: 'pipe',
+    env: {
+      ...GIT_ENV,
+      GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_AUTHOR_DATE: date,
+      GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email, GIT_COMMITTER_DATE: date,
+    },
+  });
+}
+const days = (n) => new Date(Date.now() - n * 86400e3).toISOString().replace(/\.\d+Z$/, 'Z');
+const ALICE = { name: 'Alice', email: '12345+alice@users.noreply.github.com' };
+// main: a seed outside the window, then work by four people; a `pr` branch by Bob, its own author.
+function historyRepo({ aliceRecent = true } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hist-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  commitAs(T, { ...ALICE, date: days(200) }, 'feat: seed, long ago', {
+    '.sdlc/risk-map': HIST_MAP, 'src/payments/pay.js': 'x', 'src/payments/legacy/old.js': 'x',
+    'src/catalog/c.js': 'x', 'README.md': 'x',
+  });
+  commitAs(T, { name: 'Old Timer', email: 'old@corp.io', date: days(120) }, 'fix: payments, long ago', { 'src/payments/pay.js': 'o' });
+  // Without this one, the only recent commits in payments are a robot's and the change's own author's.
+  if (aliceRecent) commitAs(T, { ...ALICE, date: days(3) }, 'fix: payments', { 'src/payments/pay.js': 'y' });
+  commitAs(T, { name: 'Legacy Larry', email: 'larry@corp.io', date: days(2) }, 'chore: the low subfolder only', { 'src/payments/legacy/old.js': 'y' });
+  commitAs(T, { name: 'Cathy', email: 'cathy@corp.io', date: days(2) }, 'chore: catalog only', { 'src/catalog/c.js': 'y' });
+  commitAs(T, { name: 'dependabot[bot]', email: '49699333+dependabot[bot]@users.noreply.github.com', date: days(1) }, 'chore: bump', { 'src/payments/pay.js': 'z' });
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'checkout', '-q', '-b', 'pr');
+  commitAs(T, { name: 'Bob Smith', email: 'bob@corp.io', date: days(0) }, 'feat: the change itself', { 'src/payments/pay.js': 'pr' });
+  return T;
+}
+const whoLines = (out) => out.split('\n').filter((l) => l.startsWith('WHO ')).map((l) => l.slice(4));
+
+test('proven history: only work in the HIGH directory counts — by the map\'s cover rule, not a path prefix', () => {
+  const T = historyRepo();
+  const r = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(whoLines(r.out), ['alice Alice'], r.out);
+  // Larry edited src/payments/legacy/, which the map marks `low` — the deepest line decides, so that
+  // is not payments history. Cathy touched catalog (medium). dependabot is a robot. Old Timer is
+  // outside the 30 days. Bob is the change's own author, and an approval must come from someone else.
+  const ci = runGate(RISK_MAP, T, ['main']);
+  assert.match(ci.out, /\n {2}ask one of these \(committed there in the last 30 days, this change's own authors left out\): Alice \(@alice\)\n/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('proven history: nobody with recent work is said plainly, and a shallow clone is "not read"', () => {
+  // Only a robot and the change's own author have touched payments lately.
+  const T = historyRepo({ aliceRecent: false });
+  let r = runGate(RISK_MAP, T, ['main']);
+  assert.match(r.out, /\n {2}nobody else has committed there in the last 30 days — the count above still stands\.\n/, r.out);
+  assert.deepEqual(whoLines(runGate(RISK_MAP, T, ['--level', 'main']).out), []);
+  // A shallow clone holds only the newest commits: it must never read as "nobody".
+  const full = historyRepo();   // the base is one commit back, so the shallow clone still has a merge base
+  const C = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-histshallow-'));
+  execFileSync('git', ['clone', '-q', '--depth', '2', '--no-single-branch', `file://${full}`, C], { stdio: 'pipe', env: GIT_ENV });
+  git(C, 'checkout', '-q', 'pr');
+  r = runGate(RISK_MAP, C, ['origin/main']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /who has worked there lately: not read — this is a shallow clone/, r.out);
+  assert.doesNotMatch(r.out, /nobody else has committed/);
+  assert.match(runGate(RISK_MAP, C, ['--level', 'origin/main']).out, /^HISTUNKNOWN this is a shallow clone/m);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(full, { recursive: true, force: true });
+  fs.rmSync(C, { recursive: true, force: true });
+});
+
+test('proven history: bash and cli/riskmap.mjs name the same people, in the same order', async () => {
+  const { parseRiskMap, recentAuthors } = await import('./riskmap.mjs');
+  const { parseGitLog } = await import('./riskmap-command.mjs');
+  const T = historyRepo();
+  // A second address for Alice (a person can have two), one more high directory, and a name git quotes.
+  commitAs(T, { name: 'Alice', email: 'alice@corp.io', date: days(1) }, 'fix: payments again', { 'src/payments/pay.js': 'q' });
+  commitAs(T, { name: 'Ünder Scoré', email: '99-tanuki@users.noreply.gitlab.com', date: days(1) }, 'feat: more', { 'src/payments/more.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'checkout', '-q', 'pr');
+  git(T, 'rebase', '-q', 'main');
+  for (const [i, change] of [{ 'src/payments/pay.js': 'a' }, { 'src/catalog/c.js': 'a' }, { 'src/payments/legacy/old.js': 'a' }, { 'README.md': 'a' }].entries()) {
+    commitAs(T, { name: 'Bob Smith', email: 'bob@corp.io', date: days(0) }, `feat: change ${i}`, change);
+    const r = runGate(RISK_MAP, T, ['--level', 'main']);
+    assert.equal(r.code, 0, r.out);
+    const map = git(T, 'show', 'main:.sdlc/risk-map').toString();
+    const changed = git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean);
+    const log = git(T, 'log', 'main', '--no-merges', '--since=30 days ago', '--format=%x01%an%x1f%ae', '--name-only').toString();
+    const own = git(T, 'log', 'main..HEAD', '--no-merges', '--format=%ae').toString().split('\n').filter(Boolean);
+    const js = recentAuthors(parseRiskMap(map).entries, changed, parseGitLog(log), own)
+      .map((a) => `${a.login || '-'} ${a.name}`);
+    assert.deepEqual(whoLines(r.out), js, `change #${i} — bash and JS disagree`);
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});

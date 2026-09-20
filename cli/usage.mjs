@@ -63,18 +63,11 @@ const ARTIFACT_FILES = new Set([
 
 // ---- attribution -------------------------------------------------------------------------------
 
-// The platform login a noreply commit address carries — `12345+octocat@users.noreply.github.com`,
-// `octocat@users.noreply.github.com`, `12345-tanuki@users.noreply.gitlab.com` — else null. The address
-// itself is never emitted; only the login, which the ledgers already record.
-// The login keeps the case the address carries: a platform login is case-insensitive, but it is shown
-// as written. Rows are joined case-insensitively in `analyze`.
-export function loginFromEmail(email) {
-  const e = String(email || '');
-  const gh = e.match(/^(?:\d+\+)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)@users\.noreply\.github\.com$/i);
-  if (gh) return gh[1];
-  const gl = e.match(/^\d+-([a-z0-9._-]+)@users\.noreply\.gitlab\.com$/i);
-  return gl ? gl[1] : null;
-}
+// The login a noreply commit address carries. It LIVES in cli/riskmap.mjs now, because E67's bash twin
+// has to derive the same login and the rule is compared between the two; this export stays (rule 3 —
+// add the new name beside the old) and is the one every older reader here still calls.
+import { loginFromEmail } from './riskmap.mjs';
+export { loginFromEmail };
 
 // ---- epic enumeration --------------------------------------------------------------------------
 

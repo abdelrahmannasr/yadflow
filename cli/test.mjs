@@ -17831,3 +17831,64 @@ test('escalate by count: open-pr prints the count — the larger of body and map
     assert.equal(git(r.T, 'status', '--porcelain').toString(), '', 'nothing is written');
   } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
 });
+
+// ---- E67: escalate by proven history -------------------------------------------------------------
+// A change to a `high` directory asks for an approval from someone who has committed there in the last
+// 30 days. Read from the BASE branch, reported only. The bash twin is compared in cli/test-checks.mjs.
+
+test('proven history: the login comes only from a noreply address, and it is the same rule usage.mjs had', async () => {
+  const { loginFromEmail } = await import('./riskmap.mjs');
+  const usage = await import('./usage.mjs');
+  assert.equal(usage.loginFromEmail, loginFromEmail, 'usage.mjs re-exports the one rule (rule 3)');
+  assert.equal(loginFromEmail('12345+octocat@users.noreply.github.com'), 'octocat');
+  assert.equal(loginFromEmail('Octocat@users.noreply.github.com'), 'Octocat', 'shown as written');
+  assert.equal(loginFromEmail('12345-tanuki@users.noreply.gitlab.com'), 'tanuki');
+  assert.equal(loginFromEmail('tanuki@users.noreply.gitlab.com'), null, 'GitLab writes the id first');
+  assert.equal(loginFromEmail('alice@corp.io'), null, 'a work address names no login');
+  assert.equal(loginFromEmail('49699333+dependabot[bot]@users.noreply.github.com'), null);
+});
+
+test('proven history: only the high directory counts, by the cover rule; bots, own authors and repeats drop out', async () => {
+  const { parseRiskMap, recentAuthors } = await import('./riskmap.mjs');
+  const { entries } = parseRiskMap([
+    '# yad-risk-map v1', 'src/ low confirmed', 'src/payments/ high confirmed',
+    'src/payments/legacy/ low confirmed', 'src/catalog/ medium confirmed',
+  ].join('\n'));
+  const commits = [
+    { name: 'Bob', email: 'bob@corp.io', files: ['src/payments/pay.js'] },                 // the change's own author
+    { name: 'dependabot[bot]', email: '1+dependabot[bot]@users.noreply.github.com', files: ['src/payments/pay.js'] },
+    { name: 'Alice', email: '12345+alice@users.noreply.github.com', files: ['src/payments/pay.js', 'README.md'] },
+    { name: 'Larry', email: 'larry@corp.io', files: ['src/payments/legacy/old.js'] },       // a `low` line inside a `high` one
+    { name: 'Cathy', email: 'cathy@corp.io', files: ['src/catalog/c.js'] },                 // medium adds nothing
+    { name: 'Alice again', email: 'ALICE@corp.io', files: ['src/payments/pay.js'] },        // a second address is a second row
+    { name: 'Alice', email: '12345+alice@users.noreply.github.com', files: ['src/payments/pay.js'] },  // already listed
+    { name: 'Nobody', email: 'n@corp.io', files: [] },
+  ];
+  const got = recentAuthors(entries, ['src/payments/pay.js'], commits, ['BOB@corp.io']);
+  assert.deepEqual(got, [
+    { name: 'Alice', login: 'alice' },
+    { name: 'Alice again', login: null },
+  ], 'newest first, deduped by address, the change\'s own author left out whatever its case');
+  // Nothing high in the change: nobody is asked for, however much history exists.
+  assert.deepEqual(recentAuthors(entries, ['src/catalog/c.js'], commits, []), []);
+});
+
+test('proven history: a shallow clone or a failing git is "not read", never "nobody"', async () => {
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const r = repoWithBaseMap('# yad-risk-map v1\nsrc/payments/ high confirmed\n', { 'src/payments/pay.js': 'x' });
+  try {
+    r.put({ 'src/payments/pay.js': 'y' });
+    r.commit('feat: pay');
+    const args = { entries: parseRiskMap('# yad-risk-map v1\nsrc/payments/ high confirmed\n').entries, changed: ['src/payments/pay.js'] };
+    const ok = recentAuthorsFor(r.T, 'origin/main', args);
+    assert.equal(ok.unknown, undefined, 'a full clone reads the history');
+    assert.ok(Array.isArray(ok.authors));
+    assert.match(recentAuthorsFor(r.T, 'origin/nope', args).unknown, /git could not read the history/);
+    // A shallow clone holds only the newest commits, so "nobody" would be a guess.
+    const C = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e67shallow-'));
+    execFileSync('git', ['clone', '-q', '--depth', '1', `file://${r.T}`, C], { stdio: 'pipe' });
+    assert.match(recentAuthorsFor(C, 'HEAD', args).unknown, /shallow clone/);
+    fs.rmSync(C, { recursive: true, force: true });
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});

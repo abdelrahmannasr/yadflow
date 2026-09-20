@@ -154,6 +154,54 @@ export function changeLevel(parsed, changed = []) {
   return { level, step: level ? LEVEL_STEP[level] : 0, dirs };
 }
 
+// E67 — ESCALATE BY PROVEN HISTORY. Who has worked in the `high` directories a change touches, lately.
+//
+// The platform login a noreply commit address carries — `12345+octocat@users.noreply.github.com`,
+// `octocat@users.noreply.github.com`, `12345-tanuki@users.noreply.gitlab.com` — else null. The address
+// itself is never emitted; only the login, which the ledgers already record. The login keeps the case
+// the address carries. It lives here, not in cli/usage.mjs (which re-exports it), because the awk twin
+// in `checks/risk-map-check.sh` derives the same login and a test compares the two.
+export function loginFromEmail(email) {
+  const e = String(email || '');
+  const gh = e.match(/^(?:\d+\+)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)@users\.noreply\.github\.com$/i);
+  if (gh) return gh[1];
+  const gl = e.match(/^\d+-([a-z0-9._-]+)@users\.noreply\.gitlab\.com$/i);
+  return gl ? gl[1] : null;
+}
+
+// A commit whose author is a robot, not a person: an approval can never come from one. GitHub writes
+// `dependabot[bot]` as the name and `…[bot]@users.noreply.github.com` as the address; the `[` also makes
+// the login rule above reject it, so without this it would be listed by name as if it could approve.
+const isBot = (name, email) => /\[bot\]$/i.test(String(name || '').trim()) || /\[bot\]@/i.test(String(email || ''));
+
+// The people whose recent commits are in the `high` directories this change touches.
+//
+// `entries` is the BASE branch's map, `changed` this change's files, `commits` the BASE branch's recent
+// log as [{ name, email, files }] in git's order (newest first), and `excludeEmails` the authors of the
+// change itself — an approval has to come from someone else, so their own recent work never counts.
+//
+// A commit counts for a directory by the map's own cover rule, NOT by a path prefix: with
+// `src/payments/ high` and `src/payments/legacy/ low`, a commit to `legacy/` is not payments history,
+// because the deepest listed line decides (E65).
+//
+// Returns [{ name, login }] — one row per person, in the order git printed their newest commit, deduped
+// by e-mail address. The address itself never leaves this function (nor does `yad` ever print one).
+export function recentAuthors(entries, changed, commits, excludeEmails = []) {
+  const high = new Set();
+  for (const f of changed) { const e = coverOf(entries, f); if (e && e.level === 'high') high.add(e); }
+  const skip = new Set(excludeEmails.map((e) => String(e).toLowerCase()));
+  const seen = new Set();
+  const out = [];
+  for (const cm of commits) {
+    const key = String(cm.email || '').toLowerCase();
+    if (seen.has(key) || skip.has(key) || isBot(cm.name, cm.email)) continue;
+    if (!cm.files.some((f) => high.has(coverOf(entries, f)))) continue;
+    seen.add(key);
+    out.push({ name: cm.name, login: loginFromEmail(cm.email) });
+  }
+  return out;
+}
+
 // The directory to add for a file no line covers. Walk down from the root while some listed line sits
 // deeper under the current directory; the first directory with none below it is the one to add. A file
 // directly inside a directory that only has deeper lines asks for that directory itself. A directory a

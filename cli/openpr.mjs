@@ -11,7 +11,7 @@ import {
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase, gateRuleSum, gateRuleEnforced } from './epic-state.mjs';
-import { baseChangeLevel } from './riskmap-command.mjs';
+import { baseChangeLevel, recentAuthorsFor } from './riskmap-command.mjs';
 import { gateOpen } from './gate.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
@@ -114,6 +114,15 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
   if (map.unknown) lines.push([info, `risk map not counted — ${map.unknown}; the count below is the body's alone`]);
   else if (map.noMap) lines.push([info, `risk map: none — ${map.noMap}`]);
   else if (high.length) lines.push([info, `risk map on ${map.base}: high — ${high.join(', ')}`]);
+  // E67 — who can meet the ask a `high` directory makes: someone who has committed there in the last 30
+  // days, from the BASE branch's history, this change's own authors left out. Reported, never enforced.
+  if (high.length) {
+    const hist = recentAuthorsFor(repoRoot, `origin/${baseBranch}`, { entries: map.entries, changed: map.changed });
+    if (hist.unknown) lines.push([info, `who has worked there lately: not read — ${hist.unknown}`]);
+    else if (hist.authors.length) {
+      lines.push([hand, `this change asks for an approval from someone who has committed in ${high.join(', ')} in the last 30 days: ${hist.authors.map((a) => a.name + (a.login ? ` (@${a.login})` : '')).join(', ')}`]);
+    } else lines.push([info, `nobody else has committed in ${high.join(', ')} in the last 30 days — ask anyone who knows it`]);
+  }
   if (high.length && opts.risk !== 'high') lines.push([warn, `the body says Risk level: ${opts.risk || 'low'}, but the risk map on ${map.base} marks ${high.join(', ')} high — the larger counts`]);
   lines.push([riskStep ? hand : info, `this PR asks for ${gateRuleSum(rule)}${gateRuleEnforced(rule)}; \`bash checks/risk-route.sh "<pr body>" ${map.base}\` prints the same count`]);
   return { rule, map, lines };
