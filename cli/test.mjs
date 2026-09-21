@@ -18206,3 +18206,51 @@ test('withLedgerLock: a stale EMPTY lock is still reclaimed, and the body runs',
     assert.ok(!fs.existsSync(lock), 'and it is released afterwards');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- E71: the surfaces ---------------------------------------------------------------------------
+const { activeSum: _activeSum, activeBasis: _activeBasis } = await import('./people.mjs');
+const { gatePredicate: _gatePred } = await import('./epic-state.mjs');
+
+test('E71 surfaces: the predicate CARRIES active on every path, and never invents one', () => {
+  // E72 caps `needed` with this field, so it has to be present on the paths that report no count of
+  // their own too — an inherited or skipped step is still part of a Product with a head count.
+  const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
+  assert.equal(_gatePred({ step, approvals: [], active: 4 }).active, 4);
+  assert.equal(_gatePred({ step, approvals: [] }).active, null, 'a caller that read nothing gets null, not 0');
+  assert.equal(_gatePred({ step: { ...step, status: 'done', inherited: true, inheritedFrom: 'EP-p', boundHash: 'h' }, approvals: [], acceptedHashes: ['h'], active: 3 }).active, 3,
+    'an inherited step carries it too');
+  assert.equal(_gatePred({ step: { ...step, id: 'ui-design-review', skipped: true }, approvals: [], optional: ['ui-design'], active: 3 }).active, 3,
+    'a skipped step carries it too');
+});
+
+test('E71 surfaces: an unknown count never prints as a number, anywhere', () => {
+  // The single rule of the row, checked on the strings people actually read.
+  const unknownCounted = { capacity: { active: null, days: 180, basis: 'x' }, unknown: ['repos.json does not parse', 'and another'] };
+  const line = _activeSum(unknownCounted);
+  assert.match(line, /NOT COUNTED/);
+  assert.match(line, /repos\.json does not parse/, 'it says WHICH source, not just that one failed');
+  assert.match(line, /and 1 more/, 'and how many others');
+  assert.doesNotMatch(line, /\b0\b/, 'zero must never appear where a count would be');
+  assert.match(_activeBasis(unknownCounted), /never counted as few people/);
+
+  const known = { capacity: { active: 4, days: 90, basis: 'the last 20 merged PRs span 90 day(s)' }, unknown: [] };
+  assert.equal(_activeSum(known), 'active people: 4 in the last 90 days');
+  assert.match(_activeBasis(known), /does not cap the approval count yet/, 'it always says what it does not do');
+});
+
+test('E71 surfaces: the review-PR body states the head count beside the ask', () => {
+  const args = {
+    epic: 'EP-x', artifact: 'epic.md', owner: 'alice', domains: ['backend'],
+    step: { id: 'epic-review', artifact: 'epic.md', risk_tags: ['contract'] },
+  };
+  const counted = fillHubTemplate({ ...args, active: 2 });
+  assert.match(counted, /\*\*Approvals needed:\*\* 1 \(enforced\)/);
+  assert.match(counted, /\*\*Active people:\*\* 2 \(reported only/, 'a reviewer can see the ask and the team size together');
+  // A gate asking for 3 on a team of 2 is exactly the deadlock E7 described and E72 fixes. E71's job is
+  // to make it VISIBLE on the artifact people are about to review, not to resolve it.
+  assert.match(counted, /full count 3 approvers/);
+
+  const uncounted = fillHubTemplate({ ...args, active: null });
+  assert.match(uncounted, /\*\*Active people:\*\* not counted/);
+  assert.doesNotMatch(uncounted, /\*\*Active people:\*\* 0/, 'never zero');
+});

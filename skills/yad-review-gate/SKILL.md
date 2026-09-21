@@ -204,7 +204,9 @@ The step may advance **iff ALL hold**:
    here** — it is advisory until the capacity cap ships (E72), so a step that is short of the full count
    still advances when the base holds. Report the shortfall in the record; do not hold the step on it.
    This matches `gatePredicate`, which returns `rule: "count"` and the count as `gateRule`/`have`/`short`,
-   and never puts the risk step in `missing`. With `hub.review.requireEngagement` on, only `verified`
+   and never puts the risk step in `missing`. The predicate also carries `active` — the live number of
+   people who have committed or approved lately (E71) — which is likewise NOT a condition here: E72 is
+   the row that caps the ask with it. `active: null` means no source could be read, never "nobody". With `hub.review.requireEngagement` on, only `verified`
    approvals count.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
    newest `approved` record). If it changed, approvals are stale → return to `comment`. For the

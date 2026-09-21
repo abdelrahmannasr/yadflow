@@ -345,3 +345,26 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
     stale: window(STALE_DAYS),
   };
 }
+
+// The capacity count as ONE human-readable line, defined here beside the rule for the same reason
+// `gateRuleSum` is defined beside `gateRuleFor`: several surfaces print it, and several copies of the
+// wording would eventually disagree about what the number means.
+//
+// It always says what it does NOT do. E71 reports the count; E72 is what turns it into the cap on
+// `needed`, so a reader must never take today's number as a requirement that is already being applied.
+export function activeSum(counted) {
+  const cap = counted?.capacity;
+  if (!cap) return 'active people: not counted';
+  if (cap.active === null) {
+    const [first, ...rest] = counted.unknown || [];
+    const more = rest.length ? ` (and ${rest.length} more)` : '';
+    return `active people: NOT COUNTED — ${first || 'a source could not be read'}${more}`;
+  }
+  return `active people: ${cap.active} in the last ${cap.days} days`;
+}
+
+// Why that window is the length it is, and what the number is not yet used for. Printed under
+// `activeSum` where there is room for a second line.
+export const activeBasis = (counted) => (counted?.capacity?.active === null
+  ? 'an unreadable source is never counted as few people — the cap will not be applied from an unknown'
+  : `${counted?.capacity?.basis || ''} — reported, it does not cap the approval count yet`);

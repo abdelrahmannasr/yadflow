@@ -110,6 +110,11 @@ Print, in this order:
      `yad gate status` prints the sum and the shortfall (`; count: 3 approvers = base 1 + contract risk 2
      — base enforced, risk step advisory — 1 short`) — read both from there rather than recomputing
      them, and say "short N" rather than "blocked" when it is short. In solo mode it prints no shortfall.
+   - **How many people there are to ask (E71), printed once per epic and not per step:** `active people:
+     4 in the last 90 days`, with the window's basis on the line under it. It is the count E72 will cap
+     the ask with; today it caps nothing, so never report a step as blocked by it. A source that could
+     not be read prints `active people: NOT COUNTED — <which source>`: report that wording as it stands
+     and NEVER as a number or as "no people" — an unreadable input is not a small team.
    - Touched domains (`epic.repos` for a step with a risk tag; the union of every story's `repos` for
      `stories-review`) only label the review. They add no approvals.
    - An approval is **stale** (it no longer counts) when the `artifactHash` it recorded no longer

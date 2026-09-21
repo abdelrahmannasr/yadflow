@@ -130,6 +130,20 @@ base enforced, risk step advisory — 1 short`), `yad gate status` (the same sum
 count) and the generated review-PR body (`Approvals needed: 1 (enforced) · full count …`). `yad gate review
 --json` carries the rule as an object under `step.gateRule`.
 
+**How many people are there to ask?** The engine counts that live, and prints it beside the ask
+(`active people: 4 in the last 90 days`). "Active" means committed or approved — read from the approval
+and ship records, plus git authorship in the product repo and every connected code repo. The window
+scales with how fast the team merges: the span of the last 20 merged pull requests, bounded to between
+30 and 180 days, and the wide end when there are fewer than 20. Nothing is stored; it is counted fresh
+every time.
+
+If any source cannot be read — a code repo that is not on this machine, a shallow clone, a file that
+does not parse — the answer is **`not counted`**, never a number. That is deliberate. A small count will
+one day lower the number of approvals a gate asks for, so an unreadable input must never look like a
+small team. The line says which source failed.
+
+The count is **reported only today**: it caps nothing yet.
+
 Review PRs request no reviewers — ask them on the PR itself. A record's `by` (who wrote a skip, a
 deferral or a closing record) is the login `gh api user` / `glab api user` reports, else your git
 `user.name`; set `YAD_PLATFORM_LOGIN=0` to skip the lookup (for example offline).

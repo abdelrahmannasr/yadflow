@@ -34,7 +34,7 @@ export const DECISION_TREE: DecisionBranch[] = [
   {
     condition: 'risk_tags include contract / auth / payments',
     result: 'full count = base 1 + risk step (advisory)',
-    detail: 'The risk step is +2 for a contract tag and +1 for auth or payments — the highest tag, never the sum. It counts people, not roles. The risk step is advisory for now: the gate prints the full count and the shortfall (for example "1 short") but holds only on the base. The capacity cap (a later roadmap row) caps the count at the number of active people; without that cap a two-person team could never pass its architecture gate.',
+    detail: 'The risk step is +2 for a contract tag and +1 for auth or payments — the highest tag, never the sum. It counts people, not roles. The risk step is advisory for now: the gate prints the full count and the shortfall (for example "1 short") but holds only on the base. The number of active people is counted live and printed next to the ask: committed or approved, from the approval and ship records plus git authorship in the product and every connected repo, over a window that scales with how fast the team merges (the last 20 merged PRs, bounded 30-180 days, and the wide end when there are fewer than 20). Nothing is stored. A source that cannot be read makes it "not counted" rather than a number, because a small count will one day lower what a gate asks for. A later roadmap row applies it as the cap; without that cap a two-person team could never pass its architecture gate.',
     visibleTo: ALL,
   },
   {

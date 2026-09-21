@@ -1433,6 +1433,15 @@ export function gatePredicate({
   merged = true,
   solo = false,
   requireEngagement = false,
+  // How many people are ACTIVE right now, Product-wide (E71, `activePeople` in cli/people.mjs), or null
+  // when no source could be read. PASSED IN, never computed here: this function is pure and is called
+  // once per step, while the count is one fact about the whole Product that the CALLER reads once per
+  // command. Computing it here would also walk git from inside the golden fixture — which lives inside
+  // yadflow's own work tree — and fold this repo's committers into a frozen snapshot.
+  //
+  // E71 only CARRIES it. E72 is the row that caps `needed` at `active − 1` (floor 1 in team mode) with
+  // one `missing.push` reading it, and `null` is what must never become a small number there.
+  active = null,
   // Which author steps THIS epic's route marks optional — `optionalStepsFor(state)`. Empty means
   // "no step on this chain may be skipped", and that is the right default for a gate: a caller that
   // forgets to pass it fails closed, and a `skipped: true` nobody can justify falls through to the
@@ -1459,7 +1468,7 @@ export function gatePredicate({
       // The step's own rule is a fact about the step, so it is reported even where nothing was counted
       // against it — here the approvals live upstream in the thread, under the parent epic. `have: null`
       // says "not counted", which is not the same fact as zero approvals.
-      gateRule: gateRuleFor(step), have: null, short: 0,
+      gateRule: gateRuleFor(step), have: null, short: 0, active,
     };
   }
 
@@ -1474,7 +1483,7 @@ export function gatePredicate({
     return {
       approvalsSatisfied: true, threadsResolved: true, merged: true, staleDropped: 0,
       passed: true, missing: [], rule: 'skipped',
-      gateRule: gateRuleFor(step), have: null, short: 0,   // nothing is counted on a step nobody reviewed
+      gateRule: gateRuleFor(step), have: null, short: 0, active,   // nothing is counted on a step nobody reviewed
     };
   }
 
@@ -1536,6 +1545,8 @@ export function gatePredicate({
     gateRule,
     have: approvers,
     short: solo ? 0 : Math.max(0, gateRule.needed - approvers),
+    // The live capacity count as the caller read it, so E72 can cap on it without a second reader.
+    active,
   };
 }
 
