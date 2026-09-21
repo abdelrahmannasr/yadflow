@@ -2,9 +2,9 @@
 # Product review routing — the Shape analogue of yad-pr-template's risk-route.sh. Reads a Product review
 # PR/MR description's "Impact & Risk (front-half)" block and prints how many approvers the gate asks for,
 # as the same sum the gate prints: base 1, plus a risk step from the tags — `contract` +2, `auth` or
-# `payments` +1, the largest and never the sum. The gate caps that count at the number of active people
-# less one (E72) and enforces the capped number; when it cannot count the people, only the base holds. This
-# script cannot count them, so it prints the full sum. There are no roles and no named owners: yadflow
+# `payments` +1, the largest and never the sum. Only the base holds the gate; the risk step is advisory
+# until E73. The gate reports that count capped at the number of active people less one (E72); this
+# script cannot count people, so it prints the full sum. There are no roles and no named owners: yadflow
 # keeps no list of people (E62), so when a risk tag raises the count the touched repos are printed as a
 # hint for whom to ask (with no risk step it prints the base line alone). Advisory: it ROUTES the human
 # review; it does not approve or merge.
@@ -37,8 +37,8 @@ case "$tags" in *" contract "*) step=2; tier=contract; why="${why:+$why, }risk t
 
 if [ "$step" -gt 0 ]; then
   echo "ROUTE: $((1 + step)) approvers = base 1 + ${tier} risk ${step} (${why})"
-  echo "       The gate caps this at the active people less one and enforces that; if it cannot count them, only the base holds: 1 approval."
-  echo "       \`yad gate status\` prints the capped count. The platform decides whether the author may approve. Ask reviewers who know the touched repos:"
+  echo "       Only the base holds the gate: 1 approval (the platform decides whether the author may give it)."
+  echo "       The risk step is advisory until E73; \`yad gate status\` prints it capped by the active people. Ask reviewers who know the touched repos:"
   case "$repos" in
     ""|*"<"*|*"…"*|*"|"*)
       echo "  (Repos line not filled in — list each touched repo so the right reviewers can be asked.)" ;;

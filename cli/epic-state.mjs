@@ -20,23 +20,24 @@ const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 // no name and no role anywhere in it, which is the whole point: a rule that names a person, a role or
 // a step goes stale the moment the team changes, and "repository access is the roster" replaces it.
 //
-// WHAT HOLDS THE GATE (E72). Part 3's rule is ONE formula: `needed = base + risk_step`, CAPPED at
+// WHAT HOLDS THE GATE. Part 3's rule is ONE formula: `needed = base + risk_step`, CAPPED at
 // `active − 1`, floor 1 in team mode. `active` is the live count of people (E71, cli/people.mjs), read
-// once per command by the caller. `gateCapFor` below applies the cap, and the capped number is what
-// holds a team gate. The cap is what stops deadlock: base 1 + contract 2 asks a contract gate for three
-// approvers, and a two-person team has one person who is not the author — so the cap asks it for one.
+// once per command by the caller. E72 computes the cap (`gateCapFor` below), prints it wherever a gate
+// reports itself and records it on the closing record — but ONLY THE BASE HOLDS THE GATE, still.
 //
-// WHEN THE COUNT IS UNKNOWN (`active: null`), NO CAP IS APPLIED AND THE RISK STEP STAYS ADVISORY — only
-// the base holds the gate, as it did before E72. That is the user's decision (2026-09-21), and it is
-// the only answer that neither invents a number (E71's rule: an unknown is never a small count) nor
-// enforces the uncapped count (E7's two-person deadlock). It has a stated cost: Product CI checks out
-// only the hub, so on a Product with connected repos `active` is unknown there, and CI — the one writer
-// of `state.json` on a verified Product — enforces the base alone. Every surface says so.
+// WHY THE CAP IS SHOWN AND NOT ENFORCED (the user's decision, 2026-09-21, after review). The count of
+// people errs HIGH on purpose (E71), and in the NORMAL case, not an edge: a commit is keyed by its git
+// NAME unless its address is a platform `noreply` one, an approval by its platform LOGIN, and E71 never
+// joins the two without exact evidence. So a two-person team whose members commit with work addresses
+// and approve on GitHub reads as FOUR, the cap lowers nothing, and an enforced contract gate would ask
+// for three approvals from one person who is not the author — E7's deadlock, back. Rule 7 needs a way
+// out before any count holds a gate, and that is E73's `yad gate lower --reason`. So E73 turns the
+// capped count on, together with its escape hatch; until then `short` is measured against the capped
+// ask and printed, and never enforced.
 //
-// RULE 7, STATED: the count of people errs HIGH on purpose (E71 — two commit addresses are two people),
-// and a count that is too high gives a cap that is too high, which can still ask a small team for more
-// approvals than it can give. The way out is E73's `yad gate lower --reason`. Nothing between E72 and E73
-// is released (the E62 precedent), so no user runs a cap without its escape hatch.
+// WHEN THE COUNT IS UNKNOWN (`active: null`) no cap is computed at all: an unknown is never a small
+// number (E71). Product CI is usually that case — it checks out only the hub, so connected repos are
+// not on disk — and the surfaces say so.
 //
 // Until E62 the base was not what held a gate either: a ROLE rule read from the roster did (1 owner,
 // 1 reviewer, a domain owner per touched repo). E62 removed the roster, and the base took its place.
@@ -94,7 +95,7 @@ export function gateRuleFor(step) {
 // allows self-approval; GitLab only when its settings say so; a local ledger checks nothing).
 //
 // The floor of 1 means the cap can only ever trim the RISK STEP. The base is 1, so `to` is at least the
-// base, and E62's rule — one approval — still holds on every team gate.
+// base. Until E73 the cap is REPORTED: the base alone holds every team gate (see `gateRuleFor`).
 //
 // Shape: { active, limit, to, capped } — `limit` is `max(1, active − 1)`, `to` the number asked for,
 // `capped` true only when the cap LOWERED the count (rule 6: every cap is said, and recorded on the
@@ -115,17 +116,15 @@ export const gateRuleSum = (rule) => {
 };
 
 // Which part of that sum holds the gate, said wherever the sum is printed. Empty when the step carries
-// no risk step: then the base IS the whole count, and the cap can never lower it.
-//   * no cap (`cap` is null or not given) — the count of people is unknown, or the caller has none (the
-//     Build half, whose count never holds a merge): the base holds, the risk step is advisory.
-//   * a cap that lowered the count — the lower number holds, and the line says how many people it read.
-//   * a cap that did not — the full count holds.
+// no risk step: then the base IS the whole count, and the cap can never lower it. Otherwise the base
+// holds and the risk step is advisory (until E73 — see `gateRuleFor`), and a cap that lowered the ask
+// is named first, so the shortfall printed after it reads against the capped number.
 export const gateRuleEnforced = (rule, cap = null) => {
   if (!rule.riskStep) return '';
-  if (!cap) return ' — base enforced, risk step advisory';
-  return cap.capped
-    ? ` — capped to ${cap.to}: ${cap.active} active ${cap.active === 1 ? 'person' : 'people'}, less one seat for the author — enforced`
-    : ' — enforced in full';
+  const capped = cap?.capped
+    ? ` — capped to ${cap.to}: ${cap.active} active ${cap.active === 1 ? 'person' : 'people'}, less one seat for the author`
+    : '';
+  return `${capped} — base enforced, risk step advisory`;
 };
 
 // The name -> login pairs of a roster an older release left on disk (E62). Read for ONE job: recognising
@@ -1423,11 +1422,11 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 //   waived    `solo` when a REVIEW step passed while solo mode waived its approvals (E10). Absent on a
 //             gate that counted approvals. Never on the author step it closes: the approvals were
 //             waived, the authoring was not, so `closeAuthorStep` is handed its fields one by one.
-//   capped    `{ needed, to, active }` when a REVIEW step passed on a count the capacity cap LOWERED
-//             (E72): the full count, what the cap asked for instead, and the count of people it read.
-//             Absent when no cap applied — the count of people was unknown, or it did not lower anything.
-//             Recorded in solo mode too, beside `waived`, because the cap is a fact about the step.
-//             Never on the author step, for the same reason as `waived`.
+//   capped    `{ needed, to, active }` when a REVIEW step passed in team mode while the capacity cap
+//             LOWERED its ask (E72): the full count, the capped ask, and the count of people it read.
+//             The ask is reported until E73, so this records what the gate asked, not what held it.
+//             Absent when no cap applied — the count of people was unknown, or it lowered nothing — and
+//             in solo mode, where nothing was counted. Never on the author step, as `waived`.
 //
 // FIRST CLOSE WINS: a step that already carries one keeps it. Nothing moves a `done` step back today,
 // so nothing has to remove one; a writer that ever does must take `closed` with it, as `record` goes
@@ -1464,13 +1463,13 @@ const uniqueBy = (arr, key) => {
 // `currentHash` drops any approval bound to a different hash (revoke-on-change). `merged` /
 // `threadsResolved` come from the platform; with a local ledger they default to the "advance" intent.
 //
-// ONE APPROVAL RULE (E62, capped by E72). No role and no name is inspected anywhere in it:
-//   * `active` KNOWN — the gate asks for `needed`, capped at `active − 1` with a floor of 1
-//     (`gateCapFor`), and that number decides `passed`.
-//   * `active` UNKNOWN (null) — no cap can be applied, so only the BASE (one approver) decides `passed`
-//     and the risk step is reported as `short`, as before E72. Enforcing the uncapped count instead would
-//     make a two-person team's contract gate unpassable (E7), and capping on an unknown would invent a
-//     number (E71). See the long note on `gateRuleFor`.
+// ONE APPROVAL RULE (E62). No role and no name is inspected anywhere in it:
+//   * the BASE — `gateRuleFor(step).base` distinct approvers (one). This is what decides `passed`.
+//   * the RISK STEP — the rest of `needed`, capped at `active − 1` (floor 1) when the count of people is
+//     known (E72, `gateCapFor`). Computed, returned as `gateRule`/`cap`/`have`/`short` and printed
+//     wherever a gate reports itself, and it holds NOTHING until E73 lands its escape hatch. See the
+//     long note on `gateRuleFor`: the count of people errs high in the normal case, so an enforced cap
+//     would still lock a small team out with no recorded way out (rule 7).
 // Approvals are counted as distinct PEOPLE: two approvals from one person are one approver.
 // Before E62 a role rule read from the roster held the gate (1 owner, 1 reviewer, a domain owner per
 // touched repo). The `role` and `domain` fields older approvals carry are left on disk and never read.
@@ -1492,7 +1491,7 @@ export function gatePredicate({
   // command. Computing it here would also walk git from inside the golden fixture — which lives inside
   // yadflow's own work tree — and fold this repo's committers into a frozen snapshot.
   //
-  // E72 caps `needed` with it (`gateCapFor`). `null` never becomes a small number: it applies no cap.
+  // E72 caps the reported ask with it (`gateCapFor`); `null` never becomes a small number — no cap.
   active = null,
   // Which author steps THIS epic's route marks optional — `optionalStepsFor(state)`. Empty means
   // "no step on this chain may be skipped", and that is the right default for a gate: a caller that
@@ -1563,17 +1562,17 @@ export function gatePredicate({
   const approvers = uniqueBy(counted.filter((a) => typeof a.approver === 'string' && a.approver.trim()), 'approver').length;
   const gateRule = gateRuleFor(step);
   // E72. `asks` is the count the gate asks for — capped when the count of people is known, the full
-  // count otherwise. `holds` is the part of it that decides `passed`: all of it under a cap, only the
-  // base without one (the risk step stays advisory when no cap can be applied — see `gateRuleFor`).
+  // count otherwise. Only the BASE holds the gate until E73 (see `gateRuleFor`).
   const cap = gateCapFor(gateRule, active);
   const asks = cap ? cap.to : gateRule.needed;
-  const holds = cap ? cap.to : gateRule.base;
 
   const missing = [];
   // Solo mode waives the APPROVAL requirements entirely (you can't approve your own PR on GitHub) —
   // merge + resolved threads are what advance the step.
   if (!solo) {
-    if (approvers < holds) missing.push(`${holds - approvers} approval(s)`);
+    // Only the BASE holds the gate. The rest of the ask rides out as `short`, which is what the surfaces
+    // print and what E73 turns into a `missing` entry, beside `yad gate lower --reason`.
+    if (approvers < gateRule.base) missing.push(`${gateRule.base - approvers} approval(s)`);
   }
   const approvalsSatisfied = missing.length === 0;
   // Surface engagement-gated approvals that did not count (only when requireEngagement holds the gate).
@@ -1597,8 +1596,7 @@ export function gatePredicate({
     rule: solo ? 'solo' : 'count',
     // The rule and what was counted against it. `have` is the number of distinct approvers and `short`
     // how many more the gate ASKS for — the capped count when `active` is known, the full count when it
-    // is not. Under a cap `short` is exactly what `missing` holds; without one a gate can pass while
-    // `short` is not 0, because only the base is enforced.
+    // is not. A gate can pass while `short` is not 0: only the base is enforced until E73.
     gateRule,
     have: approvers,
     short: solo ? 0 : Math.max(0, asks - approvers),
@@ -2128,8 +2126,8 @@ export function markInReview(state, step, close = null) {
 // WHAT THIS TABLE IS NOT. The catalogue is the data structure the rest of Wave 2b keys off, and each
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
 // below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); how many approvals each step's
-// gate ASKS FOR — the count capped by the active people (E72), or only the base when they are unknown —
-// is `gateRuleFor` and `gateCapFor` at the top of this file (E7, E62, E72), which read
+// gate ASKS FOR — the base enforced, the risk step reported and capped by the active people (E72) until
+// E73 — is `gateRuleFor` and `gateCapFor` at the top of this file (E7, E62, E72), which read
 // the `risk_tags` a seed copies from the row below into the epic's own `state.json`;
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default

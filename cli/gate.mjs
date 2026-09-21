@@ -45,7 +45,7 @@ function closedLine(closed) {
   // E72 — a count the capacity cap lowered. Read defensively: the record is a file a person can edit.
   const k = closed.capped;
   const capped = k && typeof k === 'object' && !Array.isArray(k)
-    ? `; count capped from ${k.needed ?? '?'} to ${k.to ?? '?'} (${k.active ?? '?'} active people)` : '';
+    ? `; count capped from ${k.needed ?? '?'} to ${k.to ?? '?'} (${k.active ?? '?'} active ${k.active === 1 ? 'person' : 'people'})` : '';
   return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${waived}${capped}${closed.by ? `; recorded by ${closed.by}` : ''}`;
 }
 
@@ -667,8 +667,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   let synced = 0;
   let advanced = 0;
   // E71 — said ONCE, before the per-artifact lines, because it is a fact about the PRODUCT and not
-  // about any one gate (rule 6: say the arithmetic, not just the verdict). Since E72 it caps `needed` on
-  // every gate below, and each gate's line says whether the cap lowered its count.
+  // about any one gate (rule 6: say the arithmetic, not just the verdict). Since E72 it caps the count
+  // each gate below ASKS for — reported, and not enforced until E73.
   // E71 — ONE Product-wide count per command, read here: before the per-step loop, so N steps cannot
   // mean N walks of every repo's history, and AFTER the early exits above, so a run that bails out for
   // a missing ledger or no targets never pays for a git walk at all. `today` is the one this command
@@ -743,7 +743,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     }
 
     const pred = gatePredicate({
-      // E72: caps `needed` at `active − 1`. `null` (not counted) applies no cap — only the base holds.
+      // E72: caps the reported ask at `active − 1`; `null` (not counted) gives no cap. Only the base holds.
       active: people.capacity.active,
       step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact),
       threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
@@ -752,9 +752,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       optional: optionalStepsFor(state),
     });
 
-    // Say the arithmetic, not just the verdict (rule 6): the count, and which part of it holds the gate
-    // — the capped count when the people were counted, only the base when they were not — labelled so
-    // nobody reads a number the gate is not enforcing as the reason it did or did not pass.
+    // Say the arithmetic, not just the verdict (rule 6): the count, the cap when the people were counted,
+    // and which half of it holds the gate — only the base until E73 — labelled so nobody reads a number
+    // the gate is not enforcing as the reason it did or did not pass.
     // `have: null` is a step whose approvals were never counted (inherited from a parent epic, or
     // skipped): there is no head count to report and no requirement to report either.
     const count = pred.have === null
@@ -786,9 +786,10 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
         pr: pr.number ?? null, commit: pull.mergeCommit || null, hash: curHash, mergedBy: pull.mergedBy || null,
         // Solo mode passed this gate without counting approvals, and the record says so (E10).
         waived: solo ? 'solo' : null,
-        // Every cap is recorded (E72): a gate that passed on a count the cap LOWERED says so, with the
-        // full count, what it asked instead, and the count of people it read.
-        capped: pred.cap?.capped ? { needed: pred.gateRule.needed, to: pred.cap.to, active: pred.cap.active } : null,
+        // Every cap is recorded (E72): a team gate that passed while the cap LOWERED its ask says so, with
+        // the full count, the capped ask and the count of people it read. Not in solo mode, where nothing
+        // was counted, so nothing was lowered.
+        capped: !solo && pred.cap?.capped ? { needed: pred.gateRule.needed, to: pred.cap.to, active: pred.cap.active } : null,
       });
       advanced++;
       ok(`gate PASSED — ${step.id} → done; next: ${state.currentStep}`);
@@ -1215,7 +1216,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && isStaleHash(a.artifactHash, accepted)).length;
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
     // E7's count, per step, from the step's own risk tags, capped by E72 when the people were counted —
-    // and labelled with which part of it holds the gate.
+    // only its base holds the gate until E73, and it is labelled so.
     // Distinct PEOPLE, which is why it can differ from the approval count beside it: two approvals from
     // one person are one approver. Printed in solo mode too, where approvals are waived, so a reader who
     // later switches to team mode can see what each gate will then ask for.
@@ -1571,14 +1572,10 @@ const base = (artifact) => artifactBase(artifact);
 export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true, active = null }) {
   const rule = gateRuleFor(step);
   const cap = gateCapFor(rule, active);
-  // What the count asks for (E72). With no risk step the base is the whole count and no cap can lower
-  // it. With one, the ask depends on the count of people — and the gate counts AGAIN when it decides,
-  // on whatever machine decides it, so a known count here is dated and the unknown case is named.
-  const needed = !rule.riskStep
-    ? `${rule.base} (enforced) · full count ${gateRuleSum(rule)}`
-    : !cap
-      ? `${rule.base} (enforced) · full count ${gateRuleSum(rule)} (the risk step is advisory: the active people could not be counted, so no cap applies and only the base holds)`
-      : `${cap.to} · full count ${gateRuleSum(rule)}${cap.capped ? `, capped to ${cap.to} for ${cap.active} active people` : ''} — counted when this PR was opened; the gate counts again when it decides, and if it cannot count the people there only the base ${rule.base} holds`;
+  // What the count asks for. Only the base holds (until E73); the cap (E72) is shown when it lowered the
+  // ask, dated, because this body is written once and the count can differ when the gate decides.
+  const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active ${cap.active === 1 ? 'person' : 'people'} when this PR was opened` : '';
+  const needed = `${rule.base} (enforced) · full count ${gateRuleSum(rule)}${capped}${rule.riskStep ? ' (the risk step is advisory until E73)' : ''}`;
   return [
     '## Artifact under review',
     `- Epic: \`${epic}\``,
@@ -1593,7 +1590,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     // them to discover later (rule 6). See `needed` above.
     `- **Approvals needed:** ${needed}`,
     // E71 — how many people could give those approvals, stated beside the ask so a reviewer can see a
-    // gate that asks for more people than the team has BEFORE they start. E72 caps the ask with it.
+    // gate that asks for more people than the team has BEFORE they start. E72 caps the reported ask with it.
     //
     // THIS IS THE ONE SURFACE WHERE THE COUNT BECOMES A LASTING RECORD. Everywhere else it is printed
     // live and gone; a PR description is written once, at `gate open`, and read for as long as the PR
@@ -1601,7 +1598,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     // from a laptop that has not cloned the connected repos reads "not counted" and would leave that
     // word in the body for good. So the line dates itself. It does NOT go quiet on an unknown (Part 3),
     // it just says WHEN it could not count, which is the only honest thing a frozen line can say.
-    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (the approval count is capped at ${Math.max(1, active - 1)} — one seat is left for the author; \`yad gate status\` counts it live)`}`,
+    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (the count asks for at most ${Math.max(1, active - 1)} — one seat is left for the author; \`yad gate status\` counts it live)`}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',

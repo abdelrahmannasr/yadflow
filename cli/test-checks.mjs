@@ -1429,8 +1429,9 @@ test('hub-route: prints the gate count from the risk tags — no roles, and stor
   assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk tag: auth, risk tag: payments\)/, 'two high tags are one step');
   r = run(['- **Risk tags:** contract, auth', '- **Domains / repos touched:** backend, mobile']);
   assert.match(r.out, /ROUTE: 3 approvers = base 1 \+ contract risk 2/);
-  // E72: the gate caps this sum; the script cannot count people, so it says what the gate does instead.
-  assert.match(r.out, /The gate caps this at the active people less one and enforces that; if it cannot count them, only the base holds: 1 approval\./);
+  // E72: the gate reports this sum capped; the script cannot count people, so it says where to look.
+  assert.match(r.out, /Only the base holds the gate: 1 approval/);
+  assert.match(r.out, /The risk step is advisory until E73; `yad gate status` prints it capped by the active people/);
   assert.match(r.out, /\n {2}- backend\n {2}- mobile/);
   assert.doesNotMatch(r.out, /owner|domain_owner|repos\.json/, 'no role and no stored owner is named');
   fs.rmSync(T, { recursive: true, force: true });

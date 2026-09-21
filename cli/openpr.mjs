@@ -127,7 +127,7 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
   if (high.length && opts.risk !== 'high') lines.push([warn, `the body says Risk level: ${opts.risk || 'low'}, but the risk map on ${map.base} marks ${high.join(', ')} high — the larger counts`]);
   // E72 — the cap, SHOWN and never enforced here. The Build count never holds a merge: the platform's
   // branch protection does (Part 9), and the user decided (2026-09-21) that the Build half stays
-  // reported. That is also E66's answer: the CI half of this count runs from the PR's own checkout of
+  // reported even after E73 turns the Shape cap on. That is also E66's answer: the CI half of this count runs from the PR's own checkout of
   // `checks/`, so a PR can edit the script that counts it — harmless only because nothing blocks on it.
   // `gateRuleEnforced` is called WITHOUT the cap on purpose, so the line keeps saying "advisory".
   const cap = gateCapFor(rule, opts.active);
