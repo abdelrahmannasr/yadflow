@@ -14,7 +14,7 @@
 
 ## Impact & Risk (front-half)
 - **Domains / repos touched:** <epic.repos, e.g. backend, mobile>
-- **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => raises the approver count -->
+- **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => raises the advisory approver count -->
 - **Contract surface:** <n/a | locked @ sha256:…>  <!-- architecture only; a re-lock invalidates prior approvals -->
 
 ## Checklist

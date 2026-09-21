@@ -160,7 +160,7 @@ sections, so every participant is attributable in one place:
 ```markdown
 # Approval record — <artifact> — <YYYY-MM-DD>
 
-Count: **<have> distinct approver(s)** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>; <the engine's suffix, e.g. `capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory`, or just `base enforced, risk step advisory` when no cap lowered the ask>[, short <N> — recorded here, never blocking].
+Count: **<have> distinct approver(s)** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>; <the engine's suffix, e.g. `capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory`, or just `base enforced, risk step advisory` when no cap lowered the ask; nothing after the sum when the step has no risk tag>[, short <N> — recorded here, never blocking].
 
 ## Approved by
 - <approver> — approved <date>[ (<source>)]

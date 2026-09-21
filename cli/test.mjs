@@ -1870,7 +1870,7 @@ test('gatePredicate: the count counts people, not records, and its risk step hol
   assert.equal(p.passed, true, 'the base decides the gate, and it is satisfied');
   assert.equal(p.have, 2, 'two distinct people, though three approval records');
   assert.equal(p.gateRule.needed, 3);
-  assert.equal(p.short, 1, 'the shortfall is reported — this is the value E72 will enforce on');
+  assert.equal(p.short, 1, 'the shortfall is reported — E73 enforces it, capped');
   assert.deepEqual(p.missing, [], 'nothing the risk step says may hold a gate before the cap exists');
 
   // A third human clears the shortfall.
@@ -17939,7 +17939,7 @@ test('proven history: the JS reader sees a quoted path and a move out, exactly a
 //
 // THE ONE RULE THESE TESTS EXIST FOR: an input that cannot be read must produce `active: null`, never a
 // number and never zero. E66 and E67 needed the opposite (an unknown must not read as "nobody", which
-// under-ASKS); here a small `active` lowers E72's cap and weakens every gate, so an unknown must not
+// under-ASKS); here a small `active` lowers E72's cap (the reported ask E73 enforces), so an unknown must not
 // read as "few people". Part 3: err towards MORE people.
 const {
   activePeople, peopleEvidence, capacityWindow, activeIn, personKey, daysBefore, dayNumber,
@@ -18251,7 +18251,7 @@ test('withLedgerLock: a stale EMPTY lock is still reclaimed, and the body runs',
 const { gatePredicate: _gatePred } = await import('./epic-state.mjs');
 
 test('E71 surfaces: the predicate CARRIES active on every path, and never invents one', () => {
-  // E72 caps `needed` with this field, so it has to be present on the paths that report no count of
+  // E72 caps the reported ask with this field, so it has to be present on the paths that report no count of
   // their own too — an inherited or skipped step is still part of a Product with a head count.
   const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
   assert.equal(_gatePred({ step, approvals: [], active: 4 }).active, 4);

@@ -183,7 +183,8 @@ product and everything connected to it, and a code repo on its own cannot see th
 On a Shape gate the cap is **reported until E73** (above). On the Build half — a code repo's task PR —
 `yad open-pr` shows the count capped by the active people, and it stays reported even after E73: the
 platform's branch protection holds a Build merge. `checks/risk-map-check.sh` and `checks/risk-route.sh`
-cannot cap at all, because a code repo's CI has no product to count people from, and they say so.
+cannot cap at all, because a code repo's CI has no product to count people from. `risk-route.sh` says so in
+its output; `risk-map-check.sh` says so in its header comment.
 
 Review PRs request no reviewers — ask them on the PR itself. A record's `by` (who wrote a skip, a
 deferral or a closing record) is the login `gh api user` / `glab api user` reports, else your git

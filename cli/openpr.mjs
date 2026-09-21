@@ -131,7 +131,7 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
   // `checks/`, so a PR can edit the script that counts it — harmless only because nothing blocks on it.
   // `gateRuleEnforced` is called WITHOUT the cap on purpose, so the line keeps saying "advisory".
   const cap = gateCapFor(rule, opts.active);
-  const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active people` : '';
+  const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active ${cap.active === 1 ? 'person' : 'people'}` : '';
   lines.push([riskStep ? hand : info, `this PR asks for ${gateRuleSum(rule)}${capped}${gateRuleEnforced(rule)}; \`bash checks/risk-route.sh "<pr body>" ${map.base}\` prints the count without the cap`]);
   // E71 — how many people are around to meet that ask. `opts.active` is the Product-wide count the
   // CALLER already read: this function runs in a code repo, which has no Product of its own to read

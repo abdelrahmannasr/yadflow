@@ -88,7 +88,7 @@ Where each surface puts it:
   With no cap: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory until E73)`.
 - `yad open-pr` (a code-repo task PR, Build half): `this PR asks for 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people — base enforced, risk step advisory`.
 
-`yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule` instead of a sentence.
+`yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule`, and the cap under `step.cap` (null when the people were not counted), instead of a sentence.
 
 Solo mode waives approvals entirely, exactly as before, and reports no shortfall. No `capped` record is
 written in solo mode. The merge and the
