@@ -194,8 +194,14 @@ function ledgerEvidence(root, aliases) {
 // The date is the COMMITTER date (`%cd` with `--since`, which filters on the same field), so a rebase
 // or squash counts a commit from when it LANDED. E67 recorded the same behaviour. It refreshes old
 // work into the window, which over-counts — the safe side here.
-function gitAuthors(repoRoot, sinceDays) {
+//
+// `since` is an ABSOLUTE `YYYY-MM-DD` date, never `'N days ago'`. A relative one is measured from the
+// real clock, and the JS range below is measured from the INJECTED `today` — so the two would disagree
+// on every day but one, and a fixture test pinned to a fixed `today` would quietly rot into a failure.
+// The whole point of injecting `today` is that this file reads no clock at all.
+function gitAuthors(repoRoot, since) {
   const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  if (since === null) return { unknown: 'the window has no readable start date' };
   if (!fs.existsSync(repoRoot)) return { unknown: `${repoRoot} is not on disk` };
   if (git(['rev-parse', '--is-inside-work-tree']).status !== 0) return { unknown: `${repoRoot} is not a git repo` };
   // A shallow clone holds only the newest commits. E67's rule, and the reason is even stronger here:
@@ -203,7 +209,7 @@ function gitAuthors(repoRoot, sinceDays) {
   if (/true/.test(git(['rev-parse', '--is-shallow-repository']).stdout || '')) {
     return { unknown: `${repoRoot} is a shallow clone — it does not hold enough history to count people` };
   }
-  const r = git(['log', '--all', '--no-merges', '--since=' + sinceDays + ' days ago', '--date=short', '--format=%cd%x1f%an%x1f%ae']);
+  const r = git(['log', '--all', '--no-merges', `--since=${since}`, '--date=short', '--format=%cd%x1f%an%x1f%ae']);
   if (r.status !== 0) return { unknown: `git could not read the history of ${repoRoot}` };
   const out = [];
   for (const line of (r.stdout || '').split('\n')) {
@@ -243,13 +249,15 @@ function connectedRepos(root) {
 }
 
 // Every piece of evidence, from every source, with one list of the reasons any of it is missing.
-export function peopleEvidence(root, { aliases = new Map(), sinceDays = CAPACITY_MAX_DAYS * WALK_PAD } = {}) {
+export function peopleEvidence(root, { today = todayString(), aliases = new Map(), sinceDays = CAPACITY_MAX_DAYS * WALK_PAD } = {}) {
   const led = ledgerEvidence(root, aliases);
   const events = [...led.events];
   const unknown = [...led.unknown];
+  // One absolute date for every repo, computed from the injected `today` (see `gitAuthors`).
+  const since = daysBefore(today, sinceDays);
 
   // The Product's own git history: authoring an artifact is committing.
-  const product = gitAuthors(root, sinceDays);
+  const product = gitAuthors(root, since);
   if (product.unknown) unknown.push(product.unknown);
   else events.push(...product.events);
 
@@ -257,7 +265,7 @@ export function peopleEvidence(root, { aliases = new Map(), sinceDays = CAPACITY
   if (conn.unknown) unknown.push(conn.unknown);
   else {
     for (const repo of conn.repos) {
-      const got = gitAuthors(repo.root, sinceDays);
+      const got = gitAuthors(repo.root, since);
       if (got.unknown) unknown.push(`repo '${repo.name}': ${got.unknown}`);
       else events.push(...got.events);
     }
@@ -319,7 +327,7 @@ export function activeIn(events, from, today) {
 // The windows themselves are still reported, because "we could not count, and here is the window we
 // would have counted over" is a more useful thing to print than silence.
 export function activePeople(root, { today = todayString(), aliases = new Map() } = {}) {
-  const { events, merges, unknown } = peopleEvidence(root, { aliases });
+  const { events, merges, unknown } = peopleEvidence(root, { today, aliases });
   if (dayNumber(today) === null) unknown.push(`'${today}' is not a readable date`);
   const cap = capacityWindow(merges, today);
   const window = (days, extra = {}) => {

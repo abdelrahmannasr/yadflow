@@ -18075,6 +18075,23 @@ const assertUnknown = (r, why) => {
   assert.ok(r.capacity.days > 0, 'the window is still reported — "we could not count, over this window" beats silence');
 };
 
+test('E71 git is asked for an ABSOLUTE date, so a fixed `today` never rots', () => {
+  // `--since=30 days ago` is measured from the real clock, while the range below it is measured from
+  // the injected `today`. The two agree on exactly one day a month, so a relative ask would make every
+  // fixture test here expire — and would make "the count reads no clock" untrue.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    // A `today` a year in the FUTURE. `--since` is a lower bound, so an absolute ask built from it lands
+    // after every commit in the fixture and git hands back nothing. A clock-relative `30 days ago` would
+    // still return the commit made 3 days before P_TODAY — which is exactly the difference being pinned.
+    const future = peopleEvidence(fx.T, { today: '2027-09-21', sinceDays: 30 });
+    assert.equal(future.events.filter((e) => e.how === 'committed').length, 0,
+      'git was asked about 2027-08-22 onwards, not about the last 30 real days');
+    const now = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: 30 });
+    assert.ok(now.events.some((e) => e.how === 'committed'), 'the same repo, asked about the right dates');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
 test('E71 unknown: an approvals file that does not parse is NOT zero approvers', () => {
   const fx = peopleFixture();
   try {
@@ -18141,8 +18158,8 @@ test('E71 the padded walk finds a person git\'s date cut-off would hide', () => 
     fx.commit(fx.T, 'Hidden Person', 'hidden@corp.io', 25);   // inside the 30-day window
     fx.commit(fx.T, 'Old Commit', 'old@corp.io', 50);         // outside it, and IN FRONT of Hidden
     fx.commit(fx.T, 'Tip Person', 'tip@corp.io', 1);
-    const padded = peopleEvidence(fx.T, { sinceDays: EXPERTISE_DAYS * WALK_PAD });
-    const naive = peopleEvidence(fx.T, { sinceDays: EXPERTISE_DAYS });
+    const padded = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: EXPERTISE_DAYS * WALK_PAD });
+    const naive = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: EXPERTISE_DAYS });
     const inWindow = (ev) => activeIn(ev.events, daysBefore(P_TODAY, EXPERTISE_DAYS), P_TODAY).people.map((p) => p.key);
     assert.ok(inWindow(naive).includes('tip person'), 'the tip is always reachable');
     assert.ok(!inWindow(naive).includes('hidden person'), 'without the pad the cut-off hides them — this is the bug');
