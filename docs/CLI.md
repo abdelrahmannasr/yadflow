@@ -132,7 +132,8 @@ the platform decides whether they may approve.
 
 | Active people | Contract gate: capped ask (full count 3) |
 |---|---|
-| 0–2 | 1 (never below 1) |
+| 0–1 | 1 (never below 1) |
+| 2 | 1 (one seat is left for the author) |
 | 3 | 2 |
 | 4 or more | 3 |
 
@@ -154,20 +155,22 @@ skip or inherited shortcut, where nothing was asked. The full rules are in
 `skills/yad-epic/references/state-schema.md` (Closing records). `yad gate status` prints it as
 `count capped from 3 to 1 (2 active people)`.
 
-Four surfaces print the count: `yad gate sync`, `yad gate status` (the same sum after the
-distinct-people count), the generated review-PR body and `yad open-pr`. `yad gate sync` and `yad gate
+Four surfaces print the count with its cap: `yad gate sync`, `yad gate status` (the same sum after
+the distinct-people count), the generated review-PR body and `yad open-pr`. `checks/risk-route.sh` and
+`checks/hub-route.sh` print it without the cap, because they cannot count people. `yad gate sync` and `yad gate
 status` share one suffix; the review-PR body and `yad open-pr` word the cap their own way. The shared
 suffix names a cap only when it lowered the ask, and always says what holds: `— capped to 1: 2 active
-people, less one seat for the author — base enforced, risk step advisory` (at 0 or 1 active people:
-`— capped to 1: 1 active person (never below 1) — base enforced, risk step advisory`), or just
+people, less one seat for the author — base enforced, risk step advisory` (at 1 active person:
+`— capped to 1: 1 active person (never below 1) — base enforced, risk step advisory`; at 0 it reads
+`0 active people (never below 1)`), or just
 `— base enforced, risk step advisory`. For example
 `yad gate sync` prints `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active
 people, less one seat for the author — base enforced, risk step advisory`, and the review-PR body says
 `Approvals needed: 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2
 active people when this PR was opened (the risk step is advisory until E73)`. `yad gate review --json`
 carries the rule as an object under `step.gateRule`, and the cap under `step.cap` — an object
-`{ active, limit, to, capped }`, where `to` is the capped count (`null` when the people were not
-counted).
+`{ active, limit, to, capped }`, where `to` is the count asked for after the cap and `capped` is true
+when the cap lowered it. The whole `step.cap` field is `null` when the people were not counted.
 
 **How many people are there to ask?** The engine counts that live, and prints it beside the ask
 (`active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73`). "Active" means committed or approved — read from the approval

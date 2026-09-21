@@ -41,7 +41,8 @@ reported as `short`, never blocking:
 
 | Active people | Contract gate: capped ask (full count 3) |
 |---|---|
-| 0–2 | 1 (never below 1) |
+| 0–1 | 1 (never below 1) |
+| 2 | 1 (one seat is left for the author) |
 | 3 | 2 |
 | 4 or more | 3 |
 
@@ -74,30 +75,34 @@ was when the PR was opened.
 Why count people: the rule names no person, no role and no step. A stored list of people goes
 stale; repository access decides who can approve.
 
-Four surfaces print the count: `yad gate sync`, `yad gate status`, the generated review-PR body and
-`yad open-pr`. `yad gate sync` and `yad gate status` share one suffix; the review-PR body and `yad
+Four surfaces print the count with its cap: `yad gate sync`, `yad gate status`, the generated
+review-PR body and `yad open-pr`. (`checks/risk-route.sh` and `checks/hub-route.sh` print the count
+without the cap — they cannot count people.) `yad gate sync` and `yad gate status` share one suffix; the review-PR body and `yad
 open-pr` word the cap their own way (below). The shared suffix appears only when the step has a risk
 step. It names the cap only when the cap lowered the ask, and always ends by saying what holds:
 - ` — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory` — the cap lowered the ask;
-- ` — capped to 1: 1 active person (never below 1) — base enforced, risk step advisory` — the same at 0 or 1 active people;
+- ` — capped to 1: 1 active person (never below 1) — base enforced, risk step advisory` — at 1 active person (at 0 it reads `0 active people (never below 1)`);
 - ` — base enforced, risk step advisory` — the cap lowered nothing, or the people could not be counted.
 
 Where each surface puts it:
 - `yad gate sync`: `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory`
 - `yad gate status`: `; count: <sum>` with the same suffix, after the distinct-people count. Above the
   gates it prints the count of people and what it does, for example
-  `active people: 2 in the last 90 days — caps each gate's count at 1 approver (one seat is left for the author); reported, only the base is enforced until E73`,
+  `active people: 2 in the last 90 days — caps each gate's count at 1 approver (one seat is left for the author); reported, only the base is enforced until E73`
+  (at 0 or 1 people the bracket reads `(never below 1)`),
   or, when it cannot count them, `active people: NOT COUNTED — <reason> — no cap can be shown, and only the base holds each gate`.
 - the generated review-PR body: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people when this PR was opened (the risk step is advisory until E73)`.
   With no cap: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory until E73)`.
-  Its Active-people line: ``- **Active people:** 2 when this PR was opened (with one seat left for the author, the cap is 1, so this gate's count is 1; `yad gate status` counts it live)``;
+  Its Active-people line: ``- **Active people:** 2 when this PR was opened (the cap is 1 (one seat is left for the author), so this gate's count is 1; `yad gate status` counts it live)``
+  (at 0 or 1 people the inner bracket reads `(never below 1)`);
   with no risk step it ends ``… (`yad gate status` counts it live)``.
 - `yad open-pr` (a code-repo task PR, Build half): `this PR asks for 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people — base enforced, risk step advisory; …`
   (the line goes on to name `checks/risk-route.sh`, which prints the count without the cap). The cap
   appears only when `yad open-pr` is run from the Product; from inside a code repo the people are not counted.
 
-`yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule`, and the cap under `step.cap` — an object `{ active, limit, to, capped }`, where `to` is the capped count and
-`capped` is true when the cap lowered it (`null` when the people were not counted) — instead of a sentence.
+`yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule`, and the cap under `step.cap` — an object `{ active, limit, to, capped }`, where `to` is the count asked for after the cap and
+`capped` is true when the cap lowered it — instead of a sentence. The whole `step.cap` field is `null`
+when the people were not counted.
 
 Solo mode waives approvals entirely, exactly as before, and reports no shortfall. No `capped` record is
 written in solo mode. The merge and the
