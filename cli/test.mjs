@@ -17943,8 +17943,9 @@ test('proven history: the JS reader sees a quoted path and a move out, exactly a
 // under-ASKS); here a small `active` lowers E72's cap and weakens every gate, so an unknown must not
 // read as "few people". Part 3: err towards MORE people.
 const {
-  activePeople, peopleEvidence, capacityWindow, activeIn, personKey, daysBefore,
-  EXPERTISE_DAYS, CAPACITY_MAX_DAYS, CAPACITY_MIN_DAYS, CAPACITY_MERGES, WALK_PAD,
+  activePeople, peopleEvidence, capacityWindow, activeIn, personKey, daysBefore, dayNumber,
+  activeSum: _activeSum, activeBasis: _activeBasis,
+  EXPERTISE_DAYS, STALE_DAYS, CAPACITY_MAX_DAYS, CAPACITY_MIN_DAYS, CAPACITY_MERGES, WALK_PAD,
 } = await import('./people.mjs');
 
 const P_TODAY = '2026-09-21';
@@ -18010,6 +18011,13 @@ test('E71 personKey: a noreply address joins a commit and an approval into ONE p
     'the login decides the key whenever there is one');
   assert.notEqual(personKey({ name: 'Octo Cat', login: null }), personKey({ name: 'Octo Cat', login: 'octocat' }),
     'a bare name is NOT assumed to be the same person as a login that resembles it (E64)');
+  // KNOWN LIMIT, pinned so it cannot change unnoticed: names and logins share ONE keyspace, so a git
+  // author literally named `ada` and a different person whose login is `ada` collapse into one row.
+  // That under-counts, which is the unsafe direction here. Namespacing the key would fix it and would
+  // also stop a post-E62 approval (whose recorded name IS a login) joining that person's commits —
+  // the open identity question this row did not close.
+  assert.equal(personKey({ name: 'ada', login: null }), personKey({ name: 'Ada L', login: 'ada' }),
+    'today they collide — change this test only together with the identity decision');
   assert.equal(got.count, 1, 'logins are case-insensitive on both platforms');
   assert.deepEqual(got.people[0].how, ['approved', 'committed']);
   assert.equal(got.nameOnly, 0);
@@ -18026,10 +18034,34 @@ test('E71 personKey: a person with no provable login is TWO rows, and the count 
   assert.equal(got.nameOnly, 1);
 });
 
-test('E71 activeIn: only what is inside the window counts, on both edges', () => {
+test('E71 activeIn: the window has a floor and deliberately NO ceiling', () => {
   const ev = (ts) => ({ ts, name: ts, login: null, how: 'committed' });
-  const got = activeIn([ev('2026-08-31'), ev('2026-09-01'), ev(P_TODAY), ev('2026-09-22')], '2026-09-01', P_TODAY);
-  assert.deepEqual(got.people.map((p) => p.key), ['2026-09-01', '2026-09-21'], 'both ends inclusive, nothing outside');
+  const got = activeIn([ev('2026-08-31'), ev('2026-09-01'), ev(P_TODAY), ev('2026-09-22')], '2026-09-01');
+  // The lower edge is inclusive and anything before it is out. The UPPER edge is not enforced at all:
+  // clock skew, a rebase, a hand-edited ledger and a machine in another timezone all produce a date in
+  // the future, and dropping one makes the count SMALLER — the one direction this file may never go.
+  assert.deepEqual(got.people.map((p) => p.key), ['2026-09-01', '2026-09-21', '2026-09-22'],
+    'a future-dated event is still evidence of a person');
+  assert.ok(!got.people.some((p) => p.key === '2026-08-31'), 'but nothing before the window counts');
+});
+
+test('E71 a commit made today in a timezone ahead of UTC is NOT lost', () => {
+  // `git log --date=short %cd` renders the date in the COMMIT'S OWN timezone while everything else here
+  // is UTC, so a commit made at 08:00 in Tokyo (23:00 the previous day in UTC) printed tomorrow's date.
+  // With an upper bound that dropped it, a real person became `active: 0` and `unknown` stayed empty.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.writeFileSync(path.join(fx.T, 'tokyo.txt'), 'x');
+    execFileSync('git', ['add', '-A'], { cwd: fx.T, stdio: 'pipe' });
+    execFileSync('git', ['-c', 'user.name=Tokyo Dev', '-c', 'user.email=tokyo@corp.io', 'commit', '-q', '-m', 'tz'], {
+      cwd: fx.T, stdio: 'pipe',
+      env: { ...GIT_ENV, GIT_AUTHOR_DATE: `${daysBefore(P_TODAY, -1)}T08:00:00+09:00`, GIT_COMMITTER_DATE: `${daysBefore(P_TODAY, -1)}T08:00:00+09:00` },
+    });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    assert.ok(r.expertise.people.some((p) => p.key === 'tokyo dev'), 'the Tokyo commit still names its author');
+    assert.notEqual(r.expertise.active, 0);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
 
 test('E71 counts commits AND approvals, from the Product and every connected repo', () => {
@@ -18052,7 +18084,7 @@ test('E71 a robot is not capacity', () => {
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
 
-test('E71 `today` is injected — the count never reads a clock', () => {
+test('E71 `today` is injected, so a CALLER can fix the day the count is measured from', () => {
   // The gate predicate's return is compared byte for byte by the golden test; a number derived from the
   // current date would move that snapshot every single day.
   const fx = peopleFixture({ withRepo: false });
@@ -18070,9 +18102,17 @@ const assertUnknown = (r, why) => {
   assert.ok(r.unknown.length, `expected an unknown reason: ${why}`);
   for (const w of ['capacity', 'expertise', 'stale']) {
     assert.equal(r[w].active, null, `${w}.active must be null, not a number (${why})`);
-    assert.notEqual(r[w].active, 0, `${w}.active must never fall back to zero (${why})`);
+    assert.equal(r[w].people.length, 0, `${w}.people must be empty when nothing was counted (${why})`);
+    assert.equal(typeof r[w].active, 'object', `${w}.active must not be a number of any kind (${why})`);
   }
-  assert.ok(r.capacity.days > 0, 'the window is still reported — "we could not count, over this window" beats silence');
+  // The window is still reported — "we could not count, and here is what we would have counted over"
+  // beats silence. Pinned to the real values, not to `> 0`, which nothing could ever falsify.
+  assert.equal(r.expertise.days, EXPERTISE_DAYS);
+  assert.equal(r.stale.days, STALE_DAYS);
+  assert.equal(r.capacity.days, CAPACITY_MAX_DAYS);
+  assert.equal(r.expertise.from, daysBefore(r.today, EXPERTISE_DAYS), 'and the window it would have used');
+  // The printed line must name a source and never show a number in place of the count.
+  assert.match(_activeSum(r), /NOT COUNTED/);
 };
 
 test('E71 git is asked for an ABSOLUTE date, so a fixed `today` never rots', () => {
@@ -18208,7 +18248,6 @@ test('withLedgerLock: a stale EMPTY lock is still reclaimed, and the body runs',
 });
 
 // ---- E71: the surfaces ---------------------------------------------------------------------------
-const { activeSum: _activeSum, activeBasis: _activeBasis } = await import('./people.mjs');
 const { gatePredicate: _gatePred } = await import('./epic-state.mjs');
 
 test('E71 surfaces: the predicate CARRIES active on every path, and never invents one', () => {
@@ -18217,13 +18256,17 @@ test('E71 surfaces: the predicate CARRIES active on every path, and never invent
   const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
   assert.equal(_gatePred({ step, approvals: [], active: 4 }).active, 4);
   assert.equal(_gatePred({ step, approvals: [] }).active, null, 'a caller that read nothing gets null, not 0');
-  assert.equal(_gatePred({ step: { ...step, status: 'done', inherited: true, inheritedFrom: 'EP-p', boundHash: 'h' }, approvals: [], acceptedHashes: ['h'], active: 3 }).active, 3,
-    'an inherited step carries it too');
-  assert.equal(_gatePred({ step: { ...step, id: 'ui-design-review', skipped: true }, approvals: [], optional: ['ui-design'], active: 3 }).active, 3,
-    'a skipped step carries it too');
+  // Assert the RULE as well as the value: all three return sites carry the same `active`, so without
+  // this the fixtures could quietly fall through to the ordinary path and the test would still pass.
+  const inherited = _gatePred({ step: { ...step, status: 'done', inherited: true, inheritedFrom: 'EP-p', boundHash: 'h' }, approvals: [], acceptedHashes: ['h'], active: 3 });
+  assert.equal(inherited.rule, 'inherited', 'the fixture really took the inherited path');
+  assert.equal(inherited.active, 3, 'an inherited step carries it too');
+  const skipped = _gatePred({ step: { ...step, id: 'ui-design-review', skipped: true }, approvals: [], optional: ['ui-design'], active: 3 });
+  assert.equal(skipped.rule, 'skipped', 'the fixture really took the skipped path');
+  assert.equal(skipped.active, 3, 'a skipped step carries it too');
 });
 
-test('E71 surfaces: an unknown count never prints as a number, anywhere', () => {
+test('E71 surfaces: the two sentence builders never turn an unknown into a number', () => {
   // The single rule of the row, checked on the strings people actually read.
   const unknownCounted = { capacity: { active: null, days: 180, basis: 'x' }, unknown: ['repos.json does not parse', 'and another'] };
   const line = _activeSum(unknownCounted);
@@ -18234,8 +18277,9 @@ test('E71 surfaces: an unknown count never prints as a number, anywhere', () => 
   assert.match(_activeBasis(unknownCounted), /never counted as few people/);
 
   const known = { capacity: { active: 4, days: 90, basis: 'the last 20 merged PRs span 90 day(s)' }, unknown: [] };
-  assert.equal(_activeSum(known), 'active people: 4 in the last 90 days');
-  assert.match(_activeBasis(known), /does not cap the approval count yet/, 'it always says what it does not do');
+  assert.equal(_activeSum(known), 'active people: 4 in the last 90 days — reported only, it does not cap the approval count yet',
+    'the number and its disclaimer are ONE string, because they go to different streams');
+  assert.equal(_activeBasis(known), 'the last 20 merged PRs span 90 day(s)');
 });
 
 test('E71 surfaces: the review-PR body states the head count beside the ask', () => {
@@ -18257,4 +18301,164 @@ test('E71 surfaces: the review-PR body states the head count beside the ask', ()
   assert.match(uncounted, /\*\*Active people:\*\* not counted when this PR was opened/,
     'it says WHEN it could not count — a frozen line must not claim a lasting fact');
   assert.doesNotMatch(uncounted, /\*\*Active people:\*\* 0/, 'never zero');
+});
+
+// ---- E71: the review round's findings, each pinned -----------------------------------------------
+
+test('E71 review: a stray FILE where a shard directory belongs does not crash the gate', () => {
+  // `fs.existsSync` is true for a file too, so `readdirSync` threw ENOTDIR — and `activePeople` is
+  // called with no guard by `gate sync`, `gate status`, `gate open` and `gate review`, so the
+  // exception escaped and broke three commands that used to work.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.writeFileSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), 'i am a file, not a directory');
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'build-log is a file');
+    assert.match(r.unknown.join(' '), /not a directory/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: a folded build-log whose `ships` is not a list is unknown, not "no ships"', () => {
+  // `readShips` does `Array.isArray(foldedObj?.ships) ? … : []`, and `readJSONStrict` only checks that
+  // the JSON PARSES. So a file of the wrong shape lost every engineer-review approver in it silently.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.write('epics/EP-x/.sdlc/build-log.json', { epic: 'EP-x', ships: { one: { approver: 'lost' } } });
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'ships is not a list');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: the capacity window really does read the ledger\'s merge records', () => {
+  // The whole data path behind decision (2) — closing records + ships — had no fixture at all; only
+  // `capacityWindow` was unit-tested, on a hand-built array.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    // 20 merged review PRs, the oldest 60 days back: the window should be that span, not the wide end.
+    const steps = Array.from({ length: CAPACITY_MERGES }, (_, i) => ({
+      id: `step-${i}`, type: 'review+approve',
+      closed: { by: 'alice', date: daysBefore(P_TODAY, Math.round((i * 60) / (CAPACITY_MERGES - 1))), via: 'merge', pr: 100 + i },
+    }));
+    fx.write('epics/EP-x/.sdlc/state.json', { currentStep: 'x', steps });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    assert.equal(r.capacity.days, 60, 'the 20th-newest merge sets the window');
+    assert.match(r.capacity.basis, /span 60 day/);
+
+    // And a ship's engineer-review approver is a person, dated by the ship.
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), { recursive: true });
+    fx.write('epics/EP-x/.sdlc/build-log/s-t-r.json', {
+      story: 'EP-x-S01', task: 'T01', repo: 'backend', pr: 7,
+      shippedAt: daysBefore(P_TODAY, 2), engineer_review: [{ approver: 'ship-reviewer' }],
+    });
+    const r2 = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r2.unknown, []);
+    assert.ok(r2.expertise.people.some((p) => p.key === 'ship-reviewer'), 'an engineer review is an approval');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: a record we can read whose DATE we cannot is a gap, not one person fewer', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', [{ approver: 'reviewer-one', date: '2026-9-4' }]);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'an approval date that does not parse');
+    assert.match(r.unknown.join(' '), /no readable `date`/);
+    assert.doesNotMatch(r.unknown.join(' '), /2026-9-4/, 'the field is named, the value is never printed');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: ships that cannot be told apart are unknown — one would silently replace the other', () => {
+  // `readShips` de-duplicates on `story|task|repo`; two records missing those collide on
+  // `undefined|undefined|undefined` and one wins, taking its engineer reviewers with it.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), { recursive: true });
+    fx.write('epics/EP-x/.sdlc/build-log/a.json', { pr: 1, shippedAt: daysBefore(P_TODAY, 1), engineer_review: [{ approver: 'rev-a' }] });
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'a ship with no story/task/repo');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: an epic folder the enumerator will not name is reported, not skipped', () => {
+  // `epicIds` drops a directory whose name is not a valid id. Right for something that turns a name
+  // into a path; wrong for a counter, because the approvals inside go with it.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-Legacy/.sdlc'), { recursive: true });
+    fx.write('epics/EP-Legacy/.sdlc/approvals.json', [{ approver: 'legacy-reviewer', date: daysBefore(P_TODAY, 1) }]);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'an epic id the enumerator rejects');
+    assert.match(r.unknown.join(' '), /EP-Legacy/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: for MERGES more evidence is the UNSAFE direction, so a future date cannot narrow the window', () => {
+  // Everywhere else in this reader more evidence means more people. For merges it is inverted: more
+  // records push the 20th-newest closer to today, which NARROWS the window and finds FEWER people. A
+  // future date made `span` negative, and clamping a negative number landed on the narrow end — 20 bad
+  // records took the window from 180 days to 30 and printed "-111 day(s)" as the reason.
+  const future = Array.from({ length: CAPACITY_MERGES }, (_, i) => daysBefore(P_TODAY, -100 - i));
+  const w = capacityWindow(future, P_TODAY);
+  assert.equal(w.days, CAPACITY_MAX_DAYS, 'a merge cannot have happened after today');
+  assert.doesNotMatch(w.basis, /-/, 'and no negative span is ever printed as a reason');
+});
+
+test('E71 review: a clone that does not hold what the registry packed is behind, so it is unknown', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('.sdlc/repos.json', { repos: [{ name: 'backend', path: 'demo/backend', syncedHead: '0'.repeat(40) }] });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'a clone behind the registry');
+    assert.match(r.unknown.join(' '), /behind/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: every shape of a broken repos.json is unknown, not "no repos"', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, '.sdlc'), { recursive: true });
+    for (const [reg, why] of [
+      [{ repos: [{ path: 'demo/x' }] }, 'a repo with no name'],
+      [{ repos: [{ name: 'x' }] }, 'a repo with no path'],
+      [{ repos: 'nope' }, 'repos is not a list'],
+      [{}, 'no repos key at all'],
+    ]) {
+      fx.write('.sdlc/repos.json', reg);
+      assertUnknown(activePeople(fx.T, { today: P_TODAY }), why);
+    }
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: dayNumber accepts only a real YYYY-MM-DD', () => {
+  assert.equal(dayNumber('2026-02-30'), null, 'an impossible day is rejected, never rolled forward');
+  for (const bad of ['2026-9-4', '2026-09-04T10:00:00Z', '', null, undefined, 20260904, 'today']) {
+    assert.equal(dayNumber(bad), null, `${String(bad)} is not a date`);
+  }
+  assert.equal(dayNumber('2026-09-04') + 1, dayNumber('2026-09-05'), 'and consecutive days are consecutive');
+});
+
+test('E71 review: the disclaimer travels WITH the number, because the two lines go to different streams', () => {
+  // `activeSum` goes to stdout through `log()`; `activeBasis` goes to stderr through `note()`. Anything
+  // capturing stdout alone (CI logs, a redirect) would have kept the number and lost the sentence
+  // saying it enforces nothing.
+  const known = { capacity: { active: 4, days: 90, basis: 'the last 20 merged PRs span 90 day(s)' }, unknown: [] };
+  assert.match(_activeSum(known), /does not cap the approval count yet/);
+  // And an absent or undefined count must take the NOT-COUNTED branch, not print a dangling sentence.
+  for (const odd of [undefined, {}, { capacity: {} }, { capacity: { active: undefined } }]) {
+    assert.match(_activeSum(odd), /NOT COUNTED/, 'an absent count is never a counted one');
+    assert.doesNotMatch(_activeBasis(odd), /^ — /, 'and the basis never starts with a dangling dash');
+  }
+});
+
+test('withLedgerLock: a stale lock reclaimed on the LAST try is taken, not reported as held', () => {
+  // The reclaim deleted the stale lock and then threw "another process is writing" about a lock that
+  // no longer existed. The user re-ran and it worked, with no idea why.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lock-'));
+  try {
+    const lock = path.join(T, '.sdlc/build-log.json.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    const stale = new Date(Date.now() - 120_000);
+    fs.utimesSync(lock, stale, stale);
+    assert.equal(_withLedgerLock(lock, () => 'done', { retries: 0, waitMs: 1 }), 'done',
+      'with zero retries left, reclaiming the lock must still win it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

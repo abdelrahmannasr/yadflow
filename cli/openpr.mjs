@@ -236,7 +236,19 @@ export async function runOpenPr(root, opts = {}) {
   hand('no reviewers were requested — ask them on the PR itself');
   // The Product-wide active count (E71), read ONCE here and handed down: `routeCount` works inside a
   // code repo and must not go looking for a Product itself.
+  //
+  // ONLY WHEN `root` REALLY IS A PRODUCT. `root` is the working directory, and running this command
+  // from inside the code repo is a supported path — `detectStage` returns `code-repo` for exactly that
+  // case. Counting from there would have walked the CODE REPO's history and reported its committers as
+  // the whole team: no `epics/` (so no ledger and no `unknown`), no `.sdlc/repos.json` (which is a
+  // readable "no connected repos"), and one git log that works — a confident, smaller, wrong number,
+  // feeding the field E72 will cap with. `null` is the honest answer there: we are not standing in a
+  // Product, so we did not count.
   const active = (() => {
+    // Only the `code-repo` stage prints it (`routeCount`, below). On a `hub-tooling` PR this would
+    // otherwise walk the Product and every connected repo's history and throw the answer away.
+    if (stage !== 'code-repo') return null;
+    if (!exists(productConfigPath(root))) return null;
     // `readJSON`, not `readJSONStrict`, and that is not the degradation cli/people.mjs warns about:
     // losing the roster's name -> login table only stops OLDER records being joined to a login, so a
     // person lands on two rows instead of one. That over-counts, the safe direction here. The count

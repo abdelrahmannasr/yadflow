@@ -137,10 +137,14 @@ scales with how fast the team merges: the span of the last 20 merged pull reques
 30 and 180 days, and the wide end when there are fewer than 20. Nothing is stored; it is counted fresh
 every time.
 
-If any source cannot be read — a code repo that is not on this machine, a shallow clone, a file that
-does not parse — the answer is **`not counted`**, never a number. That is deliberate. A small count will
-one day lower the number of approvals a gate asks for, so an unreadable input must never look like a
-small team. The line says which source failed.
+If any source cannot be read — a code repo that is not on this machine, a shallow clone, a clone that is
+behind, a file that does not parse, a date that does not parse — the answer is **`NOT COUNTED`**, never a
+number. That is deliberate. A small count will one day lower the number of approvals a gate asks for, so
+an unreadable input must never look like a small team. The line names the first source that failed and
+says how many others did.
+
+Running `yad open-pr` from inside a code repo also reads `not counted`: the count is a fact about the
+product and everything connected to it, and a code repo on its own cannot see that.
 
 The count is **reported only today**: it caps nothing yet.
 

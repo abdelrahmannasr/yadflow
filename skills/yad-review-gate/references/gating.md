@@ -34,8 +34,10 @@ records it in `state.json`, so adding `auth` to a step by hand raises that epic'
 
 **Only the base is enforced — yet.** The base (1) holds the gate today. The risk step is reported, not
 enforced. The roadmap's rule is one formula: `needed = base + risk step`, **capped** at the number of
-active people minus one, floor 1. The cap needs a live count of active people, which is a later task
-(E72), and enforcing the uncapped count on its own would deadlock a small team: two people on an
+active people minus one, floor 1. The live count of active people SHIPPED in E71 — `yad gate status`
+and `yad gate sync` print it, and the predicate carries it as `active` — so what is still a later task
+(E72) is the CAP itself, not the count. Enforcing the uncapped count on its own would deadlock a small
+team: two people on an
 architecture review cannot reach three approvers, and there is no cap and no override to escape
 through. So the full count is computed and shown everywhere a gate speaks, and the shortfall is reported
 as `short` rather than blocking. Nothing is written to disk: the count is printed, not recorded.

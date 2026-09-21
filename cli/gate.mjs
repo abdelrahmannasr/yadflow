@@ -587,7 +587,7 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
   return { targets: entry(found.number, found.url), discovered: true };
 }
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
+export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null } = {}) {
   const { hub } = loadProduct(root);
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
@@ -595,10 +595,6 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   const clashed = ambiguousLegacyNames(hub);
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
-  // E71 — ONE Product-wide count per command, read before the per-step loop so that N steps cannot mean
-  // N walks of every repo's history. `today` is the one this command was given, so the count and the
-  // records it reports on are measured from the same day.
-  const headCount = activePeople(root, { today: today || undefined, aliases });
   // Local invocation in verified mode is ADVISORY: CI is the sole ledger writer, so a human run reads
   // the platform and prints the predicate but writes nothing. CI calls gateSync with local=false.
   // With a local ledger (platform but no gate-sync CI) the local command stays the writer.
@@ -669,8 +665,17 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   // E71 — said ONCE, before the per-artifact lines, because it is a fact about the PRODUCT and not
   // about any one gate (rule 6: say the arithmetic, not just the verdict). It is reported only: E72 is
   // the row that turns it into the cap on `needed`, so the basis line says so in as many words.
-  log(`  ${c.dim(activeSum(headCount))}`);
-  note(c.dim(activeBasis(headCount)));
+  // E71 — ONE Product-wide count per command, read here: before the per-step loop, so N steps cannot
+  // mean N walks of every repo's history, and AFTER the early exits above, so a run that bails out for
+  // a missing ledger or no targets never pays for a git walk at all. `today` is the one this command
+  // was given, so the count and the records it reports on are measured from the same day.
+  //
+  // `yad gate ci` is why it can be HANDED IN. Its sweep builds one job per (epic, open review PR) and
+  // calls this function once per job, so reading it here would walk every repo once PER PR — the very
+  // thing the sentence above promises it does not do. The sweep reads it once and passes it down.
+  const people = headCount || activePeople(root, { today: today || undefined, aliases });
+  log(`  ${c.dim(activeSum(people))}`);
+  note(c.dim(activeBasis(people)));
   // Targets whose step is still open. The dated approval-record file is regenerated only for these —
   // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
   // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
@@ -735,7 +740,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 
     const pred = gatePredicate({
       // Carried, not applied: E72 is the row that caps `needed` with it.
-      active: headCount.capacity.active,
+      active: people.capacity.active,
       step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact),
       threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
       // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
@@ -883,6 +888,11 @@ export function convertProductLevel(root, hub, { git = (...a) => run('git', a, {
 
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { hub } = loadProduct(root);
+  // E71 — read ONCE for the whole sweep. This builds one job per (epic, open review PR) and calls
+  // `gateSync` for each; letting each call read the count would walk the Product and every connected
+  // repo's git history once per PR. It is one fact about the Product, so it is read once and handed to
+  // every job, which also makes each job's printed number the same one.
+  const sweepCount = activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) });
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = hub.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
@@ -1000,7 +1010,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     try {
       // A branch event that is not a merge can never advance (the predicate requires merged), so it
       // is read-only under Path B — run it as a dry sync that persists nothing to the working tree.
-      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: !!branch && !merged });
+      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: !!branch && !merged, headCount: sweepCount });
       synced += r.synced;
       // When the step actually ADVANCED (the merge phase, or a swept merge the schedule observed),
       // reflect it in the artifact frontmatter (draft → approved). Keyed off the advance, not the

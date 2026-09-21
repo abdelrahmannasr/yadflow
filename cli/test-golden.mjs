@@ -131,8 +131,9 @@ export async function collectGolden(root) {
         // `gateSync` reads it with `activePeople(root, …)`, which walks the git history of the Product
         // and of every connected repo — and this fixture is copied into a temp directory that sits
         // inside yadflow's OWN work tree, so that walk would count THIS repo's committers and the
-        // snapshot would move with every commit made here. `null` is also the honest answer for a
-        // frozen archive: nobody is active in it. What the snapshot freezes is that the predicate
+        // snapshot would move with every commit made here. `null` here means NOT COUNTED — which is a
+        // different fact from "nobody is active", and confusing the two is the exact error this row
+        // exists to prevent. What the snapshot freezes is that the predicate
         // CARRIES the field; that it caps nothing is E72's decision to change, and it will have to
         // update this file when it does.
       });

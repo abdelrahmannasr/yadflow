@@ -64,16 +64,21 @@ export const WALK_PAD = 2;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// A `YYYY-MM-DD` date as a whole number of days, or null when it is not one. `Date.parse` rejects an
-// impossible day (`2026-02-30`) rather than rolling it forward, which is what we want from a ledger
-// field a human may have typed.
-export function dayNumber(date) {
-  if (!DATE_RE.test(String(date ?? ''))) return null;
-  const t = Date.parse(`${date}T00:00:00Z`);
-  return Number.isFinite(t) ? Math.floor(t / 86400000) : null;
-}
-
 const dayString = (n) => new Date(n * 86400000).toISOString().slice(0, 10);
+
+// A `YYYY-MM-DD` date as a whole number of days, or null when it is not one.
+//
+// The round-trip is the real check. `Date.parse` does NOT reject an impossible day: it rolls it
+// forward, so `2026-02-30` silently becomes 2 March and a typo in a ledger a human edited would be
+// read as a real date a couple of days out. Parsing it back and comparing the text is what rejects it.
+export function dayNumber(date) {
+  const text = String(date ?? '');
+  if (!DATE_RE.test(text)) return null;
+  const t = Date.parse(`${text}T00:00:00Z`);
+  if (!Number.isFinite(t)) return null;
+  const n = Math.floor(t / 86400000);
+  return dayString(n) === text ? n : null;
+}
 
 // `days` before `date`. Null in, null out — a caller with an unreadable `today` has nothing to ask.
 export function daysBefore(date, days) {
@@ -120,6 +125,22 @@ function ledgerEvidence(root, aliases) {
   } catch (e) {
     return { events, merges, unknown: [`the epic list could not be read: ${e.message}`] };
   }
+  // `epicIds` drops a directory whose name is not a valid id — and, because `Dirent.isDirectory()` is
+  // false for a symlink, a symlinked epic too. That guard is right for an enumerator that turns a name
+  // into a path segment; it is wrong for a counter, because the approvals inside go with it. Anything
+  // holding a `.sdlc/` that the enumerator did not name is reported.
+  try {
+    const epicsDir = path.join(root, 'epics');
+    if (fs.existsSync(epicsDir)) {
+      const named = new Set(ids);
+      for (const e of fs.readdirSync(epicsDir)) {
+        if (named.has(e) || !fs.existsSync(path.join(epicsDir, e, '.sdlc'))) continue;
+        unknown.push(`epics/${e} holds a ledger but is not a readable epic id — its people are not counted`);
+      }
+    }
+  } catch (e) {
+    unknown.push(`the epics folder could not be listed: ${e.code || e.message}`);
+  }
   for (const epic of ids) {
     const dir = epicRoot(root, epic);
     const f = epicFiles(dir);
@@ -141,7 +162,18 @@ function ledgerEvidence(root, aliases) {
     for (const a of approvals) {
       if (!a || typeof a !== 'object') continue;
       const name = typeof a.approver === 'string' ? a.approver.trim() : '';
-      if (!name || dayNumber(a.date) === null) continue;
+      // A record naming nobody IS nobody — the same rule `gatePredicate` and `mapApprovers` apply.
+      if (!name) continue;
+      // But a record that names SOMEBODY and carries a date we cannot read is a source we could not
+      // read, not one person fewer. These dates are written by LLM-driven skills from a `<YYYY-MM-DD>`
+      // template, so a `2026-9-4` is a realistic input. The value is never printed — only the field.
+      if (dayNumber(a.date) === null) {
+        unknown.push(`${epic}: an approval has no readable \`date\``);
+        continue;
+      }
+      // `status` is not filtered: someone who asked for changes reviewed the artifact and is plainly
+      // active. It counts them in, which is the safe direction, and never counts them as an approval —
+      // nothing here feeds `have`.
       events.push({ ts: a.date, name, login: ledgerPersonLogin(a, name, aliases), how: 'approved' });
     }
     // A merged review PR, as the Product recorded it: a step whose closing record carries a PR number
@@ -152,11 +184,33 @@ function ledgerEvidence(root, aliases) {
       const closed = s && typeof s === 'object' ? s.closed : null;
       if (closed && typeof closed === 'object' && closed.pr != null && dayNumber(closed.date) !== null) merges.push(closed.date);
     }
+    // The FOLDED build-log has the same hazard in a different shape: `readShips` does
+    // `Array.isArray(foldedObj?.ships) ? … : []`, so a file that parses but whose `ships` is missing or
+    // is not a list reads as "no ships at all" — every engineer-review approver and every merge date in
+    // it vanishes, with no throw. That shrinks the count AND widens the window. `corruptShards` cannot
+    // see it: it only inspects the shard directory.
+    if (fs.existsSync(f.buildLog)) {
+      let folded;
+      try {
+        folded = readJSONStrict(f.buildLog, null);
+      } catch (e) {
+        unknown.push(`${epic}: ${e.message}`);
+        continue;
+      }
+      if (!folded || typeof folded !== 'object' || Array.isArray(folded) || !Array.isArray(folded.ships)) {
+        unknown.push(`${epic}: .sdlc/build-log.json holds no \`ships\` list`);
+        continue;
+      }
+    }
     // A corrupt ship shard is SKIPPED by `readShardDir` — advisory behaviour that is right for a
     // report and wrong for a count, so it is asked about first (cli/ledger.mjs `corruptShards`).
-    const bad = corruptShards(f.buildLogDir);
-    if (bad.length) {
-      unknown.push(`${epic}: ${bad.length} unreadable ship record(s) in .sdlc/build-log/ (${bad.join(', ')})`);
+    const shards = corruptShards(f.buildLogDir);
+    if (shards.unreadable) {
+      unknown.push(`${epic}: ${shards.unreadable}`);
+      continue;
+    }
+    if (shards.bad.length) {
+      unknown.push(`${epic}: ${shards.bad.length} unreadable ship record(s) in .sdlc/build-log/ (${shards.bad.join(', ')})`);
       continue;
     }
     let ships;
@@ -168,12 +222,27 @@ function ledgerEvidence(root, aliases) {
     }
     for (const s of ships) {
       if (!s || typeof s !== 'object') continue;
+      // `readShips` de-duplicates on `story|task|repo`, so two ships missing those fields collide on
+      // `undefined|undefined|undefined` and one silently replaces the other — taking its engineer
+      // reviewers with it. We cannot tell which was lost, so the whole count is unknown.
+      if (s.story == null || s.task == null || s.repo == null) {
+        unknown.push(`${epic}: a ship record has no story/task/repo, so ships cannot be told apart`);
+        continue;
+      }
+      // A merge date we cannot read only costs a point on the WINDOW, which then stays at the wide end
+      // — more days, more people. Safe, so it is skipped rather than reported.
       if (s.pr != null && dayNumber(s.shippedAt) !== null) merges.push(s.shippedAt);
-      for (const er of Array.isArray(s.engineer_review) ? s.engineer_review : []) {
+      const reviews = Array.isArray(s.engineer_review) ? s.engineer_review : [];
+      // An engineer-review entry carries no date of its own; the ship's is the day it counted. So a ship
+      // with reviewers and no readable `shippedAt` loses PEOPLE, which is never skipped quietly.
+      if (reviews.length && dayNumber(s.shippedAt) === null) {
+        unknown.push(`${epic}: a ship with engineer reviews has no readable \`shippedAt\``);
+        continue;
+      }
+      for (const er of reviews) {
         if (!er || typeof er !== 'object') continue;
         const name = typeof er.approver === 'string' ? er.approver.trim() : '';
-        // An engineer-review entry carries no date of its own; the ship's is the day it counted.
-        if (!name || dayNumber(s.shippedAt) === null) continue;
+        if (!name) continue;
         events.push({ ts: s.shippedAt, name, login: ledgerPersonLogin(er, name, aliases), how: 'approved' });
       }
     }
@@ -198,7 +267,16 @@ function ledgerEvidence(root, aliases) {
 // `since` is an ABSOLUTE `YYYY-MM-DD` date, never `'N days ago'`. A relative one is measured from the
 // real clock, and the JS range below is measured from the INJECTED `today` — so the two would disagree
 // on every day but one, and a fixture test pinned to a fixed `today` would quietly rot into a failure.
-// The whole point of injecting `today` is that this file reads no clock at all.
+// Injecting `today` is what lets a CALLER fix the day — `gate sync` and `gate ci` pass theirs, and the
+// golden test would otherwise move daily. It does not mean nothing here reads a clock: `todayString()`
+// is the default, and `gate status`, `gate open` and `gate review` take it.
+// Does this clone hold that commit? Used to tell a clone that is provably behind the registry from one
+// that is merely old.
+export function gitHas(repoRoot, sha) {
+  const r = spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: repoRoot, encoding: 'utf8' });
+  return r.status === 0;
+}
+
 function gitAuthors(repoRoot, since) {
   const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
   if (since === null) return { unknown: 'the window has no readable start date' };
@@ -206,20 +284,30 @@ function gitAuthors(repoRoot, since) {
   if (git(['rev-parse', '--is-inside-work-tree']).status !== 0) return { unknown: `${repoRoot} is not a git repo` };
   // A shallow clone holds only the newest commits. E67's rule, and the reason is even stronger here:
   // reading a truncated history as "these are all the people" is exactly the quiet under-count.
-  if (/true/.test(git(['rev-parse', '--is-shallow-repository']).stdout || '')) {
+  // The exit status matters as much as the word: `--is-shallow-repository` did not exist before git
+  // 2.15, and there the command FAILS and prints nothing — which would have read as "not shallow".
+  const shallow = git(['rev-parse', '--is-shallow-repository']);
+  if (shallow.status !== 0) return { unknown: `${repoRoot}: this git cannot say whether the clone is shallow` };
+  if (/true/.test(shallow.stdout || '')) {
     return { unknown: `${repoRoot} is a shallow clone — it does not hold enough history to count people` };
   }
-  const r = git(['log', '--all', '--no-merges', `--since=${since}`, '--date=short', '--format=%cd%x1f%an%x1f%ae']);
+  // `%ct`, the committer date as EPOCH SECONDS — never `%cd` with `--date=short`. `%cd` renders the date
+  // in the COMMIT'S OWN timezone, while every other date here comes from `toISOString()` and is UTC, so
+  // the two clocks disagreed by up to a day. A commit made at 08:00 in Tokyo is 23:00 the previous day
+  // in UTC: git printed tomorrow's date, the range below dropped it, and a real person vanished —
+  // `active: 0` with an empty `unknown`, the exact outcome this file exists to prevent.
+  const r = git(['log', '--all', '--no-merges', `--since=${since}`, '--format=%ct%x1f%an%x1f%ae']);
   if (r.status !== 0) return { unknown: `git could not read the history of ${repoRoot}` };
   const out = [];
   for (const line of (r.stdout || '').split('\n')) {
     if (!line) continue;
     // \x1f, never NUL: E67's separator, for the same reason — a reader that takes C strings would cut
     // the line at the first NUL byte.
-    const [ts, name, email] = line.split('\x1f');
+    const [ct, name, email] = line.split('\x1f');
     if (isBot(name, email)) continue;   // a robot cannot approve, so it is not capacity
-    if (dayNumber(ts) === null) continue;
-    out.push({ ts, name: String(name || '').trim(), login: loginFromEmail(email), how: 'committed' });
+    const secs = Number(ct);
+    if (!Number.isFinite(secs)) continue;
+    out.push({ ts: dayString(Math.floor(secs / 86400)), name: String(name || '').trim(), login: loginFromEmail(email), how: 'committed' });
   }
   return { events: out };
 }
@@ -243,7 +331,7 @@ function connectedRepos(root) {
     // A repo with no path is registered but not on this machine. It is NOT "zero people": we cannot
     // read it, so the count is unknown rather than smaller.
     if (typeof r.path !== 'string' || !r.path) return { unknown: `repo '${r.name}' has no local path — its history cannot be counted here` };
-    repos.push({ name: r.name, root: path.resolve(root, r.path) });
+    repos.push({ name: r.name, root: path.resolve(root, r.path), syncedHead: typeof r.syncedHead === 'string' ? r.syncedHead : null });
   }
   return { repos };
 }
@@ -265,6 +353,15 @@ export function peopleEvidence(root, { today = todayString(), aliases = new Map(
   if (conn.unknown) unknown.push(conn.unknown);
   else {
     for (const repo of conn.repos) {
+      // A clone last fetched months ago answers with a small number and no complaint — the one
+      // failure this reader cannot see from git alone. The registry records the commit it last packed
+      // (`syncedHead`); if this clone does not even hold that, it is provably behind, and behind means
+      // fewer people. It is a floor, not a freshness guarantee: a clone that HAS it may still be stale,
+      // which stays a stated limit.
+      if (repo.syncedHead && !gitHas(repo.root, repo.syncedHead)) {
+        unknown.push(`repo '${repo.name}': this clone does not hold the commit the registry last packed — it is behind, and a behind clone shows fewer people`);
+        continue;
+      }
       const got = gitAuthors(repo.root, since);
       if (got.unknown) unknown.push(`repo '${repo.name}': ${got.unknown}`);
       else events.push(...got.events);
@@ -280,24 +377,38 @@ export function peopleEvidence(root, { today = todayString(), aliases = new Map(
 // FEWER THAN 20 MERGES MEANS THE WIDE END, not a short window. A young or quiet project has little
 // history, and reading "little history" as "few people" is the quiet under-count this file exists to
 // prevent. `basis` says which branch was taken so a surface can explain the number.
+// HERE THE SAFETY DIRECTION IS INVERTED, and it is the one place in this file where it is. Everywhere
+// else more evidence means more people. For merges, MORE records push the 20th-newest merge closer to
+// today, which makes the span smaller, the window narrower, and the count SMALLER. So a merge date that
+// is wrong in the "recent" direction is the dangerous one, and a future date is the sharp edge: it
+// makes `span` negative, and clamping a negative number lands on the NARROW end. Twenty bad records
+// would have taken the window from 180 days to 30 and printed "-111 day(s)" as the reason.
 export function capacityWindow(mergeDates, today) {
-  const days = [...mergeDates].map(dayNumber).filter((n) => n !== null).sort((a, b) => b - a);
   const now = dayNumber(today);
   if (now === null) return { days: CAPACITY_MAX_DAYS, basis: 'today is not a readable date' };
+  // A merge cannot have happened after today. One that says so is a wrong clock or a typo, and
+  // believing it would narrow the window.
+  const days = [...mergeDates].map(dayNumber).filter((n) => n !== null && n <= now).sort((a, b) => b - a);
   if (days.length < CAPACITY_MERGES) {
     return { days: CAPACITY_MAX_DAYS, basis: `only ${days.length} merged PR(s) recorded — fewer than ${CAPACITY_MERGES}, so the window is the wide end` };
   }
   const span = now - days[CAPACITY_MERGES - 1];
+  if (span < 0) return { days: CAPACITY_MAX_DAYS, basis: 'the merge dates are not in a readable order — the window is the wide end' };
   const bounded = Math.min(CAPACITY_MAX_DAYS, Math.max(CAPACITY_MIN_DAYS, span));
   const bound = bounded !== span ? `, bounded from ${span}` : '';
   return { days: bounded, basis: `the last ${CAPACITY_MERGES} merged PRs span ${span} day(s)${bound}` };
 }
 
-// The distinct people with an event in [from, today]. Pure, and it never reads a clock.
-export function activeIn(events, from, today) {
+// The distinct people with an event ON OR AFTER `from`. Pure, and it never reads a clock.
+//
+// THERE IS NO UPPER BOUND, deliberately. A date in the future is not a reason to forget a person: clock
+// skew, a rebase, a hand-edited ledger and a machine in another timezone all produce one, and dropping
+// it makes the count SMALLER — the one direction this file may never go. Keeping it can only add a
+// person who is real, which Part 3 asks for in as many words.
+export function activeIn(events, from) {
   const people = new Map();
   for (const e of events) {
-    if (!e || e.ts < from || e.ts > today) continue;
+    if (!e || !e.ts || e.ts < from) continue;
     const key = personKey(e);
     if (!key) continue;
     const seen = people.get(key);
@@ -327,14 +438,25 @@ export function activeIn(events, from, today) {
 // The windows themselves are still reported, because "we could not count, and here is the window we
 // would have counted over" is a more useful thing to print than silence.
 export function activePeople(root, { today = todayString(), aliases = new Map() } = {}) {
-  const { events, merges, unknown } = peopleEvidence(root, { today, aliases });
+  // NOTHING BELOW MAY THROW OUT OF HERE. `gate sync`, `gate status`, `gate open` and `gate review`
+  // call this with no guard of their own, so an unexpected filesystem error would stop a gate that
+  // worked yesterday. Every known case is already turned into an `unknown` line; this catches the ones
+  // nobody has thought of yet, and turns them into the same answer rather than an exception.
+  let events = [];
+  let merges = [];
+  let unknown = [];
+  try {
+    ({ events, merges, unknown } = peopleEvidence(root, { today, aliases }));
+  } catch (e) {
+    unknown = [`the people could not be read: ${e.code || e.message}`];
+  }
   if (dayNumber(today) === null) unknown.push(`'${today}' is not a readable date`);
   const cap = capacityWindow(merges, today);
   const window = (days, extra = {}) => {
     const from = daysBefore(today, days);
     // The ONE rule of this file: unknown never becomes a small number.
     if (unknown.length || from === null) return { days, from, active: null, people: [], nameOnly: 0, ...extra };
-    const got = activeIn(events, from, today);
+    const got = activeIn(events, from);
     return { days, from, active: got.count, people: got.people, nameOnly: got.nameOnly, ...extra };
   };
   return {
@@ -354,17 +476,23 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
 // `needed`, so a reader must never take today's number as a requirement that is already being applied.
 export function activeSum(counted) {
   const cap = counted?.capacity;
-  if (!cap) return 'active people: not counted';
-  if (cap.active === null) {
-    const [first, ...rest] = counted.unknown || [];
+  // `== null` on purpose, so a missing count and an explicitly null one take the SAME branch. With
+  // `=== null`, an `undefined` slipped through the counted branch and printed a disclaimer for a number
+  // that was not there.
+  if (!cap || cap.active == null) {
+    const [first, ...rest] = counted?.unknown || [];
     const more = rest.length ? ` (and ${rest.length} more)` : '';
     return `active people: NOT COUNTED — ${first || 'a source could not be read'}${more}`;
   }
-  return `active people: ${cap.active} in the last ${cap.days} days`;
+  // THE DISCLAIMER TRAVELS WITH THE NUMBER, and that is not a style choice. `activeBasis` is printed
+  // through `note()`, which writes to stderr, while this goes to stdout through `log()` — so anything
+  // that captures or pipes stdout alone (CI logs, a redirect) would keep the number and lose the
+  // sentence saying it enforces nothing. E72 is what makes it a cap.
+  return `active people: ${cap.active} in the last ${cap.days} days — reported only, it does not cap the approval count yet`;
 }
 
-// Why that window is the length it is, and what the number is not yet used for. Printed under
-// `activeSum` where there is room for a second line.
-export const activeBasis = (counted) => (counted?.capacity?.active === null
+// Why that window is the length it is. The second line under `activeSum`, and the only part that may be
+// lost without misleading anyone — the number above carries its own disclaimer.
+export const activeBasis = (counted) => (counted?.capacity?.active == null
   ? 'an unreadable source is never counted as few people — the cap will not be applied from an unknown'
-  : `${counted?.capacity?.basis || ''} — reported, it does not cap the approval count yet`);
+  : String(counted?.capacity?.basis || ''));

@@ -71,7 +71,16 @@ export function withLedgerLock(lockPath, fn, { retries = LOCK_RETRIES, waitMs = 
       // to delete the lock directory it names, which is exactly the fix for a non-empty one.
       let age = null;
       try { age = Date.now() - fs.statSync(lockPath).mtimeMs; } catch { /* it vanished — just retry */ }
-      if (age !== null && age > LOCK_STALE_MS) { try { fs.rmdirSync(lockPath); } catch { /* someone else won, or it is not empty */ } }
+      if (age !== null && age > LOCK_STALE_MS) {
+        let reclaimed = false;
+        try { fs.rmdirSync(lockPath); reclaimed = true; } catch { /* someone else won, or it is not empty */ }
+        // TAKE IT IMMEDIATELY. Without this, a reclaim on the LAST pass deleted the stale lock and then
+        // reported "another process is writing" about a lock that no longer existed — the user re-ran
+        // and it worked, with no idea why. Losing the race here is normal: fall through and retry.
+        if (reclaimed) {
+          try { fs.mkdirSync(lockPath); break; } catch { /* another writer took it first */ }
+        }
+      }
       if (i >= retries) {
         throw err('YAD-STATE-006', `another process is writing ${path.basename(lockPath, '.lock')} in ${path.basename(path.dirname(path.dirname(lockPath)))}`,
           'wait for the other yad command to finish and re-run; if nothing else is running, delete the stale .lock directory the message names');
@@ -126,14 +135,27 @@ function readShardDir(dir) {
 // that vanishes, and a person who vanishes makes the active count SMALLER, which lowers E72's cap and
 // weakens every gate (E71). Such a caller asks this first and reports "unknown" rather than a number.
 // Deliberately cheap: it parses, it does not validate a ship's fields.
+// Returns { bad: [names], unreadable: null | reason }. It NEVER throws: `fs.existsSync` is true for a
+// FILE as well as a directory, so a stray file named `build-log` under an epic's `.sdlc/` made
+// `readdirSync` throw ENOTDIR — and since the caller counts people for `yad gate sync`, `gate status`
+// and `gate open`, that exception escaped and turned three working commands into a crash. A directory
+// the user cannot list (EACCES) did the same. Both are now "we could not read this", which is exactly
+// what the counter needs to hear.
 export function corruptShards(dir) {
-  if (!fs.existsSync(dir)) return [];
+  let names;
+  try {
+    if (!fs.existsSync(dir)) return { bad: [], unreadable: null };
+    if (!fs.statSync(dir).isDirectory()) return { bad: [], unreadable: `${path.basename(dir)} is not a directory` };
+    names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
+  } catch (e) {
+    return { bad: [], unreadable: `${path.basename(dir)} could not be listed: ${e.code || e.message}` };
+  }
   const bad = [];
-  for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort()) {
+  for (const name of names) {
     const obj = readJSON(path.join(dir, name), null);
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) bad.push(name);
   }
-  return bad;
+  return { bad, unreadable: null };
 }
 
 // The half-applied-tidy guard key: a shard is a genuine duplicate of a folded entry ONLY when its FULL
