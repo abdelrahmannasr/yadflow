@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, peopleWord, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
@@ -42,10 +42,12 @@ function closedLine(closed) {
     ? `merged${closed.mergedBy ? ` by ${closed.mergedBy}` : ''}${closed.pr != null ? ` (PR #${closed.pr})` : ''}${closed.commit ? ` at ${String(closed.commit).slice(0, 7)}` : ''}`
     : `via ${closed.via || 'an unknown path'}${closed.pr != null ? ` (PR #${closed.pr})` : ''}`;
   const waived = closed.waived === 'solo' ? '; approvals waived (solo mode)' : closed.waived ? `; approvals waived (${closed.waived})` : '';
-  // E72 — a count the capacity cap lowered. Read defensively: the record is a file a person can edit.
+  // E72 — a count the capacity cap lowered. Read strictly: the record is a file a person can edit, and
+  // a line built from half a record would state a cap nobody applied. All three numbers, or nothing.
   const k = closed.capped;
-  const capped = k && typeof k === 'object' && !Array.isArray(k)
-    ? `; count capped from ${k.needed ?? '?'} to ${k.to ?? '?'} (${k.active ?? '?'} active ${k.active === 1 ? 'person' : 'people'})` : '';
+  const whole = (n) => Number.isInteger(n) && n >= 0;
+  const capped = k && typeof k === 'object' && !Array.isArray(k) && whole(k.needed) && whole(k.to) && whole(k.active)
+    ? `; count capped from ${k.needed} to ${k.to} (${k.active} active ${peopleWord(k.active)})` : '';
   return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${waived}${capped}${closed.by ? `; recorded by ${closed.by}` : ''}`;
 }
 
@@ -787,9 +789,10 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
         // Solo mode passed this gate without counting approvals, and the record says so (E10).
         waived: solo ? 'solo' : null,
         // Every cap is recorded (E72): a team gate that passed while the cap LOWERED its ask says so, with
-        // the full count, the capped ask and the count of people it read. Not in solo mode, where nothing
-        // was counted, so nothing was lowered.
-        capped: !solo && pred.cap?.capped ? { needed: pred.gateRule.needed, to: pred.cap.to, active: pred.cap.active } : null,
+        // the full count, the capped ask and the count of people it read. Only on a gate that COUNTED
+        // (`rule: 'count'`): not in solo mode, and not on a skipped or inherited step that passed by its
+        // shortcut — nothing was asked there, so nothing was lowered.
+        capped: pred.rule === 'count' && pred.cap?.capped ? { needed: pred.gateRule.needed, to: pred.cap.to, active: pred.cap.active } : null,
       });
       advanced++;
       ok(`gate PASSED — ${step.id} → done; next: ${state.currentStep}`);
@@ -1467,7 +1470,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 // Assemble (but don't print) the Shape grounding bundle. Shared by `review` and `walkthrough` so the
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
 // Returns { error } when there is no epic state, else { bundle, epicDir, hub }.
-function reviewBundle(root, { epic, artifact } = {}) {
+function reviewBundle(root, { epic, artifact, headCount = null } = {}) {
   const { hub, repos } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -1477,8 +1480,9 @@ function reviewBundle(root, { epic, artifact } = {}) {
   const step = art ? findReviewStep(ledger.state, art) : null;
   // E71 — the live capacity count. Its own read, and still once per command: `reviewBundle` has exactly
   // two callers, `gate review` and `gate walkthrough`, and neither runs alongside `gate status` or
-  // `gate sync`. Read before the bundle because the step's cap (E72) is computed from it.
-  const counted = activePeople(root, { aliases: legacyLogins(hub) });
+  // `gate sync`. Read before the bundle because the step's cap (E72) is computed from it. `headCount`
+  // is a count the caller already read, as `gateSync` and `gateStatus` take one — the CLI passes none.
+  const counted = headCount || activePeople(root, { aliases: legacyLogins(hub) });
   const bundle = {
     epic,
     artifact: art,
@@ -1511,8 +1515,8 @@ function reviewBundle(root, { epic, artifact } = {}) {
   return { bundle, epicDir, hub };
 }
 
-export async function gateReview(root, { epic, artifact } = {}) {
-  const r = reviewBundle(root, { epic, artifact });
+export async function gateReview(root, { epic, artifact, headCount = null } = {}) {
+  const r = reviewBundle(root, { epic, artifact, headCount });
   if (r.error) { fail(r.error); process.exitCode = 1; return; }
   log(JSON.stringify(r.bundle, null, 2));
   return r.bundle;
@@ -1574,7 +1578,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
   const cap = gateCapFor(rule, active);
   // What the count asks for. Only the base holds (until E73); the cap (E72) is shown when it lowered the
   // ask, dated, because this body is written once and the count can differ when the gate decides.
-  const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active ${cap.active === 1 ? 'person' : 'people'} when this PR was opened` : '';
+  const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active ${peopleWord(cap.active)} when this PR was opened` : '';
   const needed = `${rule.base} (enforced) · full count ${gateRuleSum(rule)}${capped}${rule.riskStep ? ' (the risk step is advisory until E73)' : ''}`;
   return [
     '## Artifact under review',
@@ -1598,7 +1602,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     // from a laptop that has not cloned the connected repos reads "not counted" and would leave that
     // word in the body for good. So the line dates itself. It does NOT go quiet on an unknown (Part 3),
     // it just says WHEN it could not count, which is the only honest thing a frozen line can say.
-    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (the count asks for at most ${Math.max(1, active - 1)} — one seat is left for the author; \`yad gate status\` counts it live)`}`,
+    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (${rule.riskStep && cap ? `with one seat left for the author, the cap is ${cap.limit}, so this gate's count is ${cap.to}; ` : ''}\`yad gate status\` counts it live)`}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',

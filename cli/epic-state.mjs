@@ -102,10 +102,23 @@ export function gateRuleFor(step) {
 // step's closing record by the caller that closes it).
 export function gateCapFor(rule, active) {
   if (!Number.isInteger(active) || active < 0) return null;
-  const limit = Math.max(1, active - 1);
+  const limit = capLimit(active);
   const to = Math.max(rule.base, Math.min(rule.needed, limit));
   return { active, limit, to, capped: to < rule.needed };
 }
+
+// The cap's arithmetic and its wording, ONE copy each. Every surface that prints a cap reads these, so
+// E73 — which changes what those surfaces say — has one place to change, not five.
+//   capLimit   the most approvals a count of `active` people can give: one seat is left for the author,
+//              and never below 1 (a known count of 0 or 1 people still asks for the base).
+//   peopleWord `person` or `people`.
+//   capWho     the reason a cap gives, e.g. `2 active people, less one seat for the author`; at 0 or 1
+//              people the floor decides, and the phrase says so instead of doing the subtraction.
+export const capLimit = (active) => Math.max(1, active - 1);
+export const peopleWord = (n) => (n === 1 ? 'person' : 'people');
+export const capWho = (active) => (active - 1 >= 1
+  ? `${active} active ${peopleWord(active)}, less one seat for the author`
+  : `${active} active ${peopleWord(active)} (never below 1)`);
 
 // The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside
 // the rule, because several surfaces print it (`gate sync`, `gate status`, the generated review-PR body
@@ -121,9 +134,7 @@ export const gateRuleSum = (rule) => {
 // is named first, so the shortfall printed after it reads against the capped number.
 export const gateRuleEnforced = (rule, cap = null) => {
   if (!rule.riskStep) return '';
-  const capped = cap?.capped
-    ? ` — capped to ${cap.to}: ${cap.active} active ${cap.active === 1 ? 'person' : 'people'}, less one seat for the author`
-    : '';
+  const capped = cap?.capped ? ` — capped to ${cap.to}: ${capWho(cap.active)}` : '';
   return `${capped} — base enforced, risk step advisory`;
 };
 

@@ -109,7 +109,7 @@ if [ "$step" -gt 0 ]; then
   if [ -n "$map_high" ] && [ "$risk" != "high" ]; then
     echo "       The body says Risk level: ${risk:-unspecified}, but the risk map on ${map_base} marks ${map_high} high — the larger counts."
   fi
-  echo "       Branch protection holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do)."
+  echo "       Branch protection (when configured) holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do)."
   echo "       The risk step is advisory, and not capped here — \`yad open-pr\` shows the count capped by the active people."
   # E67 — a change to a `high` directory asks for an approval from someone who has worked there in the
   # last 30 days. Reported, like the count: it names who can meet it and blocks nothing. With nobody to

@@ -1380,7 +1380,7 @@ test('risk-route: high risk adds one to the count and lists the touched domains 
   const r = runGate(RISK_ROUTE, T, [p]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk: high\)/);
-  assert.match(r.out, /Branch protection holds the merge, not this count/);
+  assert.match(r.out, /Branch protection \(when configured\) holds the merge, not this count/);
   assert.match(r.out, /not capped here — `yad open-pr` shows the count capped by the active people/, 'E72: the script cannot cap, and says so');
   assert.match(r.out, /\n {2}- auth\n {2}- payments/);
   assert.doesNotMatch(r.out, /domain-owner/);
@@ -3190,7 +3190,7 @@ test('risk-route: a high directory on the base map raises a body that says low �
   assert.match(r.out, /\nRisk map \(main\): high — src\/payments\/\n/);
   assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(high on the risk map: src\/payments\/\)/);
   assert.match(r.out, /The body says Risk level: low, but the risk map on main marks src\/payments\/ high — the larger counts\./);
-  assert.match(r.out, /Branch protection holds the merge, not this count/, 'still reported, not enforced');
+  assert.match(r.out, /Branch protection \(when configured\) holds the merge, not this count/, 'still reported, not enforced');
   // The skill's own copy has no risk-map-check.sh beside it; run from the code repo, it finds checks/.
   r = runGate(RISK_ROUTE, T, [low, 'main']);
   assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1/);

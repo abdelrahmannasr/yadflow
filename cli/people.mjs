@@ -36,7 +36,7 @@ import { spawnSync } from 'node:child_process';
 
 import { readJSONStrict } from './lib.mjs';
 import { PROJECT_FILES, epicFiles } from './manifest.mjs';
-import { epicIds, epicRoot, ledgerPersonLogin } from './epic-state.mjs';
+import { epicIds, epicRoot, ledgerPersonLogin, capLimit } from './epic-state.mjs';
 import { corruptShards, readShips } from './ledger.mjs';
 import { isBot, loginFromEmail } from './riskmap.mjs';
 
@@ -525,8 +525,8 @@ export function activeSum(counted) {
   // THE CONSEQUENCE TRAVELS WITH THE NUMBER, and that is not a style choice. `activeBasis` is printed
   // through `note()`, which writes to stderr, while this goes to stdout through `log()` — so anything
   // that captures or pipes stdout alone (CI logs, a redirect) would keep the number and lose the
-  // sentence saying what it does. The `max(1, …)` is `gateCapFor`'s floor, in cli/epic-state.mjs.
-  const limit = Math.max(1, cap.active - 1);
+  // sentence saying what it does. `capLimit` is the cap's one copy of the arithmetic (cli/epic-state.mjs).
+  const limit = capLimit(cap.active);
   return `active people: ${cap.active} in the last ${cap.days} days — caps each gate's count at ${limit} approver${limit === 1 ? '' : 's'} (one seat is left for the author); reported, only the base is enforced until E73`;
 }
 
