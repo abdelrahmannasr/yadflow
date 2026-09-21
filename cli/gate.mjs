@@ -888,11 +888,6 @@ export function convertProductLevel(root, hub, { git = (...a) => run('git', a, {
 
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { hub } = loadProduct(root);
-  // E71 — read ONCE for the whole sweep. This builds one job per (epic, open review PR) and calls
-  // `gateSync` for each; letting each call read the count would walk the Product and every connected
-  // repo's git history once per PR. It is one fact about the Product, so it is read once and handed to
-  // every job, which also makes each job's printed number the same one.
-  const sweepCount = activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) });
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = hub.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
@@ -952,6 +947,12 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const failedEpics = new Set();
   const advancedEpics = new Set(); // epics whose step actually passed this run (merge OR a swept merge)
   const statusFiles = new Map();   // epic -> the artifact files syncStatuses rewrote (staging allowlist)
+  // E71 — read ONCE for the whole sweep, and only once there is something to sweep. `gateSync` is
+  // called per job, so letting each call read it would walk the Product and every connected repo's
+  // history once PER open review PR; reading it above the early exits (no platform, an unparseable
+  // branch, no jobs) would pay for a 360-day `git log --all` on every push and throw it away. It is
+  // one fact about the Product, so every job also prints the same number.
+  const sweepCount = jobs.length ? activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) }) : null;
   for (const job of jobs) {
     const epicDir = epicRoot(root, job.epic);
     // Event mode (--branch) targets a single epic: fail loudly. Sweep mode skips the bad epic.

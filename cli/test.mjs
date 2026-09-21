@@ -18006,7 +18006,7 @@ test('E71 personKey: a noreply address joins a commit and an approval into ONE p
   const got = activeIn([
     { ts: '2026-09-20', name: 'Octo Cat', login: 'octocat', how: 'committed' },
     { ts: '2026-09-20', name: 'OctoCat', login: 'OctoCat', how: 'approved' },
-  ], '2026-09-01', P_TODAY);
+  ], '2026-09-01');
   assert.equal(personKey({ name: 'Octo Cat', login: 'OctoCat' }), personKey({ name: 'octo cat', login: 'octocat' }),
     'the login decides the key whenever there is one');
   assert.notEqual(personKey({ name: 'Octo Cat', login: null }), personKey({ name: 'Octo Cat', login: 'octocat' }),
@@ -18029,7 +18029,7 @@ test('E71 personKey: a person with no provable login is TWO rows, and the count 
   const got = activeIn([
     { ts: '2026-09-20', name: 'Ada Lovelace', login: null, how: 'committed' },
     { ts: '2026-09-20', name: 'ada', login: 'ada', how: 'approved' },
-  ], '2026-09-01', P_TODAY);
+  ], '2026-09-01');
   assert.equal(got.count, 2);
   assert.equal(got.nameOnly, 1);
 });
@@ -18399,7 +18399,15 @@ test('E71 review: for MERGES more evidence is the UNSAFE direction, so a future 
   const future = Array.from({ length: CAPACITY_MERGES }, (_, i) => daysBefore(P_TODAY, -100 - i));
   const w = capacityWindow(future, P_TODAY);
   assert.equal(w.days, CAPACITY_MAX_DAYS, 'a merge cannot have happened after today');
-  assert.doesNotMatch(w.basis, /-/, 'and no negative span is ever printed as a reason');
+  // Assert WHICH path ran. Without this the test passes through the "fewer than 20" branch while its
+  // name talks about a negative span — the very weakness this round removed elsewhere.
+  assert.match(w.basis, /only 0 usable merged PR\(s\) recorded \(20 dated after today were ignored\)/,
+    'the basis says how many were thrown away, so a suddenly-wide window is explainable');
+  assert.doesNotMatch(w.basis, /span -/, 'and no negative span is ever printed as a reason');
+
+  // A real project with a few bad dates mixed in: the count of USABLE records is what is reported.
+  const mixed = [...Array.from({ length: 11 }, (_, i) => daysBefore(P_TODAY, i + 1)), ...Array.from({ length: 7 }, (_, i) => daysBefore(P_TODAY, -i - 1))];
+  assert.match(capacityWindow(mixed, P_TODAY).basis, /only 11 usable merged PR\(s\) recorded \(7 dated after today were ignored\)/);
 });
 
 test('E71 review: a clone that does not hold what the registry packed is behind, so it is unknown', () => {
@@ -18461,4 +18469,30 @@ test('withLedgerLock: a stale lock reclaimed on the LAST try is taken, not repor
     assert.equal(_withLedgerLock(lock, () => 'done', { retries: 0, waitMs: 1 }), 'done',
       'with zero retries left, reclaiming the lock must still win it');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E71 review 2: a commit git cannot express as a calendar day is unknown, never a dropped person', () => {
+  // `dayString` is a FORMATTER. A `%ct` in MILLISECONDS — a slip git accepts — formats as `+058691-05`,
+  // and because `+` sorts below every digit that value compares as EARLIER than any real date, so the
+  // window filter dropped the author from all three windows with `unknown` left empty.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.writeFileSync(path.join(fx.T, 'ms.txt'), 'x');
+    execFileSync('git', ['add', '-A'], { cwd: fx.T, stdio: 'pipe' });
+    execFileSync('git', ['-c', 'user.name=Millis Dev', '-c', 'user.email=ms@corp.io', 'commit', '-q', '-m', 'ms'], {
+      cwd: fx.T, stdio: 'pipe',
+      env: { ...GIT_ENV, GIT_AUTHOR_DATE: '@1789952400000 +0000', GIT_COMMITTER_DATE: '@1789952400000 +0000' },
+    });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'a commit date git cannot express as a day');
+    assert.match(r.unknown.join(' '), /calendar day/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review 2: dayString refuses what it cannot render, so nothing unprintable becomes a date', () => {
+  // Past about 8.64e15 `toISOString()` throws RangeError rather than returning nonsense; outside
+  // 0000-9999 it returns `+058691-05-…`. Both must read as "no date", never as a comparable string.
+  assert.equal(daysBefore('2026-09-21', 30), '2026-08-22', 'the ordinary case still works');
+  assert.equal(dayNumber('+058691-05'), null, 'an expanded-year string is not a date');
+  assert.equal(dayNumber('1970-01-01'), 0, 'and the epoch itself is a perfectly good one');
 });

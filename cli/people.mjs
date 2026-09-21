@@ -64,7 +64,19 @@ export const WALK_PAD = 2;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-const dayString = (n) => new Date(n * 86400000).toISOString().slice(0, 10);
+// A day number back to `YYYY-MM-DD`, or null when it is not a date a human would recognise. It is a
+// FORMATTER, so everything it is handed must be checked: `toISOString()` renders a year outside 0000-9999
+// as `+058691-05-…`, which is not a date and — because `+` sorts below every digit — compares as EARLIER
+// than any real one; and past about 8.64e15 it throws `RangeError: Invalid time value` instead.
+const dayString = (n) => {
+  let text;
+  try {
+    text = new Date(n * 86400000).toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+  return DATE_RE.test(text) ? text : null;
+};
 
 // A `YYYY-MM-DD` date as a whole number of days, or null when it is not one.
 //
@@ -77,13 +89,15 @@ export function dayNumber(date) {
   const t = Date.parse(`${text}T00:00:00Z`);
   if (!Number.isFinite(t)) return null;
   const n = Math.floor(t / 86400000);
+  // The round-trip is the real check: `Date.parse` does NOT reject an impossible day, it rolls it
+  // forward, so `2026-02-30` would silently become 2 March.
   return dayString(n) === text ? n : null;
 }
 
 // `days` before `date`. Null in, null out — a caller with an unreadable `today` has nothing to ask.
 export function daysBefore(date, days) {
   const n = dayNumber(date);
-  return n === null ? null : dayString(n - days);
+  return n === null ? null : dayString(n - days);   // dayString itself refuses anything unprintable
 }
 
 export const todayString = () => new Date().toISOString().slice(0, 10);
@@ -305,9 +319,15 @@ function gitAuthors(repoRoot, since) {
     // the line at the first NUL byte.
     const [ct, name, email] = line.split('\x1f');
     if (isBot(name, email)) continue;   // a robot cannot approve, so it is not capacity
+    // A commit we can READ but cannot date is a source we could not read — the same rule this file
+    // applies to an approval and to a ship, and the one place the first pass left it as a silent skip.
+    // `Number('')` is 0, which is finite and would have become 1970-01-01; a `%ct` in MILLISECONDS
+    // (a slip git accepts) formats as `+058691-05`, which sorts BELOW every real date and made its
+    // author disappear from all three windows with nothing reported.
     const secs = Number(ct);
-    if (!Number.isFinite(secs)) continue;
-    out.push({ ts: dayString(Math.floor(secs / 86400)), name: String(name || '').trim(), login: loginFromEmail(email), how: 'committed' });
+    const ts = Number.isFinite(secs) && ct !== '' ? dayString(Math.floor(secs / 86400)) : null;
+    if (ts === null) return { unknown: `${repoRoot}: a commit carries a date git cannot express as a calendar day` };
+    out.push({ ts, name: String(name || '').trim(), login: loginFromEmail(email), how: 'committed' });
   }
   return { events: out };
 }
@@ -358,8 +378,11 @@ export function peopleEvidence(root, { today = todayString(), aliases = new Map(
       // (`syncedHead`); if this clone does not even hold that, it is provably behind, and behind means
       // fewer people. It is a floor, not a freshness guarantee: a clone that HAS it may still be stale,
       // which stays a stated limit.
-      if (repo.syncedHead && !gitHas(repo.root, repo.syncedHead)) {
-        unknown.push(`repo '${repo.name}': this clone does not hold the commit the registry last packed — it is behind, and a behind clone shows fewer people`);
+      // AFTER the "is it even here" checks, not before: `spawnSync` with a missing `cwd` returns an
+      // error rather than throwing, so `gitHas` would answer false for a repo that is simply not on
+      // this machine and send the reader off to fix the wrong thing.
+      if (fs.existsSync(repo.root) && repo.syncedHead && !gitHas(repo.root, repo.syncedHead)) {
+        unknown.push(`repo '${repo.name}': this clone does not hold the commit the registry last packed — it is behind, and a behind clone shows fewer people; fetch it, or re-pack it with \`yad repo refresh ${repo.name}\``);
         continue;
       }
       const got = gitAuthors(repo.root, since);
@@ -388,12 +411,17 @@ export function capacityWindow(mergeDates, today) {
   if (now === null) return { days: CAPACITY_MAX_DAYS, basis: 'today is not a readable date' };
   // A merge cannot have happened after today. One that says so is a wrong clock or a typo, and
   // believing it would narrow the window.
-  const days = [...mergeDates].map(dayNumber).filter((n) => n !== null && n <= now).sort((a, b) => b - a);
+  const parsed = [...mergeDates].map(dayNumber).filter((n) => n !== null);
+  const days = parsed.filter((n) => n <= now).sort((a, b) => b - a);
+  const ignored = parsed.length - days.length;
   if (days.length < CAPACITY_MERGES) {
-    return { days: CAPACITY_MAX_DAYS, basis: `only ${days.length} merged PR(s) recorded — fewer than ${CAPACITY_MERGES}, so the window is the wide end` };
+    // Say how many were thrown away. Without it, a window that suddenly went wide sends the reader
+    // hunting for missing records when the records are there and their dates are wrong.
+    const why = ignored ? ` (${ignored} dated after today ${ignored === 1 ? 'was' : 'were'} ignored)` : '';
+    return { days: CAPACITY_MAX_DAYS, basis: `only ${days.length} usable merged PR(s) recorded${why} — fewer than ${CAPACITY_MERGES}, so the window is the wide end` };
   }
+  // `days` is filtered to `<= now` and sorted descending, so `span` can never be negative here.
   const span = now - days[CAPACITY_MERGES - 1];
-  if (span < 0) return { days: CAPACITY_MAX_DAYS, basis: 'the merge dates are not in a readable order — the window is the wide end' };
   const bounded = Math.min(CAPACITY_MAX_DAYS, Math.max(CAPACITY_MIN_DAYS, span));
   const bound = bounded !== span ? `, bounded from ${span}` : '';
   return { days: bounded, basis: `the last ${CAPACITY_MERGES} merged PRs span ${span} day(s)${bound}` };
