@@ -112,13 +112,16 @@ export function gateCapFor(rule, active) {
 //   capLimit   the most approvals a count of `active` people can give: one seat is left for the author,
 //              and never below 1 (a known count of 0 or 1 people still asks for the base).
 //   peopleWord `person` or `people`.
-//   capWho     the reason a cap gives, e.g. `2 active people, less one seat for the author`; at 0 or 1
-//              people the floor decides, and the phrase says so instead of doing the subtraction.
+//   capSeat    why the limit is what it is: `one seat is left for the author` from 2 people up; at 0 or
+//              1 people the floor decides, and the phrase says `never below 1` instead of subtracting.
+//   capWho     the reason a capped line gives, e.g. `2 active people, less one seat for the author`.
 export const capLimit = (active) => Math.max(1, active - 1);
 export const peopleWord = (n) => (n === 1 ? 'person' : 'people');
-export const capWho = (active) => (active - 1 >= 1
-  ? `${active} active ${peopleWord(active)}, less one seat for the author`
-  : `${active} active ${peopleWord(active)} (never below 1)`);
+const capByFloor = (active) => active - 1 < 1;
+export const capSeat = (active) => (capByFloor(active) ? 'never below 1' : 'one seat is left for the author');
+export const capWho = (active) => (capByFloor(active)
+  ? `${active} active ${peopleWord(active)} (never below 1)`
+  : `${active} active ${peopleWord(active)}, less one seat for the author`);
 
 // The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside
 // the rule, because several surfaces print it (`gate sync`, `gate status`, the generated review-PR body

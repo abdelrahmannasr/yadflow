@@ -18486,7 +18486,7 @@ test('E72 review-PR body: the base is enforced, and a cap is shown dated', () =>
   const args = { epic: 'EP-x', artifact: 'architecture.md', owner: 'alice', domains: ['backend'], step: E72_CONTRACT };
   const capped = fillHubTemplate({ ...args, active: 2 });
   assert.match(capped, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2, capped to 1 for 2 active people when this PR was opened \(the risk step is advisory until E73\)$/m);
-  assert.match(capped, /\*\*Active people:\*\* 2 when this PR was opened \(with one seat left for the author, the cap is 1, so this gate's count is 1; `yad gate status` counts it live\)/);
+  assert.match(capped, /\*\*Active people:\*\* 2 when this PR was opened \(the cap is 1 \(one seat is left for the author\), so this gate's count is 1; `yad gate status` counts it live\)/);
   const full = fillHubTemplate({ ...args, active: 6 });
   assert.match(full, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory until E73\)$/m);
   const unknown = fillHubTemplate({ ...args, active: null });
@@ -18570,6 +18570,16 @@ test('E72 review: a step that passes by its SKIP shortcut records no cap — not
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E72 review: an INHERITED pass reports rule "inherited", which the record guard excludes', () => {
+  // `gateSync` never reaches its pass branch on an inherited step — the step is stamped `done`, so it
+  // takes the already-done path and writes no record at all. The guard (`rule === 'count'`) still covers
+  // a direct caller: the predicate names the shortcut, and carries a cap that lowered the ask.
+  const p = gatePredicate({ step: { ...E72_CONTRACT, status: 'in_review', inherited: true, inheritedFrom: 'EP-p', boundHash: 'h' }, approvals: [], acceptedHashes: ['h'], active: 2 });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'inherited');
+  assert.equal(p.cap.capped, true, 'so only the rule keeps it off the record');
+});
+
 test('E72 review: a hand-edited `capped` prints only when all three numbers are whole', async () => {
   const { T, ep } = scaffoldEpic();
   try {
@@ -18582,7 +18592,7 @@ test('E72 review: a hand-edited `capped` prints only when all three numbers are 
     };
     assert.match(await line({ needed: 3, to: 1, active: 2 }), /count capped from 3 to 1 \(2 active people\)/);
     assert.match(await line({ needed: 2, to: 1, active: 1 }), /count capped from 2 to 1 \(1 active person\)/);
-    for (const bad of [{}, [1, 2], 'x', { needed: 3, to: 1 }, { needed: 3, to: {}, active: 2 }, { needed: 3, to: 1, active: -1 }]) {
+    for (const bad of [{}, [1, 2], 'x', { needed: 3, to: 1 }, { needed: 3, to: {}, active: 2 }, { needed: 3, to: 1, active: -1 }, { needed: 1, to: 3, active: 2 }, { needed: 3, to: 3, active: 9 }]) {
       assert.doesNotMatch(await line(bad), /count capped/, `${JSON.stringify(bad)} states no cap`);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -18621,10 +18631,10 @@ test('E72 review: at 0 or 1 active people the floor decides, and the words say s
   const args = { epic: 'EP-x', artifact: 'architecture.md', owner: 'alice', domains: ['backend'], step: E72_CONTRACT };
   const body = fillHubTemplate({ ...args, active: 1 });
   assert.match(body, /capped to 1 for 1 active person when this PR was opened/);
-  assert.match(body, /\*\*Active people:\*\* 1 when this PR was opened \(with one seat left for the author, the cap is 1, so this gate's count is 1; `yad gate status` counts it live\)/);
+  assert.match(body, /\*\*Active people:\*\* 1 when this PR was opened \(the cap is 1 \(never below 1\), so this gate's count is 1; `yad gate status` counts it live\)/);
   const plain = fillHubTemplate({ ...args, step: { ...E72_CONTRACT, risk_tags: [] }, active: 5 });
   assert.match(plain, /\*\*Active people:\*\* 5 when this PR was opened \(`yad gate status` counts it live\)/, 'no risk step: no cap to explain');
-  assert.equal(_activeSum({ capacity: { active: 1, days: 90 }, unknown: [] }), 'active people: 1 in the last 90 days — caps each gate\'s count at 1 approver (one seat is left for the author); reported, only the base is enforced until E73');
+  assert.equal(_activeSum({ capacity: { active: 1, days: 90 }, unknown: [] }), 'active people: 1 in the last 90 days — caps each gate\'s count at 1 approver (never below 1); reported, only the base is enforced until E73');
 });
 
 test('E72 review: with requireEngagement on, the capped shortfall counts only engaged approvals', () => {
@@ -18654,11 +18664,9 @@ test('E72 review: gate status reads the REAL count from git and caps with the sa
     const { out } = await captureConsole(() => gateStatus(T, { epic: 'EP-test' }));
     const m = /active people: (\d+) in the last/.exec(out);
     assert.ok(m, `the count was read: ${out}`);
-    const active = Number(m[1]);
-    assert.ok(active >= 2, 'both committers are counted');
-    const to = Math.max(1, Math.min(3, active - 1));
-    if (to < 3) assert.match(out, new RegExp(`capped to ${to}: ${active} active people`));
-    else assert.doesNotMatch(out, /capped to/);
+    assert.equal(Number(m[1]), 2, 'two committers, no approvals in the ledger: two people');
+    assert.match(out, /architecture-review .*capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory/,
+      'the step line caps with the number the header printed');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, peopleWord, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
@@ -43,10 +43,11 @@ function closedLine(closed) {
     : `via ${closed.via || 'an unknown path'}${closed.pr != null ? ` (PR #${closed.pr})` : ''}`;
   const waived = closed.waived === 'solo' ? '; approvals waived (solo mode)' : closed.waived ? `; approvals waived (${closed.waived})` : '';
   // E72 — a count the capacity cap lowered. Read strictly: the record is a file a person can edit, and
-  // a line built from half a record would state a cap nobody applied. All three numbers, or nothing.
+  // a line built from half a record would state a cap nobody applied. All three numbers, and a `to`
+  // below `needed` (a cap only ever lowers), or nothing.
   const k = closed.capped;
   const whole = (n) => Number.isInteger(n) && n >= 0;
-  const capped = k && typeof k === 'object' && !Array.isArray(k) && whole(k.needed) && whole(k.to) && whole(k.active)
+  const capped = k && typeof k === 'object' && !Array.isArray(k) && whole(k.needed) && whole(k.to) && whole(k.active) && k.to < k.needed
     ? `; count capped from ${k.needed} to ${k.to} (${k.active} active ${peopleWord(k.active)})` : '';
   return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${waived}${capped}${closed.by ? `; recorded by ${closed.by}` : ''}`;
 }
@@ -1235,7 +1236,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     const counted = reqEng ? live.filter((a) => a.engagement === 'verified') : live;
     const unengaged = live.length - counted.length;
     const people = new Set(counted.filter((a) => typeof a.approver === 'string' && a.approver.trim()).map((a) => a.approver)).size; // as gatePredicate counts
-    const from = `from ${people} ${people === 1 ? 'person' : 'people'}${unengaged ? `, ${unengaged} not engagement-verified (not counted)` : ''}`;
+    const from = `from ${people} ${peopleWord(people)}${unengaged ? `, ${unengaged} not engagement-verified (not counted)` : ''}`;
     // A `skipped` flag is honoured here on exactly the terms `gatePredicate` honours it: only on a step
     // THIS epic's route marks optional (`isSkippableStep`). Without that guard a hand-edited
     // `skipped: true` on a required step would read as waived in `gate status` while `gate sync` fell
@@ -1602,7 +1603,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     // from a laptop that has not cloned the connected repos reads "not counted" and would leave that
     // word in the body for good. So the line dates itself. It does NOT go quiet on an unknown (Part 3),
     // it just says WHEN it could not count, which is the only honest thing a frozen line can say.
-    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (${rule.riskStep && cap ? `with one seat left for the author, the cap is ${cap.limit}, so this gate's count is ${cap.to}; ` : ''}\`yad gate status\` counts it live)`}`,
+    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (${rule.riskStep && cap ? `the cap is ${cap.limit} (${capSeat(active)}), so this gate's count is ${cap.to}; ` : ''}\`yad gate status\` counts it live)`}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
