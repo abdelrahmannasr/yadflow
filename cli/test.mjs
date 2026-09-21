@@ -17935,3 +17935,591 @@ test('proven history: the JS reader sees a quoted path and a move out, exactly a
       'a move OUT of payments is work in payments, and a quoted path never drops its author');
   } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
 });
+
+// ---- E71: counting active people -----------------------------------------------------------------
+//
+// THE ONE RULE THESE TESTS EXIST FOR: an input that cannot be read must produce `active: null`, never a
+// number and never zero. E66 and E67 needed the opposite (an unknown must not read as "nobody", which
+// under-ASKS); here a small `active` lowers E72's cap and weakens every gate, so an unknown must not
+// read as "few people". Part 3: err towards MORE people.
+const {
+  activePeople, peopleEvidence, capacityWindow, activeIn, personKey, daysBefore, dayNumber,
+  activeSum: _activeSum, activeBasis: _activeBasis,
+  EXPERTISE_DAYS, STALE_DAYS, CAPACITY_MAX_DAYS, CAPACITY_MIN_DAYS, CAPACITY_MERGES, WALK_PAD,
+} = await import('./people.mjs');
+
+const P_TODAY = '2026-09-21';
+
+// A Product with one epic, one connected code repo, and git history in both. `commit(repo, name,
+// email, daysAgo)` writes a commit whose AUTHOR and COMMITTER dates are both `daysAgo` before P_TODAY,
+// because `--since` filters on the committer date and the reader reads the same field.
+function peopleFixture({ withRepo = true } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-people-'));
+  git(T, 'init', '-q');
+  git(T, 'checkout', '-q', '-b', 'main');
+  const at = (daysAgo) => `${daysBefore(P_TODAY, daysAgo)}T12:00:00Z`;
+  const commit = (cwd, name, email, daysAgo, file = `f${Math.random().toString(36).slice(2)}.txt`) => {
+    fs.writeFileSync(path.join(cwd, file), String(daysAgo));
+    execFileSync('git', ['add', '-A'], { cwd, stdio: 'pipe' });
+    execFileSync('git', ['-c', `user.name=${name}`, '-c', `user.email=${email}`, 'commit', '-q', '-m', `c${daysAgo}`], {
+      cwd, stdio: 'pipe', env: { ...GIT_ENV, GIT_AUTHOR_DATE: at(daysAgo), GIT_COMMITTER_DATE: at(daysAgo) },
+    });
+  };
+  const epicDir = path.join(T, 'epics/EP-x/.sdlc');
+  fs.mkdirSync(epicDir, { recursive: true });
+  const write = (rel, obj) => fs.writeFileSync(path.join(T, rel), typeof obj === 'string' ? obj : JSON.stringify(obj));
+  write('epics/EP-x/.sdlc/state.json', { currentStep: 'epic-review', steps: [] });
+  write('epics/EP-x/.sdlc/approvals.json', []);
+  commit(T, 'Product Writer', 'writer@corp.io', 3);
+
+  let backend = null;
+  if (withRepo) {
+    backend = path.join(T, 'demo/backend');
+    fs.mkdirSync(backend, { recursive: true });
+    git(backend, 'init', '-q');
+    git(backend, 'checkout', '-q', '-b', 'main');
+    commit(backend, 'Repo Dev', 'dev@corp.io', 5);
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    write('.sdlc/repos.json', { repos: [{ name: 'backend', path: 'demo/backend' }] });
+  }
+  return { T, backend, write, commit, at };
+}
+
+test('E71 capacityWindow: fewer than 20 merges is the WIDE end, never a short window', () => {
+  // A young or quiet project has little history. Reading "little history" as "few people" is the quiet
+  // under-count the whole row is about.
+  const w = capacityWindow(['2026-09-20', '2026-09-19'], P_TODAY);
+  assert.equal(w.days, CAPACITY_MAX_DAYS);
+  assert.match(w.basis, /fewer than 20/);
+  assert.equal(capacityWindow([], P_TODAY).days, CAPACITY_MAX_DAYS, 'no merges at all is still the wide end');
+});
+
+test('E71 capacityWindow: the last 20 merges set the window, bounded 30–180', () => {
+  const merges = (span) => Array.from({ length: CAPACITY_MERGES }, (_, i) => daysBefore(P_TODAY, Math.round((i * span) / (CAPACITY_MERGES - 1))));
+  assert.equal(capacityWindow(merges(90), P_TODAY).days, 90, 'a 90-day span is the window');
+  assert.equal(capacityWindow(merges(4), P_TODAY).days, CAPACITY_MIN_DAYS, 'a fast team is floored at 30, not 4');
+  assert.equal(capacityWindow(merges(400), P_TODAY).days, CAPACITY_MAX_DAYS, 'a slow team is capped at 180');
+  assert.match(capacityWindow(merges(4), P_TODAY).basis, /bounded from 4/, 'the basis says it was bounded');
+});
+
+test('E71 personKey: a noreply address joins a commit and an approval into ONE person', () => {
+  const got = activeIn([
+    { ts: '2026-09-20', name: 'Octo Cat', login: 'octocat', how: 'committed' },
+    { ts: '2026-09-20', name: 'OctoCat', login: 'OctoCat', how: 'approved' },
+  ], '2026-09-01');
+  assert.equal(personKey({ name: 'Octo Cat', login: 'OctoCat' }), personKey({ name: 'totally other', login: 'octocat' }),
+    'the login decides the key whenever there is one, and the name beside it is ignored');
+  assert.notEqual(personKey({ name: 'Octo Cat', login: null }), personKey({ name: 'Octo Cat', login: 'octocat' }),
+    'a bare name is NOT assumed to be the same person as a login that resembles it (E64)');
+  // THE COLLISION IS CLOSED. Logins and bare names live in separate namespaces, so a git author
+  // literally named `ada` and a different human whose platform login is `ada` are two people, not one.
+  // Folding them was an under-count — the one direction this file may never go.
+  assert.notEqual(personKey({ name: 'ada', login: null }), personKey({ name: 'Ada L', login: 'ada' }),
+    'a bare name can never swallow a login');
+  assert.equal(personKey({ name: 'whoever', login: 'ada' }), personKey({ name: 'someone else', login: 'ada' }),
+    'but one login is always one person, whatever name each record happens to carry');
+  assert.equal(personKey({ name: '  ', login: '' }), '', 'a record naming nobody keys to nothing');
+  assert.equal(got.count, 1, 'logins are case-insensitive on both platforms');
+  assert.deepEqual(got.people[0].how, ['approved', 'committed']);
+  assert.equal(got.nameOnly, 0);
+});
+
+test('E71 personKey: a person with no provable login is TWO rows, and the count says so', () => {
+  // E64: only exact evidence proves identity. Guessing two rows into one makes the count SMALLER,
+  // which is the unsafe direction here — so they stay apart and `nameOnly` reports it.
+  const got = activeIn([
+    { ts: '2026-09-20', name: 'Ada Lovelace', login: null, how: 'committed' },
+    { ts: '2026-09-20', name: 'ada', login: 'ada', how: 'approved' },
+  ], '2026-09-01');
+  assert.equal(got.count, 2);
+  assert.equal(got.nameOnly, 1);
+});
+
+test('E71 activeIn: the window has a floor and deliberately NO ceiling', () => {
+  const ev = (ts) => ({ ts, name: ts, login: null, how: 'committed' });
+  const got = activeIn([ev('2026-08-31'), ev('2026-09-01'), ev(P_TODAY), ev('2026-09-22')], '2026-09-01');
+  // The lower edge is inclusive and anything before it is out. The UPPER edge is not enforced at all:
+  // clock skew, a rebase, a hand-edited ledger and a machine in another timezone all produce a date in
+  // the future, and dropping one makes the count SMALLER — the one direction this file may never go.
+  assert.deepEqual(got.people.map((p) => p.key), ['name:2026-09-01', 'name:2026-09-21', 'name:2026-09-22'],
+    'a future-dated event is still evidence of a person');
+  assert.ok(!got.people.some((p) => p.key === 'name:2026-08-31'), 'but nothing before the window counts');
+});
+
+test('E71 a commit made today in a timezone ahead of UTC is NOT lost', () => {
+  // `git log --date=short %cd` renders the date in the COMMIT'S OWN timezone while everything else here
+  // is UTC, so a commit made at 08:00 in Tokyo (23:00 the previous day in UTC) printed tomorrow's date.
+  // With an upper bound that dropped it, a real person became `active: 0` and `unknown` stayed empty.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.writeFileSync(path.join(fx.T, 'tokyo.txt'), 'x');
+    execFileSync('git', ['add', '-A'], { cwd: fx.T, stdio: 'pipe' });
+    execFileSync('git', ['-c', 'user.name=Tokyo Dev', '-c', 'user.email=tokyo@corp.io', 'commit', '-q', '-m', 'tz'], {
+      cwd: fx.T, stdio: 'pipe',
+      env: { ...GIT_ENV, GIT_AUTHOR_DATE: `${daysBefore(P_TODAY, -1)}T08:00:00+09:00`, GIT_COMMITTER_DATE: `${daysBefore(P_TODAY, -1)}T08:00:00+09:00` },
+    });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    assert.ok(r.expertise.people.some((p) => p.key === 'name:tokyo dev'), 'the Tokyo commit still names its author');
+    assert.notEqual(r.expertise.active, 0);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 counts commits AND approvals, from the Product and every connected repo', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', [{ approver: 'reviewer-one', date: daysBefore(P_TODAY, 2) }]);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, [], 'a readable Product reports no unknowns');
+    assert.deepEqual(r.expertise.people.map((p) => p.key).sort(), ['name:product writer', 'name:repo dev', 'name:reviewer-one']);
+    assert.equal(r.expertise.active, 3);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 a robot is not capacity', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.commit(fx.T, 'dependabot[bot]', 'dependabot[bot]@users.noreply.github.com', 1);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.expertise.people.map((p) => p.key), ['name:product writer'], 'a bot can never approve, so it is not a person to cap against');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 `today` is injected, so a CALLER can fix the day the count is measured from', () => {
+  // The gate predicate's return is compared byte for byte by the golden test; a number derived from the
+  // current date would move that snapshot every single day.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    const now = activePeople(fx.T, { today: P_TODAY });
+    const later = activePeople(fx.T, { today: daysBefore(P_TODAY, -400) });
+    assert.equal(now.expertise.active, 1);
+    assert.equal(later.expertise.active, 0, 'the same repo, a different day, a different answer');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+// ---- the unknown rules ---------------------------------------------------------------------------
+
+const assertUnknown = (r, why) => {
+  assert.ok(r.unknown.length, `expected an unknown reason: ${why}`);
+  for (const w of ['capacity', 'expertise', 'stale']) {
+    assert.equal(r[w].active, null, `${w}.active must be null, not a number (${why})`);
+    assert.equal(r[w].people.length, 0, `${w}.people must be empty when nothing was counted (${why})`);
+    assert.equal(typeof r[w].active, 'object', `${w}.active must not be a number of any kind (${why})`);
+  }
+  // The window is still reported — "we could not count, and here is what we would have counted over"
+  // beats silence. Pinned to the real values, not to `> 0`, which nothing could ever falsify.
+  assert.equal(r.expertise.days, EXPERTISE_DAYS);
+  assert.equal(r.stale.days, STALE_DAYS);
+  assert.equal(r.capacity.days, CAPACITY_MAX_DAYS);
+  assert.equal(r.expertise.from, daysBefore(r.today, EXPERTISE_DAYS), 'and the window it would have used');
+  // The printed line must name a source and never show a number in place of the count.
+  assert.match(_activeSum(r), /NOT COUNTED/);
+};
+
+test('E71 git is asked for an ABSOLUTE date, so a fixed `today` never rots', () => {
+  // `--since=30 days ago` is measured from the real clock, while the range below it is measured from
+  // the injected `today`. The two agree on exactly one day a month, so a relative ask would make every
+  // fixture test here expire — and would make "the count reads no clock" untrue.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    // A `today` a year in the FUTURE. `--since` is a lower bound, so an absolute ask built from it lands
+    // after every commit in the fixture and git hands back nothing. A clock-relative `30 days ago` would
+    // still return the commit made 3 days before P_TODAY — which is exactly the difference being pinned.
+    const future = peopleEvidence(fx.T, { today: '2027-09-21', sinceDays: 30 });
+    assert.equal(future.events.filter((e) => e.how === 'committed').length, 0,
+      'git was asked about 2027-08-22 onwards, not about the last 30 real days');
+    const now = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: 30 });
+    assert.ok(now.events.some((e) => e.how === 'committed'), 'the same repo, asked about the right dates');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: an approvals file that does not parse is NOT zero approvers', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', '{ broken');
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'corrupt approvals.json');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a repos.json that does not parse is NOT "no repos" (the E65 bug, inverted)', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('.sdlc/repos.json', '{ nope');
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'corrupt repos.json');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a registered repo that is not on this machine is NOT "nobody committed there"', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('.sdlc/repos.json', { repos: [{ name: 'backend', path: 'demo/backend' }, { name: 'gone', path: 'demo/not-here' }] });
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'a repo missing from disk');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a shallow clone holds too little history to count people', () => {
+  const fx = peopleFixture();
+  try {
+    const shallow = path.join(fx.T, 'demo/shallow');
+    execFileSync('git', ['clone', '-q', '--depth', '1', `file://${fx.backend}`, shallow], { stdio: 'pipe', env: GIT_ENV });
+    fx.write('.sdlc/repos.json', { repos: [{ name: 'shallow', path: 'demo/shallow' }] });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'a shallow clone');
+    assert.match(r.unknown.join(' '), /shallow/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a ship shard that does not parse is NOT one fewer engineer-review approver', () => {
+  // `readShardDir` skips a corrupt shard on purpose — right for an advisory report, wrong for a count.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), { recursive: true });
+    fx.write('epics/EP-x/.sdlc/build-log/s-t-r.json', 'not json');
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'corrupt ship shard');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 NOT unknown: a Product with no connected repos is a readable answer, not a gap', () => {
+  // Absent is not the same fact as unreadable. A registry that is missing means there are no code
+  // repos; a registry that does not parse means we cannot know how many there were.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    assert.equal(r.expertise.active, 1);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 the padded walk finds a person git\'s date cut-off would hide', () => {
+  // `--since` STOPS the walk at the first commit older than the date, so an out-of-order commit hides
+  // everyone behind it. E67 could accept that (it under-LISTS, the safe side there); here it
+  // under-COUNTS. The pad widens the cliff — it does not remove it, and that limit is stated.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.commit(fx.T, 'Hidden Person', 'hidden@corp.io', 25);   // inside the 30-day window
+    fx.commit(fx.T, 'Old Commit', 'old@corp.io', 50);         // outside it, and IN FRONT of Hidden
+    fx.commit(fx.T, 'Tip Person', 'tip@corp.io', 1);
+    const padded = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: EXPERTISE_DAYS * WALK_PAD });
+    const naive = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: EXPERTISE_DAYS });
+    const inWindow = (ev) => activeIn(ev.events, daysBefore(P_TODAY, EXPERTISE_DAYS), P_TODAY).people.map((p) => p.key);
+    assert.ok(inWindow(naive).includes('name:tip person'), 'the tip is always reachable');
+    assert.ok(!inWindow(naive).includes('name:hidden person'), 'without the pad the cut-off hides them — this is the bug');
+    assert.ok(inWindow(padded).includes('name:hidden person'), 'with the pad they are counted');
+    assert.ok(!inWindow(padded).includes('name:old commit'), 'the pad widens the ASK, never the window itself');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+// ---- the ledger lock must always be able to give up ----------------------------------------------
+const { withLedgerLock: _withLedgerLock } = await import('./ledger.mjs');
+
+test('withLedgerLock: a stale lock it cannot remove is REPORTED, never spun on', () => {
+  // `fs.rmdirSync` throws ENOTEMPTY on a lock directory with anything inside it, so a lock that is both
+  // older than the stale window and not empty can never be reclaimed. Two `continue` statements used to
+  // skip the retry cap and the sleep on exactly that path: an unbounded synchronous loop at 100% CPU
+  // that also swallowed SIGTERM, because a busy JS loop never lets node reach its event loop.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lock-'));
+  try {
+    const lock = path.join(T, '.sdlc/build-log.json.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    fs.writeFileSync(path.join(lock, 'stray-file'), 'x');   // rmdir will now always fail
+    const stale = new Date(Date.now() - 120_000);           // older than LOCK_STALE_MS (30s)
+    fs.utimesSync(lock, stale, stale);
+    let ran = false;
+    assert.throws(
+      () => _withLedgerLock(lock, () => { ran = true; }, { retries: 3, waitMs: 1 }),
+      /another process is writing/,
+      'it must give up and report, not retry forever',
+    );
+    assert.equal(ran, false, 'the body never runs without the lock');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('withLedgerLock: a stale EMPTY lock is still reclaimed, and the body runs', () => {
+  // The fix must not cost the reclaim it was protecting: a lock left behind by a process that died is
+  // removed and the caller proceeds.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lock-'));
+  try {
+    const lock = path.join(T, '.sdlc/build-log.json.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    const stale = new Date(Date.now() - 120_000);
+    fs.utimesSync(lock, stale, stale);
+    assert.equal(_withLedgerLock(lock, () => 'done', { retries: 3, waitMs: 1 }), 'done');
+    assert.ok(!fs.existsSync(lock), 'and it is released afterwards');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E71: the surfaces ---------------------------------------------------------------------------
+const { gatePredicate: _gatePred } = await import('./epic-state.mjs');
+
+test('E71 surfaces: the predicate CARRIES active on every path, and never invents one', () => {
+  // E72 caps `needed` with this field, so it has to be present on the paths that report no count of
+  // their own too — an inherited or skipped step is still part of a Product with a head count.
+  const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
+  assert.equal(_gatePred({ step, approvals: [], active: 4 }).active, 4);
+  assert.equal(_gatePred({ step, approvals: [] }).active, null, 'a caller that read nothing gets null, not 0');
+  // Assert the RULE as well as the value: all three return sites carry the same `active`, so without
+  // this the fixtures could quietly fall through to the ordinary path and the test would still pass.
+  const inherited = _gatePred({ step: { ...step, status: 'done', inherited: true, inheritedFrom: 'EP-p', boundHash: 'h' }, approvals: [], acceptedHashes: ['h'], active: 3 });
+  assert.equal(inherited.rule, 'inherited', 'the fixture really took the inherited path');
+  assert.equal(inherited.active, 3, 'an inherited step carries it too');
+  const skipped = _gatePred({ step: { ...step, id: 'ui-design-review', skipped: true }, approvals: [], optional: ['ui-design'], active: 3 });
+  assert.equal(skipped.rule, 'skipped', 'the fixture really took the skipped path');
+  assert.equal(skipped.active, 3, 'a skipped step carries it too');
+});
+
+test('E71 surfaces: the two sentence builders never turn an unknown into a number', () => {
+  // The single rule of the row, checked on the strings people actually read.
+  const unknownCounted = { capacity: { active: null, days: 180, basis: 'x' }, unknown: ['repos.json does not parse', 'and another'] };
+  const line = _activeSum(unknownCounted);
+  assert.match(line, /NOT COUNTED/);
+  assert.match(line, /repos\.json does not parse/, 'it says WHICH source, not just that one failed');
+  assert.match(line, /and 1 more/, 'and how many others');
+  assert.doesNotMatch(line, /\b0\b/, 'zero must never appear where a count would be');
+  assert.match(_activeBasis(unknownCounted), /never counted as few people/);
+
+  const known = { capacity: { active: 4, days: 90, basis: 'the last 20 merged PRs span 90 day(s)' }, unknown: [] };
+  assert.equal(_activeSum(known), 'active people: 4 in the last 90 days — reported only, it does not cap the approval count yet',
+    'the number and its disclaimer are ONE string, because they go to different streams');
+  assert.equal(_activeBasis(known), 'the last 20 merged PRs span 90 day(s)');
+});
+
+test('E71 surfaces: the review-PR body states the head count beside the ask', () => {
+  const args = {
+    epic: 'EP-x', artifact: 'epic.md', owner: 'alice', domains: ['backend'],
+    step: { id: 'epic-review', artifact: 'epic.md', risk_tags: ['contract'] },
+  };
+  const counted = fillHubTemplate({ ...args, active: 2 });
+  assert.match(counted, /\*\*Approvals needed:\*\* 1 \(enforced\)/);
+  assert.match(counted, /\*\*Active people:\*\* 2 when this PR was opened/, 'a reviewer can see the ask and the team size together');
+  // The body is written once and read for as long as the PR lives, so the line DATES itself — the same
+  // number read from a machine without the connected repos would otherwise sit there as fact for good.
+  assert.match(counted, /`yad gate status` counts it live/);
+  // A gate asking for 3 on a team of 2 is exactly the deadlock E7 described and E72 fixes. E71's job is
+  // to make it VISIBLE on the artifact people are about to review, not to resolve it.
+  assert.match(counted, /full count 3 approvers/);
+
+  const uncounted = fillHubTemplate({ ...args, active: null });
+  assert.match(uncounted, /\*\*Active people:\*\* not counted when this PR was opened/,
+    'it says WHEN it could not count — a frozen line must not claim a lasting fact');
+  assert.doesNotMatch(uncounted, /\*\*Active people:\*\* 0/, 'never zero');
+});
+
+// ---- E71: the review round's findings, each pinned -----------------------------------------------
+
+test('E71 review: a stray FILE where a shard directory belongs does not crash the gate', () => {
+  // `fs.existsSync` is true for a file too, so `readdirSync` threw ENOTDIR — and `activePeople` is
+  // called with no guard by `gate sync`, `gate status`, `gate open` and `gate review`, so the
+  // exception escaped and broke three commands that used to work.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.writeFileSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), 'i am a file, not a directory');
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'build-log is a file');
+    assert.match(r.unknown.join(' '), /not a directory/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: a folded build-log whose `ships` is not a list is unknown, not "no ships"', () => {
+  // `readShips` does `Array.isArray(foldedObj?.ships) ? … : []`, and `readJSONStrict` only checks that
+  // the JSON PARSES. So a file of the wrong shape lost every engineer-review approver in it silently.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.write('epics/EP-x/.sdlc/build-log.json', { epic: 'EP-x', ships: { one: { approver: 'lost' } } });
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'ships is not a list');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: the capacity window really does read the ledger\'s merge records', () => {
+  // The whole data path behind decision (2) — closing records + ships — had no fixture at all; only
+  // `capacityWindow` was unit-tested, on a hand-built array.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    // 20 merged review PRs, the oldest 60 days back: the window should be that span, not the wide end.
+    const steps = Array.from({ length: CAPACITY_MERGES }, (_, i) => ({
+      id: `step-${i}`, type: 'review+approve',
+      closed: { by: 'alice', date: daysBefore(P_TODAY, Math.round((i * 60) / (CAPACITY_MERGES - 1))), via: 'merge', pr: 100 + i },
+    }));
+    fx.write('epics/EP-x/.sdlc/state.json', { currentStep: 'x', steps });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    assert.equal(r.capacity.days, 60, 'the 20th-newest merge sets the window');
+    assert.match(r.capacity.basis, /span 60 day/);
+
+    // And a ship's engineer-review approver is a person, dated by the ship.
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), { recursive: true });
+    fx.write('epics/EP-x/.sdlc/build-log/s-t-r.json', {
+      story: 'EP-x-S01', task: 'T01', repo: 'backend', pr: 7,
+      shippedAt: daysBefore(P_TODAY, 2), engineer_review: [{ approver: 'ship-reviewer' }],
+    });
+    const r2 = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r2.unknown, []);
+    assert.ok(r2.expertise.people.some((p) => p.key === 'name:ship-reviewer'), 'an engineer review is an approval');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: a record we can read whose DATE we cannot is a gap, not one person fewer', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', [{ approver: 'reviewer-one', date: '2026-9-4' }]);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'an approval date that does not parse');
+    assert.match(r.unknown.join(' '), /no readable `date`/);
+    assert.doesNotMatch(r.unknown.join(' '), /2026-9-4/, 'the field is named, the value is never printed');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: ships that cannot be told apart are unknown — one would silently replace the other', () => {
+  // `readShips` de-duplicates on `story|task|repo`; two records missing those collide on
+  // `undefined|undefined|undefined` and one wins, taking its engineer reviewers with it.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), { recursive: true });
+    fx.write('epics/EP-x/.sdlc/build-log/a.json', { pr: 1, shippedAt: daysBefore(P_TODAY, 1), engineer_review: [{ approver: 'rev-a' }] });
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'a ship with no story/task/repo');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: an epic folder the enumerator will not name is reported, not skipped', () => {
+  // `epicIds` drops a directory whose name is not a valid id. Right for something that turns a name
+  // into a path; wrong for a counter, because the approvals inside go with it.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-Legacy/.sdlc'), { recursive: true });
+    fx.write('epics/EP-Legacy/.sdlc/approvals.json', [{ approver: 'legacy-reviewer', date: daysBefore(P_TODAY, 1) }]);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'an epic id the enumerator rejects');
+    assert.match(r.unknown.join(' '), /EP-Legacy/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: for MERGES more evidence is the UNSAFE direction, so a future date cannot narrow the window', () => {
+  // Everywhere else in this reader more evidence means more people. For merges it is inverted: more
+  // records push the 20th-newest closer to today, which NARROWS the window and finds FEWER people. A
+  // future date made `span` negative, and clamping a negative number landed on the narrow end — 20 bad
+  // records took the window from 180 days to 30 and printed "-111 day(s)" as the reason.
+  const future = Array.from({ length: CAPACITY_MERGES }, (_, i) => daysBefore(P_TODAY, -100 - i));
+  const w = capacityWindow(future, P_TODAY);
+  assert.equal(w.days, CAPACITY_MAX_DAYS, 'a merge cannot have happened after today');
+  // Assert WHICH path ran. Without this the test passes through the "fewer than 20" branch while its
+  // name talks about a negative span — the very weakness this round removed elsewhere.
+  assert.match(w.basis, /only 0 usable merged PR\(s\) recorded \(20 dated after today were ignored\)/,
+    'the basis says how many were thrown away, so a suddenly-wide window is explainable');
+  assert.doesNotMatch(w.basis, /span -/, 'and no negative span is ever printed as a reason');
+
+  // A real project with a few bad dates mixed in: the count of USABLE records is what is reported.
+  const mixed = [...Array.from({ length: 11 }, (_, i) => daysBefore(P_TODAY, i + 1)), ...Array.from({ length: 7 }, (_, i) => daysBefore(P_TODAY, -i - 1))];
+  assert.match(capacityWindow(mixed, P_TODAY).basis, /only 11 usable merged PR\(s\) recorded \(7 dated after today were ignored\)/);
+});
+
+test('E71 review: a clone that does not hold what the registry packed is behind, so it is unknown', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('.sdlc/repos.json', { repos: [{ name: 'backend', path: 'demo/backend', syncedHead: '0'.repeat(40) }] });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'a clone behind the registry');
+    assert.match(r.unknown.join(' '), /behind/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: every shape of a broken repos.json is unknown, not "no repos"', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, '.sdlc'), { recursive: true });
+    for (const [reg, why] of [
+      [{ repos: [{ path: 'demo/x' }] }, 'a repo with no name'],
+      [{ repos: [{ name: 'x' }] }, 'a repo with no path'],
+      [{ repos: 'nope' }, 'repos is not a list'],
+      [{}, 'no repos key at all'],
+    ]) {
+      fx.write('.sdlc/repos.json', reg);
+      assertUnknown(activePeople(fx.T, { today: P_TODAY }), why);
+    }
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review: dayNumber accepts only a real YYYY-MM-DD', () => {
+  assert.equal(dayNumber('2026-02-30'), null, 'an impossible day is rejected, never rolled forward');
+  for (const bad of ['2026-9-4', '2026-09-04T10:00:00Z', '', null, undefined, 20260904, 'today']) {
+    assert.equal(dayNumber(bad), null, `${String(bad)} is not a date`);
+  }
+  assert.equal(dayNumber('2026-09-04') + 1, dayNumber('2026-09-05'), 'and consecutive days are consecutive');
+});
+
+test('E71 review: the disclaimer travels WITH the number, because the two lines go to different streams', () => {
+  // `activeSum` goes to stdout through `log()`; `activeBasis` goes to stderr through `note()`. Anything
+  // capturing stdout alone (CI logs, a redirect) would have kept the number and lost the sentence
+  // saying it enforces nothing.
+  const known = { capacity: { active: 4, days: 90, basis: 'the last 20 merged PRs span 90 day(s)' }, unknown: [] };
+  assert.match(_activeSum(known), /does not cap the approval count yet/);
+  // And an absent or undefined count must take the NOT-COUNTED branch, not print a dangling sentence.
+  for (const odd of [undefined, {}, { capacity: {} }, { capacity: { active: undefined } }]) {
+    assert.match(_activeSum(odd), /NOT COUNTED/, 'an absent count is never a counted one');
+    assert.doesNotMatch(_activeBasis(odd), /^ — /, 'and the basis never starts with a dangling dash');
+  }
+});
+
+test('withLedgerLock: a stale lock reclaimed on the LAST try is taken, not reported as held', () => {
+  // The reclaim deleted the stale lock and then threw "another process is writing" about a lock that
+  // no longer existed. The user re-ran and it worked, with no idea why.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lock-'));
+  try {
+    const lock = path.join(T, '.sdlc/build-log.json.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    const stale = new Date(Date.now() - 120_000);
+    fs.utimesSync(lock, stale, stale);
+    assert.equal(_withLedgerLock(lock, () => 'done', { retries: 0, waitMs: 1 }), 'done',
+      'with zero retries left, reclaiming the lock must still win it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E71 review 2: a commit git cannot express as a calendar day is unknown, never a dropped person', () => {
+  // `dayString` is a FORMATTER. A `%ct` in MILLISECONDS — a slip git accepts — formats as `+058691-05`,
+  // and because `+` sorts below every digit that value compares as EARLIER than any real date, so the
+  // window filter dropped the author from all three windows with `unknown` left empty.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.writeFileSync(path.join(fx.T, 'ms.txt'), 'x');
+    execFileSync('git', ['add', '-A'], { cwd: fx.T, stdio: 'pipe' });
+    execFileSync('git', ['-c', 'user.name=Millis Dev', '-c', 'user.email=ms@corp.io', 'commit', '-q', '-m', 'ms'], {
+      cwd: fx.T, stdio: 'pipe',
+      env: { ...GIT_ENV, GIT_AUTHOR_DATE: '@1789952400000 +0000', GIT_COMMITTER_DATE: '@1789952400000 +0000' },
+    });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'a commit date git cannot express as a day');
+    assert.match(r.unknown.join(' '), /calendar day/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 review 2: dayString refuses what it cannot render, so nothing unprintable becomes a date', () => {
+  // Past about 8.64e15 `toISOString()` throws RangeError rather than returning nonsense; outside
+  // 0000-9999 it returns `+058691-05-…`. Both must read as "no date", never as a comparable string.
+  assert.equal(daysBefore('2026-09-21', 30), '2026-08-22', 'the ordinary case still works');
+  assert.equal(dayNumber('+058691-05'), null, 'an expanded-year string is not a date');
+  assert.equal(dayNumber('1970-01-01'), 0, 'and the epoch itself is a perfectly good one');
+});
+
+test('E71 identity: a bridge-written approval IS a proven login, and joins that person\'s commits', () => {
+  // The question this row left open, now closed on evidence the writer already records rather than on
+  // what a string looks like. `upsertBridge` stamps `source: 'bridge'` on every approval it builds from
+  // the platform's own answer, and `mapApprovers` builds those as `name: r.login` — so a bridge record
+  // names a LOGIN. E62 decision 4 is about a record's `by`, which falls back to git `user.name` when
+  // there is no platform; the marker is what tells the two apart.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', [
+      { approver: 'octocat', date: daysBefore(P_TODAY, 2), source: 'bridge', status: 'approved' },
+      { approver: 'handwritten', date: daysBefore(P_TODAY, 2), status: 'approved' },
+    ]);
+    // The same person's commits, carrying the login in a GitHub noreply address.
+    fx.commit(fx.T, 'Octo Cat', '1234+octocat@users.noreply.github.com', 1);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    const keys = r.expertise.people.map((p) => p.key).sort();
+    assert.ok(keys.includes('login:octocat'), 'the approval and the commits are one person, keyed by login');
+    assert.equal(keys.filter((k) => k.includes('octocat')).length, 1, 'and NOT two rows for one human');
+    assert.ok(keys.includes('name:handwritten'), 'a hand-written approval proves no login, so it stays a name');
+    // `nameOnly` is now truthful: it counts rows with no proven login, not every ledger row.
+    assert.equal(r.expertise.nameOnly, r.expertise.people.filter((p) => !p.login).length);
+    assert.ok(r.expertise.people.find((p) => p.key === 'login:octocat').login, 'the login is reported, not inferred');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});

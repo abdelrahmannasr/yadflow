@@ -16,7 +16,7 @@ const REVIEWS = [
     method: 'COUNT',
     path: 'every step (risk step advisory)',
     description:
-      'Names no person, role or step: a step asks for base 1 + risk step distinct approvers. The risk step is +2 for a contract tag and +1 for auth or payments, the highest tag and never the sum. Read from the tags the epic records. Only the base is enforced for now; the risk step is printed as a shortfall ("1 short"). The capacity cap (a later roadmap row) caps the count at the number of active people — without it, a two-person team\'s architecture gate would be unpassable.',
+      'Names no person, role or step: a step asks for base 1 + risk step distinct approvers. The risk step is +2 for a contract tag and +1 for auth or payments, the highest tag and never the sum. Read from the tags the epic records. Only the base is enforced for now; the risk step is printed as a shortfall ("1 short"). The number of active people is now counted live and printed beside the ask — committed or approved, over a window that scales with how fast the team merges (the span of the last 20 merged PRs, bounded 30-180 days). It is reported only; a later roadmap row caps the count with it, and without that cap a two-person team\'s architecture gate would be unpassable. When a source cannot be read the count says "not counted" rather than a number, because an unreadable input must never look like a small team.',
     middleware: ['asks base 1 + risk step', 'distinct people, not roles', 'shortfall reported, not blocking'],
     category: 'base',
   },

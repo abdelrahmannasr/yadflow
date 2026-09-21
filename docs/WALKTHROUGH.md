@@ -234,6 +234,9 @@ engine computes a **count** — `base + risk step` distinct approvers, base 1, p
 or 1 for `auth`/`payments` — and `yad gate sync`, `yad gate status` and the generated review-PR body print
 that arithmetic. **Only the base holds the gate** until the capacity cap ships, because an uncapped count
 would make a two-person team's architecture gate unpassable; the rest is reported as a shortfall.
+The same three surfaces also print how many people are **active** — committed or approved lately, counted
+live from the records and from git, over a window that scales with how fast the team merges. It is
+reported only, and when a source cannot be read it says `not counted` rather than showing a small number.
 - **Epic, UI, stories, test cases:** 1 approver; the count asks for 1.
 - **Architecture+contract** (`risk_tags: ["contract"]`): 1 approver holds it; the count asks for **3
   distinct approvers** (base 1 + contract 2) and reports the shortfall without blocking. The

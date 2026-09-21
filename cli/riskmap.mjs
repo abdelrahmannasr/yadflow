@@ -172,7 +172,7 @@ export function loginFromEmail(email) {
 // A commit whose author is a robot, not a person: an approval can never come from one. GitHub writes
 // `dependabot[bot]` as the name and `…[bot]@users.noreply.github.com` as the address; the `[` also makes
 // the login rule above reject it, so without this it would be listed by name as if it could approve.
-const isBot = (name, email) => /\[bot\]$/i.test(String(name || '').trim()) || /\[bot\]@/i.test(String(email || ''));
+export const isBot = (name, email) => /\[bot\]$/i.test(String(name || '').trim()) || /\[bot\]@/i.test(String(email || ''));
 
 // The `high` directories this change touches, in map order. One git query runs per directory.
 export function highTouched(entries, changed) {

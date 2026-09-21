@@ -57,9 +57,30 @@ export function withLedgerLock(lockPath, fn, { retries = LOCK_RETRIES, waitMs = 
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
       // A holder that died leaves its lock behind forever; reclaim one that is provably too old.
-      let age;
-      try { age = Date.now() - fs.statSync(lockPath).mtimeMs; } catch { continue; } // vanished → retry
-      if (age > LOCK_STALE_MS) { try { fs.rmdirSync(lockPath); } catch { /* someone else won */ } continue; }
+      //
+      // NEITHER BRANCH BELOW MAY `continue`. Both used to, which skipped the retry cap AND the sleep
+      // underneath them — an unbounded, unpaused, fully synchronous loop. The reclaim path is the one
+      // that bites: `fs.rmdirSync` throws ENOTEMPTY when anything at all is inside the lock directory
+      // (a stray file, an editor's dotfile), so a lock that is older than LOCK_STALE_MS and not empty
+      // can NEVER be removed, and the old code retried it forever at 100% CPU. Because the loop is
+      // synchronous, node cannot reach its event loop, so the process also ignores SIGTERM: it has to
+      // be killed with -9. Observed here for 2h27m before it was noticed (2026-09-21).
+      //
+      // Now every path falls through to the cap and the sleep. A stale lock nobody can remove is
+      // REPORTED as YAD-STATE-006 after the normal retry window — and that error's hint already says
+      // to delete the lock directory it names, which is exactly the fix for a non-empty one.
+      let age = null;
+      try { age = Date.now() - fs.statSync(lockPath).mtimeMs; } catch { /* it vanished — just retry */ }
+      if (age !== null && age > LOCK_STALE_MS) {
+        let reclaimed = false;
+        try { fs.rmdirSync(lockPath); reclaimed = true; } catch { /* someone else won, or it is not empty */ }
+        // TAKE IT IMMEDIATELY. Without this, a reclaim on the LAST pass deleted the stale lock and then
+        // reported "another process is writing" about a lock that no longer existed — the user re-ran
+        // and it worked, with no idea why. Losing the race here is normal: fall through and retry.
+        if (reclaimed) {
+          try { fs.mkdirSync(lockPath); break; } catch { /* another writer took it first */ }
+        }
+      }
       if (i >= retries) {
         throw err('YAD-STATE-006', `another process is writing ${path.basename(lockPath, '.lock')} in ${path.basename(path.dirname(path.dirname(lockPath)))}`,
           'wait for the other yad command to finish and re-run; if nothing else is running, delete the stale .lock directory the message names');
@@ -106,6 +127,35 @@ function readShardDir(dir) {
     out.push({ name, obj });
   }
   return out;
+}
+
+// The shards in `dir` that do NOT parse as a JSON object, by file name. `readShardDir` SKIPS such a
+// shard on purpose — these ledgers are advisory evidence and one bad file must not abort a report. A
+// caller that COUNTS PEOPLE cannot accept that: a skipped ship shard is an engineer-review approval
+// that vanishes, and a person who vanishes makes the active count SMALLER, which lowers E72's cap and
+// weakens every gate (E71). Such a caller asks this first and reports "unknown" rather than a number.
+// Deliberately cheap: it parses, it does not validate a ship's fields.
+// Returns { bad: [names], unreadable: null | reason }. It NEVER throws: `fs.existsSync` is true for a
+// FILE as well as a directory, so a stray file named `build-log` under an epic's `.sdlc/` made
+// `readdirSync` throw ENOTDIR — and since the caller counts people for `yad gate sync`, `gate status`
+// and `gate open`, that exception escaped and turned three working commands into a crash. A directory
+// the user cannot list (EACCES) did the same. Both are now "we could not read this", which is exactly
+// what the counter needs to hear.
+export function corruptShards(dir) {
+  let names;
+  try {
+    if (!fs.existsSync(dir)) return { bad: [], unreadable: null };
+    if (!fs.statSync(dir).isDirectory()) return { bad: [], unreadable: `${path.basename(dir)} is not a directory` };
+    names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
+  } catch (e) {
+    return { bad: [], unreadable: `${path.basename(dir)} could not be listed: ${e.code || e.message}` };
+  }
+  const bad = [];
+  for (const name of names) {
+    const obj = readJSON(path.join(dir, name), null);
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) bad.push(name);
+  }
+  return { bad, unreadable: null };
 }
 
 // The half-applied-tidy guard key: a shard is a genuine duplicate of a folded entry ONLY when its FULL

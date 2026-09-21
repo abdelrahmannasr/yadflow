@@ -454,7 +454,7 @@ export const MODULES: Module[] = [
             '**Epic, UI, stories, test-cases** — the base count: 1 approver. Stories touching several repos add no approvals.',
             '**Engineer review at ship** — a human engineer, always, never automated.',
           ] },
-          { kind: 'p', text: 'The full count is **base 1 + risk step**, and it counts people rather than roles. Only the base holds a gate for now; `yad gate sync` prints the rest as a shortfall, for example `count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory — 1 short`. The risk step starts to hold gates when the capacity cap lands (a later roadmap row): that cap limits the count to the number of active people, so a two-person team is never stuck on a gate it cannot pass. Solo mode still waives approvals: the merge plus resolved threads advance the step.' },
+          { kind: 'p', text: 'The full count is **base 1 + risk step**, and it counts people rather than roles. Only the base holds a gate for now; `yad gate sync` prints the rest as a shortfall, for example `count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory — 1 short`. The risk step starts to hold gates when the capacity cap lands (a later roadmap row): that cap limits the count to the number of active people — which `yad gate sync` now prints on its own line (`active people: 4 in the last 90 days`), reported only until the cap arrives, so a two-person team is never stuck on a gate it cannot pass. Solo mode still waives approvals: the merge plus resolved threads advance the step.' },
         ],
         quiz: [
           {

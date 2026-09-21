@@ -16,6 +16,7 @@ const TERM_GROUPS = [
       'Review gate — the reusable team approval: 1 approver, who should not be the author (the base), all threads resolved, and the review PR/MR merged. Anyone with access to the repo can approve; yadflow keeps no list of people.',
       'Approval count — how many distinct people a step asks to approve: base 1 + risk step. Only the base is enforced for now; the gate prints the rest as a shortfall.',
       'Risk step — what a step\'s risk tags add to the count: contract +2, auth or payments +1, the highest tag and never the sum. Advisory until the capacity cap lands.',
+      'Active people — how many people committed or approved lately, counted live from the approval and ship records plus git authorship, never from a stored list. The window scales with how fast the team merges. Printed once per epic on `yad gate status` and `yad gate sync`, and beside the ask in a generated review PR; it caps nothing yet. An unreadable source reads as "not counted", never as a small number.',
       'Engineer review — the human merge gate; advisory AI first-pass, never the authority. Permanently human.',
       'Lens — the role a step is authored through (analyst, pm, architect, ux, dev, tester, reviewer, engineer).',
     ],

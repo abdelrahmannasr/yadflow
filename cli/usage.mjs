@@ -32,7 +32,7 @@ import path from 'node:path';
 import { c, log, ok, note, readJSON, run } from './lib.mjs';
 import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
-import { epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
+import { epicRoot, ledgerPersonLogin, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
 import { legacyLogins } from './gate.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -97,10 +97,11 @@ function ledgerEvents(root, epic, aliases = new Map()) {
   const events = [];
   const emit = (rec, rawName, action, date, extra = {}) => {
     if (!rawName || !date) return;
-    const older = (rec.role !== undefined || rec.domain !== undefined) && !rec.unverified;
     // A record whose login a gate write recorded from the roster (E64, `rosterName`) names that login, just
-    // as the name table said before the stamp — so the row stays one known by login.
-    const login = rec.rosterName !== undefined ? rawName : (older && aliases.has(rawName) ? aliases.get(rawName) : null);
+    // as the name table said before the stamp — so the row stays one known by login. The rule LIVES in
+    // cli/epic-state.mjs since E71, because the active-people count has to place a record on exactly the
+    // person this report does — two readers that disagreed would split or fold a person between them.
+    const login = ledgerPersonLogin(rec, rawName, aliases);
     events.push({ ts: date, actor: login || rawName, login, action, epic, ...extra });
   };
   for (const a of readLedger(f.approvals, []) || []) emit(a, a.approver, 'approved', a.date, { artifact: a.artifact });

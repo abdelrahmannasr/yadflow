@@ -10,7 +10,8 @@ import {
   detectPlatform, createPr, platformLogin, resolveBaseBranch,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
-import { parseReviewBranch, artifactFromBase, gateRuleSum, gateRuleEnforced } from './epic-state.mjs';
+import { parseReviewBranch, artifactFromBase, gateRuleSum, gateRuleEnforced, legacyLogins } from './epic-state.mjs';
+import { activePeople } from './people.mjs';
 import { baseChangeLevel, recentAuthorsFor } from './riskmap-command.mjs';
 import { gateOpen } from './gate.mjs';
 
@@ -125,6 +126,15 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
   }
   if (high.length && opts.risk !== 'high') lines.push([warn, `the body says Risk level: ${opts.risk || 'low'}, but the risk map on ${map.base} marks ${high.join(', ')} high — the larger counts`]);
   lines.push([riskStep ? hand : info, `this PR asks for ${gateRuleSum(rule)}${gateRuleEnforced(rule)}; \`bash checks/risk-route.sh "<pr body>" ${map.base}\` prints the same count`]);
+  // E71 — how many people are around to meet that ask. `opts.active` is the Product-wide count the
+  // CALLER already read: this function runs in a code repo, which has no Product of its own to read
+  // (the E65 finding that keeps `checks/*.sh` out of this entirely), so it is handed the number or
+  // nothing. `null` means no source could be read, which is never the same as "few people".
+  if (opts.active !== undefined) {
+    lines.push([info, opts.active === null
+      ? 'active people: not counted — reported only, and an unreadable source is never read as few people'
+      : `active people: ${opts.active} — reported only, it does not cap the count yet`]);
+  }
   return { rule, map, lines };
 }
 
@@ -224,7 +234,28 @@ export async function runOpenPr(root, opts = {}) {
   if (!r.ok) { fail(`could not open PR/MR — ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`opened ${r.url}`);
   hand('no reviewers were requested — ask them on the PR itself');
-  const count = stage === 'code-repo' ? routeCount(repoRoot, baseBranch, opts) : null;
+  // The Product-wide active count (E71), read ONCE here and handed down: `routeCount` works inside a
+  // code repo and must not go looking for a Product itself.
+  //
+  // ONLY WHEN `root` REALLY IS A PRODUCT. `root` is the working directory, and running this command
+  // from inside the code repo is a supported path — `detectStage` returns `code-repo` for exactly that
+  // case. Counting from there would have walked the CODE REPO's history and reported its committers as
+  // the whole team: no `epics/` (so no ledger and no `unknown`), no `.sdlc/repos.json` (which is a
+  // readable "no connected repos"), and one git log that works — a confident, smaller, wrong number,
+  // feeding the field E72 will cap with. `null` is the honest answer there: we are not standing in a
+  // Product, so we did not count.
+  const active = (() => {
+    // Only the `code-repo` stage prints it (`routeCount`, below). On a `hub-tooling` PR this would
+    // otherwise walk the Product and every connected repo's history and throw the answer away.
+    if (stage !== 'code-repo') return null;
+    if (!exists(productConfigPath(root))) return null;
+    // `readJSON`, not `readJSONStrict`, and that is not the degradation cli/people.mjs warns about:
+    // losing the roster's name -> login table only stops OLDER records being joined to a login, so a
+    // person lands on two rows instead of one. That over-counts, the safe direction here. The count
+    // itself still refuses on every source it cannot read.
+    try { return activePeople(root, { aliases: legacyLogins(readJSON(productConfigPath(root), null)) }).capacity.active; } catch { return null; }
+  })();
+  const count = stage === 'code-repo' ? routeCount(repoRoot, baseBranch, { ...opts, active }) : null;
   if (count) for (const [say, line] of count.lines) say(line);
   else if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` to see how many approvers it asks for');
   return { url: r.url };

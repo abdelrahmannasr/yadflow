@@ -11,11 +11,12 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
+import { activePeople, activeSum, activeBasis } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -160,23 +161,11 @@ export const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.
 // but is recorded `engagement: none` and draws the friendly nudge.
 export const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === true));
 
-// The name → login pairs of a roster an older release left on disk (E62). Read for ONE job: recognising
-// the person an older approval or comment record names, so the first sync after the upgrade continues
-// that record instead of guessing. The roster decides nothing else and nothing writes it; `yad doctor`
-// still names it as unused. The user chose this over matching by order (2026-09-16), which swapped two
-// people's fingerprints on GitLab. A name the roster gives to two logins cannot be told apart and is
-// left out.
-export function legacyLogins(hub) {
-  const out = new Map();
-  const clash = new Set();
-  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
-    if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
-    if (out.has(e.name) && out.get(e.name) !== e.login) clash.add(e.name);
-    out.set(e.name, e.login);
-  }
-  for (const n of clash) out.delete(n);
-  return out;
-}
+// `legacyLogins` LIVES in cli/epic-state.mjs now (E71): the active-people reader needs the same table to
+// recognise an older record, and importing it from here would have made a cycle (gate.mjs prints the
+// count that reader returns). This re-export stays — rule 3, the new name beside the old — and is the
+// one every older reader here and in cli/usage.mjs still calls.
+export { legacyLogins };
 
 // Re-add this step's bridge approvals from the current platform state (drop+re-add => dismissals and
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
@@ -598,7 +587,7 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
   return { targets: entry(found.number, found.url), discovered: true };
 }
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
+export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null } = {}) {
   const { hub } = loadProduct(root);
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
@@ -673,6 +662,20 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 
   let synced = 0;
   let advanced = 0;
+  // E71 — said ONCE, before the per-artifact lines, because it is a fact about the PRODUCT and not
+  // about any one gate (rule 6: say the arithmetic, not just the verdict). It is reported only: E72 is
+  // the row that turns it into the cap on `needed`, so the basis line says so in as many words.
+  // E71 — ONE Product-wide count per command, read here: before the per-step loop, so N steps cannot
+  // mean N walks of every repo's history, and AFTER the early exits above, so a run that bails out for
+  // a missing ledger or no targets never pays for a git walk at all. `today` is the one this command
+  // was given, so the count and the records it reports on are measured from the same day.
+  //
+  // `yad gate ci` is why it can be HANDED IN. Its sweep builds one job per (epic, open review PR) and
+  // calls this function once per job, so reading it here would walk every repo once PER PR — the very
+  // thing the sentence above promises it does not do. The sweep reads it once and passes it down.
+  const people = headCount || activePeople(root, { today: today || undefined, aliases });
+  log(`  ${c.dim(activeSum(people))}`);
+  note(c.dim(activeBasis(people)));
   // Targets whose step is still open. The dated approval-record file is regenerated only for these —
   // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
   // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
@@ -736,6 +739,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     }
 
     const pred = gatePredicate({
+      // Carried, not applied: E72 is the row that caps `needed` with it.
+      active: people.capacity.active,
       step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact),
       threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
       // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
@@ -942,6 +947,12 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const failedEpics = new Set();
   const advancedEpics = new Set(); // epics whose step actually passed this run (merge OR a swept merge)
   const statusFiles = new Map();   // epic -> the artifact files syncStatuses rewrote (staging allowlist)
+  // E71 — read ONCE for the whole sweep, and only once there is something to sweep. `gateSync` is
+  // called per job, so letting each call read it would walk the Product and every connected repo's
+  // history once PER open review PR; reading it above the early exits (no platform, an unparseable
+  // branch, no jobs) would pay for a 360-day `git log --all` on every push and throw it away. It is
+  // one fact about the Product, so every job also prints the same number.
+  const sweepCount = jobs.length ? activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) }) : null;
   for (const job of jobs) {
     const epicDir = epicRoot(root, job.epic);
     // Event mode (--branch) targets a single epic: fail loudly. Sweep mode skips the bad epic.
@@ -1000,7 +1011,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     try {
       // A branch event that is not a merge can never advance (the predicate requires merged), so it
       // is read-only under Path B — run it as a dry sync that persists nothing to the working tree.
-      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: !!branch && !merged });
+      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: !!branch && !merged, headCount: sweepCount });
       synced += r.synced;
       // When the step actually ADVANCED (the merge phase, or a swept merge the schedule observed),
       // reflect it in the artifact frontmatter (draft → approved). Keyed off the advance, not the
@@ -1178,7 +1189,17 @@ export async function gateStatus(root, { epic } = {}) {
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
   const optional = optionalStepsFor(ledger.state);   // which steps THIS epic's route allows to be skipped
+  // E71 — read ONCE for the whole view, not once per step: it is a Product-wide fact, and a per-step
+  // read would walk every connected repo's history once for every gate on the screen.
+  // NOT `counted`: the per-step loop below already binds that name to this step's engagement-filtered
+  // approvals, and two different meanings of one word in one function is how a later edit reads the
+  // wrong one.
+  const headCount = activePeople(root, { aliases: legacyLogins(hub) });
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
+  // Printed in solo mode too, exactly as the per-step count is: someone who later switches to team mode
+  // can see the number their gates will be capped against, before it starts holding anything.
+  log(`  ${c.dim(activeSum(headCount))}`);
+  note(c.dim(activeBasis(headCount)));
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const accepted = acceptedHashes(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
@@ -1375,6 +1396,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // CI writes nothing pre-merge. With a local ledger the local command records the PR itself (no CI will).
   const body = fillHubTemplate({
     epic, artifact, step, owner: ownerOf(epicDir), domains,
+    active: activePeople(root, { aliases: legacyLogins(hub) }).capacity.active,
     // Does this epic's ROUTE have an architecture step? Asked of the recorded route and never of the
     // chain (`routeLacksStep`): a truncated legacy chain has no `architecture` row and is not on a
     // short lane, and telling its reviewer in writing that it is would be a false claim in a record
@@ -1452,6 +1474,15 @@ function reviewBundle(root, { epic, artifact } = {}) {
     step: step
       ? { id: step.id, riskTags: step.risk_tags || [], escalated: isEscalated(step), gateRule: gateRuleFor(step) }
       : null,
+    // E71 — the live capacity count, as an OBJECT and never as the sentence, so a consumer reads the
+    // number rather than parsing prose (the same discipline `gateRule` follows). `active: null` means a
+    // source could not be read, which is NOT the same fact as "few people": `unknown` says which.
+    // Its own read, and still once per command: `reviewBundle` has exactly two callers, `gate review`
+    // and `gate walkthrough`, and neither runs alongside `gate status` or `gate sync`.
+    activePeople: (() => {
+      const counted = activePeople(root, { aliases: legacyLogins(hub) });
+      return { active: counted.capacity.active, windowDays: counted.capacity.days, basis: counted.capacity.basis, unknown: counted.unknown };
+    })(),
     artifactPath: art ? path.join(epicDir, art) : null,
     contractPath: art && base(art) === 'architecture' ? path.join(epicDir, 'contract.md') : null,
     touchedDomains: step ? touchedDomains(epicDir, step) : [],
@@ -1523,7 +1554,10 @@ export async function gateTrailer(root, { epic, artifact, body, number, getBody 
 // ---- helpers ------------------------------------------------------------------------------------
 const base = (artifact) => artifactBase(artifact);
 
-export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true }) {
+// `active` is the caller's already-read count (E71, `activePeople`), or null when it did not read one.
+// Passed in rather than read here for the same reason the predicate takes it: this builds a string and
+// must stay callable from a test without a Product on disk.
+export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true, active = null }) {
   const rule = gateRuleFor(step);
   return [
     '## Artifact under review',
@@ -1539,6 +1573,16 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     // them to discover later (rule 6). Only the base holds this gate; the risk step starts holding gates
     // when E72 caps it. Said plainly here so nobody treats the full number as the requirement.
     `- **Approvals needed:** ${rule.base} (enforced) · full count ${gateRuleSum(rule)}${rule.riskStep ? ' (the risk step is advisory until the capacity cap)' : ''}`,
+    // E71 — how many people could give those approvals, stated beside the ask so a reviewer can see a
+    // gate that asks for more people than the team has BEFORE they start. It caps nothing yet.
+    //
+    // THIS IS THE ONE SURFACE WHERE THE COUNT BECOMES A LASTING RECORD. Everywhere else it is printed
+    // live and gone; a PR description is written once, at `gate open`, and read for as long as the PR
+    // exists. The number can be different an hour later, and on a different machine: `gate open` run
+    // from a laptop that has not cloned the connected repos reads "not counted" and would leave that
+    // word in the body for good. So the line dates itself. It does NOT go quiet on an unknown (Part 3),
+    // it just says WHEN it could not count, which is the only honest thing a frozen line can say.
+    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (reported only — it does not cap the count yet; \`yad gate status\` counts it live)`}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
