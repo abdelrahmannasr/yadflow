@@ -44,10 +44,10 @@ function closedLine(closed) {
   const waived = closed.waived === 'solo' ? '; approvals waived (solo mode)' : closed.waived ? `; approvals waived (${closed.waived})` : '';
   // E72 — a count the capacity cap lowered. Read strictly: the record is a file a person can edit, and
   // a line built from half a record would state a cap nobody applied. All three numbers, and a `to`
-  // below `needed` (a cap only ever lowers), or nothing.
+  // of at least 1 (the base) and below `needed` (a cap only ever lowers), or nothing.
   const k = closed.capped;
   const whole = (n) => Number.isInteger(n) && n >= 0;
-  const capped = k && typeof k === 'object' && !Array.isArray(k) && whole(k.needed) && whole(k.to) && whole(k.active) && k.to < k.needed
+  const capped = k && typeof k === 'object' && !Array.isArray(k) && whole(k.needed) && whole(k.to) && whole(k.active) && k.to >= 1 && k.to < k.needed
     ? `; count capped from ${k.needed} to ${k.to} (${k.active} active ${peopleWord(k.active)})` : '';
   return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${waived}${capped}${closed.by ? `; recorded by ${closed.by}` : ''}`;
 }

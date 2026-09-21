@@ -18570,7 +18570,7 @@ test('E72 review: a step that passes by its SKIP shortcut records no cap — not
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E72 review: an INHERITED pass reports rule "inherited", which the record guard excludes', () => {
+test('E72 review: an INHERITED pass reports rule "inherited" — the rule the record guard keys on', () => {
   // `gateSync` never reaches its pass branch on an inherited step — the step is stamped `done`, so it
   // takes the already-done path and writes no record at all. The guard (`rule === 'count'`) still covers
   // a direct caller: the predicate names the shortcut, and carries a cap that lowered the ask.
@@ -18592,7 +18592,7 @@ test('E72 review: a hand-edited `capped` prints only when all three numbers are 
     };
     assert.match(await line({ needed: 3, to: 1, active: 2 }), /count capped from 3 to 1 \(2 active people\)/);
     assert.match(await line({ needed: 2, to: 1, active: 1 }), /count capped from 2 to 1 \(1 active person\)/);
-    for (const bad of [{}, [1, 2], 'x', { needed: 3, to: 1 }, { needed: 3, to: {}, active: 2 }, { needed: 3, to: 1, active: -1 }, { needed: 1, to: 3, active: 2 }, { needed: 3, to: 3, active: 9 }]) {
+    for (const bad of [{}, [1, 2], 'x', { needed: 3, to: 1 }, { needed: 3, to: {}, active: 2 }, { needed: 3, to: 1, active: -1 }, { needed: 1, to: 3, active: 2 }, { needed: 3, to: 3, active: 9 }, { needed: 3, to: 0, active: 2 }]) {
       assert.doesNotMatch(await line(bad), /count capped/, `${JSON.stringify(bad)} states no cap`);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
