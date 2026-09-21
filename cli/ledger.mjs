@@ -57,9 +57,21 @@ export function withLedgerLock(lockPath, fn, { retries = LOCK_RETRIES, waitMs = 
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
       // A holder that died leaves its lock behind forever; reclaim one that is provably too old.
-      let age;
-      try { age = Date.now() - fs.statSync(lockPath).mtimeMs; } catch { continue; } // vanished → retry
-      if (age > LOCK_STALE_MS) { try { fs.rmdirSync(lockPath); } catch { /* someone else won */ } continue; }
+      //
+      // NEITHER BRANCH BELOW MAY `continue`. Both used to, which skipped the retry cap AND the sleep
+      // underneath them — an unbounded, unpaused, fully synchronous loop. The reclaim path is the one
+      // that bites: `fs.rmdirSync` throws ENOTEMPTY when anything at all is inside the lock directory
+      // (a stray file, an editor's dotfile), so a lock that is older than LOCK_STALE_MS and not empty
+      // can NEVER be removed, and the old code retried it forever at 100% CPU. Because the loop is
+      // synchronous, node cannot reach its event loop, so the process also ignores SIGTERM: it has to
+      // be killed with -9. Observed here for 2h27m before it was noticed (2026-09-21).
+      //
+      // Now every path falls through to the cap and the sleep. A stale lock nobody can remove is
+      // REPORTED as YAD-STATE-006 after the normal retry window — and that error's hint already says
+      // to delete the lock directory it names, which is exactly the fix for a non-empty one.
+      let age = null;
+      try { age = Date.now() - fs.statSync(lockPath).mtimeMs; } catch { /* it vanished — just retry */ }
+      if (age !== null && age > LOCK_STALE_MS) { try { fs.rmdirSync(lockPath); } catch { /* someone else won, or it is not empty */ } }
       if (i >= retries) {
         throw err('YAD-STATE-006', `another process is writing ${path.basename(lockPath, '.lock')} in ${path.basename(path.dirname(path.dirname(lockPath)))}`,
           'wait for the other yad command to finish and re-run; if nothing else is running, delete the stale .lock directory the message names');

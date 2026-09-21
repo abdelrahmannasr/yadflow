@@ -18167,3 +18167,42 @@ test('E71 the padded walk finds a person git\'s date cut-off would hide', () => 
     assert.ok(!inWindow(padded).includes('old commit'), 'the pad widens the ASK, never the window itself');
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
+
+// ---- the ledger lock must always be able to give up ----------------------------------------------
+const { withLedgerLock: _withLedgerLock } = await import('./ledger.mjs');
+
+test('withLedgerLock: a stale lock it cannot remove is REPORTED, never spun on', () => {
+  // `fs.rmdirSync` throws ENOTEMPTY on a lock directory with anything inside it, so a lock that is both
+  // older than the stale window and not empty can never be reclaimed. Two `continue` statements used to
+  // skip the retry cap and the sleep on exactly that path: an unbounded synchronous loop at 100% CPU
+  // that also swallowed SIGTERM, because a busy JS loop never lets node reach its event loop.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lock-'));
+  try {
+    const lock = path.join(T, '.sdlc/build-log.json.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    fs.writeFileSync(path.join(lock, 'stray-file'), 'x');   // rmdir will now always fail
+    const stale = new Date(Date.now() - 120_000);           // older than LOCK_STALE_MS (30s)
+    fs.utimesSync(lock, stale, stale);
+    let ran = false;
+    assert.throws(
+      () => _withLedgerLock(lock, () => { ran = true; }, { retries: 3, waitMs: 1 }),
+      /another process is writing/,
+      'it must give up and report, not retry forever',
+    );
+    assert.equal(ran, false, 'the body never runs without the lock');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('withLedgerLock: a stale EMPTY lock is still reclaimed, and the body runs', () => {
+  // The fix must not cost the reclaim it was protecting: a lock left behind by a process that died is
+  // removed and the caller proceeds.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lock-'));
+  try {
+    const lock = path.join(T, '.sdlc/build-log.json.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    const stale = new Date(Date.now() - 120_000);
+    fs.utimesSync(lock, stale, stale);
+    assert.equal(_withLedgerLock(lock, () => 'done', { retries: 3, waitMs: 1 }), 'done');
+    assert.ok(!fs.existsSync(lock), 'and it is released afterwards');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
