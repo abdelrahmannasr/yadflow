@@ -74,7 +74,7 @@ Contract surface touched: no
 Domains touched: backend, mobile
 Risk map (origin/main): low — nothing this change touches is high
 ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)
-       Branch protection holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
+       Branch protection (when configured) holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
        The risk step is advisory, and not capped here — `yad open-pr` shows the count capped by the active people.
        Ask reviewers who know the touched domains:
   - backend
@@ -90,7 +90,7 @@ Risk map (origin/main): high — src/payments/ (guessed)
   worked there in the last 30 days: Alice (@alice)
 ROUTE: 2 approvers = base 1 + high risk 1 (high on the risk map: src/payments/ (guessed))
        The body says Risk level: low, but the risk map on origin/main marks src/payments/ (guessed) high — the larger counts.
-       Branch protection holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
+       Branch protection (when configured) holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
        The risk step is advisory, and not capped here — `yad open-pr` shows the count capped by the active people.
        This change touches src/payments/ (guessed), so it asks for an approval from someone who has
        committed there in the last 30 days (its own authors left out):

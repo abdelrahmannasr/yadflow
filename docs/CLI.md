@@ -122,7 +122,7 @@ PR, and GitLab stops it only when the project's approval settings say so. The ri
 step comes from the step's own risk tags — `contract` +2, `auth`/`payments` +1, nothing +0, the highest
 tag and never the sum. So an ordinary step asks for 1 approver and the architecture+contract gate asks for 3.
 
-**Only the base holds the gate — until E73.** A gate passes with one approver, and the rest of the
+**Only the base holds the gate — until E73.** The base is always enforced; until E73 it is the only part that is. A gate passes with one approver, and the rest of the
 count is reported as a shortfall.
 
 **The capacity cap (E72).** The engine caps the count at the number of **active people less one**, and
@@ -132,7 +132,7 @@ the platform decides whether they may approve.
 
 | Active people | Contract gate: capped ask (full count 3) |
 |---|---|
-| 2 | 1 |
+| 0–2 | 1 (never below 1) |
 | 3 | 2 |
 | 4 or more | 3 |
 
@@ -147,21 +147,27 @@ gate that cannot be met.
 Product CI is usually this case: it checks out only the product repo, so on a Product with connected
 repos the repos are not on disk.
 
-When a **team** gate passes while the cap lowered its ask, the step's closing record gets
-`capped: { needed, to, active }`, beside `waived`. It records what the gate asked, not what held it. It
-is not written in solo mode, where nothing was counted. `yad gate status` prints it as
+When a **team** gate passes on its counted approvals while the cap lowered its ask, the step's closing
+record gets `capped: { needed, to, active }`, beside `waived`. It records what the gate asked, not what
+held it. It is not written in solo mode, where nothing was counted, nor on a step that passed by its
+skip or inherited shortcut, where nothing was asked. The full rules are in
+`skills/yad-epic/references/state-schema.md` (Closing records). `yad gate status` prints it as
 `count capped from 3 to 1 (2 active people)`.
 
-Several surfaces print the same arithmetic: `yad gate sync`, `yad gate status` (the same sum after the
-distinct-people count), the generated review-PR body and `yad open-pr`. The suffix names a cap only when
-it lowered the ask, and always says what holds: `— capped to 1: 2 active people, less one seat for the
-author — base enforced, risk step advisory`, or just `— base enforced, risk step advisory`. For example
+Four surfaces print the count: `yad gate sync`, `yad gate status` (the same sum after the
+distinct-people count), the generated review-PR body and `yad open-pr`. `yad gate sync` and `yad gate
+status` share one suffix; the review-PR body and `yad open-pr` word the cap their own way. The shared
+suffix names a cap only when it lowered the ask, and always says what holds: `— capped to 1: 2 active
+people, less one seat for the author — base enforced, risk step advisory` (at 0 or 1 active people:
+`— capped to 1: 1 active person (never below 1) — base enforced, risk step advisory`), or just
+`— base enforced, risk step advisory`. For example
 `yad gate sync` prints `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active
 people, less one seat for the author — base enforced, risk step advisory`, and the review-PR body says
 `Approvals needed: 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2
 active people when this PR was opened (the risk step is advisory until E73)`. `yad gate review --json`
-carries the rule as an object under `step.gateRule`, and the cap under `step.cap` (`null` when the
-people were not counted).
+carries the rule as an object under `step.gateRule`, and the cap under `step.cap` — an object
+`{ active, limit, to, capped }`, where `to` is the capped count (`null` when the people were not
+counted).
 
 **How many people are there to ask?** The engine counts that live, and prints it beside the ask
 (`active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73`). "Active" means committed or approved — read from the approval
@@ -181,7 +187,7 @@ Running `yad open-pr` from inside a code repo also reads `not counted`: the coun
 product and everything connected to it, and a code repo on its own cannot see that.
 
 On a Shape gate the cap is **reported until E73** (above). On the Build half — a code repo's task PR —
-`yad open-pr` shows the count capped by the active people, and it stays reported even after E73: the
+`yad open-pr` shows the count capped by the active people when run from the Product, and it stays reported even after E73: the
 platform's branch protection holds a Build merge. `checks/risk-map-check.sh` and `checks/risk-route.sh`
 cannot cap at all, because a code repo's CI has no product to count people from. `risk-route.sh` says so in
 its output; `risk-map-check.sh` says so in its header comment.
@@ -807,7 +813,7 @@ tagged `auth` or `payments`. `medium` is printed for information and adds nothin
 | An `unset` line, and a directory no line covers, add nothing. | They are warned about, never counted as `high`. |
 | A deleted or moved file counts where it was. | Deleting code in a `high` directory is a `high` change. |
 | The body's `Risk level` and the map: the **larger** step wins. | The body can raise the count and never lower it. |
-| The count is **reported, not enforced**. | The platform's branch protection holds a Build merge. `yad open-pr` shows the count capped by the active people (E72); the check scripts cannot cap it. |
+| The count is **reported, not enforced**. | The platform's branch protection holds a Build merge. `yad open-pr`, run from the Product, shows the count capped by the active people (E72); the check scripts cannot cap it. |
 
 Three places print it, and none of them writes it anywhere:
 

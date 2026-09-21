@@ -251,10 +251,13 @@ If the predicate **passes**:
   `approved`, not `merge`: nothing merged, so there is no `pr` or `commit` to write.
   **In solo mode** (`solo: true` in `.sdlc/hub.json`, or the older `review_gate.solo: true`), add `"waived": "solo"` to that record: the gate passed
   without counting approvals, and the record says so (E10). Only on the review step, never on its author step.
-  **In team mode, when the cap lowered the ask** (E72), add `"capped": { "needed": <full count>, "to": <capped ask>, "active": <people counted> }`
-  — every cap is recorded. It records what the gate ASKED, not what held it: the base held.
-  `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`. Absent in solo mode
-  (nothing was counted), and when no cap applied (the people were not counted, or the cap lowered nothing).
+  **In team mode, on a gate that counted approvals, when the cap lowered the ask** (E72), add
+  `"capped": { "needed": <full count>, "to": <capped ask>, "active": <people counted> }` — every cap is
+  recorded. Read `active` and the capped ask from `yad gate status` (its `active people:` line and the
+  step's `capped to N` suffix); write nothing when it prints `NOT COUNTED`. It records what the gate
+  ASKED, not what held it: the base held. `yad gate status` prints it back as
+  `count capped from 3 to 1 (2 active people)`. Absent in solo mode (nothing was counted), on a step that
+  passed by its skip or inherited shortcut (nothing was asked), and when the cap lowered nothing.
 - **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively
   (issue #131) because a passed gate can never leave its author step behind. Skipping it strands every
   later step behind `YAD-STATE-005`. Give it `"closed": { "by": …, "date": …, "via": "review-passed" }`.

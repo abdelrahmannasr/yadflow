@@ -315,7 +315,7 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 | `mergedBy` | The platform login that merged the PR, when the platform reports it. |
 | `run` | Build lanes only: the `uid` of the trust-log run that moved past the step. |
 | `waived` | `solo` on a **review** step that passed while solo mode waived its approvals (E10). Absent when the gate counted approvals, and never on the author step it closes. |
-| `capped` | `{ needed, to, active }` on a **review** step of a TEAM gate that passed while the capacity cap LOWERED its ask (E72): the full count, the capped ask, and the number of active people it read. It records what the gate asked, not what held it — the base held, until E73. `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`. Absent when no cap applied (the people could not be counted, or the cap lowered nothing), never in solo mode (nothing was counted), and never on the author step. |
+| `capped` | `{ needed, to, active }` on a **review** step of a TEAM gate that passed while the capacity cap LOWERED its ask (E72): the full count, the capped ask, and the number of active people it read. It records what the gate asked, not what held it — the base held (until E73, only the base holds). `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`. Absent when no cap applied (the people could not be counted, or the cap lowered nothing), never in solo mode (nothing was counted), never on a step that passed by its skip or inherited shortcut (nothing was asked), and never on the author step. |
 
 | `via` | Written by | When |
 |---|---|---|

@@ -254,7 +254,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "architecture.md · contract.md · contract-lock.json" },
   },
-  gateStep("architecture", "architecture.md", "count: 3 approvers = base 1 + contract risk 2 — capped at active people − 1 · base enforced, risk step advisory", "#ca6f1e"),
+  gateStep("architecture", "architecture.md", "3 approvers = base 1 + contract risk 2, capped at active people − 1 · base enforced, risk step advisory", "#ca6f1e"),
   {
     id: "ui",
     title: "Author UI Design",

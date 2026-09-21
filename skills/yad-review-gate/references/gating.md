@@ -32,7 +32,7 @@ Several tags take the **highest** step, never the sum — a gate is one decision
 it touches. `have` is the number of **distinct approvers**. The tags are read from the step as the epic
 records it in `state.json`, so adding `auth` to a step by hand raises that epic's full count.
 
-**What holds the gate: the base — until E73.** The base (1) holds every team gate. The rule is one
+**What holds the gate: only the base — until E73.** The base (1) always holds every team gate; until E73 it is the only part that does. The rule is one
 formula: `needed = base + risk step`, **capped** at `active − 1`, with a floor of 1. `active` is the live
 count of people who committed or approved lately (E71); `yad gate status` and `yad gate sync` print it,
 and the predicate carries it as `active`. Since E72 the engine **computes, prints and records** the cap,
@@ -41,7 +41,7 @@ reported as `short`, never blocking:
 
 | Active people | Contract gate: capped ask (full count 3) |
 |---|---|
-| 2 | 1 |
+| 0–2 | 1 (never below 1) |
 | 3 | 2 |
 | 4 or more | 3 |
 
@@ -62,33 +62,42 @@ computed or shown**, and the base holds as always. The engine never guesses a sm
 unknown. Product CI is usually this case: it checks out only the hub, so on a Product with connected
 repos the repos are not on disk.
 
-**Every cap is recorded.** When a **team** gate passes while the cap lowered its ask, its closing record
-gets `capped: { needed, to, active }` beside `waived` — the full count, the capped ask, and the count of
-people it read. It records what the gate ASKED, not what held it (the base held). It is not written in
-solo mode, where nothing was counted. `yad gate status` prints it as
+**Every cap is recorded.** When a **team** gate passes on its counted approvals while the cap lowered
+its ask, its closing record gets `capped: { needed, to, active }` beside `waived` — the full count, the
+capped ask, and the count of people it read. It records what the gate ASKED, not what held it (the base
+held). It is not written in solo mode, where nothing was counted, nor on a step that passed by its skip
+or inherited shortcut, where nothing was asked. The same rules are listed in
+`../../yad-epic/references/state-schema.md` (Closing records) and `docs/CLI.md`. `yad gate status` prints it as
 `count capped from 3 to 1 (2 active people)`. The generated review-PR body also keeps the count as it
 was when the PR was opened.
 
 Why count people: the rule names no person, no role and no step. A stored list of people goes
 stale; repository access decides who can approve.
 
-Several surfaces print the same arithmetic, each in its own sentence: `yad gate sync`, `yad gate
-status`, the generated review-PR body and `yad open-pr`. The suffix appears only when the step has a
-risk step. It names the cap only when the cap lowered the ask, and always ends by saying what holds:
+Four surfaces print the count: `yad gate sync`, `yad gate status`, the generated review-PR body and
+`yad open-pr`. `yad gate sync` and `yad gate status` share one suffix; the review-PR body and `yad
+open-pr` word the cap their own way (below). The shared suffix appears only when the step has a risk
+step. It names the cap only when the cap lowered the ask, and always ends by saying what holds:
 - ` — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory` — the cap lowered the ask;
+- ` — capped to 1: 1 active person (never below 1) — base enforced, risk step advisory` — the same at 0 or 1 active people;
 - ` — base enforced, risk step advisory` — the cap lowered nothing, or the people could not be counted.
 
 Where each surface puts it:
 - `yad gate sync`: `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory`
 - `yad gate status`: `; count: <sum>` with the same suffix, after the distinct-people count. Above the
   gates it prints the count of people and what it does, for example
-  `active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73`,
+  `active people: 2 in the last 90 days — caps each gate's count at 1 approver (one seat is left for the author); reported, only the base is enforced until E73`,
   or, when it cannot count them, `active people: NOT COUNTED — <reason> — no cap can be shown, and only the base holds each gate`.
 - the generated review-PR body: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people when this PR was opened (the risk step is advisory until E73)`.
   With no cap: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory until E73)`.
-- `yad open-pr` (a code-repo task PR, Build half): `this PR asks for 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people — base enforced, risk step advisory`.
+  Its Active-people line: ``- **Active people:** 2 when this PR was opened (with one seat left for the author, the cap is 1, so this gate's count is 1; `yad gate status` counts it live)``;
+  with no risk step it ends ``… (`yad gate status` counts it live)``.
+- `yad open-pr` (a code-repo task PR, Build half): `this PR asks for 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people — base enforced, risk step advisory; …`
+  (the line goes on to name `checks/risk-route.sh`, which prints the count without the cap). The cap
+  appears only when `yad open-pr` is run from the Product; from inside a code repo the people are not counted.
 
-`yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule`, and the cap under `step.cap` (null when the people were not counted), instead of a sentence.
+`yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule`, and the cap under `step.cap` — an object `{ active, limit, to, capped }`, where `to` is the capped count and
+`capped` is true when the cap lowered it (`null` when the people were not counted) — instead of a sentence.
 
 Solo mode waives approvals entirely, exactly as before, and reports no shortfall. No `capped` record is
 written in solo mode. The merge and the
