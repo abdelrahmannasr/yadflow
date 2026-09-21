@@ -114,7 +114,13 @@ export function legacyLogins(hub) {
 // must place the same record on the same person: if they disagreed, one of them would split a person
 // into two rows or — worse for a count that must never shrink — fold two people into one.
 //
-// Three cases, in the order they are decided:
+// Four cases, in the order they are decided:
+//   * `source: 'bridge'`    -> the record was written from the PLATFORM's own answer. `mapApprovers`
+//     builds it as `name: r.login` (cli/platform.mjs), so the name IS a platform login — exact
+//     evidence, recorded by the writer, not a guess about what the string looks like. E62 decision 4
+//     is about a record's `by`, which falls back to git `user.name` when there is no platform; this
+//     marker is what tells the two apart, and it is why "a post-E62 record names a login" is true of
+//     bridge records and NOT true in general.
 //   * `rosterName` present  -> a gate write already recorded the login from the roster (E64), so the
 //     name the record carries IS the login.
 //   * an OLDER record (it carries the `role` or `domain` the roster gave it, and is not `unverified`)
@@ -123,6 +129,7 @@ export function legacyLogins(hub) {
 //     collided with passed a gate on an outsider's old approval once (E62) — hence the exclusion.
 //   * anything else -> no login is proven. The caller falls back to the name as written.
 export function ledgerPersonLogin(rec, rawName, aliases = new Map()) {
+  if (rec && rec.source === 'bridge') return rawName || null;
   if (rec && rec.rosterName !== undefined) return rawName || null;
   const older = !!rec && (rec.role !== undefined || rec.domain !== undefined) && !rec.unverified;
   return older && aliases.has(rawName) ? aliases.get(rawName) : null;

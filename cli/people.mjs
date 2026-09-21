@@ -107,12 +107,22 @@ export const todayString = () => new Date().toISOString().slice(0, 10);
 // The key two records share when they are the same human. Case-insensitive because GitHub and GitLab
 // logins are: `OctoCat` on an approval and `octocat` in a noreply commit address are one approver.
 //
-// A person whose git name and platform login cannot be JOINED — no noreply address, no roster pair —
-// lands on TWO keys and is counted twice. That is deliberate. E64's lesson is that only exact evidence
-// proves identity, and the alternative here is guessing two people into one, which makes the count
-// SMALLER. Over-counting is the direction Part 3 asks for; the caller is told how many keys are
-// name-only so it can say so rather than pretend.
-export const personKey = (person) => String(person.login || person.name || '').trim().toLowerCase();
+// A LOGIN AND A BARE NAME LIVE IN DIFFERENT NAMESPACES, and that is the whole point. They used to share
+// one, so a git author literally named `ada` and a different human whose platform login is `ada`
+// collapsed into ONE row — an under-count, the one direction this file may never go, and a collision
+// nobody would ever notice. Namespacing turns that into a harmless split.
+//
+// Every intended join still works, because a join is now only ever login-to-login or name-to-name: a
+// noreply commit address carries a login (`loginFromEmail`), a bridge-written approval carries one
+// (`ledgerPersonLogin`), and those meet. What no longer joins is a bare name that merely LOOKS like a
+// login — which is exactly E64's rule that only exact evidence proves identity. The cost is that such a
+// person lands on two rows and is counted twice, which over-counts: the direction Part 3 asks for.
+export const personKey = (person) => {
+  const login = String(person.login || '').trim().toLowerCase();
+  if (login) return `login:${login}`;
+  const name = String(person.name || '').trim().toLowerCase();
+  return name ? `name:${name}` : '';
+};
 
 // ---- reading the sources ------------------------------------------------------------------------
 //

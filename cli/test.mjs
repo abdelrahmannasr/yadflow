@@ -18007,17 +18007,18 @@ test('E71 personKey: a noreply address joins a commit and an approval into ONE p
     { ts: '2026-09-20', name: 'Octo Cat', login: 'octocat', how: 'committed' },
     { ts: '2026-09-20', name: 'OctoCat', login: 'OctoCat', how: 'approved' },
   ], '2026-09-01');
-  assert.equal(personKey({ name: 'Octo Cat', login: 'OctoCat' }), personKey({ name: 'octo cat', login: 'octocat' }),
-    'the login decides the key whenever there is one');
+  assert.equal(personKey({ name: 'Octo Cat', login: 'OctoCat' }), personKey({ name: 'totally other', login: 'octocat' }),
+    'the login decides the key whenever there is one, and the name beside it is ignored');
   assert.notEqual(personKey({ name: 'Octo Cat', login: null }), personKey({ name: 'Octo Cat', login: 'octocat' }),
     'a bare name is NOT assumed to be the same person as a login that resembles it (E64)');
-  // KNOWN LIMIT, pinned so it cannot change unnoticed: names and logins share ONE keyspace, so a git
-  // author literally named `ada` and a different person whose login is `ada` collapse into one row.
-  // That under-counts, which is the unsafe direction here. Namespacing the key would fix it and would
-  // also stop a post-E62 approval (whose recorded name IS a login) joining that person's commits —
-  // the open identity question this row did not close.
-  assert.equal(personKey({ name: 'ada', login: null }), personKey({ name: 'Ada L', login: 'ada' }),
-    'today they collide — change this test only together with the identity decision');
+  // THE COLLISION IS CLOSED. Logins and bare names live in separate namespaces, so a git author
+  // literally named `ada` and a different human whose platform login is `ada` are two people, not one.
+  // Folding them was an under-count — the one direction this file may never go.
+  assert.notEqual(personKey({ name: 'ada', login: null }), personKey({ name: 'Ada L', login: 'ada' }),
+    'a bare name can never swallow a login');
+  assert.equal(personKey({ name: 'whoever', login: 'ada' }), personKey({ name: 'someone else', login: 'ada' }),
+    'but one login is always one person, whatever name each record happens to carry');
+  assert.equal(personKey({ name: '  ', login: '' }), '', 'a record naming nobody keys to nothing');
   assert.equal(got.count, 1, 'logins are case-insensitive on both platforms');
   assert.deepEqual(got.people[0].how, ['approved', 'committed']);
   assert.equal(got.nameOnly, 0);
@@ -18040,9 +18041,9 @@ test('E71 activeIn: the window has a floor and deliberately NO ceiling', () => {
   // The lower edge is inclusive and anything before it is out. The UPPER edge is not enforced at all:
   // clock skew, a rebase, a hand-edited ledger and a machine in another timezone all produce a date in
   // the future, and dropping one makes the count SMALLER — the one direction this file may never go.
-  assert.deepEqual(got.people.map((p) => p.key), ['2026-09-01', '2026-09-21', '2026-09-22'],
+  assert.deepEqual(got.people.map((p) => p.key), ['name:2026-09-01', 'name:2026-09-21', 'name:2026-09-22'],
     'a future-dated event is still evidence of a person');
-  assert.ok(!got.people.some((p) => p.key === '2026-08-31'), 'but nothing before the window counts');
+  assert.ok(!got.people.some((p) => p.key === 'name:2026-08-31'), 'but nothing before the window counts');
 });
 
 test('E71 a commit made today in a timezone ahead of UTC is NOT lost', () => {
@@ -18059,7 +18060,7 @@ test('E71 a commit made today in a timezone ahead of UTC is NOT lost', () => {
     });
     const r = activePeople(fx.T, { today: P_TODAY });
     assert.deepEqual(r.unknown, []);
-    assert.ok(r.expertise.people.some((p) => p.key === 'tokyo dev'), 'the Tokyo commit still names its author');
+    assert.ok(r.expertise.people.some((p) => p.key === 'name:tokyo dev'), 'the Tokyo commit still names its author');
     assert.notEqual(r.expertise.active, 0);
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
@@ -18070,7 +18071,7 @@ test('E71 counts commits AND approvals, from the Product and every connected rep
     fx.write('epics/EP-x/.sdlc/approvals.json', [{ approver: 'reviewer-one', date: daysBefore(P_TODAY, 2) }]);
     const r = activePeople(fx.T, { today: P_TODAY });
     assert.deepEqual(r.unknown, [], 'a readable Product reports no unknowns');
-    assert.deepEqual(r.expertise.people.map((p) => p.key).sort(), ['product writer', 'repo dev', 'reviewer-one']);
+    assert.deepEqual(r.expertise.people.map((p) => p.key).sort(), ['name:product writer', 'name:repo dev', 'name:reviewer-one']);
     assert.equal(r.expertise.active, 3);
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
@@ -18080,7 +18081,7 @@ test('E71 a robot is not capacity', () => {
   try {
     fx.commit(fx.T, 'dependabot[bot]', 'dependabot[bot]@users.noreply.github.com', 1);
     const r = activePeople(fx.T, { today: P_TODAY });
-    assert.deepEqual(r.expertise.people.map((p) => p.key), ['product writer'], 'a bot can never approve, so it is not a person to cap against');
+    assert.deepEqual(r.expertise.people.map((p) => p.key), ['name:product writer'], 'a bot can never approve, so it is not a person to cap against');
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
 
@@ -18201,10 +18202,10 @@ test('E71 the padded walk finds a person git\'s date cut-off would hide', () => 
     const padded = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: EXPERTISE_DAYS * WALK_PAD });
     const naive = peopleEvidence(fx.T, { today: P_TODAY, sinceDays: EXPERTISE_DAYS });
     const inWindow = (ev) => activeIn(ev.events, daysBefore(P_TODAY, EXPERTISE_DAYS), P_TODAY).people.map((p) => p.key);
-    assert.ok(inWindow(naive).includes('tip person'), 'the tip is always reachable');
-    assert.ok(!inWindow(naive).includes('hidden person'), 'without the pad the cut-off hides them — this is the bug');
-    assert.ok(inWindow(padded).includes('hidden person'), 'with the pad they are counted');
-    assert.ok(!inWindow(padded).includes('old commit'), 'the pad widens the ASK, never the window itself');
+    assert.ok(inWindow(naive).includes('name:tip person'), 'the tip is always reachable');
+    assert.ok(!inWindow(naive).includes('name:hidden person'), 'without the pad the cut-off hides them — this is the bug');
+    assert.ok(inWindow(padded).includes('name:hidden person'), 'with the pad they are counted');
+    assert.ok(!inWindow(padded).includes('name:old commit'), 'the pad widens the ASK, never the window itself');
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
 
@@ -18352,7 +18353,7 @@ test('E71 review: the capacity window really does read the ledger\'s merge recor
     });
     const r2 = activePeople(fx.T, { today: P_TODAY });
     assert.deepEqual(r2.unknown, []);
-    assert.ok(r2.expertise.people.some((p) => p.key === 'ship-reviewer'), 'an engineer review is an approval');
+    assert.ok(r2.expertise.people.some((p) => p.key === 'name:ship-reviewer'), 'an engineer review is an approval');
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
 
@@ -18495,4 +18496,30 @@ test('E71 review 2: dayString refuses what it cannot render, so nothing unprinta
   assert.equal(daysBefore('2026-09-21', 30), '2026-08-22', 'the ordinary case still works');
   assert.equal(dayNumber('+058691-05'), null, 'an expanded-year string is not a date');
   assert.equal(dayNumber('1970-01-01'), 0, 'and the epoch itself is a perfectly good one');
+});
+
+test('E71 identity: a bridge-written approval IS a proven login, and joins that person\'s commits', () => {
+  // The question this row left open, now closed on evidence the writer already records rather than on
+  // what a string looks like. `upsertBridge` stamps `source: 'bridge'` on every approval it builds from
+  // the platform's own answer, and `mapApprovers` builds those as `name: r.login` — so a bridge record
+  // names a LOGIN. E62 decision 4 is about a record's `by`, which falls back to git `user.name` when
+  // there is no platform; the marker is what tells the two apart.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', [
+      { approver: 'octocat', date: daysBefore(P_TODAY, 2), source: 'bridge', status: 'approved' },
+      { approver: 'handwritten', date: daysBefore(P_TODAY, 2), status: 'approved' },
+    ]);
+    // The same person's commits, carrying the login in a GitHub noreply address.
+    fx.commit(fx.T, 'Octo Cat', '1234+octocat@users.noreply.github.com', 1);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    const keys = r.expertise.people.map((p) => p.key).sort();
+    assert.ok(keys.includes('login:octocat'), 'the approval and the commits are one person, keyed by login');
+    assert.equal(keys.filter((k) => k.includes('octocat')).length, 1, 'and NOT two rows for one human');
+    assert.ok(keys.includes('name:handwritten'), 'a hand-written approval proves no login, so it stays a name');
+    // `nameOnly` is now truthful: it counts rows with no proven login, not every ledger row.
+    assert.equal(r.expertise.nameOnly, r.expertise.people.filter((p) => !p.login).length);
+    assert.ok(r.expertise.people.find((p) => p.key === 'login:octocat').login, 'the login is reported, not inferred');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
