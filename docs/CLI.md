@@ -36,7 +36,7 @@ no clone needed.
 | `yad gate open <epic> <artifact>` | Open the Shape **review PR/MR** for an artifact and mark the step `in_review` (in verified mode CI owns the ledger, so it only opens the PR). The `review/<epic>/<artifact>` branch must already be **on origin** — it does not create or push one; `yad open-pr`, run from the branch, pushes it and then delegates here. For an epic's **first** gate, cut that branch from the authoring branch (`epic/…`, `change/…`) so the PR/MR carries the `.sdlc/` **seed**: no CI path can create a ledger, so `ledger-guard` exempts a new epic's ledger there — creation, not mutation (#162) — and it lands on the default branch at merge. |
 | `yad gate sync <epic> [artifact] [--pr <n>]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. With no PR recorded in the ledger (the normal bridge case, where CI records it only at merge) it resolves the PR from the `review/<epic>/<artifact>` branch; `--pr <n>` names one outright and overrides a stale recorded pointer, after confirming the number really is that branch's PR. In **verified mode this stays advisory** — the writing recovery is `yad gate ci … --merged`. |
 | `yad gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
-| `yad gate status <epic>` | Show each review step, its recorded approvals, how many distinct people they came from, that step's approval count and which part of it holds the gate (the count capped by the active people; only the base when they cannot be counted), and how a closed step closed (when, on which PR, who merged it, and whether the cap lowered its count). |
+| `yad gate status <epic>` | Show each review step, its recorded approvals, how many distinct people they came from, that step's approval count (the base holds the gate; a risk step is advisory, shown capped by the active people), and how a closed step closed (when, on which PR, who merged it, and whether the cap lowered its ask). |
 | `yad gate repair <epic>` | Close an authoring step left stranded behind a review gate that already passed (`YAD-STATE-005`). Writes only `state.json`. `--push` commits it to the default branch with a `chore(gate): repair…[skip ci]` audit-trail message (`--allow-branch` to override the default-branch guard, `--dry-run` to preview). |
 | `yad gate ci [--branch <head>] [--pr <n>]` | The CI entry the Product workflow calls **at merge** (and from its scheduled reconcile — nothing fires pre-merge, where the platform PR/MR holds the review state): derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the Product default branch. On a merge run it also records the platform login on older roster-era approval and comment records in **every** epic, including one with no open review (E64), skipping an epic with uncommitted changes under `.sdlc` or `reviews`. **One exception, once:** on a verified Product it also moves an old-spelling product level (`epics/EP-discovery/` → `foundation/`, shape 8) after its jobs, under the commit subject `chore(gate): move the product level to foundation/ (shape 8)` — only on the default branch, only once the product level's own review has passed, never from a checkout with uncommitted changes under either folder, and not while the checks committed in the repo predate the Foundation (docs/migrations/shape-8.md). A later merge of a `review/EP-discovery/*` branch finds the moved ledger in `foundation/`. The wired jobs always name a branch: they discover merged reviews through the platform API and call `--branch <ref> --pr <n> --merged` per review. With no `--branch` it falls back to a local sweep of the review PRs *already recorded in the ledger* whose step is not yet `done` — it does no platform discovery of its own, so a review the ledger never saw is only reachable by naming it. **Idempotent down to the bytes:** the ledgers are written in a canonical order, so re-syncing an already-`done` step (what the 15-minute sweep does for a week after every merge) produces a byte-identical file and commits nothing. Before the #163 fix the re-sync re-appended each step's approvals at the tail, so a sweep over N merged reviews rotated `approvals.json` and committed the reorder on every pass — an unbounded commit loop (#163). |
 | `yad commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
@@ -122,38 +122,49 @@ PR, and GitLab stops it only when the project's approval settings say so. The ri
 step comes from the step's own risk tags — `contract` +2, `auth`/`payments` +1, nothing +0, the highest
 tag and never the sum. So an ordinary step asks for 1 approver and the architecture+contract gate asks for 3.
 
-**The capacity cap (E72).** The gate caps that count at the number of **active people less one**, and
-never below 1. The capped number is what the gate enforces. The `− 1` is one seat left for the author —
-a seat, not a check: yadflow does not know who the author is, and the platform decides whether they may
-approve. Without the cap, a two-person team's architecture gate would ask for 3 and could never pass.
+**Only the base holds the gate — until E73.** A gate passes with one approver, and the rest of the
+count is reported as a shortfall.
 
-| Active people | Contract gate asks (full count 3) |
+**The capacity cap (E72).** The engine caps the count at the number of **active people less one**, and
+never below 1. It computes, prints and records the capped count, but does **not enforce** it yet. The
+`− 1` is one seat left for the author — a seat, not a check: yadflow does not know who the author is, and
+the platform decides whether they may approve.
+
+| Active people | Contract gate: capped ask (full count 3) |
 |---|---|
 | 2 | 1 |
 | 3 | 2 |
 | 4 or more | 3 |
 
-**When the people cannot be counted, no cap applies and only the base (1) holds.** The risk step is then
-advisory — reported as a shortfall, never blocking. This has a cost worth knowing: Product CI checks out
-only the product repo, so on a Product with connected repos the repos are not on disk and CI cannot count
-the people. On a verified Product, where CI is the one writer of the ledger, CI enforces the base alone.
+**Why the cap is not enforced yet.** The count of people reads high in the normal case. A commit is
+counted by its git name, an approval by its platform login, and yadflow never joins the two without
+exact evidence — so a two-person team can read as four. At four the cap lowers nothing, and an enforced
+contract gate would ask three approvals of a team with one person who is not the author: a gate it could
+never pass. **E73** turns the capped count on together with `yad gate lower --reason`, the way out of a
+gate that cannot be met.
 
-Every cap that lowered a count is recorded on the step's closing record as `capped: { needed, to, active }`,
-beside `waived`, and `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`. A count
-of people that is too high can still ask a small team for more than it can give; the way out is
-`yad gate lower --reason` (E73), which lands before any release.
+**When the people cannot be counted, no cap is computed or shown**, and the base holds as always.
+Product CI is usually this case: it checks out only the product repo, so on a Product with connected
+repos the repos are not on disk.
 
-Three surfaces print the same arithmetic, each ending with which part holds:
-`— capped to 1: 2 active people, less one seat for the author — enforced`, `— enforced in full`, or, when
-the people were not counted, `— base enforced, risk step advisory`. They are `yad gate sync`
-(`1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat
-for the author — enforced`), `yad gate status` (the same sum after the distinct-people count) and the
-generated review-PR body (`Approvals needed: 1 · full count 3 approvers = base 1 + contract risk 2, capped
-to 1 for 2 active people — …`). `yad gate review --json` carries the rule as an object under
-`step.gateRule`, and the cap under `step.cap` (`null` when the people were not counted).
+When a **team** gate passes while the cap lowered its ask, the step's closing record gets
+`capped: { needed, to, active }`, beside `waived`. It records what the gate asked, not what held it. It
+is not written in solo mode, where nothing was counted. `yad gate status` prints it as
+`count capped from 3 to 1 (2 active people)`.
+
+Several surfaces print the same arithmetic: `yad gate sync`, `yad gate status` (the same sum after the
+distinct-people count), the generated review-PR body and `yad open-pr`. The suffix names a cap only when
+it lowered the ask, and always says what holds: `— capped to 1: 2 active people, less one seat for the
+author — base enforced, risk step advisory`, or just `— base enforced, risk step advisory`. For example
+`yad gate sync` prints `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active
+people, less one seat for the author — base enforced, risk step advisory`, and the review-PR body says
+`Approvals needed: 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2
+active people when this PR was opened (the risk step is advisory until E73)`. `yad gate review --json`
+carries the rule as an object under `step.gateRule`, and the cap under `step.cap` (`null` when the
+people were not counted).
 
 **How many people are there to ask?** The engine counts that live, and prints it beside the ask
-(`active people: 4 in the last 90 days — caps each gate at 3 approvers (one seat is left for the author)`). "Active" means committed or approved — read from the approval
+(`active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73`). "Active" means committed or approved — read from the approval
 and ship records, plus git authorship in the product repo and every connected code repo. The window
 scales with how fast the team merges: the span of the last 20 merged pull requests, bounded to between
 30 and 180 days, and the wide end when there are fewer than 20. Nothing is stored; it is counted fresh
@@ -161,7 +172,7 @@ every time.
 
 If any source cannot be read — a code repo that is not on this machine, a shallow clone, a clone that is
 behind, a file that does not parse, a date that does not parse — the answer is **`NOT COUNTED`**, never a
-number, and the line ends `— no cap applies, so only the base holds each gate`. That is deliberate. A
+number, and the line ends `— no cap can be shown, and only the base holds each gate`. That is deliberate. A
 small count lowers the number of approvals a gate asks for, so an unreadable input must never look like a
 small team. The line names the first source that failed and
 says how many others did.
@@ -169,11 +180,10 @@ says how many others did.
 Running `yad open-pr` from inside a code repo also reads `not counted`: the count is a fact about the
 product and everything connected to it, and a code repo on its own cannot see that.
 
-The count **caps every Shape gate** (above). On the Build half — a code repo's task PR — `yad open-pr`
-shows the count capped by the active people, but nothing enforces it there: the platform's branch
-protection holds a Build merge. `checks/risk-map-check.sh` and `checks/risk-route.sh` cannot cap at all,
-because a code repo's CI has no product to count people from, and they say so. **In solo mode** the cap is
-computed and printed, and nothing is enforced.
+On a Shape gate the cap is **reported until E73** (above). On the Build half — a code repo's task PR —
+`yad open-pr` shows the count capped by the active people, and it stays reported even after E73: the
+platform's branch protection holds a Build merge. `checks/risk-map-check.sh` and `checks/risk-route.sh`
+cannot cap at all, because a code repo's CI has no product to count people from, and they say so.
 
 Review PRs request no reviewers — ask them on the PR itself. A record's `by` (who wrote a skip, a
 deferral or a closing record) is the login `gh api user` / `glab api user` reports, else your git

@@ -109,8 +109,8 @@ defaults:
 review_gate:
   # `default_reviewers` is no longer read since E62 (the owner + reviewer role rule is gone). A team gate
   # needs 1 approval from someone other than the author (base 1); the full count adds the risk step
-  # below. The gate caps that count at the active people less one (E72) and enforces the capped number;
-  # when it cannot count the people, only the base holds.
+  # below, which is advisory until E73. E72 caps that count at the active people less one and reports it;
+  # only the base holds a gate.
   default_reviewers: 1          # legacy, not read since E62
   # Solo mode (a lone developer): a relaxed, opt-in safety guarantee, recorded per-project in
   # .sdlc/hub.json (`solo: true`). On GitHub you CANNOT approve your own PR, so requiring an approval

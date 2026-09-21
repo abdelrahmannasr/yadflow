@@ -32,60 +32,66 @@ Several tags take the **highest** step, never the sum — a gate is one decision
 it touches. `have` is the number of **distinct approvers**. The tags are read from the step as the epic
 records it in `state.json`, so adding `auth` to a step by hand raises that epic's full count.
 
-**The capacity cap (E72) — what holds the gate.** The rule is one formula: `needed = base + risk step`,
-**capped** at `active − 1`, with a floor of 1. `active` is the live count of people who committed or
-approved lately (E71); `yad gate status` and `yad gate sync` print it, and the predicate carries it as
-`active`. The **capped number is enforced**:
+**What holds the gate: the base — until E73.** The base (1) holds every team gate. The rule is one
+formula: `needed = base + risk step`, **capped** at `active − 1`, with a floor of 1. `active` is the live
+count of people who committed or approved lately (E71); `yad gate status` and `yad gate sync` print it,
+and the predicate carries it as `active`. Since E72 the engine **computes, prints and records** the cap,
+but it does **not enforce** it — the risk step stays advisory, capped or not, and its shortfall is
+reported as `short`, never blocking:
 
-| Active people | Contract gate asks (full count 3) |
+| Active people | Contract gate: capped ask (full count 3) |
 |---|---|
 | 2 | 1 |
 | 3 | 2 |
 | 4 or more | 3 |
 
-The cap is what stops a deadlock: two people on an architecture review cannot reach three approvers, so
-the cap asks them for one. The `− 1` is **one seat left for the author**. It is a seat, not a check: the
-engine does not know who the author is. The platform decides whether the author may approve (GitHub
-never allows it; GitLab only when its settings say so; a local ledger checks nothing). The floor of 1
-means the cap only ever trims the risk step — the base always holds.
+The `− 1` is **one seat left for the author**. It is a seat, not a check: the engine does not know who
+the author is. The platform decides whether the author may approve (GitHub never allows it; GitLab only
+when its settings say so; a local ledger checks nothing). The floor of 1 means the cap only ever trims
+the risk step.
 
-**When the people cannot be counted** (`active: null` — a source could not be read), **no cap applies**:
-only the base (1) holds, and the risk step is advisory — reported as `short`, never blocking. The
-engine never guesses a small number from an unknown. This has a stated cost: Product CI checks out only
-the hub, so on a Product with connected repos the repos are not on disk, `active` is unknown there, and
-CI — the one writer of `state.json` on a verified Product — enforces the base alone.
+**Why the cap is not enforced yet.** The count of people errs high in the normal case. A commit is
+counted by its git name, an approval by its platform login, and yadflow never joins the two without
+exact evidence. So an ordinary two-person team can read as **four**. At four the cap lowers nothing,
+and an enforced contract gate would ask three approvals of a team with one person who is not the author
+— a gate it could never pass. **E73** turns the capped count on together with `yad gate lower --reason`,
+the way out of a gate that cannot be met.
 
-**Every cap is recorded.** When a review step passes on a count the cap LOWERED, its closing record gets
-`capped: { needed, to, active }` beside `waived` — the full count, what the cap asked instead, and the
-count of people it read. `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`.
-The count itself is printed, not written anywhere else.
+**When the people cannot be counted** (`active: null` — a source could not be read), **no cap is
+computed or shown**, and the base holds as always. The engine never guesses a small number from an
+unknown. Product CI is usually this case: it checks out only the hub, so on a Product with connected
+repos the repos are not on disk.
 
-A count of people that is too high (two commit addresses are two people, on purpose) gives a cap that is
-too high, and that can still ask a small team for more than it can give. The way out is
-`yad gate lower --reason` (E73), which lands before any release.
+**Every cap is recorded.** When a **team** gate passes while the cap lowered its ask, its closing record
+gets `capped: { needed, to, active }` beside `waived` — the full count, the capped ask, and the count of
+people it read. It records what the gate ASKED, not what held it (the base held). It is not written in
+solo mode, where nothing was counted. `yad gate status` prints it as
+`count capped from 3 to 1 (2 active people)`. The generated review-PR body also keeps the count as it
+was when the PR was opened.
 
 Why count people: the rule names no person, no role and no step. A stored list of people goes
 stale; repository access decides who can approve.
 
-Three surfaces print the same arithmetic, each in its own sentence. The suffix says which part of the
-count holds the gate, and appears only when the step has a risk step:
-- ` — capped to 1: 2 active people, less one seat for the author — enforced` — the cap lowered the count;
-- ` — enforced in full` — the people were counted and the cap lowered nothing;
-- ` — base enforced, risk step advisory` — the people could not be counted, so no cap applies.
+Several surfaces print the same arithmetic, each in its own sentence: `yad gate sync`, `yad gate
+status`, the generated review-PR body and `yad open-pr`. The suffix appears only when the step has a
+risk step. It names the cap only when the cap lowered the ask, and always ends by saying what holds:
+- ` — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory` — the cap lowered the ask;
+- ` — base enforced, risk step advisory` — the cap lowered nothing, or the people could not be counted.
 
 Where each surface puts it:
-- `yad gate sync`: `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — enforced`
+- `yad gate sync`: `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory`
 - `yad gate status`: `; count: <sum>` with the same suffix, after the distinct-people count. Above the
   gates it prints the count of people and what it does, for example
-  `active people: 4 in the last 90 days — caps each gate at 3 approvers (one seat is left for the author)`,
-  or, when it cannot count them, `active people: NOT COUNTED — <reason> — no cap applies, so only the base holds each gate`.
-- the generated review-PR body: `- **Approvals needed:** 1 · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people — counted when this PR was opened; the gate counts again when it decides, and if it cannot count the people there only the base 1 holds`.
-  When the people could not be counted: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory: the active people could not be counted, so no cap applies and only the base holds)`
+  `active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73`,
+  or, when it cannot count them, `active people: NOT COUNTED — <reason> — no cap can be shown, and only the base holds each gate`.
+- the generated review-PR body: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people when this PR was opened (the risk step is advisory until E73)`.
+  With no cap: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory until E73)`.
+- `yad open-pr` (a code-repo task PR, Build half): `this PR asks for 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people — base enforced, risk step advisory`.
 
 `yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule` instead of a sentence.
 
-Solo mode waives approvals entirely, exactly as before, and reports no shortfall. The cap is still
-computed and printed, but nothing is enforced. The merge and the
+Solo mode waives approvals entirely, exactly as before, and reports no shortfall. No `capped` record is
+written in solo mode. The merge and the
 resolved threads still advance the step, and the review step's closing record carries `waived: "solo"`
 (E10). Switch with `yad mode solo --reason "<why>"` / `yad mode team`.
 
@@ -194,8 +200,8 @@ unchanged**: it counts distinct approvers regardless of how they were recorded.
 - One approver who is not the author keeps review load low on a small team (design priority 2) while
   still requiring a second pair of eyes (priority 1, code quality / production safety).
 - The risk step asks for more people only where a change can break a shared surface
-  (contract/auth/payments). The capacity cap (E72) makes it safe to enforce: it never asks for more
-  people than the team has, less one seat for the author. When the people cannot be counted, only the
-  base holds.
+  (contract/auth/payments). It is advisory for now: the capacity cap (E72) is reported, and E73 enforces
+  it together with `yad gate lower --reason`, so a gate that asks for more people than the team has
+  always has a way out.
 - No stored list of people: it goes stale, and repository access already decides who can approve.
 - Everything is a file, so a future service can drive the same gate by writing the same records.

@@ -1,6 +1,6 @@
 ---
 name: yad-review-gate
-description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the approver count (1 distinct approver; contract/auth/payments raise the full count, capped by active people), and advances the epic state ONLY when approval is recorded. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
+description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the approver count (1 distinct approver; contract/auth/payments raise the full count, advisory until E73), and advances the epic state ONLY when approval is recorded. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
 ---
 
 # SDLC — Team Review Gate (build plan §3 piece 2, §4, §5)
@@ -9,8 +9,8 @@ description: 'The reusable team review + approve gate for the SDLC. Shares an au
 review. Every `review+approve` step in the workflow (the optional analysis, epic, architecture+contract,
 UI, stories, test-cases) uses this exact gate. **No step advances until its review is approved** and
 recorded as a file. Every review uses the same **count** rule: distinct approvers, base 1. A step's
-`risk_tags` raise the full count. The gate caps that count at the number of active people less one
-(E72) and enforces the capped number; when the people cannot be counted, only the base holds.
+`risk_tags` raise the full count. The engine caps that count at the number of active people less one
+and shows it (E72), but only the base holds the gate until E73; the risk step is advisory.
 
 This gate is **swappable and file-driven**: it talks only through files. A Shape step advances only on a
 human act — recording an approval and `advance`, or (with a verified ledger) **merging the approved,
@@ -43,18 +43,22 @@ roles — there are no roles, and yadflow keeps no list of people:
 - **Base (enforced):** at least **1 distinct approver**, who should not be the author. The engine does
   not check that: GitHub stops you approving your own PR, GitLab does only when the project's approval
   settings say so, and on a local ledger nothing does — so do not record the author's own approval.
-- **Full count, capped (E72):** `needed = base 1 + risk step`. The risk step comes from the step's
-  `risk_tags`: `contract` +2, `auth`/`payments` +1 (the "high" tier). Take the highest tag, never the
-  sum. The gate then **caps** `needed` at `active − 1`, with a floor of 1. `active` is the live count of
-  people who committed or approved lately (E71). The capped number is **enforced**. Example: a contract
-  gate asks 3; with 2 active people it asks 1, with 3 it asks 2, with 4 or more it asks all 3. The `− 1`
-  is one seat left for the author — a seat, not a check: the platform decides whether the author may
-  approve. The cap stops a small team from being asked for more people than it has.
+- **Full count, capped and reported (E72):** `needed = base 1 + risk step`. The risk step comes from the
+  step's `risk_tags`: `contract` +2, `auth`/`payments` +1 (the "high" tier). Take the highest tag, never
+  the sum. The engine then **caps** that ask at `active − 1`, with a floor of 1. `active` is the live
+  count of people who committed or approved lately (E71). Example: a contract gate asks 3; with 2 active
+  people the capped ask is 1, with 3 it is 2, with 4 or more all 3. The `− 1` is one seat left for the
+  author — a seat, not a check: the platform decides whether the author may approve.
+- **The risk step is ADVISORY until E73, capped or not.** Report the shortfall against the capped ask
+  (`short`); never block on it. Why: the count of people errs high in the normal case. A commit is
+  counted by its git name, an approval by its platform login, and yadflow never joins the two without
+  exact evidence — so a two-person team can read as four. At four the cap lowers nothing, and an enforced
+  contract gate would ask three approvals of a team with one person who is not the author. E73 turns the
+  capped count on together with `yad gate lower --reason`, the way out.
 - **When the people cannot be counted** (`active: null` — for example Product CI, which checks out only
-  the hub, so the connected repos are not on disk): **no cap applies**. Only the base holds, and the risk
-  step is advisory — report the shortfall (`short`); never block on it. So on a verified Product with
-  connected repos, CI enforces the base alone. `yad gate status` and `yad gate sync` print the
-  arithmetic and which part of it holds — read it from there rather than recomputing it.
+  the hub, so the connected repos are not on disk): **no cap is computed or shown**, and the base holds as
+  always. `yad gate status` and `yad gate sync` print the arithmetic — read it from there rather than
+  recomputing it.
 - **Touched domains** only name and label the review; they add no approvals. For a step with a risk
   tag (the **architecture+contract** review) they are the epic's `repos`. For the **stories** review they
   are the **union of every story's `repos`** under `stories/`. `stories-review` is an ordinary count gate.
@@ -156,7 +160,7 @@ sections, so every participant is attributable in one place:
 ```markdown
 # Approval record — <artifact> — <YYYY-MM-DD>
 
-Count: **<have> distinct approver(s)** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>; <what held: `capped to <N> for <A> active people — enforced`, `enforced in full`, or (people not counted) `base 1 enforced, risk step advisory, short <N> — recorded here, never blocking`>.
+Count: **<have> distinct approver(s)** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>; <the engine's suffix, e.g. `capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory`, or just `base enforced, risk step advisory` when no cap lowered the ask>[, short <N> — recorded here, never blocking].
 
 ## Approved by
 - <approver> — approved <date>[ (<source>)]
@@ -205,16 +209,15 @@ gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-
 
 ### Step 3 — Gate predicate (the only path that advances)
 The step may advance **iff ALL hold**:
-1. the advance dial is `human` (`automation: human_approve` — it always is for Shape steps) and the
-   count is met (counted by `approver`, so two records from one person are one):
-   - **people counted** (`active` is a number): **≥ the capped count** — `needed` capped at
-     `active − 1`, floor 1 (Step 1). If it is not met, the missing line is `<N> approval(s)`.
-   - **people not counted** (`active: null`): **≥1 distinct approver** — the base alone. The risk step is
-     then NOT a condition: a step short of the full count still advances when the base holds. Report the
-     shortfall in the record; do not hold the step on it.
+1. the advance dial is `human` (`automation: human_approve` — it always is for Shape steps) and the base
+   is met: **≥1 distinct approver** (counted by `approver`, so two records from one person are one).
+   If it is not, the missing line is `1 approval(s)`. **The risk step (Step 1) is NOT a condition
+   here, capped or not** — it is advisory until E73. A step short of the capped ask still advances when
+   the base holds. Report the shortfall in the record; do not hold the step on it.
    This matches `gatePredicate`, which returns `rule: "count"`, the count as `gateRule`/`have`/`short`,
-   `active`, and `cap` (null when `active` is null). `active: null` means no source could be read, never
-   "nobody". With `hub.review.requireEngagement` on, only `verified` approvals count.
+   `active`, and `cap` (null when `active` is null), and never puts the risk step in `missing`.
+   `active: null` means no source could be read, never "nobody". With `hub.review.requireEngagement`
+   on, only `verified` approvals count.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
    newest `approved` record). If it changed, approvals are stale → return to `comment`. For the
    **architecture+contract** review, also recompute the contract-surface hash (see
@@ -248,9 +251,10 @@ If the predicate **passes**:
   `approved`, not `merge`: nothing merged, so there is no `pr` or `commit` to write.
   **In solo mode** (`solo: true` in `.sdlc/hub.json`, or the older `review_gate.solo: true`), add `"waived": "solo"` to that record: the gate passed
   without counting approvals, and the record says so (E10). Only on the review step, never on its author step.
-  **When the cap lowered the count** (E72), add `"capped": { "needed": <full count>, "to": <capped count>, "active": <people counted> }`
-  beside it — every cap is recorded. `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`.
-  Absent when no cap applied (the people were not counted, or the cap lowered nothing).
+  **In team mode, when the cap lowered the ask** (E72), add `"capped": { "needed": <full count>, "to": <capped ask>, "active": <people counted> }`
+  — every cap is recorded. It records what the gate ASKED, not what held it: the base held.
+  `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`. Absent in solo mode
+  (nothing was counted), and when no cap applied (the people were not counted, or the cap lowered nothing).
 - **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively
   (issue #131) because a passed gate can never leave its author step behind. Skipping it strands every
   later step behind `YAD-STATE-005`. Give it `"closed": { "by": …, "date": …, "via": "review-passed" }`.

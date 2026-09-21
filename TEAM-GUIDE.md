@@ -494,30 +494,31 @@ project's approval settings say so.
 - **The approval count:** `base 1 + risk step`. A `contract` tag adds 2 and an `auth` or `payments` tag
   adds 1; a step with several tags takes the largest, never the sum. None of the approvals should be the
   author's own.
-- **What holds a gate:** that count **capped at the number of active people less one** (never below 1),
-  plus every comment thread resolved and the review PR merged. "Active people" means people who
-  committed or approved lately, counted live. The `− 1` leaves one seat for the author. So a small team is
-  never asked for more approvers than it has: a contract gate asks 1 with 2 active people, 2 with 3, and
-  all 3 with 4 or more.
-- **When the people cannot be counted** (for example in Product CI, which sees only the product repo and
-  not the connected code repos), no cap applies: only the base — one approval — holds, and the rest is
-  reported as a shortfall.
-- `yad gate sync` and `yad gate status` print the count and which part holds, for example
-  `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — enforced`,
-  or, when the people were not counted,
-  `count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory — 1 short`. A gate
-  that passed on a lowered count says so later: `count capped from 3 to 1 (2 active people)`.
+- **What holds a gate:** one approval from someone other than the author (the **base**), plus every
+  comment thread resolved and the review PR merged. The risk step is **advisory** until E73.
+- **The cap (reported):** the engine caps the count at the number of **active people less one** (never
+  below 1) and prints it. "Active people" means people who committed or approved lately, counted live.
+  The `− 1` leaves one seat for the author. A contract gate's capped ask is 1 with 2 active people, 2 with
+  3, and all 3 with 4 or more. When the people cannot be counted (for example in Product CI, which sees
+  only the product repo), no cap is shown.
+- **Why the cap is not enforced yet:** the count of people can read high. A commit is counted by its git
+  name and an approval by its platform login, and they are two people until proven one — so a
+  two-person team can read as four, the cap lowers nothing, and an enforced gate would lock them out.
+  E73 enforces the capped count together with `yad gate lower --reason`, a way out of a gate that
+  cannot be met.
+- `yad gate sync` and `yad gate status` print the count, for example
+  `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`.
+  A team gate that passed while the cap lowered its ask says so later: `count capped from 3 to 1 (2 active people)`.
 
 | Review | Full count | Holds the gate |
 |--------|------------|----------------|
 | Epic | 1 | 1 approver |
 | UI | 1 | 1 approver |
-| **Architecture + contract** | **3** (base 1 + contract risk 2). The contract surface is hash-locked — changing it invalidates approvals. | 3, capped at the active people less one; 1 approver when the people cannot be counted |
+| **Architecture + contract** | **3** (base 1 + contract risk 2), shown capped at the active people less one. The contract surface is hash-locked — changing it invalidates approvals. | 1 approver (the rest is advisory until E73) |
 | **Stories** | 1 | 1 approver |
 | **Engineer review at ship** | reported only — `yad open-pr` shows it capped by the active people | a human engineer — **always, never automated**; the platform's branch protection holds the merge |
 
-Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge still decides. The cap is
-still printed, but nothing is enforced.
+Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge still decides.
 
 ---
 

@@ -101,25 +101,25 @@ Print, in this order:
      A record that names nobody counts as nobody. When `requireEngagement` is on in the Product config,
      only approvals with `engagement: verified` count. There are no roles; a `role` or `domain` an older
      record carries is legacy data, and it counts for nothing.
-   - **Pass (team mode):** `|approvers| >=` the capped count (below) — or `>= 1`, the base alone, when
-     the people could not be counted — plus, with a platform, resolved review threads and a merged
+   - **Pass (team mode):** `|approvers| >= 1` — the base — plus, with a platform, resolved review threads and a merged
      review PR/MR. Solo mode waives approvals entirely.
    - **The full count, reported on every step that is not inherited, skipped or deferred:** `needed = base 1 + risk step` — plus `2` when the
      step's `risk_tags` carry `contract`, or `1` when they carry `auth`/`payments` (the highest tag,
-     never the sum). The gate **caps** that at `active − 1` (floor 1) and **enforces the capped number**
-     (E72) — for example a contract gate asks 3, and with 2 active people it asks 1. When the people
-     could not be counted, no cap applies: only the base holds and the risk step is ADVISORY — it never
-     decides whether the gate would pass. `yad gate status` prints the sum, which part holds, and the
-     shortfall (`; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less
-     one seat for the author — enforced`, `— enforced in full`, or, with the people not counted,
-     `— base enforced, risk step advisory — 1 short`) — read it from there rather than recomputing it.
-     Under a cap a shortfall is a real missing approval; with no cap, say "short N" rather than
-     "blocked". A closed step whose count was lowered says `count capped from 3 to 1 (2 active people)`.
-     In solo mode the cap is printed but nothing is enforced, and no shortfall is shown.
+     never the sum). The engine **caps** that ask at `active − 1` (floor 1) and prints it (E72) — for
+     example a contract gate asks 3, and with 2 active people the capped ask is 1. The risk step is
+     ADVISORY until E73, capped or not — it never decides whether the gate would pass, because the count
+     of people can read high (a git name and a platform login are two people until proven one). When the
+     people could not be counted, no cap is shown. `yad gate status` prints the sum and the shortfall
+     (`; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat
+     for the author — base enforced, risk step advisory — 1 short`, or without the `capped to …` part
+     when the cap lowered nothing) — read it from there rather than recomputing it, and say "short N"
+     rather than "blocked" when it is short. A closed team gate whose ask was lowered says
+     `count capped from 3 to 1 (2 active people)`. In solo mode it prints no shortfall.
    - **How many people there are to ask (E71), printed once per epic and not per step:** `active people:
-     4 in the last 90 days — caps each gate at 3 approvers (one seat is left for the author)`, with the
-     window's basis on the line under it. It is the count the cap (E72) uses. A source that could
-     not be read prints `active people: NOT COUNTED — <which source> — no cap applies, so only the base
+     4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author);
+     reported, only the base is enforced until E73`, with the window's basis on the line under it. It is
+     the count the cap (E72) uses, so never report a step as blocked by it. A source that could not be
+     read prints `active people: NOT COUNTED — <which source> — no cap can be shown, and only the base
      holds each gate`: report that wording as it stands and NEVER as a number or as "no people" — an
      unreadable input is not a small team.
    - Touched domains (`epic.repos` for a step with a risk tag; the union of every story's `repos` for
