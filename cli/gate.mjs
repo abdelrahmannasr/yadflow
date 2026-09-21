@@ -598,7 +598,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   // E71 — ONE Product-wide count per command, read before the per-step loop so that N steps cannot mean
   // N walks of every repo's history. `today` is the one this command was given, so the count and the
   // records it reports on are measured from the same day.
-  const counted = activePeople(root, { today: today || undefined, aliases });
+  const headCount = activePeople(root, { today: today || undefined, aliases });
   // Local invocation in verified mode is ADVISORY: CI is the sole ledger writer, so a human run reads
   // the platform and prints the predicate but writes nothing. CI calls gateSync with local=false.
   // With a local ledger (platform but no gate-sync CI) the local command stays the writer.
@@ -669,8 +669,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   // E71 — said ONCE, before the per-artifact lines, because it is a fact about the PRODUCT and not
   // about any one gate (rule 6: say the arithmetic, not just the verdict). It is reported only: E72 is
   // the row that turns it into the cap on `needed`, so the basis line says so in as many words.
-  log(`  ${c.dim(activeSum(counted))}`);
-  note(c.dim(activeBasis(counted)));
+  log(`  ${c.dim(activeSum(headCount))}`);
+  note(c.dim(activeBasis(headCount)));
   // Targets whose step is still open. The dated approval-record file is regenerated only for these —
   // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
   // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
@@ -735,7 +735,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 
     const pred = gatePredicate({
       // Carried, not applied: E72 is the row that caps `needed` with it.
-      active: counted.capacity.active,
+      active: headCount.capacity.active,
       step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact),
       threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
       // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
@@ -1180,12 +1180,15 @@ export async function gateStatus(root, { epic } = {}) {
   const optional = optionalStepsFor(ledger.state);   // which steps THIS epic's route allows to be skipped
   // E71 — read ONCE for the whole view, not once per step: it is a Product-wide fact, and a per-step
   // read would walk every connected repo's history once for every gate on the screen.
-  const counted = activePeople(root, { aliases: legacyLogins(hub) });
+  // NOT `counted`: the per-step loop below already binds that name to this step's engagement-filtered
+  // approvals, and two different meanings of one word in one function is how a later edit reads the
+  // wrong one.
+  const headCount = activePeople(root, { aliases: legacyLogins(hub) });
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   // Printed in solo mode too, exactly as the per-step count is: someone who later switches to team mode
   // can see the number their gates will be capped against, before it starts holding anything.
-  log(`  ${c.dim(activeSum(counted))}`);
-  note(c.dim(activeBasis(counted)));
+  log(`  ${c.dim(activeSum(headCount))}`);
+  note(c.dim(activeBasis(headCount)));
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const accepted = acceptedHashes(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
@@ -1463,6 +1466,8 @@ function reviewBundle(root, { epic, artifact } = {}) {
     // E71 — the live capacity count, as an OBJECT and never as the sentence, so a consumer reads the
     // number rather than parsing prose (the same discipline `gateRule` follows). `active: null` means a
     // source could not be read, which is NOT the same fact as "few people": `unknown` says which.
+    // Its own read, and still once per command: `reviewBundle` has exactly two callers, `gate review`
+    // and `gate walkthrough`, and neither runs alongside `gate status` or `gate sync`.
     activePeople: (() => {
       const counted = activePeople(root, { aliases: legacyLogins(hub) });
       return { active: counted.capacity.active, windowDays: counted.capacity.days, basis: counted.capacity.basis, unknown: counted.unknown };
@@ -1559,7 +1564,14 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     `- **Approvals needed:** ${rule.base} (enforced) · full count ${gateRuleSum(rule)}${rule.riskStep ? ' (the risk step is advisory until the capacity cap)' : ''}`,
     // E71 — how many people could give those approvals, stated beside the ask so a reviewer can see a
     // gate that asks for more people than the team has BEFORE they start. It caps nothing yet.
-    `- **Active people:** ${active === null ? 'not counted (reported only; an unreadable source is never read as few people)' : `${active} (reported only — it does not cap the count yet)`}`,
+    //
+    // THIS IS THE ONE SURFACE WHERE THE COUNT BECOMES A LASTING RECORD. Everywhere else it is printed
+    // live and gone; a PR description is written once, at `gate open`, and read for as long as the PR
+    // exists. The number can be different an hour later, and on a different machine: `gate open` run
+    // from a laptop that has not cloned the connected repos reads "not counted" and would leave that
+    // word in the body for good. So the line dates itself. It does NOT go quiet on an unknown (Part 3),
+    // it just says WHEN it could not count, which is the only honest thing a frozen line can say.
+    `- **Active people:** ${active === null ? 'not counted when this PR was opened (an unreadable source is never read as few people — `yad gate status` counts it live)' : `${active} when this PR was opened (reported only — it does not cap the count yet; \`yad gate status\` counts it live)`}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',

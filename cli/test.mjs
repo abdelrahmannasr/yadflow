@@ -18245,12 +18245,16 @@ test('E71 surfaces: the review-PR body states the head count beside the ask', ()
   };
   const counted = fillHubTemplate({ ...args, active: 2 });
   assert.match(counted, /\*\*Approvals needed:\*\* 1 \(enforced\)/);
-  assert.match(counted, /\*\*Active people:\*\* 2 \(reported only/, 'a reviewer can see the ask and the team size together');
+  assert.match(counted, /\*\*Active people:\*\* 2 when this PR was opened/, 'a reviewer can see the ask and the team size together');
+  // The body is written once and read for as long as the PR lives, so the line DATES itself — the same
+  // number read from a machine without the connected repos would otherwise sit there as fact for good.
+  assert.match(counted, /`yad gate status` counts it live/);
   // A gate asking for 3 on a team of 2 is exactly the deadlock E7 described and E72 fixes. E71's job is
   // to make it VISIBLE on the artifact people are about to review, not to resolve it.
   assert.match(counted, /full count 3 approvers/);
 
   const uncounted = fillHubTemplate({ ...args, active: null });
-  assert.match(uncounted, /\*\*Active people:\*\* not counted/);
+  assert.match(uncounted, /\*\*Active people:\*\* not counted when this PR was opened/,
+    'it says WHEN it could not count — a frozen line must not claim a lasting fact');
   assert.doesNotMatch(uncounted, /\*\*Active people:\*\* 0/, 'never zero');
 });

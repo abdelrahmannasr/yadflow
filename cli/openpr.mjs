@@ -237,6 +237,10 @@ export async function runOpenPr(root, opts = {}) {
   // The Product-wide active count (E71), read ONCE here and handed down: `routeCount` works inside a
   // code repo and must not go looking for a Product itself.
   const active = (() => {
+    // `readJSON`, not `readJSONStrict`, and that is not the degradation cli/people.mjs warns about:
+    // losing the roster's name -> login table only stops OLDER records being joined to a login, so a
+    // person lands on two rows instead of one. That over-counts, the safe direction here. The count
+    // itself still refuses on every source it cannot read.
     try { return activePeople(root, { aliases: legacyLogins(readJSON(productConfigPath(root), null)) }).capacity.active; } catch { return null; }
   })();
   const count = stage === 'code-repo' ? routeCount(repoRoot, baseBranch, { ...opts, active }) : null;
