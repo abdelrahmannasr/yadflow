@@ -135,9 +135,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 
 - **`yad-review-gate`** — The reusable team review + approve gate. Shares an authored artifact, records
   reviewer comments and approvals as files (each under the reviewer's platform login — there are no
-  roles), holds the gate until **one person other than the author** approves, reports the full approval
-  count (a `contract` tag asks 3, `auth`/`payments` 2 — advisory until the capacity cap) beside the live
-  number of active people, and advances the
+  roles), holds the gate on the full approval count (a `contract` tag asks 3, `auth`/`payments` 2) **capped at the
+  live number of active people less one** — or on **one person other than the author** alone when the
+  people cannot be counted — and advances the
   epic state **only** when approval is recorded.
 - **`yad-review-companion`** — The fun, easy, transparent layer on top of the gate (front **and**
   Build). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through

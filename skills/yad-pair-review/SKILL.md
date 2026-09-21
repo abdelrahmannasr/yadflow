@@ -50,8 +50,8 @@ Run the walkthrough grounding for the half you're on:
 - Build: `yad review walkthrough --repo <r> --pr <n>` → prints the grounding bundle **plus an ordered
   `stops[]`** (the code diff parsed into hunk-anchored, risk-tagged review stops, highest-risk first).
 - Shape: `yad gate walkthrough <epic> [artifact]` → the same, over the artifact's review diff. Its
-  `step.gateRule` carries the step's advisory approver count (`needed` distinct people, and the `risk`
-  tier that set it) — useful context for how hard a step is being reviewed, never a pass/fail input.
+  `step.gateRule` carries the step's full approver count (`needed` distinct people, and the `risk`
+  tier that set it), and `step.cap` that count capped by the active people (E72; `null` when not counted) — useful context for how hard a step is being reviewed, never a pass/fail input.
 
 **Read the real material yourself** — run the bundle's `diffCmd`, and read the named `codeMap` / `pack` /
 `contract` / `artifactPath` / `specs/<story>/` files. Never invent content. If a stop's material isn't

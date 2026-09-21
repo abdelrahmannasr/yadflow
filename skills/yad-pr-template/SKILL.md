@@ -9,7 +9,8 @@ description: 'Build Step D of the gated SDLC. Detect a code repo''s platform and
 **Impact & Risk** block and a checklist tied to the check gates. A **high** risk level (or a touched
 contract surface) **raises the approver count** — the same count `yad-review-gate` prints on
 the Shape gates: base 1 (someone other than the author, enforced) plus a risk step (`high` +1, contract
-+2, advisory until the capacity cap). This step **never auto-advances**; it sets up the template and the
++2, advisory — branch protection holds the merge; `yad open-pr` shows the count capped by the active
+people). This step **never auto-advances**; it sets up the template and the
 routing helper.
 
 ## Conventions
@@ -94,8 +95,9 @@ PR description's Impact & Risk block, read the base branch's risk map, and print
   days** (E67). The script names them from the base branch's history, without this change's own authors,
   as one list across every `high` directory touched; "nobody" and "not read" are said apart.
 
-When the count is raised, the script adds that only the base holds the merge until the capacity cap
-(1 approval from someone other than the author), that the risk step is advisory, and lists the touched
+When the count is raised, the script adds that branch protection holds the merge, not this count (at
+least 1 approval from someone other than the author), that the risk step is advisory and not capped
+there (`yad open-pr` shows the count capped by the active people), and lists the touched
 domains as a hint for whom to ask. The actual approvals are recorded by the engineer review (Step E),
 via `yad-review-gate`.
 

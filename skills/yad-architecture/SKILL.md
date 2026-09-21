@@ -1,6 +1,6 @@
 ---
 name: yad-architecture
-description: 'Shape step 3 of the gated SDLC. With the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the contract surface into .sdlc/contract-lock.json. Reads epic.md as input. Never auto-advances — hands off to the team review gate (the contract risk tag raises its advisory approver count). Use when the user says "author the architecture" or after the epic gate passes.'
+description: 'Shape step 3 of the gated SDLC. With the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the contract surface into .sdlc/contract-lock.json. Reads epic.md as input. Never auto-advances — hands off to the team review gate (the contract risk tag raises its approver count). Use when the user says "author the architecture" or after the epic gate passes.'
 ---
 
 # SDLC — Author Architecture + Contract (Shape step 3)
@@ -204,11 +204,12 @@ through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
-and that the next action is **review** via `yad-review-gate`. The gate needs 1 distinct approver (the base), who
-should not be the author. Because of the risk tag `contract`, the engine also reports a full approver count
-for the step — 3 distinct people (base 1 + contract risk 2) — which is advisory until the capacity cap
-(E72): it is printed wherever the gate reports itself, written to no file, and a shortfall never holds
-the gate. The review PR requests no reviewers; the team asks them on the PR itself.
+and that the next action is **review** via `yad-review-gate`. Because of the risk tag `contract`, the
+step's full approver count is 3 distinct people (base 1 + contract risk 2), none of whom should be the
+author. The gate caps it at the active people less one, floor 1, and enforces the capped number (E72):
+with 2 active people it asks 1, with 3 it asks 2, with 4 or more all 3. When the people cannot be counted
+(as in Product CI with connected repos), no cap applies: only the base (1 distinct approver) holds, and
+the risk step is printed as a shortfall that never holds the gate. The review PR requests no reviewers; the team asks them on the PR itself.
 **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate
 opens a review PR on the Product (via `yad-hub-bridge`, labelled per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; a contract re-lock

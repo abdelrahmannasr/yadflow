@@ -14,7 +14,7 @@
 
 ## Impact & Risk (front-half)
 - **Domains / repos touched:** <epic.repos, e.g. backend, mobile>
-- **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => raises the advisory approver count -->
+- **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => raises the approver count -->
 - **Contract surface:** <n/a | locked @ sha256:…>  <!-- architecture only; a re-lock invalidates prior approvals -->
 
 ## Checklist
@@ -27,11 +27,12 @@
 <!-- One or two sentences on what this artifact says / what changed since the last review round. -->
 
 ## Required approvals (yad-review-gate rule)
-- Enforced: **1 approval, which should not be the author’s own** (the base).
 - Full count, in **distinct people**: base 1 + the step's risk step — 3 on a `contract` step, 2 on
-  `auth`/`payments`, 1 otherwise (the largest step, never the sum). The risk step is **advisory** until
-  the capacity cap; `yad gate status <epic>` prints it, and so does `yad-hub-bridge`'s `hub-route.sh`
-  run on this description.
+  `auth`/`payments`, 1 otherwise (the largest step, never the sum). No approval should be the author’s own.
+- Enforced: that count **capped at the active people less one** (one seat is left for the author), and
+  never below 1. When the gate cannot count the people, only the base (1 approval) is enforced and the
+  risk step is **advisory**. `yad gate status <epic>` prints the count and the cap, and `yad-hub-bridge`'s
+  `hub-route.sh` run on this description prints the full count.
 - No reviewers are requested automatically — ask them on this MR. The `domain:<repo>` labels show the touched repos.
 
 ## How to review (this drives the gate)

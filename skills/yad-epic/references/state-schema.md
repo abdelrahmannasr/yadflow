@@ -62,8 +62,8 @@ Each `steps[]` entry:
 | `locked` | `true` \| `false` | Seeded `true` on every Shape step. Since E34 it decides nothing about the dial on a step the catalogue knows: an author step may be set to `auto` (for the whole project, in `.sdlc/automation.json`), and a review gate is `human` because it is a gate. It is still read as a gate on a step id the catalogue does not know. |
 | `status` | one of the **step states** below | Where the step stands. |
 | `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
-| `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy?, run?, waived? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
-| `risk_tags` | subset of `contract`, `auth`, `payments` | Sets the step's full approver count (build plan §4): `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). Only the base is enforced until the capacity cap (E72); the risk step is advisory and reported as a shortfall. A team gate reports `rule: "count"`. A step with one of these tags has its review PR name and label the epic's `repos`. |
+| `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy?, run?, waived?, capped? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
+| `risk_tags` | subset of `contract`, `auth`, `payments` | Sets the step's full approver count (build plan §4): `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). The gate caps that count at the active people less one, floor 1, and enforces the capped number (E72); when the people cannot be counted, only the base holds and the risk step is advisory, reported as a shortfall. A team gate reports `rule: "count"`. A step with one of these tags has its review PR name and label the epic's `repos`. |
 
 ### The step catalogue
 
@@ -315,6 +315,7 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 | `mergedBy` | The platform login that merged the PR, when the platform reports it. |
 | `run` | Build lanes only: the `uid` of the trust-log run that moved past the step. |
 | `waived` | `solo` on a **review** step that passed while solo mode waived its approvals (E10). Absent when the gate counted approvals, and never on the author step it closes. |
+| `capped` | `{ needed, to, active }` on a **review** step that passed on a count the capacity cap LOWERED (E72): the full count, the count the cap asked for instead, and the number of active people it read. `yad gate status` prints it as `count capped from 3 to 1 (2 active people)`. Absent when no cap applied (the people could not be counted, or the cap lowered nothing). Recorded in solo mode too, beside `waived`, and never on the author step. |
 
 | `via` | Written by | When |
 |---|---|---|
@@ -960,7 +961,7 @@ no `contract.md` in the child to edit, so the surface physically cannot drift.
 
 Omitting `architecture` from `inherits` (depth `contract-surface`) is what triggers a **real re-lock**:
 `yad-architecture` re-authors `contract.md`, computes a **new** hash, and `architecture-review` carries
-`risk_tags: ["contract"]` → the usual contract-risk review (full approver count 3; only the base 1 is enforced until the capacity cap, E72). This unifies "route back to the
+`risk_tags: ["contract"]` → the usual contract-risk review (full approver count 3, capped at the active people less one and enforced, E72; only the base 1 when the people cannot be counted). This unifies "route back to the
 architecture gate" with "open a contract-surface change-epic" — one mechanism, not two.
 
 ## `change.json`

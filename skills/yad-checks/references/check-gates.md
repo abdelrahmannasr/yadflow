@@ -332,8 +332,10 @@ it), and **no names** (E65). The format, the rubric and who may change what:
 `../yad-connect-repos/references/risk-map.md`. The rules have a twin in `cli/riskmap.mjs`
 (`yad risk-map check`, `yad doctor`); a test runs both over the same repos and compares the output.
 
-It **always exits 0**: the count it prints is reported, never enforced, until the capacity cap (E72), so
-a stale map must never block a merge. It prints `WARN [risk-map] <code> <target>: …` for:
+It **always exits 0**: the count it prints is reported, never enforced — the platform's branch
+protection holds a Build merge. It cannot apply the capacity cap (E72) either: the cap needs the
+Product's count of active people, which a code repo's CI does not have; `yad open-pr` shows the capped
+count. So a stale map must never block a merge. It prints `WARN [risk-map] <code> <target>: …` for:
 
 | Code | When |
 |---|---|
@@ -360,7 +362,7 @@ team's, so `yad update` never owns or overwrites it; only the check is.
 **The count (E66).** Before the warnings it prints one line saying how many approvers the change asks for:
 
 ```
-COUNT [risk-map]: 2 approvers = base 1 + high risk 1 (high on origin/main: src/payments/ (guessed)) — only the base holds the merge until the capacity cap.
+COUNT [risk-map]: 2 approvers = base 1 + high risk 1 (high on origin/main: src/payments/ (guessed)) — reported, not enforced: branch protection holds the merge.
 COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on origin/main.
 ```
 
@@ -414,8 +416,8 @@ someone who has worked in any of them meets the ask, and the output never says w
 and held nobody — and `HISTUNKNOWN <why>`) for `checks/risk-route.sh`, which joins it with the PR
 body. One awk program serves both the warnings and the count. Its twin is `changeLevel` in
 `cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** like every check here, the
-script runs from the PR's own checkout, so a PR can edit the script itself; that matters once the count
-is enforced (E72), not while it is only reported. And, as for the warnings, a path holding a newline is
+script runs from the PR's own checkout, so a PR can edit the script itself; that is harmless only because nothing
+blocks on the count — the Build count stays reported, and branch protection holds the merge (E72). And, as for the warnings, a path holding a newline is
 split in two here but kept whole by `changeLevel`, so the bash count can read its second half as a file
 at the root; the error can only raise the count, never lower it. (The E67 history is free of that class:
 it reads no file names at all.) If git itself fails, each step of the
@@ -500,8 +502,8 @@ it wants them:
 - **approvals-present** — an epic at `ready-for-build` has the approvals the gate rule requires recorded
   in `.sdlc/approvals.json`: at least 1 approver (the author is not checked here — the platform's own
   rules stop self-approval on GitHub, and on GitLab when its settings say so; the same predicate
-  `yad-review-gate` enforces; the risk step of the full count is reported beside it and gates nothing
-  until the capacity cap).
+  `yad-review-gate` enforces: the full count capped at the active people less one, or only the base
+  when the people cannot be counted (E72).
 
 These are advisory checks on the Product's own PRs (the Shape review PRs the verified ledger opens); they keep
 the Product's artifacts internally consistent. The Product never runs the code-repo `spec-link`/`build-test-lint`

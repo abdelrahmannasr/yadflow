@@ -47,8 +47,9 @@ Read `.sdlc/hub.json` for the platform, `epics/<epic>/epic.md` for `repos` + `ow
 author), and the matching `review+approve` step's `risk_tags` from `.sdlc/state.json`. Compute the
 **count** with `route` (below) — the same rule `yad-review-gate` enforces: `needed = base 1 + risk step`
 distinct approvers, where `contract` adds 2 and `auth`/`payments` add 1 (the highest tag, never the sum).
-Only the base (1 distinct approver, who should not be the author) holds the gate; the risk step is advisory until the
-capacity cap (E72). Compute the **touched domains** too: the union of story `repos` for
+The gate caps that count at the active people less one (floor 1) and enforces the capped number (E72);
+when it cannot count the people — as in Product CI, which checks out only the hub — only the base (1
+distinct approver, who should not be the author) holds and the risk step is advisory. Compute the **touched domains** too: the union of story `repos` for
 `stories-review`, the epic's `repos` for a step tagged `contract`, `auth` or `payments`, none otherwise.
 They become `domain:<repo>` labels and
 are a hint for whom to ask. There is no roster to turn them into people.
@@ -87,7 +88,8 @@ are a hint for whom to ask. There is no roster to turn them into people.
 ### Step 3 — `route` (print the count)
 Compute and print the count as above. Use `templates/checks/hub-route.sh <body>` to parse a PR/MR
 body's Impact & Risk block when given one; it prints e.g. `ROUTE: 3 approvers = base 1 + contract risk 2
-(risk tag: contract)`, says only the base holds the gate, and lists the touched repos as a hint for whom
+(risk tag: contract)`, says the gate caps this at the active people less one and enforces that (only the
+base holds when it cannot count them), and lists the touched repos as a hint for whom
 to ask. With no `contract`/`auth`/`payments` tag it prints `ROUTE: 1 approver = base 1 (no risk step).`
 and no repo list. Otherwise derive from
 `epic.repos` + the step's `risk_tags`. Stories do not route per repo. Advisory only — it routes the

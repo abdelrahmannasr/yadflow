@@ -16,7 +16,8 @@ ship. Shipping records the merge and updates the story state so the whole chain 
      +1, a touched contract surface +2 — or from the base branch's risk map, where a change touching a
      `high` directory adds +1 (E66). The largest step, never the sum. Exactly what `risk-route.sh` prints,
      run in the code repo on the PR's branch.
-     The risk step holds nothing until the capacity cap (E72). The touched domains it lists are a hint
+     The risk step holds nothing on a code PR: branch protection holds the merge. `yad open-pr` shows
+     the count capped by the active people (E72), for information only. The touched domains it lists are a hint
      for whom to ask.
 
    The actual merge protection is the platform's branch protection.

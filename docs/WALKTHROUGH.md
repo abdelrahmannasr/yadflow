@@ -232,14 +232,20 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
 **The gate rule, by review.** There are no roles: a gate counts **distinct people who approved**. The
 engine computes a **count** — `base + risk step` distinct approvers, base 1, plus 2 for a `contract` tag
 or 1 for `auth`/`payments` — and `yad gate sync`, `yad gate status` and the generated review-PR body print
-that arithmetic. **Only the base holds the gate** until the capacity cap ships, because an uncapped count
-would make a two-person team's architecture gate unpassable; the rest is reported as a shortfall.
-The same three surfaces also print how many people are **active** — committed or approved lately, counted
-live from the records and from git, over a window that scales with how fast the team merges. It is
-reported only, and when a source cannot be read it says `not counted` rather than showing a small number.
+that arithmetic. The gate **caps** that count at the number of **active people less one** (never below
+1) and **enforces the capped number** (E72). "Active" means committed or approved lately, counted live from
+the records and from git, over a window that scales with how fast the team merges. The `− 1` leaves one
+seat for the author. The cap is what keeps a two-person team's architecture gate passable: it asks them
+for 1, not 3. When a source cannot be read, the count says `not counted` rather than showing a small
+number, **no cap applies, and only the base (1) holds** — the risk step is then reported as a shortfall.
+Product CI is that case on a Product with connected repos: it checks out only the product repo, so it
+enforces the base alone. A gate that passed on a lowered count records `capped: { needed, to, active }`
+on its closing record.
 - **Epic, UI, stories, test cases:** 1 approver; the count asks for 1.
-- **Architecture+contract** (`risk_tags: ["contract"]`): 1 approver holds it; the count asks for **3
-  distinct approvers** (base 1 + contract 2) and reports the shortfall without blocking. The
+- **Architecture+contract** (`risk_tags: ["contract"]`): the count asks for **3 distinct approvers**
+  (base 1 + contract 2), capped by the active people — 1 with 2 active people, 2 with 3, all 3 with 4 or
+  more. When the people cannot be counted, 1 approver holds it and the shortfall is reported without
+  blocking. The
   contract-surface hash must still match `.sdlc/contract-lock.json` (a changed surface invalidates
   approvals).
 - Review PRs request no reviewers — ask the people who know the touched repos on the PR itself.

@@ -35,8 +35,12 @@ The count is `base 1 + risk step`:
 `high` risk and a touched contract surface together take the **larger** step (contract, +2), never the
 sum. Approvers are counted as distinct people, and the base approver should not be the author.
 
-**Only the base is enforced.** A merge needs 1 approval (GitHub blocks self-approval; GitLab only if its settings do). The risk step
-is **advisory** until the capacity cap (roadmap E72) lands. There are no roles: no owner, no reviewer, no
+**The count is reported, not enforced, on a code PR.** Branch protection holds the merge — at least 1
+approval (GitHub blocks self-approval; GitLab only if its settings do). The risk step is **advisory**
+here. The capacity cap (roadmap E72) caps a count at the active people less one, and it holds the
+Shape gates; on the Build half it is only shown: `yad open-pr` prints the count capped by the active
+people, while `risk-route.sh` cannot cap, because a code repo's CI has no Product to count people
+from. There are no roles: no owner, no reviewer, no
 domain owner. This is `yad-review-gate`'s rule (`references/gating.md`) applied at the code-review
 boundary. The **approvals are recorded by the engineer review (Step E) through `yad-review-gate`** — the
 template and `risk-route.sh` only *route* (advisory); they never approve or merge.
@@ -70,8 +74,8 @@ Contract surface touched: no
 Domains touched: backend, mobile
 Risk map (origin/main): low — nothing this change touches is high
 ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)
-       Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
-       The risk step is advisory.
+       Branch protection holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
+       The risk step is advisory, and not capped here — `yad open-pr` shows the count capped by the active people.
        Ask reviewers who know the touched domains:
   - backend
   - mobile
@@ -86,8 +90,8 @@ Risk map (origin/main): high — src/payments/ (guessed)
   worked there in the last 30 days: Alice (@alice)
 ROUTE: 2 approvers = base 1 + high risk 1 (high on the risk map: src/payments/ (guessed))
        The body says Risk level: low, but the risk map on origin/main marks src/payments/ (guessed) high — the larger counts.
-       Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
-       The risk step is advisory.
+       Branch protection holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
+       The risk step is advisory, and not capped here — `yad open-pr` shows the count capped by the active people.
        This change touches src/payments/ (guessed), so it asks for an approval from someone who has
        committed there in the last 30 days (its own authors left out):
   - Alice (@alice)

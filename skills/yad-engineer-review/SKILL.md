@@ -1,6 +1,6 @@
 ---
 name: yad-engineer-review
-description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (1 distinct approver, who should not be the author; high risk / contract raise the full count, advisory until the capacity cap — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
+description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (1 distinct approver, who should not be the author; high risk / contract raise the full count, advisory, not enforced — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
 ---
 
 # SDLC — Engineer Review & Merge (Build Step E)
@@ -25,8 +25,9 @@ then **ship** — merge, record the ship, and update the story state. This is th
 - The engineer-review rule reuses `yad-review-gate`'s count: `needed = base 1 + risk step` distinct
   approvers. The risk step comes from the PR's Impact & Risk block — `high` risk +1, a touched contract
   surface +2 — and from the code repo's risk map on the **base branch**: a change touching a `high`
-  directory +1 (E66). The largest step wins, never the sum. Only the base (1 distinct approver, who should not be the author) holds the merge; the
-  risk step is advisory until the capacity cap (E72). This is what `yad-pr-template`'s `risk-route.sh`
+  directory +1 (E66). The largest step wins, never the sum. The count is reported, not enforced: branch protection holds the merge (at least 1
+  distinct approver, who should not be the author), and the risk step is advisory. `yad open-pr` shows
+  the count capped by the active people (E72); the check scripts cannot cap it. This is what `yad-pr-template`'s `risk-route.sh`
   prints. The real merge protection is the platform's branch protection.
 - AI review wiring: `templates/.coderabbit.yaml` → `<repo>/.coderabbit.yaml`.
 
@@ -67,8 +68,8 @@ the map adds nothing, so check out the PR branch first. If the repo has no `chec
 not wired yet: run `yad update` for it (that installs `checks/risk-route.sh` and
 `checks/risk-map-check.sh` together). Until then, count from the body alone and say that the map was not
 counted. It prints e.g.
-`ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface touched)`, says only the base holds the
-merge until the capacity cap, and lists the touched domains as a hint for whom to ask. With no risk it
+`ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface touched)`, says branch protection holds the
+merge, not this count (the risk step is advisory and not capped there), and lists the touched domains as a hint for whom to ask. With no risk it
 prints `ROUTE: 1 approver = base 1 (no risk step).` When the map raises a body that says `low`, it
 names the `high` directories and says the two disagree — tell the engineer, and ask the author to fix the
 body if the body is wrong. Record each approval; re-evaluate whether the base
@@ -164,8 +165,8 @@ stays as it was (`ready-for-build`). Build is recorded in `build-log.json` + the
 - **High risk raises the count** — the same count as `yad-review-gate` / `risk-route.sh`, and a `high`
   directory on the base branch's risk map raises it too; that directory also asks for an approver who has
   worked there in the last 30 days (E67), reported in the same three states as everything else here:
-  met, short, or could not confirm. Only the base holds the merge until the capacity
-  cap; there are no domain owners to route to.
+  met, short, or could not confirm. The count is advisory — branch protection holds the
+  merge; `yad open-pr` shows the count capped by the active people. There are no domain owners to route to.
 - **The ship record's `risk` is the body's level**, as the author wrote it — not the level the map raised
   it to. The count is worked out live each time and never stored (the user's decision, 2026-09-18).
 - **Ship only after gates + engineer review.** No gate skipped; the human owns the merge.
