@@ -133,9 +133,9 @@ export async function collectGolden(root) {
         // inside yadflow's OWN work tree, so that walk would count THIS repo's committers and the
         // snapshot would move with every commit made here. `null` here means NOT COUNTED — which is a
         // different fact from "nobody is active", and confusing the two is the exact error this row
-        // exists to prevent. What the snapshot freezes is that the predicate
-        // CARRIES the field; that it caps nothing is E72's decision to change, and it will have to
-        // update this file when it does.
+        // exists to prevent. With `active: null` the predicate applies NO cap (E72): `cap` is null on
+        // all nine gates and only the base holds, so pass/fail, `missing` and `short` are the same as
+        // before E72. What the cap does with a KNOWN count is pinned by unit tests that pass it in.
       });
       gates.push({ epic, step: step.id, ...pred });
     }

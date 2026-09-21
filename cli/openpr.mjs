@@ -10,7 +10,7 @@ import {
   detectPlatform, createPr, platformLogin, resolveBaseBranch,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
-import { parseReviewBranch, artifactFromBase, gateRuleSum, gateRuleEnforced, legacyLogins } from './epic-state.mjs';
+import { parseReviewBranch, artifactFromBase, gateCapFor, gateRuleSum, gateRuleEnforced, legacyLogins } from './epic-state.mjs';
 import { activePeople } from './people.mjs';
 import { baseChangeLevel, recentAuthorsFor } from './riskmap-command.mjs';
 import { gateOpen } from './gate.mjs';
@@ -125,15 +125,22 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
     } else lines.push([info, `nobody else has committed in ${high.join(', ')} in the last 30 days — ask anyone who knows it`]);
   }
   if (high.length && opts.risk !== 'high') lines.push([warn, `the body says Risk level: ${opts.risk || 'low'}, but the risk map on ${map.base} marks ${high.join(', ')} high — the larger counts`]);
-  lines.push([riskStep ? hand : info, `this PR asks for ${gateRuleSum(rule)}${gateRuleEnforced(rule)}; \`bash checks/risk-route.sh "<pr body>" ${map.base}\` prints the same count`]);
+  // E72 — the cap, SHOWN and never enforced here. The Build count never holds a merge: the platform's
+  // branch protection does (Part 9), and the user decided (2026-09-21) that the Build half stays
+  // reported. That is also E66's answer: the CI half of this count runs from the PR's own checkout of
+  // `checks/`, so a PR can edit the script that counts it — harmless only because nothing blocks on it.
+  // `gateRuleEnforced` is called WITHOUT the cap on purpose, so the line keeps saying "advisory".
+  const cap = gateCapFor(rule, opts.active);
+  const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active people` : '';
+  lines.push([riskStep ? hand : info, `this PR asks for ${gateRuleSum(rule)}${capped}${gateRuleEnforced(rule)}; \`bash checks/risk-route.sh "<pr body>" ${map.base}\` prints the count without the cap`]);
   // E71 — how many people are around to meet that ask. `opts.active` is the Product-wide count the
   // CALLER already read: this function runs in a code repo, which has no Product of its own to read
   // (the E65 finding that keeps `checks/*.sh` out of this entirely), so it is handed the number or
   // nothing. `null` means no source could be read, which is never the same as "few people".
   if (opts.active !== undefined) {
     lines.push([info, opts.active === null
-      ? 'active people: not counted — reported only, and an unreadable source is never read as few people'
-      : `active people: ${opts.active} — reported only, it does not cap the count yet`]);
+      ? 'active people: not counted — no cap applies; reported only, and an unreadable source is never read as few people'
+      : `active people: ${opts.active} — caps the count at ${Math.max(1, opts.active - 1)}; reported only, a Build merge is held by branch protection, not by this count`]);
   }
   return { rule, map, lines };
 }
@@ -242,7 +249,7 @@ export async function runOpenPr(root, opts = {}) {
   // case. Counting from there would have walked the CODE REPO's history and reported its committers as
   // the whole team: no `epics/` (so no ledger and no `unknown`), no `.sdlc/repos.json` (which is a
   // readable "no connected repos"), and one git log that works — a confident, smaller, wrong number,
-  // feeding the field E72 will cap with. `null` is the honest answer there: we are not standing in a
+  // feeding the number E72 caps with. `null` is the honest answer there: we are not standing in a
   // Product, so we did not count.
   const active = (() => {
     // Only the `code-repo` stage prints it (`routeCount`, below). On a `hub-tooling` PR this would

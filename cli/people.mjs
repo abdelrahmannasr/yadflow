@@ -1,5 +1,5 @@
 // How many people are ACTIVE right now (E71) — the live count Part 3's three windows ask for, and the
-// number E72's cap (`needed` capped at `active − 1`) will read.
+// number E72's cap (`needed` capped at `active − 1`, `gateCapFor` in cli/epic-state.mjs) reads.
 //
 // THE SAFETY DIRECTION IS THE OPPOSITE OF E66 AND E67, and it is the whole reason this file exists
 // instead of a call into `yad usage`. There, an input nobody could read must never say "nobody worked
@@ -510,8 +510,8 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
 // `gateRuleSum` is defined beside `gateRuleFor`: several surfaces print it, and several copies of the
 // wording would eventually disagree about what the number means.
 //
-// It always says what it does NOT do. E71 reports the count; E72 is what turns it into the cap on
-// `needed`, so a reader must never take today's number as a requirement that is already being applied.
+// It always says what the number DOES to a gate (E72): a known count caps every gate at `active − 1`,
+// and an unknown one applies no cap, so only the base holds. Either way the consequence is on the line.
 export function activeSum(counted) {
   const cap = counted?.capacity;
   // `== null` on purpose, so a missing count and an explicitly null one take the SAME branch. With
@@ -520,17 +520,18 @@ export function activeSum(counted) {
   if (!cap || cap.active == null) {
     const [first, ...rest] = counted?.unknown || [];
     const more = rest.length ? ` (and ${rest.length} more)` : '';
-    return `active people: NOT COUNTED — ${first || 'a source could not be read'}${more}`;
+    return `active people: NOT COUNTED — ${first || 'a source could not be read'}${more} — no cap applies, so only the base holds each gate`;
   }
-  // THE DISCLAIMER TRAVELS WITH THE NUMBER, and that is not a style choice. `activeBasis` is printed
+  // THE CONSEQUENCE TRAVELS WITH THE NUMBER, and that is not a style choice. `activeBasis` is printed
   // through `note()`, which writes to stderr, while this goes to stdout through `log()` — so anything
   // that captures or pipes stdout alone (CI logs, a redirect) would keep the number and lose the
-  // sentence saying it enforces nothing. E72 is what makes it a cap.
-  return `active people: ${cap.active} in the last ${cap.days} days — reported only, it does not cap the approval count yet`;
+  // sentence saying what it does. The `max(1, …)` is `gateCapFor`'s floor, in cli/epic-state.mjs.
+  const limit = Math.max(1, cap.active - 1);
+  return `active people: ${cap.active} in the last ${cap.days} days — caps each gate at ${limit} approver${limit === 1 ? '' : 's'} (one seat is left for the author)`;
 }
 
 // Why that window is the length it is. The second line under `activeSum`, and the only part that may be
 // lost without misleading anyone — the number above carries its own disclaimer.
 export const activeBasis = (counted) => (counted?.capacity?.active == null
-  ? 'an unreadable source is never counted as few people — the cap will not be applied from an unknown'
+  ? 'an unreadable source is never counted as few people — the cap is not applied from an unknown, and the risk step stays advisory'
   : String(counted?.capacity?.basis || ''));

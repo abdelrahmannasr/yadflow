@@ -5,8 +5,9 @@
 // WHAT IT IS FOR. Part 3's escalation needs to know which code is risky. A hard-coded guess from file
 // names (`RISK_PATTERNS`, cli/walkthrough.mjs) breaks on every naming habit, so the team keeps its own
 // answer, one line per directory. E66 turns a `high` directory into the high step (+1), read from the
-// map on the BASE branch (`changeLevel`); E67 asks who has committed to it. The step is REPORTED, like
-// every risk step until the capacity cap (E72): only the base of one approver holds a merge.
+// map on the BASE branch (`changeLevel`); E67 asks who has committed to it. The step is REPORTED and
+// never holds a merge: a Build merge is held by the platform's branch protection, and the capacity cap
+// (E72) is shown on the Build half but not enforced there (the user's decision, 2026-09-21).
 //
 // WHO WRITES IT. `yad risk-map draft` adds a line for every directory nothing covers, as `unset`. The
 // `yad-connect-repos` skill has an AI agent read the code and fill each `unset` line with a level, a

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Risk routing (Phase 3 build plan §D). Reads a PR/MR description's Impact & Risk block and prints how
 # many approvers the change asks for, as the same sum the review gate prints: base 1, plus a risk step —
-# `high` risk +1, a touched contract surface +2, the larger of the two and never their sum. Only the base
-# holds a merge until the capacity cap lands; the risk step is advisory. There are no roles and no named
-# owners: yadflow keeps no list of people (E62), so when a risk step raises the count the touched domains
-# are printed as a hint for whom to ask (with no risk step it prints the base line alone). Advisory: it
-# ROUTES the human review; it does not approve or merge.
+# `high` risk +1, a touched contract surface +2, the larger of the two and never their sum. The count is
+# advisory on the Build half: branch protection holds the merge, and this script cannot apply the capacity
+# cap (E72), which needs the Product's count of active people — `yad open-pr` shows the capped count.
+# There are no roles and no named owners: yadflow keeps no list of people (E62), so when a risk step
+# raises the count the touched domains are printed as a hint for whom to ask (with no risk step it prints
+# the base line alone). Advisory: it ROUTES the human review; it does not approve or merge.
 #
 # E66 — the risk map counts too. Run inside the code repo, ON THE PR'S BRANCH, it also asks
 # `checks/risk-map-check.sh --level` which directories the change touches on the BASE branch's
@@ -108,8 +109,8 @@ if [ "$step" -gt 0 ]; then
   if [ -n "$map_high" ] && [ "$risk" != "high" ]; then
     echo "       The body says Risk level: ${risk:-unspecified}, but the risk map on ${map_base} marks ${map_high} high — the larger counts."
   fi
-  echo "       Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do)."
-  echo "       The risk step is advisory."
+  echo "       Branch protection holds the merge, not this count: at least 1 approval (GitHub blocks self-approval; GitLab only if its settings do)."
+  echo "       The risk step is advisory, and not capped here — \`yad open-pr\` shows the count capped by the active people."
   # E67 — a change to a `high` directory asks for an approval from someone who has worked there in the
   # last 30 days. Reported, like the count: it names who can meet it and blocks nothing. With nobody to
   # name (or a history that could not be read), the touched domains stay the only hint.
