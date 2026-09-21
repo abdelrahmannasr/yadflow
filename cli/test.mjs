@@ -18506,6 +18506,8 @@ test('E72 open-pr: the Build count SHOWS the cap and still enforces nothing', as
     const two = text({ risk: 'low', contractChange: true, active: 2 });
     assert.match(two, /asks for 3 approvers = base 1 \+ contract risk 2, capped to 1 for 2 active people — base enforced, risk step advisory/);
     assert.match(two, /active people: 2 — caps the count at 1; reported only, a Build merge is held by branch protection, not by this count/);
+    // A team of one: the cap lowers the ask to the floor, and the line says "person", not "people".
+    assert.match(text({ risk: 'low', contractChange: true, active: 1 }), /, capped to 1 for 1 active person — base enforced/);
     const none = text({ risk: 'low', contractChange: true, active: null });
     assert.doesNotMatch(none, /capped to/);
     assert.match(none, /active people: not counted — no cap applies/);
