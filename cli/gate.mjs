@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
@@ -160,23 +160,11 @@ export const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.
 // but is recorded `engagement: none` and draws the friendly nudge.
 export const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === true));
 
-// The name → login pairs of a roster an older release left on disk (E62). Read for ONE job: recognising
-// the person an older approval or comment record names, so the first sync after the upgrade continues
-// that record instead of guessing. The roster decides nothing else and nothing writes it; `yad doctor`
-// still names it as unused. The user chose this over matching by order (2026-09-16), which swapped two
-// people's fingerprints on GitLab. A name the roster gives to two logins cannot be told apart and is
-// left out.
-export function legacyLogins(hub) {
-  const out = new Map();
-  const clash = new Set();
-  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
-    if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
-    if (out.has(e.name) && out.get(e.name) !== e.login) clash.add(e.name);
-    out.set(e.name, e.login);
-  }
-  for (const n of clash) out.delete(n);
-  return out;
-}
+// `legacyLogins` LIVES in cli/epic-state.mjs now (E71): the active-people reader needs the same table to
+// recognise an older record, and importing it from here would have made a cycle (gate.mjs prints the
+// count that reader returns). This re-export stays — rule 3, the new name beside the old — and is the
+// one every older reader here and in cli/usage.mjs still calls.
+export { legacyLogins };
 
 // Re-add this step's bridge approvals from the current platform state (drop+re-add => dismissals and
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a

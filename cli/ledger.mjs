@@ -108,6 +108,22 @@ function readShardDir(dir) {
   return out;
 }
 
+// The shards in `dir` that do NOT parse as a JSON object, by file name. `readShardDir` SKIPS such a
+// shard on purpose — these ledgers are advisory evidence and one bad file must not abort a report. A
+// caller that COUNTS PEOPLE cannot accept that: a skipped ship shard is an engineer-review approval
+// that vanishes, and a person who vanishes makes the active count SMALLER, which lowers E72's cap and
+// weakens every gate (E71). Such a caller asks this first and reports "unknown" rather than a number.
+// Deliberately cheap: it parses, it does not validate a ship's fields.
+export function corruptShards(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const bad = [];
+  for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort()) {
+    const obj = readJSON(path.join(dir, name), null);
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) bad.push(name);
+  }
+  return bad;
+}
+
 // The half-applied-tidy guard key: a shard is a genuine duplicate of a folded entry ONLY when its FULL
 // identity matches — NOT `uid` alone. `uid` is minted by an LLM skill, so two runs of DIFFERENT
 // (story,repo,step) could share a short token; keying on uid alone would drop the second as a false

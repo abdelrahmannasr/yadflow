@@ -88,6 +88,46 @@ export const gateRuleSum = (rule) => {
 // carries no risk step: then the base IS the whole count, and there is nothing advisory to point at.
 export const gateRuleEnforced = (rule) => (rule.riskStep ? ' — base enforced, risk step advisory' : '');
 
+// The name -> login pairs of a roster an older release left on disk (E62). Read for ONE job: recognising
+// the person an older approval or comment record names, so the first sync after the upgrade continues
+// that record instead of guessing. The roster decides nothing else and nothing writes it; `yad doctor`
+// still names it as unused. The user chose this over matching by order (2026-09-16), which swapped two
+// people's fingerprints on GitLab. A name the roster gives to two logins cannot be told apart and is
+// left out.
+//
+// It sat in cli/gate.mjs until E71, which needs it in the active-people reader that gate.mjs prints —
+// a cycle. It is pure and data-only, so it belongs here beside `gateRuleFor`; gate.mjs re-exports it.
+export function legacyLogins(hub) {
+  const out = new Map();
+  const clash = new Set();
+  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
+    if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
+    if (out.has(e.name) && out.get(e.name) !== e.login) clash.add(e.name);
+    out.set(e.name, e.login);
+  }
+  for (const n of clash) out.delete(n);
+  return out;
+}
+
+// The platform LOGIN an approval or comment record names, or null when the record only ever knew a
+// roster name. Shared by `yad usage` (the report) and the active-people reader (E71), because the two
+// must place the same record on the same person: if they disagreed, one of them would split a person
+// into two rows or — worse for a count that must never shrink — fold two people into one.
+//
+// Three cases, in the order they are decided:
+//   * `rosterName` present  -> a gate write already recorded the login from the roster (E64), so the
+//     name the record carries IS the login.
+//   * an OLDER record (it carries the `role` or `domain` the roster gave it, and is not `unverified`)
+//     -> translate through the roster's name -> login table, which is exact or absent (`legacyLogins`).
+//     An `unverified` record already named a login, and translating it through a roster name it
+//     collided with passed a gate on an outsider's old approval once (E62) — hence the exclusion.
+//   * anything else -> no login is proven. The caller falls back to the name as written.
+export function ledgerPersonLogin(rec, rawName, aliases = new Map()) {
+  if (rec && rec.rosterName !== undefined) return rawName || null;
+  const older = !!rec && (rec.role !== undefined || rec.domain !== undefined) && !rec.unverified;
+  return older && aliases.has(rawName) ? aliases.get(rawName) : null;
+}
+
 // Epic ids are EP-<slug> with [a-z0-9-] only — anything else (uppercase, dots, slashes) is
 // rejected before it can become a path segment under epics/.
 export const isValidEpicId = (epic) => /^EP-[a-z0-9-]+$/.test(epic || '');

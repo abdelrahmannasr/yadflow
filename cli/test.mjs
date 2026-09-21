@@ -17935,3 +17935,218 @@ test('proven history: the JS reader sees a quoted path and a move out, exactly a
       'a move OUT of payments is work in payments, and a quoted path never drops its author');
   } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
 });
+
+// ---- E71: counting active people -----------------------------------------------------------------
+//
+// THE ONE RULE THESE TESTS EXIST FOR: an input that cannot be read must produce `active: null`, never a
+// number and never zero. E66 and E67 needed the opposite (an unknown must not read as "nobody", which
+// under-ASKS); here a small `active` lowers E72's cap and weakens every gate, so an unknown must not
+// read as "few people". Part 3: err towards MORE people.
+const {
+  activePeople, peopleEvidence, capacityWindow, activeIn, personKey, daysBefore,
+  EXPERTISE_DAYS, CAPACITY_MAX_DAYS, CAPACITY_MIN_DAYS, CAPACITY_MERGES, WALK_PAD,
+} = await import('./people.mjs');
+
+const P_TODAY = '2026-09-21';
+
+// A Product with one epic, one connected code repo, and git history in both. `commit(repo, name,
+// email, daysAgo)` writes a commit whose AUTHOR and COMMITTER dates are both `daysAgo` before P_TODAY,
+// because `--since` filters on the committer date and the reader reads the same field.
+function peopleFixture({ withRepo = true } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-people-'));
+  git(T, 'init', '-q');
+  git(T, 'checkout', '-q', '-b', 'main');
+  const at = (daysAgo) => `${daysBefore(P_TODAY, daysAgo)}T12:00:00Z`;
+  const commit = (cwd, name, email, daysAgo, file = `f${Math.random().toString(36).slice(2)}.txt`) => {
+    fs.writeFileSync(path.join(cwd, file), String(daysAgo));
+    execFileSync('git', ['add', '-A'], { cwd, stdio: 'pipe' });
+    execFileSync('git', ['-c', `user.name=${name}`, '-c', `user.email=${email}`, 'commit', '-q', '-m', `c${daysAgo}`], {
+      cwd, stdio: 'pipe', env: { ...GIT_ENV, GIT_AUTHOR_DATE: at(daysAgo), GIT_COMMITTER_DATE: at(daysAgo) },
+    });
+  };
+  const epicDir = path.join(T, 'epics/EP-x/.sdlc');
+  fs.mkdirSync(epicDir, { recursive: true });
+  const write = (rel, obj) => fs.writeFileSync(path.join(T, rel), typeof obj === 'string' ? obj : JSON.stringify(obj));
+  write('epics/EP-x/.sdlc/state.json', { currentStep: 'epic-review', steps: [] });
+  write('epics/EP-x/.sdlc/approvals.json', []);
+  commit(T, 'Product Writer', 'writer@corp.io', 3);
+
+  let backend = null;
+  if (withRepo) {
+    backend = path.join(T, 'demo/backend');
+    fs.mkdirSync(backend, { recursive: true });
+    git(backend, 'init', '-q');
+    git(backend, 'checkout', '-q', '-b', 'main');
+    commit(backend, 'Repo Dev', 'dev@corp.io', 5);
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    write('.sdlc/repos.json', { repos: [{ name: 'backend', path: 'demo/backend' }] });
+  }
+  return { T, backend, write, commit, at };
+}
+
+test('E71 capacityWindow: fewer than 20 merges is the WIDE end, never a short window', () => {
+  // A young or quiet project has little history. Reading "little history" as "few people" is the quiet
+  // under-count the whole row is about.
+  const w = capacityWindow(['2026-09-20', '2026-09-19'], P_TODAY);
+  assert.equal(w.days, CAPACITY_MAX_DAYS);
+  assert.match(w.basis, /fewer than 20/);
+  assert.equal(capacityWindow([], P_TODAY).days, CAPACITY_MAX_DAYS, 'no merges at all is still the wide end');
+});
+
+test('E71 capacityWindow: the last 20 merges set the window, bounded 30–180', () => {
+  const merges = (span) => Array.from({ length: CAPACITY_MERGES }, (_, i) => daysBefore(P_TODAY, Math.round((i * span) / (CAPACITY_MERGES - 1))));
+  assert.equal(capacityWindow(merges(90), P_TODAY).days, 90, 'a 90-day span is the window');
+  assert.equal(capacityWindow(merges(4), P_TODAY).days, CAPACITY_MIN_DAYS, 'a fast team is floored at 30, not 4');
+  assert.equal(capacityWindow(merges(400), P_TODAY).days, CAPACITY_MAX_DAYS, 'a slow team is capped at 180');
+  assert.match(capacityWindow(merges(4), P_TODAY).basis, /bounded from 4/, 'the basis says it was bounded');
+});
+
+test('E71 personKey: a noreply address joins a commit and an approval into ONE person', () => {
+  const got = activeIn([
+    { ts: '2026-09-20', name: 'Octo Cat', login: 'octocat', how: 'committed' },
+    { ts: '2026-09-20', name: 'OctoCat', login: 'OctoCat', how: 'approved' },
+  ], '2026-09-01', P_TODAY);
+  assert.equal(personKey({ name: 'Octo Cat', login: 'OctoCat' }), personKey({ name: 'octo cat', login: 'octocat' }),
+    'the login decides the key whenever there is one');
+  assert.notEqual(personKey({ name: 'Octo Cat', login: null }), personKey({ name: 'Octo Cat', login: 'octocat' }),
+    'a bare name is NOT assumed to be the same person as a login that resembles it (E64)');
+  assert.equal(got.count, 1, 'logins are case-insensitive on both platforms');
+  assert.deepEqual(got.people[0].how, ['approved', 'committed']);
+  assert.equal(got.nameOnly, 0);
+});
+
+test('E71 personKey: a person with no provable login is TWO rows, and the count says so', () => {
+  // E64: only exact evidence proves identity. Guessing two rows into one makes the count SMALLER,
+  // which is the unsafe direction here — so they stay apart and `nameOnly` reports it.
+  const got = activeIn([
+    { ts: '2026-09-20', name: 'Ada Lovelace', login: null, how: 'committed' },
+    { ts: '2026-09-20', name: 'ada', login: 'ada', how: 'approved' },
+  ], '2026-09-01', P_TODAY);
+  assert.equal(got.count, 2);
+  assert.equal(got.nameOnly, 1);
+});
+
+test('E71 activeIn: only what is inside the window counts, on both edges', () => {
+  const ev = (ts) => ({ ts, name: ts, login: null, how: 'committed' });
+  const got = activeIn([ev('2026-08-31'), ev('2026-09-01'), ev(P_TODAY), ev('2026-09-22')], '2026-09-01', P_TODAY);
+  assert.deepEqual(got.people.map((p) => p.key), ['2026-09-01', '2026-09-21'], 'both ends inclusive, nothing outside');
+});
+
+test('E71 counts commits AND approvals, from the Product and every connected repo', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', [{ approver: 'reviewer-one', date: daysBefore(P_TODAY, 2) }]);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, [], 'a readable Product reports no unknowns');
+    assert.deepEqual(r.expertise.people.map((p) => p.key).sort(), ['product writer', 'repo dev', 'reviewer-one']);
+    assert.equal(r.expertise.active, 3);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 a robot is not capacity', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.commit(fx.T, 'dependabot[bot]', 'dependabot[bot]@users.noreply.github.com', 1);
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.expertise.people.map((p) => p.key), ['product writer'], 'a bot can never approve, so it is not a person to cap against');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 `today` is injected — the count never reads a clock', () => {
+  // The gate predicate's return is compared byte for byte by the golden test; a number derived from the
+  // current date would move that snapshot every single day.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    const now = activePeople(fx.T, { today: P_TODAY });
+    const later = activePeople(fx.T, { today: daysBefore(P_TODAY, -400) });
+    assert.equal(now.expertise.active, 1);
+    assert.equal(later.expertise.active, 0, 'the same repo, a different day, a different answer');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+// ---- the unknown rules ---------------------------------------------------------------------------
+
+const assertUnknown = (r, why) => {
+  assert.ok(r.unknown.length, `expected an unknown reason: ${why}`);
+  for (const w of ['capacity', 'expertise', 'stale']) {
+    assert.equal(r[w].active, null, `${w}.active must be null, not a number (${why})`);
+    assert.notEqual(r[w].active, 0, `${w}.active must never fall back to zero (${why})`);
+  }
+  assert.ok(r.capacity.days > 0, 'the window is still reported — "we could not count, over this window" beats silence');
+};
+
+test('E71 unknown: an approvals file that does not parse is NOT zero approvers', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', '{ broken');
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'corrupt approvals.json');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a repos.json that does not parse is NOT "no repos" (the E65 bug, inverted)', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('.sdlc/repos.json', '{ nope');
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'corrupt repos.json');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a registered repo that is not on this machine is NOT "nobody committed there"', () => {
+  const fx = peopleFixture();
+  try {
+    fx.write('.sdlc/repos.json', { repos: [{ name: 'backend', path: 'demo/backend' }, { name: 'gone', path: 'demo/not-here' }] });
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'a repo missing from disk');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a shallow clone holds too little history to count people', () => {
+  const fx = peopleFixture();
+  try {
+    const shallow = path.join(fx.T, 'demo/shallow');
+    execFileSync('git', ['clone', '-q', '--depth', '1', `file://${fx.backend}`, shallow], { stdio: 'pipe', env: GIT_ENV });
+    fx.write('.sdlc/repos.json', { repos: [{ name: 'shallow', path: 'demo/shallow' }] });
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assertUnknown(r, 'a shallow clone');
+    assert.match(r.unknown.join(' '), /shallow/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 unknown: a ship shard that does not parse is NOT one fewer engineer-review approver', () => {
+  // `readShardDir` skips a corrupt shard on purpose — right for an advisory report, wrong for a count.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fs.mkdirSync(path.join(fx.T, 'epics/EP-x/.sdlc/build-log'), { recursive: true });
+    fx.write('epics/EP-x/.sdlc/build-log/s-t-r.json', 'not json');
+    assertUnknown(activePeople(fx.T, { today: P_TODAY }), 'corrupt ship shard');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 NOT unknown: a Product with no connected repos is a readable answer, not a gap', () => {
+  // Absent is not the same fact as unreadable. A registry that is missing means there are no code
+  // repos; a registry that does not parse means we cannot know how many there were.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(r.unknown, []);
+    assert.equal(r.expertise.active, 1);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E71 the padded walk finds a person git\'s date cut-off would hide', () => {
+  // `--since` STOPS the walk at the first commit older than the date, so an out-of-order commit hides
+  // everyone behind it. E67 could accept that (it under-LISTS, the safe side there); here it
+  // under-COUNTS. The pad widens the cliff — it does not remove it, and that limit is stated.
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.commit(fx.T, 'Hidden Person', 'hidden@corp.io', 25);   // inside the 30-day window
+    fx.commit(fx.T, 'Old Commit', 'old@corp.io', 50);         // outside it, and IN FRONT of Hidden
+    fx.commit(fx.T, 'Tip Person', 'tip@corp.io', 1);
+    const padded = peopleEvidence(fx.T, { sinceDays: EXPERTISE_DAYS * WALK_PAD });
+    const naive = peopleEvidence(fx.T, { sinceDays: EXPERTISE_DAYS });
+    const inWindow = (ev) => activeIn(ev.events, daysBefore(P_TODAY, EXPERTISE_DAYS), P_TODAY).people.map((p) => p.key);
+    assert.ok(inWindow(naive).includes('tip person'), 'the tip is always reachable');
+    assert.ok(!inWindow(naive).includes('hidden person'), 'without the pad the cut-off hides them — this is the bug');
+    assert.ok(inWindow(padded).includes('hidden person'), 'with the pad they are counted');
+    assert.ok(!inWindow(padded).includes('old commit'), 'the pad widens the ASK, never the window itself');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
