@@ -18604,14 +18604,19 @@ test('yad doctor: the codeowners section — facts warn, no file is a note, the 
       ['ok', 'lab: every CODEOWNERS line yad can read matches a file'],
       ['warn', 'big: CODEOWNERS may be out of date — CODEOWNERS is 3 MB or more, so GitHub does not load it'],
     ]);
-    // One of each, in the singular; and a repo whose file list git cannot read is left to the repos check.
+    // One of each, in the singular; a repo whose file list git cannot read is not known, never quiet; and a
+    // bare repo (no files on disk) is the repos check's to report.
     mk('one', { 'CODEOWNERS': 'src/ @a\ngone/ @a\n!x @a\nfoo[a] @a\n' });
     mk('broken', { 'CODEOWNERS': 'gone/ @a\n' });
     fs.writeFileSync(path.join(T, 'broken/.git/index'), 'not an index');
-    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'one', path: 'one' }, { name: 'broken', path: 'broken' }] }));
+    execFileSync('git', ['clone', '-q', '--bare', path.join(T, 'one'), path.join(T, 'bare.git')], { stdio: 'pipe' });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'one', path: 'one' }, { name: 'broken', path: 'broken' }, { name: 'bare', path: 'bare.git' }] }));
     checks = [];
     codeownersChecks(checks, T);
-    assert.deepEqual(checks.map((x) => x.message), ['one: CODEOWNERS may be out of date — in CODEOWNERS, 1 line matches no file (line 2); in CODEOWNERS, 2 lines yad could not read (lines 3, 4)']);
+    assert.deepEqual(checks.map((x) => [x.status, x.message]), [
+      ['warn', 'one: CODEOWNERS may be out of date — in CODEOWNERS, 1 line matches no file (line 2); in CODEOWNERS, 2 lines yad could not read (lines 3, 4)'],
+      ['warn', 'broken: CODEOWNERS could not be checked — git could not list the files in this repo'],
+    ]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

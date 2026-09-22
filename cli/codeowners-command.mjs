@@ -37,8 +37,8 @@ const shownPattern = (d) => (d.pattern.includes('@') ? '' : ` (\`${d.negate ? '!
 // One repo → { git, platform, path?, none?, unknown?, tooBig?, ignored, notRead, dead, inactive? }. With
 // `hint`, `inactive` is { unknown } or { quiet, checked, notChecked } (see the header).
 export function checkCodeowners(repoRoot, { platform = null, remote, hint = false } = {}) {
-  const files = repoFiles(repoRoot);
-  if (!files) return { git: false };
+  // A work tree, not only a repo: a bare repo has no files on disk to check.
+  if (run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: repoRoot }).stdout !== 'true') return { git: false };
   const url = remote ?? run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout;
   const plat = platform || detectPlatform(url || '');
   const base = { git: true, platform: plat, ignored: [], notRead: [], dead: [] };
@@ -48,6 +48,9 @@ export function checkCodeowners(repoRoot, { platform = null, remote, hint = fals
   if (co.none) return { ...base, none: co.none };
   const out = { ...base, path: co.path, ignored: co.ignored };
   if (co.tooBig) return { ...out, tooBig: true };
+  // Only now the file list: it is slow on a large repo, and a repo with no CODEOWNERS never needs it.
+  const files = repoFiles(repoRoot);
+  if (!files) return { ...base, unknown: 'git could not list the files in this repo' };
   const parsed = parseCodeowners(co.text, plat);
   out.notRead = parsed.skipped;
   out.dead = deadLines(parsed, files, { submodules: submodulesOf(repoRoot) });
