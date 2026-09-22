@@ -19014,11 +19014,15 @@ test('E73 silent paths: an unknown count and solo mode print nothing, and an ope
     assert.doesNotMatch(unknown.out, /may not be met/, 'an unknown count is never a warning');
     const statusUnknown = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(null, 0) }));
     assert.doesNotMatch(statusUnknown.out, /may not be met/);
-    // The warning run leaves the step exactly where the same run with no warning leaves it.
-    await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(2, 0) }));
-    const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((x) => x.id === 'architecture-review');
-    assert.notEqual(after.status, 'done');
-    assert.equal(gatePredicate({ step: E72_CONTRACT, approvals: e72Approvals('al'), currentHash: 'h', active: 2 }).missing.length, 0, 'nothing is added to `missing`');
+    // The warning run writes EXACTLY what the same run with no warning wrote: the ledger never hears of it.
+    const ledger = () => ['state.json', 'approvals.json', 'comments.json'].map((f) => {
+      const file = path.join(ep, '.sdlc', f);
+      return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+    });
+    const quiet = ledger();
+    const warned = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(2, 0) }));
+    assert.match(warned.out, /may not be met/, 'this run did warn');
+    assert.deepEqual(ledger(), quiet, 'and wrote nothing the silent run did not');
     const hubFile = path.join(T, '.sdlc/hub.json');
     fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
     const solo = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(1, 0) }));

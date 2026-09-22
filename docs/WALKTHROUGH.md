@@ -239,8 +239,8 @@ a window that scales with how fast the team merges. The `− 1` leaves one seat 
 reported, not enforced: the count of people can read high (a git name and a platform login count as two
 people until proven one), so a two-person team can read as four and an enforced gate could lock them
 out. A later yadflow change turns the capped count on together with `yad gate lower --reason`, a
-recorded way out of a gate a team cannot meet, once the count is accurate. Until then, under an open
-gate, `yad gate status` and `yad gate sync` print a `! may not be met:` warning line when the count suggests the
+recorded way out of a gate a team cannot meet, once the count is accurate. Until then, under a team gate that has not
+passed, `yad gate status` and `yad gate sync` print a `! may not be met:` warning line when the count suggests the
 gate may not pass; it is a warning and holds nothing. When a source
 cannot be read, the count says `NOT COUNTED` rather than showing a small number, and no cap is shown.
 A team gate that passed on its counted approvals (not solo, not a skip or inherited shortcut) while the cap lowered its ask records `capped: { needed, to, active }` on its

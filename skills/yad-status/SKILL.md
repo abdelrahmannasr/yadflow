@@ -117,8 +117,8 @@ Print, in this order:
      `count capped from 3 to 1 (2 active people)`. In solo mode it prints no shortfall.
    - **A gate that may not be met (E73):** under a team gate that has not passed, `yad gate status` can print a line
      starting `! may not be met:` — the base may have nobody but the author to give it, the full count
-     would jam if enforced, or people known only by a git name may make the team smaller than the capped
-     ask. Relay it as stated, as a warning and never as "blocked": it holds nothing.
+     would jam if enforced, or people known only by a git name may make the team one person, or smaller
+     than the capped ask. Relay it as stated, as a warning and never as "blocked": it holds nothing.
    - **How many people there are to ask (E71), printed once per epic and not per step:** `active people:
      4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author);
      reported, only the base is enforced`, with the window's basis on the line under it. It is
