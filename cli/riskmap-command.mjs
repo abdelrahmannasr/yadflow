@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok, readJSONStrict, run, warn } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { changeLevel, draftRiskMap, highTouched, parseRiskMap, pathspecsFor, recentAuthors, RISK_MAP_FILE, riskMapFindings } from './riskmap.mjs';
+import { changeLevel, draftRiskMap, folderPathspec, highTouched, parseRiskMap, pathspecsFor, rankAuthors, recentAuthors, RISK_MAP_FILE, riskMapFindings, touchedFolders } from './riskmap.mjs';
 
 // Every file in a code repo, as the map sees it: tracked files plus new files git does not ignore, so a
 // directory someone has just created is asked about before it is committed. null when it is not a git repo.
@@ -116,10 +116,10 @@ export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window =
   return { authors: recentAuthors(commits, h.own) };
 }
 
-// The one git reader behind E67's ask. Returns { unknown: why } for a history it
+// The one git reader behind E67's ask and E68's suggestion. Returns { unknown: why } for a history it
 // cannot read — a shallow clone holds only the newest commits, and reading that as "nobody has worked
 // here" would be a guess — or { own, authorRecords }: the addresses of the change's own authors (left out
-// of every answer: an approval has to come from someone else), and a function that runs ONE
+// of every answer: an approval, and a suggestion, have to be someone else), and a function that runs ONE
 // log on the base branch for a set of pathspecs and returns its author records, or null when git fails.
 function historyReader(repoRoot, baseRef) {
   const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
@@ -141,6 +141,38 @@ function historyReader(repoRoot, baseRef) {
     });
   };
   return { own: own.stdout.split('\n').filter(Boolean), authorRecords };
+}
+
+// E68 — the files this change touches, deletions and moves included (E66's range: three dots, from where
+// the branch left its base, `--no-renames`, NUL-separated so an odd name is never quoted). Read WITHOUT the
+// risk map, because most repos have none and a suggestion does not need one. { files } or { unknown }.
+export function changedSince(repoRoot, baseRef) {
+  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  if (git(['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`]).status !== 0 || git(['merge-base', baseRef, 'HEAD']).status !== 0) {
+    return { unknown: `base ref '${baseRef}' not found, or it shares no history with HEAD (a shallow clone?)` };
+  }
+  const diff = git(['diff', '--name-only', '-z', '--no-renames', `${baseRef}...HEAD`]);
+  if (diff.status !== 0) return { unknown: `git could not read the change against ${baseRef}` };
+  return { files: diff.stdout.split('\0').filter(Boolean) };
+}
+
+// How many folders one suggestion asks git about. Every folder goes into ONE log, so the cost does not
+// grow with the count; the cap only keeps the command line short. A cut is always printed.
+export const SUGGEST_FOLDER_CAP = 200;
+
+// E68 — who has committed in the folders this change touches, in the window: a SUGGESTION of who may know
+// the code, never an ask, never a request. The files DIRECTLY in each touched folder (`folderPathspec`),
+// all in one log, so a commit touching two of them is counted once. Returns { authors: [{ name, login,
+// commits }], folders, skipped } or { unknown: why } — never an empty list for a history it could not read.
+export function suggestedAuthorsFor(repoRoot, baseRef, { changed, window = HISTORY_WINDOW, cap = SUGGEST_FOLDER_CAP } = {}) {
+  const all = touchedFolders(changed);
+  const folders = all.slice(0, cap);
+  if (!folders.length) return { authors: [], folders: 0, skipped: 0 };
+  const h = historyReader(repoRoot, baseRef);
+  if (h.unknown) return h;
+  const got = h.authorRecords(folders.map(folderPathspec), window);
+  if (!got) return { unknown: `git could not read the history of '${baseRef}'` };
+  return { authors: rankAuthors(got, h.own), folders: folders.length, skipped: all.length - folders.length };
 }
 
 export function checkRepo(repoRoot) {

@@ -216,6 +216,51 @@ export function recentAuthors(commits, excludeEmails = []) {
   return out;
 }
 
+// E68 — the folders a change touches, for the reviewer SUGGESTION: the folder each changed file sits in
+// (`./` for a file at the root), nobody twice, the folder holding the most changed files first (then by
+// name, so the order is the same every run). A folder that holds only subfolders is never one.
+export function touchedFolders(changed) {
+  const n = new Map();
+  for (const f of changed) {
+    const i = f.lastIndexOf('/');
+    const dir = i < 0 ? './' : f.slice(0, i + 1);
+    n.set(dir, (n.get(dir) || 0) + 1);
+  }
+  return [...n.keys()].sort((a, b) => n.get(b) - n.get(a) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+// The pathspec for the files DIRECTLY in one folder — never its subfolders, so work in `src/` is not
+// work in every folder below it. A glob, because `:(literal)` cannot stop at one level; so every glob
+// character in the name is escaped, and the name can never tell git what to do (E67's `:weird/` lesson:
+// the magic ends at `)`, and what follows is only a pattern).
+export function folderPathspec(dir) {
+  if (dir === './') return ':(glob)*';
+  return `:(glob)${dir.replace(/[\\*?[]/g, '\\$&')}*`;
+}
+
+// The people to suggest, from ONE log over every touched folder: `recentAuthors`' rules (the change's own
+// authors and robots left out, one row per address), ranked by how many commits each made there, then
+// newest first. A count, because a suggestion list is read top-down and the first name should be the one
+// who has done the most there lately.
+export function rankAuthors(commits, excludeEmails = []) {
+  const count = new Map();
+  const first = [];
+  for (const cm of commits) {
+    const key = String(cm.email || '').toLowerCase();
+    if (!count.has(key)) first.push(cm);
+    count.set(key, (count.get(key) || 0) + 1);
+  }
+  // One record per address, in git's order (newest first). Each goes through recentAuthors on its own, so
+  // the robot and own-author rules are the SAME code E67 runs, never a copy of them.
+  const rows = [];
+  for (const cm of first) {
+    const [p] = recentAuthors([cm], excludeEmails);
+    if (p) rows.push({ ...p, commits: count.get(String(cm.email || '').toLowerCase()) });
+  }
+  // Array.prototype.sort is stable, so equal counts keep git's newest-first order.
+  return rows.sort((a, b) => b.commits - a.commits);
+}
+
 // The directory to add for a file no line covers. Walk down from the root while some listed line sits
 // deeper under the current directory; the first directory with none below it is the one to add. A file
 // directly inside a directory that only has deeper lines asks for that directory itself. A directory a

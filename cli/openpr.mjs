@@ -12,7 +12,8 @@ import {
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase, gateCapFor, capLimit, peopleWord, gateRuleSum, gateRuleEnforced, legacyLogins } from './epic-state.mjs';
 import { activePeople } from './people.mjs';
-import { baseChangeLevel, recentAuthorsFor } from './riskmap-command.mjs';
+import { baseCodeowners, ownersFor, parseCodeowners } from './codeowners.mjs';
+import { baseChangeLevel, changedSince, recentAuthorsFor, suggestedAuthorsFor } from './riskmap-command.mjs';
 import { gateOpen } from './gate.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
@@ -145,6 +146,65 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
   return { rule, map, lines };
 }
 
+// E68 — a reviewer SUGGESTION, printed once the PR is open. Two separate hints, never merged: the people
+// who have committed in the folders this change touches in the last 30 days (base branch, the change's
+// own authors and robots left out), and what CODEOWNERS on the base lists for those files. It holds
+// nothing, waives nothing and requests no one — E62 decided PRs request no reviewers, and a name here is
+// a hint about who MAY know the code, never a claim about who owns it or who must approve. A git name
+// and a CODEOWNERS login are joined only on exact evidence: a commit address that carries that login.
+export const SUGGEST_SHOWN = 5;
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+export function suggestReviewers(repoRoot, baseBranch, platform) {
+  const base = `origin/${baseBranch}`;
+  const lines = [];
+  const ch = changedSince(repoRoot, base);
+  if (ch.unknown) return { lines: [[info, `reviewer suggestion: not read — ${ch.unknown}`]] };
+  if (!ch.files.length) return { lines: [[info, `reviewer suggestion: none — this branch changes no file against ${base}`]] };
+
+  const hist = suggestedAuthorsFor(repoRoot, base, { changed: ch.files });
+  const where = hist.folders > 1 ? `the ${hist.folders} folders this change touches` : hist.folders === 1 ? 'the folder this change touches' : 'the folders this change touches';
+  const cut = hist.skipped ? ` (${plural(hist.skipped, 'more folder')} not asked about — the list stops at ${hist.folders})` : '';
+  const logins = new Set();
+  if (hist.unknown) lines.push([info, `who has committed in ${where} lately: not read — ${hist.unknown}`]);
+  else if (!hist.authors.length) lines.push([info, `nobody else has committed in ${where} in the last 30 days${cut}`]);
+  else {
+    for (const a of hist.authors) if (a.login) logins.add(a.login);
+    const shown = hist.authors.slice(0, SUGGEST_SHOWN).map((a) => `${a.name}${a.login ? ` (@${a.login})` : ''} — ${plural(a.commits, 'commit')}`);
+    const more = hist.authors.length > SUGGEST_SHOWN ? `, and ${hist.authors.length - SUGGEST_SHOWN} more` : '';
+    lines.push([hand, `may know this code — committed in ${where} in the last 30 days: ${shown.join(', ')}${more}${cut}`]);
+  }
+
+  const co = baseCodeowners(repoRoot, base, platform);
+  let listed = false;
+  if (co.unknown) lines.push([info, `CODEOWNERS: not read — ${co.unknown}`]);
+  else if (co.none) lines.push([info, `CODEOWNERS: none — ${co.none}`]);
+  else {
+    const parsed = parseCodeowners(co.text, platform);
+    const got = ownersFor(parsed, ch.files);
+    // A file with no owner: no line matched it, the matching line names nobody, or a GitLab `!` line
+    // excludes it — the same answer for a reviewer, so one count.
+    const unmatched = got.unmatched ? `; ${got.unmatched} of ${plural(ch.files.length, 'touched file')} ${got.unmatched === 1 ? 'has' : 'have'} no owner there` : '';
+    if (!got.owners.length) lines.push([info, `CODEOWNERS on ${base} (${co.path}) lists nobody for the files this change touches`]);
+    else {
+      listed = true;
+      const tag = { team: ' (a team)', group: ' (a group)', role: ' (a role)' };
+      const shown = got.owners.slice(0, SUGGEST_SHOWN).map((o) => {
+        const also = (o.kind === 'user' || o.kind === 'name') && logins.has(o.text.slice(1)) ? ', also in the history above' : '';
+        const notes = [tag[o.kind]?.slice(2, -1), o.optional ? 'optional section' : '', also.slice(2)].filter(Boolean);
+        return `${o.text}${notes.length ? ` (${notes.join(', ')})` : ''}`;
+      });
+      const more = got.owners.length > SUGGEST_SHOWN ? `, and ${got.owners.length - SUGGEST_SHOWN} more` : '';
+      const gl = platform === 'gitlab' && got.owners.some((o) => o.kind === 'name') ? '; on GitLab an @name can be a person or a group' : '';
+      lines.push([hand, `CODEOWNERS on ${base} (${co.path}) lists for the touched files: ${shown.join(', ')}${more}${unmatched} — a hint only: these files go stale, and yad does not check that anyone listed still works here${gl}`]);
+    }
+    for (const s of parsed.skipped.slice(0, 3)) lines.push([warn, `CODEOWNERS line ${s.line} not read — ${s.why}`]);
+    if (parsed.skipped.length > 3) lines.push([warn, `CODEOWNERS: ${plural(parsed.skipped.length - 3, 'more line')} not read`]);
+  }
+  const both = listed && hist.authors?.length;
+  lines.push([info, `a suggestion only — nobody was asked to review, and no name above is an owner or a required approver${both ? '; the same person can appear in both lists under two names (yad joins them only when a commit address carries the exact @login)' : ''}`]);
+  return { lines };
+}
+
 export async function runOpenPr(root, opts = {}) {
   log(c.bold('\nyad open-pr'));
   const { repoRoot, meta } = resolveRepo(root, opts);
@@ -230,7 +290,7 @@ export async function runOpenPr(root, opts = {}) {
 
   // Assignee = the committer: `@me` on GitHub (buildPrArgs sends it when no assignee is named, and `gh`
   // resolves it on the repo's own host), the login `glab` reports on GitLab. No reviewers are requested (E62): the roster that named them is gone. The team requests them
-  // on the PR, and E68 will suggest them from history.
+  // on the PR; E68 prints a suggestion from history and CODEOWNERS below, and requests no one.
   const committer = platform === 'gitlab' ? platformLogin(repoRoot, platform) : null;
   const assignees = committer ? [committer] : [];
 
@@ -265,5 +325,6 @@ export async function runOpenPr(root, opts = {}) {
   const count = stage === 'code-repo' ? routeCount(repoRoot, baseBranch, { ...opts, active }) : null;
   if (count) for (const [say, line] of count.lines) say(line);
   else if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` to see how many approvers it asks for');
+  if (stage === 'code-repo') for (const [say, line] of suggestReviewers(repoRoot, baseBranch, platform).lines) say(line);
   return { url: r.url };
 }
