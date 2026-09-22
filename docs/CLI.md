@@ -1011,45 +1011,56 @@ directory of that name (`apps/`, `**/logs`), while one ending in a wildcard matc
 
 **Is CODEOWNERS stale? (E69).** A CODEOWNERS file names who looks after each part of a repo, and
 these files rot: a folder moves, a person leaves. `yad codeowners check [repo]` reads the file **on disk**
-(like `yad risk-map check`), in the platform's own order, and warns. `yad doctor` prints the same facts
-as one line per connected repo, in its `codeowners` section. It is advisory: nothing fails, and nothing
-is written.
+(like `yad risk-map check`), in the platform's own order, and warns. `yad doctor` sums up the same facts
+in one line per connected repo, in its `codeowners` section. A repo that is not on disk, is not a git
+repo, or has no commits yet gets no `codeowners` line: the doctor's repos check already reports it. It is
+advisory: a finding never fails, and nothing is written. (An unknown repo name, or `--write`, does fail.)
 
-| What it says | Kind | Printed by |
+| What it finds | Kind | Printed by |
 |---|---|---|
-| `line N (…) matches no file in this repo`, with the pattern in brackets — or `excludes no file` for a GitLab `!` line. Files not committed yet count, like the risk map. A line that could reach into a submodule is never called dead: a submodule's own files are not in the list. | fact | command and doctor |
-| `docs/CODEOWNERS is never read — GitHub reads .github/CODEOWNERS first` | fact | command and doctor |
-| `CODEOWNERS is 3 MB or more — GitHub does not load a file that large` (GitHub only; GitLab documents no limit) | fact | command and doctor |
-| `line N not read — why` — the same reasons as E68's `not read` | fact | command and doctor |
+| A line that matches no file: `line N (…) matches no file in this repo`, or `excludes no file` for a GitLab `!` line. The pattern is shown in brackets, unless it holds an `@` — then only the line number is shown. Files not committed yet count, like the risk map. | fact | command; the doctor gives a count and the line numbers |
+| A second CODEOWNERS the platform never reads, because it reads another location first: `docs/CODEOWNERS is never read — GitHub reads .github/CODEOWNERS first` | fact | command; the doctor says `… is never read (… is read first)` |
+| A GitHub file of 3 MB or more, which GitHub does not load, so it lists no owner for any file. GitLab documents no size limit. | fact | command and doctor |
+| A line yad cannot read: `line N not read — why`, with the same reasons as E68's `not read` | fact | command; the doctor gives a count and the line numbers |
 | `no commit on the checked-out branch in the last 90 days carries a github.com noreply address for @a, @b — a hint only: they may commit under another address or work in other repos, so this does not mean they have left` | **hint** | command only |
+
+A **submodule** is another repo kept inside this one. Its files are not in this repo's file list, and the
+platform only ever sees the submodule's own path. So a line for the submodule's folder (`vendor/lib/`) is
+never called dead, but a line for files inside it (`vendor/lib/*.js`) is.
 
 **The hint is a guess, so it is fenced in.** A `noreply` address is the private address GitHub or GitLab
 gives each account; it is the only exact link between a commit and a login. So the hint checks only a
 person's `@login` — never a team, group, role or e-mail address (they are counted as `not checked`) — and
-only when the origin remote is on `github.com` or `gitlab.com`. On GitLab an `@name` can also be a group,
-and the output says so. The history is the whole checked-out branch, read by the same reader as E67 and
-E68, with robots left out. A self-managed server, a shallow clone, a repo with no commits, or a history
-git cannot read says `not known` with the reason — never that someone is inactive. The doctor never
-prints the hint: it warns only on facts.
+only when the `origin` remote (the server the repo pushes to) is on `github.com` or `gitlab.com`. On
+GitLab an `@name` can also be a group, and the output says so. The history is the whole checked-out
+branch, read by the same reader as E67 and E68, with robot accounts left out. These cases say `not known`
+with the reason, never that someone is inactive: a self-managed server; a **shallow clone** (a copy that
+holds only the newest commits); a repo with no commits; a history git cannot read. The doctor never prints
+the hint: it warns only on facts.
 
 | Situation | What is printed |
 |---|---|
 | No CODEOWNERS file | `none` — a note, not a warning. (A repo with no review rules at all is E70's warning.) |
-| The first location is a symlink or a folder, or cannot be read | `not known` with the reason — never `none`, never fine |
-| git cannot list the repo's files (a broken index) | `not known` — in `yad doctor` too, a warning rather than a quiet skip |
+| The first location is a **symlink** (a file that only points at another file) or a folder, or cannot be read | `not known` with the reason — never `none`, never fine |
+| A file named `codeowners` in another case | Not read: git stores names exactly as written, so the platform looks for `CODEOWNERS`. yad matches the exact name even on a disk that ignores case. |
+| The path is a folder inside a repo, not its top folder | `not known`: the platform reads CODEOWNERS from the top folder |
+| git cannot list the repo's files (for example, a broken **index** — git's list of tracked files) | `not known` — in `yad doctor` too, a warning rather than a quiet skip |
+| A **bare** repo (a git repo with no files on disk) | skipped by the command; the doctor leaves it to the repos check |
 | yad cannot tell GitHub from GitLab (no `platform` in `repos.json`, and the remote names neither) | `not known` — pass `--platform` |
 
-**Why there is no `--write`.** The roadmap title named one. It was dropped (2026-09-22): GitHub and GitLab
-can **enforce** CODEOWNERS ("Require review from Code Owners"), so any name yadflow wrote into the file —
-even inside a comment, since GitLab reads owners written in a comment — would become an owner the
-platform enforces. That turns a hint into an authority. `yad codeowners write` (or `--write`) is refused
-with that reason. Edit the file yourself and commit it through a PR.
+**Why there is no `--write`.** The roadmap title named one. It was dropped (2026-09-22): both platforms
+can **enforce** CODEOWNERS (GitHub's "Require review from Code Owners" branch rule, and GitLab's code owner
+approval on a protected branch). So any name yadflow wrote into the file — even inside a comment, since
+GitLab reads owners written in a comment — would become an owner the platform enforces. That turns a hint
+into an authority. `yad codeowners write`, or `--write` anywhere on the line, is refused with that reason.
+Edit the file yourself and commit it through a PR.
 
 **Known limits.** The hint reads the **author** address, so a person whose noreply address appears only as
-the committer is not counted. E67's limits apply: git's date-limited walk stops at the first commit older
-than the window, so out-of-order dates can hide recent work; `--since` reads the committer date. "Matches
-no file" uses the same pattern reading as E68, including its one reading of our own (a pattern whose last
-part has no wildcard also covers a folder of that name).
+the committer is not counted. Merge commits are left out (the reader's `--no-merges`), so a person whose
+only recent commits are merges is named. E67's limits apply: git's date-limited walk stops at the first
+commit older than the window, so out-of-order dates can hide recent work; `--since` reads the committer
+date. "Matches no file" uses the same pattern reading as E68, including its one reading of our own (a
+pattern whose last part has no wildcard also covers a folder of that name).
 
 ## File shape: `schemaVersion`
 

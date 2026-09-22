@@ -37,7 +37,7 @@ const GROUPS = [
       'yad repo list / yad repo refresh [name] — fresh/stale code-context',
       'yad repo refresh [name] --push — publish refreshed code-maps + the registry to the Product default branch (chore(hub): sync code-context [skip ci])',
       'yad risk-map check|draft [repo] — a code repo\'s .sdlc/risk-map: a risk level per directory (high / medium / low), no names. draft adds unset lines and never changes one; check warns where the map is stale (advisory). A PR touching a directory the base branch\'s map marks high asks for one more approver (reported, not enforced); the CI check, risk-route.sh and yad open-pr — not this command — also name who committed there in the last 30 days',
-      'yad codeowners check [repo] [--json] — warn where a code repo\'s CODEOWNERS looks stale (E69): a line that matches no file, a second file the platform never reads, a GitHub file of 3 MB or more, a line yad cannot read; plus a hint (this command only, never yad doctor) naming @logins with no commit in 90 days that carries their noreply address. Advisory; never writes the file — there is no --write, because a name yad wrote would become an owner the platform can enforce',
+      'yad codeowners check [repo] [--json] [--platform github|gitlab] — warn where a code repo\'s CODEOWNERS looks stale (E69): a line that matches no file, a second file the platform never reads, a GitHub file of 3 MB or more, a line yad cannot read; plus a hint (this command only, never yad doctor) naming @logins with no commit in 90 days that carries their noreply address. Advisory; never writes the file — there is no --write, because a name yad wrote would become an owner the platform can enforce',
     ],
   },
 ];
