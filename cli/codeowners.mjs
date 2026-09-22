@@ -119,7 +119,8 @@ export function patternOf(raw, platform) {
     if (!last) body += '/';
   }
   const lastSeg = segs[segs.length - 1];
-  return { re: new RegExp(`^${anchored ? '' : '(?:.*/)?'}${body}$`), dirs: dirOnly || !/[*?]/.test(lastSeg), fileToo: !dirOnly };
+  // `s`: a folder name can hold a line break (git lists it), and `.` must cross it like any character.
+  return { re: new RegExp(`^${anchored ? '' : '(?:.*/)?'}${body}$`, 's'), dirs: dirOnly || !/[*?]/.test(lastSeg), fileToo: !dirOnly };
 }
 
 export function matches(pat, file) {
@@ -283,7 +284,9 @@ export function deadLines(parsed, files, { submodules = [] } = {}) {
     if (!tails.has(k)) {
       // A name with fewer than k parts gives itself, which holds fewer than k-1 slashes and so never matches.
       const cut = (list) => new Set(list.map((x) => x.split('/').slice(-k).join('/')));
-      tails.set(k, { files: cut(names), dirs: cut(dirList) });
+      const files = cut(names);
+      const folders = cut(dirList);
+      tails.set(k, { files, dirs: folders, fileList: [...files], dirList: [...folders] });
     }
     return tails.get(k);
   };
@@ -334,8 +337,8 @@ export function deadLines(parsed, files, { submodules = [] } = {}) {
       // name's last k parts can match it, so the distinct last k parts are tested instead of every path.
       const t = tailsOf(parts.filter((p) => p.text === '/').length + 1);
       if (plain) return (pat.fileToo && t.files.has(text)) || (pat.dirs && t.dirs.has(text));
-      const last = new RegExp(`^${rest}$`);
-      return (pat.fileToo && [...t.files].some((x) => last.test(x))) || (pat.dirs && [...t.dirs].some((x) => last.test(x)));
+      const last = new RegExp(`^${rest}$`, 's');
+      return (pat.fileToo && t.fileList.some((x) => last.test(x))) || (pat.dirs && t.dirList.some((x) => last.test(x)));
     }
     if (!anyDepth) {
       // Anchored at the top: every match starts with the plain text before the first wildcard, so only

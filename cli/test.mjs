@@ -18348,7 +18348,7 @@ test('codeowners check: a line that matches no file is found, and a submodule is
 
   // The fast paths (a set lookup for plain text, last parts for "at any depth") give exactly the answer of
   // asking `matches` about every file, for every pattern shape the reader accepts.
-  const { matches } = await import('./codeowners.mjs');
+  const { matches, ownersFor } = await import('./codeowners.mjs');
   const tree = ['src/a.js', 'src/deep/b.ts', 'docs/api/x.md', 'README.md', 'a+b.js', 'weird $x/(y).py', 'my docs/a b.txt',
     'logs/today.log', 'app/logs/old.log', 'internal/README.md', 'docs/internal/README.md', 'lib.rs', '.github/CODEOWNERS'];
   const shapes = ['*', '/', 'src/', '/src', 'src', 'src/a.js', '/src/a.js', 'a.js', '*.js', '**/*.ts', '*.md', 'docs/*', 'docs/**',
@@ -18378,6 +18378,15 @@ test('codeowners check: a line that matches no file is found, and a submodule is
     assert.deepEqual(deadLines(parseCodeowners('a\rb @a\na\u2028b @a\n', platform), ['arb', 'au2028b']).map((d) => d.line), [1, 2], platform);
     assert.deepEqual(deadLines(parseCodeowners('a\rb @a\n', platform), ['x/a\rb']).map((d) => d.line), [], platform);
     assert.deepEqual(deadLines(parseCodeowners('/src/a.js* @a\n/src/a.js*/ @a\n', platform), ['src/a.js']).map((d) => d.line), [2], platform);
+  }
+  // A folder name holding a line break is crossed like any other (E69 review, round 3): `.` in a pattern's
+  // regex matches it, so "at any depth" reaches below it, in `matches` and so in E68's `ownersFor` too.
+  for (const platform of ['github', 'gitlab']) {
+    for (const lb of ['\r', '\n', '\u2028']) {
+      const parsed = parseCodeowners('a @o\n*.md @o\n**/a/b @o\n', platform);
+      assert.deepEqual(deadLines(parsed, [`x${lb}/a`, `y${lb}/r.md`, `z${lb}/a/b`]).map((d) => d.line), [], `${platform} ${JSON.stringify(lb)}`);
+      assert.equal(ownersFor(parsed, [`x${lb}/a`]).matched, 1, `${platform} ${JSON.stringify(lb)}`);
+    }
   }
   // And random ones, from a fixed seed so a failure repeats.
   let seed = 69;
