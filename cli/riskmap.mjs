@@ -255,7 +255,14 @@ export function rankAuthors(commits, excludeEmails = []) {
   const rows = [];
   for (const cm of first) {
     const [p] = recentAuthors([cm], excludeEmails);
-    if (p) rows.push({ ...p, commits: count.get(String(cm.email || '').toLowerCase()) });
+    if (!p) continue;
+    // A git NAME can itself be an address (`user.name` set to one is a common slip), and no address is
+    // ever printed: the login stands in when there is one, else these words.
+    const name = /[^\s@]@[^\s@]/.test(p.name) ? (p.login ? `@${p.login}` : 'a name that is an e-mail address') : p.name;
+    // Which platform the login belongs to: a GitHub noreply login says nothing about a GitLab account
+    // spelled the same, so a caller joins a login to a platform name only when the two match.
+    const loginHost = p.login ? (/@users\.noreply\.github\.com$/i.test(cm.email) ? 'github' : 'gitlab') : null;
+    rows.push({ ...p, name, loginHost, commits: count.get(String(cm.email || '').toLowerCase()) });
   }
   // Array.prototype.sort is stable, so equal counts keep git's newest-first order.
   return rows.sort((a, b) => b.commits - a.commits);

@@ -91,6 +91,18 @@ export function baseChangeLevel(repoRoot, baseRef) {
   return { base, files: files.length, entries: parsed.entries, changed: files, ...got };
 }
 
+// The environment for a git call that carries pathspecs. Four variables change how git reads EVERY
+// pathspec: `GIT_LITERAL_PATHSPECS` makes `:(glob)src/*` match nothing (and git still exits 0, so the
+// answer would read as "nobody"), `GIT_ICASE_PATHSPECS` makes `src/` match `SRC/` (the wrong people),
+// and the glob pair changes what `*` means. The pathspecs here say exactly what they mean, so none of
+// the four may reach git.
+export const PATHSPEC_ENV = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
+export function gitEnv() {
+  const env = { ...process.env };
+  for (const k of PATHSPEC_ENV) delete env[k];
+  return env;
+}
+
 // Git's own words for E67's window (Part 3: expertise is a fixed, tight 30 days).
 export const HISTORY_WINDOW = '30 days ago';
 
@@ -122,7 +134,7 @@ export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window =
 // of every answer: an approval, and a suggestion, have to be someone else), and a function that runs ONE
 // log on the base branch for a set of pathspecs and returns its author records, or null when git fails.
 function historyReader(repoRoot, baseRef) {
-  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30, env: gitEnv() });
   if (/true/.test(git(['rev-parse', '--is-shallow-repository']).stdout || '')) {
     return { unknown: 'this is a shallow clone — it does not hold the history of those directories' };
   }

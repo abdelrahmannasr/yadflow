@@ -34,6 +34,7 @@
 // NO E-MAIL ADDRESS IS EVER PRINTED (E67's rule): an address owner is kept as "an e-mail address".
 
 import { spawnSync } from 'node:child_process';
+import { gitEnv } from './riskmap-command.mjs';
 
 export const CODEOWNERS_PATHS = {
   github: ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS'],
@@ -172,8 +173,9 @@ export function parseCodeowners(text, platform) {
     const owners = rest.map((x) => ownerOf(x, platform));
     const badAt = owners.indexOf(null);
     if (badAt >= 0) {
-      // A word with an `@` inside may be a mistyped address, so it is never printed as written.
-      const shown = /^[^@]+@/.test(rest[badAt]) ? 'an address-like word' : `\`${rest[badAt]}\``;
+      // A word with an `@` anywhere after its first character may be a mistyped address (`bob@corp`,
+      // `@alice@corp.com`), so it is never printed as written.
+      const shown = rest[badAt].indexOf('@', 1) >= 0 ? 'an address-like word' : `\`${rest[badAt]}\``;
       skipped.push({ line: n, why: `${shown} is not an owner (@user, @org/team or an e-mail address)` });
       return;
     }
@@ -223,7 +225,8 @@ export function ownersFor(parsed, files) {
 // { unknown: why } — git failing is never "none". Only a regular file is read (a symlink's `git show` is
 // its target's name).
 export function baseCodeowners(repoRoot, baseRef, platform) {
-  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  // gitEnv: a pathspec variable in the caller's environment makes `ls-tree -- <path>` fail outright.
+  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30, env: gitEnv() });
   const paths = CODEOWNERS_PATHS[platform];
   if (!paths) return { unknown: `no CODEOWNERS locations are known for platform '${platform}'` };
   for (const p of paths) {

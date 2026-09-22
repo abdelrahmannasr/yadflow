@@ -17991,10 +17991,15 @@ test('suggest reviewers: ranked by commits, then newest; the change\'s own autho
     { name: 'Me', email: 'me@corp.io' },
   ];
   assert.deepEqual(rankAuthors(commits, ['ME@corp.io']), [
-    { name: 'Ana', login: null, commits: 2 },
-    { name: 'Carol', login: 'carol', commits: 1 },
-    { name: 'Bo', login: null, commits: 1 },
+    { name: 'Ana', login: null, loginHost: null, commits: 2 },
+    { name: 'Carol', login: 'carol', loginHost: 'github', commits: 1 },
+    { name: 'Bo', login: null, loginHost: null, commits: 1 },
   ], 'one row per address whatever its case, most commits first, a tie kept newest first');
+  // A git NAME that is itself an address is never printed: the login stands in, else plain words.
+  assert.deepEqual(rankAuthors([
+    { name: 'ana@corp.io', email: 'ana@corp.io' },
+    { name: 'tanuki@corp.io', email: '9-tanuki@users.noreply.gitlab.com' },
+  ]).map((a) => [a.name, a.loginHost]), [['a name that is an e-mail address', null], ['@tanuki', 'gitlab']]);
 });
 
 test('suggest reviewers: the real reader reads files directly in each touched folder, once per commit', async () => {
@@ -18011,7 +18016,7 @@ test('suggest reviewers: the real reader reads files directly in each touched fo
     r.branch();
     r.mine({ 'src/a.js': '2', 'lib/b.js': '2', ':weird/w.js': '2' });
     const got = suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js', 'lib/b.js', ':weird/w.js'] });
-    assert.deepEqual(got.authors, [{ name: 'Weird', login: null, commits: 1 }, { name: 'Both', login: null, commits: 1 }],
+    assert.deepEqual(got.authors, [{ name: 'Weird', login: null, loginHost: null, commits: 1 }, { name: 'Both', login: null, loginHost: null, commits: 1 }],
       'work only in src/deep/ is not work in src/; a commit in two folders counts once; `:weird/` is not `weird/`; 60 days is outside');
     assert.deepEqual([got.folders, got.skipped], [3, 0]);
     const capped = suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js', 'lib/b.js', ':weird/w.js'], cap: 1 });
@@ -18075,6 +18080,7 @@ test('suggest reviewers: GitHub CODEOWNERS follows every example in GitHub\'s ow
   assert.deepEqual(bad.rules, []);
   assert.deepEqual(bad.skipped.map((s) => s.line), [1, 2, 3, 4, 5, 6]);
   assert.match(bad.skipped[5].why, /^an address-like word/, 'a mistyped address is not printed either');
+  assert.match(parseCodeowners('src/ @alice@corp.com\n', 'github').skipped[0].why, /^an address-like word/, 'nor one that starts with `@`');
 });
 
 test('suggest reviewers: GitLab CODEOWNERS follows its sections, exclusions and any-depth paths', async () => {
@@ -18152,7 +18158,7 @@ test('suggest reviewers: what open-pr prints is hedged, capped, and joins a name
     r.mine({ 'src/a.js': 'z' });
     const out = await suggestText(r.T);
     assert.match(out, /^may know this code — committed in the folder this change touches in the last 30 days: Carl \(@Carl\) — 1 commit, Carol \(@carol\) — 1 commit, F — 1 commit, E — 1 commit, D — 1 commit, and 3 more$/m);
-    assert.match(out, /CODEOWNERS on origin\/main \(\.github\/CODEOWNERS\) lists for the touched files: @carol \(also in the history above\), @carl, @ana, @org\/payments \(a team\), @leaver, and 1 more — a hint only: these files go stale/);
+    assert.match(out, /CODEOWNERS on origin\/main \(\.github\/CODEOWNERS\) lists for the touched files: @carol \(also in the 30-day history\), @carl, @ana, @org\/payments \(a team\), @leaver, and 1 more — a hint only: these files go stale/);
     assert.doesNotMatch(out, /@carl \(also/, 'a login differing in case is not exact evidence');
     assert.doesNotMatch(out, /@ana \(also/, 'a work address carries no login, so Ana is not joined to @ana');
     assert.doesNotMatch(out, /corp\.io/, 'no e-mail address is ever printed');
@@ -18230,11 +18236,45 @@ test('suggest reviewers: open-pr says what it cut and what it could not read', a
     r.mine(Object.fromEntries(Object.keys(many).map((k) => [k, '2'])));
     const out = await suggestText(r.T, 'gitlab');
     assert.match(out, /committed in the 200 folders this change touches in the last 30 days: Ana — 1 commit \(2 more folders not asked about — the list stops at 200\)/);
-    assert.match(out, /lists for the touched files: @ana, @lead \(optional section\); 200 of 202 touched files have no owner there — a hint only/);
+    assert.match(out, /lists for the touched files: @ana, @lead \(optional section\); 200 of 202 touched files have no owner there; 4 lines could not be read, so this list may be wrong — a hint only/);
     assert.match(out, /on GitLab an @name can be a person or a group/);
     assert.match(out, /CODEOWNERS line 6 not read — a `\\` that is not `\\ `/);
     assert.match(out, /CODEOWNERS: 1 more line not read/);
   } finally { r.done(); }
+});
+
+test('suggest reviewers: a login joins a CODEOWNERS name only on the same platform, and the git environment cannot blank the answer', async () => {
+  const { suggestedAuthorsFor, PATHSPEC_ENV } = await import('./riskmap-command.mjs');
+  const { baseCodeowners } = await import('./codeowners.mjs');
+  const r = authoredRepo();
+  const saved = Object.fromEntries(PATHSPEC_ENV.map((k) => [k, process.env[k]]));
+  try {
+    r.as('Carol', '7+carol@users.noreply.github.com', 3, { 'src/a.js': '1', 'CODEOWNERS': 'src/ @carol\n' });
+    r.as('Mail Name', 'mail@corp.io', 2, { 'src/b.js': '1' });
+    r.as('tanuki@corp.io', '9-tanuki@users.noreply.gitlab.com', 2, { 'lib/l.js': '1' });
+    r.as('bob@corp.io', 'bob@corp.io', 2, { 'lib/l.js': '2' });
+    r.branch();
+    r.mine({ 'src/a.js': '2', 'lib/l.js': '3' });
+    const gh = await suggestText(r.T, 'github');
+    assert.match(gh, /@carol \(also in the 30-day history\)/);
+    assert.match(gh, /a name that is an e-mail address — 1 commit, @tanuki — 1 commit/, 'the login stands in once, never `@tanuki (@tanuki)`');
+    assert.doesNotMatch(gh, /corp\.io/, 'a git name that is an address is never printed');
+    const gl = await suggestText(r.T, 'gitlab');
+    assert.match(gl, /Carol \(@carol\) — 1 commit/, 'the login is still shown as the commit address says it');
+    assert.doesNotMatch(gl, /also in/, 'a GitHub login says nothing about a GitLab @carol');
+    // Each variable changes how git reads every pathspec; none may reach the reader.
+    for (const k of PATHSPEC_ENV) {
+      process.env[k] = '1';
+      if (k === 'GIT_GLOB_PATHSPECS') delete process.env.GIT_NOGLOB_PATHSPECS;
+      const got = suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js'] });
+      assert.deepEqual(got.authors?.map((a) => a.name), ['Mail Name', 'Carol'], `${k} must not change the answer`);
+      assert.equal(baseCodeowners(r.T, 'origin/main', 'gitlab').path, 'CODEOWNERS', `${k} must not make ls-tree fail`);
+      delete process.env[k];
+    }
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    r.done();
+  }
 });
 
 // ---- E71: counting active people -----------------------------------------------------------------

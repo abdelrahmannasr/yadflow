@@ -168,8 +168,9 @@ export function suggestReviewers(repoRoot, baseBranch, platform) {
   if (hist.unknown) lines.push([info, `who has committed in ${where} lately: not read — ${hist.unknown}`]);
   else if (!hist.authors.length) lines.push([info, `nobody else has committed in ${where} in the last 30 days${cut}`]);
   else {
-    for (const a of hist.authors) if (a.login) logins.add(a.login);
-    const shown = hist.authors.slice(0, SUGGEST_SHOWN).map((a) => `${a.name}${a.login ? ` (@${a.login})` : ''} — ${plural(a.commits, 'commit')}`);
+    // Only a login from THIS platform's noreply address is evidence for a CODEOWNERS `@name` here.
+    for (const a of hist.authors) if (a.login && a.loginHost === platform) logins.add(a.login);
+    const shown = hist.authors.slice(0, SUGGEST_SHOWN).map((a) => `${a.name}${a.login && a.name !== `@${a.login}` ? ` (@${a.login})` : ''} — ${plural(a.commits, 'commit')}`);
     const more = hist.authors.length > SUGGEST_SHOWN ? `, and ${hist.authors.length - SUGGEST_SHOWN} more` : '';
     lines.push([hand, `may know this code — committed in ${where} in the last 30 days: ${shown.join(', ')}${more}${cut}`]);
   }
@@ -189,13 +190,16 @@ export function suggestReviewers(repoRoot, baseBranch, platform) {
       listed = true;
       const tag = { team: ' (a team)', group: ' (a group)', role: ' (a role)' };
       const shown = got.owners.slice(0, SUGGEST_SHOWN).map((o) => {
-        const also = (o.kind === 'user' || o.kind === 'name') && logins.has(o.text.slice(1)) ? ', also in the history above' : '';
+        // "the 30-day history", not "above": the person may be one of the `and N more` not shown.
+        const also = (o.kind === 'user' || o.kind === 'name') && logins.has(o.text.slice(1)) ? ', also in the 30-day history' : '';
         const notes = [tag[o.kind]?.slice(2, -1), o.optional ? 'optional section' : '', also.slice(2)].filter(Boolean);
         return `${o.text}${notes.length ? ` (${notes.join(', ')})` : ''}`;
       });
       const more = got.owners.length > SUGGEST_SHOWN ? `, and ${got.owners.length - SUGGEST_SHOWN} more` : '';
       const gl = platform === 'gitlab' && got.owners.some((o) => o.kind === 'name') ? '; on GitLab an @name can be a person or a group' : '';
-      lines.push([hand, `CODEOWNERS on ${base} (${co.path}) lists for the touched files: ${shown.join(', ')}${more}${unmatched} — a hint only: these files go stale, and yad does not check that anyone listed still works here${gl}`]);
+      // A line this reader skipped could have been the last match for a file, so the list may be wrong.
+      const partial = parsed.skipped.length ? `; ${plural(parsed.skipped.length, 'line')} could not be read, so this list may be wrong` : '';
+      lines.push([hand, `CODEOWNERS on ${base} (${co.path}) lists for the touched files: ${shown.join(', ')}${more}${unmatched}${partial} — a hint only: these files go stale, and yad does not check that anyone listed still works here${gl}`]);
     }
     for (const s of parsed.skipped.slice(0, 3)) lines.push([warn, `CODEOWNERS line ${s.line} not read — ${s.why}`]);
     if (parsed.skipped.length > 3) lines.push([warn, `CODEOWNERS: ${plural(parsed.skipped.length - 3, 'more line')} not read`]);
