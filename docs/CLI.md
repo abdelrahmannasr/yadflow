@@ -1060,7 +1060,9 @@ the committer is not counted. Merge commits are left out (the reader's `--no-mer
 only recent commits are merges is named. E67's limits apply: git's date-limited walk stops at the first
 commit older than the window, so out-of-order dates can hide recent work; `--since` reads the committer
 date. "Matches no file" uses the same pattern reading as E68, including its one reading of our own (a
-pattern whose last part has no wildcard also covers a folder of that name).
+pattern whose last part has no wildcard also covers a folder of that name). Finding a dead line is quick for
+plain paths, but a wildcard line may be tested against every file: on a repo with hundreds of thousands of
+files, hundreds of dead wildcard lines can take several seconds, in `yad doctor` too.
 
 ## File shape: `schemaVersion`
 
