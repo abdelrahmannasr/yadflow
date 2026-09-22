@@ -115,7 +115,7 @@ Print, in this order:
      when the cap lowered nothing) — read it from there rather than recomputing it, and say "short N"
      rather than "blocked" when it is short. A closed team gate whose ask was lowered says
      `count capped from 3 to 1 (2 active people)`. In solo mode it prints no shortfall.
-   - **A gate that may not be met (E73):** under an open team gate, `yad gate status` can print a line
+   - **A gate that may not be met (E73):** under a team gate that has not passed, `yad gate status` can print a line
      starting `! may not be met:` — the base may have nobody but the author to give it, the full count
      would jam if enforced, or people known only by a git name may make the team smaller than the capped
      ask. Relay it as stated, as a warning and never as "blocked": it holds nothing.

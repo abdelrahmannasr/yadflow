@@ -56,7 +56,7 @@ roles — there are no roles, and yadflow keeps no list of people:
   contract gate would ask three approvals of a team with one person who is not the author. A later yadflow
   change turns the capped count on together with `yad gate lower --reason`, the way out, once the count
   is accurate.
-- **Relay a `! may not be met:` line.** Under an open team gate, `yad gate status` prints one when the
+- **Relay a `! may not be met:` line.** Under a team gate that has not passed, `yad gate status` prints one when the
   count of people suggests the gate may not pass (E73). It is a warning: never block on it and never
   write it into the ledger. Tell the reviewers, because a merged review PR can no longer take approvals.
 - **When the people cannot be counted** (`active: null` — for example Product CI, which checks out only

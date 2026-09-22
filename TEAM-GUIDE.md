@@ -511,12 +511,12 @@ project's approval settings say so.
 - `yad gate sync` and `yad gate status` print the count, for example
   `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`.
   A team gate that passed on its counted approvals while the cap lowered its ask says so later: `count capped from 3 to 1 (2 active people)`.
-- **When a gate may not be met (a warning only):** under an open team gate, `yad gate status` and
+- **When a gate may not be met (a warning only):** under a team gate that has not passed, `yad gate status` and
   `yad gate sync` print a `! may not be met: …` line when the count of people suggests the gate may not
   pass. It holds nothing and writes nothing. It prints in three cases: only 0 or 1 active person is
   counted (the way out is `yad mode solo --reason`); the cap lowered the ask, so the full count would jam
-  if enforced; or some people are known only by a git name, so the team may be too small for the capped
-  ask. It says "may" because the count can be wrong both ways — a reviewer who has not committed or
+  if enforced; or some people are known only by a git name, so the team may be one person, or too small for
+  the capped ask. CI does not show it before the merge, so run `yad gate status` while the review is open. It says "may" because the count can be wrong both ways — a reviewer who has not committed or
   approved yet is not counted, and one person with a work email and a platform login counts twice.
 
 | Review | Full count | Holds the gate |
