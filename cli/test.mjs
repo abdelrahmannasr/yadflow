@@ -19327,3 +19327,28 @@ test('E74 yad doctor: a suggestion is a warning, never a failure; unknown is ok;
     assert.deepEqual(find(e74Count({ logins: 1, names: 1 })), [], 'nothing to suggest is no check at all');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E74 real reader: all three new count reads pass the roster aliases, so one person is not told "team"', async () => {
+  // One developer: commits through GitHub's web editor (the login `writer`), and an older roster-shaped
+  // approval under the roster NAME `Pat`, which the roster maps to `writer`. With the aliases that is one
+  // person; without them it is two rows and an approval, which would speak. No `headCount` is passed, so
+  // `yad mode`, `yad next` and `yad doctor` each read the count themselves.
+  const { runMode } = await import('./mode.mjs');
+  const { collectDoctor } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e74-alias-'));
+  try {
+    const put = (rel, obj) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), JSON.stringify(obj)); };
+    put('.sdlc/hub.json', { platform: 'github', default_branch: 'main', solo: true, mode: 'solo', roster: [{ name: 'Pat', login: 'writer', role: 'owner' }] });
+    put('epics/EP-x/.sdlc/state.json', { epicId: 'EP-x', currentStep: 'epic-review', steps: [{ id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] }] });
+    const today = new Date().toISOString().slice(0, 10);
+    put('epics/EP-x/.sdlc/approvals.json', [{ approver: 'Pat', role: 'owner', step: 'epic-review', date: today, status: 'approved' }]);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: T, env: GIT_ENV });
+    execFileSync('git', ['add', '-A'], { cwd: T, env: GIT_ENV });
+    execFileSync('git', ['-c', 'user.name=Writer', '-c', 'user.email=1+writer@users.noreply.github.com', 'commit', '-q', '-m', 'c'], { cwd: T, env: GIT_ENV });
+    const bare = activePeople(T, {});
+    assert.match(_teamHint(bare).line || '', E74_LINE, 'without the aliases this reads as two people — the case the wiring exists for');
+    assert.doesNotMatch(await grab(() => runMode(T, {})), E74_LINE, 'yad mode');
+    assert.doesNotMatch(await grab(() => runNext(T, {})), E74_LINE, 'yad next');
+    assert.deepEqual(collectDoctor(T).checks.filter((x) => x.id === 'mode:suggest-team'), [], 'yad doctor');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
