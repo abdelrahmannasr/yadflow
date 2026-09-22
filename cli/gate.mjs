@@ -772,7 +772,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // approvals can still come; wired CI does not — it runs only on merged PRs, and usually cannot count
     // people. Each distinct line once per command (`uniqueReach`).
     if (!alreadyDone && !pred.passed && pred.rule === 'count' && pred.have !== null) {
-      for (const why of uniqueReach(gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly, approvers: approverCount(people) }), reachSeen)) warn(why);
+      for (const why of uniqueReach(gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly, approvers: approverCount(people), days: people.capacity.days }), reachSeen)) warn(why);
     }
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
@@ -1287,7 +1287,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     // including one not reached yet — so a line about the whole Product (the base, one person) prints
     // once, under the first step it applies to (`uniqueReach`), not under every step after it.
     if (!solo && !waived && !isPassed(s)) {
-      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly, approvers: approverCount(headCount) }), reachSeen)) log(`      ${c.yellow('!')} ${c.dim(why)}`);
+      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly, approvers: approverCount(headCount), days: headCount.capacity.days }), reachSeen)) log(`      ${c.yellow('!')} ${c.dim(why)}`);
     }
   }
 }

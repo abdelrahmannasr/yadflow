@@ -152,14 +152,16 @@ export const capWho = (active) => (capByFloor(active)
 //
 // The checks, each only while its own ask is unmet:
 //   base        0 or 1 active person counted, and no approval anywhere.
-//   one person  some people are known only by a NAME (a git name, or a hand-written approval) and exactly
-//               one by a LOGIN, and no approval anywhere: the names may all be that one person. (A solo
+//   one person  exactly two people counted, one NOT MATCHED to a login (a git name, or an approval record
+//               that proves no login — an older hand-written one, or an engineer-review record, which
+//               carries none) and one login, and no approval anywhere: they may be one person. (A solo
 //               developer who commits with a work address AND through GitHub's web editor, whose noreply
 //               address carries the login, reads as two people; only this check sees it.)
 //   full        (what-if) the cap lowered the ask: the full count is more than the people counted can
 //               give. Not said when a today line is, nor when the approvals show more people than counted.
-//   names       (what-if) some people are known only by a name and at least one by a login, and the
-//               smallest team those allow cannot give the ask.
+//   names       (what-if) some people are not matched to a login and at least one is a login, and the
+//               smallest possible team cannot give the ask.
+// "No approval" always names the capacity window (`days`): the reader never sees an older approval.
 // A Product whose records are all names (no platform) gets no name line — there is no login for a name
 // to be the same person as. Two spellings of one NAME still count twice; that is E108's, with the join.
 //
@@ -168,9 +170,9 @@ export const capWho = (active) => (capByFloor(active)
 // waived — and prints each distinct line once per command (`uniqueReach`).
 export const REACH_TODAY = 'may not be met';
 export const REACH_IF_ENFORCED = 'if the risk step were enforced';
-const WAY_OUT = "Another person's first approval settles it, or use the recorded way out, `yad mode solo --reason`";
+const WAY_OUT = "Another person's approval settles it, or use the recorded way out, `yad mode solo --reason`";
 const whole = (n) => (Number.isInteger(n) && n > 0 ? n : 0);
-export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0 } = {}) {
+export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0, days = null } = {}) {
   if (!cap) return [];
   const lines = [];
   const got = whole(have);
@@ -181,15 +183,21 @@ export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0 
   const names = Number.isInteger(nameOnly) && nameOnly > 0 && nameOnly < cap.active;
   const logins = names ? cap.active - nameOnly : null;
   const today = (t) => lines.push(`${REACH_TODAY}: ${t}`);
-  const ifEnforced = (t) => lines.push(`${REACH_IF_ENFORCED}: ${t}. Nothing is needed today: only one approval is enforced`);
+  const ifEnforced = (t) => lines.push(`${REACH_IF_ENFORCED}: ${t}. Nothing beyond the one enforced approval is needed today`);
+  // The count only sees the capacity window, so every claim about "no approval" names it: an approval
+  // older than the window is on record, and "no approval yet" would be untrue.
+  const window = whole(days) ? `in the last ${days} days` : 'in the counting window';
   let base = false;
   if (!approved && cap.active <= 1) {
     base = true;
-    today(`only ${cap.active} active ${peopleWord(cap.active)} counted and no approval recorded yet, so if nobody but the author can approve, this gate cannot pass. Someone who has never committed or approved is not counted yet. ${WAY_OUT}`);
+    today(`only ${cap.active} active ${peopleWord(cap.active)} counted and no approval ${window}, so if nobody but the author can approve, this gate cannot pass. Someone who has not committed or approved ${window} is not counted. ${WAY_OUT}`);
   }
-  if (!approved && names && logins === 1) {
+  // Only the two-row shape (one name, one login): the solo developer who commits two ways. With more
+  // names beside one login — a new team where one person once used the web editor — "the team may be
+  // one person" is possible but not a fair reading, and it would alarm every first week.
+  if (!approved && names && cap.active === 2) {
     base = true;
-    today(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a name, not a platform login, and may be the same person as the one login, and no approval is recorded yet, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass. ${WAY_OUT}`);
+    today(`1 of the 2 people counted is not matched to a platform login and may be the same person as the one login, and there is no approval ${window}, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass. ${WAY_OUT}`);
   }
   // `floor <= cap.active` also covers "the full count is already met" and "only one person counted":
   // either way the approvals prove more people than were counted, and the line would contradict them.
@@ -201,7 +209,7 @@ export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0 
     const room = capLimit(smallest);
     if (room < cap.to) {
       const why = smallest > logins ? ` (the approvals already recorded show at least ${smallest} people)` : '';
-      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a name, not a platform login, and may be the same ${nameOnly === 1 ? 'person' : 'people'} as ${logins === 1 ? 'the one login' : 'the logins'}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked, so if the team is that small, this gate could not pass`);
+      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} not matched to a platform login and may be the same ${nameOnly === 1 ? 'person' : 'people'} as ${logins === 1 ? 'the one login' : 'the logins'}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked, so if the team is that small, this gate could not pass`);
     }
   }
   return lines;

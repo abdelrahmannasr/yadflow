@@ -205,8 +205,9 @@ function ledgerEvidence(root, aliases) {
         continue;
       }
       // `status` is not filtered: someone who asked for changes reviewed the artifact and is plainly
-      // active. It counts them in, which is the safe direction, and never counts them as an approval —
-      // nothing here feeds `have`.
+      // active. It counts them in, which is the safe direction. Nothing here feeds `have`; E73's
+      // `approverCount` does read `how: 'approved'` as "approvals can be given here", and today every
+      // writer records only approvals in this file.
       events.push({ ts: a.date, name, login: ledgerPersonLogin(a, name, aliases), how: 'approved' });
     }
     // A merged review PR, as the Product recorded it: a step whose closing record carries a PR number
@@ -515,18 +516,18 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
   };
 }
 
-// The capacity count as ONE human-readable line, defined here beside the rule for the same reason
-// `gateRuleSum` is defined beside `gateRuleFor`: several surfaces print it, and several copies of the
-// wording would eventually disagree about what the number means.
-//
-// It always says what the number DOES to a gate (E72): a known count caps the count each gate ASKS for
-// at `active − 1`, which is reported and not enforced until E108; an unknown one gives no cap.
 // How many of the people counted APPROVED something in the window (E73) — evidence that approvals can be
 // given in this Product. 0 when the count is unknown or carries no list: the caller reads that as "no
 // evidence", which can only make a warning speak, never hide one.
 export const approverCount = (counted) => (Array.isArray(counted?.capacity?.people)
   ? counted.capacity.people.filter((p) => Array.isArray(p?.how) && p.how.includes('approved')).length : 0);
 
+// The capacity count as ONE human-readable line, defined here beside the rule for the same reason
+// `gateRuleSum` is defined beside `gateRuleFor`: several surfaces print it, and several copies of the
+// wording would eventually disagree about what the number means.
+//
+// It always says what the number DOES to a gate (E72): a known count caps the count each gate ASKS for
+// at `active − 1`, which is reported and not enforced until E108; an unknown one gives no cap.
 export function activeSum(counted) {
   const cap = counted?.capacity;
   // `== null` on purpose, so a missing count and an explicitly null one take the SAME branch. With
