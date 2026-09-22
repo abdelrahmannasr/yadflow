@@ -112,7 +112,7 @@ files. Relay both as they are. It is a **suggestion only**:
   could not match safely (the first three get a reason, the rest a count, and the list then says it
   `may be wrong`); mention it, do not guess what it meant.
 - The same person can appear in both lists under two names (a git name, a platform login). Do not join
-  them unless the output says `also in the 30-day history` (only a same-platform `noreply` login counts).
+  them unless the output says `also in the 30-day history` (only a `noreply` login of the same platform counts, and only on github.com or gitlab.com).
 - `not read` (a shallow clone, a missing base) is never "nobody". Say it as the CLI says it.
 
 ### Step 3b — Post the review trailer (optional, recommended)
