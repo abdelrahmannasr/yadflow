@@ -18126,6 +18126,8 @@ test('suggest reviewers: GitLab CODEOWNERS follows its sections, exclusions and 
     assert.deepEqual(p.skipped.map((s) => s.line), [2], `${JSON.stringify(t)}: reported, so the answer is hedged`);
   }
   assert.deepEqual(who('[Docs] @d\ndocs/\n', 'docs/a.md'), ['@d'], 'an entry that writes no owner still takes the defaults');
+  assert.deepEqual(parseCodeowners('[Docs] @d\ndocs/ @a\n!docs/x.md bob\n', 'gitlab').skipped, [], 'an exclusion takes no owners, so its words are nothing to report');
+  assert.doesNotMatch(parseCodeowners('docs/ bob\n', 'gitlab').skipped[0].why, /default owners/, 'no heading, no defaults to mention');
   assert.deepEqual(parseCodeowners('[Docs] @docs\\team\n/app/\n', 'gitlab').skipped.map((s) => s.line), [1],
     'a heading whose default owners cannot be read is reported, so "nobody" is hedged');
 });

@@ -165,7 +165,10 @@ export function parseCodeowners(text, platform) {
       // no owner, never the defaults — printing a default owner there would name the wrong person. It is
       // also reported, so the answer is hedged.
       const own = rest.map((x) => ownerOf(x, platform)).filter(Boolean);
-      if (rest.length && !own.length) skipped.push({ line: n, why: `\`${pattern}\` names no owner this reader can read, and the section's default owners do not apply to it` });
+      // An exclusion takes no owners, so words after it are nothing to report.
+      if (!negate && rest.length && !own.length) {
+        skipped.push({ line: n, why: `\`${pattern}\` is read as having no owner: none of its owner words is one this reader can read${defaults.length ? ', and the section\'s default owners do not apply to it' : ''}` });
+      }
       rules.push({ line: n, section, negate, pat, owners: rest.length ? own : defaults });
       return;
     }
