@@ -196,8 +196,8 @@ export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0,
     today(`only ${cap.active} active ${peopleWord(cap.active)} counted and no approval ${window}, so if nobody but the author can approve, this gate cannot pass. Someone who has not committed or approved ${window} is not counted. ${WAY_OUT}`);
   }
   // Only the two-row shape (one name, one login): the solo developer who commits two ways. With more
-  // names beside one login — a new team where one person once used the web editor — "the team may be
-  // one person" is possible but not a fair reading, and it would alarm every first week.
+  // names beside one login, distinct names are distinct people (as the count takes them), so the team is
+  // at least that many — one person is not a reading the count allows.
   if (!approved && names && cap.active === 2) {
     base = true;
     today(`1 of the 2 people counted is not matched to a platform login and may be the same person as the one login, and there is no approval ${window}, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass. ${WAY_OUT}`);
@@ -215,10 +215,12 @@ export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0,
       // At most as many names as there are logins can be a login's second row, so say how many.
       const overlap = Math.min(nameOnly, logins);
       const logWord = logins === 1 ? 'the one login' : 'the logins';
+      // One name beside one login is two people counted, where the ask is 1 and never exceeds the room —
+      // so a lone name always sits beside several logins here. `overlap` is 1 only with a single login.
       const same = nameOnly === 1
-        ? `and may be the same person as ${logins === 1 ? 'the one login' : 'one of the logins'}`
+        ? 'and may be the same person as one of the logins'
         : `and ${overlap === 1 ? 'one of them' : `up to ${overlap} of them`} may be the same ${overlap === 1 ? 'person' : 'people'} as ${logWord}`;
-      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} not matched to a platform login, ${same}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked, so if the team is that small, this gate could not pass`);
+      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} not matched to a platform login, ${same}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked${cap.capped ? ' after the cap' : ''}, so if the team is that small, this gate could not pass`);
     }
   }
   return lines;

@@ -19039,6 +19039,10 @@ test('E73 names: needs a login, uses the approvals as a floor, and speaks only w
   // When the approvals prove more people than the rows do, the line SAYS that is why.
   assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 2, nameOnly: 2 })[0], /so the team may be as small as 3 \(the approvals already recorded show at least 3 people\)\. That leaves room for 2 of the 3 approvals asked/);
   assert.doesNotMatch(_gateReach(rule, _gateCapFor(rule, 4), { have: 1, nameOnly: 3 })[0], /approvals already recorded/, 'no reason given when the rows decide');
+  // When the cap lowered the ask, the line says so — the full-count line above it quotes the uncapped number.
+  const capped = _gateReach(rule, _gateCapFor(rule, 3), { have: 0, nameOnly: 2, approvers: 2 });
+  assert.match(capped[1], /That leaves room for 1 of the 2 approvals asked after the cap, so/);
+  assert.doesNotMatch(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 2 })[0], /after the cap/, 'not when nothing was capped');
   assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 4), { have: 3, nameOnly: 2 }), [], 'an ask already met says nothing');
   const high = _gateRuleFor({ ...E72_CONTRACT, risk_tags: ['auth'] });   // asks 2
   assert.equal(_gateReach(high, _gateCapFor(high, 3), { have: 0, nameOnly: 1 }).length, 1, '2 logins leave room for 1 of 2');
