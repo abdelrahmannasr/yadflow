@@ -158,8 +158,9 @@ Notes:
 - `analysis-review` carries no `risk_tags` — it is the **base** rule (1 distinct approver, who
   should not be the author). The catalogue sets that; there is nothing to type.
 - `architecture-review` carries `risk_tags: ["contract"]` by default (build plan §4): the tag raises
-  the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the gate until
-  the capacity cap (E72); the risk step is advisory and reported as a shortfall.
+  the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the
+  gate; the risk step is advisory until E73, reported as a shortfall against the count capped at the
+  active people less one (E72).
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
   when `stories-review` passes — the epic is already `ready-for-build` by then, so Build
   runs alongside the tester (see `../yad-epic/references/state-schema.md`).

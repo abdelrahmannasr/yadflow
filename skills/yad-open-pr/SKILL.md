@@ -50,9 +50,13 @@ the Product.
   any directory, with CODEOWNERS as a hint only.
 - **Routing** — the merge needs 1 approval from someone other than the author (the base). `high` risk
   adds 1, a touched contract surface adds 2, and a change touching a `high` directory on the base
-  branch's risk map adds 1 (E66) — the larger, never the sum. That risk step is advisory until the
-  capacity cap. The CLI prints the count once the PR is open; `bash checks/risk-route.sh <body>` prints
-  the same count from the PR body.
+  branch's risk map adds 1 (E66) — the larger, never the sum. That risk step is advisory: branch
+  protection holds the merge, never this count. The CLI prints the count once the PR is open — capped by
+  the active people (E72) when run from the Product — for example `this PR asks for 3 approvers = base 1
+  + contract risk 2, capped to 1 for 2 active people — base enforced, risk step advisory; …` — and prints the count of people on its
+  own line (`active people: not counted — no cap applies; …` when it cannot count them).
+  `bash checks/risk-route.sh <body>` prints the same count from the PR body, without the cap: a code
+  repo's CI has no Product to count people from.
 
 ## Inputs
 

@@ -42,7 +42,8 @@ who is logged in and who has access.
 - **Approvals.** Each approval records the platform login that gave it as `approver`, with no `role` and
   no `domain`. A team gate needs at least **1 approval from someone other than the author**, plus
   resolved threads and a merged PR. The full count is `base 1 + risk step` (`contract` +2, `auth` /
-  `payments` +1, the largest and never the sum); the risk step is advisory until the capacity cap. Solo
+  `payments` +1, the largest and never the sum); the gate caps it at the active people less one and
+  reports that (E72); the risk step is advisory until E73. Solo
   mode still waives the approval.
 - **Reviewers.** Nothing requests reviewers on a PR/MR. Ask them on the PR/MR itself. A later roadmap row
   (E68) will suggest reviewers from history; CODEOWNERS is a hint only.

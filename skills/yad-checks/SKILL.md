@@ -52,7 +52,7 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    covers, leaves a line whose directory is gone, touches a line still `unset` or `guessed`, or edits the
    map itself. A repo with no map gets one note. It also prints the **approver count** (E66): a change
    touching a directory the **base branch's** map marks `high` asks for one more approver — reported,
-   never enforced until the capacity cap — and names who has **committed there in the last 30 days**
+   never enforced: branch protection holds the merge — and names who has **committed there in the last 30 days**
    (E67), so the team knows who can meet that ask. The map is the team's file, never wired; the
    `yad-connect-repos` skill drafts it. See `references/check-gates.md` §10.
 

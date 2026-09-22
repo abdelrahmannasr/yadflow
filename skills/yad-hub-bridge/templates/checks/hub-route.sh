@@ -2,10 +2,11 @@
 # Product review routing — the Shape analogue of yad-pr-template's risk-route.sh. Reads a Product review
 # PR/MR description's "Impact & Risk (front-half)" block and prints how many approvers the gate asks for,
 # as the same sum the gate prints: base 1, plus a risk step from the tags — `contract` +2, `auth` or
-# `payments` +1, the largest and never the sum. Only the base holds the gate until the capacity cap
-# lands; the risk step is advisory. There are no roles and no named owners: yadflow keeps no list of
-# people (E62), so when a risk tag raises the count the touched repos are printed as a hint for whom to
-# ask (with no risk step it prints the base line alone). Advisory: it ROUTES the human
+# `payments` +1, the largest and never the sum. Only the base holds the gate; the risk step is advisory
+# until E73. The gate reports that count capped at the number of active people less one (E72); this
+# script cannot count people, so it prints the full sum. There are no roles and no named owners: yadflow
+# keeps no list of people (E62), so when a risk tag raises the count the touched repos are printed as a
+# hint for whom to ask (with no risk step it prints the base line alone). Advisory: it ROUTES the human
 # review; it does not approve or merge.
 set -euo pipefail
 
@@ -36,8 +37,8 @@ case "$tags" in *" contract "*) step=2; tier=contract; why="${why:+$why, }risk t
 
 if [ "$step" -gt 0 ]; then
   echo "ROUTE: $((1 + step)) approvers = base 1 + ${tier} risk ${step} (${why})"
-  echo "       Only the base holds the gate until the capacity cap: 1 approval (the platform decides whether the author may give it)."
-  echo "       The risk step is advisory. Ask reviewers who know the touched repos:"
+  echo "       Only the base holds the gate: 1 approval (the platform decides whether the author may give it)."
+  echo "       The risk step is advisory until E73; \`yad gate status\` prints it capped by the active people. Ask reviewers who know the touched repos:"
   case "$repos" in
     ""|*"<"*|*"…"*|*"|"*)
       echo "  (Repos line not filled in — list each touched repo so the right reviewers can be asked.)" ;;

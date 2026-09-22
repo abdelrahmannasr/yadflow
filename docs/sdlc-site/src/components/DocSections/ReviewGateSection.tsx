@@ -14,10 +14,10 @@ const REVIEWS = [
   },
   {
     method: 'COUNT',
-    path: 'every step (risk step advisory)',
+    path: 'every step (risk step advisory for now)',
     description:
-      'Names no person, role or step: a step asks for base 1 + risk step distinct approvers. The risk step is +2 for a contract tag and +1 for auth or payments, the highest tag and never the sum. Read from the tags the epic records. Only the base is enforced for now; the risk step is printed as a shortfall ("1 short"). The number of active people is now counted live and printed beside the ask — committed or approved, over a window that scales with how fast the team merges (the span of the last 20 merged PRs, bounded 30-180 days). It is reported only; a later roadmap row caps the count with it, and without that cap a two-person team\'s architecture gate would be unpassable. When a source cannot be read the count says "not counted" rather than a number, because an unreadable input must never look like a small team.',
-    middleware: ['asks base 1 + risk step', 'distinct people, not roles', 'shortfall reported, not blocking'],
+      'Names no person, role or step: a step asks for base 1 + risk step distinct approvers. The risk step is +2 for a contract tag and +1 for auth or payments, the highest tag and never the sum. Read from the tags the epic records. The number of active people is counted live — committed or approved, over a window that scales with how fast the team merges (the span of the last 20 merged PRs, bounded 30-180 days). The engine caps the count at the active people less one, never below 1 — a contract gate asks 3, and with 2 active people the capped ask is 1; the one seat is left for the author. Only the base is enforced; the risk step is printed as a shortfall ("1 short"). The cap is reported, not enforced, until E73 — a later yadflow change that adds yad gate lower --reason, a recorded way out of a gate a team cannot meet. Why: the count of people can read high (a git name and a platform login are two people until proven one), so a two-person team can read as four and an enforced gate would lock it out. E73 enforces the capped count together with yad gate lower --reason. When a source cannot be read the count says "NOT COUNTED" rather than a number, because an unreadable input must never look like a small team, and no cap is shown. A team gate that passes on its counted approvals while the cap lowered its ask records it as capped on its closing record (not in solo mode, and not on a skipped or inherited step).',
+    middleware: ['asks base 1 + risk step', 'capped at active people − 1 (reported)', 'distinct people, not roles', 'shortfall reported, not blocking'],
     category: 'base',
   },
   {

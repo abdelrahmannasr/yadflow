@@ -51,8 +51,10 @@ Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `actio
 
 1. **Get the grounding bundle.** Shape: `yad gate review <epic> [artifact]` prints JSON with the
    artifact path, risk tags, PR number, contract path, touched domains, repo code-map paths,
-   `requireEngagement`, and `step.gateRule` — the step's advisory approver count (`base`, `riskStep`,
-   `needed`, `risk`), which is worth naming in the trailer on a high-risk step and never a blocker. Build: `yad review chat --repo <r>` (see `yad-engineer-review`) provides the
+   `requireEngagement`, and `step.gateRule` — the step's full approver count (`base`, `riskStep`,
+   `needed`, `risk`) — with `step.cap`, an object `{ active, limit, to, capped }` (E72): `to` is the count
+   capped by the active people, `capped` is true when the cap lowered it, and the field is `null` when
+   the people could not be counted, which is worth naming in the trailer on a high-risk step and never a blocker. Build: `yad review chat --repo <r>` (see `yad-engineer-review`) provides the
    diff + code-map grounding. Read the named files yourself — never invent content.
 2. **Trailer.** Generate ≤6 lines (what / risk / read-time), grounded only in the bundle. Post it:
    `yad gate trailer <epic> <artifact> --body "<text>" [--pr <n>]` (idempotent; re-run after edits).

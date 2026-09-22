@@ -32,7 +32,7 @@ flowchart LR
       tc["yad-test-cases<br/>test-cases.md + automation tests<br/>(parallel · non-blocking)"]:::artifact
       gAn{{"gate · analysis"}}:::gated
       gEp{{"gate · epic<br/>base: 1 approver, not the author"}}:::gated
-      gAr{{"gate · architecture<br/>count 3 = base 1 + contract risk 2<br/>base enforced · risk step advisory"}}:::gated
+      gAr{{"gate · architecture<br/>count 3 = base 1 + contract risk 2<br/>capped at active people − 1<br/>base enforced · risk step advisory"}}:::gated
       gUi{{"gate · UI · base"}}:::gated
       gSt{{"gate · stories · base"}}:::gated
       gTc{{"gate · test cases · base"}}:::gated

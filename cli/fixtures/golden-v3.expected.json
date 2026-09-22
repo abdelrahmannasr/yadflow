@@ -145,7 +145,8 @@
       },
       "have": 2,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout",
@@ -165,7 +166,8 @@
       },
       "have": 4,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout",
@@ -185,7 +187,8 @@
       },
       "have": 2,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout",
@@ -205,7 +208,8 @@
       },
       "have": 4,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -227,7 +231,8 @@
       },
       "have": null,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -247,7 +252,8 @@
       },
       "have": null,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -267,7 +273,8 @@
       },
       "have": null,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -287,7 +294,8 @@
       },
       "have": 3,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -307,7 +315,8 @@
       },
       "have": 2,
       "short": 0,
-      "active": null
+      "active": null,
+      "cap": null
     }
   ]
 }

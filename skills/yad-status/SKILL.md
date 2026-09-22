@@ -105,16 +105,23 @@ Print, in this order:
      review PR/MR. Solo mode waives approvals entirely.
    - **The full count, reported on every step that is not inherited, skipped or deferred:** `needed = base 1 + risk step` — plus `2` when the
      step's `risk_tags` carry `contract`, or `1` when they carry `auth`/`payments` (the highest tag,
-     never the sum). The risk step is ADVISORY — it never decides whether the gate would pass, because
-     the full rule caps it at the number of active people and that cap (E72) does not exist yet.
-     `yad gate status` prints the sum and the shortfall (`; count: 3 approvers = base 1 + contract risk 2
-     — base enforced, risk step advisory — 1 short`) — read both from there rather than recomputing
-     them, and say "short N" rather than "blocked" when it is short. In solo mode it prints no shortfall.
+     never the sum). The engine **caps** that ask at `active − 1` (floor 1) and prints it (E72) — for
+     example a contract gate asks 3, and with 2 active people the capped ask is 1. The risk step is
+     ADVISORY until E73, capped or not — it never decides whether the gate would pass, because the count
+     of people can read high (a git name and a platform login are two people until proven one). When the
+     people could not be counted, no cap is shown. `yad gate status` prints the sum and the shortfall
+     (`; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat
+     for the author — base enforced, risk step advisory — 1 short`, or without the `capped to …` part
+     when the cap lowered nothing) — read it from there rather than recomputing it, and say "short N"
+     rather than "blocked" when it is short. A closed team gate whose ask was lowered says
+     `count capped from 3 to 1 (2 active people)`. In solo mode it prints no shortfall.
    - **How many people there are to ask (E71), printed once per epic and not per step:** `active people:
-     4 in the last 90 days`, with the window's basis on the line under it. It is the count E72 will cap
-     the ask with; today it caps nothing, so never report a step as blocked by it. A source that could
-     not be read prints `active people: NOT COUNTED — <which source>`: report that wording as it stands
-     and NEVER as a number or as "no people" — an unreadable input is not a small team.
+     4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author);
+     reported, only the base is enforced until E73`, with the window's basis on the line under it. It is
+     the count the cap (E72) uses, so never report a step as blocked by it. A source that could not be
+     read prints `active people: NOT COUNTED — <which source> — no cap can be shown, and only the base
+     holds each gate`: report that wording as it stands and NEVER as a number or as "no people" — an
+     unreadable input is not a small team.
    - Touched domains (`epic.repos` for a step with a risk tag; the union of every story's `repos` for
      `stories-review`) only label the review. They add no approvals.
    - An approval is **stale** (it no longer counts) when the `artifactHash` it recorded no longer

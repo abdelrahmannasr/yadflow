@@ -204,8 +204,9 @@ Notes:
   before the artifact exists. Closing it is Step 5b's job, and on the local path `yad gate open` does it
   — so after writing `epic.md`, take Step 5b.
 - `architecture-review` carries `risk_tags: ["contract"]` by default (build plan §4): the tag raises
-  the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the gate until
-  the capacity cap (E72); the risk step is advisory and reported as a shortfall. The catalogue sets it;
+  the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the
+  gate; the risk step is advisory until E73, reported as a shortfall against the count capped at the
+  active people less one (E72). The catalogue sets it;
   there is nothing to type.
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
   when `stories-review` passes — at which point the epic is already `ready-for-build`, so Build

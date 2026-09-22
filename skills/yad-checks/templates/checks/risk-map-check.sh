@@ -6,8 +6,11 @@
 #
 # It also COUNTS (E66): a change touching a `high` directory adds the high step, +1 approver, printed as
 # a `COUNT [risk-map]:` line. The count reads the map on the BASE branch, never this change's copy, so a
-# change cannot lower its own count by editing the map. It is reported, not enforced: only the base of
-# one approver holds a merge until the capacity cap (E72). A `guessed` level counts as a `confirmed` one;
+# change cannot lower its own count by editing the map. It is reported, never enforced: a Build merge is
+# held by the platform's branch protection, and this script runs from the PR's own checkout, so a PR could
+# edit it — harmless only because nothing blocks on it (E72). It cannot apply the capacity cap either: the
+# cap needs the Product's count of active people, which a code repo's CI does not have; `yad open-pr`
+# shows the capped count. A `guessed` level counts as a `confirmed` one;
 # an `unset` line and an uncovered directory add nothing. The change's files for the count include
 # deleted and moved-away files — deleting code in a `high` directory is a `high` change.
 #
@@ -363,7 +366,7 @@ NOMAP "*)
   *)
     high="$(dirs_of high)"; medium="$(dirs_of medium)"
     if [ -n "$high" ]; then
-      echo "COUNT [risk-map]: 2 approvers = base 1 + high risk 1 (high on ${BASE}: ${high}) — only the base holds the merge until the capacity cap."
+      echo "COUNT [risk-map]: 2 approvers = base 1 + high risk 1 (high on ${BASE}: ${high}) — reported, not enforced: branch protection holds the merge."
     else
       echo "COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on ${BASE}."
     fi

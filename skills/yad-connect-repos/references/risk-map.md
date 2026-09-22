@@ -9,7 +9,8 @@ that repo's PRs (E65).
 reads the map on the **base branch**, so a PR cannot lower its own count, and a `guessed` level counts
 exactly as a `confirmed` one. That is why a guess matters: a `high` guess adds a reviewer to every change
 under that directory until a person confirms or changes it. `medium` and `low` add nothing. The count is
-reported, not enforced, until the capacity cap (E72). A `high` directory also asks for an approval from someone who has committed there in the last 30 days
+reported, not enforced: branch protection holds the merge, and `yad open-pr` shows the count capped by the
+active people (E72). A `high` directory also asks for an approval from someone who has committed there in the last 30 days
 (E67), named live from the base branch's history — so a guess here decides who can review, too.
 
 ## Format

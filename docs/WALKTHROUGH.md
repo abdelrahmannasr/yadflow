@@ -232,14 +232,21 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
 **The gate rule, by review.** There are no roles: a gate counts **distinct people who approved**. The
 engine computes a **count** — `base + risk step` distinct approvers, base 1, plus 2 for a `contract` tag
 or 1 for `auth`/`payments` — and `yad gate sync`, `yad gate status` and the generated review-PR body print
-that arithmetic. **Only the base holds the gate** until the capacity cap ships, because an uncapped count
-would make a two-person team's architecture gate unpassable; the rest is reported as a shortfall.
-The same three surfaces also print how many people are **active** — committed or approved lately, counted
-live from the records and from git, over a window that scales with how fast the team merges. It is
-reported only, and when a source cannot be read it says `not counted` rather than showing a small number.
+that arithmetic. **Only the base holds the gate** until E73 — a later yadflow change that adds `yad gate lower --reason`,
+a recorded way out of a gate a team cannot meet; the rest is reported as a shortfall. The
+engine also **caps** the count at the number of **active people less one** (never below 1) and prints
+it (E72). "Active" means committed or approved lately, counted live from the records and from git, over
+a window that scales with how fast the team merges. The `− 1` leaves one seat for the author. The cap is
+reported, not enforced: the count of people can read high (a git name and a platform login count as two
+people until proven one), so a two-person team can read as four and an enforced gate could lock them
+out. E73 enforces the capped count together with `yad gate lower --reason`, the way out. When a source
+cannot be read, the count says `NOT COUNTED` rather than showing a small number, and no cap is shown.
+A team gate that passed on its counted approvals (not solo, not a skip or inherited shortcut) while the cap lowered its ask records `capped: { needed, to, active }` on its
+closing record.
 - **Epic, UI, stories, test cases:** 1 approver; the count asks for 1.
 - **Architecture+contract** (`risk_tags: ["contract"]`): 1 approver holds it; the count asks for **3
-  distinct approvers** (base 1 + contract 2) and reports the shortfall without blocking. The
+  distinct approvers** (base 1 + contract 2), shown capped by the active people — 1 with 2 active
+  people, 2 with 3, all 3 with 4 or more — and reports the shortfall without blocking. The
   contract-surface hash must still match `.sdlc/contract-lock.json` (a changed surface invalidates
   approvals).
 - Review PRs request no reviewers — ask the people who know the touched repos on the PR itself.
