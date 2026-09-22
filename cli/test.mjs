@@ -18334,7 +18334,33 @@ test('codeowners check: a line that matches no file is found, and a submodule is
   // GitLab: a path with no leading `/` matches at any depth, and an exclusion that excludes nothing is dead.
   const gl = parseCodeowners('[Docs] @writers\ndocs/\n!docs/gone.md\n!docs/guide/x.md\nguide/x.md @a\n/guide/x.md @a\n', 'gitlab');
   assert.deepEqual(deadLines(gl, files), [{ line: 3, pattern: 'docs/gone.md', negate: true }, { line: 6, pattern: '/guide/x.md', negate: false }]);
-  assert.deepEqual(deadLines(parseCodeowners('* @a\n', 'github'), []).map((d) => d.line), [1], 'a repo with no file: every line is dead');
+  assert.deepEqual(deadLines(parseCodeowners('* @a\n/ @a\n', 'github'), []).map((d) => d.line), [1, 2], 'a repo with no file: every line is dead, even the whole-repo one');
+  assert.deepEqual(deadLines(parseCodeowners('/ @a\n', 'github'), ['x']), [], 'the whole-repo line matches any file');
+
+  // A pattern can be a mistyped address; a `not read` reason never prints it (E69 review, round 1).
+  for (const [text, platform] of [['alice@corp.com docs/\n', 'gitlab'], ['!bob@corp.com @a\n', 'github'], ['x[@corp.com @a\n', 'github'],
+    ['x\\y@corp.com @a\n', 'github'], ['q?@corp.com @a\n', 'gitlab'], ['a**b@corp.com @a\n', 'gitlab'], ['d@corp.com/** @a\n', 'gitlab']]) {
+    const why = parseCodeowners(text, platform).skipped.map((x) => x.why);
+    assert.equal(why.length, 1, text);
+    assert.match(why[0], /^an address-like word /, text);
+    assert.doesNotMatch(why[0], /corp/, text);
+  }
+
+  // The fast paths (a set lookup for plain text, last parts for "at any depth") give exactly the answer of
+  // asking `matches` about every file, for every pattern shape the reader accepts.
+  const { matches } = await import('./codeowners.mjs');
+  const tree = ['src/a.js', 'src/deep/b.ts', 'docs/api/x.md', 'README.md', 'a+b.js', 'weird $x/(y).py', 'my docs/a b.txt',
+    'logs/today.log', 'app/logs/old.log', 'internal/README.md', 'docs/internal/README.md', 'lib.rs', '.github/CODEOWNERS'];
+  const shapes = ['*', '/', 'src/', '/src', 'src', 'src/a.js', '/src/a.js', 'a.js', '*.js', '**/*.ts', '*.md', 'docs/*', 'docs/**',
+    '**/logs', 'logs/', '/logs', 'app/**/old.log', 'a+b.js', '*+b.js', 'weird $x/', '(y).py', '*.py', 'README.md', 'internal/README.md',
+    '/internal/README.md', 'deep', 'deep/', 'src/deep', 'nope', '/nope/', '*.nope', '**/nope', 'nope/*', 'lib.r?', 'l*b.rs', '.github/',
+    '*.txt', 'my\\ docs/', 'a\\ b.txt', 'd?cs/', 'x.md', '**/x.md', 'api', 'docs/api/', '*/x.md', '*/*/x.md'];
+  for (const platform of ['github', 'gitlab']) {
+    const parsed = parseCodeowners(shapes.map((x) => `${x} @a`).join('\n'), platform);
+    const brute = parsed.rules.filter((r) => !tree.some((f) => matches(r.pat, f))).map((r) => r.line);
+    assert.deepEqual(deadLines(parsed, tree).map((d) => d.line), brute, `${platform}: the fast answer is the slow one`);
+    assert.ok(brute.length >= 5 && brute.length < parsed.rules.length - 10, `${platform}: the list holds both dead and live lines (${brute.length})`);
+  }
 });
 
 test('codeowners check: the file on disk is picked in the platform\'s order; one GitHub will not load is a fact', async () => {
@@ -18363,6 +18389,10 @@ test('codeowners check: the file on disk is picked in the platform\'s order; one
     fs.rmSync(path.join(T, 'docs/CODEOWNERS'), { recursive: true });
     put('docs/CODEOWNERS', '* @d\n');
     fs.rmSync(path.join(T, 'CODEOWNERS'));
+    // Only the exact name counts: a disk that ignores case would otherwise find `codeowners` for `CODEOWNERS`.
+    put('.github/codeowners', '* @lower\n');
+    assert.deepEqual(diskCodeowners(T, 'github').path, 'docs/CODEOWNERS');
+    fs.rmSync(path.join(T, '.github'), { recursive: true });
     put('.github/CODEOWNERS', `* @x\n${'#'.repeat(3_000_000)}\n`);
     assert.deepEqual(diskCodeowners(T, 'github'), { path: '.github/CODEOWNERS', tooBig: true, ignored: ['docs/CODEOWNERS'] });
     put('CODEOWNERS', `* @x\n${'#'.repeat(3_000_000)}\n`);
@@ -18406,7 +18436,11 @@ test('codeowners check: the real repo — files on disk count, the platform must
     assert.deepEqual(checkCodeowners(r.T, { platform: 'github', remote: '' }).dead.map((d) => d.line), [3, 5], 'only a submodule is probed as a folder');
     const N = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e69-nogit-'));
     assert.deepEqual(checkCodeowners(N, { platform: 'github' }), { git: false });
+    execFileSync('git', ['clone', '-q', '--bare', r.T, path.join(N, 'bare.git')], { stdio: 'pipe' });
+    assert.deepEqual(checkCodeowners(path.join(N, 'bare.git'), { platform: 'github' }), { git: false }, 'a bare repo has no files on disk');
     fs.rmSync(N, { recursive: true, force: true });
+    // A folder inside the repo is not where the platform reads CODEOWNERS: not known, never "none".
+    assert.match(checkCodeowners(path.join(r.T, 'src'), { platform: 'github', remote: '' }).unknown, /inside a git repo but is not its top folder/);
   } finally { r.done(); S.done(); }
 });
 
@@ -18540,10 +18574,16 @@ test('yad codeowners: check prints facts and the hint, never an address, never f
     assert.deepEqual(out.repos[0].inactive, { quiet: ['@carol'], checked: 1, notChecked: { email: 1 } });
     assert.doesNotMatch(r.out, /corp\.io/);
 
-    for (const [action, name] of [['write', undefined], ['--write', undefined], ['check', '--write']]) {
-      r = await run(() => runCodeowners(T, { action, name }));
+    for (const opts of [{ action: 'write' }, { action: '--write' }, { action: 'check', name: 'backend', write: true }]) {
+      r = await run(() => runCodeowners(T, opts));
       assert.equal(r.failed, true);
       assert.match(r.out, /yad never writes CODEOWNERS — any name it wrote would become an owner the platform can enforce/);
+    }
+    // Wherever `--write` is typed — after the repo name too — the CLI refuses it, never ignores it.
+    for (const args of [['check', 'backend', '--write'], ['check', '--write'], ['--write']]) {
+      const cli = yadRun(T, 'codeowners', ...args);
+      assert.equal(cli.code, 1, args.join(' '));
+      assert.match(cli.out, /yad never writes CODEOWNERS/, args.join(' '));
     }
     assert.equal(fs.readFileSync(path.join(repo, 'CODEOWNERS'), 'utf8').startsWith('src/ @carol'), true, 'the file is untouched');
     r = await run(() => runCodeowners(T, { action: 'bogus' }));

@@ -12,6 +12,7 @@
 //     hint: a person may commit under a work address. Printed by this command only, never by the doctor,
 //     and only where a noreply address is evidence (a github.com or gitlab.com remote).
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 
 import { c, fail, hand, info, log, ok, run, warn } from './lib.mjs';
 import { deadLines, diskCodeowners, parseCodeowners } from './codeowners.mjs';
@@ -39,6 +40,11 @@ const shownPattern = (d) => (d.pattern.includes('@') ? '' : ` (\`${d.negate ? '!
 export function checkCodeowners(repoRoot, { platform = null, remote, hint = false } = {}) {
   // A work tree, not only a repo: a bare repo has no files on disk to check.
   if (run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: repoRoot }).stdout !== 'true') return { git: false };
+  // The platform reads CODEOWNERS from the repo's top folder, and the file list must be the whole repo's.
+  const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: repoRoot }).stdout;
+  if (!top || fs.realpathSync(top) !== fs.realpathSync(repoRoot)) {
+    return { git: true, platform: null, ignored: [], notRead: [], dead: [], unknown: 'this folder is inside a git repo but is not its top folder, where the platform reads CODEOWNERS — check the repo\'s top folder instead' };
+  }
   const url = remote ?? run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout;
   const plat = platform || detectPlatform(url || '');
   const base = { git: true, platform: plat, ignored: [], notRead: [], dead: [] };
@@ -103,7 +109,7 @@ const KIND_WORD = { team: ['team'], group: ['group'], role: ['role'], email: ['e
 
 function printRepo(name, r) {
   log(c.bold(`\ncodeowners — ${name}`));
-  if (!r.git) { warn('not a git repo — skipped'); return; }
+  if (!r.git) { warn('no files on disk to check (not a git repo, or a bare one) — skipped'); return; }
   if (r.unknown) { warn(`CODEOWNERS: not known — ${r.unknown}`); return; }
   if (r.none) { info(`none — ${r.none}; nothing to check`); return; }
   const findings = codeownersFindings(r);
@@ -126,12 +132,12 @@ function printRepo(name, r) {
   if (findings.length) hand(`fix ${r.path} in ${name} through a PR — the warnings are advisory: CODEOWNERS is a hint, and yad never enforces it`);
 }
 
-export async function runCodeowners(root, { action = 'check', name, json = false, platform = null } = {}) {
-  if (action !== 'check' || name === '--write') {
+export async function runCodeowners(root, { action = 'check', name, json = false, platform = null, write = false } = {}) {
+  if (action !== 'check' || write) {
     // `--write` was part of E69's title and was dropped by decision: a name yad wrote into the file would
     // become an owner the platform can enforce ("Require review from Code Owners"), turning a hint into an
     // authority. Said plainly, so a habit or a script learns why.
-    if (action === 'write' || action === '--write' || name === '--write') {
+    if (write || action === 'write' || action === '--write') {
       fail('yad never writes CODEOWNERS — any name it wrote would become an owner the platform can enforce');
       hand('edit CODEOWNERS by hand and commit it through a PR; `yad codeowners check` shows which lines look stale');
     } else fail(`unknown action: ${action} (use: yad codeowners check [repo])`);
