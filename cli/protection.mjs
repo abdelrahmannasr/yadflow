@@ -97,15 +97,13 @@ export function branchMatches(pattern, branch) {
 // counts (`Number(true)` is 1), so each is "could not read", never 0 and never 1.
 const count = (v) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 
-// `gh auth status` is asked once per CLI and host per run: on a network that drops packets, each ask can
-// take the full timeout, and a Product with many repos on one host would pay it once per repo.
-const authAsked = new WeakMap();
-function loggedIn(runner, cli, host) {
-  let seen = authAsked.get(runner);
-  if (!seen) { seen = new Map(); authAsked.set(runner, seen); }
+// `gh auth status` is asked once per CLI and host per doctor run (`authCache`, which the caller makes
+// fresh for each run): on a network that drops packets each ask can take the full timeout, and a Product
+// with many repos on one host would pay it once per repo. Never kept longer — a login can change.
+function loggedIn(runner, cli, host, authCache) {
   const key = `${cli}\0${host}`;
-  if (!seen.has(key)) seen.set(key, runner(cli, ['auth', 'status', '--hostname', host], { timeout: TIMEOUT }).ok);
-  return seen.get(key);
+  if (!authCache.has(key)) authCache.set(key, runner(cli, ['auth', 'status', '--hostname', host], { timeout: TIMEOUT }).ok);
+  return authCache.get(key);
 }
 
 // The answer, for one repo and one branch. Every field that could not be read is null with a reason:
@@ -116,7 +114,7 @@ function loggedIn(runner, cli, host) {
 //     approvals: n|null, atLeast, approvalsWhy, from: [..],— the required approval count, and where
 //     codeOwners: true|false|null }                        — a code-owner review is required (a fact beside)
 // `kind` names the reason for a hint, so the hint never depends on the words of `why`.
-export function readProtection({ platform, gitUrl, branch = null, branchFrom = 'registry' } = {}, { runner = run, env = process.env } = {}) {
+export function readProtection({ platform, gitUrl, branch = null, branchFrom = 'registry' } = {}, { runner = run, env = process.env, authCache = new Map() } = {}) {
   const host = hostFromGitUrl(gitUrl || '');
   const repo = repoPathFromGitUrl(gitUrl || '');
   const plat = platform || detectPlatform(gitUrl || '') || null;
@@ -131,7 +129,7 @@ export function readProtection({ platform, gitUrl, branch = null, branchFrom = '
   if (env.YAD_PLATFORM_READ === '0') return unknown('off', 'platform reads are turned off (YAD_PLATFORM_READ=0)');
   if (!host || !repo) return unknown('no-url', 'no git remote URL yad can read, so it cannot tell which repo to ask about');
   if (!runner(process.platform === 'win32' ? 'where' : 'which', [cli], {}).ok) return unknown('no-cli', `${cli} is not installed, so yad cannot ask ${PLATFORM_NAME[plat]}`);
-  if (!loggedIn(runner, cli, host)) return unknown('no-login', `${cli} is not logged in for ${host} (or ${host} did not answer)`);
+  if (!loggedIn(runner, cli, host, authCache)) return unknown('no-login', `${cli} is not logged in for ${host} (or ${host} did not answer)`);
   return plat === 'github' ? readGitHub(base, runner, unknown) : readGitLab(base, runner, unknown);
 }
 
@@ -144,6 +142,11 @@ function repoAndBranch(base, runner, unknown, { cli, platform, at, what }) {
   if (!platformDefault) return { fail: unknown('no-default', `no default branch is set in yad's files, and ${PLATFORM_NAME[platform]} named none`) };
   return { branch: platformDefault, branchFrom: 'platform', platformDefault };
 }
+
+// A 404 on the branch: yad's files name one the platform does not have — or, when the branch IS the
+// platform's own default, a repo with no commits yet (or one the login cannot see).
+const branchMissing = (res, branchFrom) => (res.status !== 404 ? 'other' : branchFrom === 'platform' ? 'empty' : 'no-branch');
+const RULESET_OF = { Organization: 'an organisation ruleset', Repository: 'a repo ruleset' };
 
 // One source of required approvals, as { floor, exact, why }: `floor` is the most it proved; `exact` says
 // nothing was left unread; `why` says what was, when it was not.
@@ -165,7 +168,7 @@ function readGitHub(base, runner, unknown) {
   const b = api(runner, 'gh', host, `${at}/branches/${segment(branch)}`);
   if (!b.ok) {
     const why = whyFailed(b, { platform: 'github', host, what: `the branch ${shown(branch)}` });
-    return { ...out, known: false, kind: b.status === 404 ? 'no-branch' : 'other', why };
+    return { ...out, known: false, kind: branchMissing(b, branchFrom), why };
   }
   if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'other', why: 'GitHub did not say whether the branch is protected' };
   out.protected = b.body.protected;
@@ -173,17 +176,20 @@ function readGitHub(base, runner, unknown) {
   const rules = api(runner, 'gh', host, `${at}/rules/branches/${segment(branch)}?per_page=${PAGE}`);
   let rs;
   let rulesetCodeOwners = false;
+  let rulesetReviewers = false;
   if (rules.ok && Array.isArray(rules.body)) {
     let floor = 0;
     let unreadable = false;
     for (const r of rules.body) {
       if (r?.type !== 'pull_request') continue;
       if (r.parameters?.require_code_owner_review === true) rulesetCodeOwners = true;
+      // A named reviewer for some files (`required_reviewers`): like a code owner, a fact beside the count.
+      if (Array.isArray(r.parameters?.required_reviewers) && r.parameters.required_reviewers.some((x) => (count(x?.minimum_approvals) ?? 1) > 0)) rulesetReviewers = true;
       const n = count(r.parameters?.required_approving_review_count);
       if (n === null) { unreadable = true; continue; }
       if (n > 0) {
         floor = Math.max(floor, n);
-        out.from.push(`${r.ruleset_source_type === 'Organization' ? 'an organisation' : 'a repo'} ruleset${count(r.ruleset_id) !== null ? `, id ${r.ruleset_id}` : ''}`);
+        out.from.push(`${RULESET_OF[r.ruleset_source_type] || 'a ruleset'}${count(r.ruleset_id) !== null ? `, id ${r.ruleset_id}` : ''}`);
       }
     }
     // Any active rule at all is a protection, even one GitHub's `protected` flag may not count.
@@ -232,6 +238,7 @@ function readGitHub(base, runner, unknown) {
   // GitHub applies the strictest of the layered rules, so the count is exact only when both were read.
   Object.assign(out, settle([rs, cl]));
   out.codeOwners = rulesetCodeOwners || classicCodeOwners ? true : (rs.exact && cl.exact ? false : null);
+  out.fileReviewers = rulesetReviewers ? true : (rs.exact ? false : null);
   return out;
 }
 
@@ -242,17 +249,19 @@ function readGitLab(base, runner, unknown) {
   if (rb.fail) return rb.fail;
   const { branch, branchFrom, platformDefault } = rb;
   const out = { ...base, branch, branchFrom, platformDefault, known: true, protected: null, protectedWhy: null, approvals: null, atLeast: false, approvalsWhy: null, from: [], codeOwners: null };
+  // The branch itself: it must exist (a typo in yad's files must never read as "nothing protects it"),
+  // and its `protected` flag is GitLab's own answer — wildcards and group-level protection included.
+  const b = api(runner, 'glab', host, `${at}/repository/branches/${encodeURIComponent(branch)}`);
+  if (!b.ok) {
+    return { ...out, known: false, kind: branchMissing(b, branchFrom), why: whyFailed(b, { platform: 'gitlab', host, what: `the branch ${shown(branch)}` }) };
+  }
+  if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'other', why: 'GitLab did not say whether the branch is protected' };
+  out.protected = b.body.protected;
+  // The project's protected branches, for the code-owner fact only. A full page proves nothing past it.
   const pb = api(runner, 'glab', host, `${at}/protected_branches?per_page=${PAGE}`);
   if (pb.ok && Array.isArray(pb.body)) {
-    const matched = pb.body.filter((p) => branchMatches(p?.name, branch));
-    if (!matched.length && pb.body.length >= PAGE) {
-      out.protectedWhy = `the project has ${PAGE} or more protected branches and yad reads only the first ${PAGE}`;
-    } else {
-      out.protected = matched.length > 0;
-      out.codeOwners = matched.some((p) => p?.code_owner_approval_required === true);
-    }
-  } else {
-    out.protectedWhy = whyFailed(pb.ok ? { unreadable: true } : pb, { platform: 'gitlab', host, what: 'the protected branches' });
+    if (pb.body.some((p) => branchMatches(p?.name, branch) && p?.code_owner_approval_required === true)) out.codeOwners = true;
+    else if (pb.body.length < PAGE) out.codeOwners = false;
   }
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
@@ -267,15 +276,10 @@ function readGitLab(base, runner, unknown) {
       if (n === null) { whys.push('GitLab listed an approval rule whose count yad could not read'); continue; }
       if (n === 0) continue;
       let applies;
-      if (r.applies_to_all_protected_branches === true) applies = out.protected; // null when unknown
+      if (r.applies_to_all_protected_branches === true) applies = out.protected;
       else if (Array.isArray(r.protected_branches)) applies = r.protected_branches.length ? r.protected_branches.some((p) => branchMatches(p?.name, branch)) : true; // none listed: every branch
       else applies = null;
-      if (applies === null) {
-        whys.push(r.applies_to_all_protected_branches === true
-          ? `an approval rule applies to every protected branch, and ${out.protectedWhy}`
-          : 'GitLab did not say which branches an approval rule covers');
-        continue;
-      }
+      if (applies === null) { whys.push('GitLab did not say which branches an approval rule covers'); continue; }
       if (applies) { floor = Math.max(floor, n); out.from.push(`approval rule ${JSON.stringify(String(r.name ?? r.id))}`); }
     }
     if (ar.body.length >= PAGE) whys.push(`the project has ${PAGE} or more approval rules and yad reads only the first ${PAGE}`);
@@ -308,7 +312,14 @@ export const BANNER = 'This repo has no approval rules and no branch protection.
 // No e-mail address is ever printed (E67). `shown` hides a name yad places itself; this last pass hides
 // any other word with an `@` after its first character — a host, a rule name, a repo's name in yad, a
 // platform string — wherever it came from. Leading quotes and brackets are not the first character.
-export const hideAddresses = (text) => (typeof text === 'string' ? text.replace(/\S+/g, (w) => (w.replace(/^[`"'([]+/, '').indexOf('@', 1) >= 0 ? shown('x@x') : w)) : text);
+// Only the word's core is replaced: the quotes, brackets and punctuation around it stay, so a sentence
+// keeps its shape (`"bob@x.com")` becomes `"a name with an @ in it")`).
+export const hideAddresses = (text) => (typeof text === 'string'
+  ? text.replace(/\S+/g, (w) => {
+    const [, lead, core, trail] = w.match(/^([`"'([<]*)(.*?)([`"')\]>,;:.!?]*)$/);
+    return core.indexOf('@', 1) >= 0 ? `${lead}${shown('x@x')}${trail}` : w;
+  })
+  : text);
 
 // The answer as `--json` prints it: every string in it passed through `hideAddresses`.
 export function protectionJSON(r) {
@@ -340,11 +351,21 @@ function lineFor(r, { name, solo = false } = {}) {
   if (!r.known) {
     return { status: team, message: `${name}: not known whether ${br} requires an approval${branchNote} — ${r.why}`, hint: unknownHint(r) };
   }
-  const owners = r.codeOwners === true ? '; a code owner must also approve a change to a file CODEOWNERS lists' : '';
+  // Approvals asked only for some files: facts beside the count, never the count itself.
+  const scoped = [
+    ...(r.codeOwners === true ? ['a code owner must approve a change to a file CODEOWNERS lists'] : []),
+    ...(r.fileReviewers === true ? ['a named reviewer must approve a change to some files'] : []),
+  ];
+  const owners = scoped.length ? `; ${scoped.join('; ').replace(/ must /g, ' must also ')}` : '';
   if (r.approvals > 0) {
     const n = `${r.atLeast ? 'at least ' : ''}${r.approvals} approval${r.approvals === 1 ? '' : 's'}`;
     if (solo) {
       return { status: 'warn', message: `${name}: solo mode, but ${where} requires ${n} to merge into ${br}${branchNote} — you cannot approve your own pull request, so the merge will be blocked`, hint: `relax the required approvals in ${setting} (from: ${r.from.join(', ')})` };
+    }
+    // A rule on a branch that is NOT protected holds only a merge request: a direct push skips it. (GitLab:
+    // a rule with no branch listed covers every branch. On GitHub a count always comes with protection.)
+    if (r.protected !== true) {
+      return { status: 'warn', message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no merge request; a merge request into it needs ${n} (from: ${r.from.join(', ')})${owners}`, hint: `only a protected branch stops a direct push — protect ${br} in ${P}'s settings; yad only reports what is set` };
     }
     return { status: 'ok', message: `${name}: ${where} requires ${n} to merge into ${br} (from: ${r.from.join(', ')})${note ? `; ${note}` : ''}${owners} — ${P} holds the merge, not yad` };
   }
@@ -353,14 +374,11 @@ function lineFor(r, { name, solo = false } = {}) {
     return { status: 'warn', message: `${name} (${where}, branch ${br}${note ? `; ${note}` : ''}): ${BANNER}`, hint: `only ${P} can hold a merge — a required approval in ${setting} does it; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === true) {
-    const msg = r.codeOwners === true
-      ? `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval — only a change to a file CODEOWNERS lists needs a code owner's approval; anyone with write access can merge any other change of their own`
-      : `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval — anyone with write access can merge their own pull request`;
+    // Who may merge is not read, so the line says "whoever may merge", never "anyone with write access".
+    const msg = scoped.length
+      ? `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval — only some changes need one (${scoped.join('; ')}); whoever may merge into it can merge any other change of their own`
+      : `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval — whoever may merge into it can merge their own pull request`;
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval — in ${setting}; yad only reports what is set` };
-  }
-  if (r.approvals === 0) {
-    const msg = `${name}: no rule on ${where} requires an approval to merge into ${br}${branchNote}; whether the branch is protected is not known — ${r.protectedWhy}`;
-    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: 'anyone with write access may be able to push to it directly' };
   }
   // approvals not known
   if (r.protected === false) {
@@ -385,6 +403,7 @@ function unknownHint(r) {
     case 'no-platform': return 'set `platform` (github or gitlab) in yad\'s files — `yad setup` for the Product, `yad repo connect` for a code repo';
     case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (hub.json for the Product), or give the repo an origin remote';
     case 'no-branch': return 'check that `default_branch` in yad\'s files names a branch that exists on the platform';
+    case 'empty': return 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, then run `yad doctor` again';
     case 'no-default': return 'set `default_branch` in yad\'s files (.sdlc/repos.json, or hub.json for the Product)';
     default: return 'run `yad doctor` again when the platform can be reached; nothing about this repo\'s protection is assumed meanwhile';
   }

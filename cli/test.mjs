@@ -18752,8 +18752,9 @@ const ghRead = (calls, target = {}, spec = {}) => {
   const f = fakePlatform({ calls: [[/^repos\/acme\/app$/, 200, { default_branch: 'main' }], ...calls], ...spec });
   return { r: readProtection({ platform: 'github', gitUrl: GH_URL, branch: 'main', ...target }, { runner: f.runner, env: ON }), asked: f.asked };
 };
-const glRead = (calls, target = {}, spec = {}) => {
-  const f = fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], ...calls], ...spec });
+// GitLab's branch answers `protected: prot` unless a test's own calls answer it first.
+const glRead = (calls, target = {}, { prot = false, ...spec } = {}) => {
+  const f = fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], ...calls, [/\/repository\/branches\//, 200, { protected: prot }]], ...spec });
   return { r: readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: 'main', ...target }, { runner: f.runner, env: ON }), asked: f.asked };
 };
 const PR_RULE = (n, extra = {}) => ({ type: 'pull_request', parameters: { required_approving_review_count: n, ...extra }, ruleset_source_type: 'Repository', ruleset_id: 7 });
@@ -18826,6 +18827,17 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   ({ r } = ghRead([[/\/rules\//, 200, 'garbage'], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals], [null, null]);
   assert.match(r.approvalsWhy, /with something yad could not read/);
+  ({ r } = ghRead([[/\/rules\//, 200, {}], [/\/branches\/main$/, 200, { protected: true }], [/\/protection$/, 200, {}]]));
+  assert.equal(r.approvalsWhy, 'GitHub answered the rulesets on the branch with something yad could not read', 'valid JSON that is not a list');
+  // A ruleset from a source yad does not name is "a ruleset"; a named reviewer for some files is a fact.
+  ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [{ ...PR_RULE(1), ruleset_source_type: 'Enterprise', ruleset_id: 5 }]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual(r.from, ['a ruleset, id 5']);
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(0, { required_reviewers: [{ minimum_approvals: 1, file_patterns: ['*'] }] })]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.approvals, r.fileReviewers], [0, true]);
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(0, { required_reviewers: [{ minimum_approvals: 0 }] })]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.equal(r.fileReviewers, false, 'a reviewer asked for 0 approvals asks for none');
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.equal(r.fileReviewers, null, 'unread rulesets: not known');
   // A FULL page of rules with no review rule proves nothing about what is past it.
   ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, Array.from({ length: PAGE }, () => ({ type: 'deletion' }))], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.equal(r.approvals, null);
@@ -18900,33 +18912,57 @@ test('E70 readProtection: the branch is yad\'s; with none, the platform\'s defau
   assert.ok(asked.some((a) => a.endsWith('repos/acme/app/branches/release/1.0%20%23x')), asked.join('\n'));
 });
 
-test('E70 readProtection on GitLab: protected branches (wildcards), approval rules (Premium) never guessed', () => {
+test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the list, approval rules (Premium) never guessed', () => {
+  const P = { prot: true };
   // Free: the branch is protected, the approval rules are refused → not known, and the tier is not guessed.
-  let { r, asked } = glRead([[/\/approval_rules/, 403], [/\/protected_branches/, 200, [{ name: 'main' }]]]);
-  assert.deepEqual([r.known, r.protected, r.approvals], [true, true, null]);
+  let { r, asked } = glRead([[/\/approval_rules/, 403], [/\/protected_branches/, 200, [{ name: 'main' }]]], {}, P);
+  assert.deepEqual([r.known, r.protected, r.approvals, r.codeOwners], [true, true, null, false]);
   assert.match(r.approvalsWhy, /^GitLab refused to show the approval rules \(HTTP 403\): they need GitLab Premium or Ultimate, or your login may not read them$/);
-  assert.ok(asked.some((a) => a === 'glab api --hostname gitlab.com projects/acme%2Fapp/protected_branches?per_page=100'), asked.join('\n'));
+  assert.ok(asked.includes('glab api --hostname gitlab.com projects/acme%2Fapp/repository/branches/main'), asked.join('\n'));
+  assert.ok(asked.includes('glab api --hostname gitlab.com projects/acme%2Fapp/protected_branches?per_page=100'), asked.join('\n'));
   for (const code of [401, 404]) assert.match(glRead([[/\/approval_rules/, code], [/\/protected_branches/, 200, []]]).r.approvalsWhy, new RegExp(`HTTP ${code}\\): they need GitLab Premium`));
   assert.match(glRead([[/\/approval_rules/, null], [/\/protected_branches/, 200, []]]).r.approvalsWhy, /could not reach gitlab\.com to read the approval rules/);
   assert.match(glRead([[/\/approval_rules/, 200, 'x'], [/\/protected_branches/, 200, []]]).r.approvalsWhy, /could not read/);
-  // Premium: a rule scoped to no branch applies to every branch.
-  ({ r } = glRead([[/\/approval_rules/, 200, [{ id: 1, name: 'All', approvals_required: 2, protected_branches: [] }, { id: 2, name: 'Zero', approvals_required: 0 }]], [/\/protected_branches/, 200, [{ name: 'main' }]]]));
+  assert.match(glRead([[/\/approval_rules/, 200, {}], [/\/protected_branches/, 200, []]]).r.approvalsWhy, /^GitLab answered the approval rules with something yad could not read$/, 'valid JSON that is not a list');
+  // The branch must exist: a typo in yad's files is never "nothing protects it".
+  ({ r } = glRead([[/\/repository\/branches\//, 404]], { branch: 'mian' }));
+  assert.deepEqual([r.known, r.kind, r.platformDefault], [false, 'no-branch', 'main']);
+  assert.match(r.why, /^GitLab answered 404 for the branch mian/);
+  ({ r } = glRead([[/\/repository\/branches\//, 404]], { branch: null }));
+  assert.deepEqual([r.known, r.kind, r.branchFrom], [false, 'empty', 'platform'], 'the platform\'s own default with no commits yet');
+  ({ r } = glRead([[/\/repository\/branches\//, 200, { name: 'main' }]]));
+  assert.deepEqual([r.known, r.why], [false, 'GitLab did not say whether the branch is protected']);
+  // GitLab's own flag decides "protected" — group-level protection included, which the project list omits.
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.protected, r.approvals, r.codeOwners], [true, 0, false]);
+  // Code owners come from the list: a wildcard match counts; a full page without one proves nothing.
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, [{ name: 'ma*', code_owner_approval_required: true }]]], {}, P));
+  assert.equal(r.codeOwners, true);
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, [{ name: 'main', code_owner_approval_required: false }, ...Array.from({ length: PAGE - 1 }, (_, i) => ({ name: `b${i}` }))]]], {}, P));
+  assert.equal(r.codeOwners, null);
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 403]], {}, P));
+  assert.deepEqual([r.protected, r.approvals, r.codeOwners], [true, 0, null], 'the list is only for the code-owner fact');
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, {}]], {}, P));
+  assert.equal(r.codeOwners, null);
+  // Premium: a rule scoped to no branch applies to every branch; a rule named by nothing is named by its id.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ id: 1, name: 'All', approvals_required: 2, protected_branches: [] }, { id: 2, name: 'Zero', approvals_required: 0 }]], [/\/protected_branches/, 200, [{ name: 'main' }]]], {}, P));
   assert.deepEqual([r.approvals, !!r.atLeast, r.from], [2, false, ['approval rule "All"']]);
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ id: 42, approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual(r.from, ['approval rule "42"']);
   // Two rules: each is met on its own and their approvers may overlap — the largest is a floor.
-  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'B', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'B', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [2, true]);
-  // A wildcard protects the branch; a rule on every protected branch then applies.
-  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Sec', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, [{ name: 'ma*', code_owner_approval_required: true }]]]));
-  assert.deepEqual([r.protected, r.approvals, r.codeOwners], [true, 1, true]);
+  // A rule on every protected branch follows the branch's flag.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Sec', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.protected, r.approvals], [true, 1]);
   // …and does not apply to a branch that is not protected; a rule listing another branch does not either.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Sec', approvals_required: 1, applies_to_all_protected_branches: true }, { name: 'Rel', approvals_required: 3, protected_branches: [{ name: 'release-*' }] }]], [/\/protected_branches/, 200, [{ name: 'release-*' }]]]));
   assert.deepEqual([r.protected, r.approvals], [false, 0]);
-  // A rule on every protected branch, while the protected branches cannot be read: not known.
-  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Sec', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 403]]));
-  assert.deepEqual([r.protected, r.approvals], [null, null]);
-  assert.match(r.approvalsWhy, /an approval rule applies to every protected branch, and GitLab refused to show the protected branches/);
+  // A rule on an UNprotected branch: a count, and `protected: false` beside it (the line says a push skips it).
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
+  assert.deepEqual([r.protected, r.approvals], [false, 2]);
   // One rule's reach unknown, another applying: the count is a floor, never exact.
-  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'a', approvals_required: 3, applies_to_all_protected_branches: true }, { name: 'b', approvals_required: 1, protected_branches: [{ name: 'main' }] }]], [/\/protected_branches/, 500]]));
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'a', approvals_required: 3 }, { name: 'b', approvals_required: 1, protected_branches: [{ name: 'main' }] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [1, true]);
   // No `protected_branches` key at all is not "every branch".
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'x', approvals_required: 2 }]], [/\/protected_branches/, 200, []]]));
@@ -18939,21 +18975,17 @@ test('E70 readProtection on GitLab: protected branches (wildcards), approval rul
     ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'x', approvals_required: bad, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
     assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab listed an approval rule whose count yad could not read'], String(bad));
   }
-  // A full page that holds a count is a floor.
-  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [] }, ...Array.from({ length: PAGE - 1 }, () => ({ name: 'z', approvals_required: 0 }))]], [/\/protected_branches/, 200, []]]));
+  // A full page that holds a count is a floor; one that holds none proves nothing.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [] }, ...Array.from({ length: PAGE - 1 }, () => ({ name: 'z', approvals_required: 0 }))]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [2, true]);
-  // Nothing at all, proven.
-  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, []]]));
-  assert.deepEqual([r.protected, r.approvals], [false, 0]);
-  // Full pages prove nothing.
-  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, Array.from({ length: PAGE }, (_, i) => ({ name: `b${i}` }))]]));
-  assert.equal(r.protected, null);
-  assert.match(r.protectedWhy, /100 or more protected branches/);
   ({ r } = glRead([[/\/approval_rules/, 200, Array.from({ length: PAGE }, () => ({ name: 'z', approvals_required: 0 }))], [/\/protected_branches/, 200, []]]));
   assert.equal(r.approvals, null);
   assert.match(r.approvalsWhy, /100 or more approval rules/);
+  // Nothing at all, proven.
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, []]]));
+  assert.deepEqual([r.protected, r.approvals], [false, 0]);
   // A self-managed host and a subgroup: the host is asked, and the whole path is the project.
-  const f = fakePlatform({ calls: [[/^projects\/group%2Fsub%2Fproj$/, 200, { default_branch: 'trunk' }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]] });
+  const f = fakePlatform({ calls: [[/^projects\/group%2Fsub%2Fproj$/, 200, { default_branch: 'trunk' }], [/\/repository\/branches\/trunk$/, 200, { protected: false }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]] });
   r = readProtection({ platform: 'gitlab', gitUrl: 'https://git.corp.example/group/sub/proj.git', branch: null }, { runner: f.runner, env: ON });
   assert.deepEqual([r.host, r.repo, r.branch, r.approvals], ['git.corp.example', 'group/sub/proj', 'trunk', 0]);
   assert.ok(f.asked.includes('glab auth status --hostname git.corp.example'));
@@ -18979,16 +19011,26 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
     assert.ok(!protectionLine(r, { name: 'b' }).message.includes(BANNER), JSON.stringify(r));
   }
   l = protectionLine({ ...base, protected: true }, { name: 'b' });
-  assert.deepEqual([l.status, l.message], ['warn', 'b: `main` is protected on GitHub acme/app, but no rule requires an approval — anyone with write access can merge their own pull request']);
+  assert.deepEqual([l.status, l.message], ['warn', 'b: `main` is protected on GitHub acme/app, but no rule requires an approval — whoever may merge into it can merge their own pull request'], 'who may merge is not read');
+  l = protectionLine({ ...base, protected: true, fileReviewers: true }, { name: 'b' });
+  assert.equal(l.message, 'b: `main` is protected on GitHub acme/app, but no rule requires an approval — only some changes need one (a named reviewer must approve a change to some files); whoever may merge into it can merge any other change of their own');
+  // A count on a branch that is NOT protected (GitLab: a rule covering every branch) holds a merge request
+  // only: a direct push skips it — a warning, never "holds the merge", in both modes.
+  for (const solo of [false, true]) {
+    l = protectionLine({ ...base, platform: 'gitlab', protected: false, approvals: 2, from: ['approval rule "A"'] }, { name: 'web', solo });
+    assert.equal(l.status, 'warn');
+  }
+  l = protectionLine({ ...base, platform: 'gitlab', protected: false, approvals: 2, from: ['approval rule "A"'] }, { name: 'web' });
+  assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, with no merge request; a merge request into it needs 2 approvals (from: approval rule "A")');
+  assert.equal(l.hint, 'only a protected branch stops a direct push — protect `main` in GitLab\'s settings; yad only reports what is set');
   l = protectionLine({ ...base, protected: true, codeOwners: true }, { name: 'b' });
-  assert.match(l.message, /no rule requires an approval — only a change to a file CODEOWNERS lists needs a code owner's approval; anyone with write access can merge any other change of their own$/);
+  assert.match(l.message, /no rule requires an approval — only some changes need one \(a code owner must approve a change to a file CODEOWNERS lists\); whoever may merge into it can merge any other change of their own$/);
   assert.equal(protectionLine({ ...base, protected: true }, { name: 'b', solo: true }).status, 'ok');
-  l = protectionLine({ ...base, protected: null, protectedWhy: 'GitLab refused' }, { name: 'b' });
-  assert.equal(l.message, 'b: no rule on GitHub acme/app requires an approval to merge into `main`; whether the branch is protected is not known — GitLab refused');
-  assert.equal(protectionLine({ ...base, protected: null, protectedWhy: 'x' }, { name: 'b', solo: true }).status, 'ok');
   // Required approvals: a fact, `ok` — and never "safe", never "yad holds".
   l = protectionLine({ ...base, protected: true, approvals: 2, atLeast: true, from: ['a repo ruleset, id 7'], codeOwners: true }, { name: 'b' });
   assert.deepEqual([l.status, l.message], ['ok', 'b: GitHub acme/app requires at least 2 approvals to merge into `main` (from: a repo ruleset, id 7); a code owner must also approve a change to a file CODEOWNERS lists — GitHub holds the merge, not yad']);
+  l = protectionLine({ ...base, protected: true, approvals: 1, from: ['x'], codeOwners: true, fileReviewers: true }, { name: 'b' });
+  assert.match(l.message, /; a code owner must also approve a change to a file CODEOWNERS lists; a named reviewer must also approve a change to some files — GitHub holds the merge/);
   // Solo: a required approval blocks the solo developer's own merge — the old solo probe's warning.
   l = protectionLine({ ...base, protected: true, approvals: 1, from: ['classic branch protection'] }, { name: 'Product hub', solo: true });
   assert.deepEqual([l.status, l.message], ['warn', 'Product hub: solo mode, but GitHub acme/app requires 1 approval to merge into `main` — you cannot approve your own pull request, so the merge will be blocked']);
@@ -19021,6 +19063,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('no-url').hint, /\.sdlc\/repos\.json/);
   assert.match(unknown('no-branch').hint, /names a branch that exists/);
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
+  assert.match(unknown('empty').hint, /^the platform names this default branch, but it has no commits yet/);
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^run `yad doctor` again when the platform can be reached/);
   assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /names a branch that exists/);
   // A "not known" line still names the platform's own default when it differs (the typo case).
@@ -19028,7 +19071,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.equal(protectionLine({ ...base, known: false, why: 'x', branch: null, platform: null }, { name: 'b' }).message, 'b: not known whether the default branch requires an approval — x');
   // The branch notes.
   assert.equal(protectionLine({ ...base, branch: 'develop' }, { name: 'b' }).message, `b (GitHub acme/app, branch \`develop\`; GitHub's own default branch is \`main\`): ${BANNER}`);
-  assert.equal(protectionLine({ ...base, protected: true, branchFrom: 'platform' }, { name: 'b' }).message, 'b: `main` is protected on GitHub acme/app (yad\'s files name no default branch, so GitHub\'s default was read), but no rule requires an approval — anyone with write access can merge their own pull request');
+  assert.equal(protectionLine({ ...base, protected: true, branchFrom: 'platform' }, { name: 'b' }).message, 'b: `main` is protected on GitHub acme/app (yad\'s files name no default branch, so GitHub\'s default was read), but no rule requires an approval — whoever may merge into it can merge their own pull request');
   // No e-mail address, anywhere: not the branch, not the platform's default, not in --json.
   const at = { ...base, branch: 'me@corp.com', platformDefault: 'you@corp.com', repo: 'acme/app' };
   for (const r of [at, { ...at, protected: true, approvals: 1, from: ['x'] }, { ...at, known: false, why: 'x' }]) {
@@ -19049,7 +19092,8 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
 test('E70: no address anywhere in a line, a hint or --json; one login check per host; reason kinds', () => {
   const { hideAddresses } = { hideAddresses: protHide };
   assert.equal(hideAddresses('a b@c.com d'), 'a a name with an @ in it d');
-  assert.equal(hideAddresses('(`me@corp.com`):'), 'a name with an @ in it');
+  assert.equal(hideAddresses('(`me@corp.com`):'), '(`a name with an @ in it`):', 'the punctuation around it stays');
+  assert.equal(hideAddresses('approval rule "owner bob@x.com")'), 'approval rule "owner a name with an @ in it")');
   assert.equal(hideAddresses('@team and "@org/x"'), '@team and "@org/x"', 'a login is not an address');
   // A host with an `@` (a remote written with two), a rule name, a platform string, a repo's name in yad.
   const f = fakePlatform({ calls: [[/./, null]] });
@@ -19059,7 +19103,7 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
   assert.ok(!/b\.com/.test(JSON.stringify(protectionJSON(r))), 'the --json object too');
   r = readProtection({ platform: 'gitlab', gitUrl: 'a@b.com@gitlab.com:g/p.git', branch: 'main' }, { runner: fakePlatform({ authed: false }).runner, env: ON });
   l = protectionLine(r, { name: 'svc' });
-  assert.equal(l.hint, 'run `glab auth login --hostname a name with an @ in it then `yad doctor` again', 'the login hint names the host');
+  assert.equal(l.hint, 'run `glab auth login --hostname a name with an @ in it`, then `yad doctor` again', 'the login hint names the host');
   r = readProtection({ platform: 'bob@x.com', gitUrl: GH_URL, branch: 'main' }, { runner: f.runner, env: ON });
   assert.ok(!/x\.com/.test(protectionLine(r, { name: 'svc' }).message));
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'owner bob@x.com', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
@@ -19068,14 +19112,19 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
   assert.ok(!/x\.com/.test(JSON.stringify(protectionJSON(r))));
   // `gh auth status` once per host per run, however many repos live there.
   const g = fakePlatform({ calls: [[/^repos\/acme\/(app|other)$/, 200, { default_branch: 'main' }], [/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: false }]] });
-  readProtection({ platform: 'github', gitUrl: GH_URL, branch: 'main' }, { runner: g.runner, env: ON });
-  readProtection({ platform: 'github', gitUrl: 'https://github.com/acme/other.git', branch: 'main' }, { runner: g.runner, env: ON });
-  readProtection({ platform: 'github', gitUrl: 'https://ghe.corp.example/acme/app.git', branch: 'main' }, { runner: g.runner, env: ON });
+  const authCache = new Map();
+  readProtection({ platform: 'github', gitUrl: GH_URL, branch: 'main' }, { runner: g.runner, env: ON, authCache });
+  readProtection({ platform: 'github', gitUrl: 'https://github.com/acme/other.git', branch: 'main' }, { runner: g.runner, env: ON, authCache });
+  readProtection({ platform: 'github', gitUrl: 'https://ghe.corp.example/acme/app.git', branch: 'main' }, { runner: g.runner, env: ON, authCache });
   assert.deepEqual(g.asked.filter((a) => / auth status /.test(a)), ['gh auth status --hostname github.com', 'gh auth status --hostname ghe.corp.example']);
   const h = fakePlatform({ authed: false });
-  readProtection({ platform: 'github', gitUrl: GH_URL, branch: 'main' }, { runner: h.runner, env: ON });
-  assert.equal(readProtection({ platform: 'github', gitUrl: 'https://github.com/acme/other.git', branch: 'main' }, { runner: h.runner, env: ON }).kind, 'no-login', 'a failed login is remembered too');
+  const cache2 = new Map();
+  readProtection({ platform: 'github', gitUrl: GH_URL, branch: 'main' }, { runner: h.runner, env: ON, authCache: cache2 });
+  assert.equal(readProtection({ platform: 'github', gitUrl: 'https://github.com/acme/other.git', branch: 'main' }, { runner: h.runner, env: ON, authCache: cache2 }).kind, 'no-login', 'a failed login is remembered for the run');
   assert.equal(h.asked.filter((a) => / auth status /.test(a)).length, 1);
+  // …and only for the run: with no cache given, each read asks again (a login can change between runs).
+  readProtection({ platform: 'github', gitUrl: GH_URL, branch: 'main' }, { runner: h.runner, env: ON });
+  assert.equal(h.asked.filter((a) => / auth status /.test(a)).length, 2);
   // The kinds the reader sets.
   const kinds = [
     [readProtection({ platform: null, gitUrl: 'https://example.org/a/b.git' }, { runner: f.runner, env: ON }), 'no-platform'],
@@ -19084,6 +19133,7 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
     [readProtection({ platform: 'github', gitUrl: GH_URL }, { runner: fakePlatform({ installed: false }).runner, env: ON }), 'no-cli'],
     [ghRead([[/\/branches\/main$/, 404]]).r, 'no-branch'],
     [ghRead([[/\/branches\/main$/, 502]]).r, 'other'],
+    [ghRead([[/\/branches\/main$/, 404]], { branch: null }).r, 'empty'],
     [readProtection({ platform: 'github', gitUrl: GH_URL, branch: null }, { runner: fakePlatform({ calls: [[/^repos\/acme\/app$/, 200, { default_branch: '' }]] }).runner, env: ON }), 'no-default'],
   ];
   for (const [res, kind] of kinds) assert.equal(res.kind, kind, res.why);
@@ -19109,7 +19159,7 @@ test('yad doctor: the protection section — one line for the hub and each conne
     const f = fakePlatform({ calls: [
       [/^repos\/acme\/app$/, 200, { default_branch: 'main' }], [/^repos\/acme\/app\/rules\//, 200, []], [/^repos\/acme\/app\/branches\/main$/, 200, { protected: false }],
       [/^repos\/acme\/backend$/, 200, { default_branch: 'main' }], [/^repos\/acme\/backend\/rules\//, 200, [PR_RULE(1)]], [/^repos\/acme\/backend\/branches\/main$/, 200, { protected: true }], [/^repos\/acme\/backend\/branches\/main\/protection$/, 404],
-      [/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], [/protected_branches/, 200, [{ name: 'main' }]], [/approval_rules/, 403],
+      [/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], [/repository\/branches\/main$/, 200, { protected: true }], [/protected_branches/, 200, [{ name: 'main' }]], [/approval_rules/, 403],
     ] });
     let checks = [];
     protectionChecks(checks, T, { runner: f.runner, env: ON });
@@ -19121,6 +19171,7 @@ test('yad doctor: the protection section — one line for the hub and each conne
     assert.match(checks[2].message, /^mobile: not known whether `main` requires an approval — no git remote URL yad can read/);
     assert.match(checks[3].message, /^web: `main` is protected on GitLab acme\/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules \(HTTP 403\)/);
     assert.equal(checks[1].protection.approvals, 1, '--json carries the answer');
+    assert.deepEqual(f.asked.filter((a) => / auth status /.test(a)), ['gh auth status --hostname github.com', 'glab auth status --hostname gitlab.com'], 'one login check per host for the whole run');
     assert.ok(checks.every((x) => x.status !== 'fail'), 'advisory: never a failure');
     // Solo mode: the same facts, `ok`, no banner.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', git_url: GH_URL, default_branch: 'main', solo: true }));
@@ -19135,6 +19186,13 @@ test('yad doctor: the protection section — one line for the hub and each conne
     checks = [];
     protectionChecks(checks, T, { runner: f.runner, env: ON });
     assert.deepEqual(checks.map((x) => [x.status, x.message]), [['warn', 'Product hub: not known whether the default branch requires an approval — no platform (GitHub or GitLab) is set, so there is no platform to ask']]);
+    // A repo's name with an `@` is hidden in the check id too, not only in the line.
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'me@corp.com', path: 'x', platform: 'github', git_url: null }] }));
+    checks = [];
+    protectionChecks(checks, T, { runner: f.runner, env: ON });
+    assert.deepEqual(checks.map((x) => x.id), ['protection', 'protection:a name with an @ in it']);
+    assert.ok(!/corp\.com/.test(JSON.stringify(checks)));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
     // No hub file: only the repos.
     fs.rmSync(path.join(T, '.sdlc/hub.json'));
     checks = [];

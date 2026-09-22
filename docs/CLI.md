@@ -1179,9 +1179,15 @@ default is read, and the line says that too.
 | GitHub | classic branch protection's required reviews (`GET …/branches/{branch}/protection`) | **repo admins only** |
 | GitLab | a project approval rule that applies to the branch (`GET projects/{id}/approval_rules`) | GitLab **Premium and Ultimate** only |
 
-Two things are printed as facts beside the answer, and are not approval rules: that the branch is
-protected at all (for example, no direct push), and that a code owner must approve a change to a file
-CODEOWNERS lists. On GitLab Free an approval is optional and never blocks a merge.
+Some things are printed as facts beside the answer, and are not approval rules: whether the branch is
+protected at all (for example, no direct push); that a code owner must approve a change to a file
+CODEOWNERS lists; and, on GitHub, that a ruleset names a reviewer who must approve a change to some files.
+Whether the branch is protected comes from the branch's own `protected` flag (`GET
+repos/{owner}/{repo}/branches/{branch}` on GitHub, `GET projects/{id}/repository/branches/{branch}` on
+GitLab — GitLab's flag also covers protection set for a whole group). The branch must exist: a branch
+that yad's files name but the platform does not have is "not known", never "unprotected". Who may merge
+into a protected branch is not read, so a line says "whoever may merge into it". On GitLab Free an
+approval is optional and never blocks a merge.
 
 **"Not known" is never "fine", and never "unprotected".** A call that fails is not an answer. GitHub
 answers 404 on classic protection to anyone who is not an admin — even for a branch it reports as
@@ -1198,7 +1204,7 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | Offline | `yad could not reach github.com to read the repo acme/app (offline, or the host did not answer)` |
 | Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin, or the branch is protected by rulesets alone)` |
 | GitLab approval rules refused | `GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them` |
-| A branch that does not exist | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
+| A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
 
 Three real lines, each from a different team Product (the arrow line is the first one's hint):
@@ -1216,7 +1222,7 @@ Three real lines, each from a different team Product (the arrow line is the firs
 | No approval rule **and** no branch protection, both proven — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
 | Protected, but no rule requires an approval | **warn** | ok |
 | Not protected, or not known whether it needs an approval | **warn** | ok |
-| No rule requires an approval, but not known whether the branch is protected (GitLab) | **warn** | ok |
+| A merge request needs N approvals, but the branch is not protected, so a direct push skips them (GitLab) | **warn** | **warn** |
 | Not known at all, with why | **warn** | ok |
 
 "At least N" means part of the answer could not be read — for example classic protection, while a ruleset
@@ -1230,8 +1236,8 @@ reports what is set. How to set up branch protection is not documented here.
 **How it reads.** With your own `gh` or `glab` login, from the repo's own host — nothing is written,
 and nothing is sent anywhere else. `gh auth status --hostname <host>` (or `glab`) is asked once per host.
 Then, per repo, up to four read-only calls on GitHub (the repo, the branch, its rulesets, and classic
-protection when GitHub's own flag says the branch is protected) and three on GitLab (the project, its
-protected branches, its approval rules). Each call has a 10-second limit. `YAD_PLATFORM_READ=0` turns the reads off, for example offline; every line then
+protection when GitHub's own flag says the branch is protected) and four on GitLab (the project, the
+branch, its protected branches for the code-owner fact, and its approval rules). Each call has a 10-second limit. `YAD_PLATFORM_READ=0` turns the reads off, for example offline; every line then
 says not known.
 
 **Limits.**
@@ -1248,7 +1254,7 @@ says not known.
   branch is protected is not known.
 - A GitLab report rule (such as Coverage-Check or License-Check) asks for an approval only when its report
   fails, so it is not counted as an approval rule. A GitLab approval rule that does not say which branches
-  it covers makes the count not known.
+  it covers makes the count not known — or "at least N" when another rule applies.
 - A GitLab server served under a sub-path (`https://host/gitlab/group/project`) is not supported: the
   sub-path is read as part of the project's path, and GitLab answers 404.
 

@@ -18,7 +18,7 @@ import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
-import { readProtection, protectionLine, protectionJSON } from './protection.mjs';
+import { readProtection, protectionLine, protectionJSON, hideAddresses } from './protection.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 
 const MIN_NODE = 18;
@@ -1893,7 +1893,8 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
   const productPath = productConfigPath(root);
   const hub = readJSON(productPath, null);
   const solo = isSolo(hub);
-  const opts = { ...(runner ? { runner } : {}), ...(env ? { env } : {}) };
+  // One login check per host for this run, and never longer: a login can change between runs.
+  const opts = { ...(runner ? { runner } : {}), ...(env ? { env } : {}), authCache: new Map() };
   const origin = (cwd) => run('git', ['remote', 'get-url', 'origin'], { cwd }).stdout || null;
   const emit = (id, name, target) => {
     const r = readProtection(target, opts);
@@ -1914,7 +1915,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     if (!repo || typeof repo.name !== 'string' || !repo.name) continue;
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
     const onDisk = repoRoot && exists(repoRoot) && gitHead(repoRoot);
-    emit(`protection:${repo.name}`, repo.name, {
+    emit(`protection:${hideAddresses(repo.name)}`, repo.name, {
       platform: repo.platform || null,
       gitUrl: (typeof repo.git_url === 'string' && repo.git_url) || (onDisk ? origin(repoRoot) : null),
       branch: typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null,
