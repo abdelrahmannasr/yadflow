@@ -1911,11 +1911,12 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
   }
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const repos = Array.isArray(registry?.repos) ? registry.repos : [];
-  for (const repo of repos) {
+  for (const [i, repo] of repos.entries()) {
     if (!repo || typeof repo.name !== 'string' || !repo.name) continue;
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
     const onDisk = repoRoot && exists(repoRoot) && gitHead(repoRoot);
-    emit(`protection:${hideAddresses(repo.name)}`, repo.name, {
+    // A name with an `@` is hidden in the id too; its place in repos.json keeps the id one word and unique.
+    emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:repo-${i + 1}`, repo.name, {
       platform: repo.platform || null,
       gitUrl: (typeof repo.git_url === 'string' && repo.git_url) || (onDisk ? origin(repoRoot) : null),
       branch: typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null,

@@ -1180,14 +1180,16 @@ default is read, and the line says that too.
 | GitLab | a project approval rule that applies to the branch (`GET projects/{id}/approval_rules`) | GitLab **Premium and Ultimate** only |
 
 Some things are printed as facts beside the answer, and are not approval rules: whether the branch is
-protected at all (for example, no direct push); that a code owner must approve a change to a file
+protected at all (for example, limits on who may push to it); that a code owner must approve a change to a file
 CODEOWNERS lists; and, on GitHub, that a ruleset names a reviewer who must approve a change to some files.
 Whether the branch is protected comes from the branch's own `protected` flag (`GET
 repos/{owner}/{repo}/branches/{branch}` on GitHub, `GET projects/{id}/repository/branches/{branch}` on
 GitLab — GitLab's flag also covers protection set for a whole group). The branch must exist: a branch
-that yad's files name but the platform does not have is "not known", never "unprotected". Who may merge
-into a protected branch is not read, so a line says "whoever may merge into it". On GitLab Free an
-approval is optional and never blocks a merge.
+that yad's files name but the platform does not have is "not known", never "unprotected". A line states
+only what the platform answered: who may merge into a protected branch, or push to it directly, is not
+read, so no line says who can merge, or that the platform holds a merge. A fact that could not be read
+is said as not known (for example "whether a code owner must approve some files is not known"). On
+GitLab Free an approval is optional and never blocks a merge.
 
 **"Not known" is never "fine", and never "unprotected".** A call that fails is not an answer. GitHub
 answers 404 on classic protection to anyone who is not an admin — even for a branch it reports as
@@ -1196,7 +1198,7 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 
 | Reason | What the line says |
 |---|---|
-| No platform set | `no platform (GitHub or GitLab) is set, so there is no platform to ask` |
+| No platform set, and the remote names neither | `no platform (GitHub or GitLab) is set, so there is no platform to ask` |
 | A platform yad does not read | `yad does not know the platform "bitbucket" (it reads GitHub and GitLab)` |
 | `gh`/`glab` missing | `gh is not installed, so yad cannot ask GitHub` |
 | Not logged in for that host | `gh is not logged in for github.com (or github.com did not answer)` |
@@ -1211,14 +1213,14 @@ Three real lines, each from a different team Product (the arrow line is the firs
 
 ```text
   ! Product hub (GitHub acme/app, branch `main`): This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.
-  → only GitHub can hold a merge — a required approval in GitHub's branch protection or a ruleset for `main` does it; yad only reports what is set
-  ✓ Product hub: GitHub acme/app requires at least 2 approvals to merge into `main` (from: a repo ruleset, id 7) — GitHub holds the merge, not yad
-  ! Product hub: `main` is protected on GitLab acme/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them
+  → only GitHub can hold a merge, through a required approval in GitHub's branch protection or a ruleset for `main`; yad only reports what is set
+  ✓ Product hub: a pull request into `main` on GitHub acme/app needs at least 2 approvals (from: a repo ruleset (id 7)); whether a code owner must approve some files is not known — yad reports this and enforces nothing
+  ! Product hub: `main` is protected on GitLab acme/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them; whether a code owner must approve some files is not known
 ```
 
 | Line | Level (team) | Level (solo) |
 |---|---|---|
-| The platform requires N approvals | ok | **warn** — you cannot approve your own pull request, so the merge will be blocked |
+| A pull request (GitLab: merge request) into a protected branch needs N approvals | ok | **warn** — GitHub never lets you approve your own pull request, so the merge will be blocked; on GitLab it may be, by a project setting yad does not read |
 | No approval rule **and** no branch protection, both proven — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
 | Protected, but no rule requires an approval | **warn** | ok |
 | Not protected, or not known whether it needs an approval | **warn** | ok |
@@ -1246,6 +1248,10 @@ says not known.
   not known, or "at least N" when it found a count.
 - GitHub rulesets in "evaluate" or "disabled" mode are not active, so they are not counted.
 - Who may bypass a rule (for example an admin) is not read.
+- Who may push directly to a protected branch is not read (GitLab's `push_access_levels`). On GitLab a
+  direct push by someone allowed to push skips the merge request, and with it the approval rule.
+- On GitLab, whether a code owner must approve is read from the project's own protected-branch list, which
+  leaves out protection set for a whole group. With no entry for the branch, the line says it is not known.
 - GitLab's tier (Free, Premium, Ultimate) is never guessed.
 - In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
   then says not known (HTTP 403 or 404), never "no rules".
