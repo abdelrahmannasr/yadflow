@@ -17964,9 +17964,11 @@ function authoredRepo() {
   const mine = (files) => as('Me', 'me@corp.io', 0, files);
   return { T, put, as, branch, mine, done: () => fs.rmSync(T, { recursive: true, force: true }) };
 }
-const suggestText = async (T, platform = 'github', base = 'main') => {
+// A public-host remote by default, so a same-platform login can join; pass `remote` to test another host.
+const PUBLIC_REMOTE = { github: 'https://github.com/acme/app.git', gitlab: 'git@gitlab.com:acme/app.git' };
+const suggestText = async (T, platform = 'github', base = 'main', remote = PUBLIC_REMOTE[platform]) => {
   const { suggestReviewers } = await import('./openpr.mjs');
-  return suggestReviewers(T, base, platform).lines.map(([, l]) => l).join('\n');
+  return suggestReviewers(T, base, platform, { remote }).lines.map(([, l]) => l).join('\n');
 };
 
 test('suggest reviewers: the folders asked about are each changed file\'s own, and a glob name cannot command git', async () => {
@@ -18262,7 +18264,15 @@ test('suggest reviewers: a login joins a CODEOWNERS name only on the same platfo
     const gl = await suggestText(r.T, 'gitlab');
     assert.match(gl, /Carol \(@carol\) — 1 commit/, 'the login is still shown as the commit address says it');
     assert.doesNotMatch(gl, /also in/, 'a GitHub login says nothing about a GitLab @carol');
+    // GitHub Enterprise keeps its own accounts: a github.com login says nothing about @carol there.
+    assert.doesNotMatch(await suggestText(r.T, 'github', 'main', 'git@github.corp.io:acme/app.git'), /also in/);
+    assert.doesNotMatch(await suggestText(r.T, 'github', 'main', ''), /also in/, 'no remote, no evidence');
     // Each variable changes how git reads every pathspec; none may reach the reader.
+    // log.follow=true: git crashes on ONE `:(glob)dir/*` pathspec, which a one-folder change is.
+    process.env.GIT_CONFIG_COUNT = '1'; process.env.GIT_CONFIG_KEY_0 = 'log.follow'; process.env.GIT_CONFIG_VALUE_0 = 'true';
+    try {
+      assert.deepEqual(suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js'] }).authors?.map((a) => a.name), ['Mail Name', 'Carol']);
+    } finally { for (const k of ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0']) delete process.env[k]; }
     for (const k of PATHSPEC_ENV) {
       process.env[k] = '1';
       if (k === 'GIT_GLOB_PATHSPECS') delete process.env.GIT_NOGLOB_PATHSPECS;
@@ -18275,6 +18285,21 @@ test('suggest reviewers: a login joins a CODEOWNERS name only on the same platfo
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     r.done();
   }
+});
+
+test('suggest reviewers: "lists nobody" is hedged when a skipped line may have been the only match', async () => {
+  const { remoteHost } = await import('./openpr.mjs');
+  assert.deepEqual(['https://github.com/a/b.git', 'git@gitlab.com:a/b.git', 'ssh://git@gitlab.corp.com:2222/a/b', 'https://u:t@GitHub.com/a', '/local/path', ''].map(remoteHost),
+    ['github.com', 'gitlab.com', 'gitlab.corp.com', 'github.com', null, null]);
+  const r = authoredRepo();
+  try {
+    r.as('Ana', 'ana@corp.io', 3, { 'app/a.js': '1', 'CODEOWNERS': '/app/a?.js @alice\n' });
+    r.branch();
+    r.mine({ 'app/a.js': '2' });
+    const out = await suggestText(r.T, 'gitlab');
+    assert.match(out, /lists nobody this reader could match for the files this change touches; 1 line could not be read, so this may be wrong/);
+    assert.doesNotMatch(out, /lists nobody for the files/, 'never a bare "nobody" beside a line it could not read');
+  } finally { r.done(); }
 });
 
 // ---- E71: counting active people -----------------------------------------------------------------

@@ -60,7 +60,7 @@ map_base="$(line_of BASE)"
 map_high=""
 # E67 — the people the check found with recent commits in those `high` directories: `WHO <login|-> <name>`.
 # `$1 = ""` would rebuild the line with one space between fields and squash a name's own spacing.
-who_list() { printf '%s\n' "$lv" | sed -n 's/^WHO //p' | awk '{ login = $1; name = $0; sub(/^[^ ]* /, "", name); printf "%s%s%s", sep, name, (login == "-") ? "" : " (@" login ")"; sep = ", " }'; }
+who_list() { printf '%s\n' "$lv" | sed -n 's/^WHO //p' | awk '{ login = $1; name = $0; sub(/^[^ ]* /, "", name); printf "%s%s%s", sep, name, (login == "-" || name == "@" login) ? "" : " (@" login ")"; sep = ", " }'; }
 if [ -n "$(line_of UNKNOWN)" ]; then
   echo "Risk map: not counted — $(line_of UNKNOWN). Only the body is counted."
 elif [ -n "$(line_of NOMAP)" ]; then
@@ -119,7 +119,7 @@ if [ "$step" -gt 0 ]; then
     echo "       committed there in the last 30 days (its own authors left out):"
     printf '%s\n' "$lv" | sed -n 's/^WHO //p' | while IFS= read -r row; do
       login="${row%% *}"; name="${row#* }"
-      if [ "$login" = "-" ]; then echo "  - ${name}"; else echo "  - ${name} (@${login})"; fi
+      if [ "$login" = "-" ] || [ "$name" = "@${login}" ]; then echo "  - ${name}"; else echo "  - ${name} (@${login})"; fi
     done
   fi
   echo "       Ask reviewers who know the touched domains:"

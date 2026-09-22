@@ -144,7 +144,11 @@ function historyReader(repoRoot, baseRef) {
     // --no-merges: a merge commit is nobody's work here. --no-renames: a file moved OUT of the directory
     // is work in it, counted where it was (E66). --full-history: without it git simplifies a
     // path-filtered log and hides a side branch whose merge kept the other side.
-    const r = git(['log', baseRef, '--no-merges', '--no-renames', '--full-history', `--since=${window}`,
+    // --no-show-signature: `log.showSignature=true` (common where commits are signed) prints a signature
+    // check for each commit into this output, and each such line would read as a person.
+    // --no-follow: `log.follow=true` makes git crash on a single `:(glob)dir/*` pathspec (E68's kind; E67's
+    // `:(literal)` ones are unaffected), which would read every one-folder suggestion as "not read".
+    const r = git(['log', baseRef, '--no-merges', '--no-renames', '--full-history', '--no-show-signature', '--no-follow', `--since=${window}`,
       '--format=%an%x1f%ae', '--', ...pathspecs]);
     if (r.status !== 0) return null;
     return r.stdout.split('\n').filter(Boolean).map((line) => {

@@ -202,7 +202,15 @@ export function pathspecsFor(entries, dir) {
 // the order git printed them (newest first, one run per directory in map order), and `excludeEmails` the
 // authors of the change itself — an approval has to come from someone else, so their own work never
 // counts. A robot is never a person who can approve. Deduped by address; the address itself never leaves
-// this function (nor does `yad` ever print one).
+// this function (nor does `yad` ever print one) — and neither does a git NAME that is itself an address
+// (`user.name` set to one is a common slip): the login stands in, else plain words. The awk twin in
+// checks/risk-map-check.sh applies the same rule with the same character class, and a test compares them.
+export const NAME_IS_ADDRESS = 'a name that is an e-mail address';
+export function shownName(name, login) {
+  return /[^ \t@]@[^ \t@]/.test(String(name || '')) ? (login ? `@${login}` : NAME_IS_ADDRESS) : name;
+}
+// How a person prints: the name, then `(@login)` unless the login already stands in for the name.
+export const personLabel = (a) => `${a.name}${a.login && a.name !== `@${a.login}` ? ` (@${a.login})` : ''}`;
 export function recentAuthors(commits, excludeEmails = []) {
   const skip = new Set(excludeEmails.map((e) => String(e).toLowerCase()));
   const seen = new Set();
@@ -211,7 +219,8 @@ export function recentAuthors(commits, excludeEmails = []) {
     const key = String(cm.email || '').toLowerCase();
     if (seen.has(key) || skip.has(key) || isBot(cm.name, cm.email)) continue;
     seen.add(key);
-    out.push({ name: cm.name, login: loginFromEmail(cm.email) });
+    const login = loginFromEmail(cm.email);
+    out.push({ name: shownName(cm.name, login), login });
   }
   return out;
 }
@@ -256,13 +265,10 @@ export function rankAuthors(commits, excludeEmails = []) {
   for (const cm of first) {
     const [p] = recentAuthors([cm], excludeEmails);
     if (!p) continue;
-    // A git NAME can itself be an address (`user.name` set to one is a common slip), and no address is
-    // ever printed: the login stands in when there is one, else these words.
-    const name = /[^\s@]@[^\s@]/.test(p.name) ? (p.login ? `@${p.login}` : 'a name that is an e-mail address') : p.name;
     // Which platform the login belongs to: a GitHub noreply login says nothing about a GitLab account
     // spelled the same, so a caller joins a login to a platform name only when the two match.
     const loginHost = p.login ? (/@users\.noreply\.github\.com$/i.test(cm.email) ? 'github' : 'gitlab') : null;
-    rows.push({ ...p, name, loginHost, commits: count.get(String(cm.email || '').toLowerCase()) });
+    rows.push({ ...p, loginHost, commits: count.get(String(cm.email || '').toLowerCase()) });
   }
   // Array.prototype.sort is stable, so equal counts keep git's newest-first order.
   return rows.sort((a, b) => b.commits - a.commits);

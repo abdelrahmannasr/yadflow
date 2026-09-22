@@ -14,6 +14,7 @@ import { parseReviewBranch, artifactFromBase, gateCapFor, capLimit, peopleWord, 
 import { activePeople } from './people.mjs';
 import { baseCodeowners, ownersFor, parseCodeowners } from './codeowners.mjs';
 import { baseChangeLevel, changedSince, recentAuthorsFor, suggestedAuthorsFor } from './riskmap-command.mjs';
+import { personLabel } from './riskmap.mjs';
 import { gateOpen } from './gate.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
@@ -122,7 +123,7 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
     const hist = recentAuthorsFor(repoRoot, `origin/${baseBranch}`, { entries: map.entries, changed: map.changed });
     if (hist.unknown) lines.push([info, `who has worked there lately: not read — ${hist.unknown}`]);
     else if (hist.authors.length) {
-      lines.push([hand, `this change asks for an approval from someone who has committed in ${high.join(', ')} in the last 30 days: ${hist.authors.map((a) => a.name + (a.login ? ` (@${a.login})` : '')).join(', ')}`]);
+      lines.push([hand, `this change asks for an approval from someone who has committed in ${high.join(', ')} in the last 30 days: ${hist.authors.map(personLabel).join(', ')}`]);
     } else lines.push([info, `nobody else has committed in ${high.join(', ')} in the last 30 days — ask anyone who knows it`]);
   }
   if (high.length && opts.risk !== 'high') lines.push([warn, `the body says Risk level: ${opts.risk || 'low'}, but the risk map on ${map.base} marks ${high.join(', ')} high — the larger counts`]);
@@ -153,9 +154,22 @@ export function routeCount(repoRoot, baseBranch, opts = {}) {
 // a hint about who MAY know the code, never a claim about who owns it or who must approve. A git name
 // and a CODEOWNERS login are joined only on exact evidence: a commit address that carries that login.
 export const SUGGEST_SHOWN = 5;
+// The host of a remote URL — `https://host/…`, `ssh://user@host:port/…` or scp-like `user@host:path` —
+// lower-cased, or null.
+export function remoteHost(url) {
+  const u = String(url || '').trim();
+  const m = u.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)/i) || u.match(/^(?:[^@/]+@)?([^:/]+):(?!\/\/)/);
+  return m ? m[1].toLowerCase() : null;
+}
+// A noreply login is a github.com or gitlab.com account. It is evidence for a CODEOWNERS `@name` only
+// on that same public host: a self-managed GitLab or GitHub Enterprise keeps its own accounts, and
+// one spelled the same may be someone else.
+const PUBLIC_HOST = { github: 'github.com', gitlab: 'gitlab.com' };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-export function suggestReviewers(repoRoot, baseBranch, platform) {
+export function suggestReviewers(repoRoot, baseBranch, platform, { remote } = {}) {
   const base = `origin/${baseBranch}`;
+  const url = remote ?? run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout;
+  const sameHost = remoteHost(url) === PUBLIC_HOST[platform];
   const lines = [];
   const ch = changedSince(repoRoot, base);
   if (ch.unknown) return { lines: [[info, `reviewer suggestion: not read — ${ch.unknown}`]] };
@@ -169,8 +183,8 @@ export function suggestReviewers(repoRoot, baseBranch, platform) {
   else if (!hist.authors.length) lines.push([info, `nobody else has committed in ${where} in the last 30 days${cut}`]);
   else {
     // Only a login from THIS platform's noreply address is evidence for a CODEOWNERS `@name` here.
-    for (const a of hist.authors) if (a.login && a.loginHost === platform) logins.add(a.login);
-    const shown = hist.authors.slice(0, SUGGEST_SHOWN).map((a) => `${a.name}${a.login && a.name !== `@${a.login}` ? ` (@${a.login})` : ''} — ${plural(a.commits, 'commit')}`);
+    for (const a of hist.authors) if (a.login && a.loginHost === platform && sameHost) logins.add(a.login);
+    const shown = hist.authors.slice(0, SUGGEST_SHOWN).map((a) => `${personLabel(a)} — ${plural(a.commits, 'commit')}`);
     const more = hist.authors.length > SUGGEST_SHOWN ? `, and ${hist.authors.length - SUGGEST_SHOWN} more` : '';
     lines.push([hand, `may know this code — committed in ${where} in the last 30 days: ${shown.join(', ')}${more}${cut}`]);
   }
@@ -185,8 +199,14 @@ export function suggestReviewers(repoRoot, baseBranch, platform) {
     // A file with no owner: no line matched it, the matching line names nobody, or a GitLab `!` line
     // excludes it — the same answer for a reviewer, so one count.
     const unmatched = got.unmatched ? `; ${got.unmatched} of ${plural(ch.files.length, 'touched file')} ${got.unmatched === 1 ? 'has' : 'have'} no owner there` : '';
-    if (!got.owners.length) lines.push([info, `CODEOWNERS on ${base} (${co.path}) lists nobody for the files this change touches`]);
-    else {
+    // A line this reader skipped could have been the last match for a file, so an answer built without it
+    // may be wrong — and "nobody" most of all, since the skipped line may be the only one that matched.
+    const skippedN = parsed.skipped.length ? plural(parsed.skipped.length, 'line') : '';
+    if (!got.owners.length) {
+      lines.push([info, skippedN
+        ? `CODEOWNERS on ${base} (${co.path}) lists nobody this reader could match for the files this change touches; ${skippedN} could not be read, so this may be wrong`
+        : `CODEOWNERS on ${base} (${co.path}) lists nobody for the files this change touches`]);
+    } else {
       listed = true;
       const tag = { team: ' (a team)', group: ' (a group)', role: ' (a role)' };
       const shown = got.owners.slice(0, SUGGEST_SHOWN).map((o) => {
@@ -197,8 +217,7 @@ export function suggestReviewers(repoRoot, baseBranch, platform) {
       });
       const more = got.owners.length > SUGGEST_SHOWN ? `, and ${got.owners.length - SUGGEST_SHOWN} more` : '';
       const gl = platform === 'gitlab' && got.owners.some((o) => o.kind === 'name') ? '; on GitLab an @name can be a person or a group' : '';
-      // A line this reader skipped could have been the last match for a file, so the list may be wrong.
-      const partial = parsed.skipped.length ? `; ${plural(parsed.skipped.length, 'line')} could not be read, so this list may be wrong` : '';
+      const partial = skippedN ? `; ${skippedN} could not be read, so this list may be wrong` : '';
       lines.push([hand, `CODEOWNERS on ${base} (${co.path}) lists for the touched files: ${shown.join(', ')}${more}${unmatched}${partial} — a hint only: these files go stale, and yad does not check that anyone listed still works here${gl}`]);
     }
     for (const s of parsed.skipped.slice(0, 3)) lines.push([warn, `CODEOWNERS line ${s.line} not read — ${s.why}`]);
@@ -329,6 +348,6 @@ export async function runOpenPr(root, opts = {}) {
   const count = stage === 'code-repo' ? routeCount(repoRoot, baseBranch, { ...opts, active }) : null;
   if (count) for (const [say, line] of count.lines) say(line);
   else if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` to see how many approvers it asks for');
-  if (stage === 'code-repo') for (const [say, line] of suggestReviewers(repoRoot, baseBranch, platform).lines) say(line);
+  if (stage === 'code-repo') for (const [say, line] of suggestReviewers(repoRoot, baseBranch, platform, { remote }).lines) say(line);
   return { url: r.url };
 }

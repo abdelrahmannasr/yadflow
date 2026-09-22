@@ -3417,6 +3417,54 @@ test('proven history: bash and cli/riskmap.mjs name the same people, in the same
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('proven history: an address-shaped name, a signed commit and hostile git settings — bash and JS still agree', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const T = historyRepo();
+  const key = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-sigkey-')), 'k');
+  execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key], { stdio: 'pipe' });
+  // `user.name` set to an address is a common slip: with a noreply login the login stands in, else words.
+  // One `high` directory with nothing listed below it, so git gets exactly ONE pathspec — the case
+  // log.follow=true refuses. (Legacy Larry's work now counts as payments.)
+  commitAs(T, { name: 'Mapper', email: 'map@corp.io', date: days(1) }, 'chore: map', { '.sdlc/risk-map': '# yad-risk-map v1\n./ low confirmed\nsrc/ low confirmed\nsrc/payments/ high confirmed\nsrc/catalog/ medium confirmed\n' });
+  commitAs(T, { name: 'carol@corp.io', email: '7+carol@users.noreply.github.com', date: days(1) }, 'feat: c', { 'src/payments/c.js': 'x' });
+  commitAs(T, { name: 'dan@corp.io', email: 'dan@corp.io', date: days(1) }, 'feat: d', { 'src/payments/d.js': 'x' });
+  // A signed commit: with log.showSignature=true git prints a signature check into the log's output.
+  fs.writeFileSync(path.join(T, 'src/payments/s.js'), 'x');
+  execFileSync('git', ['add', '-A'], { cwd: T, stdio: 'pipe', env: GIT_ENV });
+  execFileSync('git', ['-c', 'gpg.format=ssh', '-c', `user.signingkey=${key}`, 'commit', '-q', '-S', '-m', 'feat: signed'], {
+    cwd: T, stdio: 'pipe',
+    env: { ...GIT_ENV, GIT_AUTHOR_NAME: 'Signer', GIT_AUTHOR_EMAIL: 'signer@corp.io', GIT_AUTHOR_DATE: days(1), GIT_COMMITTER_NAME: 'Signer', GIT_COMMITTER_EMAIL: 'signer@corp.io', GIT_COMMITTER_DATE: days(1) },
+  });
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'checkout', '-q', 'pr');
+  git(T, 'rebase', '-q', 'main');
+  commitAs(T, { name: 'Bob Smith', email: 'bob@corp.io', date: days(0) }, 'feat: change', { 'src/payments/pay.js': 'z' });
+  const HOSTILE = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'log.showSignature', GIT_CONFIG_VALUE_0: 'true', GIT_CONFIG_KEY_1: 'log.follow', GIT_CONFIG_VALUE_1: 'true', GIT_LITERAL_PATHSPECS: '1' };
+  const saved = Object.fromEntries(Object.keys(HOSTILE).map((k) => [k, process.env[k]]));
+  try {
+    const r = runGate(RISK_MAP, T, ['--level', 'main'], HOSTILE);
+    assert.equal(r.code, 0, r.out);
+    const want = ['- Signer', '- a name that is an e-mail address', 'carol @carol', '- Legacy Larry', 'alice Alice'];
+    assert.deepEqual(whoLines(r.out), want, 'no signature line as a person, no address, and the pathspecs still read');
+    Object.assign(process.env, HOSTILE);
+    const map = git(T, 'show', 'main:.sdlc/risk-map').toString();
+    const got = recentAuthorsFor(T, 'main', { entries: parseRiskMap(map).entries, changed: ['src/payments/pay.js'] });
+    assert.deepEqual(got.authors.map((a) => `${a.login || '-'} ${a.name}`), want, 'the JS reader agrees under the same settings');
+    const ci = runGate(RISK_MAP, T, ['main'], HOSTILE);
+    assert.match(ci.out, /: Signer, a name that is an e-mail address, @carol, Legacy Larry, Alice \(@alice\)\n/, 'a login standing in for a name is printed once');
+    assert.doesNotMatch(ci.out, /corp\.io/, 'no address is ever printed');
+    const route = runGate(wiredRoute(T), T, [body(T, '- Risk level: low\n- Contract surface touched: no\n'), 'main'], HOSTILE).out;
+    assert.match(route, /worked there in the last 30 days: Signer, a name that is an e-mail address, @carol, Legacy Larry, Alice \(@alice\)\n/, route);
+    assert.match(route, /\n {2}- @carol\n/, 'risk-route prints the login once too');
+    assert.doesNotMatch(route, /corp\.io/);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(path.dirname(key), { recursive: true, force: true });
+  }
+});
+
 test('proven history: a path git would quote still counts — and its author is never dropped', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-histq-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
