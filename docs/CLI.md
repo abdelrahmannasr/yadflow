@@ -254,14 +254,16 @@ its output; `risk-map-check.sh` says so in its header comment.
 
 Review PRs request no reviewers — ask them on the PR itself. A record's `by` (who wrote a skip, a
 deferral or a closing record) is the login `gh api user` / `glab api user` reports, else your git
-`user.name`; set `YAD_PLATFORM_LOGIN=0` to skip the lookup (for example offline).
+`user.name`; set `YAD_PLATFORM_LOGIN=0` to skip the lookup (for example offline). `YAD_PLATFORM_READ=0`
+does the same for `yad doctor`'s read of each repo's branch protection.
 
 **Solo mode.** A lone developer can't approve their own PR on GitHub, so an approval requirement would
 deadlock them. Opt in (`yad setup --solo`, recorded as `solo: true` in `.sdlc/hub.json`) and the gate
 **waives the approval requirement only** — the review PR/MR and its merge stay, so CI still runs on the
 PR and the **merge** advances the step. Net: the gate passes on *merged + all threads resolved*. It's a
-documented, reversible relaxation; `yad doctor` warns if branch protection still "requires approvals"
-(which would block the solo dev's own merge). Switch it later with `yad mode solo --reason "<why>"` or
+documented, reversible relaxation; `yad doctor` warns if the platform still requires an approval — in
+classic branch protection, a GitHub ruleset or a GitLab approval rule — which would block the solo dev's
+own merge (see [the `protection` section](#the-protection-section--does-the-platform-require-an-approval-e70)). Switch it later with `yad mode solo --reason "<why>"` or
 `yad mode team`, which records who, when and why; each gate that passes in solo mode records
 `waived: "solo"` on its closing record.
 
@@ -1155,6 +1157,91 @@ When something is off, run `yad doctor` first — it checks the environment (git
 version), the project state (`.sdlc/*.json` parse and point at real repos), and every epic ledger,
 with a fix-it hint per finding. Failures carry stable, greppable codes, also printed by any failing
 `yad` command:
+
+### The `protection` section — does the platform require an approval? (E70)
+
+yad never holds a merge itself. The platform does, through **branch protection** — the rules a
+platform puts on a branch, such as "a pull request needs one approval before it can merge". On GitHub
+these rules come in two forms: **classic branch protection** and the newer **rulesets**. The
+`protection` section of `yad doctor` reads what the platform holds on the Product hub's branch and on
+each connected repo's branch. It prints one line for each, and says where the answer came from.
+
+**Which branch.** The branch yad's files name: `default_branch` in `.sdlc/hub.json` for the Product, and in
+`.sdlc/repos.json` for a code repo. That is the branch the gates merge into. When the platform's own
+default branch is a different one, the line says so. When yad's files name no branch, the platform's
+default is read, and the line says that too.
+
+**What counts as an approval rule** — a required approval count above 0:
+
+| Platform | Read from | Who may read it |
+|---|---|---|
+| GitHub | a ruleset's `pull_request` rule — every active rule on the branch, from the repo or its organisation (`GET repos/{owner}/{repo}/rules/branches/{branch}`) | anyone who can see the repo |
+| GitHub | classic branch protection's required reviews (`GET …/branches/{branch}/protection`) | **repo admins only** |
+| GitLab | a project approval rule that applies to the branch (`GET projects/{id}/approval_rules`) | GitLab **Premium and Ultimate** only |
+
+Two things are printed as facts beside the answer, and are not approval rules: that the branch is
+protected at all (for example, no direct push), and that a code owner must approve a change to a file
+CODEOWNERS lists. On GitLab Free an approval is optional and never blocks a merge.
+
+**"Not known" is never "fine", and never "unprotected".** A call that fails is not an answer. GitHub
+answers 404 on classic protection to anyone who is not an admin — even for a branch it reports as
+protected. So yad says "no rules" only when every call it needed succeeded. Otherwise the line says
+**not known**, and why:
+
+| Reason | What the line says |
+|---|---|
+| No platform set | `no platform (GitHub or GitLab) is set, so there is no platform to ask` |
+| A platform yad does not read | `yad does not know the platform "bitbucket" (it reads GitHub and GitLab)` |
+| `gh`/`glab` missing | `gh is not installed, so yad cannot ask GitHub` |
+| Not logged in for that host | `gh is not logged in for github.com (or github.com did not answer)` |
+| No remote URL | `no git remote URL yad can read, so it cannot tell which repo to ask about` |
+| Offline | `yad could not reach github.com to read the repo acme/app (offline, or the host did not answer)` |
+| Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin, or the branch is protected by rulesets alone)` |
+| GitLab approval rules refused | `GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them` |
+| A branch that does not exist | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
+| Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
+
+Three real lines, each from a different team Product (the arrow line is the first one's hint):
+
+```text
+  ! Product hub (GitHub acme/app, branch `main`): This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.
+  → only GitHub can hold a merge — a required approval in GitHub's branch protection or a ruleset for `main` does it; yad only reports what is set
+  ✓ Product hub: GitHub acme/app requires at least 2 approvals to merge into `main` (from: a repo ruleset, id 7) — GitHub holds the merge, not yad
+  ! Product hub: `main` is protected on GitLab acme/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them
+```
+
+| Line | Level (team) | Level (solo) |
+|---|---|---|
+| The platform requires N approvals | ok | **warn** — you cannot approve your own pull request, so the merge will be blocked |
+| No approval rule **and** no branch protection, both proven — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
+| Protected, but no rule requires an approval | **warn** | ok |
+| Not protected, or not known whether it needs an approval | **warn** | ok |
+| Not known at all, with why | **warn** | ok |
+
+"At least N" means part of the answer could not be read (for example classic protection, while a ruleset
+asks for N), or that several GitLab rules each ask for approvals and their approvers may overlap.
+
+**It is advisory.** A line is a warning at most, never a failure: the platform holds a merge, and yad only
+reports what is set. How to set up branch protection is not documented here.
+
+**How it reads.** With your own `gh` or `glab` login, from the repo's own host — nothing is written,
+and nothing is sent anywhere else. Per repo: `gh auth status --hostname <host>` (or `glab`), then up to
+four read-only calls on GitHub (the repo, the branch, its rulesets, and classic protection when the
+branch is protected) and three on GitLab (the project, its protected branches, its approval rules). Each
+call has a 10-second limit. `YAD_PLATFORM_READ=0` turns the reads off, for example offline; every line then
+says not known.
+
+**Limits.**
+
+- A list is read one page of 100 entries at a time. If a full page does not already hold the answer, the
+  line says not known.
+- GitHub rulesets in "evaluate" or "disabled" mode are not active, so they are not counted.
+- Who may bypass a rule (for example an admin) is not read.
+- GitLab's tier (Free, Premium, Ultimate) is never guessed.
+- In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
+  then says not known (HTTP 403 or 404), never "no rules".
+- A GitHub branch that GitHub reports as not protected, but that has an active ruleset, counts as
+  protected.
 
 ### Gate-integrity findings (no code — the message names the epic and step)
 

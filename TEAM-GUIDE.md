@@ -577,7 +577,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   it is; `yad skill unbind <step>` goes back to the default.
 - **Something not working? Run the doctor first:** `npx yadflow doctor`. It checks your environment (git,
   Node, and whether `gh` or `glab` is installed and logged in — a warning if not), that the `.sdlc/` config
-  parses and points at real repos, and that every epic ledger loads. It prints a fix-it hint for each
+  parses and points at real repos, and that every epic ledger loads. It also asks GitHub or GitLab, with
+  your own login, whether each repo's branch requires an approval before a merge — and says **not known**,
+  with the reason, when it cannot read that (for example, only a repo admin can read GitHub's classic
+  branch protection). yad never holds a merge itself; the platform does. It prints a fix-it hint for each
   problem, and exits with an error if any check fails. Add `--json` when you file a bug. Environment and
   state-file failures carry a stable code (such as `YAD-STATE-001`), listed in [docs/CLI.md](docs/CLI.md).
 - **Keep the install in sync with the CLI** (run from the Product):
