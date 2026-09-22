@@ -21,6 +21,7 @@ import { c, fail, hand, info, log, ok, readJSONStrict, warn, writeProductConfig 
 import { isVerifiedLedger, productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { epicIds, epicRoot, loadLedger, stepStatus } from './epic-state.mjs';
 import { isSolo } from './gate.mjs';
+import { printTeamHint, soloTeamHint } from './people.mjs';
 import { recordActor } from './skip.mjs';
 
 export const MODES = ['solo', 'team'];
@@ -104,7 +105,11 @@ const setLine = (set) => {
 };
 
 // `yad mode` reads; `yad mode solo|team` sets.
-export async function runMode(root, { to = null, reason = null, json = false, today = null } = {}) {
+//
+// With no argument in solo mode it also counts people once (E74) and suggests `yad mode team` when the
+// count shows more than one person may work here — see `teamHint`. Team mode reads no count.
+// `headCount` is a count the caller already read; the CLI passes none, a test passes one.
+export async function runMode(root, { to = null, reason = null, json = false, today = null, headCount = null } = {}) {
   const bail = makeBail(json);
   const file = productConfigPath(root);
   const rel = path.relative(root, file).split(path.sep).join('/');
@@ -120,11 +125,13 @@ export async function runMode(root, { to = null, reason = null, json = false, to
     const mode = modeOf(hub);
     const name = isObj(hub) && hub.mode !== undefined ? hub.mode : null;
     const set = isObj(hub) && isObj(hub.mode_set) ? hub.mode_set : null;
-    if (json) return log(JSON.stringify({ ok: true, mode, name, agrees: name === null || name === mode, set }, null, 2));
+    const hint = soloTeamHint(root, hub, { solo: mode === 'solo', headCount, today });
+    if (json) return log(JSON.stringify({ ok: true, mode, name, agrees: name === null || name === mode, set, suggest: hint }, null, 2));
     ok(`mode: ${mode} — ${MEANING[mode]}`);
     if (!hub) info('no Product config yet — team mode is the default; `yad setup` records it');
     if (set) info(setLine(set));
     if (name !== null && name !== mode) warn(`the file also says mode: ${JSON.stringify(name)}, but the old \`solo\` flag is the one read — run \`yad mode ${mode}\` to make them agree`);
+    printTeamHint(hint, { unknown: true });
     return;
   }
 

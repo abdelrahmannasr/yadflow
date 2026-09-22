@@ -17,6 +17,7 @@ import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
+import { soloTeamHint, TEAM_CMD } from './people.mjs';
 
 const MIN_NODE = 18;
 
@@ -59,7 +60,8 @@ export function envChecks(checks) {
   }
 }
 
-export function projectChecks(checks, root) {
+// `headCount` is a count of people the caller already read (E74); the CLI passes none, a test passes one.
+export function projectChecks(checks, root, { headCount = null } = {}) {
   const productPath = productConfigPath(root);
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const verPath = path.join(root, PROJECT_FILES.version);
@@ -140,7 +142,22 @@ export function projectChecks(checks, root) {
             'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
         }
       }
-      if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
+      if (isSolo(hub)) {
+        check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
+        // E74: suggest team mode when the count shows more than one person may work here. Counted ONLY
+        // in solo mode, because the count walks the git history of every connected repo; team mode
+        // pays nothing. A suggestion, never a switch — so a warning, never a failure. An unknown count
+        // is a warning too (the user's choice, 2026-09-22): doctor is where a count that cannot be read
+        // is fixed, and a ✓ beside "could not be counted" would read as healthy.
+        const hint = soloTeamHint(root, hub, { solo: true, headCount });
+        if (hint.line && hint.known) {
+          check(checks, 'mode:suggest-team', 'project', 'warn', hint.line,
+            `run \`${TEAM_CMD}\` if more than one person works here; if it is only you (for example two accounts, two spellings of your name, a robot committing or auto-approving, or your own approval on a local ledger), leave solo mode on`);
+        } else if (hint.line) {
+          check(checks, 'mode:suggest-team', 'project', 'warn', hint.line,
+            'the reason in brackets names what could not be read — clone the missing repo, unshallow it, or fix the file — then run `yad doctor` again');
+        }
+      }
       // E10 writes `mode: solo|team` beside `solo`, and `solo` is still the one read. A hand edit can leave
       // the two saying different things; name that, and say which one the gates follow. Silent on a file
       // with no `mode`, which is every Product set up before E10 (the frozen golden one included).
@@ -1873,10 +1890,10 @@ export function threadChecks(checks, root) {
 // `runDoctor`, and the same shape `--json` prints. Checks carry names and paths, so anything that
 // leaves the machine must scrub them — `yad report` does NOT consume this; it builds its own
 // allowlisted subset (cli/report.mjs `sanitizeContext`).
-export function collectDoctor(root) {
+export function collectDoctor(root, { headCount = null } = {}) {
   const checks = [];
   envChecks(checks);
-  projectChecks(checks, root);
+  projectChecks(checks, root, { headCount });
   riskMapChecks(checks, root);
   foundationChecks(checks, root);
   shapeChecks(checks, root);
@@ -1898,8 +1915,8 @@ export function collectDoctor(root) {
   return { version: VERSION, ok: failed.length === 0, checks };
 }
 
-export async function runDoctor(root, { json = false } = {}) {
-  const { checks } = collectDoctor(root);
+export async function runDoctor(root, { json = false, headCount = null } = {}) {
+  const { checks } = collectDoctor(root, { headCount });
 
   const failed = checks.filter((x) => x.status === 'fail');
   const warned = checks.filter((x) => x.status === 'warn');

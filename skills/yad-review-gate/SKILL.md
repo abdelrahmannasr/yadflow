@@ -61,6 +61,9 @@ roles — there are no roles, and yadflow keeps no list of people:
   it) or `! if the risk step were enforced: …` (a what-if about the extra approvals) when the count of
   people suggests the gate may not pass (E73). Never block on it and never write it into the ledger. Tell the
   reviewers while the review is open, because a merged review PR can no longer take approvals.
+  In solo mode, `yad gate status` prints `! solo mode is on, but …` instead when the count shows more than
+  one person may work on the Product (E74). Relay it as a suggestion to run `yad mode team`; never switch
+  the mode yourself, and never read it as a fault.
 - **When the people cannot be counted** (`active: null` — for example Product CI, which checks out only
   the hub, so the connected repos are not on disk): **no cap is computed or shown**, and the base holds as
   always. `yad gate status` and `yad gate sync` print the arithmetic — read it from there rather than

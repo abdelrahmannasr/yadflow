@@ -16,7 +16,7 @@ import {
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
-import { activePeople, activeSum, activeBasis, approverCount } from './people.mjs';
+import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -1224,6 +1224,9 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // can see the number their gates will be capped against (E72), before it holds anything for them.
   log(`  ${c.dim(activeSum(headCount))}`);
   note(c.dim(activeBasis(headCount)));
+  // E74: in solo mode, suggest `yad mode team` when the count shows more than one person may work here.
+  // An unknown count is already said by `activeSum` just above, so only a known suggestion prints.
+  printTeamHint(soloTeamHint(root, hub, { solo, headCount }));
   const reachSeen = new Set();   // E73: each warning line once per view, not once per step
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const accepted = acceptedHashes(epicDir, s.artifact);

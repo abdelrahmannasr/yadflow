@@ -13,19 +13,15 @@
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
+import { printTeamHint, soloTeamHint } from './people.mjs';
 import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
+const soloOf = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 function isSolo(root) {
-  const hub = readJSON(productConfigPath(root), null);
-  return !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
+  return soloOf(readJSON(productConfigPath(root), null));
 }
-// The SETUP profile recorded by `yad setup` (codebase / repo_layout / team_size), or null. Not the
-// lifecycle profile — that is the route an epic walks through the steps (`LIFECYCLE_PROFILES` in
-// epic-state.mjs, E5). Two unrelated things share the word `profile`, one of them a `hub.json` field
-// that predates the other, so this one is spelled out wherever it is read.
-const setupProfileOf = (root) => readJSON(productConfigPath(root), null)?.profile || null;
 // Has `yad setup` run here? True once the version stamp or Product config exists.
 const isSetUp = (root) => exists(path.join(root, PROJECT_FILES.version)) || exists(productConfigPath(root));
 
@@ -331,21 +327,29 @@ function phaseLine(a) {
 }
 
 // `yad next` with no epic: orient across the whole project, always ending on ONE thing to do.
-function generalNext(root, { all } = {}) {
+function generalNext(root, { all, headCount = null } = {}) {
   if (!isSetUp(root)) {
     log(`\n  ${c.bold('Project not set up yet.')}`);
     hand(`run ${c.bold('yad setup')} ${c.dim('(then come back to `yad next`)')}`);
     return;
   }
-  const solo = isSolo(root);
-  const brownfield = setupProfileOf(root)?.codebase === 'brownfield';
+  // The Product config, read ONCE for this view.
+  const hub = readJSON(productConfigPath(root), null);
+  const solo = soloOf(hub);
+  // E74: in solo mode, suggest `yad mode team` when the count shows more than one person may work here.
+  // Printed first, so it is not lost under a long list of epics. An unknown count is not said here —
+  // `yad doctor` and `yad mode` say it (the user's choice, 2026-09-22). `headCount` is for tests.
+  printTeamHint(soloTeamHint(root, hub, { solo, headCount }));
+  // `profile` here is the SETUP profile `yad setup` records (codebase / repo_layout / team_size), not the
+  // lifecycle profile an epic walks (`LIFECYCLE_PROFILES`, E5): two things share the word.
+  const brownfield = hub?.profile?.codebase === 'brownfield';
   // The PRODUCT level (the Foundation, or a ledger still in its old `discovery` spelling) is not a
   // feature epic — split it out so it is surfaced on its own line and never mixed into the roll-up.
   const allEpics = listEpics(root);
   // One read of `.sdlc/skills.json` for the whole roll-up, not one per epic.
   const bindings = loadSkillBindings(root);
   const automation = loadAutomation(root);
-  const verified = isVerifiedLedger(readJSON(productConfigPath(root), null));
+  const verified = isVerifiedLedger(hub);
   // The Foundation wins when both exist. Two product levels is a fault `yad doctor` fails on; until it
   // is fixed the new spelling is the one worth acting on, and the old one is named so it is not lost.
   const productIds = PRODUCT_EPICS.filter((id) => allEpics.includes(id));
@@ -467,7 +471,7 @@ function jsonNext(root, { epic, check }) {
 
 // Entry point for the `next` command: route to the precondition check, a single epic's action, or the
 // project-wide general view. Validates the epic id first.
-export async function runNext(root, { epic, check, all, json } = {}) {
+export async function runNext(root, { epic, check, all, json, headCount = null } = {}) {
   if (epic && !isValidEpicId(epic)) {
     const message = `invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`;
     if (json) return jsonError(message);
@@ -477,7 +481,7 @@ export async function runNext(root, { epic, check, all, json } = {}) {
   }
   if (json) return jsonNext(root, { epic, check });
   if (epic && check) return checkPrecondition(root, epic, check);
-  if (!epic) return generalNext(root, { all });
+  if (!epic) return generalNext(root, { all, headCount });
 
   const epicDir = epicRoot(root, epic);
   if (!exists(path.join(epicDir, '.sdlc', 'state.json'))) {

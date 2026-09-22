@@ -129,6 +129,10 @@ Print, in this order:
      read prints `active people: NOT COUNTED — <which source> — no cap can be shown, and only the base
      holds each gate`: report that wording as it stands and NEVER as a number or as "no people" — an
      unreadable input is not a small team.
+   - **Solo mode may be wrong (E74):** in solo mode, under the `active people:` line, `yad gate status`
+     can print `! solo mode is on, but … so more than one person may work on this Product`. Relay it as
+     a suggestion to run `yad mode team`, never as a fault and never as switched: nothing changes until
+     a person runs it. It never suggests solo mode.
    - Touched domains (`epic.repos` for a step with a risk tag; the union of every story's `repos` for
      `stories-review`) only label the review. They add no approvals.
    - An approval is **stale** (it no longer counts) when the `artifactHash` it recorded no longer

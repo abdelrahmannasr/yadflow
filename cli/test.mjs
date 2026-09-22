@@ -19170,3 +19170,259 @@ test('E73 silent paths: an unknown count and solo mode print nothing, and a warn
     assert.doesNotMatch(solo.out, E73_LINE, 'solo mode counts nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- E74: suggest team mode when the count disagrees with solo mode --------------------------------
+// The user's decisions (2026-09-22): suggest only, never switch; TEAM direction only (the solo direction
+// stays with E73's `may not be met:` line); "changes" means the count disagrees with the mode set, and
+// nothing is stored; the evidence is E73's smallest possible team (the larger of the logins and the names)
+// of 2 or more, or an approval in the window with more than one person counted; printed by `yad mode`
+// (no argument), `gate status`, `yad next` and `yad doctor`, each reading the count only in solo mode.
+const { teamHint: _teamHint } = await import('./people.mjs');
+// A count as the reader returns it, with real `login` / `how` fields on each person.
+const e74Count = ({ logins = 0, names = 0, approvers = 0, days = 90 } = {}) => {
+  const people = [
+    ...Array.from({ length: logins }, (_, k) => ({ key: `login:l${k}`, name: null, login: `l${k}`, how: k < approvers ? ['approved'] : ['committed'] })),
+    ...Array.from({ length: names }, (_, k) => ({ key: `name:n${k}`, name: `n${k}`, login: null, how: ['committed'] })),
+  ];
+  return { today: '2026-06-09', unknown: [], capacity: { days, basis: 'b', active: people.length, people, nameOnly: names } };
+};
+const E74_UNKNOWN = { today: '2026-06-09', unknown: ["repo 'backend' has no local path"], capacity: { days: 90, basis: 'b', active: null, people: [], nameOnly: 0 } };
+const E74_TAIL = 'so more than one person may work on this Product. If so, `yad mode team` makes each review gate ask for approvals, which solo mode waives';
+const E74_LINE = /solo mode is on, but .* may work on this Product/;
+const e74Solo = (T) => {
+  const hubFile = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true, mode: 'solo' }));
+};
+
+test('E74 teamHint: the smallest possible team of 2 or more speaks; one login and one name does not', () => {
+  assert.deepEqual(_teamHint(e74Count({ logins: 1, names: 1 })), { known: true, line: null },
+    'the solo developer who commits two ways (a work address and the web editor) is not told "team"');
+  assert.deepEqual(_teamHint(e74Count({ logins: 1 })), { known: true, line: null });
+  assert.deepEqual(_teamHint(e74Count({ names: 1 })), { known: true, line: null });
+  assert.deepEqual(_teamHint(e74Count({ logins: 0, names: 0 })), { known: true, line: null }, 'nobody counted is not a team');
+  assert.equal(_teamHint(e74Count({ logins: 2 })).line, `solo mode is on, but 2 different platform logins committed or approved in the last 90 days, ${E74_TAIL}`);
+  assert.equal(_teamHint(e74Count({ names: 3 })).line, `solo mode is on, but 3 different names not matched to a platform login committed or approved in the last 90 days, ${E74_TAIL}`,
+    'a team whose commits all use work addresses is names only');
+  assert.equal(_teamHint(e74Count({ logins: 1, names: 4 })).line, `solo mode is on, but 4 different names not matched to a platform login committed or approved in the last 90 days, ${E74_TAIL}`,
+    'the larger of the two is the smallest team, and the one named');
+  assert.equal(_teamHint(e74Count({ logins: 2, names: 3 })).line, `solo mode is on, but 3 different names not matched to a platform login committed or approved in the last 90 days, ${E74_TAIL}`,
+    'more names than logins names the names, even with two logins');
+  assert.equal(_teamHint(e74Count({ logins: 3, names: 2 })).line, `solo mode is on, but 3 different platform logins committed or approved in the last 90 days, ${E74_TAIL}`);
+  assert.equal(_teamHint(e74Count({ logins: 2, names: 2 })).line, `solo mode is on, but 2 different platform logins committed or approved in the last 90 days, ${E74_TAIL}`, 'a tie names the logins');
+});
+
+test('E74 teamHint: an approval speaks only when more than one person is counted', () => {
+  assert.equal(_teamHint(e74Count({ logins: 1, names: 1, approvers: 1 })).line, `solo mode is on, but someone approved a review in the last 90 days, ${E74_TAIL}`,
+    'the common GitHub pair: the author a name, the reviewer a login who approved');
+  assert.deepEqual(_teamHint(e74Count({ logins: 1, approvers: 1 })), { known: true, line: null },
+    'one person who approved, on a local ledger, may be approving their own work');
+  assert.equal(_teamHint(e74Count({ logins: 2, approvers: 2 })).line,
+    `solo mode is on, but 2 different platform logins committed or approved, and 2 people approved a review in the last 90 days, ${E74_TAIL}`);
+});
+
+test('E74 teamHint: an unknown count is never a number — no suggestion, and it says so', () => {
+  assert.deepEqual(_teamHint(E74_UNKNOWN), { known: false, line: "the people could not be counted (repo 'backend' has no local path), so no switch to team mode is suggested" });
+  for (const bad of [null, undefined, {}, { capacity: {} }, { capacity: { active: NaN } }, { capacity: { active: -1 } }, { capacity: { active: 1.5 } }]) {
+    const got = _teamHint(bad);
+    assert.equal(got.known, false, JSON.stringify(bad));
+    assert.equal(got.line, 'the people could not be counted, so no switch to team mode is suggested');
+  }
+});
+
+test('E74 probe: on real history — the ordinary pair and a work-email team are told, the solo developer and the gate bot are not', () => {
+  // The ordinary case first: two humans commit with work addresses and approve on GitHub (four rows).
+  const pair = peopleFixture({ withRepo: false });   // 'Product Writer' <writer@corp.io>
+  try {
+    pair.commit(pair.T, 'Bo Reviewer', 'bo@corp.io', 2);
+    pair.write('epics/EP-x/.sdlc/approvals.json', [
+      { approver: 'writer-gh', date: daysBefore(P_TODAY, 2), source: 'bridge', status: 'approved' },
+      { approver: 'bo-gh', date: daysBefore(P_TODAY, 2), source: 'bridge', status: 'approved' },
+    ]);
+    const counted = activePeople(pair.T, { today: P_TODAY });
+    assert.equal(counted.capacity.active, 4);
+    assert.match(_teamHint(counted).line, /^solo mode is on, but 2 different platform logins committed or approved, and 2 people approved a review in the last \d+ days/);
+  } finally { fs.rmSync(pair.T, { recursive: true, force: true }); }
+  const team = peopleFixture({ withRepo: false });
+  try {
+    team.commit(team.T, 'Bo', 'bo@corp.io', 2);
+    team.commit(team.T, 'Cy', 'cy@corp.io', 4);
+    const counted = activePeople(team.T, { today: P_TODAY });
+    assert.equal(_approverCount(counted), 0, 'a team in solo mode may give no approvals at all');
+    assert.match(_teamHint(counted).line, /^solo mode is on, but 3 different names not matched to a platform login committed or approved/);
+  } finally { fs.rmSync(team.T, { recursive: true, force: true }); }
+  const solo = peopleFixture({ withRepo: false });
+  try {
+    solo.commit(solo.T, 'Product Writer', '12345+writer@users.noreply.github.com', 1);   // the web editor
+    solo.commit(solo.T, 'yad-gate-sync', 'yad-gate-sync@noreply.gitlab.example', 1);     // yadflow's GitLab bot
+    const counted = activePeople(solo.T, { today: P_TODAY });
+    assert.equal(counted.capacity.active, 2, 'one name, one login; the bot is not a person');
+    assert.deepEqual(_teamHint(counted), { known: true, line: null });
+  } finally { fs.rmSync(solo.T, { recursive: true, force: true }); }
+});
+
+test('E74 yad mode: with no argument, solo mode suggests team; team mode says nothing and --json carries it', async () => {
+  const { runMode } = await import('./mode.mjs');
+  const { T } = scaffoldEpic();
+  try {
+    const team = await grab(() => runMode(T, { headCount: e74Count({ logins: 2 }) }));
+    assert.doesNotMatch(team, E74_LINE, 'team mode is never told to switch to team');
+    assert.equal(JSON.parse(await grab(() => runMode(T, { json: true, headCount: e74Count({ logins: 2 }) }))).suggest, null, 'and reads no count');
+    e74Solo(T);
+    const told = await grab(() => runMode(T, { headCount: e74Count({ logins: 2 }) }));
+    assert.match(told, / ! solo mode is on, but 2 different platform logins/);
+    const quiet = await grab(() => runMode(T, { headCount: e74Count({ logins: 1, names: 1 }) }));
+    assert.doesNotMatch(quiet, E74_LINE);
+    const unknown = await grab(() => runMode(T, { headCount: E74_UNKNOWN }));
+    assert.match(unknown, /• .*the people could not be counted .* no switch to team mode is suggested/);
+    const json = JSON.parse(await grab(() => runMode(T, { json: true, headCount: e74Count({ names: 2 }) })));
+    assert.equal(json.suggest.known, true);
+    assert.match(json.suggest.line, /2 different names not matched to a platform login/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8')).solo, true, 'a suggestion switches nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E74 gate status: in solo mode the header suggests team; an unknown count is said once, by the count line', async () => {
+  const { T } = scaffoldEpic();
+  try {
+    const team = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e74Count({ logins: 2 }) }));
+    assert.doesNotMatch(team.out, E74_LINE);
+    e74Solo(T);
+    const told = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e74Count({ logins: 2 }) }));
+    assert.match(told.out, /active people: 2 [^\n]*\n\s+! solo mode is on, but 2 different platform logins/, 'printed under the count it reads');
+    assert.equal(told.out.split('solo mode is on, but').length - 1, 1, 'once per view, not once per step');
+    const unknown = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: E74_UNKNOWN }));
+    assert.match(unknown.out, /active people: NOT COUNTED/);
+    assert.doesNotMatch(unknown.out, /could not be counted/, 'the count line already says it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E74 yad next: the project view suggests team in solo mode only', async () => {
+  const { T } = scaffoldEpic();
+  try {
+    const team = await grab(() => runNext(T, { headCount: e74Count({ logins: 2 }) }));
+    assert.doesNotMatch(team, E74_LINE);
+    e74Solo(T);
+    const told = await grab(() => runNext(T, { headCount: e74Count({ logins: 2 }) }));
+    assert.match(told, / ! solo mode is on, but 2 different platform logins/);
+    const unknown = await grab(() => runNext(T, { headCount: E74_UNKNOWN }));
+    assert.doesNotMatch(unknown, /could not be counted/, 'an unknown count is said by `yad doctor` and `yad mode`, not by the most-run command');
+    assert.doesNotMatch(await grab(() => runNext(T, { headCount: e74Count({ logins: 1 }) })), E74_LINE);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E74 yad doctor: a suggestion is a warning, never a failure; an unknown count is a warning too; team mode has no check', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { T } = scaffoldEpic();
+  const find = (headCount) => collectDoctor(T, { headCount }).checks.filter((x) => x.id === 'mode:suggest-team');
+  try {
+    assert.deepEqual(find(e74Count({ logins: 2 })), [], 'team mode');
+    e74Solo(T);
+    const [told] = find(e74Count({ logins: 2 }));
+    assert.equal(told.status, 'warn');
+    assert.match(told.message, /^solo mode is on, but 2 different platform logins/);
+    assert.match(told.hint, /^run `yad mode team` if more than one person works here/);
+    const [unknown] = find(E74_UNKNOWN);
+    assert.equal(unknown.status, 'warn', 'never a ✓ beside "could not be counted"');
+    assert.match(unknown.message, /could not be counted/);
+    assert.match(unknown.hint, /names what could not be read/);
+    assert.deepEqual(find(e74Count({ logins: 1, names: 1 })), [], 'nothing to suggest is no check at all');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E74 real reader: all three new count reads pass the roster aliases, so a second person the roster proves is seen', async () => {
+  // One developer commits through GitHub's web editor (the login `writer`). An older roster-shaped
+  // approval is under the roster NAME `Pat`, which the roster maps to the login `bo`. With the aliases
+  // that is two logins — a second person the roster proves — and it speaks. Without them `Pat` is a name
+  // beside one login (a smallest team of 1) whose approval proves nothing, and it is silent. No
+  // `headCount` is passed, so `yad mode`, `yad next` and `yad doctor` each read the count themselves.
+  const { runMode } = await import('./mode.mjs');
+  const { collectDoctor } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e74-alias-'));
+  try {
+    const put = (rel, obj) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), JSON.stringify(obj)); };
+    put('.sdlc/hub.json', { platform: 'github', default_branch: 'main', solo: true, mode: 'solo', roster: [{ name: 'Pat', login: 'bo', role: 'owner' }] });
+    put('epics/EP-x/.sdlc/state.json', { epicId: 'EP-x', currentStep: 'epic-review', steps: [{ id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] }] });
+    const today = new Date().toISOString().slice(0, 10);
+    put('epics/EP-x/.sdlc/approvals.json', [{ approver: 'Pat', role: 'owner', step: 'epic-review', date: today, status: 'approved' }]);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: T, env: GIT_ENV });
+    execFileSync('git', ['add', '-A'], { cwd: T, env: GIT_ENV });
+    execFileSync('git', ['-c', 'user.name=Writer', '-c', 'user.email=1+writer@users.noreply.github.com', 'commit', '-q', '-m', 'c'], { cwd: T, env: GIT_ENV });
+    assert.deepEqual(_teamHint(activePeople(T, {})), { known: true, line: null }, 'without the aliases the second person is not seen — the case the wiring exists for');
+    const told = /solo mode is on, but 2 different platform logins committed or approved, and someone approved a review/;
+    assert.match(await grab(() => runMode(T, {})), told, 'yad mode');
+    assert.match(await grab(() => runNext(T, {})), told, 'yad next');
+    const [doc] = collectDoctor(T).checks.filter((x) => x.id === 'mode:suggest-team');
+    assert.match(doc?.message || '', told, 'yad doctor');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+
+test('E74 teamHint: only an approval by a platform LOGIN proves a second person; a name-only approval counts as a name', () => {
+  // A local-ledger self-approval under the author's own name, beside their noreply commits: a login row
+  // and a name row that never join. The approval is no proof, and one login + one name is a team of 1.
+  const selfApproved = { today: '2026-06-09', unknown: [], capacity: { days: 90, basis: 'b', active: 2, nameOnly: 1, people: [
+    { key: 'login:ada', name: 'Ada', login: 'ada', how: ['committed'] },
+    { key: 'name:ada lovelace', name: 'Ada Lovelace', login: null, how: ['approved'] },
+  ] } };
+  assert.deepEqual(_teamHint(selfApproved), { known: true, line: null });
+  // A no-platform pair: both are names, so the smallest team is 2 and it still speaks — by names.
+  const namesPair = { today: '2026-06-09', unknown: [], capacity: { days: 90, basis: 'b', active: 2, nameOnly: 2, people: [
+    { key: 'name:ada', name: 'Ada', login: null, how: ['committed'] },
+    { key: 'name:bo', name: 'Bo', login: null, how: ['approved'] },
+  ] } };
+  assert.equal(_teamHint(namesPair).line, `solo mode is on, but 2 different names not matched to a platform login committed or approved in the last 90 days, ${E74_TAIL}`);
+});
+
+test('E74 teamHint: a person whose every record is dated after today is left out, so the line can stop', () => {
+  const past = { key: 'login:ada', name: null, login: 'ada', how: ['committed'] };
+  const future = { key: 'login:bo', name: null, login: 'bo', how: ['approved'], future: true };
+  const count = (people) => ({ today: '2026-06-09', unknown: [], capacity: { days: 90, basis: 'b', active: people.length, nameOnly: 0, people } });
+  assert.deepEqual(_teamHint(count([past, future])), { known: true, line: null }, 'a mistyped 2027 approval does not keep the line on screen for good');
+  assert.match(_teamHint(count([past, { ...future, future: undefined }])).line, E74_LINE, 'the same person dated today speaks');
+  // One person, a current commit and a mistyped future approval, beside a second spelling of a name: the
+  // approval is not proof, and one login + one name is a team of 1.
+  const mixed = { key: 'login:ada', name: null, login: 'ada', how: ['approved', 'committed'], later: ['approved'] };
+  const spelling = { key: 'name:ada lovelace', name: 'Ada Lovelace', login: null, how: ['committed'] };
+  assert.deepEqual(_teamHint(count([mixed, spelling])), { known: true, line: null }, 'an approval dated only in the future proves nothing');
+  assert.match(_teamHint(count([{ ...mixed, later: undefined }, spelling])).line, /someone approved a review/, 'the same approval dated today does');
+});
+
+test('E74 activeIn: marks `future` only when EVERY record of a person is after today, and still counts them', () => {
+  const got = activeIn([
+    { ts: '2026-09-20', name: null, login: 'ada', how: 'committed' },
+    { ts: '2027-06-01', name: null, login: 'ada', how: 'approved' },
+    { ts: '2027-06-01', name: null, login: 'bo', how: 'approved' },
+    { ts: '2026-09-22T09:00:00Z', name: null, login: 'cy', how: 'committed' },
+  ], '2026-09-01', '2026-09-22');
+  assert.equal(got.count, 3, 'a future date is never a reason to forget a person (E71)');
+  const by = Object.fromEntries(got.people.map((p) => [p.login, p.future === true]));
+  assert.deepEqual(by, { ada: false, bo: true, cy: false }, 'one record today or before is enough; a timestamp on today is today');
+  assert.deepEqual(got.people.find((p) => p.login === 'ada').later, ['approved'], 'ada committed today but approved only in 2027');
+  assert.equal(got.people.find((p) => p.login === 'cy').later, undefined, 'nothing only-later, no list');
+  assert.equal(activeIn([{ ts: '2027-06-01', login: 'bo', how: 'approved' }], '2026-09-01').people[0].future, undefined, 'no `today`, no mark');
+});
+
+test('E74 probe: a local self-approval under the SAME name beside noreply commits stays silent, on real history', () => {
+  const fx = peopleFixture({ withRepo: false });   // 'Product Writer' <writer@corp.io>, a name
+  try {
+    // Rewrite nothing: add the developer's noreply commits and their own hand-written approval, both
+    // under the name the work-email commit already carries. The work-email name joins the approval.
+    fx.commit(fx.T, 'Product Writer', '12345+writer@users.noreply.github.com', 1);
+    fx.write('epics/EP-x/.sdlc/approvals.json', [{ approver: 'Product Writer', date: daysBefore(P_TODAY, 1), status: 'approved' }]);
+    const counted = activePeople(fx.T, { today: P_TODAY });
+    assert.equal(counted.capacity.active, 2, 'one login (the noreply commit) and one name (the work email and the approval)');
+    assert.equal(_approverCount(counted), 1, 'the name row approved');
+    assert.deepEqual(_teamHint(counted), { known: true, line: null });
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E74 probe: the real reader marks a person whose only record is a mistyped future date', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    fx.write('epics/EP-x/.sdlc/approvals.json', [{ approver: 'bo-gh', date: '2099-01-01', source: 'bridge', status: 'approved' }]);
+    const counted = activePeople(fx.T, { today: P_TODAY });
+    assert.equal(counted.capacity.active, 2, 'still counted for the cap (E71)');
+    assert.equal(counted.capacity.people.find((p) => p.login === 'bo-gh').future, true);
+    assert.deepEqual(_teamHint(counted), { known: true, line: null }, 'so the suggestion does not stay on screen for good');
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});

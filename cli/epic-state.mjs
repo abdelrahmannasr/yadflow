@@ -171,6 +171,11 @@ export const capWho = (active) => (capByFloor(active)
 // An unknown count (`cap: null`) or an unknown `nameOnly` says nothing: an unknown is never a number.
 // Pure. The caller decides where it applies — never in solo mode, never on a step that passed or was
 // waived — and prints each distinct line once per command (`uniqueReach`).
+// The SMALLEST POSSIBLE TEAM behind a count: the larger of the logins and the names not matched to a
+// login (each name may be a second row for one of the logins), and never fewer than `floor`, the people
+// the approvals prove. One rule, read by E73's what-if line (`gateReach`) and E74's `teamHint`, so the
+// two can never disagree about how small a team may be.
+export const smallestTeam = (logins, names, floor = 0) => Math.max(logins, names, floor);
 export const REACH_TODAY = 'may not be met';
 export const REACH_IF_ENFORCED = 'if the risk step were enforced';
 const WAY_OUT = "Another person's approval settles it, or use the recorded way out, `yad mode solo --reason`";
@@ -208,7 +213,7 @@ export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0,
     ifEnforced(`with no cap, the full count of ${rule.needed} is more than ${cap.active} active people can give (${capSeat(cap.active)}), so if nobody else joins, this gate could not pass`);
   }
   if (names && !base) {
-    const smallest = Math.max(logins, nameOnly, floor);
+    const smallest = smallestTeam(logins, nameOnly, floor);
     const room = capLimit(smallest);
     if (room < cap.to) {
       const why = floor > Math.max(logins, nameOnly) ? ` (the approvals already recorded show at least ${smallest} people)` : '';

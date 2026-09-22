@@ -244,6 +244,8 @@ gate that has not passed, `yad gate status` and `yad gate sync` print a warning 
 people suggests the gate may not pass: `! may not be met:` about the one approval enforced today, or
 `! if the risk step were enforced:` about what enforcing more would do. It holds nothing. When a source
 cannot be read, the count says `NOT COUNTED` rather than showing a small number, and no cap is shown.
+In solo mode, `yad gate status` prints `! solo mode is on, but …` instead when the count shows more
+than one person may work on the Product. It only suggests `yad mode team`; nothing switches (E74).
 A team gate that passed on its counted approvals (not solo, not a skip or inherited shortcut) while the cap lowered its ask records `capped: { needed, to, active }` on its
 closing record.
 - **Epic, UI, stories, test cases:** 1 approver; the count asks for 1.

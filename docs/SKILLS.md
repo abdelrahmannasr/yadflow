@@ -140,7 +140,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   active people less one, and advances the
   epic state **only** when approval is recorded. When the count of people suggests a gate may not pass,
   `yad gate status` and `yad gate sync` print a warning line (`! may not be met: …` or
-  `! if the risk step were enforced: …`); it holds nothing (E73).
+  `! if the risk step were enforced: …`); it holds nothing (E73). In solo mode, `yad gate status` instead
+  suggests `yad mode team` (`! solo mode is on, but …`) when more than one person may work on the
+  Product; it switches nothing (E74).
 - **`yad-review-companion`** — The fun, easy, transparent layer on top of the gate (front **and**
   Build). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through
   review **cards**, and runs a grounded **chat** where a reviewer's questions become the record. Records
