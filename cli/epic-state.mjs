@@ -31,9 +31,10 @@ const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 // joins the two without exact evidence. So a two-person team whose members commit with work addresses
 // and approve on GitHub reads as FOUR, the cap lowers nothing, and an enforced contract gate would ask
 // for three approvals from one person who is not the author — E7's deadlock, back. Rule 7 needs a way
-// out before any count holds a gate, and that is E73's `yad gate lower --reason`. So E73 turns the
-// capped count on, together with its escape hatch; until then `short` is measured against the capped
-// ask and printed, and never enforced.
+// out before any count holds a gate, and that is `yad gate lower --reason`. E73 was to turn the capped
+// count on together with it; the user then kept E73 to DETECTION (2026-09-22, `gateReach` below), and
+// enforcement plus the escape hatch moved to E108, which waits for the count to be accurate. Until then
+// `short` is measured against the capped ask and printed, and never enforced.
 //
 // WHEN THE COUNT IS UNKNOWN (`active: null`) no cap is computed at all: an unknown is never a small
 // number (E71). Product CI is usually that case — it checks out only the hub, so connected repos are
@@ -95,7 +96,7 @@ export function gateRuleFor(step) {
 // allows self-approval; GitLab only when its settings say so; a local ledger checks nothing).
 //
 // The floor of 1 means the cap can only ever trim the RISK STEP. The base is 1, so `to` is at least the
-// base. Until E73 the cap is REPORTED: the base alone holds every team gate (see `gateRuleFor`).
+// base. Until E108 the cap is REPORTED: the base alone holds every team gate (see `gateRuleFor`).
 //
 // Shape: { active, limit, to, capped } — `limit` is `max(1, active − 1)`, `to` the number asked for,
 // `capped` true only when the cap LOWERED the count (rule 6: every cap is said, and recorded on the
@@ -108,7 +109,7 @@ export function gateCapFor(rule, active) {
 }
 
 // The cap's arithmetic and its wording, ONE copy each. Every surface that prints a cap reads these, so
-// E73 — which changes what those surfaces say — has one place to change, not five.
+// E108 — which changes what those surfaces say — has one place to change, not five.
 //   capLimit   the most approvals a count of `active` people can give: one seat is left for the author,
 //              and never below 1 (a known count of 0 or 1 people still asks for the base).
 //   peopleWord `person` or `people`.
@@ -123,6 +124,113 @@ export const capWho = (active) => (capByFloor(active)
   ? `${active} active ${peopleWord(active)} (never below 1)`
   : `${active} active ${peopleWord(active)}, less one seat for the author`);
 
+// UNMEETABLE-GATE DETECTION (E73): lines saying why a team gate may not pass. REPORTED, and never
+// enforced — nothing here holds a gate, changes `passed`, `missing` or `short`, or writes a file.
+// Enforcing the risk step, and `yad gate lower --reason` as its way out, is a later row (E108), which
+// waits for the count of people to be accurate. These lines are the evidence that row needs.
+//
+// TWO KINDS OF LINE, because two different things can be said, and mixing them made lines untrue:
+//   `may not be met: …`                    TODAY's rule — the base, one approval — may have nobody to
+//                                          give it.
+//   `if the risk step were enforced: …`    a WHAT-IF — what enforcing more than the base would do. Today
+//                                          the gate still passes on the base, and the line says so.
+//
+// Every claim is about the PEOPLE COUNTED, and is hedged ("may", "if"), because the count is wrong both
+// ways, and neither is an edge:
+//   too LOW   a reviewer who has not committed or approved inside the counting window is not counted —
+//             the second person on a brand-new Product reads as absent until their first approval;
+//   too HIGH  a commit is keyed by its git name and an approval by its platform login, and E71 never joins
+//             the two without exact evidence, so a two-person team can read as four (E72, case a).
+//
+// WHAT AN APPROVAL SHOWS. `have` is the approvals on THIS step and `approvers` the people counted with an
+// approval in the counting window. Any such approval shows that approvals can be given here, so the two
+// TODAY lines speak only when there is none in the window. For the what-if lines an approval is also a
+// lower bound on the team: the approvers on this step plus the author (`have + 1`), and at least two
+// people once anyone approved anything. That assumes the platform keeps authors from approving their own
+// work: always on GitHub, on GitLab only when its settings say so, never on a local ledger (E62 decision
+// h). Where it is wrong the bound is too high, so a what-if line may stay quiet — never a false alarm.
+//
+// The checks, each only while its own ask is unmet:
+//   base        0 or 1 active person counted, and no approval in the window.
+//   one person  exactly two people counted, one NOT MATCHED to a login (a git name, or an approval record
+//               that proves no login — an older hand-written one, or an engineer-review record, which
+//               carries none) and one login, and no approval in the window: they may be one person. (A solo
+//               developer who commits with a work address AND through GitHub's web editor, whose noreply
+//               address carries the login, reads as two people; only this check sees it.)
+//   full        (what-if) the cap lowered the ask: the full count is more than the people counted can
+//               give. Not said when a today line is, nor when the approvals show more people than counted.
+//   names       (what-if) some people are not matched to a login and at least one is a login, and the
+//               smallest possible team cannot give the ask. That team is the larger of the logins and the
+//               names (each name may be one of the logins, and distinct names are taken as distinct
+//               people, as the count takes them), and never fewer than the approvals prove. Taking only the
+//               logins made a four-person team with one web-editor commit read as "as small as 1".
+// "No approval" always names the capacity window (`days`): the reader never sees an older approval.
+// A Product whose records are all names (no platform) gets no name line — there is no login for a name
+// to be the same person as. Two spellings of one NAME still count twice; that is E108's, with the join.
+//
+// An unknown count (`cap: null`) or an unknown `nameOnly` says nothing: an unknown is never a number.
+// Pure. The caller decides where it applies — never in solo mode, never on a step that passed or was
+// waived — and prints each distinct line once per command (`uniqueReach`).
+export const REACH_TODAY = 'may not be met';
+export const REACH_IF_ENFORCED = 'if the risk step were enforced';
+const WAY_OUT = "Another person's approval settles it, or use the recorded way out, `yad mode solo --reason`";
+const whole = (n) => (Number.isInteger(n) && n > 0 ? n : 0);
+export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0, days = null } = {}) {
+  if (!cap) return [];
+  const lines = [];
+  const got = whole(have);
+  const approved = got > 0 || whole(approvers) > 0;
+  // The fewest people the approvals prove: this step's approvers plus the author, and two once anyone
+  // approved anything (the approver, and the author of what they approved).
+  const floor = Math.max(got > 0 ? got + 1 : 0, approved ? 2 : 0);
+  const names = Number.isInteger(nameOnly) && nameOnly > 0 && nameOnly < cap.active;
+  const logins = names ? cap.active - nameOnly : null;
+  const today = (t) => lines.push(`${REACH_TODAY}: ${t}`);
+  const ifEnforced = (t) => lines.push(`${REACH_IF_ENFORCED}: ${t}. Nothing beyond the one enforced approval is needed today`);
+  // The count only sees the capacity window, so every claim about "no approval" names it: an approval
+  // older than the window is on record, and "no approval yet" would be untrue.
+  const window = whole(days) ? `in the last ${days} days` : 'in the counting window';
+  let base = false;
+  if (!approved && cap.active <= 1) {
+    base = true;
+    today(`only ${cap.active} active ${peopleWord(cap.active)} counted and no approval ${window}, so if nobody but the author can approve, this gate cannot pass. Someone who has not committed or approved ${window} is not counted. ${WAY_OUT}`);
+  }
+  // Only the two-row shape (one name, one login): the solo developer who commits two ways. With more
+  // names beside one login, distinct names are distinct people (as the count takes them), so the team is
+  // at least that many — one person is not a reading the count allows.
+  if (!approved && names && cap.active === 2) {
+    base = true;
+    today(`1 of the 2 people counted is not matched to a platform login and may be the same person as the one login, and there is no approval ${window}, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass. ${WAY_OUT}`);
+  }
+  // `floor <= cap.active` also covers "the full count is already met" and "only one person counted":
+  // either way the approvals prove more people than were counted, and the line would contradict them.
+  if (!base && cap.capped && floor <= cap.active) {
+    ifEnforced(`with no cap, the full count of ${rule.needed} is more than ${cap.active} active people can give (${capSeat(cap.active)}), so if nobody else joins, this gate could not pass`);
+  }
+  if (names && !base) {
+    const smallest = Math.max(logins, nameOnly, floor);
+    const room = capLimit(smallest);
+    if (room < cap.to) {
+      const why = floor > Math.max(logins, nameOnly) ? ` (the approvals already recorded show at least ${smallest} people)` : '';
+      // At most as many names as there are logins can be a login's second row, so say how many.
+      const overlap = Math.min(nameOnly, logins);
+      const logWord = logins === 1 ? 'the one login' : 'the logins';
+      // One name beside one login is two people counted, where the ask is 1 and never exceeds the room —
+      // so a lone name always sits beside several logins here. `overlap` is 1 only with a single login.
+      const same = nameOnly === 1
+        ? 'and may be the same person as one of the logins'
+        : `and ${overlap === 1 ? 'one of them' : `up to ${overlap} of them`} may be the same ${overlap === 1 ? 'person' : 'people'} as ${logWord}`;
+      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} not matched to a platform login, ${same}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked${cap.capped ? ' after the cap' : ''}, so if the team is that small, this gate could not pass`);
+    }
+  }
+  return lines;
+}
+
+// Each line once. A reason about the whole Product (the base, one person) is true of every open step
+// at once; printed under each, it buries the step lines around it. `seen` is kept by the caller for one
+// command, so a line prints under the first step (or PR) it applies to and nowhere after.
+export const uniqueReach = (lines, seen) => lines.filter((l) => !seen.has(l) && seen.add(l));
+
 // The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside
 // the rule, because several surfaces print it (`gate sync`, `gate status`, the generated review-PR body
 // and `yad open-pr`) and several copies of the arithmetic would eventually disagree.
@@ -133,7 +241,7 @@ export const gateRuleSum = (rule) => {
 
 // Which part of that sum holds the gate, said wherever the sum is printed. Empty when the step carries
 // no risk step: then the base IS the whole count, and the cap can never lower it. Otherwise the base
-// holds and the risk step is advisory (until E73 — see `gateRuleFor`), and a cap that lowered the ask
+// holds and the risk step is advisory (until E108 — see `gateRuleFor`), and a cap that lowered the ask
 // is named first, so the shortfall printed after it reads against the capped number.
 export const gateRuleEnforced = (rule, cap = null) => {
   if (!rule.riskStep) return '';
@@ -1438,7 +1546,7 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 //             waived, the authoring was not, so `closeAuthorStep` is handed its fields one by one.
 //   capped    `{ needed, to, active }` when a REVIEW step passed in team mode while the capacity cap
 //             LOWERED its ask (E72): the full count, the capped ask, and the count of people it read.
-//             The ask is reported until E73, so this records what the gate asked, not what held it.
+//             The ask is reported until E108, so this records what the gate asked, not what held it.
 //             Absent when no cap applied — the count of people was unknown, or it lowered nothing — and
 //             in solo mode, where nothing was counted. Never on the author step, as `waived`.
 //
@@ -1481,7 +1589,7 @@ const uniqueBy = (arr, key) => {
 //   * the BASE — `gateRuleFor(step).base` distinct approvers (one). This is what decides `passed`.
 //   * the RISK STEP — the rest of `needed`, capped at `active − 1` (floor 1) when the count of people is
 //     known (E72, `gateCapFor`). Computed, returned as `gateRule`/`cap`/`have`/`short` and printed
-//     wherever a gate reports itself, and it holds NOTHING until E73 lands its escape hatch. See the
+//     wherever a gate reports itself, and it holds NOTHING until E108 lands its escape hatch. See the
 //     long note on `gateRuleFor`: the count of people errs high in the normal case, so an enforced cap
 //     would still lock a small team out with no recorded way out (rule 7).
 // Approvals are counted as distinct PEOPLE: two approvals from one person are one approver.
@@ -1576,7 +1684,7 @@ export function gatePredicate({
   const approvers = uniqueBy(counted.filter((a) => typeof a.approver === 'string' && a.approver.trim()), 'approver').length;
   const gateRule = gateRuleFor(step);
   // E72. `asks` is the count the gate asks for — capped when the count of people is known, the full
-  // count otherwise. Only the BASE holds the gate until E73 (see `gateRuleFor`).
+  // count otherwise. Only the BASE holds the gate until E108 (see `gateRuleFor`).
   const cap = gateCapFor(gateRule, active);
   const asks = cap ? cap.to : gateRule.needed;
 
@@ -1585,7 +1693,7 @@ export function gatePredicate({
   // merge + resolved threads are what advance the step.
   if (!solo) {
     // Only the BASE holds the gate. The rest of the ask rides out as `short`, which is what the surfaces
-    // print and what E73 turns into a `missing` entry, beside `yad gate lower --reason`.
+    // print and what E108 turns into a `missing` entry, beside `yad gate lower --reason`.
     if (approvers < gateRule.base) missing.push(`${gateRule.base - approvers} approval(s)`);
   }
   const approvalsSatisfied = missing.length === 0;
@@ -1610,7 +1718,7 @@ export function gatePredicate({
     rule: solo ? 'solo' : 'count',
     // The rule and what was counted against it. `have` is the number of distinct approvers and `short`
     // how many more the gate ASKS for — the capped count when `active` is known, the full count when it
-    // is not. A gate can pass while `short` is not 0: only the base is enforced until E73.
+    // is not. A gate can pass while `short` is not 0: only the base is enforced until E108.
     gateRule,
     have: approvers,
     short: solo ? 0 : Math.max(0, asks - approvers),
@@ -2141,7 +2249,7 @@ export function markInReview(state, step, close = null) {
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
 // below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); how many approvals each step's
 // gate ASKS FOR — the base enforced, the risk step reported and capped by the active people (E72) until
-// E73 — is `gateRuleFor` and `gateCapFor` at the top of this file (E7, E62, E72), which read
+// E108 — is `gateRuleFor` and `gateCapFor` at the top of this file (E7, E62, E72), which read
 // the `risk_tags` a seed copies from the row below into the epic's own `state.json`;
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default

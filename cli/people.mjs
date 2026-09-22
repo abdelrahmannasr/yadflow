@@ -40,6 +40,15 @@ import { epicIds, epicRoot, ledgerPersonLogin, capLimit, capSeat } from './epic-
 import { corruptShards, readShips } from './ledger.mjs';
 import { isBot, loginFromEmail } from './riskmap.mjs';
 
+// yadflow's OWN gate bot on GitLab. The GitHub workflow commits as `yad-gate-sync[bot]`, which `isBot`
+// already skips; the GitLab one commits as `yad-gate-sync` <yad-gate-sync@noreply.<host>> (the wired
+// `yad-gate-sync.gitlab-ci.yml`), with no `[bot]`, so it was counted as a person (E72 review, case b) —
+// and a solo GitLab developer read as two. Matched EXACTLY on both the name and the address our own
+// template writes: that is evidence, not a guess from how a name looks. Kept here, not in `isBot`,
+// because `isBot` has an awk twin in `risk-map-check.sh` that a parity test holds equal.
+export const isGateBot = (name, email) => String(name || '').trim() === 'yad-gate-sync'
+  && /^yad-gate-sync@noreply\./i.test(String(email || '').trim());
+
 // ---- the three windows (Part 3, "Counting people") ----------------------------------------------
 //
 // | Purpose             | Window                                  | Shape                |
@@ -129,7 +138,10 @@ export const personKey = (person) => {
 // Two kinds of evidence, and only two, because Part 3 defines it: "Active" = committed OR approved
 // within the window.
 //   * APPROVED — the Product ledger: every Shape gate approval, and every Build ship's
-//     engineer-review. Both record a platform LOGIN since E62.
+//     engineer-review. Both are MEANT to record a platform LOGIN since E62, but only a record
+//     `ledgerPersonLogin` accepts proves it (bridge-written, roster-stamped, or an older roster alias);
+//     an engineer-review entry carries no marker, so it is keyed by name — E73's lines call such a
+//     person "not matched to a platform login".
 //   * COMMITTED — git authorship, in the Product and in every connected code repo. Git records a NAME,
 //     plus a login only when the address is a platform `noreply` one.
 // A COMMENT is not either of them and does not count. Part 3 names two actions; a commenter has proven
@@ -196,8 +208,9 @@ function ledgerEvidence(root, aliases) {
         continue;
       }
       // `status` is not filtered: someone who asked for changes reviewed the artifact and is plainly
-      // active. It counts them in, which is the safe direction, and never counts them as an approval —
-      // nothing here feeds `have`.
+      // active. It counts them in, which is the safe direction. Nothing here feeds `have`; E73's
+      // `approverCount` does read `how: 'approved'` as "approvals can be given here", and today every
+      // writer records only approvals in this file.
       events.push({ ts: a.date, name, login: ledgerPersonLogin(a, name, aliases), how: 'approved' });
     }
     // A merged review PR, as the Product recorded it: a step whose closing record carries a PR number
@@ -328,7 +341,7 @@ function gitAuthors(repoRoot, since) {
     // \x1f, never NUL: E67's separator, for the same reason — a reader that takes C strings would cut
     // the line at the first NUL byte.
     const [ct, name, email] = line.split('\x1f');
-    if (isBot(name, email)) continue;   // a robot cannot approve, so it is not capacity
+    if (isBot(name, email) || isGateBot(name, email)) continue;   // a robot cannot approve, so it is not capacity
     // A commit we can READ but cannot date is a source we could not read — the same rule this file
     // applies to an approval and to a ship, and the one place the first pass left it as a silent skip.
     // `Number('')` is 0, which is finite and would have become 1970-01-01; a `%ct` in MILLISECONDS
@@ -506,12 +519,18 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
   };
 }
 
+// How many of the people counted APPROVED something in the window (E73) — evidence that approvals can be
+// given in this Product. 0 when the count is unknown or carries no list: the caller reads that as "no
+// evidence", which can only make a warning speak, never hide one.
+export const approverCount = (counted) => (Array.isArray(counted?.capacity?.people)
+  ? counted.capacity.people.filter((p) => Array.isArray(p?.how) && p.how.includes('approved')).length : 0);
+
 // The capacity count as ONE human-readable line, defined here beside the rule for the same reason
 // `gateRuleSum` is defined beside `gateRuleFor`: several surfaces print it, and several copies of the
 // wording would eventually disagree about what the number means.
 //
 // It always says what the number DOES to a gate (E72): a known count caps the count each gate ASKS for
-// at `active − 1`, which is reported and not enforced until E73; an unknown one gives no cap.
+// at `active − 1`, which is reported and not enforced until E108; an unknown one gives no cap.
 export function activeSum(counted) {
   const cap = counted?.capacity;
   // `== null` on purpose, so a missing count and an explicitly null one take the SAME branch. With
@@ -527,7 +546,7 @@ export function activeSum(counted) {
   // that captures or pipes stdout alone (CI logs, a redirect) would keep the number and lose the
   // sentence saying what it does. `capLimit` is the cap's one copy of the arithmetic (cli/epic-state.mjs).
   const limit = capLimit(cap.active);
-  return `active people: ${cap.active} in the last ${cap.days} days — caps each gate's count at ${limit} approver${limit === 1 ? '' : 's'} (${capSeat(cap.active)}); reported, only the base is enforced until E73`;
+  return `active people: ${cap.active} in the last ${cap.days} days — caps each gate's count at ${limit} approver${limit === 1 ? '' : 's'} (${capSeat(cap.active)}); reported, only the base is enforced`;
 }
 
 // Why that window is the length it is. The second line under `activeSum`, and the only part that may be

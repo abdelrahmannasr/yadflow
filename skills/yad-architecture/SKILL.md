@@ -206,7 +206,7 @@ through the gate.
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
 and that the next action is **review** via `yad-review-gate`. Because of the risk tag `contract`, the
 step's full approver count is 3 distinct people (base 1 + contract risk 2), none of whom should be the
-author. Only the base (1 distinct approver) holds the gate; the risk step is advisory until E73. The engine caps
+author. Only the base (1 distinct approver) holds the gate; the risk step is advisory. The engine caps
 the count at the active people less one, floor 1, and prints it (E72) — with 2 active people the capped
 ask is 1, with 3 it is 2, with 4 or more all 3 — and a shortfall never holds the gate. When the people
 cannot be counted (as in Product CI with connected repos), no cap is shown. The review PR requests no reviewers; the team asks them on the PR itself.

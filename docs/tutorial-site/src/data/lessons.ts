@@ -304,7 +304,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Run `yad-architecture` with the architect lens. It authors `architecture.md` and the **locked** `contract.md` — the shared cross-repo surface (endpoints, events, data-models) that every code repo must honor.' },
           { kind: 'p', text: 'It then hash-locks the contract surface into `.sdlc/contract-lock.json`. From here on, any code change that touches that surface must declare it and re-lock — otherwise CI fails and routes back to this gate.' },
-          { kind: 'callout', tone: 'key', text: 'The architecture review carries the **contract** risk tag, so its count asks for 3 approvers (base 1 + contract risk 2). Only the base — 1 approver, who should not be the author — holds the gate until E73. E73 is a later yadflow change that adds `yad gate lower --reason`, a recorded way out of a gate a team cannot meet. The rest is printed as a shortfall against the capped count and never blocks. The engine also shows the count capped at the number of active people less one: with 2 active people the capped ask is 1, with 3 it is 2, with 4 or more all 3. Changing the locked surface invalidates existing approvals.' },
+          { kind: 'callout', tone: 'key', text: 'The architecture review carries the **contract** risk tag, so its count asks for 3 approvers (base 1 + contract risk 2). Only the base — 1 approver, who should not be the author — holds the gate. A later yadflow change will enforce the rest together with `yad gate lower --reason`, a recorded way out of a gate a team cannot meet. Until then the rest is printed as a shortfall against the capped count and never blocks. The engine also shows the count capped at the number of active people less one: with 2 active people the capped ask is 1, with 3 it is 2, with 4 or more all 3. Changing the locked surface invalidates existing approvals.' },
         ],
         commands: [{ cmd: 'run yad-architecture' }],
         produces: ['epics/EP-<slug>/architecture.md', 'epics/EP-<slug>/contract.md (locked)', '.sdlc/contract-lock.json'],
@@ -449,24 +449,24 @@ export const MODULES: Module[] = [
           { kind: 'p', text: 'Every review uses the same **count** rule. It names no person and no role — yadflow keeps no list of people. Anyone with access to the repo can approve, and the platform records who did.' },
           { kind: 'list', items: [
             '**Base (enforced)** — at least 1 distinct approver, who should not be the author (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), all comment threads resolved, and the review PR merged.',
-            '**Risk step (advisory until E73)** — +2 when the step is tagged `contract`, +1 when it is tagged `auth` or `payments`. The highest tag counts, never the sum.',
+            '**Risk step (advisory)** — +2 when the step is tagged `contract`, +1 when it is tagged `auth` or `payments`. The highest tag counts, never the sum.',
             '**Architecture + contract** — the count asks for 3 approvers (base 1 + contract risk 2). The surface is hash-locked.',
             '**Epic, UI, stories, test-cases** — the base count: 1 approver. Stories touching several repos add no approvals.',
             '**Engineer review at ship** — a human engineer, always, never automated.',
           ] },
-          { kind: 'p', text: 'The full count is **base 1 + risk step**, and it counts people rather than roles. Only the base holds a gate until E73. The **capacity cap** limits the count to the number of active people less one (never below 1) — one seat is left for the author — and `yad gate sync` prints it: the count of people on its own line (`active people: 2 in the last 90 days — caps each gate\'s count at 1 approver (one seat is left for the author); reported, only the base is enforced until E73`) and the count with its shortfall, for example `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`. The cap is reported, not enforced, because the count of people can read high: a git name and a platform login count as two people until proven one, so a two-person team can read as four. E73 enforces the capped count together with `yad gate lower --reason`, a way out of a gate that cannot be met. Solo mode still waives approvals: the merge plus resolved threads advance the step.' },
+          { kind: 'p', text: 'The full count is **base 1 + risk step**, and it counts people rather than roles. Only the base holds a gate. The **capacity cap** limits the count to the number of active people less one (never below 1) — one seat is left for the author — and `yad gate sync` prints it: the count of people on its own line (`active people: 2 in the last 90 days — caps each gate\'s count at 1 approver (one seat is left for the author); reported, only the base is enforced`) and the count with its shortfall, for example `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`. The cap is reported, not enforced, because the count of people can read high: a git name and a platform login count as two people until proven one, so a two-person team can read as four. A later yadflow change will enforce the capped count together with `yad gate lower --reason`, a way out of a gate that cannot be met, once the count is accurate. Until then, under a team gate that has not passed, `yad gate status` and `yad gate sync` print a warning line when the count of people suggests the gate may not pass: `! may not be met:` about the one approval enforced today, or `! if the risk step were enforced:` about what enforcing more would do. It holds nothing. Solo mode still waives approvals: the merge plus resolved threads advance the step.' },
         ],
         quiz: [
           {
             q: 'The architecture review carries the contract risk tag. What does its approval count ask for?',
             options: [
               'Nothing extra — 1 approver, the same as every step',
-              '3 approvers (base 1 + contract risk 2); only the base is enforced until E73',
+              '3 approvers (base 1 + contract risk 2); only the base is enforced',
               'Approval from the CEO',
               'A second AI review',
             ],
             answer: 1,
-            explain: 'A contract tag adds a risk step of 2 to the base of 1. The gate holds on the base and prints the rest as a shortfall against the capped count until E73.',
+            explain: 'A contract tag adds a risk step of 2 to the base of 1. The gate holds on the base and prints the rest as a shortfall against the capped count.',
           },
         ],
       },

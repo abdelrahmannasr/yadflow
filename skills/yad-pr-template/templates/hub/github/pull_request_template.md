@@ -20,7 +20,7 @@
 ## Required approvals (yad-review-gate rule)
 - Full count, in **distinct people**: base 1 + the step's risk step — 3 on a `contract` step, 2 on
   `auth`/`payments`, 1 otherwise (the largest step, never the sum). No approval should be the author’s own.
-- Enforced: **1 approval** (the base). The risk step is **advisory** until E73. `yad gate status <epic>`
+- Enforced: **1 approval** (the base). The risk step is **advisory**. `yad gate status <epic>`
   prints the count capped at the active people less one (one seat is left for the author), and
   `yad-hub-bridge`'s `hub-route.sh` run on this description prints the full count.
 - No reviewers are requested automatically — ask them on this PR. The `domain:<repo>` labels show the touched repos.

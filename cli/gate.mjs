@@ -11,12 +11,12 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
-import { activePeople, activeSum, activeBasis } from './people.mjs';
+import { activePeople, activeSum, activeBasis, approverCount } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -671,7 +671,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   let advanced = 0;
   // E71 — said ONCE, before the per-artifact lines, because it is a fact about the PRODUCT and not
   // about any one gate (rule 6: say the arithmetic, not just the verdict). Since E72 it caps the count
-  // each gate below ASKS for — reported, and not enforced until E73.
+  // each gate below ASKS for — reported, and not enforced until E108.
   // E71 — ONE Product-wide count per command, read here: before the per-step loop, so N steps cannot
   // mean N walks of every repo's history, and AFTER the early exits above, so a run that bails out for
   // a missing ledger or no targets never pays for a git walk at all. `today` is the one this command
@@ -683,6 +683,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   const people = headCount || activePeople(root, { today: today || undefined, aliases });
   log(`  ${c.dim(activeSum(people))}`);
   note(c.dim(activeBasis(people)));
+  const reachSeen = new Set();   // E73: each warning line once per command, not once per PR
   // Targets whose step is still open. The dated approval-record file is regenerated only for these —
   // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
   // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
@@ -756,7 +757,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     });
 
     // Say the arithmetic, not just the verdict (rule 6): the count, the cap when the people were counted,
-    // and which half of it holds the gate — only the base until E73 — labelled so nobody reads a number
+    // and which half of it holds the gate — only the base until E108 — labelled so nobody reads a number
     // the gate is not enforcing as the reason it did or did not pass.
     // `have: null` is a step whose approvals were never counted (inherited from a parent epic, or
     // skipped): there is no head count to report and no requirement to report either.
@@ -764,6 +765,15 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       ? 'approvals not counted here'
       : `${pred.have} approved; count: ${gateRuleSum(pred.gateRule)}${gateRuleEnforced(pred.gateRule, pred.cap)}${pred.short ? ` — ${pred.short} short` : ''}`;
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
+    // E73: why this gate may not pass — reported only, never enforced. Only on a gate that counted
+    // (`rule: 'count'`, so never in solo mode) and is still open: not one already done (`alreadyDone` —
+    // a deferred step, or a done step whose approvals went stale, is not reopened by a sync) and not one
+    // that passed on this run. A LOCAL sync while the review is open shows it before the merge, when
+    // approvals can still come; wired CI does not — it runs only on merged PRs, and usually cannot count
+    // people. Each distinct line once per command (`uniqueReach`).
+    if (!alreadyDone && !pred.passed && pred.rule === 'count' && pred.have !== null) {
+      for (const why of uniqueReach(gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly, approvers: approverCount(people), days: people.capacity.days }), reachSeen)) warn(why);
+    }
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
       // next step, and moving it back to in_review would un-ship work already built on it. What this
@@ -1214,13 +1224,14 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // can see the number their gates will be capped against (E72), before it holds anything for them.
   log(`  ${c.dim(activeSum(headCount))}`);
   note(c.dim(activeBasis(headCount)));
+  const reachSeen = new Set();   // E73: each warning line once per view, not once per step
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const accepted = acceptedHashes(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
     const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && isStaleHash(a.artifactHash, accepted)).length;
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
     // E7's count, per step, from the step's own risk tags, capped by E72 when the people were counted —
-    // only its base holds the gate until E73, and it is labelled so.
+    // only its base holds the gate until E108, and it is labelled so.
     // Distinct PEOPLE, which is why it can differ from the approval count beside it: two approvals from
     // one person are one approver. Printed in solo mode too, where approvals are waived, so a reader who
     // later switches to team mode can see what each gate will then ask for.
@@ -1271,6 +1282,13 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     const paying = s.debt === true && state !== 'deferred' ? '; owed as debt — being paid back' : '';
     log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
     if (s.closed && typeof s.closed === 'object' && !Array.isArray(s.closed)) log(`      ${c.dim(closedLine(s.closed))}`);
+    // E73: why this gate may not pass — reported only, never enforced. Not in solo mode, not on a waived
+    // (inherited, skipped, deferred) step, and not on one that passed. Every other review step counts,
+    // including one not reached yet — so a line about the whole Product (the base, one person) prints
+    // once, under the first step it applies to (`uniqueReach`), not under every step after it.
+    if (!solo && !waived && !isPassed(s)) {
+      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly, approvers: approverCount(headCount), days: headCount.capacity.days }), reachSeen)) log(`      ${c.yellow('!')} ${c.dim(why)}`);
+    }
   }
 }
 
@@ -1577,10 +1595,10 @@ const base = (artifact) => artifactBase(artifact);
 export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true, active = null }) {
   const rule = gateRuleFor(step);
   const cap = gateCapFor(rule, active);
-  // What the count asks for. Only the base holds (until E73); the cap (E72) is shown when it lowered the
+  // What the count asks for. Only the base holds (until E108); the cap (E72) is shown when it lowered the
   // ask, dated, because this body is written once and the count can differ when the gate decides.
   const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active ${peopleWord(cap.active)} when this PR was opened` : '';
-  const needed = `${rule.base} (enforced) · full count ${gateRuleSum(rule)}${capped}${rule.riskStep ? ' (the risk step is advisory until E73)' : ''}`;
+  const needed = `${rule.base} (enforced) · full count ${gateRuleSum(rule)}${capped}${rule.riskStep ? ' (the risk step is advisory)' : ''}`;
   return [
     '## Artifact under review',
     `- Epic: \`${epic}\``,

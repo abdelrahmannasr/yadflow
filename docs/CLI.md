@@ -122,7 +122,7 @@ PR, and GitLab stops it only when the project's approval settings say so. The ri
 step comes from the step's own risk tags — `contract` +2, `auth`/`payments` +1, nothing +0, the highest
 tag and never the sum. So an ordinary step asks for 1 approver and the architecture+contract gate asks for 3.
 
-**Only the base holds the gate — until E73.** The base is always enforced; until E73 it is the only part that is. A gate passes with one approver, and the rest of the
+**Only the base holds the gate.** The base is always enforced, and for now it is the only part that is. A gate passes with one approver, and the rest of the
 count is reported as a shortfall.
 
 **The capacity cap (E72).** The engine caps the count at the number of **active people less one**, and
@@ -141,8 +141,64 @@ the platform decides whether they may approve.
 counted by its git name, an approval by its platform login, and yadflow never joins the two without
 exact evidence — so a two-person team can read as four. At four the cap lowers nothing, and an enforced
 contract gate would ask three approvals of a team with one person who is not the author: a gate it could
-never pass. **E73** turns the capped count on together with `yad gate lower --reason`, the way out of a
-gate that cannot be met.
+never pass. A later yadflow change turns the capped count on together with `yad gate lower --reason`,
+the way out of a gate that cannot be met, once the count is accurate.
+
+**When a gate may not pass (E73).** `yad gate status` and `yad gate sync` print a warning line under a
+team review gate that has not passed yet, when the count of people suggests the gate may not pass. It is a
+**warning only**: it never holds a gate, never changes whether the gate passed, and writes nothing. There
+are two kinds of line:
+
+- `! may not be met: …` is about **today's rule**: the one approval that is always required (the base) may
+  have nobody but the author to give it.
+- `! if the risk step were enforced: …` is a **what-if**. Today only the base is enforced, so the gate can
+  still pass, and the line ends by saying that nothing beyond the one enforced approval is needed today.
+  It says what would happen if a later yadflow change enforced the extra approvals that risk tags add
+  (the risk step). "The approvals asked" means the count after the cap. The cap limits the count to the
+  active people less one, and never below 1.
+
+Every line talks about **the people counted**, and says "may" or "if", because the count can be wrong both
+ways. It is too low when a reviewer has not committed or approved inside the counting window (the same
+window as the `active people:` line), because nothing in that window records them. It is too high when
+one person commits with a work email (recorded as a name) and approves on GitHub (recorded as a login):
+yadflow never joins a name and a login without proof, so that person counts twice.
+
+| Kind | When it prints | Example line (a 90-day window) |
+|---|---|---|
+| Today | 0 or 1 active person counted, and no approval in the window | ``! may not be met: only 1 active person counted and no approval in the last 90 days, so if nobody but the author can approve, this gate cannot pass. Someone who has not committed or approved in the last 90 days is not counted. Another person's approval settles it, or use the recorded way out, `yad mode solo --reason` `` |
+| Today | Exactly 2 people counted, one not matched to a platform login and one login, and no approval in the window. Example: one developer who commits with a work email and also through GitHub's web editor, which records the login | ``! may not be met: 1 of the 2 people counted is not matched to a platform login and may be the same person as the one login, and there is no approval in the last 90 days, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass. Another person's approval settles it, or use the recorded way out, `yad mode solo --reason` `` |
+| What-if | The cap lowered the count, and the approvals do not show more people than were counted | `! if the risk step were enforced: with no cap, the full count of 3 is more than 2 active people can give (one seat is left for the author), so if nobody else joins, this gate could not pass. Nothing beyond the one enforced approval is needed today` |
+| What-if | Some people are not matched to a platform login and at least one is a login, and the smallest possible team could not give the approvals asked | `! if the risk step were enforced: 2 of the 4 people counted are not matched to a platform login, and up to 2 of them may be the same people as the logins, so the team may be as small as 2. That leaves room for 1 of the 3 approvals asked, so if the team is that small, this gate could not pass. Nothing beyond the one enforced approval is needed today` |
+
+A what-if line is not printed when a today line is. When the cap lowered the count, the last line says
+"approvals asked after the cap", because the full-count line above it quotes the number before the cap.
+
+"Not matched to a platform login" means yadflow knows the person only by a name: a git author name, or an
+approval record that carries no login (an older hand-written one, or an engineer-review record, even when
+it holds a login, because nothing in it proves that). Each such name may be a second row for one of the
+logins, so the smallest possible team is the larger of the two groups: the logins, or the names. It is
+never fewer people than the approvals prove.
+
+**An approval is evidence.** Any approval in the counting window shows that approvals can be given, so no
+today line prints. It also raises the smallest team a what-if line assumes: at least the approvals on this
+step plus one (the author), and at least two people once anyone has approved anything. That assumes
+authors cannot approve their own work: always true on GitHub, true on GitLab only when its settings say
+so, and never checked on a Product with no platform. Where it is not true, the smallest team is guessed
+too high, so a what-if line may stay quiet when it should speak; it never raises a false alarm because of
+this.
+
+A Product with no platform (every record is a name) gets no name line, because there is no login to
+compare against. Two spellings of one name (`bo` and `Bo Chen`) still count as two people; no line can
+see that yet.
+
+No line prints in solo mode, under a step that passed, under a waived step (inherited from a parent epic,
+skipped, or deferred), or when the people could not be counted. A line about the whole Product prints
+once per command, under the first step it applies to.
+
+Run `yad gate status` yourself while the review is still open: reviewers can still approve then, and a
+merged review PR cannot take approvals. Do not wait for CI to show it. The wired Product workflow runs only
+for merged review PRs (at the merge, and in a scheduled sweep of merged PRs), and it usually cannot count
+people, because the connected repos are not on disk there.
 
 **When the people cannot be counted, no cap is computed or shown**, and the base holds as always.
 Product CI is usually this case: it checks out only the product repo, so on a Product with connected
@@ -167,13 +223,13 @@ people, less one seat for the author — base enforced, risk step advisory` (at 
 `yad gate sync` prints `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active
 people, less one seat for the author — base enforced, risk step advisory`, and the review-PR body says
 `Approvals needed: 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2
-active people when this PR was opened (the risk step is advisory until E73)`. `yad gate review --json`
+active people when this PR was opened (the risk step is advisory)`. `yad gate review --json`
 carries the rule as an object under `step.gateRule`, and the cap under `step.cap` — an object
 `{ active, limit, to, capped }`, where `to` is the count asked for after the cap and `capped` is true
 when the cap lowered it. The whole `step.cap` field is `null` when the people were not counted.
 
 **How many people are there to ask?** The engine counts that live, and prints it beside the ask
-(`active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73`). "Active" means committed or approved — read from the approval
+(`active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced`). "Active" means committed or approved — read from the approval
 and ship records, plus git authorship in the product repo and every connected code repo. The window
 scales with how fast the team merges: the span of the last 20 merged pull requests, bounded to between
 30 and 180 days, and the wide end when there are fewer than 20. Nothing is stored; it is counted fresh
@@ -189,8 +245,8 @@ says how many others did.
 Running `yad open-pr` from inside a code repo also reads `not counted`: the count is a fact about the
 product and everything connected to it, and a code repo on its own cannot see that.
 
-On a Shape gate the cap is **reported until E73** (above). On the Build half — a code repo's task PR —
-`yad open-pr` shows the count capped by the active people when run from the Product, and it stays reported even after E73: the
+On a Shape gate the cap is **reported** (above). On the Build half — a code repo's task PR —
+`yad open-pr` shows the count capped by the active people when run from the Product, and it stays reported even once the Shape cap is enforced: the
 platform's branch protection holds a Build merge. `checks/risk-map-check.sh` and `checks/risk-route.sh`
 cannot cap at all, because a code repo's CI has no product to count people from. `risk-route.sh` says so in
 its output; `risk-map-check.sh` says so in its header comment.

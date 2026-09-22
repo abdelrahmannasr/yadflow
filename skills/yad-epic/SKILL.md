@@ -205,7 +205,7 @@ Notes:
   — so after writing `epic.md`, take Step 5b.
 - `architecture-review` carries `risk_tags: ["contract"]` by default (build plan §4): the tag raises
   the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the
-  gate; the risk step is advisory until E73, reported as a shortfall against the count capped at the
+  gate; the risk step is advisory, reported as a shortfall against the count capped at the
   active people less one (E72). The catalogue sets it;
   there is nothing to type.
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
