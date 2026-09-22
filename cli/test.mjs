@@ -1316,9 +1316,9 @@ test('fillHubTemplate: the generated review-PR body carries every section the Pr
   assert.match(b, /^## Checklist$/m);
   assert.match(b, /Risk tags:/);
   // E7 (rule 6): the body says what the count asks of this step, and which part of it holds the gate,
-  // so nobody reads the full number as the requirement: only the base holds until E73. No count is
+  // so nobody reads the full number as the requirement: only the base holds until E108. No count is
   // passed here, so no cap (E72) is shown. Pinned here because without it the line can be deleted with a green suite.
-  assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory until E73\)$/m);
+  assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory\)$/m);
 });
 
 test('fillHubTemplate: an untagged step states the count too — the floor is still a number', () => {
@@ -1714,8 +1714,8 @@ test('gatePredicate: an approval against a stale hash is revoked', () => {
   assert.ok(p.missing.some((m) => /revoked/.test(m)));
 });
 
-test('gatePredicate: a contract step holds on the base alone — the risk step is reported, not enforced until E73 (E62)', () => {
-  // Until E73 (the capped count plus `yad gate lower --reason`), a contract gate asking for three would lock out a two-person team. So one
+test('gatePredicate: a contract step holds on the base alone — the risk step is reported, not enforced until E108 (E62)', () => {
+  // Until E108 (the capped count plus `yad gate lower --reason`), a contract gate asking for three would lock out a two-person team. So one
   // approver passes it, and the two it is short are said out loud rather than enforced.
   const one = [{ step: 'architecture-review', status: 'approved', approver: 'al', artifactHash: 'sha256:C' }];
   const p = gatePredicate({ step: escStep, approvals: one, currentHash: 'sha256:C', merged: true });
@@ -1805,7 +1805,7 @@ test('gatePredicate: a SKIPPED step short-circuits — passes with zero approval
 // The per-step gate rule (E7) — `needed = base + risk step`, counted in PEOPLE
 // ---------------------------------------------------------------------------------------------
 // The count is REPORTED, not enforced: the base (E62) is the only thing that decides `passed`. E72
-// computes the capacity cap and reports it; E73 enforces the capped count beside its escape hatch, and
+// computes the capacity cap and reports it; E108 enforces the capped count beside its escape hatch, and
 // enforcing any of it sooner would make a small team's contract gate unpassable. So these tests pin what the count SAYS — `gateRule`, `have`, `short` — and pin that
 // it changes no verdict. The case they are built around is the one the role rule cannot see: one person
 // holding two roles is two roles and one approver.
@@ -1860,7 +1860,7 @@ test('gateRuleSum: one sentence of arithmetic, shared by every surface that prin
 test('gatePredicate: the count counts people, not records, and its risk step holds nothing', () => {
   // Three records an older release wrote, from two people: alice once per role the roster gave her.
   // The count asks a contract step for three. THIS is the case that keeps the risk step advisory: a
-  // two-person team would be deadlocked by an uncapped count, with no escape until E73.
+  // two-person team would be deadlocked by an uncapped count, with no escape until E108.
   const approvals = [
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:C' },
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'reviewer', artifactHash: 'sha256:C' },
@@ -1871,7 +1871,7 @@ test('gatePredicate: the count counts people, not records, and its risk step hol
   assert.equal(p.have, 2, 'two distinct people, though three approval records');
   assert.equal(p.gateRule.needed, 3);
   assert.equal(p.short, 1, 'the shortfall is reported, never enforced here');
-  assert.deepEqual(p.missing, [], 'nothing the risk step says may hold a gate before E73');
+  assert.deepEqual(p.missing, [], 'nothing the risk step says may hold a gate before E108');
 
   // A third human clears the shortfall.
   approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', artifactHash: 'sha256:C' });
@@ -17939,7 +17939,7 @@ test('proven history: the JS reader sees a quoted path and a move out, exactly a
 //
 // THE ONE RULE THESE TESTS EXIST FOR: an input that cannot be read must produce `active: null`, never a
 // number and never zero. E66 and E67 needed the opposite (an unknown must not read as "nobody", which
-// under-ASKS); here a small `active` lowers E72's cap (the reported ask E73 enforces), so an unknown must not
+// under-ASKS); here a small `active` lowers E72's cap (the reported ask E108 enforces), so an unknown must not
 // read as "few people". Part 3: err towards MORE people.
 const {
   activePeople, peopleEvidence, capacityWindow, activeIn, personKey, daysBefore, dayNumber,
@@ -18277,7 +18277,7 @@ test('E71 surfaces: the two sentence builders never turn an unknown into a numbe
   assert.match(_activeBasis(unknownCounted), /never counted as few people/);
 
   const known = { capacity: { active: 4, days: 90, basis: 'the last 20 merged PRs span 90 day(s)' }, unknown: [] };
-  assert.equal(_activeSum(known), 'active people: 4 in the last 90 days — caps each gate\'s count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73',
+  assert.equal(_activeSum(known), 'active people: 4 in the last 90 days — caps each gate\'s count at 3 approvers (one seat is left for the author); reported, only the base is enforced',
     'the number and what it does to a gate are ONE string, because they go to different streams');
   assert.equal(_activeBasis(known), 'the last 20 merged PRs span 90 day(s)');
 });
@@ -18305,11 +18305,11 @@ test('E71 surfaces: the review-PR body states the head count beside the ask', ()
 
 // ---- E72: the capacity cap ---------------------------------------------------------------------
 // Part 3's tier-1 rule, whole: `needed = base + risk_step`, capped at `active − 1`, floor 1 in team
-// mode. E72 computes, prints and records the cap; only the base holds a gate until E73 (the user's
+// mode. E72 computes, prints and records the cap; only the base holds a gate until E108 (the user's
 // decision, 2026-09-21, after review found the count of people doubles in the normal case). Most tests
 // here PASS `active` in: the gate commands read it from git, and a fixture in the system temp folder has
 // no history. One test builds a history and lets the real reader count it. A test whose name starts
-// "E73 FLIPS THIS" pins "a known count is reported, not enforced" — E73 turns each one around.
+// "E108 FLIPS THIS" pins "a known count is reported, not enforced" — E108 turns each one around.
 const { gateCapFor: _gateCapFor, gateRuleFor: _gateRuleFor, gateRuleEnforced: _gateRuleEnforced } = await import('./epic-state.mjs');
 const E72_CONTRACT = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'] };
 const e72Approvals = (...who) => who.map((approver) => ({ step: 'architecture-review', status: 'approved', approver, artifactHash: 'h' }));
@@ -18338,7 +18338,7 @@ test('E72 cap: an unknown count is NO cap — never a small number, never zero',
   for (const v of [null, undefined, NaN, -1, 2.5, '3', {}]) assert.equal(_gateCapFor(contract, v), null, `${String(v)} gives no cap`);
 });
 
-test('E73 FLIPS THIS — E72 predicate: a known count caps the ASK, and only the base holds the gate', () => {
+test('E108 FLIPS THIS — E72 predicate: a known count caps the ASK, and only the base holds the gate', () => {
   // The two-person team: the ask drops from three to one, so `short` is 0 on one approval.
   const two = gatePredicate({ step: E72_CONTRACT, approvals: e72Approvals('al'), currentHash: 'h', active: 2 });
   assert.equal(two.passed, true);
@@ -18347,7 +18347,7 @@ test('E73 FLIPS THIS — E72 predicate: a known count caps the ASK, and only the
 
   // A team of five: nothing is capped, the full ask is reported — and the base alone decides `passed`.
   const five = gatePredicate({ step: E72_CONTRACT, approvals: e72Approvals('al', 'bo'), currentHash: 'h', active: 5 });
-  assert.equal(five.passed, true, 'the risk step holds nothing until E73');
+  assert.equal(five.passed, true, 'the risk step holds nothing until E108');
   assert.deepEqual(five.missing, []);
   assert.equal(five.short, 1, 'but the shortfall is reported');
   assert.equal(five.cap.capped, false);
@@ -18381,11 +18381,11 @@ test('E72 predicate: solo mode reports the cap and enforces nothing; waived step
   assert.equal(skipped.cap.to, 1);
 });
 
-test('E73 FLIPS THIS — E72 predicate: an OVER-count cannot jam a small team, because the cap is only reported', () => {
+test('E108 FLIPS THIS — E72 predicate: an OVER-count cannot jam a small team, because the cap is only reported', () => {
   // WHY the cap is not enforced yet: a commit is keyed by git name and an approval by platform login, and
   // E71 never joins the two without exact evidence, so a real team of two reads as four. Enforced, that
   // contract gate would ask three people of a team with one non-author. Reported, it passes on the base;
-  // E73 turns the capped count on beside `yad gate lower --reason`, and must turn THIS test around.
+  // E108 turns the capped count on beside `yad gate lower --reason`, and must turn THIS test around.
   const p = gatePredicate({ step: E72_CONTRACT, approvals: e72Approvals('al'), currentHash: 'h', active: 4 });
   assert.equal(p.passed, true);
   assert.equal(p.cap.capped, false, 'four active people lowers nothing');
@@ -18416,7 +18416,7 @@ test('E72 gate sync: a capped gate passes, says it capped, and RECORDS the cap',
       { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
     ], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => one, headCount: e72Count(2) }));
-    assert.match(out, /active people: 2 in the last 90 days — caps each gate's count at 1 approver \(one seat is left for the author\); reported, only the base is enforced until E73/);
+    assert.match(out, /active people: 2 in the last 90 days — caps each gate's count at 1 approver \(one seat is left for the author\); reported, only the base is enforced/);
     assert.match(out, /1 approved; count: 3 approvers = base 1 \+ contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory/);
     assert.ok(!/short/.test(out), `a capped gate that is met is not short: ${out}`);
     assert.match(out, /gate PASSED/);
@@ -18429,7 +18429,7 @@ test('E72 gate sync: a capped gate passes, says it capped, and RECORDS the cap',
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E73 FLIPS THIS — E72 gate sync: with enough people nothing is capped, the shortfall is reported, and the base holds', async () => {
+test('E108 FLIPS THIS — E72 gate sync: with enough people nothing is capped, the shortfall is reported, and the base holds', async () => {
   const { T, ep } = scaffoldEpic();
   try {
     const twoPeople = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [
@@ -18438,7 +18438,7 @@ test('E73 FLIPS THIS — E72 gate sync: with enough people nothing is capped, th
     ], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => twoPeople, headCount: e72Count(5) }));
     assert.match(out, /2 approved; count: 3 approvers = base 1 \+ contract risk 2 — base enforced, risk step advisory — 1 short/);
-    assert.match(out, /gate PASSED/, 'the risk step holds nothing until E73');
+    assert.match(out, /gate PASSED/, 'the risk step holds nothing until E108');
     const step = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((x) => x.id === 'architecture-review');
     assert.equal(step.status, 'done');
     assert.equal(step.closed.capped, undefined, 'a cap that lowered nothing is not recorded');
@@ -18485,12 +18485,12 @@ test('E72 gate status: the per-step shortfall is measured against the capped cou
 test('E72 review-PR body: the base is enforced, and a cap is shown dated', () => {
   const args = { epic: 'EP-x', artifact: 'architecture.md', owner: 'alice', domains: ['backend'], step: E72_CONTRACT };
   const capped = fillHubTemplate({ ...args, active: 2 });
-  assert.match(capped, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2, capped to 1 for 2 active people when this PR was opened \(the risk step is advisory until E73\)$/m);
+  assert.match(capped, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2, capped to 1 for 2 active people when this PR was opened \(the risk step is advisory\)$/m);
   assert.match(capped, /\*\*Active people:\*\* 2 when this PR was opened \(the cap is 1 \(one seat is left for the author\), so this gate's count is 1; `yad gate status` counts it live\)/);
   const full = fillHubTemplate({ ...args, active: 6 });
-  assert.match(full, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory until E73\)$/m);
+  assert.match(full, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory\)$/m);
   const unknown = fillHubTemplate({ ...args, active: null });
-  assert.match(unknown, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory until E73\)$/m);
+  assert.match(unknown, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory\)$/m);
   const plain = fillHubTemplate({ ...args, step: { ...E72_CONTRACT, risk_tags: [] }, active: 2 });
   assert.match(plain, /\*\*Approvals needed:\*\* 1 \(enforced\) · full count 1 approver = base 1$/m);
 });
@@ -18634,7 +18634,7 @@ test('E72 review: at 0 or 1 active people the floor decides, and the words say s
   assert.match(body, /\*\*Active people:\*\* 1 when this PR was opened \(the cap is 1 \(never below 1\), so this gate's count is 1; `yad gate status` counts it live\)/);
   const plain = fillHubTemplate({ ...args, step: { ...E72_CONTRACT, risk_tags: [] }, active: 5 });
   assert.match(plain, /\*\*Active people:\*\* 5 when this PR was opened \(`yad gate status` counts it live\)/, 'no risk step: no cap to explain');
-  assert.equal(_activeSum({ capacity: { active: 1, days: 90 }, unknown: [] }), 'active people: 1 in the last 90 days — caps each gate\'s count at 1 approver (never below 1); reported, only the base is enforced until E73');
+  assert.equal(_activeSum({ capacity: { active: 1, days: 90 }, unknown: [] }), 'active people: 1 in the last 90 days — caps each gate\'s count at 1 approver (never below 1); reported, only the base is enforced');
 });
 
 test('E72 review: with requireEngagement on, the capped shortfall counts only engaged approvals', () => {
@@ -18816,7 +18816,7 @@ test('E71 review: the disclaimer travels WITH the number, because the two lines 
   // capturing stdout alone (CI logs, a redirect) would have kept the number and lost the sentence
   // saying it enforces nothing.
   const known = { capacity: { active: 4, days: 90, basis: 'the last 20 merged PRs span 90 day(s)' }, unknown: [] };
-  assert.match(_activeSum(known), /only the base is enforced until E73/);
+  assert.match(_activeSum(known), /only the base is enforced$/);
   // And an absent or undefined count must take the NOT-COUNTED branch, not print a dangling sentence.
   for (const odd of [undefined, {}, { capacity: {} }, { capacity: { active: undefined } }]) {
     assert.match(_activeSum(odd), /NOT COUNTED/, 'an absent count is never a counted one');

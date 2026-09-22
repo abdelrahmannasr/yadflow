@@ -671,7 +671,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   let advanced = 0;
   // E71 — said ONCE, before the per-artifact lines, because it is a fact about the PRODUCT and not
   // about any one gate (rule 6: say the arithmetic, not just the verdict). Since E72 it caps the count
-  // each gate below ASKS for — reported, and not enforced until E73.
+  // each gate below ASKS for — reported, and not enforced until E108.
   // E71 — ONE Product-wide count per command, read here: before the per-step loop, so N steps cannot
   // mean N walks of every repo's history, and AFTER the early exits above, so a run that bails out for
   // a missing ledger or no targets never pays for a git walk at all. `today` is the one this command
@@ -756,7 +756,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     });
 
     // Say the arithmetic, not just the verdict (rule 6): the count, the cap when the people were counted,
-    // and which half of it holds the gate — only the base until E73 — labelled so nobody reads a number
+    // and which half of it holds the gate — only the base until E108 — labelled so nobody reads a number
     // the gate is not enforcing as the reason it did or did not pass.
     // `have: null` is a step whose approvals were never counted (inherited from a parent epic, or
     // skipped): there is no head count to report and no requirement to report either.
@@ -1226,7 +1226,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && isStaleHash(a.artifactHash, accepted)).length;
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
     // E7's count, per step, from the step's own risk tags, capped by E72 when the people were counted —
-    // only its base holds the gate until E73, and it is labelled so.
+    // only its base holds the gate until E108, and it is labelled so.
     // Distinct PEOPLE, which is why it can differ from the approval count beside it: two approvals from
     // one person are one approver. Printed in solo mode too, where approvals are waived, so a reader who
     // later switches to team mode can see what each gate will then ask for.
@@ -1588,10 +1588,10 @@ const base = (artifact) => artifactBase(artifact);
 export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true, active = null }) {
   const rule = gateRuleFor(step);
   const cap = gateCapFor(rule, active);
-  // What the count asks for. Only the base holds (until E73); the cap (E72) is shown when it lowered the
+  // What the count asks for. Only the base holds (until E108); the cap (E72) is shown when it lowered the
   // ask, dated, because this body is written once and the count can differ when the gate decides.
   const capped = cap?.capped ? `, capped to ${cap.to} for ${cap.active} active ${peopleWord(cap.active)} when this PR was opened` : '';
-  const needed = `${rule.base} (enforced) · full count ${gateRuleSum(rule)}${capped}${rule.riskStep ? ' (the risk step is advisory until E73)' : ''}`;
+  const needed = `${rule.base} (enforced) · full count ${gateRuleSum(rule)}${capped}${rule.riskStep ? ' (the risk step is advisory)' : ''}`;
   return [
     '## Artifact under review',
     `- Epic: \`${epic}\``,

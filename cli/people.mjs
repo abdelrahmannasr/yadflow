@@ -511,7 +511,7 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
 // wording would eventually disagree about what the number means.
 //
 // It always says what the number DOES to a gate (E72): a known count caps the count each gate ASKS for
-// at `active − 1`, which is reported and not enforced until E73; an unknown one gives no cap.
+// at `active − 1`, which is reported and not enforced until E108; an unknown one gives no cap.
 export function activeSum(counted) {
   const cap = counted?.capacity;
   // `== null` on purpose, so a missing count and an explicitly null one take the SAME branch. With
@@ -527,7 +527,7 @@ export function activeSum(counted) {
   // that captures or pipes stdout alone (CI logs, a redirect) would keep the number and lose the
   // sentence saying what it does. `capLimit` is the cap's one copy of the arithmetic (cli/epic-state.mjs).
   const limit = capLimit(cap.active);
-  return `active people: ${cap.active} in the last ${cap.days} days — caps each gate's count at ${limit} approver${limit === 1 ? '' : 's'} (${capSeat(cap.active)}); reported, only the base is enforced until E73`;
+  return `active people: ${cap.active} in the last ${cap.days} days — caps each gate's count at ${limit} approver${limit === 1 ? '' : 's'} (${capSeat(cap.active)}); reported, only the base is enforced`;
 }
 
 // Why that window is the length it is. The second line under `activeSum`, and the only part that may be

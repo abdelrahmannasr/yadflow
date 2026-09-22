@@ -31,9 +31,10 @@ const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 // joins the two without exact evidence. So a two-person team whose members commit with work addresses
 // and approve on GitHub reads as FOUR, the cap lowers nothing, and an enforced contract gate would ask
 // for three approvals from one person who is not the author — E7's deadlock, back. Rule 7 needs a way
-// out before any count holds a gate, and that is E73's `yad gate lower --reason`. So E73 turns the
-// capped count on, together with its escape hatch; until then `short` is measured against the capped
-// ask and printed, and never enforced.
+// out before any count holds a gate, and that is `yad gate lower --reason`. E73 was to turn the capped
+// count on together with it; the user then kept E73 to DETECTION (2026-09-22, `gateReach` below), and
+// enforcement plus the escape hatch moved to E108, which waits for the count to be accurate. Until then
+// `short` is measured against the capped ask and printed, and never enforced.
 //
 // WHEN THE COUNT IS UNKNOWN (`active: null`) no cap is computed at all: an unknown is never a small
 // number (E71). Product CI is usually that case — it checks out only the hub, so connected repos are
@@ -95,7 +96,7 @@ export function gateRuleFor(step) {
 // allows self-approval; GitLab only when its settings say so; a local ledger checks nothing).
 //
 // The floor of 1 means the cap can only ever trim the RISK STEP. The base is 1, so `to` is at least the
-// base. Until E73 the cap is REPORTED: the base alone holds every team gate (see `gateRuleFor`).
+// base. Until E108 the cap is REPORTED: the base alone holds every team gate (see `gateRuleFor`).
 //
 // Shape: { active, limit, to, capped } — `limit` is `max(1, active − 1)`, `to` the number asked for,
 // `capped` true only when the cap LOWERED the count (rule 6: every cap is said, and recorded on the
@@ -108,7 +109,7 @@ export function gateCapFor(rule, active) {
 }
 
 // The cap's arithmetic and its wording, ONE copy each. Every surface that prints a cap reads these, so
-// E73 — which changes what those surfaces say — has one place to change, not five.
+// E108 — which changes what those surfaces say — has one place to change, not five.
 //   capLimit   the most approvals a count of `active` people can give: one seat is left for the author,
 //              and never below 1 (a known count of 0 or 1 people still asks for the base).
 //   peopleWord `person` or `people`.
@@ -177,7 +178,7 @@ export const gateRuleSum = (rule) => {
 
 // Which part of that sum holds the gate, said wherever the sum is printed. Empty when the step carries
 // no risk step: then the base IS the whole count, and the cap can never lower it. Otherwise the base
-// holds and the risk step is advisory (until E73 — see `gateRuleFor`), and a cap that lowered the ask
+// holds and the risk step is advisory (until E108 — see `gateRuleFor`), and a cap that lowered the ask
 // is named first, so the shortfall printed after it reads against the capped number.
 export const gateRuleEnforced = (rule, cap = null) => {
   if (!rule.riskStep) return '';
@@ -1482,7 +1483,7 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 //             waived, the authoring was not, so `closeAuthorStep` is handed its fields one by one.
 //   capped    `{ needed, to, active }` when a REVIEW step passed in team mode while the capacity cap
 //             LOWERED its ask (E72): the full count, the capped ask, and the count of people it read.
-//             The ask is reported until E73, so this records what the gate asked, not what held it.
+//             The ask is reported until E108, so this records what the gate asked, not what held it.
 //             Absent when no cap applied — the count of people was unknown, or it lowered nothing — and
 //             in solo mode, where nothing was counted. Never on the author step, as `waived`.
 //
@@ -1525,7 +1526,7 @@ const uniqueBy = (arr, key) => {
 //   * the BASE — `gateRuleFor(step).base` distinct approvers (one). This is what decides `passed`.
 //   * the RISK STEP — the rest of `needed`, capped at `active − 1` (floor 1) when the count of people is
 //     known (E72, `gateCapFor`). Computed, returned as `gateRule`/`cap`/`have`/`short` and printed
-//     wherever a gate reports itself, and it holds NOTHING until E73 lands its escape hatch. See the
+//     wherever a gate reports itself, and it holds NOTHING until E108 lands its escape hatch. See the
 //     long note on `gateRuleFor`: the count of people errs high in the normal case, so an enforced cap
 //     would still lock a small team out with no recorded way out (rule 7).
 // Approvals are counted as distinct PEOPLE: two approvals from one person are one approver.
@@ -1620,7 +1621,7 @@ export function gatePredicate({
   const approvers = uniqueBy(counted.filter((a) => typeof a.approver === 'string' && a.approver.trim()), 'approver').length;
   const gateRule = gateRuleFor(step);
   // E72. `asks` is the count the gate asks for — capped when the count of people is known, the full
-  // count otherwise. Only the BASE holds the gate until E73 (see `gateRuleFor`).
+  // count otherwise. Only the BASE holds the gate until E108 (see `gateRuleFor`).
   const cap = gateCapFor(gateRule, active);
   const asks = cap ? cap.to : gateRule.needed;
 
@@ -1629,7 +1630,7 @@ export function gatePredicate({
   // merge + resolved threads are what advance the step.
   if (!solo) {
     // Only the BASE holds the gate. The rest of the ask rides out as `short`, which is what the surfaces
-    // print and what E73 turns into a `missing` entry, beside `yad gate lower --reason`.
+    // print and what E108 turns into a `missing` entry, beside `yad gate lower --reason`.
     if (approvers < gateRule.base) missing.push(`${gateRule.base - approvers} approval(s)`);
   }
   const approvalsSatisfied = missing.length === 0;
@@ -1654,7 +1655,7 @@ export function gatePredicate({
     rule: solo ? 'solo' : 'count',
     // The rule and what was counted against it. `have` is the number of distinct approvers and `short`
     // how many more the gate ASKS for — the capped count when `active` is known, the full count when it
-    // is not. A gate can pass while `short` is not 0: only the base is enforced until E73.
+    // is not. A gate can pass while `short` is not 0: only the base is enforced until E108.
     gateRule,
     have: approvers,
     short: solo ? 0 : Math.max(0, asks - approvers),
@@ -2185,7 +2186,7 @@ export function markInReview(state, step, close = null) {
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
 // below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); how many approvals each step's
 // gate ASKS FOR — the base enforced, the risk step reported and capped by the active people (E72) until
-// E73 — is `gateRuleFor` and `gateCapFor` at the top of this file (E7, E62, E72), which read
+// E108 — is `gateRuleFor` and `gateCapFor` at the top of this file (E7, E62, E72), which read
 // the `risk_tags` a seed copies from the row below into the epic's own `state.json`;
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default
