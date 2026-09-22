@@ -18480,6 +18480,11 @@ test('codeowners check: the real repo — files on disk count, the platform must
     execFileSync('git', ['clone', '-q', '--bare', r.T, path.join(N, 'bare.git')], { stdio: 'pipe' });
     assert.deepEqual(checkCodeowners(path.join(N, 'bare.git'), { platform: 'github' }), { git: false }, 'a bare repo has no files on disk');
     fs.rmSync(N, { recursive: true, force: true });
+    // The same folder named in another case (a disk that ignores case) is the top folder, not "inside" it.
+    const caseFlipped = path.join(path.dirname(r.T), path.basename(r.T).toUpperCase());
+    if (fs.existsSync(caseFlipped) && fs.realpathSync.native(caseFlipped) === fs.realpathSync.native(r.T)) {
+      assert.equal(checkCodeowners(caseFlipped, { platform: 'github', remote: '' }).unknown, undefined, 'the case the path was typed in does not matter');
+    }
     // A folder inside the repo is not where the platform reads CODEOWNERS: not known, never "none".
     assert.match(checkCodeowners(path.join(r.T, 'src'), { platform: 'github', remote: '' }).unknown, /inside a git repo but is not its top folder/);
   } finally { r.done(); S.done(); }
@@ -18630,6 +18635,15 @@ test('yad codeowners: check prints facts and the hint, never an address, never f
     r = await run(() => runCodeowners(T, { action: 'bogus' }));
     assert.equal(r.failed, true);
     assert.match(r.out, /unknown action: bogus/);
+    assert.equal(r.out.trim().split('\n').length, 1, 'an unknown action gets no empty hint line');
+    // With --json, a refusal is JSON too: a script reading the output must not break on it.
+    for (const [opts, error] of [[{ action: 'write' }, /^yad never writes CODEOWNERS/], [{ action: 'check', name: 'backend', write: true }, /^yad never writes/], [{ action: 'bogus' }, /^unknown action: bogus/]]) {
+      r = await run(() => runCodeowners(T, { ...opts, json: true }));
+      assert.equal(r.failed, true);
+      const got = JSON.parse(r.out);
+      assert.equal(got.ok, false);
+      assert.match(got.error, error);
+    }
     r = await run(() => runCodeowners(T, { action: 'check', name: 'nope' }));
     assert.equal(r.failed, true);
     assert.match(r.out, /unknown repo: nope/);

@@ -41,8 +41,10 @@ export function checkCodeowners(repoRoot, { platform = null, remote, hint = fals
   // A work tree, not only a repo: a bare repo has no files on disk to check.
   if (run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: repoRoot }).stdout !== 'true') return { git: false };
   // The platform reads CODEOWNERS from the repo's top folder, and the file list must be the whole repo's.
+  // `.native`: git names the folder as the disk stores it, and on a disk that ignores case the plain
+  // `realpathSync` keeps the case it was given (`../MyRepo` for `myrepo`) — never the same folder twice.
   const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: repoRoot }).stdout;
-  if (!top || fs.realpathSync(top) !== fs.realpathSync(repoRoot)) {
+  if (!top || fs.realpathSync.native(top) !== fs.realpathSync.native(repoRoot)) {
     return { git: true, platform: null, ignored: [], notRead: [], dead: [], unknown: 'this folder is inside a git repo but is not its top folder, where the platform reads CODEOWNERS — check the repo\'s top folder instead' };
   }
   const url = remote ?? run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout;
@@ -135,12 +137,14 @@ function printRepo(name, r) {
 export async function runCodeowners(root, { action = 'check', name, json = false, platform = null, write = false } = {}) {
   if (action !== 'check' || write) {
     // `--write` was part of E69's title and was dropped by decision: a name yad wrote into the file would
-    // become an owner the platform can enforce ("Require review from Code Owners"), turning a hint into an
-    // authority. Said plainly, so a habit or a script learns why.
-    if (write || action === 'write' || action === '--write') {
-      fail('yad never writes CODEOWNERS — any name it wrote would become an owner the platform can enforce');
-      hand('edit CODEOWNERS by hand and commit it through a PR; `yad codeowners check` shows which lines look stale');
-    } else fail(`unknown action: ${action} (use: yad codeowners check [repo])`);
+    // become an owner the platform can enforce (GitHub's "Require review from Code Owners", GitLab's code
+    // owner approval), turning a hint into an authority. Said plainly, so a habit or a script learns why.
+    const refused = write || action === 'write' || action === '--write';
+    const error = refused ? 'yad never writes CODEOWNERS — any name it wrote would become an owner the platform can enforce'
+      : `unknown action: ${action} (use: yad codeowners check [repo])`;
+    const hint = refused ? 'edit CODEOWNERS by hand and commit it through a PR; `yad codeowners check` shows which lines look stale' : '';
+    if (json) log(JSON.stringify({ ok: false, error, ...(hint ? { hint } : {}) }, null, 2));
+    else { fail(error); if (hint) hand(hint); }
     process.exitCode = 1;
     return { ok: false };
   }

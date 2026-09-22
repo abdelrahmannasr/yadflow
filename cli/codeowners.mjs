@@ -268,9 +268,10 @@ export function deadLines(parsed, files, { submodules = [] } = {}) {
   const names = [...files, ...submodules.map((g) => `${g}/\u0000`)];
   // `matches` asks about a file and every folder above it, and a dead line is asked about every name — the
   // E69 reviews measured 300 000 files × 1 000 dead lines at minutes. So each folder is asked about ONCE,
-  // and each rule takes the fastest road that gives exactly `matches`' answer (a test holds them equal):
-  // a set lookup for plain text, the distinct last parts for a one-part "at any depth" pattern, and, for a
-  // pattern anchored at the top, only the names under its fixed leading folders. Anything else scans.
+  // and each rule takes the fastest road that gives exactly `matches`' answer (tests hold them equal): a
+  // plain part no name has settles it at once; plain text is a set lookup; an "at any depth" pattern that
+  // cannot match a `/` tests the distinct last k parts; a pattern anchored at the top tests only the names
+  // that start with its plain head. Anything else scans every name.
   const dirs = new Set();
   for (const f of names) for (let i = f.indexOf('/'); i >= 0; i = f.indexOf('/', i + 1)) dirs.add(f.slice(0, i));
   const dirList = [...dirs];
@@ -278,7 +279,7 @@ export function deadLines(parsed, files, { submodules = [] } = {}) {
   const partSet = new Set(names.flatMap((f) => f.split('/')));
   const sortedNames = [...names].sort();
   const sortedDirs = [...dirList].sort();
-  // The distinct last `k` parts of every name (a name with fewer parts has none), built once per `k`.
+  // The distinct last `k` parts of every name, built once per `k`.
   const tails = new Map();
   const tailsOf = (k) => {
     if (!tails.has(k)) {
@@ -352,11 +353,6 @@ export function deadLines(parsed, files, { submodules = [] } = {}) {
   return parsed.rules.filter((r) => !live(r.pat)).map((r) => ({ line: r.line, pattern: r.pattern, negate: r.negate }));
 }
 
-// E69 — the CODEOWNERS file on DISK (the working tree, like `yad risk-map check`), as its platform would
-// pick it: the first of its locations that exists. Returns { path, text, ignored } — `ignored` the other
-// locations that hold a file the platform never reads — or { path, tooBig, ignored } for a GitHub file of
-// 3 MB or more, { none } when there is none, or { unknown: why }. A first location that is not a regular
-// file is `unknown`: the platform reads the blob git stores, and a symlink's blob is its target's name.
 // Does `rel` exist under `root` with exactly this spelling? A macOS or Windows disk ignores case, so a
 // plain stat finds `.github/codeowners` for `.github/CODEOWNERS` — but git, and so the platform, stores the
 // name as written (E69 review, round 1). Each part is looked for in its folder's listing. Throws what
@@ -370,6 +366,11 @@ function exactName(root, rel) {
   return true;
 }
 
+// E69 — the CODEOWNERS file on DISK (the working tree, like `yad risk-map check`), as its platform would
+// pick it: the first of its locations that exists. Returns { path, text, ignored } — `ignored` the other
+// locations that hold a file the platform never reads — or { path, tooBig, ignored } for a GitHub file of
+// 3 MB or more, { none } when there is none, or { unknown: why }. A first location that is not a regular
+// file is `unknown`: the platform reads the blob git stores, and a symlink's blob is its target's name.
 export function diskCodeowners(repoRoot, platform) {
   const paths = CODEOWNERS_PATHS[platform];
   if (!paths) return { unknown: `no CODEOWNERS locations are known for platform '${platform}'` };
