@@ -86,8 +86,9 @@ change's own authors left out:
   - @carol
 ```
 
-A person whose git name is itself an e-mail address is printed as their bare login (`- @carol`), or as
-`a name that is an e-mail address` when there is no login — no address is ever printed. A bare `@login`
+A person whose git name holds an `@` is printed as their bare login (`- @carol`), or, when there is no
+login, as `a name that is an e-mail address` or `a name written like a login` — both have NO login. No
+address is ever printed, and a printed `@word` is always a real login, never a git name. A bare `@login`
 counts exactly like a `(@login)` below.
 
 Report it as an ask, never as a block, and use exactly these three answers:
