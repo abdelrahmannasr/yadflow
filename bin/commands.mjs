@@ -24,6 +24,7 @@ export { runCheckpoint } from '../cli/checkpoint.mjs';
 export { runTidy } from '../cli/tidy.mjs';
 export { runRepo } from '../cli/repo.mjs';
 export { runRiskMap } from '../cli/riskmap-command.mjs';
+export { runCodeowners } from '../cli/codeowners-command.mjs';
 export { runDocs } from '../cli/docs.mjs';
 export { runDoctor } from '../cli/doctor.mjs';
 export { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';

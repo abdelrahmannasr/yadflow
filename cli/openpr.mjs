@@ -164,7 +164,7 @@ export function remoteHost(url) {
 // A noreply login is a github.com or gitlab.com account. It is evidence for a CODEOWNERS `@name` only
 // on that same public host: a self-managed GitLab or GitHub Enterprise keeps its own accounts, and
 // one spelled the same may be someone else.
-const PUBLIC_HOST = { github: 'github.com', gitlab: 'gitlab.com' };
+export const PUBLIC_HOST = { github: 'github.com', gitlab: 'gitlab.com' };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 export function suggestReviewers(repoRoot, baseBranch, platform, { remote } = {}) {
   const base = `origin/${baseBranch}`;

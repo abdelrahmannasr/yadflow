@@ -219,6 +219,7 @@ export const MODULES: Module[] = [
           { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps and .sdlc/repos.json to the Product default branch (chore(hub) audit commit)' },
           { cmd: 'yad risk-map draft <repo>', note: 'start the repo\'s .sdlc/risk-map: one unset line per directory; the skill then has the AI read the code and guess each level' },
           { cmd: 'yad risk-map check <repo>', note: 'warn where the map is stale — a directory with no level, a dead line, a level still guessed' },
+          { cmd: 'yad codeowners check <repo>', note: 'warn where CODEOWNERS looks stale — a line that matches no file, a file the platform never reads; plus a hedged hint about @logins with no recent commit. It never writes the file' },
         ],
         produces: ['.sdlc/repos.json', '.sdlc/code-context/<repo>/pack.md', '.sdlc/code-context/<repo>/code-map.md'],
       },

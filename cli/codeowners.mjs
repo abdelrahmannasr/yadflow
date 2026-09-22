@@ -33,6 +33,8 @@
 //
 // NO E-MAIL ADDRESS IS EVER PRINTED (E67's rule): an address owner is kept as "an e-mail address".
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gitEnv } from './riskmap-command.mjs';
 
@@ -79,14 +81,18 @@ function gitlabWords(line) {
   return { words };
 }
 
+// A word from the file, quoted for a `not read` reason — unless it holds an `@` after its first character:
+// a pattern can be a mistyped address (`alice@corp.com docs/`), and no address is ever printed.
+const quoted = (w) => (w.indexOf('@', 1) >= 0 ? 'an address-like word' : `\`${w}\``);
+
 const escRe = (s) => s.replace(/[.+^${}()|[\]\\*?]/g, '\\$&');
 
 // A pattern → { re, dirs } or { bad: why }. `re` is tested against a file path and, when `dirs`, against
 // each directory above it (see WHAT IS NOT GUESSED).
 export function patternOf(raw, platform) {
-  if (raw.includes('[')) return { bad: `\`${raw}\` uses \`[\`, which ${platform === 'gitlab' ? 'GitLab\'s docs do not describe' : 'GitHub does not support'}` };
-  if (platform !== 'gitlab' && raw.includes('\\')) return { bad: `\`${raw}\` uses \`\\\`, which GitHub does not support in CODEOWNERS` };
-  if (platform === 'gitlab' && raw.includes('?')) return { bad: `\`${raw}\` uses \`?\`, which GitLab's docs do not describe` };
+  if (raw.includes('[')) return { bad: `${quoted(raw)} uses \`[\`, which ${platform === 'gitlab' ? 'GitLab\'s docs do not describe' : 'GitHub does not support'}` };
+  if (platform !== 'gitlab' && raw.includes('\\')) return { bad: `${quoted(raw)} uses \`\\\`, which GitHub does not support in CODEOWNERS` };
+  if (platform === 'gitlab' && raw.includes('?')) return { bad: `${quoted(raw)} uses \`?\`, which GitLab's docs do not describe` };
   let p = raw;
   const dirOnly = p.endsWith('/');
   if (dirOnly) p = p.replace(/\/+$/, '');
@@ -103,20 +109,21 @@ export function patternOf(raw, platform) {
     const last = i === segs.length - 1;
     if (seg === '**') {
       if (!last) { body += '(?:.*/)?'; continue; }
-      if (platform === 'gitlab') return { bad: `\`${raw}\` ends in \`/**\`, which GitLab's docs do not describe (they say to end a directory with \`/\`)` };
+      if (platform === 'gitlab') return { bad: `${quoted(raw)} ends in \`/**\`, which GitLab's docs do not describe (they say to end a directory with \`/\`)` };
       if (i === 0) { body += '.*'; continue; }
       body = body.replace(/\/$/, '') + '/.+';
       continue;
     }
-    if (seg.includes('**') && platform === 'gitlab') return { bad: `\`${raw}\` uses \`**\` inside a name, which GitLab's docs do not describe` };
+    if (seg.includes('**') && platform === 'gitlab') return { bad: `${quoted(raw)} uses \`**\` inside a name, which GitLab's docs do not describe` };
     body += seg.split('').map((ch) => (ch === '*' ? '[^/]*' : ch === '?' ? '[^/]' : escRe(ch))).join('').replace(/(\[\^\/\]\*)+/g, '[^/]*');
     if (!last) body += '/';
   }
   const lastSeg = segs[segs.length - 1];
-  return { re: new RegExp(`^${anchored ? '' : '(?:.*/)?'}${body}$`), dirs: dirOnly || !/[*?]/.test(lastSeg), fileToo: !dirOnly };
+  // `s`: a folder name can hold a line break (git lists it), and `.` must cross it like any character.
+  return { re: new RegExp(`^${anchored ? '' : '(?:.*/)?'}${body}$`, 's'), dirs: dirOnly || !/[*?]/.test(lastSeg), fileToo: !dirOnly };
 }
 
-function matches(pat, file) {
+export function matches(pat, file) {
   if (pat.all) return true;
   if (pat.fileToo && pat.re.test(file)) return true;
   if (!pat.dirs) return false;
@@ -125,9 +132,10 @@ function matches(pat, file) {
   return false;
 }
 
-// The file's text → { rules, skipped }. A rule is { line, section, negate, pat, owners }; `section` is the
-// lower-cased name ('' for the unnamed one) and `optional` a per-section fact kept in `sections`. `skipped`
-// is every line this reader did not use, with why — printed, never dropped quietly.
+// The file's text → { rules, skipped }. A rule is { line, section, negate, pattern, pat, owners }; `pattern`
+// is the path as written (without a GitLab `!`), `section` the lower-cased name ('' for the unnamed one)
+// and `optional` a per-section fact kept in `sections`. `skipped` is every line this reader did not use,
+// with why — printed, never dropped quietly.
 export function parseCodeowners(text, platform) {
   const rules = [];
   const skipped = [];
@@ -167,27 +175,26 @@ export function parseCodeowners(text, platform) {
       const own = rest.map((x) => ownerOf(x, platform)).filter(Boolean);
       // An exclusion takes no owners, so words after it are nothing to report.
       if (!negate && rest.length && !own.length) {
-        skipped.push({ line: n, why: `\`${pattern}\` is read as having no owner: none of its owner words is one this reader can read${defaults.length ? ', and the section\'s default owners do not apply to it' : ''}` });
+        skipped.push({ line: n, why: `${quoted(pattern)} is read as having no owner: none of its owner words is one this reader can read${defaults.length ? ', and the section\'s default owners do not apply to it' : ''}` });
       }
-      rules.push({ line: n, section, negate, pat, owners: rest.length ? own : defaults });
+      rules.push({ line: n, section, negate, pattern, pat, owners: rest.length ? own : defaults });
       return;
     }
     const words = line.trim().split(/[ \t]+/);
     const cut = words.findIndex((x, j) => j > 0 && x.startsWith('#'));
     const [pattern, ...rest] = cut < 0 ? words : words.slice(0, cut);
-    if (pattern.startsWith('!')) { skipped.push({ line: n, why: `\`${pattern}\` is a \`!\` pattern, which GitHub does not support` }); return; }
+    if (pattern.startsWith('!')) { skipped.push({ line: n, why: `${quoted(pattern)} is a \`!\` pattern, which GitHub does not support` }); return; }
     const pat = patternOf(pattern, platform);
     if (pat.bad) { skipped.push({ line: n, why: pat.bad }); return; }
     const owners = rest.map((x) => ownerOf(x, platform));
     const badAt = owners.indexOf(null);
     if (badAt >= 0) {
       // A word with an `@` anywhere after its first character may be a mistyped address (`bob@corp`,
-      // `@alice@corp.com`), so it is never printed as written.
-      const shown = rest[badAt].indexOf('@', 1) >= 0 ? 'an address-like word' : `\`${rest[badAt]}\``;
-      skipped.push({ line: n, why: `${shown} is not an owner (@user, @org/team or an e-mail address)` });
+      // `@alice@corp.com`), so it is never printed as written (`quoted`).
+      skipped.push({ line: n, why: `${quoted(rest[badAt])} is not an owner (@user, @org/team or an e-mail address)` });
       return;
     }
-    rules.push({ line: n, section: '', negate: false, pat, owners });
+    rules.push({ line: n, section: '', negate: false, pattern, pat, owners });
   });
   return { rules, skipped, sections };
 }
@@ -250,4 +257,141 @@ export function baseCodeowners(repoRoot, baseRef, platform) {
     return { path: p, text: show.stdout.toString('utf8') };
   }
   return { none: `no CODEOWNERS on ${baseRef} (${paths.join(', ')})` };
+}
+
+// E69 — the lines that match no file: a fact about the file list, never a guess about a person. A GitLab
+// `!` line that excludes nothing is one too. `files` is every file the repo holds; `submodules` the paths
+// of its submodules, whose contents are not in that list — so a line that could reach into one is never
+// called dead (the probe name is a NUL, which no pattern this reader accepts can spell but `*` matches).
+// Returns [{ line, pattern, negate }] in file order.
+export function deadLines(parsed, files, { submodules = [] } = {}) {
+  const names = [...files, ...submodules.map((g) => `${g}/\u0000`)];
+  // `matches` asks about a file and every folder above it, and a dead line is asked about every name — the
+  // E69 reviews measured 300 000 files × 1 000 dead lines at minutes. So each folder is asked about ONCE,
+  // and each rule takes the fastest road that gives exactly `matches`' answer (tests hold them equal): a
+  // plain part no name has settles it at once; plain text is a set lookup; an "at any depth" pattern that
+  // cannot match a `/` tests the distinct last k parts; a pattern anchored at the top tests only the names
+  // that start with its plain head. Anything else scans every name.
+  const dirs = new Set();
+  for (const f of names) for (let i = f.indexOf('/'); i >= 0; i = f.indexOf('/', i + 1)) dirs.add(f.slice(0, i));
+  const dirList = [...dirs];
+  const nameSet = new Set(names);
+  const partSet = new Set(names.flatMap((f) => f.split('/')));
+  const sortedNames = [...names].sort();
+  const sortedDirs = [...dirList].sort();
+  // The distinct last `k` parts of every name, built once per `k`.
+  const tails = new Map();
+  const tailsOf = (k) => {
+    if (!tails.has(k)) {
+      // A name with fewer than k parts gives itself, which holds fewer than k-1 slashes and so never matches.
+      const cut = (list) => new Set(list.map((x) => x.split('/').slice(-k).join('/')));
+      const files = cut(names);
+      const folders = cut(dirList);
+      tails.set(k, { files, dirs: folders, fileList: [...files], dirList: [...folders] });
+    }
+    return tails.get(k);
+  };
+  // The names in a sorted list that start with `prefix`.
+  const under = (sorted, prefix) => {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < prefix) lo = mid + 1; else hi = mid; }
+    const out = [];
+    for (let i = lo; i < sorted.length && sorted[i].startsWith(prefix); i++) out.push(sorted[i]);
+    return out;
+  };
+  const test = (pat, fileList, folderList) => (pat.fileToo && fileList.some((f) => pat.re.test(f))) || (pat.dirs && folderList.some((d) => pat.re.test(d)));
+
+  const live = (pat) => {
+    if (pat.all) return names.length > 0;
+    // `patternOf` writes `^`, then `(?:.*\/)?` for "at any depth" (once per leading `**/`), then the rest,
+    // then `$`. The rest is read piece by piece: a character, `\` + a character that is not a letter or a
+    // digit (V8 writes a carriage return in `source` as `\r`, which is NOT the letter `r`), `[^/]` with or
+    // without `*`, or anything else, which is not read here. Reading a piece as "anything else" is always
+    // safe: it only sends the rule down a slower road to the same answer.
+    const m = pat.re.source.match(/^\^((?:\(\?:\.\*\\\/\)\?)*)(.*)\$$/);
+    if (!m) return test(pat, names, dirList);
+    const [, anyDepth, rest] = m;
+    const parts = [];
+    for (let i = 0; i < rest.length;) {
+      if (rest.startsWith('[^/]', i)) { parts.push({ cls: true }); i += rest[i + 4] === '*' ? 5 : 4; continue; }
+      const ch = rest[i];
+      if (ch === '\\' && i + 1 < rest.length && !/[A-Za-z0-9]/.test(rest[i + 1])) { parts.push({ text: rest[i + 1] }); i += 2; continue; }
+      if (/[\\.*+?()[\]{}|^$]/.test(ch)) { parts.push({ other: true }); i++; continue; }
+      parts.push({ text: ch });
+      i++;
+    }
+    // Every part of the pattern that is plain text between two real slashes (or an end) must be some
+    // name's part, or nothing can match — true for every shape, and it settles most dead lines at once.
+    // (A slash inside `(?:.*\/)?` sits next to `(` or `)`, so the parts beside it are never plain.)
+    let seg = [];
+    for (const p of [...parts, { text: '/' }]) {
+      if (p.text !== '/') { seg.push(p); continue; }
+      if (seg.length && seg.every((q) => 'text' in q) && !partSet.has(seg.map((q) => q.text).join(''))) return false;
+      seg = [];
+    }
+    const plain = parts.every((p) => 'text' in p);
+    const text = plain ? parts.map((p) => p.text).join('') : '';
+    if (plain && !anyDepth) return (pat.fileToo && nameSet.has(text)) || (pat.dirs && dirs.has(text));
+    if (anyDepth && !parts.some((p) => p.other)) {
+      // "At any depth", and the rest holds exactly k-1 slashes and nothing that can match one: only a
+      // name's last k parts can match it, so the distinct last k parts are tested instead of every path.
+      const t = tailsOf(parts.filter((p) => p.text === '/').length + 1);
+      if (plain) return (pat.fileToo && t.files.has(text)) || (pat.dirs && t.dirs.has(text));
+      const last = new RegExp(`^${rest}$`, 's');
+      return (pat.fileToo && t.fileList.some((x) => last.test(x))) || (pat.dirs && t.dirList.some((x) => last.test(x)));
+    }
+    if (!anyDepth) {
+      // Anchored at the top: every match starts with the plain text before the first wildcard, so only
+      // the names that start with it can match.
+      let head = '';
+      for (const p of parts) { if (!('text' in p)) break; head += p.text; }
+      if (head) return test(pat, under(sortedNames, head), under(sortedDirs, head));
+    }
+    return test(pat, names, dirList);
+  };
+  return parsed.rules.filter((r) => !live(r.pat)).map((r) => ({ line: r.line, pattern: r.pattern, negate: r.negate }));
+}
+
+// Does `rel` exist under `root` with exactly this spelling? A macOS or Windows disk ignores case, so a
+// plain stat finds `.github/codeowners` for `.github/CODEOWNERS` — but git, and so the platform, stores the
+// name as written (E69 review, round 1). Each part is looked for in its folder's listing. Throws what
+// reading a folder throws.
+function exactName(root, rel) {
+  let dir = root;
+  for (const part of rel.split('/')) {
+    if (!fs.readdirSync(dir).includes(part)) return false;
+    dir = path.join(dir, part);
+  }
+  return true;
+}
+
+// E69 — the CODEOWNERS file on DISK (the working tree, like `yad risk-map check`), as its platform would
+// pick it: the first of its locations that exists. Returns { path, text, ignored } — `ignored` the other
+// locations that hold a file the platform never reads — or { path, tooBig, ignored } for a GitHub file of
+// 3 MB or more, { none } when there is none, or { unknown: why }. A first location that is not a regular
+// file is `unknown`: the platform reads the blob git stores, and a symlink's blob is its target's name.
+export function diskCodeowners(repoRoot, platform) {
+  const paths = CODEOWNERS_PATHS[platform];
+  if (!paths) return { unknown: `no CODEOWNERS locations are known for platform '${platform}'` };
+  const found = [];
+  for (const p of paths) {
+    try {
+      if (!exactName(repoRoot, p)) continue;
+      found.push({ p, st: fs.lstatSync(path.join(repoRoot, p)) });
+    } catch (e) {
+      if (e.code === 'ENOENT' || e.code === 'ENOTDIR') continue;
+      return { unknown: `${p} could not be read (${e.code})` };
+    }
+  }
+  if (!found.length) return { none: `no CODEOWNERS (${paths.join(', ')})` };
+  const [first, ...rest] = found;
+  if (!first.st.isFile()) return { unknown: `${first.p} is not a regular file` };
+  const ignored = rest.filter((x) => !x.st.isDirectory()).map((x) => x.p);
+  if (platform === 'github' && first.st.size >= GITHUB_MAX_BYTES) return { path: first.p, tooBig: true, ignored };
+  try {
+    return { path: first.p, text: fs.readFileSync(path.join(repoRoot, first.p), 'utf8'), ignored };
+  } catch (e) {
+    return { unknown: `${first.p} could not be read (${e.code})` };
+  }
 }

@@ -16,6 +16,7 @@ import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
+import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 
@@ -1856,6 +1857,41 @@ export function riskMapChecks(checks, root) {
   }
 }
 
+// E69 — a stale CODEOWNERS, per connected repo on disk. FACTS only (a line that matches no file, a file
+// the platform never reads or will not load, a line yad cannot read): the "owner seems inactive" hint is
+// a guess, and it prints only in `yad codeowners check`, never here. Advisory — a warning, never a
+// failure: CODEOWNERS is a hint (Part 3). No file at all is a note; a repo with no review rules at all is
+// E70's to warn about. A repo not on disk, or not a git repo, is the repos check's to report.
+export function codeownersChecks(checks, root) {
+  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  const repos = Array.isArray(registry?.repos) ? registry.repos : [];
+  for (const repo of repos) {
+    if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
+    const repoRoot = path.resolve(root, repo.path);
+    if (!exists(repoRoot) || !gitHead(repoRoot)) continue;
+    const r = checkCodeowners(repoRoot, { platform: repo.platform || null });
+    if (!r.git) continue;
+    const id = `codeowners:${repo.name}`;
+    const more = `\`yad codeowners check ${repo.name}\``;
+    if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${repo.name}: CODEOWNERS could not be checked — ${r.unknown}`, more); continue; }
+    if (r.none) { check(checks, id, 'codeowners', 'ok', `${repo.name}: no CODEOWNERS — nothing to check`); continue; }
+    const findings = codeownersFindings(r);
+    if (!findings.length) { check(checks, id, 'codeowners', 'ok', `${repo.name}: every ${r.path} line yad can read matches a file`); continue; }
+    const lines = (code) => findings.filter((f) => f.code === code).map((f) => f.line);
+    const listed = (ns) => ns.slice(0, 3).join(', ') + (ns.length > 3 ? ` +${ns.length - 3} more` : '');
+    const said = [];
+    if (r.tooBig) said.push(`${r.path} is 3 MB or more, so GitHub does not load it`);
+    for (const p of r.ignored) said.push(`${p} is never read (${r.path} is read first)`);
+    const dead = lines('matches-nothing');
+    if (dead.length) said.push(`in ${r.path}, ${dead.length === 1 ? '1 line matches' : `${dead.length} lines match`} no file (line${dead.length === 1 ? '' : 's'} ${listed(dead)})`);
+    const unread = lines('not-read');
+    if (unread.length) said.push(`in ${r.path}, ${unread.length === 1 ? '1 line' : `${unread.length} lines`} yad could not read (line${unread.length === 1 ? '' : 's'} ${listed(unread)})`);
+    check(checks, id, 'codeowners', 'warn', `${repo.name}: CODEOWNERS may be out of date — ${said.join('; ')}`,
+      `${more} lists each one; fix it in ${repo.name} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`,
+      { findings });
+  }
+}
+
 // Phase 6 — feature-thread integrity. A change-epic must thread to a real parent and its denormalized
 // `thread` cache must equal the computed root; an open hotfix reconcile-debt is a warn (the next change
 // on that thread is blocked at the gate until it is paid). Pure reporting, like the other sections.
@@ -1895,6 +1931,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   envChecks(checks);
   projectChecks(checks, root, { headCount });
   riskMapChecks(checks, root);
+  codeownersChecks(checks, root);
   foundationChecks(checks, root);
   shapeChecks(checks, root);
   mirrorChecks(checks, root);

@@ -197,6 +197,11 @@ ${c.bold('Build helpers')}
   yad risk-map draft [repo]            Add an 'unset' line for every directory the map does not cover
                                        (--dry-run prints it);
                                        never changes a line (the yad-connect-repos skill classifies them)
+  yad codeowners check [repo] [--json] [--platform github|gitlab]
+                                       Warn where a code repo's CODEOWNERS looks stale: a line that
+                                       matches no file, a file the platform never reads or will not load,
+                                       a line yad cannot read; plus a hint about @logins with no recent
+                                       commit — advisory, never blocks, never writes the file
 
 ${c.bold('Feature threads (post-lock change management)')}
   yad thread                           List every feature thread (genesis → changes → defects)
@@ -557,6 +562,12 @@ async function main() {
     case 'risk-map': {
       const [, action, name] = o._;
       await commands.runRiskMap(o.dir, { action: action || 'check', name, json: o.json, dryRun: o.dryRun });
+      break;
+    }
+    case 'codeowners': {
+      const [, action, name] = o._;
+      // `--write` was dropped (E69); wherever it is typed, it is refused with the reason — never ignored.
+      await commands.runCodeowners(o.dir, { action: action || 'check', name, json: o.json, platform: o.platform, write: o._.some((a) => a === '--write' || a.startsWith('--write=')) });
       break;
     }
     case 'roster':
