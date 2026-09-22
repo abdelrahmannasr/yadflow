@@ -19,9 +19,9 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok, readJSONStrict, warn, writeProductConfig } from './lib.mjs';
 import { isVerifiedLedger, productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { epicIds, epicRoot, legacyLogins, loadLedger, stepStatus } from './epic-state.mjs';
+import { epicIds, epicRoot, loadLedger, stepStatus } from './epic-state.mjs';
 import { isSolo } from './gate.mjs';
-import { activePeople, teamHint } from './people.mjs';
+import { printTeamHint, soloTeamHint } from './people.mjs';
 import { recordActor } from './skip.mjs';
 
 export const MODES = ['solo', 'team'];
@@ -125,13 +125,13 @@ export async function runMode(root, { to = null, reason = null, json = false, to
     const mode = modeOf(hub);
     const name = isObj(hub) && hub.mode !== undefined ? hub.mode : null;
     const set = isObj(hub) && isObj(hub.mode_set) ? hub.mode_set : null;
-    const hint = mode === 'solo' ? teamHint(headCount || activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) })) : null;
+    const hint = soloTeamHint(root, hub, { solo: mode === 'solo', headCount, today });
     if (json) return log(JSON.stringify({ ok: true, mode, name, agrees: name === null || name === mode, set, suggest: hint }, null, 2));
     ok(`mode: ${mode} — ${MEANING[mode]}`);
     if (!hub) info('no Product config yet — team mode is the default; `yad setup` records it');
     if (set) info(setLine(set));
     if (name !== null && name !== mode) warn(`the file also says mode: ${JSON.stringify(name)}, but the old \`solo\` flag is the one read — run \`yad mode ${mode}\` to make them agree`);
-    if (hint?.line) (hint.known ? warn : info)(hint.known ? hint.line : c.dim(hint.line));
+    printTeamHint(hint, { unknown: true });
     return;
   }
 

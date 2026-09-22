@@ -34,9 +34,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { readJSONStrict } from './lib.mjs';
+import { c, info, readJSONStrict, warn } from './lib.mjs';
 import { PROJECT_FILES, epicFiles } from './manifest.mjs';
-import { epicIds, epicRoot, ledgerPersonLogin, capLimit, capSeat } from './epic-state.mjs';
+import { epicIds, epicRoot, ledgerPersonLogin, legacyLogins, capLimit, capSeat, smallestTeam } from './epic-state.mjs';
 import { corruptShards, readShips } from './ledger.mjs';
 import { isBot, loginFromEmail } from './riskmap.mjs';
 
@@ -456,22 +456,28 @@ export function capacityWindow(mergeDates, today) {
 // skew, a rebase, a hand-edited ledger and a machine in another timezone all produce one, and dropping
 // it makes the count SMALLER — the one direction this file may never go. Keeping it can only add a
 // person who is real, which Part 3 asks for in as many words.
-export function activeIn(events, from) {
+//
+// With `today`, a person whose EVERY event is dated after it is marked `future: true`. They are still
+// counted. Only E74's `teamHint` reads the mark: a suggestion must be able to stop, and a date that never
+// leaves the window would keep it on screen for good.
+export function activeIn(events, from, today = null) {
   const people = new Map();
   for (const e of events) {
     if (!e || !e.ts || e.ts < from) continue;
     const key = personKey(e);
     if (!key) continue;
+    const now = today === null || String(e.ts).slice(0, 10) <= today;
     const seen = people.get(key);
-    if (!seen) people.set(key, { key, name: e.name || null, login: e.login || null, how: new Set([e.how]) });
+    if (!seen) people.set(key, { key, name: e.name || null, login: e.login || null, how: new Set([e.how]), now });
     else {
       if (!seen.login && e.login) seen.login = e.login;
       if (!seen.name && e.name) seen.name = e.name;
       seen.how.add(e.how);
+      seen.now = seen.now || now;
     }
   }
   const list = [...people.values()]
-    .map((p) => ({ key: p.key, name: p.name, login: p.login, how: [...p.how].sort() }))
+    .map((p) => ({ key: p.key, name: p.name, login: p.login, how: [...p.how].sort(), ...(p.now ? {} : { future: true }) }))
     .sort((a, b) => a.key.localeCompare(b.key));
   return { count: list.length, people: list, nameOnly: list.filter((p) => !p.login).length };
 }
@@ -507,7 +513,7 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
     const from = daysBefore(today, days);
     // The ONE rule of this file: unknown never becomes a small number.
     if (unknown.length || from === null) return { days, from, active: null, people: [], nameOnly: 0, ...extra };
-    const got = activeIn(events, from);
+    const got = activeIn(events, from, today);
     return { days, from, active: got.count, people: got.people, nameOnly: got.nameOnly, ...extra };
   };
   return {
@@ -547,15 +553,26 @@ export const approverCount = (counted) => (Array.isArray(counted?.capacity?.peop
 //              two names are two git identities; either may still be one person (two accounts, two
 //              spellings of one name), so the line says "may". A team whose commits all use work
 //              addresses reads as names only, and was silent until the user added names (2026-09-22).
-//   approval   someone approved in the window, and more than one person is counted. On GitHub an author
-//              cannot approve their own work, so an approval shows a second person. On a local ledger
-//              they can (E62 decision h), and a solo developer's own approval of their own work is one
-//              row — joined to their commits by name, or kept apart, which is why `active >= 2` is also
-//              asked. It can still speak for one person whose approval and commits did not join; the line
-//              says "may".
+//   approval   a person WITH A PLATFORM LOGIN approved in the window, and more than one person is
+//              counted. On GitHub an author cannot approve their own work, so such an approval shows a
+//              second person. An approval with no login (a hand-written one on a local ledger, or an
+//              engineer-review record) proves nothing here: an author can approve their own work on a
+//              local ledger (E62 decision h), and with a noreply commit address their commits are a login
+//              and their approval a name, which never join. That approval still counts as a name under
+//              `smallest`. `active >= 2` is asked because a roster alias can join an older approval to
+//              the author's own login, which is one person.
 //
-// An unknown count gives no suggestion, and says so (E71: an unknown is never a number).
-// Returns { known, line }: `line` is null when there is nothing to suggest.
+// A person whose EVERY record is dated after today (`future`, from `activeIn`) is left out here — they
+// still count for the cap — because a date that never leaves the window would make the line permanent.
+//
+// Known limits, each a false "may be a team", the loud direction: two accounts; two spellings of one
+// name; a robot committing under a plain name, or approving through an auto-approve workflow (GitHub
+// reports a bot's login without `[bot]`); a GitLab author approving their own MR where the project
+// allows it; a connected-repo committer who cannot approve; someone who left inside the window.
+//
+// An unknown count gives no suggestion (E71: an unknown is never a number); `known: false` carries a
+// line saying so, for the caller to print or not. Returns { known, line }: `line` is null when there is
+// nothing to suggest.
 export const TEAM_CMD = 'yad mode team';
 export function teamHint(counted) {
   const cap = counted?.capacity;
@@ -563,20 +580,41 @@ export function teamHint(counted) {
     const first = Array.isArray(counted?.unknown) && counted.unknown[0] ? ` (${counted.unknown[0]})` : '';
     return { known: false, line: `the people could not be counted${first}, so no switch to team mode is suggested` };
   }
-  const people = Array.isArray(cap.people) ? cap.people : [];
-  const logins = people.filter((p) => p && p.login).length;
+  const people = (Array.isArray(cap.people) ? cap.people : []).filter((p) => p && !p.future);
+  const logins = people.filter((p) => p.login).length;
   const names = people.length - logins;
-  const approvers = approverCount(counted);
+  const approvers = people.filter((p) => p.login && Array.isArray(p.how) && p.how.includes('approved')).length;
   const why = [];
   // The larger of the two is the smallest team, so it is the one named.
-  if (logins >= 2 && logins >= names) why.push(`${logins} different platform logins committed or approved`);
-  else if (names >= 2) why.push(`${names} different names not matched to a platform login committed or approved`);
-  if (approvers >= 1 && cap.active >= 2) why.push(`${approvers === 1 ? 'someone' : `${approvers} people`} approved a review`);
+  if (smallestTeam(logins, names) >= 2) {
+    why.push(logins >= names
+      ? `${logins} different platform logins committed or approved`
+      : `${names} different names not matched to a platform login committed or approved`);
+  }
+  if (approvers >= 1 && people.length >= 2) why.push(`${approvers === 1 ? 'someone' : `${approvers} people`} approved a review`);
   if (!why.length) return { known: true, line: null };
   return {
     known: true,
     line: `solo mode is on, but ${why.join(', and ')} in the last ${cap.days} days, so more than one person may work on this Product. If so, \`${TEAM_CMD}\` makes each review gate ask for approvals, which solo mode waives`,
   };
+}
+
+// The ONE wiring every surface uses (`yad mode`, `gate status`, `yad next`, `yad doctor`): null outside
+// solo mode, where no count is read; otherwise `teamHint` over the count the caller already read, or a
+// fresh one with the roster aliases (without them an older roster-shaped approval reads as a second
+// person). `solo` is the caller's `isSolo(hub)` — it lives in cli/gate.mjs, which imports this file.
+export function soloTeamHint(root, hub, { solo, headCount = null, today = null } = {}) {
+  if (!solo) return null;
+  return teamHint(headCount || activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) }));
+}
+
+// The ONE way a suggestion is printed on a text surface: a known one as a warning line (`! …`), an
+// unknown one dimmed — and only where the caller asks for it (`unknown`), since `gate status` already
+// says NOT COUNTED and `yad next` stays quiet about it (the user's choice, 2026-09-22).
+export function printTeamHint(hint, { unknown = false } = {}) {
+  if (!hint?.line) return;
+  if (hint.known) warn(hint.line);
+  else if (unknown) info(c.dim(hint.line));
 }
 
 // The capacity count as ONE human-readable line, defined here beside the rule for the same reason

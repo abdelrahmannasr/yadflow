@@ -17,7 +17,7 @@ import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
-import { activePeople, teamHint, TEAM_CMD } from './people.mjs';
+import { soloTeamHint, TEAM_CMD } from './people.mjs';
 
 const MIN_NODE = 18;
 
@@ -146,13 +146,16 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
         // E74: suggest team mode when the count shows more than one person may work here. Counted ONLY
         // in solo mode, because the count walks the git history of every connected repo; team mode
-        // pays nothing. A suggestion, never a switch — so a warning, never a failure.
-        const hint = teamHint(headCount || activePeople(root, { aliases: legacyLogins(hub) }));
+        // pays nothing. A suggestion, never a switch — so a warning, never a failure. An unknown count
+        // is a warning too (the user's choice, 2026-09-22): doctor is where a count that cannot be read
+        // is fixed, and a ✓ beside "could not be counted" would read as healthy.
+        const hint = soloTeamHint(root, hub, { solo: true, headCount });
         if (hint.line && hint.known) {
           check(checks, 'mode:suggest-team', 'project', 'warn', hint.line,
-            `run \`${TEAM_CMD}\` if more than one person works here; if it is only you (for example two accounts, two spellings of your name, a robot committing under a plain name, or your own approval on a local ledger), leave solo mode on`);
+            `run \`${TEAM_CMD}\` if more than one person works here; if it is only you (for example two accounts, two spellings of your name, a robot committing or auto-approving, or your own approval on a local ledger), leave solo mode on`);
         } else if (hint.line) {
-          check(checks, 'mode:suggest-team', 'project', 'ok', hint.line);
+          check(checks, 'mode:suggest-team', 'project', 'warn', hint.line,
+            'the reason in brackets names what could not be read — clone the missing repo, unshallow it, or fix the file — then run `yad doctor` again');
         }
       }
       // E10 writes `mode: solo|team` beside `solo`, and `solo` is still the one read. A hand edit can leave
