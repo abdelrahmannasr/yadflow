@@ -32,7 +32,7 @@ Several tags take the **highest** step, never the sum — a gate is one decision
 it touches. `have` is the number of **distinct approvers**. The tags are read from the step as the epic
 records it in `state.json`, so adding `auth` to a step by hand raises that epic's full count.
 
-**What holds the gate: only the base — until E73.** The base (1) always holds every team gate; until E73 it is the only part that does. The rule is one
+**What holds the gate: only the base.** The base (1) always holds every team gate, and for now it is the only part that does. The rule is one
 formula: `needed = base + risk step`, **capped** at `active − 1`, with a floor of 1. `active` is the live
 count of people who committed or approved lately (E71); `yad gate status` and `yad gate sync` print it,
 and the predicate carries it as `active`. Since E72 the engine **computes, prints and records** the cap,
@@ -55,8 +55,24 @@ the risk step.
 counted by its git name, an approval by its platform login, and yadflow never joins the two without
 exact evidence. So an ordinary two-person team can read as **four**. At four the cap lowers nothing,
 and an enforced contract gate would ask three approvals of a team with one person who is not the author
-— a gate it could never pass. **E73** turns the capped count on together with `yad gate lower --reason`,
-the way out of a gate that cannot be met.
+— a gate it could never pass. A later yadflow change turns the capped count on together with
+`yad gate lower --reason`, the way out of a gate that cannot be met, once the count is accurate.
+
+**When a gate may not be met (E73).** Under an open team gate, `yad gate status` and `yad gate sync`
+print a warning line, `! may not be met: …`, when the count of people suggests the gate may not pass. It is a
+**warning only**: it never holds a gate, never changes `passed`, and writes nothing. Every line says
+"may", because the count can be wrong both ways: too low for a reviewer who has never committed or
+approved yet, and too high when work-email commits and platform approvals count one person twice. No line
+is printed in solo mode, on a gate that passed or was waived, or when the people could not be counted.
+
+| Case | When it prints | Example line |
+|---|---|---|
+| The base may not be met | Team mode, a known count of 0 or 1, and no approval yet | ``may not be met: only 1 active person counted — if nobody but the author can approve, this gate cannot pass (someone who has never committed or approved is not counted yet); the recorded way out is `yad mode solo --reason` `` |
+| The full count would jam | The cap lowered the ask, and the full count is not yet met | `may not be met: the full count of 3 could not be met: the cap allows 1 (2 active people, less one seat for the author), so enforcing the full count would jam this gate` |
+| The capped count may jam | Some counted people are known only by a git name, and the logins alone could not give the capped ask | `may not be met: 2 of the 4 people counted are known only by a git name and may be the same people as a platform login, so the team may be as small as 2: the capped ask of 3 would then leave room for 1, and enforcing the capped count could jam this gate` |
+
+`yad gate sync` prints the line while the review is still open — in CI that is the pre-merge dry sync —
+so it is seen before the merge. A merged review PR can no longer take approvals.
 
 **When the people cannot be counted** (`active: null` — a source could not be read), **no cap is
 computed or shown**, and the base holds as always. The engine never guesses a small number from an
@@ -88,11 +104,11 @@ Where each surface puts it:
 - `yad gate sync`: `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory`
 - `yad gate status`: `; count: <sum>` with the same suffix, after the distinct-people count. Above the
   gates it prints the count of people and what it does, for example
-  `active people: 2 in the last 90 days — caps each gate's count at 1 approver (one seat is left for the author); reported, only the base is enforced until E73`
+  `active people: 2 in the last 90 days — caps each gate's count at 1 approver (one seat is left for the author); reported, only the base is enforced`
   (at 0 or 1 people the bracket reads `(never below 1)`),
   or, when it cannot count them, `active people: NOT COUNTED — <reason> — no cap can be shown, and only the base holds each gate`.
-- the generated review-PR body: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people when this PR was opened (the risk step is advisory until E73)`.
-  With no cap: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory until E73)`.
+- the generated review-PR body: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2 active people when this PR was opened (the risk step is advisory)`.
+  With no cap: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory)`.
   Its Active-people line: ``- **Active people:** 2 when this PR was opened (the cap is 1 (one seat is left for the author), so this gate's count is 1; `yad gate status` counts it live)``
   (at 0 or 1 people the inner bracket reads `(never below 1)`);
   with no risk step it ends ``… (`yad gate status` counts it live)``.
@@ -214,8 +230,8 @@ unchanged**: it counts distinct approvers regardless of how they were recorded.
 - One approver who is not the author keeps review load low on a small team (design priority 2) while
   still requiring a second pair of eyes (priority 1, code quality / production safety).
 - The risk step asks for more people only where a change can break a shared surface
-  (contract/auth/payments). It is advisory for now: the capacity cap (E72) is reported, and E73 enforces
-  it together with `yad gate lower --reason`, so a gate that asks for more people than the team has
-  always has a way out.
+  (contract/auth/payments). It is advisory for now: the capacity cap (E72) is reported, and a later change
+  enforces it together with `yad gate lower --reason`, so a gate that asks for more people than the team
+  has always has a way out. Until then a gate that may not be met is only warned about (E73).
 - No stored list of people: it goes stale, and repository access already decides who can approve.
 - Everything is a file, so a future service can drive the same gate by writing the same records.

@@ -107,7 +107,7 @@ Print, in this order:
      step's `risk_tags` carry `contract`, or `1` when they carry `auth`/`payments` (the highest tag,
      never the sum). The engine **caps** that ask at `active − 1` (floor 1) and prints it (E72) — for
      example a contract gate asks 3, and with 2 active people the capped ask is 1. The risk step is
-     ADVISORY until E73, capped or not — it never decides whether the gate would pass, because the count
+     ADVISORY, capped or not — it never decides whether the gate would pass, because the count
      of people can read high (a git name and a platform login are two people until proven one). When the
      people could not be counted, no cap is shown. `yad gate status` prints the sum and the shortfall
      (`; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat
@@ -115,9 +115,13 @@ Print, in this order:
      when the cap lowered nothing) — read it from there rather than recomputing it, and say "short N"
      rather than "blocked" when it is short. A closed team gate whose ask was lowered says
      `count capped from 3 to 1 (2 active people)`. In solo mode it prints no shortfall.
+   - **A gate that may not be met (E73):** under an open team gate, `yad gate status` can print a line
+     starting `! may not be met:` — the base may have nobody but the author to give it, the full count
+     would jam if enforced, or people known only by a git name may make the team smaller than the capped
+     ask. Relay it as stated, as a warning and never as "blocked": it holds nothing.
    - **How many people there are to ask (E71), printed once per epic and not per step:** `active people:
      4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author);
-     reported, only the base is enforced until E73`, with the window's basis on the line under it. It is
+     reported, only the base is enforced`, with the window's basis on the line under it. It is
      the count the cap (E72) uses, so never report a step as blocked by it. A source that could not be
      read prints `active people: NOT COUNTED — <which source> — no cap can be shown, and only the base
      holds each gate`: report that wording as it stands and NEVER as a number or as "no people" — an

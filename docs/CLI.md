@@ -122,7 +122,7 @@ PR, and GitLab stops it only when the project's approval settings say so. The ri
 step comes from the step's own risk tags — `contract` +2, `auth`/`payments` +1, nothing +0, the highest
 tag and never the sum. So an ordinary step asks for 1 approver and the architecture+contract gate asks for 3.
 
-**Only the base holds the gate — until E73.** The base is always enforced; until E73 it is the only part that is. A gate passes with one approver, and the rest of the
+**Only the base holds the gate.** The base is always enforced, and for now it is the only part that is. A gate passes with one approver, and the rest of the
 count is reported as a shortfall.
 
 **The capacity cap (E72).** The engine caps the count at the number of **active people less one**, and
@@ -141,8 +141,24 @@ the platform decides whether they may approve.
 counted by its git name, an approval by its platform login, and yadflow never joins the two without
 exact evidence — so a two-person team can read as four. At four the cap lowers nothing, and an enforced
 contract gate would ask three approvals of a team with one person who is not the author: a gate it could
-never pass. **E73** turns the capped count on together with `yad gate lower --reason`, the way out of a
-gate that cannot be met.
+never pass. A later yadflow change turns the capped count on together with `yad gate lower --reason`,
+the way out of a gate that cannot be met, once the count is accurate.
+
+**When a gate may not be met (E73).** Under an open team gate, `yad gate status` and `yad gate sync`
+print a warning line, `! may not be met: …`, when the count of people suggests the gate may not pass. It is a
+**warning only**: it never holds a gate and writes nothing. Every line says "may", because the count can
+be wrong both ways. It reads low for a reviewer who has never committed or approved yet, and high when
+work-email commits and platform approvals count one person twice. No line is printed in solo mode, on a
+gate that passed or was waived, or when the people could not be counted.
+
+| Case | When it prints | Example line |
+|---|---|---|
+| The base may not be met | Team mode, a known count of 0 or 1, and no approval yet | ``may not be met: only 1 active person counted — if nobody but the author can approve, this gate cannot pass (someone who has never committed or approved is not counted yet); the recorded way out is `yad mode solo --reason` `` |
+| The full count would jam | The cap lowered the ask, and the full count is not yet met | `may not be met: the full count of 3 could not be met: the cap allows 1 (2 active people, less one seat for the author), so enforcing the full count would jam this gate` |
+| The capped count may jam | Some counted people are known only by a git name, and the logins alone could not give the capped ask | `may not be met: 2 of the 4 people counted are known only by a git name and may be the same people as a platform login, so the team may be as small as 2: the capped ask of 3 would then leave room for 1, and enforcing the capped count could jam this gate` |
+
+`yad gate sync` prints the line while the review is still open — in Product CI that is the pre-merge dry
+sync — so it is seen before the merge, when reviewers can still approve. A merged review PR cannot.
 
 **When the people cannot be counted, no cap is computed or shown**, and the base holds as always.
 Product CI is usually this case: it checks out only the product repo, so on a Product with connected
@@ -167,13 +183,13 @@ people, less one seat for the author — base enforced, risk step advisory` (at 
 `yad gate sync` prints `1 approved; count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active
 people, less one seat for the author — base enforced, risk step advisory`, and the review-PR body says
 `Approvals needed: 1 (enforced) · full count 3 approvers = base 1 + contract risk 2, capped to 1 for 2
-active people when this PR was opened (the risk step is advisory until E73)`. `yad gate review --json`
+active people when this PR was opened (the risk step is advisory)`. `yad gate review --json`
 carries the rule as an object under `step.gateRule`, and the cap under `step.cap` — an object
 `{ active, limit, to, capped }`, where `to` is the count asked for after the cap and `capped` is true
 when the cap lowered it. The whole `step.cap` field is `null` when the people were not counted.
 
 **How many people are there to ask?** The engine counts that live, and prints it beside the ask
-(`active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced until E73`). "Active" means committed or approved — read from the approval
+(`active people: 4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author); reported, only the base is enforced`). "Active" means committed or approved — read from the approval
 and ship records, plus git authorship in the product repo and every connected code repo. The window
 scales with how fast the team merges: the span of the last 20 merged pull requests, bounded to between
 30 and 180 days, and the wide end when there are fewer than 20. Nothing is stored; it is counted fresh
@@ -189,8 +205,8 @@ says how many others did.
 Running `yad open-pr` from inside a code repo also reads `not counted`: the count is a fact about the
 product and everything connected to it, and a code repo on its own cannot see that.
 
-On a Shape gate the cap is **reported until E73** (above). On the Build half — a code repo's task PR —
-`yad open-pr` shows the count capped by the active people when run from the Product, and it stays reported even after E73: the
+On a Shape gate the cap is **reported** (above). On the Build half — a code repo's task PR —
+`yad open-pr` shows the count capped by the active people when run from the Product, and it stays reported even once the Shape cap is enforced: the
 platform's branch protection holds a Build merge. `checks/risk-map-check.sh` and `checks/risk-route.sh`
 cannot cap at all, because a code repo's CI has no product to count people from. `risk-route.sh` says so in
 its output; `risk-map-check.sh` says so in its header comment.

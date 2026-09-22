@@ -134,7 +134,7 @@ matches, so the gate stops counting it (it shows as stale in `yad gate status`) 
 manual approval. Nothing is deleted by date and no comment is posted on the PR; the reviewer approves
 again, and a genuinely newer review (a later submission time, or a new PR/MR) binds to the new hash. The count
 (`risk_tags: ["contract"]` → 3 approvers, capped at the active people less one and reported; base 1
-enforced, risk step advisory until E73) is unchanged.
+enforced, risk step advisory) is unchanged.
 
 ## CHANGES_REQUESTED & unresolved threads hold the gate
 
@@ -145,7 +145,7 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
 
 ## Merge advances; an artifact change revokes approvals
 
-- **Merge → advance.** When the base count is met (1 distinct approver; the capped risk step is reported, not enforced, until E73; solo mode waives it), every thread is resolved, **and the review
+- **Merge → advance.** When the base count is met (1 distinct approver; the capped risk step is reported, not enforced; solo mode waives it), every thread is resolved, **and the review
   PR/MR is merged**, `sync` marks the step `done` and unblocks the next step. The merge is the human
   approval act — there is no separate machine advance. (`yad gate sync` performs this deterministically.)
 - **Revoke on artifact change (checked at merge).** Path B reconciles at merge, so an approval given

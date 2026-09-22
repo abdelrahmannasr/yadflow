@@ -87,7 +87,7 @@ the surface physically cannot drift.
 **To CHANGE the surface instead:** do not inherit `architecture`. Then `yad-architecture` re-authors
 `contract.md` in the change-epic between fresh `CONTRACT-SURFACE` markers, computes a **new** hash, and
 writes a real (non-pointer) `contract-lock.json`. `architecture-review` carries `risk_tags: ["contract"]`
-→ the contract-risk review (full approver count 3, capped at the active people less one and reported, E72; only the base 1 is enforced until E73). This is the same re-lock-invalidates-approvals behaviour Shape already has, relocated from "edit the locked file" to "author a contract-surface change-epic".
+→ the contract-risk review (full approver count 3, capped at the active people less one and reported, E72; only the base 1 is enforced). This is the same re-lock-invalidates-approvals behaviour Shape already has, relocated from "edit the locked file" to "author a contract-surface change-epic".
 
 ## Genesis migration (one-time, per feature)
 

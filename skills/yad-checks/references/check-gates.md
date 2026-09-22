@@ -503,7 +503,7 @@ it wants them:
   in `.sdlc/approvals.json`: at least 1 approver (the author is not checked here — the platform's own
   rules stop self-approval on GitHub, and on GitLab when its settings say so; the same predicate
   `yad-review-gate` enforces; the risk step of the full count, capped by the active people (E72), is
-  reported beside it and gates nothing until E73).
+  reported beside it and gates nothing).
 
 These are advisory checks on the Product's own PRs (the Shape review PRs the verified ledger opens); they keep
 the Product's artifacts internally consistent. The Product never runs the code-repo `spec-link`/`build-test-lint`

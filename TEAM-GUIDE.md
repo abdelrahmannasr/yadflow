@@ -495,8 +495,8 @@ project's approval settings say so.
   adds 1; a step with several tags takes the largest, never the sum. None of the approvals should be the
   author's own.
 - **What holds a gate:** one approval from someone other than the author (the **base**), plus every
-  comment thread resolved and the review PR merged. The risk step is **advisory** until E73 — a later yadflow change that adds `yad gate lower --reason`, a
-  recorded way out of a gate a team cannot meet.
+  comment thread resolved and the review PR merged. The risk step is **advisory**. A later yadflow change will enforce it, capped by the
+  active people, together with `yad gate lower --reason`, a recorded way out of a gate a team cannot meet.
 - **The cap (reported):** the engine caps the count at the number of **active people less one** (never
   below 1) and prints it. "Active people" means people who committed or approved lately, counted live.
   The `− 1` leaves one seat for the author. A contract gate's capped ask is 1 with 2 active people, 2 with
@@ -505,17 +505,25 @@ project's approval settings say so.
 - **Why the cap is not enforced yet:** the count of people can read high. A commit is counted by its git
   name and an approval by its platform login, and they are two people until proven one — so a
   two-person team can read as four, the cap lowers nothing, and an enforced gate would lock them out.
-  E73 enforces the capped count together with `yad gate lower --reason`, a way out of a gate that
-  cannot be met.
+  The capped count will be enforced only once the count is accurate, together with
+  `yad gate lower --reason`, a way out of a gate that cannot be met. Until then the engine warns when a
+  gate **may not be met** (see the last point below).
 - `yad gate sync` and `yad gate status` print the count, for example
   `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`.
   A team gate that passed on its counted approvals while the cap lowered its ask says so later: `count capped from 3 to 1 (2 active people)`.
+- **When a gate may not be met (a warning only):** under an open team gate, `yad gate status` and
+  `yad gate sync` print a `! may not be met: …` line when the count of people suggests the gate may not
+  pass. It holds nothing and writes nothing. It prints in three cases: only 0 or 1 active person is
+  counted (the way out is `yad mode solo --reason`); the cap lowered the ask, so the full count would jam
+  if enforced; or some people are known only by a git name, so the team may be too small for the capped
+  ask. It says "may" because the count can be wrong both ways — a reviewer who has not committed or
+  approved yet is not counted, and one person with a work email and a platform login counts twice.
 
 | Review | Full count | Holds the gate |
 |--------|------------|----------------|
 | Epic | 1 | 1 approver |
 | UI | 1 | 1 approver |
-| **Architecture + contract** | **3** (base 1 + contract risk 2), shown capped at the active people less one. The contract surface is hash-locked — changing it invalidates approvals. | 1 approver (the rest is advisory until E73) |
+| **Architecture + contract** | **3** (base 1 + contract risk 2), shown capped at the active people less one. The contract surface is hash-locked — changing it invalidates approvals. | 1 approver (the rest is advisory) |
 | **Stories** | 1 | 1 approver |
 | **Engineer review at ship** | reported only — `yad open-pr`, run from the Product, shows it capped by the active people | a human engineer — **always, never automated**; the platform's branch protection holds the merge |
 

@@ -232,14 +232,16 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
 **The gate rule, by review.** There are no roles: a gate counts **distinct people who approved**. The
 engine computes a **count** — `base + risk step` distinct approvers, base 1, plus 2 for a `contract` tag
 or 1 for `auth`/`payments` — and `yad gate sync`, `yad gate status` and the generated review-PR body print
-that arithmetic. **Only the base holds the gate** until E73 — a later yadflow change that adds `yad gate lower --reason`,
-a recorded way out of a gate a team cannot meet; the rest is reported as a shortfall. The
+that arithmetic. **Only the base holds the gate**; the rest is reported as a shortfall. The
 engine also **caps** the count at the number of **active people less one** (never below 1) and prints
 it (E72). "Active" means committed or approved lately, counted live from the records and from git, over
 a window that scales with how fast the team merges. The `− 1` leaves one seat for the author. The cap is
 reported, not enforced: the count of people can read high (a git name and a platform login count as two
 people until proven one), so a two-person team can read as four and an enforced gate could lock them
-out. E73 enforces the capped count together with `yad gate lower --reason`, the way out. When a source
+out. A later yadflow change turns the capped count on together with `yad gate lower --reason`, a
+recorded way out of a gate a team cannot meet, once the count is accurate. Until then, under an open
+gate, `yad gate status` and `yad gate sync` print a `! may not be met:` warning line when the count suggests the
+gate may not pass; it is a warning and holds nothing. When a source
 cannot be read, the count says `NOT COUNTED` rather than showing a small number, and no cap is shown.
 A team gate that passed on its counted approvals (not solo, not a skip or inherited shortcut) while the cap lowered its ask records `capped: { needed, to, active }` on its
 closing record.
