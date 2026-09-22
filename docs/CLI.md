@@ -286,7 +286,8 @@ run until someone switches or the evidence leaves the counting window. Either of
 | Someone **with a platform login** approved a review in the window, and more than one person is counted | On GitHub an author cannot approve their own work, so such an approval shows a second person. An approval with no login (a hand-written one on a local ledger, or an engineer-review record) proves nothing here, because an author can approve their own work on a local ledger; it still counts as a name in the row above | ``! solo mode is on, but someone approved a review in the last 90 days, so more than one person may work on this Product. If so, `yad mode team` makes each review gate ask for approvals, which solo mode waives`` |
 
 A person whose every record is dated after today (a mistyped year, for example) is left out of this
-suggestion, so the line can stop. They still count for the `active people:` line.
+suggestion, and an approval dated only after today is not proof of a second person, so the line can
+stop. Both still count for the `active people:` line.
 
 When the count is unknown (a connected repo is not on disk, for example), nothing is suggested.
 `yad mode` says so, with the reason: `the people could not be counted (<why>), so no switch to team mode

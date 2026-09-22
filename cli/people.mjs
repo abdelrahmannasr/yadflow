@@ -457,9 +457,11 @@ export function capacityWindow(mergeDates, today) {
 // it makes the count SMALLER — the one direction this file may never go. Keeping it can only add a
 // person who is real, which Part 3 asks for in as many words.
 //
-// With `today`, a person whose EVERY event is dated after it is marked `future: true`. They are still
-// counted. Only E74's `teamHint` reads the mark: a suggestion must be able to stop, and a date that never
-// leaves the window would keep it on screen for good.
+// With `today`, a person whose EVERY event is dated after it is marked `future: true`, and a kind of
+// evidence (`committed`, `approved`) a person has ONLY after it is listed in `later`. They are still
+// counted. Only E74's `teamHint` reads the marks: a suggestion must be able to stop, and a date that never
+// leaves the window would keep it on screen for good — per kind, because one mistyped approval beside a
+// current commit is still a mistyped approval.
 export function activeIn(events, from, today = null) {
   const people = new Map();
   for (const e of events) {
@@ -468,16 +470,20 @@ export function activeIn(events, from, today = null) {
     if (!key) continue;
     const now = today === null || String(e.ts).slice(0, 10) <= today;
     const seen = people.get(key);
-    if (!seen) people.set(key, { key, name: e.name || null, login: e.login || null, how: new Set([e.how]), now });
+    if (!seen) people.set(key, { key, name: e.name || null, login: e.login || null, how: new Set([e.how]), nowHow: new Set(now ? [e.how] : []) });
     else {
       if (!seen.login && e.login) seen.login = e.login;
       if (!seen.name && e.name) seen.name = e.name;
       seen.how.add(e.how);
-      seen.now = seen.now || now;
+      if (now) seen.nowHow.add(e.how);
     }
   }
   const list = [...people.values()]
-    .map((p) => ({ key: p.key, name: p.name, login: p.login, how: [...p.how].sort(), ...(p.now ? {} : { future: true }) }))
+    .map((p) => {
+      const later = [...p.how].filter((h) => !p.nowHow.has(h)).sort();
+      return { key: p.key, name: p.name, login: p.login, how: [...p.how].sort(),
+        ...(!p.nowHow.size ? { future: true } : later.length ? { later } : {}) };
+    })
     .sort((a, b) => a.key.localeCompare(b.key));
   return { count: list.length, people: list, nameOnly: list.filter((p) => !p.login).length };
 }
@@ -562,8 +568,9 @@ export const approverCount = (counted) => (Array.isArray(counted?.capacity?.peop
 //              `smallest`. `active >= 2` is asked because a roster alias can join an older approval to
 //              the author's own login, which is one person.
 //
-// A person whose EVERY record is dated after today (`future`, from `activeIn`) is left out here — they
-// still count for the cap — because a date that never leaves the window would make the line permanent.
+// A person whose EVERY record is dated after today (`future`, from `activeIn`) is left out here, and an
+// approval a person has only after today (`later`) is not proof — both still count for the cap — because
+// a date that never leaves the window would make the line permanent.
 //
 // Known limits, each a false "may be a team", the loud direction: two accounts; two spellings of one
 // name; a robot committing under a plain name, or approving through an auto-approve workflow (GitHub
@@ -583,7 +590,8 @@ export function teamHint(counted) {
   const people = (Array.isArray(cap.people) ? cap.people : []).filter((p) => p && !p.future);
   const logins = people.filter((p) => p.login).length;
   const names = people.length - logins;
-  const approvers = people.filter((p) => p.login && Array.isArray(p.how) && p.how.includes('approved')).length;
+  const approvers = people.filter((p) => p.login && Array.isArray(p.how) && p.how.includes('approved')
+    && !(Array.isArray(p.later) && p.later.includes('approved'))).length;
   const why = [];
   // The larger of the two is the smallest team, so it is the one named.
   if (smallestTeam(logins, names) >= 2) {

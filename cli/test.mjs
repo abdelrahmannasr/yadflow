@@ -19379,6 +19379,12 @@ test('E74 teamHint: a person whose every record is dated after today is left out
   const count = (people) => ({ today: '2026-06-09', unknown: [], capacity: { days: 90, basis: 'b', active: people.length, nameOnly: 0, people } });
   assert.deepEqual(_teamHint(count([past, future])), { known: true, line: null }, 'a mistyped 2027 approval does not keep the line on screen for good');
   assert.match(_teamHint(count([past, { ...future, future: undefined }])).line, E74_LINE, 'the same person dated today speaks');
+  // One person, a current commit and a mistyped future approval, beside a second spelling of a name: the
+  // approval is not proof, and one login + one name is a team of 1.
+  const mixed = { key: 'login:ada', name: null, login: 'ada', how: ['approved', 'committed'], later: ['approved'] };
+  const spelling = { key: 'name:ada lovelace', name: 'Ada Lovelace', login: null, how: ['committed'] };
+  assert.deepEqual(_teamHint(count([mixed, spelling])), { known: true, line: null }, 'an approval dated only in the future proves nothing');
+  assert.match(_teamHint(count([{ ...mixed, later: undefined }, spelling])).line, /someone approved a review/, 'the same approval dated today does');
 });
 
 test('E74 activeIn: marks `future` only when EVERY record of a person is after today, and still counts them', () => {
@@ -19391,6 +19397,8 @@ test('E74 activeIn: marks `future` only when EVERY record of a person is after t
   assert.equal(got.count, 3, 'a future date is never a reason to forget a person (E71)');
   const by = Object.fromEntries(got.people.map((p) => [p.login, p.future === true]));
   assert.deepEqual(by, { ada: false, bo: true, cy: false }, 'one record today or before is enough; a timestamp on today is today');
+  assert.deepEqual(got.people.find((p) => p.login === 'ada').later, ['approved'], 'ada committed today but approved only in 2027');
+  assert.equal(got.people.find((p) => p.login === 'cy').later, undefined, 'nothing only-later, no list');
   assert.equal(activeIn([{ ts: '2027-06-01', login: 'bo', how: 'approved' }], '2026-09-01').people[0].future, undefined, 'no `today`, no mark');
 });
 
