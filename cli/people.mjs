@@ -525,6 +525,60 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
 export const approverCount = (counted) => (Array.isArray(counted?.capacity?.people)
   ? counted.capacity.people.filter((p) => Array.isArray(p?.how) && p.how.includes('approved')).length : 0);
 
+// SUGGEST TEAM MODE (E74) — read only in solo mode, and only ever a suggestion: nothing is switched and
+// nothing is written. Switching needs a person to run `yad mode team`, as E10 set.
+//
+// ONE DIRECTION ONLY (the user's decision, 2026-09-22). The count is wrong both ways for ordinary teams
+// (E72 case a, E73), and a wrong "go solo" that a team follows removes every approval quietly. So the
+// solo direction stays with E73's `may not be met:` line, which already names `yad mode solo --reason`
+// under a team gate. This one speaks only in solo mode, where it cannot repeat that line (E73 prints
+// nothing in solo mode). A wrong "go team" asks for approvals nobody can give — loud, and easy to undo.
+//
+// "WHEN THE COUNT CHANGES" means the count disagrees with the mode that is set. Nothing is stored, so
+// there is no file shape to move and nothing for CI to write on a verified Product. The line repeats
+// until someone switches or the evidence leaves the window.
+//
+// THE EVIDENCE. A solo developer who commits with a work address AND through GitHub's web editor reads
+// as two people: one git name, one login (E73's "one person" case), and must not be told "team". So the
+// people are read as E73's SMALLEST POSSIBLE TEAM — the larger of the logins and the names not matched to
+// a login, since each name may be a second row for one of the logins. One login and one name is 1.
+// Either of these speaks:
+//   smallest   that smallest team is 2 or more in the capacity window. Two logins are two accounts, and
+//              two names are two git identities; either may still be one person (two accounts, two
+//              spellings of one name), so the line says "may". A team whose commits all use work
+//              addresses reads as names only, and was silent until the user added names (2026-09-22).
+//   approval   someone approved in the window, and more than one person is counted. On GitHub an author
+//              cannot approve their own work, so an approval shows a second person. On a local ledger
+//              they can (E62 decision h), and a solo developer's own approval of their own work is one
+//              row — joined to their commits by name, or kept apart, which is why `active >= 2` is also
+//              asked. It can still speak for one person whose approval and commits did not join; the line
+//              says "may".
+//
+// An unknown count gives no suggestion, and says so (E71: an unknown is never a number).
+// Returns { known, line }: `line` is null when there is nothing to suggest.
+export const TEAM_CMD = 'yad mode team';
+export function teamHint(counted) {
+  const cap = counted?.capacity;
+  if (!cap || !Number.isInteger(cap.active) || cap.active < 0) {
+    const first = Array.isArray(counted?.unknown) && counted.unknown[0] ? ` (${counted.unknown[0]})` : '';
+    return { known: false, line: `the people could not be counted${first}, so no switch to team mode is suggested` };
+  }
+  const people = Array.isArray(cap.people) ? cap.people : [];
+  const logins = people.filter((p) => p && p.login).length;
+  const names = people.length - logins;
+  const approvers = approverCount(counted);
+  const why = [];
+  // The larger of the two is the smallest team, so it is the one named.
+  if (logins >= 2 && logins >= names) why.push(`${logins} different platform logins committed or approved`);
+  else if (names >= 2) why.push(`${names} different names not matched to a platform login committed or approved`);
+  if (approvers >= 1 && cap.active >= 2) why.push(`${approvers === 1 ? 'someone' : `${approvers} people`} approved a review`);
+  if (!why.length) return { known: true, line: null };
+  return {
+    known: true,
+    line: `solo mode is on, but ${why.join(', and ')} in the last ${cap.days} days, so more than one person may work on this Product. If so, \`${TEAM_CMD}\` makes each review gate ask for approvals, which solo mode waives`,
+  };
+}
+
 // The capacity count as ONE human-readable line, defined here beside the rule for the same reason
 // `gateRuleSum` is defined beside `gateRuleFor`: several surfaces print it, and several copies of the
 // wording would eventually disagree about what the number means.

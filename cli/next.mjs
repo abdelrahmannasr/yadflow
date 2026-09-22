@@ -13,7 +13,8 @@
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
-import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
+import { activePeople, teamHint } from './people.mjs';
+import { dedupeConsecutive, legacyLogins, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -331,13 +332,24 @@ function phaseLine(a) {
 }
 
 // `yad next` with no epic: orient across the whole project, always ending on ONE thing to do.
-function generalNext(root, { all } = {}) {
+// E74: in solo mode, suggest `yad mode team` when the count of people shows more than one person may
+// work here (`teamHint`). The count is read only in solo mode, once, so team mode walks no git history.
+// Printed first, so it is not lost under a long list of epics. `headCount` is for tests.
+function printTeamHint(root, headCount) {
+  const hint = teamHint(headCount || activePeople(root, { aliases: legacyLogins(readJSON(productConfigPath(root), null)) }));
+  if (!hint.line) return;
+  if (hint.known) warn(hint.line);
+  else info(c.dim(hint.line));
+}
+
+function generalNext(root, { all, headCount = null } = {}) {
   if (!isSetUp(root)) {
     log(`\n  ${c.bold('Project not set up yet.')}`);
     hand(`run ${c.bold('yad setup')} ${c.dim('(then come back to `yad next`)')}`);
     return;
   }
   const solo = isSolo(root);
+  if (solo) printTeamHint(root, headCount);
   const brownfield = setupProfileOf(root)?.codebase === 'brownfield';
   // The PRODUCT level (the Foundation, or a ledger still in its old `discovery` spelling) is not a
   // feature epic — split it out so it is surfaced on its own line and never mixed into the roll-up.
@@ -467,7 +479,7 @@ function jsonNext(root, { epic, check }) {
 
 // Entry point for the `next` command: route to the precondition check, a single epic's action, or the
 // project-wide general view. Validates the epic id first.
-export async function runNext(root, { epic, check, all, json } = {}) {
+export async function runNext(root, { epic, check, all, json, headCount = null } = {}) {
   if (epic && !isValidEpicId(epic)) {
     const message = `invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`;
     if (json) return jsonError(message);
@@ -477,7 +489,7 @@ export async function runNext(root, { epic, check, all, json } = {}) {
   }
   if (json) return jsonNext(root, { epic, check });
   if (epic && check) return checkPrecondition(root, epic, check);
-  if (!epic) return generalNext(root, { all });
+  if (!epic) return generalNext(root, { all, headCount });
 
   const epicDir = epicRoot(root, epic);
   if (!exists(path.join(epicDir, '.sdlc', 'state.json'))) {
