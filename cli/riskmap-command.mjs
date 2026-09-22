@@ -105,27 +105,42 @@ export const HISTORY_WINDOW = '30 days ago';
 // could not read: a shallow clone holds only the newest commits, and reading that as "nobody has worked
 // here" would drop the ask instead of raising it. The twin is `--level` in checks/risk-map-check.sh.
 export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window = HISTORY_WINDOW } = {}) {
+  const h = historyReader(repoRoot, baseRef);
+  if (h.unknown) return h;
+  const commits = [];
+  for (const e of highTouched(entries, changed)) {
+    const got = h.authorRecords(pathspecsFor(entries, e.dir), window);
+    if (!got) return { unknown: `git could not read the history of '${e.dir}' on '${baseRef}'` };
+    commits.push(...got);
+  }
+  return { authors: recentAuthors(commits, h.own) };
+}
+
+// The one git reader behind E67's ask. Returns { unknown: why } for a history it
+// cannot read — a shallow clone holds only the newest commits, and reading that as "nobody has worked
+// here" would be a guess — or { own, authorRecords }: the addresses of the change's own authors (left out
+// of every answer: an approval has to come from someone else), and a function that runs ONE
+// log on the base branch for a set of pathspecs and returns its author records, or null when git fails.
+function historyReader(repoRoot, baseRef) {
   const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
   if (/true/.test(git(['rev-parse', '--is-shallow-repository']).stdout || '')) {
     return { unknown: 'this is a shallow clone — it does not hold the history of those directories' };
   }
   const own = git(['log', `${baseRef}..HEAD`, '--no-merges', '--format=%ae']);
   if (own.status !== 0) return { unknown: `git could not read the history of '${baseRef}'` };
-  const commits = [];
-  for (const e of highTouched(entries, changed)) {
+  const authorRecords = (pathspecs, window) => {
     // --no-merges: a merge commit is nobody's work here. --no-renames: a file moved OUT of the directory
     // is work in it, counted where it was (E66). --full-history: without it git simplifies a
     // path-filtered log and hides a side branch whose merge kept the other side.
     const r = git(['log', baseRef, '--no-merges', '--no-renames', '--full-history', `--since=${window}`,
-      '--format=%an%x1f%ae', '--', ...pathspecsFor(entries, e.dir)]);
-    if (r.status !== 0) return { unknown: `git could not read the history of '${e.dir}' on '${baseRef}'` };
-    for (const line of r.stdout.split('\n')) {
-      if (!line) continue;
+      '--format=%an%x1f%ae', '--', ...pathspecs]);
+    if (r.status !== 0) return null;
+    return r.stdout.split('\n').filter(Boolean).map((line) => {
       const [name, email] = line.split('\x1f');
-      commits.push({ name, email });
-    }
-  }
-  return { authors: recentAuthors(commits, own.stdout.split('\n').filter(Boolean)) };
+      return { name, email };
+    });
+  };
+  return { own: own.stdout.split('\n').filter(Boolean), authorRecords };
 }
 
 export function checkRepo(repoRoot) {
