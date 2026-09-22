@@ -138,7 +138,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   roles), holds the gate until **one person other than the author** approves, reports the full approval
   count (a `contract` tag asks 3, `auth`/`payments` 2 — advisory) capped at the live number of
   active people less one, and advances the
-  epic state **only** when approval is recorded.
+  epic state **only** when approval is recorded. When the count of people suggests a gate may not pass,
+  `yad gate status` and `yad gate sync` print a warning line (`! may not be met: …` or
+  `! if the risk step were enforced: …`); it holds nothing (E73).
 - **`yad-review-companion`** — The fun, easy, transparent layer on top of the gate (front **and**
   Build). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through
   review **cards**, and runs a grounded **chat** where a reviewer's questions become the record. Records

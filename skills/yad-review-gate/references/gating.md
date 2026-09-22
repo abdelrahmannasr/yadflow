@@ -58,24 +58,44 @@ and an enforced contract gate would ask three approvals of a team with one perso
 — a gate it could never pass. A later yadflow change turns the capped count on together with
 `yad gate lower --reason`, the way out of a gate that cannot be met, once the count is accurate.
 
-**When a gate may not be met (E73).** Under a team gate that has not passed, `yad gate status` and `yad gate sync`
-print a warning line, `! may not be met: …`, when the count of people suggests the gate may not pass. It is a
-**warning only**: it never holds a gate, never changes `passed`, and writes nothing. Every line starts
-`may not be met`, because the count can be wrong both ways: too low for a reviewer who has never committed or
-approved yet, and too high when work-email commits and platform approvals count one person twice. No line
-is printed in solo mode, on a gate that passed or was waived, or when the people could not be counted.
+**When a gate may not pass (E73).** `yad gate status` and `yad gate sync` print a warning line under a
+team review gate that has not passed yet, when the count of people suggests the gate may not pass. It is a
+**warning only**: it never holds a gate, never changes whether the gate passed, and writes nothing. There
+are two kinds of line:
 
-| Case | When it prints | Example line |
+- `! may not be met: …` is about **today's rule**: the one approval that is always required (the base) may
+  have nobody to give it.
+- `! if the risk step were enforced: …` is a **what-if**. Today only the base is enforced, so the gate can
+  still pass. The line says what would happen if a later yadflow change enforced the extra approvals that
+  risk tags add (the risk step). "The ask" below means the number of approvals the gate asks for after the
+  cap (the cap limits the ask to the active people less one).
+
+Every line talks about **the people counted**, and says "may", because the count can be wrong both ways.
+It is too low when a reviewer has never committed or approved yet, because nothing records them. It is too
+high when one person commits with a work email (recorded as a name) and approves on GitHub (recorded as a
+login): yadflow never joins a name and a login without proof, so that person counts twice.
+
+| Kind | When it prints | Example line |
 |---|---|---|
-| The base may not be met | Team mode, a known count of 0 or 1, and no approval yet | ``may not be met: only 1 active person counted — if nobody but the author can approve, this gate cannot pass (someone who has never committed or approved is not counted yet); the recorded way out is `yad mode solo --reason` `` |
-| The full count would jam | The cap lowered the ask, and the full count is not yet met | `may not be met: the full count of 3 could not be met: the cap allows 1 (2 active people, less one seat for the author), so enforcing the full count would jam this gate` |
-| The capped count may jam | Some counted people are known only by a git name, at least one is a platform login, the capped ask is not yet met, and the logins alone could not give it (when the logins alone could be one person with no approval yet, the next row prints instead) | `may not be met: 2 of the 4 people counted are known only by a git name and may be the same people as a platform login, so the team may be as small as 2: the capped ask of 3 would then leave room for 1, and enforcing the capped count could jam this gate` |
-| The team may be one person | Some counted people are known only by a git name, exactly one is a platform login, and no approval yet — for example one developer who commits with a work address and through GitHub's web editor | ``may not be met: 1 of the 2 people counted is known only by a git name and may be the same person as a platform login, so the team may be as small as 1: if nobody but the author can approve, this gate cannot pass; the recorded way out is `yad mode solo --reason` `` |
+| Today | 0 or 1 active person counted, and no approval yet | ``! may not be met: only 1 active person counted, so if nobody but the author can approve, this gate cannot pass. Someone who has never committed or approved is not counted yet, so another person's first approval settles it; the recorded way out is `yad mode solo --reason` `` |
+| Today | Some people are known only by a name, exactly one by a platform login, and no approval yet. Example: one developer who commits with a work email and also through GitHub's web editor, which records the login | ``! may not be met: 1 of the 2 people counted is known only by a name, not a platform login, and may be the same person as the one login, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass; the recorded way out is `yad mode solo --reason` `` |
+| What-if | The cap lowered the ask, and the full count has not been reached. Not printed when a "today" line is | `! if the risk step were enforced: with no cap, the full count of 3 is more than 2 active people can give (one seat is left for the author), so this gate could never pass` |
+| What-if | Some people are known only by a name and at least one by a login, and the logins alone could not give the ask. Not printed when a "today" line is | `! if the risk step were enforced: 2 of the 4 people counted are known only by a name, not a platform login, and may be the same people as the logins, so the team may be as small as 2, which leaves room for 1 of the 3 approvals asked, so this gate could never pass` |
 
-Run `yad gate status` or `yad gate sync` yourself while the review is still open, because that is when
-reviewers can still approve; a merged review PR cannot. Do not wait for CI to show it: the wired Product
-workflow runs only at the merge and on its schedule, and it usually cannot count people (the connected
-repos are not on disk there), so in the usual case it prints no line.
+"Known only by a name" means a git author name, or a name written by hand in an approval record, rather
+than a platform login. An approval already given proves that many people other than the author, so the
+smallest team is never counted below that. A Product with no platform (every record is a name) gets no
+name line, because there is no login to compare against. Two spellings of one name (`bo` and `Bo Chen`)
+still count as two people; no line can see that yet.
+
+No line prints in solo mode, under a step that passed, under a waived step (inherited from a parent epic,
+skipped, or deferred), or when the people could not be counted. A line about the whole Product prints
+once per command, under the first step it applies to.
+
+Run `yad gate status` yourself while the review is still open: reviewers can still approve then, and a
+merged review PR cannot take approvals. Do not wait for CI to show it. The wired Product workflow runs only
+for merged review PRs (at the merge, and in a scheduled sweep of merged PRs), and it usually cannot count
+people, because the connected repos are not on disk there.
 
 **When the people cannot be counted** (`active: null` — a source could not be read), **no cap is
 computed or shown**, and the base holds as always. The engine never guesses a small number from an
@@ -233,8 +253,8 @@ unchanged**: it counts distinct approvers regardless of how they were recorded.
 - One approver who is not the author keeps review load low on a small team (design priority 2) while
   still requiring a second pair of eyes (priority 1, code quality / production safety).
 - The risk step asks for more people only where a change can break a shared surface
-  (contract/auth/payments). It is advisory for now: the capacity cap (E72) is reported, and a later change
-  enforces it together with `yad gate lower --reason`, so a gate that asks for more people than the team
-  has always has a way out. Until then a gate that may not be met is only warned about (E73).
+  (contract/auth/payments). It is advisory for now: the capacity cap (E72) is reported. A later change will
+  enforce it together with `yad gate lower --reason`, so that a gate asking for more people than the team
+  has will always have a way out. Until then E73 only warns when a gate may not pass.
 - No stored list of people: it goes stale, and repository access already decides who can approve.
 - Everything is a file, so a future service can drive the same gate by writing the same records.
