@@ -477,7 +477,7 @@ is a project setting, not a fact about the lifecycle, and it lives in a file: se
 rewritten. A project may run a chain the tool does not know, and leaving a step out is normal — not
 every epic has screens, so many have no `ui-design`. `yad doctor` says what it noticed and stops there.
 
-**Six things it can now notice**, all warnings in the `shape` section:
+**Seven things it can now notice**, all warnings in the `shape` section:
 
 | Check | What it means |
 |---|---|
@@ -489,7 +489,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | `skip:not-optional` | A step is marked N/A or deferred, but this epic's route does not mark it optional. Nothing breaks today: the step is already done, so a gate sync reports that the rule no longer holds and changes nothing. What is lost is the justification — the gate stops treating the skip as the reason the step passed. A `deferred` status on a required step is reported the same way, and `yad undefer` puts it back. Silent when `profile:disagree` already names the epic, because correcting that clears this too. |
 | `step:debt` | A step is still owed as debt (`yad defer --debt`). A reminder, not a fault: it repeats on every run until the step's review passes. `yad undefer <epic> <step>` starts paying it back — after later work has finished, the step re-opens beside that work, which stays done. |
 
-**Other findings**, from other sections of `yad doctor`, each with what to do (the level is in bold):
+**Other findings**, each with what to do (the level is in bold). They are in the `project` section, except `dials:shape-auto-unread` and `dials:locked-auto`, which are in `shape`:
 
 | Check | What it means | What to do |
 |---|---|---|
