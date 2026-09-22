@@ -553,9 +553,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   recorded with who, when and why, and a gate that passes in solo mode says `waived: "solo"`.
   In solo mode, `yad mode`, `yad gate status`, `yad next` and `yad doctor` count the active people and
   print `! solo mode is on, but …` when more than one person may work on the Product: 2 or more platform
-  logins, or 2 or more names not matched to a login, or an approval in the counting window with more
-  than one person counted. It is a suggestion only; nothing switches until someone runs `yad mode team`.
-  It says "may", because one person with two accounts or two spellings of their name also reads as two.
+  logins, or 2 or more names not matched to a login, or an approval by someone with a platform login in
+  the counting window with more than one person counted. It is a suggestion only; nothing switches until someone runs `yad mode team`.
+  It says "may", because one person with two accounts, two spellings of their name, or a bot that commits
+  or auto-approves also reads as two.
   It never suggests solo mode.
 - **See how the team uses the flow (for a team lead / EM):** `yad usage` builds a per-member
   adoption & behavior report — who *authored / commented / approved / shipped*, in order, with factual
