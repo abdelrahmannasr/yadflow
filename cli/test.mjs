@@ -19026,7 +19026,10 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.deepEqual([l.status, l.message], ['warn', 'b: `main` is protected on GitHub acme/app, but no rule requires an approval'], 'who may merge is not read, so nothing is said about it');
   // A scoped fact that is not known is said as not known — never left out as if it were "no".
   l = protectionLine({ ...base, protected: true, codeOwners: null, fileReviewers: null }, { name: 'b' });
-  assert.equal(l.message, 'b: `main` is protected on GitHub acme/app, but no rule requires an approval; whether a code owner must approve some files is not known; whether a named reviewer must approve some files is not known');
+  assert.equal(l.message, 'b: `main` is protected on GitHub acme/app, but no rule requires an approval on every change; whether a code owner must approve some files is not known; whether a named reviewer must approve some files is not known');
+  assert.equal(protectionLine({ ...base, protected: true, codeOwners: null }, { name: 'b' }).hint, 'ask someone who can see GitHub\'s settings for `main`', 'the hint names how to read what was not read');
+  assert.ok(protectionLine({ ...base, protected: true, codeOwners: null }, { name: 'b', solo: true }).hint, 'a partly unread line keeps its hint in solo mode');
+  assert.ok(!protectionLine({ ...base, protected: true }, { name: 'b', solo: true }).hint, 'a line that was fully read does not');
   l = protectionLine({ ...base, protected: true, fileReviewers: true }, { name: 'b' });
   assert.equal(l.message, 'b: `main` is protected on GitHub acme/app, but no rule requires an approval on every change — only some changes need one (a named reviewer must approve a change to some files)');
   // A count on a branch that is NOT protected (GitLab: a rule covering every branch) holds a merge request
@@ -19056,7 +19059,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(l.message, /needs 1 approval \(from: x\); a named reviewer must also approve a change to some files; whether a code owner must approve some files is not known — you cannot approve/);
   l = protectionLine({ ...base, platform: 'gitlab', protected: false, approvals: 2, from: ['approval rule "A"'], codeOwners: true }, { name: 'web', solo: true });
   assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, with no merge request; a merge request into it needs 2 approvals (from: approval rule "A"); a code owner must also approve a change to a file CODEOWNERS lists — GitLab may not let you approve your own merge request (a project setting yad does not read), so the merge may be blocked');
-  assert.match(l.hint, /^relax the required approvals in an approval rule/, 'solo is told how to unblock its own merge');
+  assert.equal(l.hint, 'relax the required approvals in an approval rule (GitLab Premium or Ultimate) for `main`', 'the sources are in the message, not twice');
   // A code-owner rule IS an approval rule, so the banner's "no approval rules" half is not proven.
   l = protectionLine({ ...base, protected: false, approvals: 0, codeOwners: true }, { name: 'b' });
   assert.ok(!l.message.includes(BANNER));
@@ -19065,10 +19068,6 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   // An unprotected branch whose approval count could not be read still carries a scoped fact it proved.
   l = protectionLine({ ...base, approvals: null, approvalsWhy: 'x', codeOwners: true }, { name: 'b' });
   assert.match(l.message, /whether a merge needs an approval is not known — x; a code owner must approve a change to a file CODEOWNERS lists$/);
-  // "not protected" is never said for a protection that is not known; the count needs its own sentence.
-  l = protectionLine({ ...base, protected: null, protectedWhy: 'the rulesets could not be read', approvals: 2, from: ['x'] }, { name: 'b' });
-  assert.deepEqual([l.status, l.message], ['warn', 'b: a pull request into `main` on GitHub acme/app needs 2 approvals (from: x); whether the branch is protected is not known — the rulesets could not be read']);
-  assert.match(protectionLine({ ...base, protected: null, protectedWhy: 'y', approvals: 2, from: ['x'] }, { name: 'b', solo: true }).message, /not known — y, and you cannot approve your own pull request/);
   // Every "not known" line keeps its hint in solo mode: it names how to read it.
   for (const r of [{ ...base, approvals: null, approvalsWhy: 'x' }, { ...base, protected: true, approvals: null, approvalsWhy: 'x' }, { ...base, known: false, kind: 'no-login', why: 'x' }]) {
     const solo = protectionLine(r, { name: 'b', solo: true });
@@ -19257,6 +19256,11 @@ test('yad doctor: the protection section — one line for the hub and each conne
     const said = printed.out;
     assert.match(said, /✓ Product hub: not known whether `main` requires an approval — platform reads are turned off/);
     assert.match(said, /→ unset YAD_PLATFORM_READ to let `yad doctor` ask the platform/);
+    // `alwaysHint` drives that printing; it is not part of the shape a script reads.
+    const asJson = JSON.parse(yadRun(T, 'doctor', '--json').out);
+    const line = asJson.checks.find((x) => x.id === 'protection');
+    assert.ok(line.hint && line.protection, 'the hint and the answer are in --json');
+    assert.equal('alwaysHint' in line, false);
 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

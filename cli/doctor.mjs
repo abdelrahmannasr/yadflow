@@ -1992,7 +1992,9 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
   const failed = checks.filter((x) => x.status === 'fail');
   const warned = checks.filter((x) => x.status === 'warn');
   if (json) {
-    log(JSON.stringify({ version: VERSION, ok: failed.length === 0, checks }, null, 2));
+    // `alwaysHint` tells the printer below to show a hint on an `ok` line; it is not part of the shape a
+    // script reads, so it does not travel in `--json`.
+    log(JSON.stringify({ version: VERSION, ok: failed.length === 0, checks: checks.map((c) => { const out = { ...c }; delete out.alwaysHint; return out; }) }, null, 2));
   } else {
     log(c.bold(`\nyad doctor  ${c.dim('v' + VERSION)}`));
     let section = '';

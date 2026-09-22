@@ -15,8 +15,9 @@
 //   GitLab  — a project approval rule with `approvals_required` above 0 that applies to the branch. The
 //             API is GitLab Premium and Ultimate only; on Free an approval never blocks a merge. A refusal
 //             is "needs Premium, or your login may not read it" — the tier is never guessed.
-// Protection alone (no direct push) and a code-owner review are FACTS beside the answer, not approval
-// rules: a code-owner review covers only the files CODEOWNERS names.
+// Protection alone (no direct push) is a FACT beside the answer. So is a rule that covers only SOME files
+// (a code-owner review, a GitHub ruleset's named reviewers): it is an approval rule, but not one on every
+// change, so it is never the count — and a line that names no count says "on every change" beside it.
 //
 // Every call is the user's own `gh`/`glab`, logged in as the user, to the repo's own host (rule 8: nothing
 // leaves the machine for anywhere else). `YAD_PLATFORM_READ=0` turns the reads off — for offline work, and
@@ -398,12 +399,8 @@ function lineFor(r, { name, solo = false } = {}) {
       return {
         status: 'warn',
         message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? ` — ${own}` : ''}`,
-        hint: solo ? `relax the required approvals in ${setting} ${from}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
+        hint: solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
       };
-    }
-    if (r.protected === null) {
-      const msg = `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}; whether the branch is protected is not known — ${r.protectedWhy}`;
-      return { status: 'warn', message: solo ? `${msg}, and ${own}` : msg, hint: `ask someone who can see ${P}'s settings for ${br}` };
     }
     if (solo) {
       return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners} — ${own}`, hint: `relax the required approvals in ${setting}` };
@@ -423,9 +420,14 @@ function lineFor(r, { name, solo = false } = {}) {
   if (r.approvals === 0 && r.protected === true) {
     // "on every change": a code-owner or named-reviewer rule IS a rule that requires an approval, for the
     // files it names — so the plain "no rule requires an approval" would contradict the clause after it.
-    const only = scoped.length ? ` on every change — only some changes need one (${scoped.join('; ')})` : '';
-    const msg = `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
-    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
+    // "on every change" whenever a rule for SOME files is true OR could not be read: either way, "no rule
+    // requires an approval" on its own would claim more than the reader knows.
+    const only = scoped.length ? ` — only some changes need one (${scoped.join('; ')})` : '';
+    const msg = `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval${scoped.length || unknownScoped.length ? ' on every change' : ''}${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
+    // A line that is partly unread keeps its hint in solo mode, as every could-not-read line does.
+    const hint = unknownScoped.length ? `ask someone who can see ${P}'s settings for ${br}` : `only ${P} can require an approval, in ${setting}; yad only reports what is set`;
+    if (solo) return unknownScoped.length ? { status: 'ok', message: msg, hint } : { status: 'ok', message: msg };
+    return { status: 'warn', message: msg, hint };
   }
   // approvals not known
   if (r.protected === false) {
