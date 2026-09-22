@@ -123,6 +123,50 @@ export const capWho = (active) => (capByFloor(active)
   ? `${active} active ${peopleWord(active)} (never below 1)`
   : `${active} active ${peopleWord(active)}, less one seat for the author`);
 
+// UNMEETABLE-GATE DETECTION (E73): the reasons this gate MAY NOT BE MET, as lines to print. REPORTED, and
+// never enforced — nothing here holds a gate, writes the ledger or changes `passed`. Enforcing the capped
+// count, and `yad gate lower --reason` as its way out, is a later row (E108), which waits for the count to
+// be accurate enough to hold a merge. This is the evidence that row needs.
+//
+// Every line says MAY, because the count can be wrong in BOTH directions, and neither is an edge:
+//   too LOW   a reviewer who has never committed or approved is not counted yet — the second person on a
+//             brand-new Product reads as absent until their first approval;
+//   too HIGH  a commit is keyed by its git name and an approval by its platform login, and E71 never joins
+//             the two without exact evidence, so a two-person team can read as four (E72, case a).
+//
+// Three checks, each one only while its ask is still unmet (`have` below it):
+//   base   team mode with a known count of 0 or 1: the BASE — the one part that is enforced — may have
+//          nobody to give it. The recorded way out that exists today is `yad mode solo --reason`.
+//   full   the cap lowered the ask: the FULL count could not be met by the people counted, so enforcing
+//          it would jam this gate. This is the jam the cap exists to stop.
+//   names  some counted people are known only by a git name: they may be the same humans as the logins,
+//          so the team may be as small as the logins alone (never below 1). If THAT team cannot give the
+//          capped ask, enforcing the capped count could jam this gate. A capped ask of 1 never trips it:
+//          the smallest team still leaves room for 1, and the base check speaks for that case.
+//
+// An unknown count (`cap: null`) or an unknown `nameOnly` says nothing: an unknown is never a number.
+// Pure. The caller decides where it applies — never in solo mode, and never on a step that passed or
+// was waived (skipped, inherited), because nothing is asked of those.
+export function gateReach(rule, cap, { have = 0, nameOnly = null } = {}) {
+  if (!cap) return [];
+  const lines = [];
+  const got = Number.isInteger(have) && have > 0 ? have : 0;
+  if (cap.active <= 1 && got < rule.base) {
+    lines.push(`only ${cap.active} active ${peopleWord(cap.active)} counted — if nobody but the author can approve, this gate cannot pass (someone who has never committed or approved is not counted yet); the recorded way out is \`yad mode solo --reason\``);
+  }
+  if (cap.capped && got < rule.needed) {
+    lines.push(`the full count of ${rule.needed} could not be met: the cap allows ${cap.limit} (${capWho(cap.active)}), so enforcing the full count would jam this gate`);
+  }
+  if (got < cap.to && Number.isInteger(nameOnly) && nameOnly > 0 && nameOnly <= cap.active) {
+    const smallest = Math.max(1, cap.active - nameOnly);
+    const room = capLimit(smallest);
+    if (room < cap.to) {
+      lines.push(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a git name and may be the same ${nameOnly === 1 ? 'person' : 'people'} as a platform login, so the team may be as small as ${smallest}: the capped ask of ${cap.to} would then leave room for ${room}, and enforcing the capped count could jam this gate`);
+    }
+  }
+  return lines;
+}
+
 // The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside
 // the rule, because several surfaces print it (`gate sync`, `gate status`, the generated review-PR body
 // and `yad open-pr`) and several copies of the arithmetic would eventually disagree.

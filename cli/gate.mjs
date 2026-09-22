@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
@@ -764,6 +764,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       ? 'approvals not counted here'
       : `${pred.have} approved; count: ${gateRuleSum(pred.gateRule)}${gateRuleEnforced(pred.gateRule, pred.cap)}${pred.short ? ` — ${pred.short} short` : ''}`;
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
+    // E73: why this gate MAY NOT BE MET — reported only, never enforced. Printed while the review is still
+    // open, which is the pre-merge dry sync in CI and a local sync, so it is seen BEFORE the merge rather
+    // than on a merged PR that can no longer take approvals. Only a gate that counted (`rule: 'count'`).
+    if (!alreadyDone && !pred.passed && pred.rule === 'count' && pred.have !== null) {
+      for (const why of gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly })) warn(`may not be met: ${why}`);
+    }
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
       // next step, and moving it back to in_review would un-ship work already built on it. What this
@@ -1271,6 +1277,11 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     const paying = s.debt === true && state !== 'deferred' ? '; owed as debt — being paid back' : '';
     log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
     if (s.closed && typeof s.closed === 'object' && !Array.isArray(s.closed)) log(`      ${c.dim(closedLine(s.closed))}`);
+    // E73: why this gate MAY NOT BE MET — reported only, never enforced. Only on a gate still open to
+    // approvals: not in solo mode, not on a waived step, and not on one that already passed.
+    if (!solo && !waived && !isPassed(s)) {
+      for (const why of gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly })) log(`      ${c.yellow('!')} ${c.dim(`may not be met: ${why}`)}`);
+    }
   }
 }
 

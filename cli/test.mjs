@@ -18889,3 +18889,109 @@ test('E71 identity: a bridge-written approval IS a proven login, and joins that 
     assert.ok(r.expertise.people.find((p) => p.key === 'login:octocat').login, 'the login is reported, not inferred');
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
+
+// ---- E73: unmeetable-gate detection ------------------------------------------------------------
+// The user's decision (2026-09-22): E73 ships DETECTION only. Every line is reported and nothing holds a
+// gate; enforcing the capped count and `yad gate lower --reason` moved to E108, which waits for the count
+// to be accurate. The detection is the probe E72 said was missing before any count holds a merge.
+const { gateReach: _gateReach } = await import('./epic-state.mjs');
+const e73Count = (active, nameOnly) => ({ ...e72Count(active), capacity: { ...e72Count(active).capacity, nameOnly } });
+
+test('E73 probe: the ordinary two-person team (work-email commits, platform approvals) is flagged, on real history', () => {
+  // THE CASE E72 MISSED UNTIL REVIEW. Two humans commit with work addresses and approve on GitHub. The
+  // real reader counts four rows — two git names, two logins — and never joins them without evidence.
+  const fx = peopleFixture({ withRepo: false });   // 'Product Writer' <writer@corp.io> is one of the two
+  try {
+    fx.commit(fx.T, 'Bo Reviewer', 'bo@corp.io', 2);
+    fx.write('epics/EP-x/.sdlc/approvals.json', [
+      { approver: 'writer-gh', date: daysBefore(P_TODAY, 2), source: 'bridge', status: 'approved' },
+      { approver: 'bo-gh', date: daysBefore(P_TODAY, 2), source: 'bridge', status: 'approved' },
+    ]);
+    const counted = activePeople(fx.T, { today: P_TODAY });
+    assert.deepEqual(counted.unknown, []);
+    assert.equal(counted.capacity.active, 4, 'two humans read as four — the over-count the probe exists for');
+    assert.equal(counted.capacity.nameOnly, 2);
+    const rule = _gateRuleFor(E72_CONTRACT);
+    const cap = _gateCapFor(rule, counted.capacity.active);
+    assert.equal(cap.capped, false, 'four people lowers nothing, so the cap alone cannot see the jam');
+    const lines = _gateReach(rule, cap, { have: 0, nameOnly: counted.capacity.nameOnly });
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.match(lines[0], /^2 of the 4 people counted are known only by a git name and may be the same people as a platform login, so the team may be as small as 2: the capped ask of 3 would then leave room for 1, and enforcing the capped count could jam this gate$/);
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E73 base: a known count of 0 or 1 may leave nobody to give the one enforced approval', () => {
+  const normal = _gateRuleFor({ ...E72_CONTRACT, risk_tags: [] });
+  for (const n of [0, 1]) {
+    const lines = _gateReach(normal, _gateCapFor(normal, n), { have: 0 });
+    assert.equal(lines.length, 1, `active ${n}`);
+    assert.match(lines[0], new RegExp(`^only ${n} active ${n === 1 ? 'person' : 'people'} counted — if nobody but the author can approve, this gate cannot pass \\(someone who has never committed or approved is not counted yet\\); the recorded way out is \`yad mode solo --reason\`$`));
+  }
+  // It says MAY: once someone has approved, a second person plainly exists, so nothing is said.
+  assert.deepEqual(_gateReach(normal, _gateCapFor(normal, 1), { have: 1 }), []);
+  assert.deepEqual(_gateReach(normal, _gateCapFor(normal, 2), { have: 0 }), [], 'two people: the base can be met');
+});
+
+test('E73 full: a cap that lowered the ask says enforcing the full count would jam', () => {
+  const rule = _gateRuleFor(E72_CONTRACT);
+  assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 2), { have: 0 }),
+    ['the full count of 3 could not be met: the cap allows 1 (2 active people, less one seat for the author), so enforcing the full count would jam this gate']);
+  assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 3), { have: 3 }), [], 'an ask already met is not a jam');
+  assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 4), { have: 0 }), [], 'nothing capped, nothing to say');
+  // At one person both the base line and the full line hold, and both are said.
+  assert.equal(_gateReach(rule, _gateCapFor(rule, 1), { have: 0 }).length, 2);
+});
+
+test('E73 names: fires only when the logins alone could not give the capped ask', () => {
+  const rule = _gateRuleFor(E72_CONTRACT);
+  const cap6 = _gateCapFor(rule, 6);   // asks 3
+  assert.deepEqual(_gateReach(rule, cap6, { have: 0, nameOnly: 2 }), [], '4 logins leave room for 3');
+  assert.equal(_gateReach(rule, cap6, { have: 0, nameOnly: 3 }).length, 1, '3 logins leave room for 2 of 3');
+  assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 1 })[0], /^1 of the 4 people counted is known only by a git name and may be the same person as a platform login, so the team may be as small as 3: the capped ask of 3 would then leave room for 2/);
+  assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 4 })[0], /so the team may be as small as 1: the capped ask of 3 would then leave room for 1/, 'never below 1');
+  assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 4), { have: 3, nameOnly: 2 }), [], 'an ask already met is not a jam');
+  const high = _gateRuleFor({ ...E72_CONTRACT, risk_tags: ['auth'] });   // asks 2
+  assert.equal(_gateReach(high, _gateCapFor(high, 3), { have: 0, nameOnly: 1 }).length, 1, '2 logins leave room for 1 of 2');
+  // A capped ask of 1 is the base: the names check never speaks for it (the base check does, at 0 or 1).
+  assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 2), { have: 0, nameOnly: 2 }).filter((l) => /git name/.test(l)), []);
+});
+
+test('E73 unknown: no count, or an unknown nameOnly, never becomes a warning', () => {
+  const rule = _gateRuleFor(E72_CONTRACT);
+  assert.deepEqual(_gateReach(rule, null, { have: 0, nameOnly: 3 }), [], 'no cap: an unknown count says nothing');
+  for (const v of [null, undefined, NaN, -1, 1.5, '2', 9]) {
+    assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: v }), [], `nameOnly ${String(v)}`);
+  }
+});
+
+test('E73 gate status: an open gate prints why it may not be met; solo mode does not', async () => {
+  const { T } = scaffoldEpic();
+  try {
+    const { out } = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(4, 2) }));
+    assert.match(out, /architecture-review .*\n\s+! may not be met: 2 of the 4 people counted are known only by a git name/);
+    const hubFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const solo = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(4, 2) }));
+    assert.doesNotMatch(solo.out, /may not be met/, 'solo mode counts nothing, so nothing can jam');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E73 gate sync: an open review prints why it may not be met BEFORE the merge, and holds nothing', async () => {
+  const { T, ep } = scaffoldEpic();
+  try {
+    const open = { ok: true, state: 'open', merged: false, headOid: 'a', reviews: [], threads: [] };
+    const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(2, 0) }));
+    assert.match(out, /! may not be met: the full count of 3 could not be met: the cap allows 1 \(2 active people, less one seat for the author\), so enforcing the full count would jam this gate/);
+    // Reported only: the same merge with one approval still passes on the base, and prints no warning.
+    const merged = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [
+      { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
+    ], threads: [] };
+    const done = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => merged, headCount: e73Count(2, 0) }));
+    assert.match(done.out, /gate PASSED/);
+    assert.doesNotMatch(done.out, /may not be met/, 'a passed gate is not a jam');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((x) => x.id === 'architecture-review').status, 'done');
+    // And `gate status` stops saying it once the gate has passed.
+    const shown = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(2, 0) }));
+    assert.doesNotMatch(shown.out, /may not be met/, 'a passed gate is not a jam');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
