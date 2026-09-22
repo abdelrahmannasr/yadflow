@@ -150,7 +150,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const hint = teamHint(headCount || activePeople(root, { aliases: legacyLogins(hub) }));
         if (hint.line && hint.known) {
           check(checks, 'mode:suggest-team', 'project', 'warn', hint.line,
-            `run \`${TEAM_CMD}\` if more than one person works here; if it is only you (for example two accounts, two spellings of your name, or your own approval on a local ledger), leave solo mode on`);
+            `run \`${TEAM_CMD}\` if more than one person works here; if it is only you (for example two accounts, two spellings of your name, a robot committing under a plain name, or your own approval on a local ledger), leave solo mode on`);
         } else if (hint.line) {
           check(checks, 'mode:suggest-team', 'project', 'ok', hint.line);
         }
