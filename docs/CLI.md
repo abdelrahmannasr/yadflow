@@ -1213,16 +1213,16 @@ Three real lines, each from a different team Product (the arrow line is the firs
 
 ```text
   ! Product hub (GitHub acme/app, branch `main`): This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.
-  → only GitHub can hold a merge, through a required approval in GitHub's branch protection or a ruleset for `main`; yad only reports what is set
+  → only GitHub can require an approval before a merge, in GitHub's branch protection or a ruleset for `main`; yad only reports what is set
   ✓ Product hub: a pull request into `main` on GitHub acme/app needs at least 2 approvals (from: a repo ruleset (id 7)); whether a code owner must approve some files is not known — yad reports this and enforces nothing
   ! Product hub: `main` is protected on GitLab acme/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them; whether a code owner must approve some files is not known
 ```
 
 | Line | Level (team) | Level (solo) |
 |---|---|---|
-| A pull request (GitLab: merge request) into a protected branch needs N approvals | ok | **warn** — GitHub never lets you approve your own pull request, so the merge will be blocked; on GitLab it may be, by a project setting yad does not read |
+| A pull request (GitLab: merge request) into a protected branch needs N approvals | ok | **warn** — you cannot approve your own pull request, so the merge is blocked unless you may bypass the rule (who may bypass is not read); on GitLab the merge may be blocked, by a project setting yad does not read |
 | No approval rule **and** no branch protection, both proven — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
-| Protected, but no rule requires an approval | **warn** | ok |
+| Protected, but no rule requires an approval (or none on every change, when a code owner or a named reviewer covers some files) | **warn** | ok |
 | Not protected, or not known whether it needs an approval | **warn** | ok |
 | A merge request needs N approvals, but the branch is not protected, so a direct push skips them (GitLab) | **warn** | **warn** |
 | Not known at all, with why | **warn** | ok |
@@ -1233,7 +1233,9 @@ their approvers may overlap. A count must be a whole number the platform gave; a
 `2.5`, `true`, `"2"`) is "could not read", never 0 and never 1.
 
 **It is advisory.** A line is a warning at most, never a failure: the platform holds a merge, and yad only
-reports what is set. How to set up branch protection is not documented here.
+reports what is set. How to set up branch protection is not documented here. In solo mode a "not known"
+line is `ok`, and this section still prints its fix-it hint, which `yad doctor` otherwise shows only for a
+line that is not `ok`.
 
 **How it reads.** With your own `gh` or `glab` login, from the repo's own host — nothing is written,
 and nothing is sent anywhere else. `gh auth status --hostname <host>` (or `glab`) is asked once per host.
@@ -1251,7 +1253,9 @@ says not known.
 - Who may push directly to a protected branch is not read (GitLab's `push_access_levels`). On GitLab a
   direct push by someone allowed to push skips the merge request, and with it the approval rule.
 - On GitLab, whether a code owner must approve is read from the project's own protected-branch list, which
-  leaves out protection set for a whole group. With no entry for the branch, the line says it is not known.
+  leaves out protection set for a whole group — and a group's setting takes precedence over the project's.
+  So only an entry for the branch that says yes is proof; an entry that says no proves nothing, and only a
+  branch that is not protected proves that no code owner is needed. Anything else is "not known".
 - GitLab's tier (Free, Premium, Ultimate) is never guessed.
 - In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
   then says not known (HTTP 403 or 404), never "no rules".

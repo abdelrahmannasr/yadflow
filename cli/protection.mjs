@@ -112,7 +112,9 @@ function loggedIn(runner, cli, host, authCache) {
 //   { …, known: true,
 //     protected: true|false|null, protectedWhy,            — is the branch protected at all?
 //     approvals: n|null, atLeast, approvalsWhy, from: [..],— the required approval count, and where
-//     codeOwners: true|false|null }                        — a code-owner review is required (a fact beside)
+//     codeOwners: true|false|null,                         — a code-owner review is required (a fact beside)
+//     fileReviewers: true|false|null }                     — a named reviewer for some files (GitHub only:
+//                                                            a GitLab answer carries no such key)
 // `kind` names the reason for a hint, so the hint never depends on the words of `why`.
 export function readProtection({ platform, gitUrl, branch = null, branchFrom = 'registry' } = {}, { runner = run, env = process.env, authCache = new Map() } = {}) {
   const host = hostFromGitUrl(gitUrl || '');
@@ -186,7 +188,10 @@ function readGitHub(base, runner, unknown) {
       if (r?.type !== 'pull_request') continue;
       if (r.parameters?.require_code_owner_review === true) rulesetCodeOwners = true;
       // A named reviewer for some files (`required_reviewers`): like a code owner, a fact beside the count.
-      if (Array.isArray(r.parameters?.required_reviewers)) {
+      if (r.parameters?.required_reviewers !== undefined && !Array.isArray(r.parameters.required_reviewers)) {
+        // Present, but not a list: like a count that is not a whole number, that is "could not read".
+        if (rulesetReviewers === false) rulesetReviewers = null;
+      } else if (Array.isArray(r.parameters?.required_reviewers)) {
         for (const x of r.parameters.required_reviewers) {
           const m = count(x?.minimum_approvals);
           if (m > 0) rulesetReviewers = true;
@@ -265,14 +270,13 @@ function readGitLab(base, runner, unknown) {
   }
   if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'other', why: 'GitLab did not say whether the branch is protected' };
   out.protected = b.body.protected;
-  // The project's protected branches, for the code-owner fact only. The list leaves out protection set for
-  // a whole group, so it proves "no code-owner approval" only from an entry for this branch that says so —
-  // (on a list shorter than a page: another entry past it could say yes) — or from a branch that is not
-  // protected at all. Anything else is not known.
+  // The project's protected branches, for the code-owner fact only. The list leaves out protection set
+  // for a whole group, and a group's setting takes precedence over the project's — so an entry saying "no"
+  // proves nothing. Only a matching entry saying YES is proof, and only an UNPROTECTED branch proves no.
   const pb = api(runner, 'glab', host, `${at}/protected_branches?per_page=${PAGE}`);
   const matched = pb.ok && Array.isArray(pb.body) ? pb.body.filter((p) => branchMatches(p?.name, branch)) : [];
   if (matched.some((p) => p?.code_owner_approval_required === true)) out.codeOwners = true;
-  else if (out.protected === false || (Array.isArray(pb.body) && pb.body.length < PAGE && matched.some((p) => p?.code_owner_approval_required === false))) out.codeOwners = false;
+  else if (out.protected === false) out.codeOwners = false;
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
   if (ar.ok && Array.isArray(ar.body)) {
@@ -373,33 +377,43 @@ function lineFor(r, { name, solo = false } = {}) {
     ...(r.codeOwners === null ? ['whether a code owner must approve some files is not known'] : []),
     ...(r.fileReviewers === null ? ['whether a named reviewer must approve some files is not known'] : []),
   ];
-  const also = [...scoped.map((x) => x.replace(' must ', ' must also ')), ...unknownScoped];
-  const owners = also.length ? `; ${also.join('; ')}` : '';
+  // "also" only where something else is already required — an approval count.
+  const clauses = (withAlso) => {
+    const all = [...(withAlso ? scoped.map((x) => x.replace(' must ', ' must also ')) : scoped), ...unknownScoped];
+    return all.length ? `; ${all.join('; ')}` : '';
+  };
+  const owners = clauses(true);
   const from = `(from: ${r.from.join('; ')})`;
   const request = REQUEST[r.platform] || 'pull request';
   if (r.approvals > 0) {
     const n = `${r.atLeast ? 'at least ' : ''}${r.approvals} approval${r.approvals === 1 ? '' : 's'}`;
-    if (solo) {
-      // GitHub never lets an author approve their own pull request; GitLab has a project setting for it,
-      // which yad does not read.
-      const own = r.platform === 'gitlab'
-        ? 'GitLab may not let you approve your own merge request (a project setting yad does not read), so the merge may be blocked'
-        : 'you cannot approve your own pull request, so the merge will be blocked';
-      return { status: 'warn', message: `${name}: solo mode, but a merge into ${br} on ${where}${branchNote} needs ${n} — ${own}`, hint: `relax the required approvals in ${setting} ${from}` };
-    }
+    // Who may bypass a rule is not read, and neither is GitLab's "an author may approve" setting, so the
+    // solo line says what stands in the way, and what yad could not read about it.
+    const own = r.platform === 'gitlab'
+      ? 'GitLab may not let you approve your own merge request (a project setting yad does not read), so the merge may be blocked'
+      : 'you cannot approve your own pull request, so the merge is blocked unless you may bypass the rule (who may bypass is not read)';
     // A rule on a branch that is NOT protected covers a merge request only: a direct push skips it. (GitLab:
     // a rule with no branch listed covers every branch. On GitHub a count always comes with protection.)
     if (r.protected !== true) {
-      return { status: 'warn', message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}`, hint: `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set` };
+      return {
+        status: 'warn',
+        message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? `, and ${own}` : ''}`,
+        hint: `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
+      };
+    }
+    if (solo) {
+      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n}${owners} — ${own}`, hint: `relax the required approvals in ${setting} ${from}` };
     }
     return { status: 'ok', message: `${name}: a ${request} into ${br} on ${where} needs ${n} ${from}${note ? `; ${note}` : ''}${owners} — yad reports this and enforces nothing` };
   }
   if (r.approvals === 0 && r.protected === false) {
     if (solo) return { status: 'ok', message: `${name}: ${where} has no approval rules and no branch protection on ${br}${branchNote} — expected in solo mode; yad records what happens, but cannot stop anything here` };
-    return { status: 'warn', message: `${name} (${where}, branch ${br}${note ? `; ${note}` : ''}): ${BANNER}`, hint: `only ${P} can hold a merge, through a required approval in ${setting}; yad only reports what is set` };
+    return { status: 'warn', message: `${name} (${where}, branch ${br}${note ? `; ${note}` : ''}): ${BANNER}`, hint: `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === true) {
-    const only = scoped.length ? ` — only some changes need one (${scoped.join('; ')})` : '';
+    // "on every change": a code-owner or named-reviewer rule IS a rule that requires an approval, for the
+    // files it names — so the plain "no rule requires an approval" would contradict the clause after it.
+    const only = scoped.length ? ` on every change — only some changes need one (${scoped.join('; ')})` : '';
     const msg = `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
   }
@@ -409,8 +423,8 @@ function lineFor(r, { name, solo = false } = {}) {
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: r.platform === 'gitlab' ? 'on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in' : `ask someone who can see ${P}'s settings for ${br}` };
   }
   const msg = r.protected === true
-    ? `${name}: ${br} is protected on ${where}${branchNote}, but whether a merge needs an approval is not known — ${r.approvalsWhy}${owners}`
-    : `${name}: whether ${br} is protected on ${where}${branchNote} is not known (${r.protectedWhy}), and neither is whether a merge needs an approval — ${r.approvalsWhy}${owners}`;
+    ? `${name}: ${br} is protected on ${where}${branchNote}, but whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`
+    : `${name}: whether ${br} is protected on ${where}${branchNote} is not known (${r.protectedWhy}), and neither is whether a merge needs an approval — ${r.approvalsWhy}${clauses(false)}`;
   const hint = r.platform === 'gitlab'
     ? `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
     : `ask a repo admin to check the required approvals for ${br} in ${P}'s settings`;
