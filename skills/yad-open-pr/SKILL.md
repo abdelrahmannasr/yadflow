@@ -46,7 +46,7 @@ the Product.
   on GitLab the login `glab` reports (no assignee is passed when that lookup fails). **No reviewers are
   requested** (E62): yadflow keeps no list of people. The CLI prints `no
   reviewers were requested — ask them on the PR itself`. For a `high` directory the CLI names the people
-  who have worked there lately (E67, Step 3). For every change it also prints a reviewer **suggestion**
+  who have worked there lately (E67, Step 3). For every code-repo change it also prints a reviewer **suggestion**
   (E68, Step 3a): who has committed in the touched folders lately, and what CODEOWNERS lists — a hint
   only, never a request.
 - **Routing** — the merge needs 1 approval from someone other than the author (the base). `high` risk
@@ -109,9 +109,10 @@ files. Relay both as they are. It is a **suggestion only**:
 - Never request those people as reviewers on the PR/MR yourself, and never call them owners or required
   approvers. A name is a hint about who **may** know the code. The author decides whom to ask.
 - CODEOWNERS is a hint: these files go stale. A `CODEOWNERS line N not read — …` line is a line yadflow
-  could not match safely; mention it, do not guess what it meant.
+  could not match safely (the first three get a reason, the rest a count, and the list then says it
+  `may be wrong`); mention it, do not guess what it meant.
 - The same person can appear in both lists under two names (a git name, a platform login). Do not join
-  them unless the output says `also in the history above`.
+  them unless the output says `also in the 30-day history` (only a same-platform `noreply` login counts).
 - `not read` (a shallow clone, a missing base) is never "nobody". Say it as the CLI says it.
 
 ### Step 3b — Post the review trailer (optional, recommended)

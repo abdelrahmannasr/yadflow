@@ -68,7 +68,7 @@ are a hint for whom to ask. There is no roster to turn them into people.
    login `glab api user` reports on GitLab (no assignee when that lookup fails) — and add a
    `domain:<repo>` label per touched repo. `yad gate open` prints
    `no reviewers were requested — ask them on the PR itself`; the author asks people on the PR. (A Shape review PR gets no
-   reviewer suggestion: E68's suggestion reads a code change, so only `yad open-pr` on a code repo prints it.)
+   reviewer suggestion: E68's suggestion reads a code change, so only `yad open-pr` (and `yad ship`) on a code repo prints it.)
 4. **Do not write the ledger.** CI is the sole writer and writes only at merge. During review nothing
    is recorded in the ledger — the platform PR/MR holds the review state (native approvals + threads).
    At merge, CI records the `hub-prs.json` entry (in the shape below) and advances on the default

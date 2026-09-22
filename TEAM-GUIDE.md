@@ -658,7 +658,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |
 | `yad-pr-template` | Install the platform PR/MR template + risk routing + the pr-title/pr-template gate scripts. |
 | `yad-commit` | Commit one staged atomic change by the conventions (`--ai` co-author footer, atomic guard). |
-| `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, assign the committer — no reviewers are requested), based on the repo's **resolved default branch** — `--base` overrides, and a non-default base warns (it costs the AI first pass). |
+| `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, assign the committer — no reviewers are requested; it prints a reviewer suggestion from recent history and CODEOWNERS, a hint only), based on the repo's **resolved default branch** — `--base` overrides, and a non-default base warns (it costs the AI first pass). |
 | `yad-ship` | Commit **and** open the task PR/MR in one step. |
 | `yad-engineer-review` | AI review → engineer review → merge + record. |
 | `yad-backfill` | Spec already-built / legacy code so new work doesn't break it. |
