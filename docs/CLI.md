@@ -1167,8 +1167,8 @@ these rules come in two forms: **classic branch protection** and the newer **rul
 `protection` section of `yad doctor` reads what the platform holds on the Product hub's branch and on
 each connected repo's branch. It prints one line for each, and says where the answer came from.
 
-**Which branch.** The branch yad's files name: `default_branch` in `.sdlc/hub.json` for the Product, and in
-`.sdlc/repos.json` for a code repo. That is the branch the gates merge into. When the platform's own
+**Which branch.** The branch yad's files name: `default_branch` in `.sdlc/product.json` (`hub.json` on an
+older Product) for the Product, and in `.sdlc/repos.json` for a code repo. That is the branch the gates merge into. When the platform's own
 default branch is a different one, the line says so. When yad's files name no branch, the platform's
 default is read, and the line says that too.
 
@@ -1185,7 +1185,9 @@ protected at all (for example, limits on who may push to it); that a code owner 
 CODEOWNERS lists; and, on GitHub, that a ruleset names a reviewer who must approve a change to some files.
 Whether the branch is protected comes from the branch's own `protected` flag (`GET
 repos/{owner}/{repo}/branches/{branch}` on GitHub, `GET projects/{id}/repository/branches/{branch}` on
-GitLab — GitLab's flag also covers protection set for a whole group). The branch must exist: a branch
+GitLab — GitLab's flag also covers protection set for a whole group). If GitHub's flag says a branch is
+not protected while GitHub also lists active rules on it, the two answers disagree, so the line says it is
+not known. The branch must exist: a branch
 that yad's files name but the platform does not have is "not known", never "unprotected". A line states
 only what the platform answered: who may merge into a protected branch, or push to it directly, is not
 read, so no line says who can merge, or that the platform holds a merge. A fact that could not be read
@@ -1210,13 +1212,15 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
 
-Three real lines, each from a different team Product (only the first one has a hint, shown here):
+Three real lines, each from a different team Product, each with its hint:
 
 ```text
   ! Product hub (GitHub acme/app, branch `main`): This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.
   → only GitHub can require an approval before a merge, in GitHub's branch protection or a ruleset for `main`; yad only reports what is set
   ✓ Product hub: a pull request into `main` on GitHub acme/app needs at least 2 approvals (from: a repo ruleset (id 7)); whether a code owner must approve some files is not known — yad reports this and enforces nothing
+  → ask someone who can see GitHub's settings for `main` about what yad could not read
   ! Product hub: `main` is protected on GitLab acme/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them; whether a code owner must approve some files is not known
+  → on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for `main` in the project's merge request settings
 ```
 
 | Line | Level (team) | Level (solo) |
@@ -1225,7 +1229,9 @@ Three real lines, each from a different team Product (only the first one has a h
 | No approval rule **and** no branch protection, both proven, and no rule covering only some files — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
 | Not protected, and only some changes need an approval (a code owner or a named reviewer) | **warn** | ok |
 | Protected, but no rule requires an approval — "on every change" when a rule covering only some files is true, or could not be read | **warn** | ok (with its hint, when something could not be read) |
-| Not protected, or not known whether it needs an approval | **warn** | ok |
+| Not protected, and whether a merge needs an approval could not be read | **warn** | ok |
+| Not protected, and the platform's approval rules reach protected branches only, so none reaches this one | **warn** | ok |
+| Whether the branch is protected could not be read, and neither could the approval | **warn** | ok |
 | A merge request needs N approvals, but the branch is not protected, so a direct push skips them (GitLab) | **warn** | **warn** |
 | Not known at all, with why | **warn** | ok |
 
