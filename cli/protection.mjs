@@ -309,7 +309,7 @@ function readGitLab(base, runner, unknown) {
       if (applies) { floor = Math.max(floor, n); out.from.push(`approval rule ${JSON.stringify(String(r.name ?? r.id))}`); }
       // A rule the platform DID return that does not reach this branch: say which way it misses, so the
       // line never claims "no approval rules", nor that protecting the branch would bring this one to it.
-      else elsewhere.add(r.applies_to_all_protected_branches === true ? 'reach protected branches only' : 'name other branches');
+      else elsewhere.add(r.applies_to_all_protected_branches === true ? 'they reach protected branches only' : 'they name other branches');
     }
     if (ar.body.length >= PAGE) whys.push(`the project has ${PAGE} or more approval rules and yad reads only the first ${PAGE}`);
     src = { floor, exact: !whys.length, why: whys.join('; ') };
@@ -326,7 +326,9 @@ function readGitLab(base, runner, unknown) {
   Object.assign(out, settle([src]));
   if (elsewhere.size) {
     const how = [...elsewhere];
-    out.rulesElsewhere = how.length > 1 ? `some of them ${how[0]}, and others ${how[1]}` : how[0];
+    out.rulesElsewhere = how.length > 1
+      ? `some of them ${how[0].replace('they ', '')}, and others ${how[1].replace('they ', '')}`
+      : how[0];
   }
   // Each GitLab rule must be met on its own, and their approvers may overlap: two or more is a floor.
   if (out.approvals > 0 && out.from.length > 1) out.atLeast = true;
@@ -424,7 +426,7 @@ function lineFor(r, { name, solo = false } = {}) {
     // Whether the branch is protected may be unknown beside a count that was read: say so, never silently.
     const unsure = r.protected === null ? `; whether the branch is protected is not known — ${r.protectedWhy}` : '';
     if (solo) {
-      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure} — ${own}`, hint: `relax the required approvals in ${setting}` };
+      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}${unsure ? '; and ' : ' — '}${own}`, hint: `relax the required approvals in ${setting}` };
     }
     if (unsure) {
       return { status: 'warn', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}`, hint: unread };
@@ -437,7 +439,7 @@ function lineFor(r, { name, solo = false } = {}) {
     // The platform DID return approval rules; they do not reach this branch. "No approval rules" would be
     // false, so the banner is not printed, and the sentence says which way they miss it.
     const only = scoped.length ? `; only some changes need an approval (${scoped.join('; ')})` : '';
-    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rules ${P} has ${r.rulesElsewhere}, so none of them holds a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
+    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rules ${P} has miss it — ${r.rulesElsewhere}, so none of them holds a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === null) {
@@ -465,7 +467,7 @@ function lineFor(r, { name, solo = false } = {}) {
     const msg = `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval${scoped.length || unknownScoped.length ? ' on every change' : ''}${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     // A line that is partly unread keeps its hint in solo mode, as every could-not-read line does.
     const advice = `only ${P} can require an approval, in ${setting}; yad only reports what is set`;
-    const hint = unknownScoped.length ? `${advice}, and ${unread}` : advice;
+    const hint = unknownScoped.length ? `${advice}. ${unread[0].toUpperCase()}${unread.slice(1)}` : advice;
     if (solo) return unknownScoped.length ? { status: 'ok', message: msg, hint } : { status: 'ok', message: msg };
     return { status: 'warn', message: msg, hint };
   }

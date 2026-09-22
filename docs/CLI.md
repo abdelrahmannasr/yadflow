@@ -1244,9 +1244,10 @@ their approvers may overlap. A count must be a whole number the platform gave; a
 `2.5`, `true`, `"2"`) is "could not read", never 0 and never 1.
 
 **It is advisory.** A line is a warning at most, never a failure: the platform holds a merge, and yad only
-reports what is set. How to set up branch protection is not documented here. Every line in this
-section prints its fix-it hint, whatever its level — `yad doctor` otherwise shows a hint only for a line
-that is not `ok`. That matters most in solo mode, where a line that could not be read is `ok`.
+reports what is set. How to set up branch protection is not documented here. A line in this section
+that has a fix-it hint prints it whatever its level — `yad doctor` otherwise shows a hint only for a line
+that is not `ok`. That matters most in solo mode, where a line that could not be read is `ok`. A line that
+was read in full, and has nothing to fix, has no hint.
 
 **How it reads.** With your own `gh` or `glab` login, from the repo's own host — nothing is written,
 and nothing is sent anywhere else. `gh auth status --hostname <host>` (or `glab`) is asked once per host.
@@ -1263,6 +1264,8 @@ says not known.
 - Who may bypass a rule (for example an admin) is not read.
 - Who may push directly to a protected branch is not read (GitLab's `push_access_levels`). On GitLab a
   direct push by someone allowed to push skips the merge request, and with it the approval rule.
+- On GitLab, a line about a **protected** branch does not mention the project's approval rules that reach
+  other branches only; it says what does and does not hold a merge into this branch.
 - On GitLab, whether a code owner must approve is read from the project's own protected-branch list, which
   leaves out protection set for a whole group — and a group's setting takes precedence over the project's.
   So only an entry for the branch that says yes is proof; an entry that says no proves nothing, and only a
