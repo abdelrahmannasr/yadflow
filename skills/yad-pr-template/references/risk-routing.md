@@ -38,8 +38,8 @@ sum. Approvers are counted as distinct people, and the base approver should not 
 **The count is reported, not enforced, on a code PR.** Branch protection holds the merge — at least 1
 approval (GitHub blocks self-approval; GitLab only if its settings do). The risk step is **advisory**
 here. The capacity cap (roadmap E72) caps a count at the active people less one. It is reported, not
-enforced, on the Shape gates for now, and on the Build half it stays reported even once the Shape cap is enforced: `yad open-pr` prints the count capped by the active
-people, while `risk-route.sh` cannot cap, because a code repo's CI has no Product to count people
+enforced, on the Shape gates for now, and on the Build half it stays reported even once the Shape cap
+is enforced: `yad open-pr` prints the count capped by the active people, while `risk-route.sh` cannot cap, because a code repo's CI has no Product to count people
 from. There are no roles: no owner, no reviewer, no
 domain owner. This is `yad-review-gate`'s rule (`references/gating.md`) applied at the code-review
 boundary. The **approvals are recorded by the engineer review (Step E) through `yad-review-gate`** — the

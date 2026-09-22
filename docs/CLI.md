@@ -150,29 +150,37 @@ team review gate that has not passed yet, when the count of people suggests the 
 are two kinds of line:
 
 - `! may not be met: …` is about **today's rule**: the one approval that is always required (the base) may
-  have nobody to give it.
+  have nobody but the author to give it.
 - `! if the risk step were enforced: …` is a **what-if**. Today only the base is enforced, so the gate can
-  still pass. The line says what would happen if a later yadflow change enforced the extra approvals that
-  risk tags add (the risk step). "The ask" below means the number of approvals the gate asks for after the
-  cap (the cap limits the ask to the active people less one).
+  still pass, and the line ends by saying nothing is needed today. It says what would happen if a later
+  yadflow change enforced the extra approvals that risk tags add (the risk step). "The approvals asked"
+  means the count after the cap. The cap limits the count to the active people less one, and never below 1.
 
-Every line talks about **the people counted**, and says "may", because the count can be wrong both ways.
-It is too low when a reviewer has never committed or approved yet, because nothing records them. It is too
-high when one person commits with a work email (recorded as a name) and approves on GitHub (recorded as a
-login): yadflow never joins a name and a login without proof, so that person counts twice.
+Every line talks about **the people counted**, and says "may" or "if", because the count can be wrong both
+ways. It is too low when a reviewer has never committed or approved yet, because nothing records them. It
+is too high when one person commits with a work email (recorded as a name) and approves on GitHub
+(recorded as a login): yadflow never joins a name and a login without proof, so that person counts twice.
 
 | Kind | When it prints | Example line |
 |---|---|---|
-| Today | 0 or 1 active person counted, and no approval yet | ``! may not be met: only 1 active person counted, so if nobody but the author can approve, this gate cannot pass. Someone who has never committed or approved is not counted yet, so another person's first approval settles it; the recorded way out is `yad mode solo --reason` `` |
-| Today | Some people are known only by a name, exactly one by a platform login, and no approval yet. Example: one developer who commits with a work email and also through GitHub's web editor, which records the login | ``! may not be met: 1 of the 2 people counted is known only by a name, not a platform login, and may be the same person as the one login, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass; the recorded way out is `yad mode solo --reason` `` |
-| What-if | The cap lowered the ask, and the full count has not been reached. Not printed when a "today" line is | `! if the risk step were enforced: with no cap, the full count of 3 is more than 2 active people can give (one seat is left for the author), so this gate could never pass` |
-| What-if | Some people are known only by a name and at least one by a login, and the logins alone could not give the ask. Not printed when a "today" line is | `! if the risk step were enforced: 2 of the 4 people counted are known only by a name, not a platform login, and may be the same people as the logins, so the team may be as small as 2, which leaves room for 1 of the 3 approvals asked, so this gate could never pass` |
+| Today | 0 or 1 active person counted, and no approval recorded anywhere in the Product | ``! may not be met: only 1 active person counted and no approval recorded yet, so if nobody but the author can approve, this gate cannot pass. Someone who has never committed or approved is not counted yet. Another person's first approval settles it, or use the recorded way out, `yad mode solo --reason` `` |
+| Today | Some people are known only by a name, exactly one by a platform login, and no approval recorded anywhere. Example: one developer who commits with a work email and also through GitHub's web editor, which records the login | ``! may not be met: 1 of the 2 people counted is known only by a name, not a platform login, and may be the same person as the one login, and no approval is recorded yet, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass. Another person's first approval settles it, or use the recorded way out, `yad mode solo --reason` `` |
+| What-if | The cap lowered the count, and the approvals do not show more people than were counted | `! if the risk step were enforced: with no cap, the full count of 3 is more than 2 active people can give (one seat is left for the author), so if nobody else joins, this gate could not pass. Nothing is needed today: only one approval is enforced` |
+| What-if | Some people are known only by a name and at least one by a login, and the smallest team that allows could not give the approvals asked | `! if the risk step were enforced: 2 of the 4 people counted are known only by a name, not a platform login, and may be the same people as the logins, so the team may be as small as 2. That leaves room for 1 of the 3 approvals asked, so if the team is that small, this gate could not pass. Nothing is needed today: only one approval is enforced` |
+
+A what-if line is not printed when a today line is.
 
 "Known only by a name" means a git author name, or a name written by hand in an approval record, rather
-than a platform login. An approval already given proves that many people other than the author, so the
-smallest team is never counted below that. A Product with no platform (every record is a name) gets no
-name line, because there is no login to compare against. Two spellings of one name (`bo` and `Bo Chen`)
-still count as two people; no line can see that yet.
+than a platform login. **An approval is evidence.** Any approval recorded in the Product shows that
+approvals can be given, so no today line prints. It also sets the smallest team a what-if line assumes:
+at least the approvals on this step plus one (the author), and at least two people once anyone has
+approved anything. That assumes authors cannot approve their own work: always true on GitHub, true on
+GitLab only when its settings say so, and never checked on a Product with no platform. Where it is not
+true, a what-if line stays quiet rather than raising a false alarm.
+
+A Product with no platform (every record is a name) gets no name line, because there is no login to
+compare against. Two spellings of one name (`bo` and `Bo Chen`) still count as two people; no line can
+see that yet.
 
 No line prints in solo mode, under a step that passed, under a waived step (inherited from a parent epic,
 skipped, or deferred), or when the people could not be counted. A line about the whole Product prints

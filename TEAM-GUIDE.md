@@ -513,15 +513,17 @@ project's approval settings say so.
   A team gate that passed on its counted approvals while the cap lowered its ask says so later: `count capped from 3 to 1 (2 active people)`.
 - **When a gate may not pass (a warning only):** under a team gate that has not passed,
   `yad gate status` and `yad gate sync` print a warning line when the count of people suggests the gate
-  may not pass. It holds nothing and writes nothing. There are two kinds:
-  - `! may not be met: …` — about today's rule. The one required approval may have nobody but the author
-    to give it: only 0 or 1 person is counted, or the people counted may all be one person. The way out
-    is `yad mode solo --reason`, or another person's first approval.
-  - `! if the risk step were enforced: …` — a what-if. Today the gate can still pass on one approval; the
-    line says the extra approvals that risk tags add could never all be given by the people counted.
-  It says "may" because the count can be wrong both ways: a reviewer who has not committed or approved
-  yet is not counted, and one person with a work email and a platform login counts twice. CI does not
-  show it before the merge, so run `yad gate status` while the review is open.
+  may not pass. It holds nothing and writes nothing. It says "may" because the count can be wrong both
+  ways: a reviewer who has not committed or approved yet is not counted, and one person with a work
+  email and a platform login counts twice. CI does not show it before the merge, so run
+  `yad gate status` while the review is open. There are two kinds of line:
+  - `! may not be met: …` — about today's rule. No approval is recorded anywhere yet, and the one
+    required approval may have nobody but the author to give it: only 0 or 1 person is counted, or the
+    people counted may all be one person. Another person's first approval settles it; the recorded way
+    out is `yad mode solo --reason`.
+  - `! if the risk step were enforced: …` — a what-if. Today the gate can still pass on one approval, and
+    the line says nothing is needed today. It says the extra approvals that risk tags add could not all
+    be given by the people counted.
 
 | Review | Full count | Holds the gate |
 |--------|------------|----------------|

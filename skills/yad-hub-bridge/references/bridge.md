@@ -296,7 +296,8 @@ push retries with a rebase.
   Actions, else a fine-grained PAT as `SDLC_GATE_TOKEN` on the mergesync checkout.
 
 **Manual sync & recovery.** In verified mode `yad gate sync` is **advisory** (read-only) — it prints the
-predicate (and any `! may not be met:` / `! if the risk step were enforced:` warning, E73) but writes nothing, so it is **not** a recovery path when CI fails. If a merge-time run fails
+predicate (and any `! may not be met:` / `! if the risk step were enforced:` warning, E73) but writes
+nothing, so it is **not** a recovery path when CI fails. If a merge-time run fails
 (can't push, API hiccup), recovery is the scheduled **reconcile** job (automatic; it re-advances merged
 reviews not yet `done`). To force it immediately, a maintainer runs the same command CI runs, locally on
 the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged` (this writes + pushes,
