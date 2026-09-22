@@ -117,10 +117,11 @@ Print, in this order:
      `count capped from 3 to 1 (2 active people)`. In solo mode it prints no shortfall.
    - **A gate that may not pass (E73):** under a team gate that has not passed, `yad gate status` can
      print a warning line. Relay it as stated, as a warning and never as "blocked": it holds nothing.
-     `! may not be met: …` means no approval is recorded yet and the one required approval may have
-     nobody but the author to give it; another person's first approval settles it. `! if the risk step
-     were enforced: …` is a what-if: the extra approvals that risk tags add could not all be given by
-     the people counted. The gate can still pass today, and the line says so.
+     A line starting `! may not be met:` means there is no approval in the counting window and the one
+     required approval may have nobody but the author to give it; another person's approval settles it.
+     A line starting `! if the risk step were enforced:` is a what-if: the extra approvals that risk
+     tags add could not all be given by the people counted. The gate can still pass today, and the line
+     says so.
    - **How many people there are to ask (E71), printed once per epic and not per step:** `active people:
      4 in the last 90 days — caps each gate's count at 3 approvers (one seat is left for the author);
      reported, only the base is enforced`, with the window's basis on the line under it. It is

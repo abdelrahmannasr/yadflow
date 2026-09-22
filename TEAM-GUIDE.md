@@ -517,13 +517,13 @@ project's approval settings say so.
   ways: a reviewer who has not committed or approved yet is not counted, and one person with a work
   email and a platform login counts twice. CI does not show it before the merge, so run
   `yad gate status` while the review is open. There are two kinds of line:
-  - `! may not be met: …` — about today's rule. No approval is recorded anywhere yet, and the one
+  - `! may not be met: …` — about today's rule. There is no approval in the counting window, and the one
     required approval may have nobody but the author to give it: only 0 or 1 person is counted, or the
-    people counted may all be one person. Another person's first approval settles it; the recorded way
-    out is `yad mode solo --reason`.
+    2 people counted may be one person. Another person's approval settles it; the recorded way out is
+    `yad mode solo --reason`.
   - `! if the risk step were enforced: …` — a what-if. Today the gate can still pass on one approval, and
-    the line says nothing is needed today. It says the extra approvals that risk tags add could not all
-    be given by the people counted.
+    the line ends by saying nothing beyond that approval is needed today. It says the extra approvals
+    that risk tags add could not all be given by the people counted.
 
 | Review | Full count | Holds the gate |
 |--------|------------|----------------|

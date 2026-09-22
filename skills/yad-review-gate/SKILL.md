@@ -57,9 +57,9 @@ roles — there are no roles, and yadflow keeps no list of people:
   change turns the capped count on together with `yad gate lower --reason`, the way out, once the count
   is accurate.
 - **Relay a warning line.** Under a team gate that has not passed, `yad gate status` and `yad gate sync`
-  print `! may not be met: …` (today's one required approval may have nobody to give it) or
-  `! if the risk step were enforced: …` (a what-if about the extra approvals) when the count of people
-  suggests the gate may not pass (E73). Never block on it and never write it into the ledger. Tell the
+  print `! may not be met: …` (today's one required approval may have nobody but the author to give
+  it) or `! if the risk step were enforced: …` (a what-if about the extra approvals) when the count of
+  people suggests the gate may not pass (E73). Never block on it and never write it into the ledger. Tell the
   reviewers while the review is open, because a merged review PR can no longer take approvals.
 - **When the people cannot be counted** (`active: null` — for example Product CI, which checks out only
   the hub, so the connected repos are not on disk): **no cap is computed or shown**, and the base holds as
