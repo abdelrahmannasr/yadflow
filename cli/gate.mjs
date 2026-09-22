@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
@@ -683,6 +683,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   const people = headCount || activePeople(root, { today: today || undefined, aliases });
   log(`  ${c.dim(activeSum(people))}`);
   note(c.dim(activeBasis(people)));
+  const reachSeen = new Set();   // E73: each "may not be met" line once per command, not once per PR
   // Targets whose step is still open. The dated approval-record file is regenerated only for these —
   // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
   // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
@@ -764,12 +765,14 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       ? 'approvals not counted here'
       : `${pred.have} approved; count: ${gateRuleSum(pred.gateRule)}${gateRuleEnforced(pred.gateRule, pred.cap)}${pred.short ? ` — ${pred.short} short` : ''}`;
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
-    // E73: why this gate MAY NOT BE MET — reported only, never enforced. Printed on any gate that has not
-    // passed, so a LOCAL sync while the review is open shows it before the merge, when approvals can still
-    // come. Wired CI does not: it runs only at the merge and on a schedule, and usually cannot count people.
-    // Only a gate that counted (`rule: 'count'`).
+    // E73: why this gate may not pass — reported only, never enforced. Only on a gate that counted
+    // (`rule: 'count'`, so never in solo mode) and is still open: not one already done (`alreadyDone` —
+    // a deferred step, or a done step whose approvals went stale, is not reopened by a sync) and not one
+    // that passed on this run. A LOCAL sync while the review is open shows it before the merge, when
+    // approvals can still come; wired CI does not — it runs only on merged PRs, and usually cannot count
+    // people. Each distinct line once per command (`uniqueReach`).
     if (!alreadyDone && !pred.passed && pred.rule === 'count' && pred.have !== null) {
-      for (const why of gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly })) warn(`may not be met: ${why}`);
+      for (const why of uniqueReach(gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly }), reachSeen)) warn(why);
     }
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
@@ -1221,6 +1224,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // can see the number their gates will be capped against (E72), before it holds anything for them.
   log(`  ${c.dim(activeSum(headCount))}`);
   note(c.dim(activeBasis(headCount)));
+  const reachSeen = new Set();   // E73: each "may not be met" line once per view, not once per step
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const accepted = acceptedHashes(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
@@ -1278,10 +1282,12 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     const paying = s.debt === true && state !== 'deferred' ? '; owed as debt — being paid back' : '';
     log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
     if (s.closed && typeof s.closed === 'object' && !Array.isArray(s.closed)) log(`      ${c.dim(closedLine(s.closed))}`);
-    // E73: why this gate MAY NOT BE MET — reported only, never enforced. Only on a gate still open to
-    // approvals: not in solo mode, not on a waived step, and not on one that already passed.
+    // E73: why this gate may not pass — reported only, never enforced. Not in solo mode, not on a waived
+    // (inherited, skipped, deferred) step, and not on one that passed. Every other review step counts,
+    // including one not reached yet — so a line about the whole Product (the base, one person) prints
+    // once, under the first step it applies to (`uniqueReach`), not under every step after it.
     if (!solo && !waived && !isPassed(s)) {
-      for (const why of gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly })) log(`      ${c.yellow('!')} ${c.dim(`may not be met: ${why}`)}`);
+      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly }), reachSeen)) log(`      ${c.yellow('!')} ${c.dim(why)}`);
     }
   }
 }

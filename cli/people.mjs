@@ -40,6 +40,15 @@ import { epicIds, epicRoot, ledgerPersonLogin, capLimit, capSeat } from './epic-
 import { corruptShards, readShips } from './ledger.mjs';
 import { isBot, loginFromEmail } from './riskmap.mjs';
 
+// yadflow's OWN gate bot on GitLab. The GitHub workflow commits as `yad-gate-sync[bot]`, which `isBot`
+// already skips; the GitLab one commits as `yad-gate-sync` <yad-gate-sync@noreply.<host>> (the wired
+// `yad-gate-sync.gitlab-ci.yml`), with no `[bot]`, so it was counted as a person (E72 review, case b) —
+// and a solo GitLab developer read as two. Matched EXACTLY on both the name and the address our own
+// template writes: that is evidence, not a guess from how a name looks. Kept here, not in `isBot`,
+// because `isBot` has an awk twin in `risk-map-check.sh` that a parity test holds equal.
+export const isGateBot = (name, email) => String(name || '').trim() === 'yad-gate-sync'
+  && /^yad-gate-sync@noreply\./i.test(String(email || '').trim());
+
 // ---- the three windows (Part 3, "Counting people") ----------------------------------------------
 //
 // | Purpose             | Window                                  | Shape                |
@@ -328,7 +337,7 @@ function gitAuthors(repoRoot, since) {
     // \x1f, never NUL: E67's separator, for the same reason — a reader that takes C strings would cut
     // the line at the first NUL byte.
     const [ct, name, email] = line.split('\x1f');
-    if (isBot(name, email)) continue;   // a robot cannot approve, so it is not capacity
+    if (isBot(name, email) || isGateBot(name, email)) continue;   // a robot cannot approve, so it is not capacity
     // A commit we can READ but cannot date is a source we could not read — the same rule this file
     // applies to an approval and to a ship, and the one place the first pass left it as a silent skip.
     // `Number('')` is 0, which is finite and would have become 1970-01-01; a `%ct` in MILLISECONDS
