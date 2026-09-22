@@ -18994,14 +18994,14 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // A rule the platform DID return, which reaches only protected branches: not "no approval rules".
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Devs', approvals_required: 2, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, []]]));
   assert.deepEqual([r.protected, r.approvals, r.rulesElsewhere], [false, 0, 'they reach protected branches only']);
-  assert.match(protectionLine(r, { name: 'web' }).message, /and the approval rules GitLab has miss it — they reach protected branches only, so none of them holds a merge into it$/);
+  assert.match(protectionLine(r, { name: 'web' }).message, /and the approval rules GitLab has miss it: they reach protected branches only, so none of them holds a merge into it$/);
   // A rule scoped by NAME misses this branch a different way, and protecting the branch would not bring it.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Rel', approvals_required: 2, protected_branches: [{ name: 'release-*' }] }]], [/\/protected_branches/, 200, []]]));
   assert.equal(r.rulesElsewhere, 'they name other branches');
-  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has miss it — they name other branches, so none of them holds a merge into it$/);
+  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has miss it: they name other branches, so none of them holds a merge into it$/);
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Rel', approvals_required: 2, protected_branches: [{ name: 'release-*' }] }, { name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, []]]));
   assert.equal(r.rulesElsewhere, 'some of them name other branches, and others reach protected branches only', 'never "only" of all of them');
-  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has miss it — some of them name other branches, and others reach protected branches only, so none of them holds a merge into it$/, 'the joined phrase reads as a sentence');
+  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has miss it: some of them name other branches, and others reach protected branches only, so none of them holds a merge into it$/, 'the joined phrase reads as a sentence');
   // A code-owner fact the reader proved is still said beside them (the round-5 rule).
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, [{ name: '*', code_owner_approval_required: true }]]]));
   assert.deepEqual([r.codeOwners, r.rulesElsewhere], [true, 'they reach protected branches only']);
@@ -19106,7 +19106,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   // A rule the platform returned that reaches only protected branches: its own sentence, not the banner.
   l = protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'they reach protected branches only' }, { name: 'web' });
   assert.ok(!l.message.includes(BANNER));
-  assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, and the approval rules GitLab has miss it — they reach protected branches only, so none of them holds a merge into it');
+  assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, and the approval rules GitLab has miss it: they reach protected branches only, so none of them holds a merge into it');
   assert.match(l.hint, /^only GitLab can require an approval/);
   assert.equal(protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'they name other branches' }, { name: 'web', solo: true }).status, 'ok');
   // A partly read count line carries a hint, as every other partly read line does.

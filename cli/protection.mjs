@@ -113,8 +113,9 @@ function loggedIn(runner, cli, host, authCache) {
 //   { …, known: true,
 //     protected: true|false|null, protectedWhy,            — is the branch protected at all?
 //     approvals: n|null, atLeast, approvalsWhy, from: [..],— the required approval count, and where
-//     rulesElsewhere: '<how they miss this branch>',        — GitLab only: rules the project has that do
-//                                                            not reach this branch
+//     rulesElsewhere: '<clause: how they miss it>',        — GitLab only: rules the project has that do
+//                                                            not reach this branch ("they name other
+//                                                            branches", "some of them …, and others …")
 //     codeOwners: true|false|null,                         — a code-owner review is required (a fact beside)
 //     fileReviewers: true|false|null }                     — a named reviewer for some files (GitHub only:
 //                                                            a GitLab answer carries no such key)
@@ -439,7 +440,7 @@ function lineFor(r, { name, solo = false } = {}) {
     // The platform DID return approval rules; they do not reach this branch. "No approval rules" would be
     // false, so the banner is not printed, and the sentence says which way they miss it.
     const only = scoped.length ? `; only some changes need an approval (${scoped.join('; ')})` : '';
-    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rules ${P} has miss it — ${r.rulesElsewhere}, so none of them holds a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
+    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rules ${P} has miss it: ${r.rulesElsewhere}, so none of them holds a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === null) {
