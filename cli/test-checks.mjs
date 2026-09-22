@@ -3429,6 +3429,9 @@ test('proven history: an address-shaped name, a signed commit and hostile git se
   commitAs(T, { name: 'Mapper', email: 'map@corp.io', date: days(1) }, 'chore: map', { '.sdlc/risk-map': '# yad-risk-map v1\n./ low confirmed\nsrc/ low confirmed\nsrc/payments/ high confirmed\nsrc/catalog/ medium confirmed\n' });
   commitAs(T, { name: 'carol@corp.io', email: '7+carol@users.noreply.github.com', date: days(1) }, 'feat: c', { 'src/payments/c.js': 'x' });
   commitAs(T, { name: 'dan@corp.io', email: 'dan@corp.io', date: days(1) }, 'feat: d', { 'src/payments/d.js': 'x' });
+  // A name written like a login is not a login: `- @dave` would read as one to the engineer review.
+  commitAs(T, { name: '@dave', email: 'dave@corp.io', date: days(1) }, 'feat: dv', { 'src/payments/dv.js': 'x' });
+  commitAs(T, { name: 'Eve @eve', email: '5-eve@users.noreply.gitlab.com', date: days(1) }, 'feat: e', { 'src/payments/e.js': 'x' });
   // A signed commit: with log.showSignature=true git prints a signature check into the log's output.
   fs.writeFileSync(path.join(T, 'src/payments/s.js'), 'x');
   execFileSync('git', ['add', '-A'], { cwd: T, stdio: 'pipe', env: GIT_ENV });
@@ -3445,17 +3448,18 @@ test('proven history: an address-shaped name, a signed commit and hostile git se
   try {
     const r = runGate(RISK_MAP, T, ['--level', 'main'], HOSTILE);
     assert.equal(r.code, 0, r.out);
-    const want = ['- Signer', '- a name that is an e-mail address', 'carol @carol', '- Legacy Larry', 'alice Alice'];
+    const want = ['- Signer', 'eve @eve', '- a name written like a login', '- a name that is an e-mail address', 'carol @carol', '- Legacy Larry', 'alice Alice'];
     assert.deepEqual(whoLines(r.out), want, 'no signature line as a person, no address, and the pathspecs still read');
     Object.assign(process.env, HOSTILE);
     const map = git(T, 'show', 'main:.sdlc/risk-map').toString();
     const got = recentAuthorsFor(T, 'main', { entries: parseRiskMap(map).entries, changed: ['src/payments/pay.js'] });
     assert.deepEqual(got.authors.map((a) => `${a.login || '-'} ${a.name}`), want, 'the JS reader agrees under the same settings');
     const ci = runGate(RISK_MAP, T, ['main'], HOSTILE);
-    assert.match(ci.out, /: Signer, a name that is an e-mail address, @carol, Legacy Larry, Alice \(@alice\)\n/, 'a login standing in for a name is printed once');
+    assert.match(ci.out, /: Signer, @eve, a name written like a login, a name that is an e-mail address, @carol, Legacy Larry, Alice \(@alice\)\n/, 'a login standing in for a name is printed once');
     assert.doesNotMatch(ci.out, /corp\.io/, 'no address is ever printed');
     const route = runGate(wiredRoute(T), T, [body(T, '- Risk level: low\n- Contract surface touched: no\n'), 'main'], HOSTILE).out;
-    assert.match(route, /worked there in the last 30 days: Signer, a name that is an e-mail address, @carol, Legacy Larry, Alice \(@alice\)\n/, route);
+    assert.match(route, /worked there in the last 30 days: Signer, @eve, a name written like a login, a name that is an e-mail address, @carol, Legacy Larry, Alice \(@alice\)\n/, route);
+    assert.doesNotMatch(route, /- @dave/, 'a git name is never printed as if it were a login');
     assert.match(route, /\n {2}- @carol\n/, 'risk-route prints the login once too');
     assert.doesNotMatch(route, /corp\.io/);
   } finally {

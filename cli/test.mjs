@@ -18001,7 +18001,10 @@ test('suggest reviewers: ranked by commits, then newest; the change\'s own autho
   assert.deepEqual(rankAuthors([
     { name: 'ana@corp.io', email: 'ana@corp.io' },
     { name: 'tanuki@corp.io', email: '9-tanuki@users.noreply.gitlab.com' },
-  ]).map((a) => [a.name, a.loginHost]), [['a name that is an e-mail address', null], ['@tanuki', 'gitlab']]);
+    { name: '@dave', email: 'dave@corp.io' },
+    { name: 'Eve @eve', email: 'eve@corp.io' },
+  ]).map((a) => [a.name, a.loginHost]), [['a name that is an e-mail address', null], ['@tanuki', 'gitlab'], ['a name written like a login', null], ['a name written like a login', null]],
+  'a printed `@word` is only ever a real login: the engineer review reads it as one');
 });
 
 test('suggest reviewers: the real reader reads files directly in each touched folder, once per commit', async () => {
@@ -18116,6 +18119,13 @@ test('suggest reviewers: GitLab CODEOWNERS follows its sections, exclusions and 
   assert.deepEqual(who('[Docs] @d\n[ ]\nx\n', 'x'), ['@d'], 'a heading with a blank name is not a heading, so `x` stays in [Docs]');
   const bad = parseCodeowners('[Section name\ndocs/?.md @q\ndocs/** @s\nwhat\\ever\\x @t\n', 'gitlab');
   assert.deepEqual(bad.skipped.map((s) => s.line), [1, 2, 3, 4]);
+  // The section's defaults apply only to an entry that writes no owner; unreadable words mean no owner.
+  for (const t of ['[Docs] @d\ndocs/ bob\n', '[Docs] @d\ndocs/ # note\n', '[Docs] @d\ndocs/ user@corp\n']) {
+    const p = parseCodeowners(t, 'gitlab');
+    assert.deepEqual(ownersFor(p, ['docs/a.md']).owners, [], `${JSON.stringify(t)}: never the default owner`);
+    assert.deepEqual(p.skipped.map((s) => s.line), [2], `${JSON.stringify(t)}: reported, so the answer is hedged`);
+  }
+  assert.deepEqual(who('[Docs] @d\ndocs/\n', 'docs/a.md'), ['@d'], 'an entry that writes no owner still takes the defaults');
   assert.deepEqual(parseCodeowners('[Docs] @docs\\team\n/app/\n', 'gitlab').skipped.map((s) => s.line), [1],
     'a heading whose default owners cannot be read is reported, so "nobody" is hedged');
 });

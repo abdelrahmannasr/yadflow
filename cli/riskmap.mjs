@@ -203,11 +203,17 @@ export function pathspecsFor(entries, dir) {
 // authors of the change itself — an approval has to come from someone else, so their own work never
 // counts. A robot is never a person who can approve. Deduped by address; the address itself never leaves
 // this function (nor does `yad` ever print one) — and neither does a git NAME that is itself an address
-// (`user.name` set to one is a common slip): the login stands in, else plain words. The awk twin in
-// checks/risk-map-check.sh applies the same rule with the same character class, and a test compares them.
+// (`user.name` set to one is a common slip). A printed `@word` must also only ever be a real login, because
+// the engineer review reads a bare `@login` as one: so ANY name holding an `@` (`@dave`, `Dave @dave`) is
+// replaced too. The login stands in, else plain words. The awk twin in checks/risk-map-check.sh applies
+// the same rule with the same character classes, and a test compares them.
 export const NAME_IS_ADDRESS = 'a name that is an e-mail address';
+export const NAME_LIKE_LOGIN = 'a name written like a login';
 export function shownName(name, login) {
-  return /[^ \t@]@[^ \t@]/.test(String(name || '')) ? (login ? `@${login}` : NAME_IS_ADDRESS) : name;
+  const n = String(name || '');
+  if (!n.includes('@')) return name;
+  if (login) return `@${login}`;
+  return /[^ \t@]@[^ \t@]/.test(n) ? NAME_IS_ADDRESS : NAME_LIKE_LOGIN;
 }
 // How a person prints: the name, then `(@login)` unless the login already stands in for the name.
 export const personLabel = (a) => `${a.name}${a.login && a.name !== `@${a.login}` ? ` (@${a.login})` : ''}`;

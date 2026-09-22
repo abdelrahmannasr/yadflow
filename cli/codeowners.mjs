@@ -160,10 +160,13 @@ export function parseCodeowners(text, platform) {
       if (negate) pattern = pattern.slice(1);
       const pat = patternOf(pattern, platform);
       if (pat.bad) { skipped.push({ line: n, why: pat.bad }); return; }
-      // GitLab ignores a malformed owner and keeps the rest; an entry with none of its own takes the
-      // section's defaults.
+      // GitLab ignores a malformed owner and keeps the rest. The section's defaults apply only to an entry
+      // that WRITES no owner at all: one whose words are all unreadable (`docs/ bob`, `docs/ # note`) has
+      // no owner, never the defaults — printing a default owner there would name the wrong person. It is
+      // also reported, so the answer is hedged.
       const own = rest.map((x) => ownerOf(x, platform)).filter(Boolean);
-      rules.push({ line: n, section, negate, pat, owners: own.length ? own : defaults });
+      if (rest.length && !own.length) skipped.push({ line: n, why: `\`${pattern}\` names no owner this reader can read, and the section's default owners do not apply to it` });
+      rules.push({ line: n, section, negate, pat, owners: rest.length ? own : defaults });
       return;
     }
     const words = line.trim().split(/[ \t]+/);

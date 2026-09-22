@@ -216,9 +216,14 @@ function loginof(e,   at, local, domain) {
   }
   return ""
 }
-# A git NAME that is itself an address is never printed (the twin of `shownName` in cli/riskmap.mjs, same
-# character class): the login stands in, else plain words.
-function shownname(n, l) { if (n ~ /[^ \t@]@[^ \t@]/) return (l == "") ? "a name that is an e-mail address" : "@" l; return n }
+# A git NAME holding an `@` is never printed (the twin of `shownName` in cli/riskmap.mjs, same character
+# classes): an address must not leak, and a printed `@word` must only ever be a real login. The login
+# stands in, else plain words.
+function shownname(n, l) {
+  if (index(n, "@") == 0) return n
+  if (l != "") return "@" l
+  return (n ~ /[^ \t@]@[^ \t@]/) ? "a name that is an e-mail address" : "a name written like a login"
+}
 # A robot, not a person: an approval can never come from one, and `dependabot[bot]` has no login.
 function isbot(n, e) { return (tolower(trim(n)) ~ /\[bot\]$/ || tolower(e) ~ /\[bot\]@/) }
 # E67, the --level mode`s second pass: the people to name, from the author records the per-directory
