@@ -265,35 +265,86 @@ export function baseCodeowners(repoRoot, baseRef, platform) {
 // Returns [{ line, pattern, negate }] in file order.
 export function deadLines(parsed, files, { submodules = [] } = {}) {
   const names = [...files, ...submodules.map((g) => `${g}/\u0000`)];
-  // `matches` asks about a file and every folder above it. Here each folder is asked about ONCE, and a
-  // plain path (no wildcard) is a set lookup, not a scan — a dead line costs a scan of every name, and the
-  // E69 review measured 300 000 files × 1 000 dead lines at minutes before this.
+  // `matches` asks about a file and every folder above it, and a dead line is asked about every name — the
+  // E69 reviews measured 300 000 files × 1 000 dead lines at minutes. So each folder is asked about ONCE,
+  // and each rule takes the fastest road that gives exactly `matches`' answer (a test holds them equal):
+  // a set lookup for plain text, the distinct last parts for a one-part "at any depth" pattern, and, for a
+  // pattern anchored at the top, only the names under its fixed leading folders. Anything else scans.
   const dirs = new Set();
   for (const f of names) for (let i = f.indexOf('/'); i >= 0; i = f.indexOf('/', i + 1)) dirs.add(f.slice(0, i));
-  const nameSet = new Set(names);
-  const base = (x) => x.slice(x.lastIndexOf('/') + 1);
-  const nameBase = new Set(names.map(base));
-  const dirBase = new Set([...dirs].map(base));
   const dirList = [...dirs];
+  const nameSet = new Set(names);
+  const partSet = new Set(names.flatMap((f) => f.split('/')));
+  const sortedNames = [...names].sort();
+  const sortedDirs = [...dirList].sort();
+  // The distinct last `k` parts of every name (a name with fewer parts has none), built once per `k`.
+  const tails = new Map();
+  const tailsOf = (k) => {
+    if (!tails.has(k)) {
+      // A name with fewer than k parts gives itself, which holds fewer than k-1 slashes and so never matches.
+      const cut = (list) => new Set(list.map((x) => x.split('/').slice(-k).join('/')));
+      tails.set(k, { files: cut(names), dirs: cut(dirList) });
+    }
+    return tails.get(k);
+  };
+  // The names in a sorted list that start with `prefix`.
+  const under = (sorted, prefix) => {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < prefix) lo = mid + 1; else hi = mid; }
+    const out = [];
+    for (let i = lo; i < sorted.length && sorted[i].startsWith(prefix); i++) out.push(sorted[i]);
+    return out;
+  };
+  const test = (pat, fileList, folderList) => (pat.fileToo && fileList.some((f) => pat.re.test(f))) || (pat.dirs && folderList.some((d) => pat.re.test(d)));
+
   const live = (pat) => {
     if (pat.all) return names.length > 0;
     // `patternOf` writes `^`, then `(?:.*\/)?` for "at any depth" (once per leading `**/`), then the rest,
-    // then `$`. When the rest is plain text, the answer is a set lookup; when it is "at any depth" and the
-    // rest cannot cross a `/` (plain text, escapes other than `\/`, and `[^/]` classes), only a name's
-    // LAST part can match, so the distinct last parts are tested instead of every path.
+    // then `$`. The rest is read piece by piece: a character, `\` + a character that is not a letter or a
+    // digit (V8 writes a carriage return in `source` as `\r`, which is NOT the letter `r`), `[^/]` with or
+    // without `*`, or anything else, which is not read here. Reading a piece as "anything else" is always
+    // safe: it only sends the rule down a slower road to the same answer.
     const m = pat.re.source.match(/^\^((?:\(\?:\.\*\\\/\)\?)*)(.*)\$$/);
-    if (m) {
-      const [, anyDepth, rest] = m;
-      if (/^(?:[^\\.*+?()[\]{}|^$]|\\.)*$/.test(rest)) {
-        const text = rest.replace(/\\(.)/g, '$1');
-        if (!anyDepth) return (pat.fileToo && nameSet.has(text)) || (pat.dirs && dirs.has(text));
-        if (!text.includes('/')) return (pat.fileToo && nameBase.has(text)) || (pat.dirs && dirBase.has(text));
-      } else if (anyDepth && /^(?:\[\^\/\][*]?|[^\\.*+?()[\]{}|^$]|\\[^/])*$/.test(rest)) {
-        const last = new RegExp(`^${rest}$`);
-        return (pat.fileToo && [...nameBase].some((b) => last.test(b))) || (pat.dirs && [...dirBase].some((b) => last.test(b)));
-      }
+    if (!m) return test(pat, names, dirList);
+    const [, anyDepth, rest] = m;
+    const parts = [];
+    for (let i = 0; i < rest.length;) {
+      if (rest.startsWith('[^/]', i)) { parts.push({ cls: true }); i += rest[i + 4] === '*' ? 5 : 4; continue; }
+      const ch = rest[i];
+      if (ch === '\\' && i + 1 < rest.length && !/[A-Za-z0-9]/.test(rest[i + 1])) { parts.push({ text: rest[i + 1] }); i += 2; continue; }
+      if (/[\\.*+?()[\]{}|^$]/.test(ch)) { parts.push({ other: true }); i++; continue; }
+      parts.push({ text: ch });
+      i++;
     }
-    return (pat.fileToo && names.some((f) => pat.re.test(f))) || (pat.dirs && dirList.some((d) => pat.re.test(d)));
+    // Every part of the pattern that is plain text between two real slashes (or an end) must be some
+    // name's part, or nothing can match — true for every shape, and it settles most dead lines at once.
+    // (A slash inside `(?:.*\/)?` sits next to `(` or `)`, so the parts beside it are never plain.)
+    let seg = [];
+    for (const p of [...parts, { text: '/' }]) {
+      if (p.text !== '/') { seg.push(p); continue; }
+      if (seg.length && seg.every((q) => 'text' in q) && !partSet.has(seg.map((q) => q.text).join(''))) return false;
+      seg = [];
+    }
+    const plain = parts.every((p) => 'text' in p);
+    const text = plain ? parts.map((p) => p.text).join('') : '';
+    if (plain && !anyDepth) return (pat.fileToo && nameSet.has(text)) || (pat.dirs && dirs.has(text));
+    if (anyDepth && !parts.some((p) => p.other)) {
+      // "At any depth", and the rest holds exactly k-1 slashes and nothing that can match one: only a
+      // name's last k parts can match it, so the distinct last k parts are tested instead of every path.
+      const t = tailsOf(parts.filter((p) => p.text === '/').length + 1);
+      if (plain) return (pat.fileToo && t.files.has(text)) || (pat.dirs && t.dirs.has(text));
+      const last = new RegExp(`^${rest}$`);
+      return (pat.fileToo && [...t.files].some((x) => last.test(x))) || (pat.dirs && [...t.dirs].some((x) => last.test(x)));
+    }
+    if (!anyDepth) {
+      // Anchored at the top: every match starts with the plain text before the first wildcard, so only
+      // the names that start with it can match.
+      let head = '';
+      for (const p of parts) { if (!('text' in p)) break; head += p.text; }
+      if (head) return test(pat, under(sortedNames, head), under(sortedDirs, head));
+    }
+    return test(pat, names, dirList);
   };
   return parsed.rules.filter((r) => !live(r.pat)).map((r) => ({ line: r.line, pattern: r.pattern, negate: r.negate }));
 }

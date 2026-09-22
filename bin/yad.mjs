@@ -567,7 +567,7 @@ async function main() {
     case 'codeowners': {
       const [, action, name] = o._;
       // `--write` was dropped (E69); wherever it is typed, it is refused with the reason — never ignored.
-      await commands.runCodeowners(o.dir, { action: action || 'check', name, json: o.json, platform: o.platform, write: o._.includes('--write') });
+      await commands.runCodeowners(o.dir, { action: action || 'check', name, json: o.json, platform: o.platform, write: o._.some((a) => a === '--write' || a.startsWith('--write=')) });
       break;
     }
     case 'roster':

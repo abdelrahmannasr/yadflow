@@ -18361,6 +18361,38 @@ test('codeowners check: a line that matches no file is found, and a submodule is
     assert.deepEqual(deadLines(parsed, tree).map((d) => d.line), brute, `${platform}: the fast answer is the slow one`);
     assert.ok(brute.length >= 5 && brute.length < parsed.rules.length - 10, `${platform}: the list holds both dead and live lines (${brute.length})`);
   }
+  // The shapes each fast road takes, and characters V8 writes as a letter escape in a regex's source
+  // (a carriage return is `\r` there, not the letter r) — E69 review, round 2.
+  const tree2 = ['gone2/api/x.js', 'app/gone/api/v.md', 'arb', 'x/a\rb', 'au2028b', 'a\u2028b', 'src/a.js', 'src2/b.js', 'src/x/y/z.js',
+    'docs/api', 'q/docs/api/r.md', 'deep/a/b/c/d.txt'];
+  const shapes2 = ['gone/api/', 'gone/api', 'api/x.js', 'gone/*.js', '/gone/**', 'gone/**/x', 'src/**', 'src/**/z.js', 'src/*.js', 'src2/*',
+    'src/x/*/z.js', 'docs/api', 'docs/api/', 'a\rb', 'a\u2028b', 'au2028b', 'arb', '/src/*', 'deep/**/d.txt', 'deep/a/**', 'b/c/d.txt', 'c/d.txt'];
+  for (const platform of ['github', 'gitlab']) {
+    const parsed = parseCodeowners(shapes2.map((x) => `${x} @a`).join('\n'), platform);
+    const brute = parsed.rules.filter((r) => !tree2.some((f) => matches(r.pat, f))).map((r) => r.line);
+    assert.deepEqual(deadLines(parsed, tree2).map((d) => d.line), brute, `${platform}: every fast road gives the slow answer`);
+  }
+  // A carriage return in a pattern is not the letter r (each tree holds only the lookalike, so the two
+  // readings disagree); and a name that IS the plain start of an anchored pattern is still found.
+  for (const platform of ['github', 'gitlab']) {
+    assert.deepEqual(deadLines(parseCodeowners('a\rb @a\na\u2028b @a\n', platform), ['arb', 'au2028b']).map((d) => d.line), [1, 2], platform);
+    assert.deepEqual(deadLines(parseCodeowners('a\rb @a\n', platform), ['x/a\rb']).map((d) => d.line), [], platform);
+    assert.deepEqual(deadLines(parseCodeowners('/src/a.js* @a\n/src/a.js*/ @a\n', platform), ['src/a.js']).map((d) => d.line), [2], platform);
+  }
+  // And random ones, from a fixed seed so a failure repeats.
+  let seed = 69;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const bits = ['a', 'b', 'ab', 'x.js', '*', '?', '**', '.', '$', '+', '(', 'a b'];
+  const word = () => Array.from({ length: 1 + rnd(2) }, () => bits[rnd(bits.length)]).join('');
+  for (let round = 0; round < 300; round++) {
+    const files = Array.from({ length: 1 + rnd(6) }, () => Array.from({ length: 1 + rnd(3) }, () => ['a', 'b', 'ab', 'x.js', '$', 'a b', '+'][rnd(7)]).join('/'));
+    const pats = Array.from({ length: 4 }, () => `${rnd(3) === 0 ? '/' : ''}${Array.from({ length: 1 + rnd(3) }, word).join('/')}${rnd(3) === 0 ? '/' : ''}`);
+    for (const platform of ['github', 'gitlab']) {
+      const parsed = parseCodeowners(pats.map((x) => `${x.replace(/ /g, platform === 'gitlab' ? '\\ ' : '')} @a`).join('\n'), platform);
+      const brute = parsed.rules.filter((r) => !files.some((f) => matches(r.pat, f))).map((r) => r.line);
+      assert.deepEqual(deadLines(parsed, files).map((d) => d.line), brute, `${platform} ${JSON.stringify(pats)} ${JSON.stringify(files)}`);
+    }
+  }
 });
 
 test('codeowners check: the file on disk is picked in the platform\'s order; one GitHub will not load is a fact', async () => {
@@ -18580,7 +18612,7 @@ test('yad codeowners: check prints facts and the hint, never an address, never f
       assert.match(r.out, /yad never writes CODEOWNERS — any name it wrote would become an owner the platform can enforce/);
     }
     // Wherever `--write` is typed — after the repo name too — the CLI refuses it, never ignores it.
-    for (const args of [['check', 'backend', '--write'], ['check', '--write'], ['--write']]) {
+    for (const args of [['check', 'backend', '--write'], ['check', '--write'], ['--write'], ['check', 'backend', '--write=true']]) {
       const cli = yadRun(T, 'codeowners', ...args);
       assert.equal(cli.code, 1, args.join(' '));
       assert.match(cli.out, /yad never writes CODEOWNERS/, args.join(' '));
