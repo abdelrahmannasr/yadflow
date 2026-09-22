@@ -137,30 +137,33 @@ export const capWho = (active) => (capByFloor(active)
 //
 // Every claim is about the PEOPLE COUNTED, and is hedged ("may", "if"), because the count is wrong both
 // ways, and neither is an edge:
-//   too LOW   a reviewer who has never committed or approved is not counted yet — the second person on a
-//             brand-new Product reads as absent until their first approval;
+//   too LOW   a reviewer who has not committed or approved inside the counting window is not counted —
+//             the second person on a brand-new Product reads as absent until their first approval;
 //   too HIGH  a commit is keyed by its git name and an approval by its platform login, and E71 never joins
 //             the two without exact evidence, so a two-person team can read as four (E72, case a).
 //
 // WHAT AN APPROVAL SHOWS. `have` is the approvals on THIS step and `approvers` the people counted with an
-// approval anywhere in the Product. Any approval shows that approvals can be given here, so the two
-// TODAY lines speak only when there is none at all. For the what-if lines an approval is also a lower
-// bound on the team: the approvers on this step plus the author (`have + 1`), and at least two people
-// once anyone approved anything. That assumes the platform keeps authors from approving their own work:
-// always on GitHub, on GitLab only when its settings say so, never on a local ledger (E62 decision h).
-// Where it is wrong the bound is too high, so a what-if line stays quiet — never a false alarm.
+// approval in the counting window. Any such approval shows that approvals can be given here, so the two
+// TODAY lines speak only when there is none in the window. For the what-if lines an approval is also a
+// lower bound on the team: the approvers on this step plus the author (`have + 1`), and at least two
+// people once anyone approved anything. That assumes the platform keeps authors from approving their own
+// work: always on GitHub, on GitLab only when its settings say so, never on a local ledger (E62 decision
+// h). Where it is wrong the bound is too high, so a what-if line may stay quiet — never a false alarm.
 //
 // The checks, each only while its own ask is unmet:
-//   base        0 or 1 active person counted, and no approval anywhere.
+//   base        0 or 1 active person counted, and no approval in the window.
 //   one person  exactly two people counted, one NOT MATCHED to a login (a git name, or an approval record
 //               that proves no login — an older hand-written one, or an engineer-review record, which
-//               carries none) and one login, and no approval anywhere: they may be one person. (A solo
+//               carries none) and one login, and no approval in the window: they may be one person. (A solo
 //               developer who commits with a work address AND through GitHub's web editor, whose noreply
 //               address carries the login, reads as two people; only this check sees it.)
 //   full        (what-if) the cap lowered the ask: the full count is more than the people counted can
 //               give. Not said when a today line is, nor when the approvals show more people than counted.
 //   names       (what-if) some people are not matched to a login and at least one is a login, and the
-//               smallest possible team cannot give the ask.
+//               smallest possible team cannot give the ask. That team is the larger of the logins and the
+//               names (each name may be one of the logins, and distinct names are taken as distinct
+//               people, as the count takes them), and never fewer than the approvals prove. Taking only the
+//               logins made a four-person team with one web-editor commit read as "as small as 1".
 // "No approval" always names the capacity window (`days`): the reader never sees an older approval.
 // A Product whose records are all names (no platform) gets no name line — there is no login for a name
 // to be the same person as. Two spellings of one NAME still count twice; that is E108's, with the join.
@@ -205,11 +208,17 @@ export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0,
     ifEnforced(`with no cap, the full count of ${rule.needed} is more than ${cap.active} active people can give (${capSeat(cap.active)}), so if nobody else joins, this gate could not pass`);
   }
   if (names && !base) {
-    const smallest = Math.max(logins, floor);
+    const smallest = Math.max(logins, nameOnly, floor);
     const room = capLimit(smallest);
     if (room < cap.to) {
-      const why = smallest > logins ? ` (the approvals already recorded show at least ${smallest} people)` : '';
-      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} not matched to a platform login and may be the same ${nameOnly === 1 ? 'person' : 'people'} as ${logins === 1 ? 'the one login' : 'the logins'}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked, so if the team is that small, this gate could not pass`);
+      const why = floor > Math.max(logins, nameOnly) ? ` (the approvals already recorded show at least ${smallest} people)` : '';
+      // At most as many names as there are logins can be a login's second row, so say how many.
+      const overlap = Math.min(nameOnly, logins);
+      const logWord = logins === 1 ? 'the one login' : 'the logins';
+      const same = nameOnly === 1
+        ? `and may be the same person as ${logins === 1 ? 'the one login' : 'one of the logins'}`
+        : `and ${overlap === 1 ? 'one of them' : `up to ${overlap} of them`} may be the same ${overlap === 1 ? 'person' : 'people'} as ${logWord}`;
+      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} not matched to a platform login, ${same}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked, so if the team is that small, this gate could not pass`);
     }
   }
   return lines;

@@ -138,7 +138,9 @@ export const personKey = (person) => {
 // Two kinds of evidence, and only two, because Part 3 defines it: "Active" = committed OR approved
 // within the window.
 //   * APPROVED — the Product ledger: every Shape gate approval, and every Build ship's
-//     engineer-review. Both record a platform LOGIN since E62.
+//     engineer-review. Both are MEANT to record a platform LOGIN since E62, but only a bridge-written
+//     approval (`source: 'bridge'`) proves it (`ledgerPersonLogin`); an engineer-review entry carries no
+//     marker, so it is keyed by name — E73's lines call such a person "not matched to a platform login".
 //   * COMMITTED — git authorship, in the Product and in every connected code repo. Git records a NAME,
 //     plus a login only when the address is a platform `noreply` one.
 // A COMMENT is not either of them and does not count. Part 3 names two actions; a commenter has proven

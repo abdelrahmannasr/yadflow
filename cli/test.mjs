@@ -18929,7 +18929,7 @@ test('E73 probe: the ordinary two-person team (work-email commits, platform appr
     const cap = _gateCapFor(rule, counted.capacity.active);
     assert.equal(cap.capped, false, 'four people lowers nothing, so the cap alone cannot see it');
     assert.deepEqual(_gateReach(rule, cap, { have: 0, nameOnly: counted.capacity.nameOnly, approvers: _approverCount(counted) }), [
-      `if the risk step were enforced: 2 of the 4 people counted are not matched to a platform login and may be the same people as the logins, so the team may be as small as 2. That leaves room for 1 of the 3 approvals asked, so if the team is that small, this gate could not pass. ${E73_NOTHING_TODAY}`,
+      `if the risk step were enforced: 2 of the 4 people counted are not matched to a platform login, and up to 2 of them may be the same people as the logins, so the team may be as small as 2. That leaves room for 1 of the 3 approvals asked, so if the team is that small, this gate could not pass. ${E73_NOTHING_TODAY}`,
     ]);
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
@@ -19024,18 +19024,21 @@ test('E73 names: needs a login, uses the approvals as a floor, and speaks only w
   const cap6 = _gateCapFor(rule, 6);   // asks 3
   assert.deepEqual(_gateReach(rule, cap6, { have: 0, nameOnly: 2 }), [], '4 logins leave room for 3');
   assert.equal(_gateReach(rule, cap6, { have: 0, nameOnly: 3 }).length, 1, '3 logins leave room for 2 of 3');
-  assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 1 })[0], /^if the risk step were enforced: 1 of the 4 people counted is not matched to a platform login and may be the same person as the logins, so the team may be as small as 3\. That leaves room for 2 of the 3 approvals asked/);
+  assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 1 })[0], /^if the risk step were enforced: 1 of the 4 people counted is not matched to a platform login, and may be the same person as one of the logins, so the team may be as small as 3\. That leaves room for 2 of the 3 approvals asked/);
   assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 4 }), [], 'no login (no platform): no line');
-  // Three names beside one login (a new team where one person once used the web editor): "the team may be
-  // one person" is not a fair reading, so no today line — only the what-if, from the one login.
+  // Three names beside one login: at most ONE name can be that login's second row, so the team is at
+  // least the three names — never "as small as 1", and no today line.
   assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 3 }), [
-    `if the risk step were enforced: 3 of the 4 people counted are not matched to a platform login and may be the same people as the one login, so the team may be as small as 1. That leaves room for 1 of the 3 approvals asked, so if the team is that small, this gate could not pass. ${E73_NOTHING_TODAY}`,
+    `if the risk step were enforced: 3 of the 4 people counted are not matched to a platform login, and one of them may be the same person as the one login, so the team may be as small as 3. That leaves room for 2 of the 3 approvals asked, so if the team is that small, this gate could not pass. ${E73_NOTHING_TODAY}`,
   ]);
+  // A new team of four where one person once used GitHub's web editor: five rows, four names, one login.
+  // The four names are four people, so nothing is said.
+  assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 5), { have: 0, nameOnly: 4 }), [], 'one web-editor commit is not an alarm');
   const normal3 = _gateRuleFor(E73_NORMAL);
   assert.deepEqual(_gateReach(normal3, _gateCapFor(normal3, 4), { have: 0, nameOnly: 3 }), [], 'and nothing at all on an ordinary step');
-  // An approval makes the team at least two, and the line SAYS that is why.
-  assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 1, nameOnly: 3 })[0], /so the team may be as small as 2 \(the approvals already recorded show at least 2 people\)\. That leaves room for 1 of the 3 approvals asked/);
-  assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 0, nameOnly: 3, approvers: 1 })[0], /as small as 2 \(the approvals already recorded show at least 2 people\)/);
+  // When the approvals prove more people than the rows do, the line SAYS that is why.
+  assert.match(_gateReach(rule, _gateCapFor(rule, 4), { have: 2, nameOnly: 2 })[0], /so the team may be as small as 3 \(the approvals already recorded show at least 3 people\)\. That leaves room for 2 of the 3 approvals asked/);
+  assert.doesNotMatch(_gateReach(rule, _gateCapFor(rule, 4), { have: 1, nameOnly: 3 })[0], /approvals already recorded/, 'no reason given when the rows decide');
   assert.deepEqual(_gateReach(rule, _gateCapFor(rule, 4), { have: 3, nameOnly: 2 }), [], 'an ask already met says nothing');
   const high = _gateRuleFor({ ...E72_CONTRACT, risk_tags: ['auth'] });   // asks 2
   assert.equal(_gateReach(high, _gateCapFor(high, 3), { have: 0, nameOnly: 1 }).length, 1, '2 logins leave room for 1 of 2');
