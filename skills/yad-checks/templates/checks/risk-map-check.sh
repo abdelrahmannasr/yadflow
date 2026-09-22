@@ -48,6 +48,10 @@ set -euo pipefail
 # valid UTF-8 ("Illegal byte sequence"), which pipefail would turn into a failing exit, and a UTF-8-aware
 # awk (macOS 26's) splits some non-ASCII whitespace differently from mawk, older awks and cli/riskmap.mjs.
 export LC_ALL=C
+# Four variables change how git reads EVERY pathspec: GIT_LITERAL_PATHSPECS would make `:(glob)*` match
+# nothing (git still exits 0, so the history would read as "nobody"), GIT_ICASE_PATHSPECS would match
+# `SRC/` for `src/`, and the glob pair changes what `*` means. The pathspecs here say what they mean.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---
@@ -212,6 +216,14 @@ function loginof(e,   at, local, domain) {
   }
   return ""
 }
+# A git NAME holding an `@` is never printed (the twin of `shownName` in cli/riskmap.mjs, same character
+# classes): an address must not leak, and a printed `@word` must only ever be a real login. The login
+# stands in, else plain words.
+function shownname(n, l) {
+  if (index(n, "@") == 0) return n
+  if (l != "") return "@" l
+  return (n ~ /[^ \t@]@[^ \t@]/) ? "a name that is an e-mail address" : "a name written like a login"
+}
 # A robot, not a person: an approval can never come from one, and `dependabot[bot]` has no login.
 function isbot(n, e) { return (tolower(trim(n)) ~ /\[bot\]$/ || tolower(e) ~ /\[bot\]@/) }
 # E67, the --level mode`s second pass: the people to name, from the author records the per-directory
@@ -222,7 +234,7 @@ function who_out(   j, key) {
     key = tolower(lae[j])
     if ((key in seenau) || (key in excl) || isbot(lan[j], lae[j])) continue
     seenau[key] = 1
-    printf "WHO %s %s\n", (loginof(lae[j]) == "") ? "-" : loginof(lae[j]), lan[j]
+    printf "WHO %s %s\n", (loginof(lae[j]) == "") ? "-" : loginof(lae[j]), shownname(lan[j], loginof(lae[j]))
   }
 }
 # Every directory the base`s map lists, in map order — the shell turns them into the include/exclude
@@ -339,7 +351,9 @@ base_history() {
         case "$_e" in "$_d"?*) set -- "$@" ":(exclude,literal)${_e}" ;; esac
       done
     fi
-    git log "$BASE" --no-merges --no-renames --full-history --since="$HISTORY_WINDOW" --format='%an%x1f%ae' -- "$@" >> "$tmp/log" \
+    # --no-show-signature: log.showSignature=true would print a signature check into this output, and each
+    # such line would read as a person.
+    git log "$BASE" --no-merges --no-renames --full-history --no-show-signature --since="$HISTORY_WINDOW" --format='%an%x1f%ae' -- "$@" >> "$tmp/log" \
       || { echo "HISTUNKNOWN git could not read the history of '${_d}' on '${BASE}'"; return; }
   done
   git log "${BASE}..HEAD" --no-merges --format='%ae' > "$tmp/own" \
@@ -374,7 +388,7 @@ NOMAP "*)
     # E67 — and who can meet the ask: an approval from someone who has worked there lately.
     if [ -n "$high" ]; then
       # `$1 = ""` would rebuild the line with one space between fields and squash a name's own spacing.
-      who="$(printf '%s\n' "$lv" | sed -n 's/^WHO //p' | awk '{ login = $1; name = $0; sub(/^[^ ]* /, "", name); printf "%s%s%s", sep, name, (login == "-") ? "" : " (@" login ")"; sep = ", " }')"
+      who="$(printf '%s\n' "$lv" | sed -n 's/^WHO //p' | awk '{ login = $1; name = $0; sub(/^[^ ]* /, "", name); printf "%s%s%s", sep, name, (login == "-" || name == "@" login) ? "" : " (@" login ")"; sep = ", " }')"
       unknown_hist="$(printf '%s\n' "$lv" | sed -n 's/^HISTUNKNOWN //p')"
       if [ -n "$unknown_hist" ]; then
         echo "  who has worked there lately: not read — ${unknown_hist}."

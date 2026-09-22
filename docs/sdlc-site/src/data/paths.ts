@@ -396,7 +396,7 @@ const buildSteps: FlowStep[] = [
     activeComponents: ["code-repos", "platform"],
     messages: [
       { id: "pt-1", from: "dev", to: "code-repos", label: "commit PR/MR template + risk-route.sh", type: "write", color: "#2471a3", delay: 0, duration: 800 },
-      { id: "pt-2", from: "code-repos", to: "platform", label: "open task PR (no reviewers requested)", type: "notification", color: "#566573", delay: 900, duration: 700 },
+      { id: "pt-2", from: "code-repos", to: "platform", label: "open task PR (no reviewers requested; a suggestion is printed)", type: "notification", color: "#566573", delay: 900, duration: 700 },
     ],
     sideEffects: { jobs: "PR/MR template · risk-route.sh · pr-title.sh · pr-template.sh" },
   },

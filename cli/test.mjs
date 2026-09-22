@@ -17935,6 +17935,387 @@ test('proven history: the JS reader sees a quoted path and a move out, exactly a
   } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
 });
 
+// ---- E68: suggest reviewers from history; CODEOWNERS as a hint -----------------------------------
+// A SUGGESTION, printed by `yad open-pr` only: who committed in the folders a change touches in the last
+// 30 days, and what CODEOWNERS on the base lists for those files, on separate lines. It holds nothing,
+// waives nothing and requests no one (E62). The CODEOWNERS rules are each platform's own, from its docs.
+
+// A code repo with commits by named people on dated days; `origin/main` is the base, `feat/x` the change.
+function authoredRepo() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e68-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'me@corp.io'); git(T, 'config', 'user.name', 'Me');
+  const put = (files) => {
+    for (const [rel, text] of Object.entries(files)) {
+      if (text === null) { fs.rmSync(path.join(T, rel), { recursive: true, force: true }); continue; }
+      fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+      fs.writeFileSync(path.join(T, rel), text);
+    }
+  };
+  const at = (d) => new Date(Date.now() - d * 86400e3).toISOString();
+  const as = (name, email, days, files) => {
+    put(files);
+    execFileSync('git', ['add', '-A'], { cwd: T, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'work'], {
+      cwd: T, stdio: 'pipe',
+      env: { ...process.env, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_AUTHOR_DATE: at(days), GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email, GIT_COMMITTER_DATE: at(days) },
+    });
+  };
+  const branch = () => { git(T, 'branch', '-q', '-M', 'main'); git(T, 'update-ref', 'refs/remotes/origin/main', 'main'); git(T, 'checkout', '-q', '-b', 'feat/x'); };
+  const mine = (files) => as('Me', 'me@corp.io', 0, files);
+  return { T, put, as, branch, mine, done: () => fs.rmSync(T, { recursive: true, force: true }) };
+}
+// A public-host remote by default, so a same-platform login can join; pass `remote` to test another host.
+const PUBLIC_REMOTE = { github: 'https://github.com/acme/app.git', gitlab: 'git@gitlab.com:acme/app.git' };
+const suggestText = async (T, platform = 'github', base = 'main', remote = PUBLIC_REMOTE[platform]) => {
+  const { suggestReviewers } = await import('./openpr.mjs');
+  return suggestReviewers(T, base, platform, { remote }).lines.map(([, l]) => l).join('\n');
+};
+
+test('suggest reviewers: the folders asked about are each changed file\'s own, and a glob name cannot command git', async () => {
+  const { touchedFolders, folderPathspec } = await import('./riskmap.mjs');
+  assert.deepEqual(touchedFolders(['src/a.js', 'README.md', 'src/b.js', 'lib/x/y.js']), ['src/', './', 'lib/x/'],
+    'most changed files first, then by name; `./` for a root file; a folder holding only folders is never one');
+  assert.equal(folderPathspec('./'), ':(glob)*');
+  assert.equal(folderPathspec('src/'), ':(glob)src/*', 'the files directly in it — never its subfolders');
+  assert.equal(folderPathspec('a*b/[x]/q?\\/'), ':(glob)a\\*b/\\[x]/q\\?\\\\/*', 'every glob character is escaped');
+  assert.equal(folderPathspec(':weird/'), ':(glob):weird/*', 'the magic ends at `)`; what follows is only a pattern');
+});
+
+test('suggest reviewers: ranked by commits, then newest; the change\'s own authors and robots left out', async () => {
+  const { rankAuthors } = await import('./riskmap.mjs');
+  const commits = [                                                      // git order: newest first
+    { name: 'Carol', email: '1+carol@users.noreply.github.com' },
+    { name: 'renovate[bot]', email: 'bot@renovate.io' },
+    { name: 'Bo', email: 'bo@corp.io' },
+    { name: 'Me', email: 'me@corp.io' },
+    { name: 'Ana', email: 'ana@corp.io' },
+    { name: 'Ana', email: 'ANA@corp.io' },
+    { name: 'Me', email: 'me@corp.io' },
+  ];
+  assert.deepEqual(rankAuthors(commits, ['ME@corp.io']), [
+    { name: 'Ana', login: null, loginHost: null, commits: 2 },
+    { name: 'Carol', login: 'carol', loginHost: 'github', commits: 1 },
+    { name: 'Bo', login: null, loginHost: null, commits: 1 },
+  ], 'one row per address whatever its case, most commits first, a tie kept newest first');
+  // A git NAME that is itself an address is never printed: the login stands in, else plain words.
+  assert.deepEqual(rankAuthors([
+    { name: 'ana@corp.io', email: 'ana@corp.io' },
+    { name: 'tanuki@corp.io', email: '9-tanuki@users.noreply.gitlab.com' },
+    { name: '@dave', email: 'dave@corp.io' },
+    { name: 'Eve @eve', email: 'eve@corp.io' },
+  ]).map((a) => [a.name, a.loginHost]), [['a name that is an e-mail address', null], ['@tanuki', 'gitlab'], ['a name written like a login', null], ['a name written like a login', null]],
+  'a printed `@word` is only ever a real login: the engineer review reads it as one');
+});
+
+test('suggest reviewers: the real reader reads files directly in each touched folder, once per commit', async () => {
+  const { suggestedAuthorsFor } = await import('./riskmap-command.mjs');
+  const r = authoredRepo();
+  try {
+    // The old commit goes FIRST: git's date-limited walk stops at the first commit older than the window
+    // (E67's stated limit), so an old one on top would hide everyone behind it.
+    r.as('Old', 'old@corp.io', 60, { 'src/old.js': '1' });
+    r.as('Deep', 'deep@corp.io', 5, { 'src/deep/x.js': '1' });           // below the touched folder
+    r.as('Both', 'both@corp.io', 4, { 'src/a.js': '1', 'lib/b.js': '1' }); // one commit, two folders
+    r.as('Weird', 'weird@corp.io', 3, { ':weird/w.js': '1' });
+    r.as('Plain', 'plain@corp.io', 3, { 'weird/w.js': '1' });
+    r.branch();
+    r.mine({ 'src/a.js': '2', 'lib/b.js': '2', ':weird/w.js': '2' });
+    const got = suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js', 'lib/b.js', ':weird/w.js'] });
+    assert.deepEqual(got.authors, [{ name: 'Weird', login: null, loginHost: null, commits: 1 }, { name: 'Both', login: null, loginHost: null, commits: 1 }],
+      'work only in src/deep/ is not work in src/; a commit in two folders counts once; `:weird/` is not `weird/`; 60 days is outside');
+    assert.deepEqual([got.folders, got.skipped], [3, 0]);
+    const capped = suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js', 'lib/b.js', ':weird/w.js'], cap: 1 });
+    assert.deepEqual([capped.folders, capped.skipped], [1, 2], 'a cut is counted so it can be printed');
+    assert.match(suggestedAuthorsFor(r.T, 'origin/nope', { changed: ['src/a.js'] }).unknown, /could not read/);
+    assert.deepEqual(suggestedAuthorsFor(r.T, 'origin/main', { changed: [] }), { authors: [], folders: 0, skipped: 0 },
+      'no folder means no query: a log with no pathspec would name everyone in the repo');
+  } finally { r.done(); }
+});
+
+test('suggest reviewers: a shallow clone, a missing base and an empty change are each said, never "nobody"', async () => {
+  const r = authoredRepo();
+  const C = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e68shallow-'));
+  try {
+    for (let i = 0; i < 4; i++) r.as('Old', 'old@corp.io', 20 - i, { 'src/o.js': String(i) });
+    r.as('Ana', 'ana@corp.io', 3, { 'src/a.js': '1' });
+    r.branch();
+    r.mine({ 'src/a.js': '2' });
+    execFileSync('git', ['clone', '-q', '--depth', '2', '--no-single-branch', `file://${r.T}`, C], { stdio: 'pipe' });
+    git(C, 'checkout', '-q', 'feat/x');
+    const shallow = await suggestText(C);
+    assert.match(shallow, /not read — this is a shallow clone/);
+    assert.doesNotMatch(shallow, /nobody else/, 'a shallow clone holds only the newest commits');
+    assert.match(await suggestText(r.T, 'github', 'nope'), /^reviewer suggestion: not read — base ref 'origin\/nope' not found/);
+    git(r.T, 'checkout', '-q', 'main');
+    git(r.T, 'checkout', '-q', '-b', 'feat/empty');
+    assert.match(await suggestText(r.T), /reviewer suggestion: none — this branch changes no file/);
+  } finally { r.done(); fs.rmSync(C, { recursive: true, force: true }); }
+});
+
+test('suggest reviewers: GitHub CODEOWNERS follows every example in GitHub\'s own docs', async () => {
+  const { parseCodeowners, ownersFor } = await import('./codeowners.mjs');
+  // The example file from "About code owners", in order.
+  const DOC = [
+    '# This is a comment.', '*       @global-owner1 @global-owner2', '*.js    @js-owner #This is an inline comment.',
+    '*.go docs@example.com', '*.txt @octo-org/octocats', '/build/logs/ @doctocat', 'docs/* docs@example.com',
+    'apps/ @octocat', '/docs/ @doctocat', '/scripts/ @doctocat @octocat', '**/logs @octocat', '/apps/ @octocat', '/apps/github',
+  ].join('\n');
+  const p = parseCodeowners(DOC, 'github');
+  assert.deepEqual(p.skipped, []);
+  const who = (f) => ownersFor(p, [f]).owners.map((o) => o.text);
+  assert.deepEqual(who('README'), ['@global-owner1', '@global-owner2']);
+  assert.deepEqual(who('lib/x.js'), ['@js-owner'], 'the last matching line decides; `#` after a pattern is a comment');
+  assert.deepEqual(who('cmd/main.go'), ['an e-mail address'], 'an address is never printed');
+  assert.deepEqual(who('notes.txt'), ['@octo-org/octocats']);
+  assert.deepEqual(who('build/logs/a/b.log'), ['@octocat'], '`**/logs` is a later line and also matches');
+  assert.deepEqual(who('docs/getting-started.md'), ['@doctocat'], '`/docs/` comes after `docs/*`');
+  assert.deepEqual(who('scripts/deep/run.sh'), ['@doctocat', '@octocat']);
+  assert.deepEqual(who('deeply/nested/logs/x'), ['@octocat']);
+  assert.deepEqual(who('apps/github/x.rb'), [], '"its owners are left empty"');
+  assert.deepEqual(who('apps/web/x.rb'), ['@octocat']);
+  assert.deepEqual(who('src/apps/x.rb'), ['@octocat'], '`apps/` names an apps directory anywhere');
+  // `docs/*` matches files like docs/getting-started.md but not docs/build-app/troubleshooting.md.
+  const only = parseCodeowners('docs/* @d\n', 'github');
+  assert.deepEqual(ownersFor(only, ['docs/getting-started.md']).owners.map((o) => o.text), ['@d']);
+  assert.equal(ownersFor(only, ['docs/build-app/troubleshooting.md']).unmatched, 1);
+  // A `/` in the middle anchors the pattern at the root (gitignore); GitLab differs (next test).
+  assert.equal(ownersFor(parseCodeowners('internal/README.md @r\n', 'github'), ['app/internal/README.md']).unmatched, 1);
+  // What GitHub says does not work is never guessed at: the line is reported, not matched.
+  const bad = parseCodeowners('!secret @x\nsrc/[ab].js @x\n\\#file @x\nsrc/ @ok not-an-owner\nsrc/ @@role\nsrc/ bob@corp\n', 'github');
+  assert.deepEqual(bad.rules, []);
+  assert.deepEqual(bad.skipped.map((s) => s.line), [1, 2, 3, 4, 5, 6]);
+  assert.match(bad.skipped[5].why, /^an address-like word/, 'a mistyped address is not printed either');
+  assert.match(parseCodeowners('src/ @alice@corp.com\n', 'github').skipped[0].why, /^an address-like word/, 'nor one that starts with `@`');
+});
+
+test('suggest reviewers: GitLab CODEOWNERS follows its sections, exclusions and any-depth paths', async () => {
+  const { parseCodeowners, ownersFor } = await import('./codeowners.mjs');
+  const who = (text, f) => ownersFor(parseCodeowners(text, 'gitlab'), [f]).owners.map((o) => `${o.text}${o.optional ? '?' : ''}`);
+  // The README example from "Syntax of CODEOWNERS file": every section answers for itself.
+  const README = '* @admin\n[README Owners]\nREADME.md @user1 @user2\ninternal/README.md @user4\n[README other owners]\nREADME.md @user3\n';
+  assert.deepEqual(who(README, 'README.md'), ['@admin', '@user1', '@user2', '@user3']);
+  assert.deepEqual(who(README, 'internal/README.md'), ['@admin', '@user4', '@user3']);
+  assert.deepEqual(who('internal/README.md @r\n', 'docs/api/internal/README.md'), ['@r'], 'no leading `/` matches at any depth');
+  assert.deepEqual(who('/docs/README.md @r\n', 'x/docs/README.md'), [], 'a leading `/` anchors');
+  // Default owners, and an entry's own owners overriding them.
+  const DB = '[Database] @database-team @agarcia\nmodel/db/\nconfig/db/database-setup.md @docs-team\n';
+  assert.deepEqual(who(DB, 'model/db/x.rb'), ['@database-team', '@agarcia']);
+  assert.deepEqual(who(DB, 'config/db/database-setup.md'), ['@docs-team']);
+  // Optional sections; a duplicate that is required makes the section required; names ignore case.
+  assert.deepEqual(who('^[Go]\n*.go @root\n', 'a.go'), ['@root?']);
+  assert.deepEqual(who('^[Go]\n*.go @a\n[go]\nmain.go @b\n', 'main.go'), ['@b'], 'combined, required, last entry wins');
+  // Exclusions stay in their section and cannot be included again there.
+  const EX = '* @default-owner\n!*.rb\n/special/*.rb @ruby-owner\n[Config]\n/config/ @ops-team\n';
+  assert.deepEqual(who(EX, 'special/a.rb'), []);
+  assert.deepEqual(who(EX, 'config/x.rb'), ['@ops-team']);
+  assert.deepEqual(who(EX, 'special/a.py'), ['@default-owner']);
+  // Escaped spaces; malformed owners ignored; an owner in an inline comment is parsed (GitLab's words).
+  assert.deepEqual(who('path\\ with\\ spaces/*.md @owner\n', 'path with spaces/a.md'), ['@owner']);
+  assert.deepEqual(who('/path/* @group user_without_at_symbol @user_with_at_symbol\n', 'path/x'), ['@group', '@user_with_at_symbol']);
+  assert.deepEqual(who('docs/ @a # see @b\n', 'docs/x'), ['@a', '@b']);
+  assert.deepEqual(who('/docs/**/index.md @i\n', 'docs/index.md'), ['@i'], '`/**/` matches zero directories too');
+  assert.deepEqual(ownersFor(parseCodeowners('x @group-x/subgroup-y @@maintainer\n', 'gitlab'), ['x']).owners.map((o) => o.kind), ['group', 'role']);
+  // An unparsable heading is an entry; `[`, `?` and a trailing `/**` are forms the docs do not describe.
+  assert.deepEqual(who('[Docs] @d\n[ ]\nx\n', 'x'), ['@d'], 'a heading with a blank name is not a heading, so `x` stays in [Docs]');
+  const bad = parseCodeowners('[Section name\ndocs/?.md @q\ndocs/** @s\nwhat\\ever\\x @t\n', 'gitlab');
+  assert.deepEqual(bad.skipped.map((s) => s.line), [1, 2, 3, 4]);
+  // The section's defaults apply only to an entry that writes no owner; unreadable words mean no owner.
+  for (const t of ['[Docs] @d\ndocs/ bob\n', '[Docs] @d\ndocs/ # note\n', '[Docs] @d\ndocs/ user@corp\n']) {
+    const p = parseCodeowners(t, 'gitlab');
+    assert.deepEqual(ownersFor(p, ['docs/a.md']).owners, [], `${JSON.stringify(t)}: never the default owner`);
+    assert.deepEqual(p.skipped.map((s) => s.line), [2], `${JSON.stringify(t)}: reported, so the answer is hedged`);
+  }
+  assert.deepEqual(who('[Docs] @d\ndocs/\n', 'docs/a.md'), ['@d'], 'an entry that writes no owner still takes the defaults');
+  assert.deepEqual(parseCodeowners('[Docs] @d\ndocs/ @a\n!docs/x.md bob\n', 'gitlab').skipped, [], 'an exclusion takes no owners, so its words are nothing to report');
+  assert.doesNotMatch(parseCodeowners('docs/ bob\n', 'gitlab').skipped[0].why, /default owners/, 'no heading, no defaults to mention');
+  assert.deepEqual(parseCodeowners('[Docs] @docs\\team\n/app/\n', 'gitlab').skipped.map((s) => s.line), [1],
+    'a heading whose default owners cannot be read is reported, so "nobody" is hedged');
+});
+
+test('suggest reviewers: CODEOWNERS is read from the base, in each platform\'s order, and an unreadable one is not "none"', async () => {
+  const { baseCodeowners } = await import('./codeowners.mjs');
+  const r = authoredRepo();
+  try {
+    r.as('Ana', 'ana@corp.io', 3, { 'CODEOWNERS': '* @root\n', 'docs/CODEOWNERS': '* @docs\n', '.github/CODEOWNERS': '* @gh\n', '.gitlab/CODEOWNERS': '* @gl\n' });
+    r.branch();
+    r.mine({ '.github/CODEOWNERS': '* @mine\n', 'CODEOWNERS': '* @mine\n' });
+    assert.equal(baseCodeowners(r.T, 'origin/main', 'github').path, '.github/CODEOWNERS');
+    assert.equal(baseCodeowners(r.T, 'origin/main', 'github').text, '* @gh\n', 'the base, so a change cannot rewrite its own hint');
+    assert.equal(baseCodeowners(r.T, 'origin/main', 'gitlab').path, 'CODEOWNERS');
+    assert.match(baseCodeowners(r.T, 'origin/nope', 'github').unknown, /could not read/, 'git failing is never "none"');
+  } finally { r.done(); }
+  const s = authoredRepo();
+  try {
+    s.as('Ana', 'ana@corp.io', 3, { 'owners.txt': '* @x\n', 'docs/CODEOWNERS': '* @late\n' });
+    fs.mkdirSync(path.join(s.T, '.github'));
+    fs.symlinkSync('../owners.txt', path.join(s.T, '.github/CODEOWNERS'));
+    s.as('Ana', 'ana@corp.io', 3, {});
+    s.branch();
+    assert.match(baseCodeowners(s.T, 'origin/main', 'github').unknown, /not a regular file/, 'a symlink stops the search: which file GitHub then uses is not known');
+    assert.equal(baseCodeowners(s.T, 'origin/main', 'gitlab').path, 'docs/CODEOWNERS', 'GitLab never reads `.github/`');
+  } finally { s.done(); }
+  const big = authoredRepo();
+  try {
+    big.as('Ana', 'ana@corp.io', 3, { 'CODEOWNERS': `* @x\n${'#'.repeat(3_000_000)}\n` });
+    big.branch();
+    assert.match(baseCodeowners(big.T, 'origin/main', 'github').unknown, /3 MB or more/);
+    assert.equal(baseCodeowners(big.T, 'origin/main', 'gitlab').path, 'CODEOWNERS', 'GitLab documents no size limit');
+  } finally { big.done(); }
+});
+
+test('suggest reviewers: what open-pr prints is hedged, capped, and joins a name to a login only on exact evidence', async () => {
+  const r = authoredRepo();
+  try {
+    for (const [i, n] of ['A', 'B', 'C', 'D', 'E', 'F'].entries()) r.as(n, `${n.toLowerCase()}@corp.io`, 20 - i, { 'src/a.js': n });
+    r.as('Carol', '7+carol@users.noreply.github.com', 2, { 'src/c.js': '1' });
+    r.as('Carl', '8+Carl@users.noreply.github.com', 2, { 'src/c.js': '2' });
+    r.as('Ana', 'ana@corp.io', 1, { '.github/CODEOWNERS': 'src/ @carol @carl @ana @org/payments lead@corp.io @leaver\n' });
+    r.branch();
+    r.mine({ 'src/a.js': 'z' });
+    const out = await suggestText(r.T);
+    assert.match(out, /^may know this code — committed in the folder this change touches in the last 30 days: Carl \(@Carl\) — 1 commit, Carol \(@carol\) — 1 commit, F — 1 commit, E — 1 commit, D — 1 commit, and 3 more$/m);
+    assert.match(out, /CODEOWNERS on origin\/main \(\.github\/CODEOWNERS\) lists for the touched files: @carol \(also in the 30-day history\), @carl, @ana, @org\/payments \(a team\), @leaver, and 1 more — a hint only: these files go stale/);
+    assert.doesNotMatch(out, /@carl \(also/, 'a login differing in case is not exact evidence');
+    assert.doesNotMatch(out, /@ana \(also/, 'a work address carries no login, so Ana is not joined to @ana');
+    assert.doesNotMatch(out, /corp\.io/, 'no e-mail address is ever printed');
+    assert.match(out, /a suggestion only — nobody was asked to review, and no name above is an owner or a required approver; the same person can appear in both lists under two names/);
+    assert.doesNotMatch(out, /\b(owns|must approve|should review)\b/, 'never a claim about ownership or a duty');
+  } finally { r.done(); }
+});
+
+test('suggest reviewers: open-pr prints the suggestion and never requests a reviewer (E62, the user\'s decision)', async () => {
+  const prev = process.exitCode;
+  const { T, bare } = codeRepoWithRemote();
+  try {
+    process.exitCode = 0;
+    git(T, 'update-ref', 'refs/remotes/origin/staging', 'staging');
+    fs.writeFileSync(path.join(T, 'seed.txt'), '1'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'feat: change');
+    let seen;
+    const creator = (_p, o) => { seen = o; return { ok: true, url: 'https://x/pull/1' }; };
+    const out = await grab(() => runOpenPr(T, { platform: 'github', creator, runner: fakeRunner({ 'gh repo view': 'staging' }) }));
+    assert.match(out, /nobody else has committed in the folder this change touches in the last 30 days/);
+    assert.match(out, /a suggestion only — nobody was asked to review/);
+    assert.deepEqual(Object.keys(seen).sort(), ['assignees', 'base', 'body', 'cwd', 'head', 'title'], 'nothing carrying reviewers reaches the platform');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+test('suggest reviewers: git failing mid-read is "not read" at every step, never an empty answer', async () => {
+  const { changedSince, suggestedAuthorsFor } = await import('./riskmap-command.mjs');
+  const { baseCodeowners } = await import('./codeowners.mjs');
+  const drop = (T, rev) => {
+    const sha = git(T, 'rev-parse', rev).toString().trim();
+    fs.rmSync(path.join(T, '.git/objects', sha.slice(0, 2), sha.slice(2)));
+  };
+  const r = authoredRepo();
+  try {
+    r.as('Ana', 'ana@corp.io', 5, { 'old/o.js': '1' });
+    r.as('Bo', 'bo@corp.io', 3, { 'src/a.js': '1', 'CODEOWNERS': '* @x\n' });
+    r.branch();
+    r.mine({ 'src/a.js': '2' });
+    drop(r.T, 'main~1^{tree}');       // an older base commit: the log over the base cannot finish
+    assert.match(suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js'] }).unknown, /could not read the history/);
+    drop(r.T, 'main:CODEOWNERS');     // listed by the tree, but the file itself is gone
+    assert.match(baseCodeowners(r.T, 'origin/main', 'gitlab').unknown, /could not read CODEOWNERS/);
+    drop(r.T, 'HEAD:src');            // the change's own tree: the diff cannot be read
+    assert.match(changedSince(r.T, 'origin/main').unknown, /could not read the change/);
+  } finally { r.done(); }
+});
+
+test('suggest reviewers: the rarer pattern forms, a BOM, CRLF lines and two addresses', async () => {
+  const { parseCodeowners, ownersFor } = await import('./codeowners.mjs');
+  const who = (text, f, platform = 'github') => ownersFor(parseCodeowners(text, platform), [f]).owners.map((o) => o.text);
+  assert.deepEqual(who('\uFEFF* @a\r\nsrc/ @b\r\n', 'src/x'), ['@b'], 'a BOM and CRLF line ends are not part of a pattern or an owner');
+  // GitLab splits on spaces and tabs only, so the BOM and the CR are stripped before the words are read.
+  assert.deepEqual(who('\uFEFF* @a\n', 'x', 'gitlab'), ['@a'], 'a BOM is not part of the first pattern');
+  assert.deepEqual(who('src/ @b\r\n', 'src/x', 'gitlab'), ['@b'], 'a CR is not part of the last owner');
+  assert.deepEqual(who('/ @root\n', 'a/b/c'), ['@root'], 'a bare `/` is the whole repo');
+  assert.deepEqual(who('** @all\n', 'a/b'), ['@all']);
+  assert.deepEqual(who('abc/** @in\n', 'abc/x/y'), ['@in'], 'gitignore: a trailing `/**` is everything inside');
+  assert.deepEqual(who('abc/** @in\n', 'abc'), [], 'but not the name itself');
+  assert.deepEqual(who('a**b @r\n', 'axxb'), ['@r'], 'GitHub (gitignore): other `**` are plain asterisks');
+  assert.deepEqual(who('src/?.js @q\n', 'src/a.js'), ['@q'], 'GitHub (gitignore) has `?`');
+  assert.deepEqual(parseCodeowners('a**b @r\n', 'gitlab').skipped.map((s) => s.line), [1], 'GitLab documents no such form');
+  const two = ownersFor(parseCodeowners('a @x a@corp.io\nb b@corp.io c@corp.io\n', 'github'), ['a', 'b']);
+  assert.deepEqual(two.owners.map((o) => o.text), ['@x', '3 e-mail addresses'], 'three different addresses, counted apart and never printed');
+});
+
+test('suggest reviewers: open-pr says what it cut and what it could not read', async () => {
+  const r = authoredRepo();
+  try {
+    const many = Object.fromEntries(Array.from({ length: 202 }, (_, i) => [`d${String(i).padStart(3, '0')}/f.js`, '1']));
+    r.as('Ana', 'ana@corp.io', 3, { ...many, 'CODEOWNERS': '[A]\nd000/ @ana\n^[B]\nd001/ @lead\n!x @y\nq\\z @z\n[C\n? @w\ne?/ @v\n' });
+    r.branch();
+    r.mine(Object.fromEntries(Object.keys(many).map((k) => [k, '2'])));
+    const out = await suggestText(r.T, 'gitlab');
+    assert.match(out, /committed in the 200 folders this change touches in the last 30 days: Ana — 1 commit \(2 more folders not asked about — the list stops at 200\)/);
+    assert.match(out, /lists for the touched files: @ana, @lead \(optional section\); 200 of 202 touched files have no owner there; 4 lines could not be read, so this list may be wrong — a hint only/);
+    assert.match(out, /on GitLab an @name can be a person or a group/);
+    assert.match(out, /CODEOWNERS line 6 not read — a `\\` that is not `\\ `/);
+    assert.match(out, /CODEOWNERS: 1 more line not read/);
+  } finally { r.done(); }
+});
+
+test('suggest reviewers: a login joins a CODEOWNERS name only on the same platform, and the git environment cannot blank the answer', async () => {
+  const { suggestedAuthorsFor, PATHSPEC_ENV } = await import('./riskmap-command.mjs');
+  const { baseCodeowners } = await import('./codeowners.mjs');
+  const r = authoredRepo();
+  const saved = Object.fromEntries(PATHSPEC_ENV.map((k) => [k, process.env[k]]));
+  try {
+    r.as('Carol', '7+carol@users.noreply.github.com', 3, { 'src/a.js': '1', 'CODEOWNERS': 'src/ @carol\n' });
+    r.as('Mail Name', 'mail@corp.io', 2, { 'src/b.js': '1' });
+    r.as('tanuki@corp.io', '9-tanuki@users.noreply.gitlab.com', 2, { 'lib/l.js': '1' });
+    r.as('bob@corp.io', 'bob@corp.io', 2, { 'lib/l.js': '2' });
+    r.branch();
+    r.mine({ 'src/a.js': '2', 'lib/l.js': '3' });
+    const gh = await suggestText(r.T, 'github');
+    assert.match(gh, /@carol \(also in the 30-day history\)/);
+    assert.match(gh, /a name that is an e-mail address — 1 commit, @tanuki — 1 commit/, 'the login stands in once, never `@tanuki (@tanuki)`');
+    assert.doesNotMatch(gh, /corp\.io/, 'a git name that is an address is never printed');
+    const gl = await suggestText(r.T, 'gitlab');
+    assert.match(gl, /Carol \(@carol\) — 1 commit/, 'the login is still shown as the commit address says it');
+    assert.doesNotMatch(gl, /also in/, 'a GitHub login says nothing about a GitLab @carol');
+    // GitHub Enterprise keeps its own accounts: a github.com login says nothing about @carol there.
+    assert.doesNotMatch(await suggestText(r.T, 'github', 'main', 'git@github.corp.io:acme/app.git'), /also in/);
+    assert.doesNotMatch(await suggestText(r.T, 'github', 'main', ''), /also in/, 'no remote, no evidence');
+    // Each variable changes how git reads every pathspec; none may reach the reader.
+    // log.follow=true: git crashes on ONE `:(glob)dir/*` pathspec, which a one-folder change is.
+    process.env.GIT_CONFIG_COUNT = '1'; process.env.GIT_CONFIG_KEY_0 = 'log.follow'; process.env.GIT_CONFIG_VALUE_0 = 'true';
+    try {
+      assert.deepEqual(suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js'] }).authors?.map((a) => a.name), ['Mail Name', 'Carol']);
+    } finally { for (const k of ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0']) delete process.env[k]; }
+    for (const k of PATHSPEC_ENV) {
+      process.env[k] = '1';
+      if (k === 'GIT_GLOB_PATHSPECS') delete process.env.GIT_NOGLOB_PATHSPECS;
+      const got = suggestedAuthorsFor(r.T, 'origin/main', { changed: ['src/a.js'] });
+      assert.deepEqual(got.authors?.map((a) => a.name), ['Mail Name', 'Carol'], `${k} must not change the answer`);
+      assert.equal(baseCodeowners(r.T, 'origin/main', 'gitlab').path, 'CODEOWNERS', `${k} must not make ls-tree fail`);
+      delete process.env[k];
+    }
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    r.done();
+  }
+});
+
+test('suggest reviewers: "lists nobody" is hedged when a skipped line may have been the only match', async () => {
+  const { remoteHost } = await import('./openpr.mjs');
+  assert.deepEqual(['https://github.com/a/b.git', 'git@gitlab.com:a/b.git', 'ssh://git@gitlab.corp.com:2222/a/b', 'https://u:t@GitHub.com/a', '/local/path', ''].map(remoteHost),
+    ['github.com', 'gitlab.com', 'gitlab.corp.com', 'github.com', null, null]);
+  const r = authoredRepo();
+  try {
+    r.as('Ana', 'ana@corp.io', 3, { 'app/a.js': '1', 'CODEOWNERS': '/app/a?.js @alice\n' });
+    r.branch();
+    r.mine({ 'app/a.js': '2' });
+    const out = await suggestText(r.T, 'gitlab');
+    assert.match(out, /lists nobody this reader could match for the files this change touches; 1 line could not be read, so this may be wrong/);
+    assert.doesNotMatch(out, /lists nobody for the files/, 'never a bare "nobody" beside a line it could not read');
+  } finally { r.done(); }
+});
+
 // ---- E71: counting active people -----------------------------------------------------------------
 //
 // THE ONE RULE THESE TESTS EXIST FOR: an input that cannot be read must produce `active: null`, never a

@@ -103,7 +103,8 @@ ROUTE: 2 approvers = base 1 + high risk 1 (high on the risk map: src/payments/ (
 committed there in the **last 30 days**, read from the base branch's history, with this change's own
 authors left out (an approval has to come from someone else). A robot is never listed. A person is shown
 as their git name, plus `(@login)` only when their commit address is a platform `noreply` one — yadflow
-prints no e-mail addresses. "Recent" is git's `--since`, which uses the **committer** date, so a rebased
+prints no e-mail addresses. A name holding an `@` is shown as the bare login (`- @carol`), else as `a name
+that is an e-mail address` or `a name written like a login`, so a printed `@word` is always a real login. "Recent" is git's `--since`, which uses the **committer** date, so a rebased
 or squashed commit counts from when it landed. Work in a `low` directory *inside* a `high` one is not
 history for the `high` one: the deepest map line decides, and git applies that itself — one query per
 directory, excluding the listed directories below it, so no file name is ever read back out of git.

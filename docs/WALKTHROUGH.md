@@ -117,6 +117,9 @@ Build by hand"** below.
     CodeRabbit decides eligibility at open time and retargeting does not bring it back. The PR's CI now also
     runs the `pr-title` and `pr-template` gates; `yad-pr-template repo:<repo> action: route` prints the
     approval count and the touched domains from the Impact & Risk block (no reviewers are requested).
+    `yad open-pr` also prints a reviewer suggestion (E68): who has committed in the folders the change
+    touches in the last 30 days, and what CODEOWNERS on the base branch lists. It is a hint, never a
+    request, and it never calls anyone an owner.
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
     record in `build-log.json`, update story status to `in-build`/`shipped`). The machine-written
     ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed by **`yad checkpoint --push`**

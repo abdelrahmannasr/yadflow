@@ -140,8 +140,8 @@ else the git name.
 - **Assignee** = the person opening it: `@me` on GitHub (`gh` resolves it), the login `glab api user`
   reports on GitLab (no assignee when that lookup fails).
 - **Reviewers: none are requested.** The command prints
-  `no reviewers were requested — ask them on the PR itself`. E68 will later suggest reviewers from
-  history.
+  `no reviewers were requested — ask them on the PR itself`. On a code-repo PR, `yad open-pr` then
+  prints a reviewer suggestion from recent history and CODEOWNERS (E68) — a hint, never a request.
 - **Labels (`yad gate open` only):** a `domain:<repo>` label per touched domain is still applied — for
   `stories-review` the union of every story's `repos`, for a step tagged `contract`, `auth` or
   `payments` the epic's `repos`. The labels are a hint for whom to ask; they add no approvals.

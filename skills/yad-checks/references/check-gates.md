@@ -401,7 +401,9 @@ someone who has worked in any of them meets the ask, and the output never says w
   file names back was what let a quoted path, a name holding a newline, or a merge's simplified path
   list name the wrong person; there is no list to misread now.
 - A person is their git **name**, plus `(@login)` only when the commit address is a platform `noreply`
-  one. No e-mail address is ever printed.
+  one. No e-mail address is ever printed. A name holding an `@` is replaced: by the bare login when
+  there is one (`WHO carol @carol`), else by `a name that is an e-mail address` or `a name written like a
+  login` — so a printed `@word` is always a real login.
 - A **shallow clone** says "not read", never "nobody": it holds only the newest commits, and reading
   that as "nobody has worked here" would drop the ask instead of raising it. Wired CI checks out the
   full history (`fetch-depth: 0`, `GIT_DEPTH: 0`), so this is a local or host-overridden case.

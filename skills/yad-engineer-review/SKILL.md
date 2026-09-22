@@ -83,7 +83,13 @@ change's own authors left out:
        This change touches src/payments/, so it asks for an approval from someone who has
        committed there in the last 30 days (its own authors left out):
   - Alice (@alice)
+  - @carol
 ```
+
+A person whose git name holds an `@` is printed as their bare login (`- @carol`), or, when there is no
+login, as `a name that is an e-mail address` or `a name written like a login` — both have NO login. No
+address is ever printed, and a printed `@word` is always a real login, never a git name. A bare `@login`
+counts exactly like a `(@login)` below.
 
 Report it as an ask, never as a block, and use exactly these three answers:
 
@@ -92,10 +98,10 @@ login and another does not, fits more than one:
 
 | In order | What you see | What to report |
 |---|---|---|
-| 1 | A recorded approver's login is one of the `(@login)` names, ignoring upper and lower case | **met** |
+| 1 | A recorded approver's login is one of the printed logins — a `(@login)` after a name, or a bare `@login` — ignoring upper and lower case | **met** |
 | 2 | The printer says `not read` (a shallow clone, or git could not read the history) | **could not confirm** |
-| 3 | No approver matches, and at least one named person has NO `(@login)` | **could not confirm** — name everyone printed, and say the names could not be compared |
-| 4 | No approver matches, and every named person has a `(@login)` | **short** — name who could meet it |
+| 3 | No approver matches, and at least one named person has no login (neither `(@login)` nor a bare `@login`) | **could not confirm** — name everyone printed, and say the names could not be compared |
+| 4 | No approver matches, and every named person has a login (`(@login)` or a bare `@login`) | **short** — name who could meet it |
 
 Rows 2 and 3 matter: an approval records a platform login, while git history records a name, and a login
 only comes from a `noreply` address. Different spellings of a name prove nothing either way, so say the

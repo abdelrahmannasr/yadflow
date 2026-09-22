@@ -202,7 +202,21 @@ export function pathspecsFor(entries, dir) {
 // the order git printed them (newest first, one run per directory in map order), and `excludeEmails` the
 // authors of the change itself — an approval has to come from someone else, so their own work never
 // counts. A robot is never a person who can approve. Deduped by address; the address itself never leaves
-// this function (nor does `yad` ever print one).
+// this function (nor does `yad` ever print one) — and neither does a git NAME that is itself an address
+// (`user.name` set to one is a common slip). A printed `@word` must also only ever be a real login, because
+// the engineer review reads a bare `@login` as one: so ANY name holding an `@` (`@dave`, `Dave @dave`) is
+// replaced too. The login stands in, else plain words. The awk twin in checks/risk-map-check.sh applies
+// the same rule with the same character classes, and a test compares them.
+export const NAME_IS_ADDRESS = 'a name that is an e-mail address';
+export const NAME_LIKE_LOGIN = 'a name written like a login';
+export function shownName(name, login) {
+  const n = String(name || '');
+  if (!n.includes('@')) return name;
+  if (login) return `@${login}`;
+  return /[^ \t@]@[^ \t@]/.test(n) ? NAME_IS_ADDRESS : NAME_LIKE_LOGIN;
+}
+// How a person prints: the name, then `(@login)` unless the login already stands in for the name.
+export const personLabel = (a) => `${a.name}${a.login && a.name !== `@${a.login}` ? ` (@${a.login})` : ''}`;
 export function recentAuthors(commits, excludeEmails = []) {
   const skip = new Set(excludeEmails.map((e) => String(e).toLowerCase()));
   const seen = new Set();
@@ -211,9 +225,59 @@ export function recentAuthors(commits, excludeEmails = []) {
     const key = String(cm.email || '').toLowerCase();
     if (seen.has(key) || skip.has(key) || isBot(cm.name, cm.email)) continue;
     seen.add(key);
-    out.push({ name: cm.name, login: loginFromEmail(cm.email) });
+    const login = loginFromEmail(cm.email);
+    out.push({ name: shownName(cm.name, login), login });
   }
   return out;
+}
+
+// E68 — the folders a change touches, for the reviewer SUGGESTION: the folder each changed file sits in
+// (`./` for a file at the root), nobody twice, the folder holding the most changed files first (then by
+// name, so the order is the same every run). A folder that holds only subfolders is never one.
+export function touchedFolders(changed) {
+  const n = new Map();
+  for (const f of changed) {
+    const i = f.lastIndexOf('/');
+    const dir = i < 0 ? './' : f.slice(0, i + 1);
+    n.set(dir, (n.get(dir) || 0) + 1);
+  }
+  return [...n.keys()].sort((a, b) => n.get(b) - n.get(a) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+// The pathspec for the files DIRECTLY in one folder — never its subfolders, so work in `src/` is not
+// work in every folder below it. A glob, because `:(literal)` cannot stop at one level; so every glob
+// character in the name is escaped, and the name can never tell git what to do (E67's `:weird/` lesson:
+// the magic ends at `)`, and what follows is only a pattern).
+export function folderPathspec(dir) {
+  if (dir === './') return ':(glob)*';
+  return `:(glob)${dir.replace(/[\\*?[]/g, '\\$&')}*`;
+}
+
+// The people to suggest, from ONE log over every touched folder: `recentAuthors`' rules (the change's own
+// authors and robots left out, one row per address), ranked by how many commits each made there, then
+// newest first. A count, because a suggestion list is read top-down and the first name should be the one
+// who has done the most there lately.
+export function rankAuthors(commits, excludeEmails = []) {
+  const count = new Map();
+  const first = [];
+  for (const cm of commits) {
+    const key = String(cm.email || '').toLowerCase();
+    if (!count.has(key)) first.push(cm);
+    count.set(key, (count.get(key) || 0) + 1);
+  }
+  // One record per address, in git's order (newest first). Each goes through recentAuthors on its own, so
+  // the robot and own-author rules are the SAME code E67 runs, never a copy of them.
+  const rows = [];
+  for (const cm of first) {
+    const [p] = recentAuthors([cm], excludeEmails);
+    if (!p) continue;
+    // Which platform the login belongs to: a GitHub noreply login says nothing about a GitLab account
+    // spelled the same, so a caller joins a login to a platform name only when the two match.
+    const loginHost = p.login ? (/@users\.noreply\.github\.com$/i.test(cm.email) ? 'github' : 'gitlab') : null;
+    rows.push({ ...p, loginHost, commits: count.get(String(cm.email || '').toLowerCase()) });
+  }
+  // Array.prototype.sort is stable, so equal counts keep git's newest-first order.
+  return rows.sort((a, b) => b.commits - a.commits);
 }
 
 // The directory to add for a file no line covers. Walk down from the root while some listed line sits

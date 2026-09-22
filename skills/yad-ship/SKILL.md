@@ -59,7 +59,9 @@ requested: it prints `no reviewers were requested — ask them on the PR itself`
 ### Step 3 — Route + stop (no merge)
 The open step prints how many approvers the PR asks for — the body's level and the base branch's risk
 map, the larger step winning (E66). When it asks for more than one, `bash checks/risk-route.sh "<pr body>"`
-lists the touched domains to ask; ask reviewers on the PR/MR itself. Report the commit + the PR/MR URL. The PR now
+lists the touched domains to ask; ask reviewers on the PR/MR itself. It also prints a reviewer
+**suggestion** (E68): who has committed in the touched folders in the last 30 days, and what CODEOWNERS
+lists — a hint about who may know the code, never a request and never a list of owners. Report the commit + the PR/MR URL. The PR now
 runs the check gates (Step C); the engineer review and merge are Step E (`yad-engineer-review`).
 
 ## Hard rules
