@@ -148,6 +148,8 @@ export function parseCodeowners(text, platform) {
         // section is required."
         sections.set(section, { optional: prev ? prev.optional && !!h[1] : !!h[1] });
         const w = gitlabWords(h[4] || '');
+        // Default owners this reader cannot split are reported, never read as "no defaults".
+        if (w.bad) skipped.push({ line: n, why: w.bad });
         defaults = (w.words || []).map((x) => ownerOf(x, platform)).filter(Boolean);
         return;
       }

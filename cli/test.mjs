@@ -18116,6 +18116,8 @@ test('suggest reviewers: GitLab CODEOWNERS follows its sections, exclusions and 
   assert.deepEqual(who('[Docs] @d\n[ ]\nx\n', 'x'), ['@d'], 'a heading with a blank name is not a heading, so `x` stays in [Docs]');
   const bad = parseCodeowners('[Section name\ndocs/?.md @q\ndocs/** @s\nwhat\\ever\\x @t\n', 'gitlab');
   assert.deepEqual(bad.skipped.map((s) => s.line), [1, 2, 3, 4]);
+  assert.deepEqual(parseCodeowners('[Docs] @docs\\team\n/app/\n', 'gitlab').skipped.map((s) => s.line), [1],
+    'a heading whose default owners cannot be read is reported, so "nobody" is hedged');
 });
 
 test('suggest reviewers: CODEOWNERS is read from the base, in each platform\'s order, and an unreadable one is not "none"', async () => {
