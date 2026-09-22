@@ -764,9 +764,10 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       ? 'approvals not counted here'
       : `${pred.have} approved; count: ${gateRuleSum(pred.gateRule)}${gateRuleEnforced(pred.gateRule, pred.cap)}${pred.short ? ` — ${pred.short} short` : ''}`;
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
-    // E73: why this gate MAY NOT BE MET — reported only, never enforced. Printed while the review is still
-    // open, which is the pre-merge dry sync in CI and a local sync, so it is seen BEFORE the merge rather
-    // than on a merged PR that can no longer take approvals. Only a gate that counted (`rule: 'count'`).
+    // E73: why this gate MAY NOT BE MET — reported only, never enforced. Printed on any gate that has not
+    // passed, so a LOCAL sync while the review is open shows it before the merge, when approvals can still
+    // come. Wired CI does not: it runs only at the merge and on a schedule, and usually cannot count people.
+    // Only a gate that counted (`rule: 'count'`).
     if (!alreadyDone && !pred.passed && pred.rule === 'count' && pred.have !== null) {
       for (const why of gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly })) warn(`may not be met: ${why}`);
     }

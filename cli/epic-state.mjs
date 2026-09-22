@@ -140,10 +140,12 @@ export const capWho = (active) => (capByFloor(active)
 //          nobody to give it. The recorded way out that exists today is `yad mode solo --reason`.
 //   full   the cap lowered the ask: the FULL count could not be met by the people counted, so enforcing
 //          it would jam this gate. This is the jam the cap exists to stop.
-//   names  some counted people are known only by a git name: they may be the same humans as the logins,
-//          so the team may be as small as the logins alone (never below 1). If THAT team cannot give the
-//          capped ask, enforcing the capped count could jam this gate. A capped ask of 1 never trips it:
-//          the smallest team still leaves room for 1, and the base check speaks for that case.
+//   names  some counted people are known only by a git name, and at least one is a login: the names may
+//          be the same humans as the logins, so the team may be as small as the logins alone. If that is
+//          ONE person, the base may have nobody to give it (said as the base check says it). Otherwise, if
+//          that team cannot give the capped ask, enforcing the capped count could jam this gate. A solo
+//          developer who commits with a work address AND through GitHub's web editor (a noreply address,
+//          so a login) reads as two people, and this is the check that sees it.
 //
 // An unknown count (`cap: null`) or an unknown `nameOnly` says nothing: an unknown is never a number.
 // Pure. The caller decides where it applies — never in solo mode, and never on a step that passed or
@@ -158,11 +160,19 @@ export function gateReach(rule, cap, { have = 0, nameOnly = null } = {}) {
   if (cap.capped && got < rule.needed) {
     lines.push(`the full count of ${rule.needed} could not be met: the cap allows ${cap.limit} (${capWho(cap.active)}), so enforcing the full count would jam this gate`);
   }
-  if (got < cap.to && Number.isInteger(nameOnly) && nameOnly > 0 && nameOnly <= cap.active) {
-    const smallest = Math.max(1, cap.active - nameOnly);
+  // At least one LOGIN, or the line has nothing to collide with: on a Product with no platform every
+  // approval is hand-written and every commit a name, so `nameOnly === active`, and "may be the same
+  // people as a platform login" would be untrue.
+  if (Number.isInteger(nameOnly) && nameOnly > 0 && nameOnly < cap.active) {
+    const smallest = cap.active - nameOnly;
     const room = capLimit(smallest);
-    if (room < cap.to) {
-      lines.push(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a git name and may be the same ${nameOnly === 1 ? 'person' : 'people'} as a platform login, so the team may be as small as ${smallest}: the capped ask of ${cap.to} would then leave room for ${room}, and enforcing the capped count could jam this gate`);
+    const who = `${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a git name and may be the same ${nameOnly === 1 ? 'person' : 'people'} as a platform login, so the team may be as small as ${smallest}`;
+    // The floor of 1 hides a team of one: `capLimit(1)` is 1, but one person leaves nobody but the
+    // author. So the smallest team of 1 is the BASE case, said the way the base check says it.
+    if (smallest <= 1 && got < rule.base) {
+      lines.push(`${who}: if nobody but the author can approve, this gate cannot pass; the recorded way out is \`yad mode solo --reason\``);
+    } else if (got < cap.to && room < cap.to) {
+      lines.push(`${who}: the capped ask of ${cap.to} would then leave room for ${room}, and enforcing the capped count could jam this gate`);
     }
   }
   return lines;
