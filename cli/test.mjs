@@ -18982,6 +18982,13 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.deepEqual([r.approvals, !!r.atLeast, r.from], [2, false, ['approval rule "All"']]);
   ({ r } = glRead([[/\/approval_rules/, 200, [{ id: 42, approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual(r.from, ['approval rule "42"']);
+  // A rule with neither: named as a rule, never as the word the platform did not send.
+  for (const rule of [{ approvals_required: 1, protected_branches: [] }, { name: '', id: null, approvals_required: 1, protected_branches: [] }, { name: { a: 1 }, approvals_required: 1, protected_branches: [] }]) {
+    ({ r } = glRead([[/\/approval_rules/, 200, [rule]], [/\/protected_branches/, 200, []]], {}, P));
+    assert.deepEqual(r.from, ['an approval rule'], JSON.stringify(rule));
+  }
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: { a: 1 }, id: 7, approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual(r.from, ['approval rule "7"'], 'a name that is not a name falls back to the id');
   // Two rules: each is met on its own and their approvers may overlap — the largest is a floor.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'B', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [2, true]);

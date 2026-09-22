@@ -307,7 +307,12 @@ function readGitLab(base, runner, unknown) {
       else if (Array.isArray(r.protected_branches)) applies = r.protected_branches.length ? r.protected_branches.some((p) => branchMatches(p?.name, branch)) : true; // none listed: every branch
       else applies = null;
       if (applies === null) { whys.push('GitLab did not say which branches an approval rule covers'); continue; }
-      if (applies) { floor = Math.max(floor, n); out.from.push(`approval rule ${JSON.stringify(String(r.name ?? r.id))}`); }
+      if (applies) {
+        floor = Math.max(floor, n);
+        // A name the platform did not give is never printed as if it had: its id, else no name at all.
+        const named = typeof r.name === 'string' && r.name.trim() ? r.name : (count(r.id) !== null ? String(r.id) : null);
+        out.from.push(named === null ? 'an approval rule' : `approval rule ${JSON.stringify(named)}`);
+      }
       // A rule the platform DID return that does not reach this branch: say which way it misses, so the
       // line never claims "no approval rules", nor that protecting the branch would bring this one to it.
       else elsewhere.add(r.applies_to_all_protected_branches === true ? 'they reach protected branches only' : 'they name other branches');
