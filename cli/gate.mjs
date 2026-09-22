@@ -16,7 +16,7 @@ import {
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
-import { activePeople, activeSum, activeBasis } from './people.mjs';
+import { activePeople, activeSum, activeBasis, approverCount } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -683,7 +683,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   const people = headCount || activePeople(root, { today: today || undefined, aliases });
   log(`  ${c.dim(activeSum(people))}`);
   note(c.dim(activeBasis(people)));
-  const reachSeen = new Set();   // E73: each "may not be met" line once per command, not once per PR
+  const reachSeen = new Set();   // E73: each warning line once per command, not once per PR
   // Targets whose step is still open. The dated approval-record file is regenerated only for these —
   // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
   // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
@@ -772,7 +772,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // approvals can still come; wired CI does not — it runs only on merged PRs, and usually cannot count
     // people. Each distinct line once per command (`uniqueReach`).
     if (!alreadyDone && !pred.passed && pred.rule === 'count' && pred.have !== null) {
-      for (const why of uniqueReach(gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly }), reachSeen)) warn(why);
+      for (const why of uniqueReach(gateReach(pred.gateRule, pred.cap, { have: pred.have, nameOnly: people.capacity.nameOnly, approvers: approverCount(people) }), reachSeen)) warn(why);
     }
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
@@ -1224,7 +1224,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // can see the number their gates will be capped against (E72), before it holds anything for them.
   log(`  ${c.dim(activeSum(headCount))}`);
   note(c.dim(activeBasis(headCount)));
-  const reachSeen = new Set();   // E73: each "may not be met" line once per view, not once per step
+  const reachSeen = new Set();   // E73: each warning line once per view, not once per step
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const accepted = acceptedHashes(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
@@ -1287,7 +1287,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     // including one not reached yet — so a line about the whole Product (the base, one person) prints
     // once, under the first step it applies to (`uniqueReach`), not under every step after it.
     if (!solo && !waived && !isPassed(s)) {
-      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly }), reachSeen)) log(`      ${c.yellow('!')} ${c.dim(why)}`);
+      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly, approvers: approverCount(headCount) }), reachSeen)) log(`      ${c.yellow('!')} ${c.dim(why)}`);
     }
   }
 }

@@ -132,70 +132,84 @@ export const capWho = (active) => (capByFloor(active)
 // TWO KINDS OF LINE, because two different things can be said, and mixing them made lines untrue:
 //   `may not be met: …`                    TODAY's rule — the base, one approval — may have nobody to
 //                                          give it.
-//   `if the risk step were enforced: …`    a HYPOTHETICAL — what enforcing more than the base would do.
-//                                          Today the gate passes on the base, so these lines never say
-//                                          the gate will not pass.
+//   `if the risk step were enforced: …`    a WHAT-IF — what enforcing more than the base would do. Today
+//                                          the gate still passes on the base, and the line says so.
 //
-// Every claim is about the PEOPLE COUNTED, and says "may", because the count is wrong both ways, and
-// neither is an edge:
+// Every claim is about the PEOPLE COUNTED, and is hedged ("may", "if"), because the count is wrong both
+// ways, and neither is an edge:
 //   too LOW   a reviewer who has never committed or approved is not counted yet — the second person on a
 //             brand-new Product reads as absent until their first approval;
 //   too HIGH  a commit is keyed by its git name and an approval by its platform login, and E71 never joins
 //             the two without exact evidence, so a two-person team can read as four (E72, case a).
 //
-// The checks, each only while its own ask is unmet (`have` below it):
-//   base        a known count of 0 or 1: the one enforced approval may have nobody but the author.
-//   one person  some people are known only by a NAME (a git name, or a hand-written approval) and at least
-//               one by a LOGIN: the names may be the same humans as the logins, so the team may be as
-//               small as the logins. If that is one person, the base may have nobody to give it. (A solo
+// WHAT AN APPROVAL SHOWS. `have` is the approvals on THIS step and `approvers` the people counted with an
+// approval anywhere in the Product. Any approval shows that approvals can be given here, so the two
+// TODAY lines speak only when there is none at all. For the what-if lines an approval is also a lower
+// bound on the team: the approvers on this step plus the author (`have + 1`), and at least two people
+// once anyone approved anything. That assumes the platform keeps authors from approving their own work:
+// always on GitHub, on GitLab only when its settings say so, never on a local ledger (E62 decision h).
+// Where it is wrong the bound is too high, so a what-if line stays quiet — never a false alarm.
+//
+// The checks, each only while its own ask is unmet:
+//   base        0 or 1 active person counted, and no approval anywhere.
+//   one person  some people are known only by a NAME (a git name, or a hand-written approval) and exactly
+//               one by a LOGIN, and no approval anywhere: the names may all be that one person. (A solo
 //               developer who commits with a work address AND through GitHub's web editor, whose noreply
 //               address carries the login, reads as two people; only this check sees it.)
-//   full        (hypothetical) the cap lowered the ask: the full count is more than the people counted can
-//               give. Not said when a base line is, which already says more.
-//   names       (hypothetical) the smallest team above cannot give the ask.
-// An approval already given proves that many people OTHER than the author: the smallest team is never
-// below `have + 1`. A Product whose only records are names (no platform) gets no names line — there is
-// no login for a name to be the same person as. Two spellings of one NAME still count twice; that is
-// E108's to fix, with the name/login join.
+//   full        (what-if) the cap lowered the ask: the full count is more than the people counted can
+//               give. Not said when a today line is, nor when the approvals show more people than counted.
+//   names       (what-if) some people are known only by a name and at least one by a login, and the
+//               smallest team those allow cannot give the ask.
+// A Product whose records are all names (no platform) gets no name line — there is no login for a name
+// to be the same person as. Two spellings of one NAME still count twice; that is E108's, with the join.
 //
 // An unknown count (`cap: null`) or an unknown `nameOnly` says nothing: an unknown is never a number.
 // Pure. The caller decides where it applies — never in solo mode, never on a step that passed or was
 // waived — and prints each distinct line once per command (`uniqueReach`).
 export const REACH_TODAY = 'may not be met';
 export const REACH_IF_ENFORCED = 'if the risk step were enforced';
-const WAY_OUT = 'the recorded way out is `yad mode solo --reason`';
-export function gateReach(rule, cap, { have = 0, nameOnly = null } = {}) {
+const WAY_OUT = "Another person's first approval settles it, or use the recorded way out, `yad mode solo --reason`";
+const whole = (n) => (Number.isInteger(n) && n > 0 ? n : 0);
+export function gateReach(rule, cap, { have = 0, nameOnly = null, approvers = 0 } = {}) {
   if (!cap) return [];
   const lines = [];
-  const got = Number.isInteger(have) && have > 0 ? have : 0;
-  const today = (t) => lines.push(`${REACH_TODAY}: ${t}`);
-  const ifEnforced = (t) => lines.push(`${REACH_IF_ENFORCED}: ${t}`);
-  let base = false;
-  if (cap.active <= 1 && got < rule.base) {
-    base = true;
-    today(`only ${cap.active} active ${peopleWord(cap.active)} counted, so if nobody but the author can approve, this gate cannot pass. Someone who has never committed or approved is not counted yet, so another person's first approval settles it; ${WAY_OUT}`);
-  }
+  const got = whole(have);
+  const approved = got > 0 || whole(approvers) > 0;
+  // The fewest people the approvals prove: this step's approvers plus the author, and two once anyone
+  // approved anything (the approver, and the author of what they approved).
+  const floor = Math.max(got > 0 ? got + 1 : 0, approved ? 2 : 0);
   const names = Number.isInteger(nameOnly) && nameOnly > 0 && nameOnly < cap.active;
-  const smallest = names ? Math.max(cap.active - nameOnly, got + 1) : null;
-  const who = names
-    ? `${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a name, not a platform login, and may be the same ${nameOnly === 1 ? 'person' : 'people'} as ${cap.active - nameOnly === 1 ? 'the one login' : 'the logins'}, so the team may be ${smallest === 1 ? 'one person' : `as small as ${smallest}`}`
-    : '';
-  if (names && smallest <= 1) {   // `smallest` is at least `have + 1`, so 1 means no approval yet
+  const logins = names ? cap.active - nameOnly : null;
+  const today = (t) => lines.push(`${REACH_TODAY}: ${t}`);
+  const ifEnforced = (t) => lines.push(`${REACH_IF_ENFORCED}: ${t}. Nothing is needed today: only one approval is enforced`);
+  let base = false;
+  if (!approved && cap.active <= 1) {
     base = true;
-    today(`${who}. Then, if nobody but the author can approve, this gate cannot pass; ${WAY_OUT}`);
+    today(`only ${cap.active} active ${peopleWord(cap.active)} counted and no approval recorded yet, so if nobody but the author can approve, this gate cannot pass. Someone who has never committed or approved is not counted yet. ${WAY_OUT}`);
   }
-  if (!base && cap.active >= 2 && cap.capped && got < rule.needed) {
-    ifEnforced(`with no cap, the full count of ${rule.needed} is more than ${cap.active} active ${peopleWord(cap.active)} can give (${capSeat(cap.active)}), so this gate could never pass`);
+  if (!approved && names && logins === 1) {
+    base = true;
+    today(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a name, not a platform login, and may be the same person as the one login, and no approval is recorded yet, so the team may be one person. Then, if nobody but the author can approve, this gate cannot pass. ${WAY_OUT}`);
   }
-  if (names && !base && capLimit(smallest) < cap.to) {   // `have` at the ask makes `smallest` too big to trip
-    ifEnforced(`${who}, which leaves room for ${capLimit(smallest)} of the ${cap.to} approvals asked, so this gate could never pass`);
+  // `floor <= cap.active` also covers "the full count is already met" and "only one person counted":
+  // either way the approvals prove more people than were counted, and the line would contradict them.
+  if (!base && cap.capped && floor <= cap.active) {
+    ifEnforced(`with no cap, the full count of ${rule.needed} is more than ${cap.active} active people can give (${capSeat(cap.active)}), so if nobody else joins, this gate could not pass`);
+  }
+  if (names && !base) {
+    const smallest = Math.max(logins, floor);
+    const room = capLimit(smallest);
+    if (room < cap.to) {
+      const why = smallest > logins ? ` (the approvals already recorded show at least ${smallest} people)` : '';
+      ifEnforced(`${nameOnly} of the ${cap.active} people counted ${nameOnly === 1 ? 'is' : 'are'} known only by a name, not a platform login, and may be the same ${nameOnly === 1 ? 'person' : 'people'} as ${logins === 1 ? 'the one login' : 'the logins'}, so the team may be as small as ${smallest}${why}. That leaves room for ${room} of the ${cap.to} approvals asked, so if the team is that small, this gate could not pass`);
+    }
   }
   return lines;
 }
 
 // Each line once. A reason about the whole Product (the base, one person) is true of every open step
 // at once; printed under each, it buries the step lines around it. `seen` is kept by the caller for one
-// command, so a line prints under the first step it applies to and nowhere after.
+// command, so a line prints under the first step (or PR) it applies to and nowhere after.
 export const uniqueReach = (lines, seen) => lines.filter((l) => !seen.has(l) && seen.add(l));
 
 // The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside

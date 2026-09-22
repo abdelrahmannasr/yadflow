@@ -521,6 +521,12 @@ export function activePeople(root, { today = todayString(), aliases = new Map() 
 //
 // It always says what the number DOES to a gate (E72): a known count caps the count each gate ASKS for
 // at `active − 1`, which is reported and not enforced until E108; an unknown one gives no cap.
+// How many of the people counted APPROVED something in the window (E73) — evidence that approvals can be
+// given in this Product. 0 when the count is unknown or carries no list: the caller reads that as "no
+// evidence", which can only make a warning speak, never hide one.
+export const approverCount = (counted) => (Array.isArray(counted?.capacity?.people)
+  ? counted.capacity.people.filter((p) => Array.isArray(p?.how) && p.how.includes('approved')).length : 0);
+
 export function activeSum(counted) {
   const cap = counted?.capacity;
   // `== null` on purpose, so a missing count and an explicitly null one take the SAME branch. With
