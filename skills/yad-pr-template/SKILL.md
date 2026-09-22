@@ -104,8 +104,9 @@ via `yad-review-gate`.
 When the PR/MR is actually opened with `yad open-pr`, **no reviewers are requested** — it prints `no
 reviewers were requested — ask them on the PR itself`. The **assignee** is the person opening it: `@me`
 on GitHub (resolved by `gh`), and on GitLab the login `glab` reports (no assignee is passed when that
-lookup fails). yadflow keeps no list of people; a later roadmap row (E68) will suggest reviewers from
-history, and CODEOWNERS is a hint only.
+lookup fails). yadflow keeps no list of people. After opening, it prints a reviewer suggestion (E68):
+who has committed in the touched folders in the last 30 days, and what CODEOWNERS lists — a hint only,
+never a request.
 
 ### Step 4 — Stop (no auto-advance)
 Report what was committed (or the routing result). The template and routing are advisory inputs to the

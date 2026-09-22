@@ -1,6 +1,6 @@
 ---
 name: yad-open-pr
-description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Assigns the PR/MR to the logged-in gh/glab login and requests no reviewers (ask them on the PR itself). High risk / contract surface raises the approver count (risk-route.sh prints it). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
+description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Assigns the PR/MR to the logged-in gh/glab login and requests no reviewers (ask them on the PR itself); prints a reviewer suggestion from recent history and CODEOWNERS, a hint and never a request. High risk / contract surface raises the approver count (risk-route.sh prints it). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
 ---
 
 # SDLC — Open Task PR/MR (Build helper)
@@ -45,9 +45,10 @@ the Product.
 - **Assignee** — the person opening it: `@me` on GitHub (`gh` resolves it on the repo's own host), and
   on GitLab the login `glab` reports (no assignee is passed when that lookup fails). **No reviewers are
   requested** (E62): yadflow keeps no list of people. The CLI prints `no
-  reviewers were requested — ask them on the PR itself`. For a `high` directory the CLI already names the people
-  who have worked there lately (E67, Step 3); a later row (E68) will suggest reviewers from history for
-  any directory, with CODEOWNERS as a hint only.
+  reviewers were requested — ask them on the PR itself`. For a `high` directory the CLI names the people
+  who have worked there lately (E67, Step 3). For every change it also prints a reviewer **suggestion**
+  (E68, Step 3a): who has committed in the touched folders lately, and what CODEOWNERS lists — a hint
+  only, never a request.
 - **Routing** — the merge needs 1 approval from someone other than the author (the base). `high` risk
   adds 1, a touched contract surface adds 2, and a change touching a `high` directory on the base
   branch's risk map adds 1 (E66) — the larger, never the sum. That risk step is advisory: branch
@@ -98,6 +99,20 @@ that the history could not be read. It only prints; the body keeps the author's 
 the level in the body is wrong, fix the body on the PR. When the map cannot be read (no `origin/<base>`
 fetched, a newer map), it says so and counts the body alone. `bash checks/risk-route.sh "<pr body>"`
 also lists the touched domains as a hint for whom to ask; request those reviewers on the PR/MR yourself.
+
+### Step 3a — Relay the reviewer suggestion (E68)
+The CLI then prints two hints about whom to ask, on separate lines: the people who have **committed in
+the folders this change touches in the last 30 days** (base branch; the change's own authors and robots
+left out; ranked by commits, five shown), and what **CODEOWNERS on the base branch** lists for the changed
+files. Relay both as they are. It is a **suggestion only**:
+
+- Never request those people as reviewers on the PR/MR yourself, and never call them owners or required
+  approvers. A name is a hint about who **may** know the code. The author decides whom to ask.
+- CODEOWNERS is a hint: these files go stale. A `CODEOWNERS line N not read — …` line is a line yadflow
+  could not match safely; mention it, do not guess what it meant.
+- The same person can appear in both lists under two names (a git name, a platform login). Do not join
+  them unless the output says `also in the history above`.
+- `not read` (a shallow clone, a missing base) is never "nobody". Say it as the CLI says it.
 
 ### Step 3b — Post the review trailer (optional, recommended)
 Make the reviewer's job easy: generate the 60-sec briefing and post it to the new PR/MR so it greets

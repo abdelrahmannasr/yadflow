@@ -193,7 +193,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   subject, `Task → Contract-Change → Co-Authored-By` trailers, the `--ai` co-author footer, the ≤3-file
   atomic guard). Drives `yad commit`.
 - **`yad-open-pr`** — build helper. Open a code-repo task PR/MR from the committed template: push the
-  branch, prefill the body, assign the committer (no reviewers are requested). Bases the PR on the repo's **resolved
+  branch, prefill the body, assign the committer (no reviewers are requested). Once it is open, prints a
+  reviewer **suggestion** (E68): who has committed in the touched folders in the last 30 days, and what
+  CODEOWNERS lists — a hint only, never a request. Bases the PR on the repo's **resolved
   default branch** (`repos.json` → the platform → `origin/HEAD` → `main`; `--base` overrides), and
   warns when the base is not the platform default — a mis-based PR silently gets no AI first pass.
   Drives `yad open-pr`.

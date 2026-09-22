@@ -966,6 +966,48 @@ The Shape gate (`yad gate status`, `gate sync`, the review-PR body) does not rea
 Product files, not a code change, so its count still comes from each step's `risk_tags`. `yad doctor`
 prints no count either: a count belongs to one change.
 
+**Who may know this code: a reviewer suggestion (E68).** Once a code-repo PR is open, `yad open-pr`
+prints two hints about whom to ask, on separate lines. It is a **suggestion only**: it holds nothing,
+waives nothing, and requests no reviewer on the platform. A name it prints is a hint about who may know
+the code — never a claim about who owns it or who must approve. Only `yad open-pr` prints it; the CI check
+and `risk-route.sh` print only E67's ask.
+
+1. **From git history.** The people who have committed in the folders this change touches, in the last
+   30 days, on the base branch. "A folder" is the folder each changed file sits in (`./` for a file at the
+   repo root), and only the files **directly** in it, never its subfolders. This works with or without a
+   risk map.
+2. **From CODEOWNERS.** What the CODEOWNERS file on the base branch lists for the changed files — a
+   CODEOWNERS file is a platform file that maps paths to people or teams. It is a **hint**: these files go
+   stale, and yadflow never checks that anyone listed still works on the repo.
+
+| Rule | Why |
+|---|---|
+| The history is the base branch's, one `git log` over every touched folder, with this change's own authors and robots left out. | A change cannot add its own history, and a suggestion should be someone else. One log counts a commit that touched two folders once. |
+| Names are ranked by commits in the window, then the newest. Five are shown, then `and N more`. | A long list is noise; the first name is who has done the most there lately. |
+| At most 200 folders are asked about; a cut is printed. | It keeps the git command short. All folders go into one log, so the cost does not grow with the count. |
+| CODEOWNERS is read from the **base branch**, in the platform's own order: GitHub `.github/`, root, `docs/`; GitLab root, `docs/`, `.gitlab/`. | A change cannot rewrite the hint it is shown. |
+| The rules are each platform's own, from its docs: GitHub uses gitignore patterns without `!`, `[ ]` or `\`, and the last matching line decides; GitLab adds sections (`[Name]`, `^[Optional]`, default owners), `!` exclusions, and matches a path with no leading `/` at any depth. | GitHub and GitLab read the same line differently (`internal/README.md` is anchored on GitHub, any depth on GitLab). |
+| A pattern its platform's docs do not describe is **not matched**, and the line is printed as `not read`, with the reason. | A wrong match would print the wrong person. |
+| A team (`@org/team`), a GitLab group or role is marked as one. On GitLab an `@name` can be a person or a group, and the output says so. An e-mail owner prints as `an e-mail address`. | yadflow prints no e-mail addresses. |
+| A git name and a CODEOWNERS login are joined **only** when the commit address is a platform `noreply` one carrying that exact login (`also in the history above`). Otherwise the same person can appear twice, and the output says so. | A name and a login are different kinds of fact; joining them without exact evidence could merge two people. |
+| Anything unreadable says `not read` with the reason: a shallow clone, a missing base, a CODEOWNERS that is a symlink, a GitHub CODEOWNERS of 3 MB or more (GitHub does not load it). No file at all says `none`. | "Not read" is never "nobody". |
+
+Example output:
+
+```
+→ may know this code — committed in the 2 folders this change touches in the last 30 days: Ana Silva — 3 commits, Carol (@carol) — 1 commit
+→ CODEOWNERS on origin/main (.github/CODEOWNERS) lists for the touched files: @carol (also in the history above), @org/payments (a team) — a hint only: these files go stale, and yad does not check that anyone listed still works here
+• a suggestion only — nobody was asked to review, and no name above is an owner or a required approver; the same person can appear in both lists under two names (yad joins them only when a commit address carries the exact @login)
+```
+
+**Known limits.** E67's apply here too: git's date-limited walk stops at the first commit older than
+the window on a chain, so out-of-order dates can hide people (every name printed is still real); a person
+with two commit addresses is two rows; `--since` reads the committer date. A CODEOWNERS owner is printed
+as the file writes it, with no check that the account exists. One reading is yadflow's own, taken from
+both platforms' examples: a pattern whose last part has no wildcard also covers everything inside a
+directory of that name (`apps/`, `**/logs`), while one ending in a wildcard matches files only
+(`docs/*` does not reach `docs/build-app/x.md`). A Shape review PR (`yad gate open`) gets no suggestion.
+
 ## File shape: `schemaVersion`
 
 Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **10**

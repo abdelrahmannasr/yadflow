@@ -45,8 +45,8 @@ who is logged in and who has access.
   `payments` +1, the largest and never the sum); the gate caps it at the active people less one and
   reports that (E72); the risk step is advisory. Solo
   mode still waives the approval.
-- **Reviewers.** Nothing requests reviewers on a PR/MR. Ask them on the PR/MR itself. A later roadmap row
-  (E68) will suggest reviewers from history; CODEOWNERS is a hint only.
+- **Reviewers.** Nothing requests reviewers on a PR/MR. Ask them on the PR/MR itself. `yad open-pr`
+  prints a suggestion for a code-repo PR (E68) from recent history and CODEOWNERS — a hint only.
 
 **Legacy data an older release wrote.** A `roster` array (with `login`/`name`/`email`/`roles`, or the
 older `role`) and a `verified_authors` list may still sit in this file. Nothing adds them, and nothing
