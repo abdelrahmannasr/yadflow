@@ -19015,7 +19015,7 @@ test('E73 silent paths: an unknown count and solo mode print nothing, and an ope
     const statusUnknown = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(null, 0) }));
     assert.doesNotMatch(statusUnknown.out, /may not be met/);
     // The warning run writes EXACTLY what the same run with no warning wrote: the ledger never hears of it.
-    const ledger = () => ['state.json', 'approvals.json', 'comments.json'].map((f) => {
+    const ledger = () => ['state.json', 'approvals.json', 'comments.json', 'hub-prs.json', 'product-prs.json'].map((f) => {
       const file = path.join(ep, '.sdlc', f);
       return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
     });
