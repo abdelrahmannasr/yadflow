@@ -15,6 +15,8 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // account — the answer would differ per machine — so the lookup is off for every test in this file and
 // every CLI it spawns. The lookup's own tests pass `env` explicitly.
 process.env.YAD_PLATFORM_LOGIN = '0';
+// E70: `yad doctor` reads each repo's branch protection with the same `gh`/`glab` login — off here too.
+process.env.YAD_PLATFORM_READ = '0';
 // Strip ambient git identity env: GIT_AUTHOR_*/GIT_COMMITTER_* override repo-level `git config`,
 // and semantic-release exports them during `npm publish` (prepublishOnly runs this suite) — test
 // commits must carry the identity each test sets, not the publisher's.
@@ -18712,6 +18714,349 @@ test('yad doctor: the codeowners section — facts warn, no file is a note, the 
       ['warn', 'one: CODEOWNERS may be out of date — in CODEOWNERS, 1 line matches no file (line 2); in CODEOWNERS, 2 lines yad could not read (lines 3, 4)'],
       ['warn', 'broken: CODEOWNERS could not be checked — git could not list the files in this repo'],
     ]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E70: warn loudly when a repo has no approval rules ------------------------------------------
+//
+// THE ONE RULE THESE TESTS EXIST FOR: "no rules" is proven only from calls that SUCCEEDED. GitHub answers
+// 404 on classic branch protection to anyone who is not an admin, even on a branch it reports as
+// protected — so a failed call is "not known", with the reason, never "none" and never "fine".
+const {
+  readProtection, protectionLine, protectionJSON, repoPathFromGitUrl, httpStatus, branchMatches, shown: protShown, BANNER, PAGE,
+} = await import('./protection.mjs');
+
+// A fake `gh`/`glab`: `calls` is [[regex on the API path, status, body]]; status null is "no answer"
+// (offline). Every call is recorded, so a test can say what was — and was NOT — asked.
+function fakePlatform({ installed = true, authed = true, calls = [] } = {}) {
+  const asked = [];
+  const runner = (cmd, args) => {
+    asked.push([cmd, ...args].join(' '));
+    if (cmd === 'which' || cmd === 'where') return { ok: installed, stdout: '', stderr: '' };
+    if (args[0] === 'auth') return { ok: authed, stdout: '', stderr: '' };
+    const p = args[args.length - 1];
+    for (const [re, code, body] of calls) {
+      if (!re.test(p)) continue;
+      if (code === 200) return { ok: true, stdout: typeof body === 'string' ? body : JSON.stringify(body), stderr: '' };
+      if (code === null) return { ok: false, code: 1, stdout: '', stderr: 'error connecting to api.github.com' };
+      return { ok: false, code: 1, stdout: JSON.stringify({ message: 'x', status: String(code) }), stderr: cmd === 'gh' ? `gh: Error (HTTP ${code})` : `glab: ${code} Error (HTTP ${code})` };
+    }
+    return { ok: false, code: 1, stdout: '', stderr: cmd === 'gh' ? 'gh: Not Found (HTTP 404)' : 'glab: 404 Not Found (HTTP 404)' };
+  };
+  return { runner, asked };
+}
+const GH_URL = 'https://github.com/acme/app.git';
+const GL_URL = 'git@gitlab.com:acme/app.git';
+const ON = { YAD_PLATFORM_READ: '' };
+const ghRead = (calls, target = {}, spec = {}) => {
+  const f = fakePlatform({ calls: [[/^repos\/acme\/app$/, 200, { default_branch: 'main' }], ...calls], ...spec });
+  return { r: readProtection({ platform: 'github', gitUrl: GH_URL, branch: 'main', ...target }, { runner: f.runner, env: ON }), asked: f.asked };
+};
+const glRead = (calls, target = {}, spec = {}) => {
+  const f = fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], ...calls], ...spec });
+  return { r: readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: 'main', ...target }, { runner: f.runner, env: ON }), asked: f.asked };
+};
+const PR_RULE = (n, extra = {}) => ({ type: 'pull_request', parameters: { required_approving_review_count: n, ...extra }, ruleset_source_type: 'Repository', ruleset_id: 7 });
+
+test('E70 helpers: the repo path keeps a GitLab subgroup; the HTTP status of gh and glab; wildcard branches; no address', () => {
+  assert.equal(repoPathFromGitUrl('https://github.com/acme/app.git'), 'acme/app');
+  assert.equal(repoPathFromGitUrl('git@github.com:acme/app.git'), 'acme/app');
+  assert.equal(repoPathFromGitUrl('ssh://git@git.corp.example:2222/group/sub/proj.git'), 'group/sub/proj', 'doctor\'s old repoSlug kept only sub/proj');
+  assert.equal(repoPathFromGitUrl('https://gitlab.com/group/sub/proj/'), 'group/sub/proj');
+  for (const bad of ['', '   ', null, 'https://github.com/only', 'not a url', 42]) assert.equal(repoPathFromGitUrl(bad), null, String(bad));
+  assert.equal(httpStatus({ stderr: 'gh: Not Found (HTTP 404)' }), 404);
+  assert.equal(httpStatus({ stderr: 'glab: 401 Unauthorized' }), 401);
+  assert.equal(httpStatus({ stdout: '{"message":"403 Forbidden"}' }), 403);
+  assert.equal(httpStatus({ stdout: '{"message":"x","status":"422"}' }), 422);
+  assert.equal(httpStatus({ stderr: 'error connecting to api.github.com' }), null, 'no answer is not a status');
+  assert.equal(httpStatus(undefined), null);
+  assert.ok(branchMatches('main', 'main'));
+  assert.ok(!branchMatches('main', 'mainline'));
+  assert.ok(branchMatches('release-*', 'release-1.2'));
+  assert.ok(branchMatches('*', 'anything'));
+  assert.ok(!branchMatches('rel.ase-*', 'relXase-1'), 'a dot is a dot, not any character');
+  assert.ok(!branchMatches(undefined, 'main'));
+  assert.equal(protShown('me@corp.com'), 'a name with an @ in it');
+  assert.equal(protShown('@team'), '@team', 'a leading @ is a login, not an address');
+  assert.equal(protShown('main'), 'main');
+});
+
+test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 404 on classic protection is not known', () => {
+  // Classic protection read by an admin: the count, exact.
+  let { r } = ghRead([[/\/protection$/, 200, { required_pull_request_reviews: { required_approving_review_count: 1 } }], [/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: true }]]);
+  assert.deepEqual([r.known, r.protected, r.approvals, !!r.atLeast, r.from], [true, true, 1, false, ['classic branch protection']]);
+  // A ruleset while classic protection is unreadable: a FLOOR — classic might ask for more.
+  ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.approvals, r.atLeast, r.from], [2, true, ['a repo ruleset, id 7']]);
+  // Only a `pull_request` rule is an approval rule, whatever another rule's parameters say; a review block
+  // with no count requires none.
+  ({ r } = ghRead([[/\/protection$/, 200, { required_pull_request_reviews: {} }], [/\/rules\//, 200, [{ type: 'merge_queue', parameters: { required_approving_review_count: 5 } }]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.protected, r.approvals], [true, 0]);
+  // An organisation ruleset is named as one; a 0-count pull_request rule requires no approval.
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(0), { ...PR_RULE(3), ruleset_source_type: 'Organization', ruleset_id: 9 }]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.approvals, r.atLeast, r.from], [3, false, ['an organisation ruleset, id 9']]);
+  // Nothing at all, PROVEN: not protected, and no active rule. Classic protection is not even asked.
+  let asked;
+  ({ r, asked } = ghRead([[/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: false }]]));
+  assert.deepEqual([r.known, r.protected, r.approvals, r.codeOwners], [true, false, 0, false]);
+  assert.ok(!asked.some((a) => /\/protection$/.test(a)), 'a 404 there would prove nothing');
+  assert.ok(asked.every((a) => !/ api /.test(a) || / api --hostname github\.com /.test(a)), 'every call names the host');
+  // cli/cli's real shape (2026-09-22): protected, no review ruleset, classic 404 → NOT KNOWN, never 0.
+  ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [{ type: 'copilot_code_review', parameters: {} }]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.known, r.protected, r.approvals], [true, true, null]);
+  assert.match(r.approvalsWhy, /only a repo admin can read classic branch protection, and GitHub answered 404/);
+  // A 403 on classic protection (a job token) is not known too, with its own reason.
+  ({ r } = ghRead([[/\/protection$/, 403], [/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.equal(r.approvals, null);
+  assert.match(r.approvalsWhy, /refused to show classic branch protection \(HTTP 403/);
+  // An admin's read of classic protection with no required reviews: proven 0 — and a code-owner review is a fact.
+  ({ r } = ghRead([[/\/protection$/, 200, { required_pull_request_reviews: { required_approving_review_count: 0, require_code_owner_reviews: true } }], [/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.protected, r.approvals, r.codeOwners], [true, 0, true]);
+  ({ r } = ghRead([[/\/protection$/, 200, { enforce_admins: { enabled: true } }], [/\/rules\//, 200, [PR_RULE(0, { require_code_owner_review: true })]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.approvals, r.codeOwners], [0, true], 'a ruleset\'s code-owner review is the same fact');
+  // `protected: false` with an active non-review rule is still protection.
+  ({ r } = ghRead([[/\/rules\//, 200, [{ type: 'deletion' }]], [/\/branches\/main$/, 200, { protected: false }]]));
+  assert.deepEqual([r.protected, r.approvals], [true, 0]);
+  // The rulesets cannot be read: approvals not known, even on an unprotected branch.
+  ({ r } = ghRead([[/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: false }]]));
+  assert.deepEqual([r.protected, r.approvals], [false, null]);
+  assert.match(r.approvalsWhy, /refused to show the rulesets on the branch \(HTTP 403/);
+  ({ r } = ghRead([[/\/rules\//, 200, 'garbage'], [/\/branches\/main$/, 200, { protected: false }]]));
+  assert.equal(r.approvals, null);
+  assert.match(r.approvalsWhy, /with something yad could not read/);
+  // A FULL page of rules with no review rule proves nothing about what is past it.
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, Array.from({ length: PAGE }, () => ({ type: 'deletion' }))], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.equal(r.approvals, null);
+  assert.match(r.approvalsWhy, new RegExp(`${PAGE} or more active rules`));
+  // …but a full page that already holds a review rule has the answer.
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(1), ...Array.from({ length: PAGE - 1 }, () => ({ type: 'deletion' }))]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.equal(r.approvals, 1);
+});
+
+test('E70 readProtection: every way of not being able to ask is not known, with why', () => {
+  const t = { platform: 'github', gitUrl: GH_URL, branch: 'main' };
+  const f = fakePlatform();
+  const cases = [
+    [readProtection({ ...t, platform: null, gitUrl: 'https://example.org/a/b.git' }, { runner: f.runner, env: ON }), /^no platform \(GitHub or GitLab\) is set/],
+    [readProtection({ ...t, platform: 'bitbucket' }, { runner: f.runner, env: ON }), /^yad does not know the platform "bitbucket"/],
+    [readProtection(t, { runner: f.runner, env: { YAD_PLATFORM_READ: '0' } }), /^platform reads are turned off \(YAD_PLATFORM_READ=0\)$/],
+    [readProtection({ ...t, gitUrl: null }, { runner: f.runner, env: ON }), /^no git remote URL yad can read/],
+    [readProtection({ ...t, gitUrl: 'https://github.com/only' }, { runner: f.runner, env: ON }), /^no git remote URL yad can read/],
+    [readProtection(t, { runner: fakePlatform({ installed: false }).runner, env: ON }), /^gh is not installed/],
+    [readProtection(t, { runner: fakePlatform({ authed: false }).runner, env: ON }), /^gh is not logged in for github\.com/],
+    [readProtection(t, { runner: fakePlatform({ calls: [[/./, null]] }).runner, env: ON }), /^yad could not reach github\.com to read the repo acme\/app \(offline/],
+    [ghRead([[/\/branches\/main$/, null]]).r, /^yad could not reach github\.com to read the branch main \(offline/],
+    [ghRead([[/\/branches\/main$/, 404]]).r, /^GitHub answered 404 for the branch main \(it does not exist, or your login may not see it\)$/],
+    [ghRead([[/\/branches\/main$/, 401]]).r, /HTTP 401 — the login may have expired/],
+    [ghRead([[/\/branches\/main$/, 500]]).r, /answered HTTP 500 for the branch main/],
+    [ghRead([[/\/branches\/main$/, 200, 'not json']]).r, /with something yad could not read/],
+    [ghRead([[/\/branches\/main$/, 200, { name: 'main' }]]).r, /did not say whether the branch is protected/],
+  ];
+  for (const [r, why] of cases) {
+    assert.equal(r.known, false, String(why));
+    assert.match(r.why, why);
+  }
+  assert.deepEqual(f.asked, [], 'nothing was asked when the answer was known to be unknowable');
+  // The platform is taken from the URL when yad's files name none.
+  const g = fakePlatform({ calls: [[/^repos\/acme\/app$/, 200, { default_branch: 'main' }], [/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: false }]] });
+  assert.equal(readProtection({ platform: null, gitUrl: GH_URL, branch: 'main' }, { runner: g.runner, env: ON }).approvals, 0);
+});
+
+test('E70 readProtection: the branch is yad\'s; with none, the platform\'s default is read and said', () => {
+  let { r } = ghRead([[/\/rules\//, 200, []], [/\/branches\/develop$/, 200, { protected: false }]], { branch: 'develop' });
+  assert.deepEqual([r.branch, r.branchFrom, r.platformDefault], ['develop', 'registry', 'main']);
+  ({ r } = ghRead([[/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: false }]], { branch: null }));
+  assert.deepEqual([r.branch, r.branchFrom], ['main', 'platform']);
+  const f = fakePlatform({ calls: [[/^repos\/acme\/app$/, 200, {}]] });
+  r = readProtection({ platform: 'github', gitUrl: GH_URL, branch: null }, { runner: f.runner, env: ON });
+  assert.equal(r.known, false);
+  assert.match(r.why, /no default branch is set in yad's files, and GitHub named none/);
+  // A branch with a `/` keeps it; anything else is encoded.
+  const { asked } = ghRead([[/\/rules\//, 200, []], [/\/branches\//, 200, { protected: false }]], { branch: 'release/1.0 #x' });
+  assert.ok(asked.some((a) => a.endsWith('repos/acme/app/branches/release/1.0%20%23x')), asked.join('\n'));
+});
+
+test('E70 readProtection on GitLab: protected branches (wildcards), approval rules (Premium) never guessed', () => {
+  // Free: the branch is protected, the approval rules are refused → not known, and the tier is not guessed.
+  let { r, asked } = glRead([[/\/approval_rules/, 403], [/\/protected_branches/, 200, [{ name: 'main' }]]]);
+  assert.deepEqual([r.known, r.protected, r.approvals], [true, true, null]);
+  assert.match(r.approvalsWhy, /^GitLab refused to show the approval rules \(HTTP 403\): they need GitLab Premium or Ultimate, or your login may not read them$/);
+  assert.ok(asked.some((a) => a === 'glab api --hostname gitlab.com projects/acme%2Fapp/protected_branches?per_page=100'), asked.join('\n'));
+  for (const code of [401, 404]) assert.match(glRead([[/\/approval_rules/, code], [/\/protected_branches/, 200, []]]).r.approvalsWhy, new RegExp(`HTTP ${code}\\): they need GitLab Premium`));
+  assert.match(glRead([[/\/approval_rules/, null], [/\/protected_branches/, 200, []]]).r.approvalsWhy, /could not reach gitlab\.com to read the approval rules/);
+  assert.match(glRead([[/\/approval_rules/, 200, 'x'], [/\/protected_branches/, 200, []]]).r.approvalsWhy, /could not read/);
+  // Premium: a rule scoped to no branch applies to every branch.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ id: 1, name: 'All', approvals_required: 2, protected_branches: [] }, { id: 2, name: 'Zero', approvals_required: 0 }]], [/\/protected_branches/, 200, [{ name: 'main' }]]]));
+  assert.deepEqual([r.approvals, !!r.atLeast, r.from], [2, false, ['approval rule "All"']]);
+  // Two rules: each is met on its own and their approvers may overlap — the largest is a floor.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1 }, { name: 'B', approvals_required: 2 }]], [/\/protected_branches/, 200, []]]));
+  assert.deepEqual([r.approvals, r.atLeast], [2, true]);
+  // A wildcard protects the branch; a rule on every protected branch then applies.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Sec', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, [{ name: 'ma*', code_owner_approval_required: true }]]]));
+  assert.deepEqual([r.protected, r.approvals, r.codeOwners], [true, 1, true]);
+  // …and does not apply to a branch that is not protected; a rule listing another branch does not either.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Sec', approvals_required: 1, applies_to_all_protected_branches: true }, { name: 'Rel', approvals_required: 3, protected_branches: [{ name: 'release-*' }] }]], [/\/protected_branches/, 200, [{ name: 'release-*' }]]]));
+  assert.deepEqual([r.protected, r.approvals], [false, 0]);
+  // A rule on every protected branch, while the protected branches cannot be read: not known.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Sec', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 403]]));
+  assert.deepEqual([r.protected, r.approvals], [null, null]);
+  assert.match(r.approvalsWhy, /an approval rule applies to every protected branch, and GitLab refused to show the protected branches/);
+  // Nothing at all, proven.
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, []]]));
+  assert.deepEqual([r.protected, r.approvals], [false, 0]);
+  // Full pages prove nothing.
+  ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, Array.from({ length: PAGE }, (_, i) => ({ name: `b${i}` }))]]));
+  assert.equal(r.protected, null);
+  assert.match(r.protectedWhy, /100 or more protected branches/);
+  ({ r } = glRead([[/\/approval_rules/, 200, Array.from({ length: PAGE }, () => ({ name: 'z', approvals_required: 0 }))], [/\/protected_branches/, 200, []]]));
+  assert.equal(r.approvals, null);
+  assert.match(r.approvalsWhy, /100 or more approval rules/);
+  // A self-managed host and a subgroup: the host is asked, and the whole path is the project.
+  const f = fakePlatform({ calls: [[/^projects\/group%2Fsub%2Fproj$/, 200, { default_branch: 'trunk' }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]] });
+  r = readProtection({ platform: 'gitlab', gitUrl: 'https://git.corp.example/group/sub/proj.git', branch: null }, { runner: f.runner, env: ON });
+  assert.deepEqual([r.host, r.repo, r.branch, r.approvals], ['git.corp.example', 'group/sub/proj', 'trunk', 0]);
+  assert.ok(f.asked.includes('glab auth status --hostname git.corp.example'));
+  r = readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: 'main' }, { runner: fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 404]] }).runner, env: ON });
+  assert.match(r.why, /GitLab answered 404 for the project acme\/app/);
+  const g = fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, {}]] });
+  assert.match(readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: null }, { runner: g.runner, env: ON }).why, /GitLab named none/);
+});
+
+test('E70 protectionLine: the Part 3 banner word for word only when both halves are proven; solo prints facts', () => {
+  const base = { platform: 'github', host: 'github.com', repo: 'acme/app', branch: 'main', branchFrom: 'registry', platformDefault: 'main', known: true, protected: false, approvals: 0, from: [], codeOwners: false };
+  assert.equal(BANNER, 'This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.');
+  let l = protectionLine(base, { name: 'backend' });
+  assert.equal(l.status, 'warn');
+  assert.equal(l.message, `backend (GitHub acme/app, branch \`main\`): ${BANNER}`);
+  assert.equal(l.hint, 'only GitHub can hold a merge — a required approval in GitHub\'s branch protection or a ruleset for `main` does it; yad only reports what is set');
+  assert.equal(protectionLine({ ...base, platform: 'gitlab' }, { name: 'b' }).hint, 'only GitLab can hold a merge — a required approval in an approval rule (GitLab Premium or Ultimate) for `main` does it; yad only reports what is set', 'GitLab has no rulesets');
+  assert.equal(protectionLine({ ...base, platform: 'gitlab', protected: true }, { name: 'b' }).hint, 'only GitLab can require an approval — in an approval rule (GitLab Premium or Ultimate) for `main`; yad only reports what is set');
+  l = protectionLine(base, { name: 'backend', solo: true });
+  assert.deepEqual([l.status, l.message], ['ok', 'backend: GitHub acme/app has no approval rules and no branch protection on `main` — expected in solo mode; yad records what happens, but cannot stop anything here']);
+  // No banner unless BOTH are proven.
+  for (const r of [{ ...base, protected: true }, { ...base, protected: null, protectedWhy: 'x' }, { ...base, approvals: null, approvalsWhy: 'y' }, { ...base, known: false, why: 'z' }]) {
+    assert.ok(!protectionLine(r, { name: 'b' }).message.includes(BANNER), JSON.stringify(r));
+  }
+  l = protectionLine({ ...base, protected: true }, { name: 'b' });
+  assert.deepEqual([l.status, l.message], ['warn', 'b: `main` is protected on GitHub acme/app, but no rule requires an approval — anyone with write access can merge their own pull request']);
+  l = protectionLine({ ...base, protected: true, codeOwners: true }, { name: 'b' });
+  assert.match(l.message, /no rule requires an approval — only a change to a file CODEOWNERS lists needs a code owner's approval; anyone with write access can merge any other change of their own$/);
+  assert.equal(protectionLine({ ...base, protected: true }, { name: 'b', solo: true }).status, 'ok');
+  l = protectionLine({ ...base, protected: null, protectedWhy: 'GitLab refused' }, { name: 'b' });
+  assert.equal(l.message, 'b: no rule on GitHub acme/app requires an approval to merge into `main`; whether the branch is protected is not known — GitLab refused');
+  assert.equal(protectionLine({ ...base, protected: null, protectedWhy: 'x' }, { name: 'b', solo: true }).status, 'ok');
+  // Required approvals: a fact, `ok` — and never "safe", never "yad holds".
+  l = protectionLine({ ...base, protected: true, approvals: 2, atLeast: true, from: ['a repo ruleset, id 7'], codeOwners: true }, { name: 'b' });
+  assert.deepEqual([l.status, l.message], ['ok', 'b: GitHub acme/app requires at least 2 approvals to merge into `main` (from: a repo ruleset, id 7); a code owner must also approve a change to a file CODEOWNERS lists — GitHub holds the merge, not yad']);
+  // Solo: a required approval blocks the solo developer's own merge — the old solo probe's warning.
+  l = protectionLine({ ...base, protected: true, approvals: 1, from: ['classic branch protection'] }, { name: 'Product hub', solo: true });
+  assert.deepEqual([l.status, l.message], ['warn', 'Product hub: solo mode, but GitHub acme/app requires 1 approval to merge into `main` — you cannot approve your own pull request, so the merge will be blocked']);
+  assert.equal(l.hint, 'relax the required approvals in GitHub\'s branch protection or a ruleset for `main` (from: classic branch protection)');
+  // Approvals not known.
+  l = protectionLine({ ...base, protected: true, approvals: null, approvalsWhy: 'only a repo admin can read it' }, { name: 'b' });
+  assert.deepEqual([l.status, l.message], ['warn', 'b: `main` is protected on GitHub acme/app, but whether a merge needs an approval is not known — only a repo admin can read it']);
+  assert.match(l.hint, /ask a repo admin/);
+  l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'refused' }, { name: 'b' });
+  assert.match(l.hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see/);
+  l = protectionLine({ ...base, protected: null, protectedWhy: 'p', approvals: null, approvalsWhy: 'a' }, { name: 'b' });
+  assert.equal(l.message, 'b: whether `main` is protected on GitHub acme/app is not known (p), but whether a merge needs an approval is not known — a');
+  l = protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b' });
+  assert.equal(l.message, 'b: `main` is not protected on GitHub acme/app — anyone with write access can push to it directly; whether a merge needs an approval is not known — a');
+  assert.match(protectionLine({ ...base, platform: 'gitlab', approvals: null, approvalsWhy: 'a' }, { name: 'b' }).hint, /on GitLab Free an approval never blocks a merge, so with no protected branch nothing holds one/);
+  for (const solo of [true, false]) {
+    assert.equal(protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b', solo }).status, solo ? 'ok' : 'warn');
+    assert.equal(protectionLine({ ...base, protected: true, approvals: null, approvalsWhy: 'a' }, { name: 'b', solo }).status, solo ? 'ok' : 'warn');
+  }
+  // Not known: `warn` in team mode, `ok` in solo mode; the hint follows the reason.
+  const unknown = (why, extra = {}) => protectionLine({ ...base, known: false, why, ...extra }, { name: 'b' });
+  assert.deepEqual([unknown('gh is not installed, so yad cannot ask GitHub').status, unknown('gh is not installed, so yad cannot ask GitHub').message], ['warn', 'b: not known whether `main` requires an approval — gh is not installed, so yad cannot ask GitHub']);
+  assert.equal(protectionLine({ ...base, known: false, why: 'x' }, { name: 'b', solo: true }).status, 'ok');
+  assert.match(unknown('gh is not installed').hint, /^install gh and log in/);
+  assert.match(unknown('gh is not logged in for github.com').hint, /^run `gh auth login --hostname github\.com`/);
+  assert.match(unknown('platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /^unset YAD_PLATFORM_READ/);
+  assert.match(unknown('no platform (GitHub or GitLab) is set', { platform: null }).hint, /^set `platform`/);
+  assert.match(unknown('yad does not know the platform "x"', { platform: 'x' }).hint, /^set `platform`/);
+  assert.match(unknown('no git remote URL yad can read').hint, /\.sdlc\/repos\.json/);
+  assert.match(unknown('GitHub answered 404 for the branch main (it does not exist, or your login may not see it)').hint, /names a branch that exists/);
+  assert.match(unknown('yad could not reach github.com').hint, /^run `yad doctor` again when the platform can be reached/);
+  assert.equal(protectionLine({ ...base, known: false, why: 'x', branch: null, platform: null }, { name: 'b' }).message, 'b: not known whether the default branch requires an approval — x');
+  // The branch notes.
+  assert.equal(protectionLine({ ...base, branch: 'develop' }, { name: 'b' }).message, `b (GitHub acme/app, branch \`develop\`; GitHub's own default branch is \`main\`): ${BANNER}`);
+  assert.equal(protectionLine({ ...base, protected: true, branchFrom: 'platform' }, { name: 'b' }).message, 'b: `main` is protected on GitHub acme/app (yad\'s files name no default branch, so GitHub\'s default was read), but no rule requires an approval — anyone with write access can merge their own pull request');
+  // No e-mail address, anywhere: not the branch, not the platform's default, not in --json.
+  const at = { ...base, branch: 'me@corp.com', platformDefault: 'you@corp.com', repo: 'acme/app' };
+  for (const r of [at, { ...at, protected: true, approvals: 1, from: ['x'] }, { ...at, known: false, why: 'x' }]) {
+    for (const solo of [true, false]) {
+      const out = protectionLine(r, { name: 'b', solo });
+      assert.ok(!/corp\.com/.test(`${out.message} ${out.hint || ''}`), out.message);
+      assert.ok(!/`a name with an @ in it`/.test(out.message), 'a hidden name is not dressed as a real one');
+    }
+  }
+  assert.deepEqual([protectionJSON(at).branch, protectionJSON(at).platformDefault, protectionJSON(at).repo], ['a name with an @ in it', 'a name with an @ in it', 'acme/app']);
+  assert.equal(at.branch, 'me@corp.com', 'the answer itself is not changed');
+  // "safe", "enforced by yad": never.
+  for (const r of [base, { ...base, approvals: 3, from: ['x'] }, { ...base, protected: true }]) {
+    for (const solo of [true, false]) assert.ok(!/\bsafe\b|yad (holds|enforces)/i.test(protectionLine(r, { name: 'b', solo }).message));
+  }
+});
+
+test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {
+  const { protectionChecks, collectDoctor } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e70-doc-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    const repo = path.join(T, 'backend');
+    fs.mkdirSync(repo);
+    git(repo, 'init', '-q');
+    git(repo, 'remote', 'add', 'origin', 'https://github.com/acme/backend.git');
+    git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'seed');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', git_url: GH_URL, default_branch: 'main' }));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [
+      { name: 'backend', path: 'backend', platform: 'github', default_branch: 'main' }, // no git_url: the origin remote
+      { name: 'mobile', path: 'mobile', platform: 'github', git_url: null, default_branch: 'main' }, // not on disk
+      { name: 'web', path: 'web', platform: 'gitlab', git_url: GL_URL, default_branch: 'main' },
+      { path: 'nameless' }, null,
+    ] }));
+    const f = fakePlatform({ calls: [
+      [/^repos\/acme\/app$/, 200, { default_branch: 'main' }], [/^repos\/acme\/app\/rules\//, 200, []], [/^repos\/acme\/app\/branches\/main$/, 200, { protected: false }],
+      [/^repos\/acme\/backend$/, 200, { default_branch: 'main' }], [/^repos\/acme\/backend\/rules\//, 200, [PR_RULE(1)]], [/^repos\/acme\/backend\/branches\/main$/, 200, { protected: true }], [/^repos\/acme\/backend\/branches\/main\/protection$/, 404],
+      [/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], [/protected_branches/, 200, [{ name: 'main' }]], [/approval_rules/, 403],
+    ] });
+    let checks = [];
+    protectionChecks(checks, T, { runner: f.runner, env: ON });
+    assert.deepEqual(checks.map((x) => [x.id, x.section, x.status]), [
+      ['protection:hub', 'protection', 'warn'], ['protection:backend', 'protection', 'ok'], ['protection:mobile', 'protection', 'warn'], ['protection:web', 'protection', 'warn'],
+    ]);
+    assert.equal(checks[0].message, `Product hub (GitHub acme/app, branch \`main\`): ${BANNER}`);
+    assert.equal(checks[1].message, 'backend: GitHub acme/backend requires at least 1 approval to merge into `main` (from: a repo ruleset, id 7) — GitHub holds the merge, not yad');
+    assert.match(checks[2].message, /^mobile: not known whether `main` requires an approval — no git remote URL yad can read/);
+    assert.match(checks[3].message, /^web: `main` is protected on GitLab acme\/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules \(HTTP 403\)/);
+    assert.equal(checks[1].protection.approvals, 1, '--json carries the answer');
+    assert.ok(checks.every((x) => x.status !== 'fail'), 'advisory: never a failure');
+    // Solo mode: the same facts, `ok`, no banner.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', git_url: GH_URL, default_branch: 'main', solo: true }));
+    checks = [];
+    protectionChecks(checks, T, { runner: f.runner, env: ON });
+    assert.deepEqual(checks.map((x) => x.status), ['ok', 'warn', 'ok', 'ok'], 'except a required approval, which blocks the solo developer\'s own merge');
+    assert.match(checks[1].message, /^backend: solo mode, but GitHub acme\/backend requires at least 1 approval/);
+    assert.ok(checks.every((x) => !x.message.includes(BANNER)));
+    // A hub with no platform, and no default branch named anywhere: not known, said — never quiet.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    checks = [];
+    protectionChecks(checks, T, { runner: f.runner, env: ON });
+    assert.deepEqual(checks.map((x) => [x.status, x.message]), [['warn', 'Product hub: not known whether the default branch requires an approval — no platform (GitHub or GitLab) is set, so there is no platform to ask']]);
+    // No hub file: only the repos.
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    checks = [];
+    protectionChecks(checks, T, { runner: f.runner, env: ON });
+    assert.deepEqual(checks, []);
+    // The whole doctor: the section is there, a read that is off is not known, and nothing fails over it.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', git_url: GH_URL, default_branch: 'main', solo: true }));
+    const all = collectDoctor(T).checks;
+    const hub = all.find((x) => x.id === 'protection:hub');
+    assert.match(hub.message, /not known whether `main` requires an approval — platform reads are turned off \(YAD_PLATFORM_READ=0\)$/);
+    assert.ok(!all.some((x) => x.id === 'solo-branch-protection'), 'the old solo probe moved into this section');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

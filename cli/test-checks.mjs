@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 // account — the answer would differ per machine — so the lookup is off for every test in this file and
 // every CLI it spawns. The lookup's own tests pass `env` explicitly.
 process.env.YAD_PLATFORM_LOGIN = '0';
+// E70: `yad doctor` reads each repo's branch protection with the same `gh`/`glab` login — off here too.
+process.env.YAD_PLATFORM_READ = '0';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CHECKS = path.join(ROOT, 'skills/yad-checks/templates/checks');

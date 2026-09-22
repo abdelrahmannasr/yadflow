@@ -18,6 +18,7 @@ import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
+import { readProtection, protectionLine, protectionJSON } from './protection.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 
 const MIN_NODE = 18;
@@ -25,8 +26,6 @@ const MIN_NODE = 18;
 // Solo mode (a lone developer): approval waived, merge + resolved threads still gate. Persisted in
 // hub.json. Mirrors gate.mjs / next.mjs.
 const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
-// owner/repo slug from a git url (https or ssh), for the branch-protection probe.
-const repoSlug = (url) => ((url || '').match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/) || [])[1] || null;
 // Is an already-resolved path nested under the project root? Repo paths are contained to the WORKSPACE
 // (the root's parent, see setup.insideWorkspace), so a registered sibling resolves outside the root —
 // which is what distinguishes "absent because it lives elsewhere" from "absent because it is broken".
@@ -207,18 +206,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
               check(checks, 'gitlab-api', 'project', 'warn', `glab is authenticated but \`glab api\` failed for ${host} [YAD-ENV-002]`, 'ensure the token has `api` scope — the gate reads MR approvals/discussions via the API');
             }
           }
-          // Solo + GitHub: a branch that "requires approvals" would block the solo dev's own merge
-          // (they can't approve their own PR). Best-effort probe; a 404 (no protection) is fine.
-          if (isSolo(hub) && hub.platform === 'github') {
-            const slug = repoSlug(hub.git_url) || repoSlug(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
-            const br = hub.default_branch || 'main';
-            if (slug) {
-              const probe = run('gh', ['api', `repos/${slug}/branches/${br}/protection/required_pull_request_reviews`, '--jq', '.required_approving_review_count']);
-              if (probe.ok && Number(probe.stdout) > 0) {
-                check(checks, 'solo-branch-protection', 'project', 'warn', `solo mode but ${br} requires ${probe.stdout} approval(s) — you cannot approve your own PR, so the merge will be blocked`, `relax "Require approvals" in ${slug} branch protection for ${br}`);
-              }
-            }
-          }
+          // Solo mode's "a required approval blocks your own merge" warning moved to the `protection`
+          // section (E70), which reads rulesets as well as classic protection, asks the Product's own host,
+          // and says "not known" when a call fails instead of staying quiet.
         }
       }
     }
@@ -1892,6 +1882,45 @@ export function codeownersChecks(checks, root) {
   }
 }
 
+// E70 — what the platform holds on the Product hub's branch and on each connected repo's: branch
+// protection, and whether a rule requires an approval before a merge (cli/protection.mjs). Never quiet
+// (rule 6): every repo gets a line, and a read that failed says "not known" and why — never "fine", never
+// "unprotected". Advisory, like E69: a warning at most, never a failure — the platform holds a merge, not
+// yad. Solo mode prints the facts as `ok` (the user's decision, 2026-09-22), except a required approval,
+// which blocks the solo developer's own merge. The branch is the one yad's files name (`default_branch`),
+// the branch gates merge into; with none, the platform's own default is read and the line says so.
+export function protectionChecks(checks, root, { runner, env } = {}) {
+  const productPath = productConfigPath(root);
+  const hub = readJSON(productPath, null);
+  const solo = isSolo(hub);
+  const opts = { ...(runner ? { runner } : {}), ...(env ? { env } : {}) };
+  const origin = (cwd) => run('git', ['remote', 'get-url', 'origin'], { cwd }).stdout || null;
+  const emit = (id, name, target) => {
+    const r = readProtection(target, opts);
+    const line = protectionLine(r, { name, solo });
+    check(checks, id, 'protection', line.status, line.message, line.hint || '', { protection: protectionJSON(r) });
+  };
+  if (isPlainObject(hub)) {
+    emit('protection:hub', 'Product hub', {
+      platform: hub.platform || null,
+      gitUrl: hub.git_url || origin(root),
+      branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : null,
+    });
+  }
+  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  const repos = Array.isArray(registry?.repos) ? registry.repos : [];
+  for (const repo of repos) {
+    if (!repo || typeof repo.name !== 'string' || !repo.name) continue;
+    const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
+    const onDisk = repoRoot && exists(repoRoot) && gitHead(repoRoot);
+    emit(`protection:${repo.name}`, repo.name, {
+      platform: repo.platform || null,
+      gitUrl: (typeof repo.git_url === 'string' && repo.git_url) || (onDisk ? origin(repoRoot) : null),
+      branch: typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null,
+    });
+  }
+}
+
 // Phase 6 — feature-thread integrity. A change-epic must thread to a real parent and its denormalized
 // `thread` cache must equal the computed root; an open hotfix reconcile-debt is a warn (the next change
 // on that thread is blocked at the gate until it is paid). Pure reporting, like the other sections.
@@ -1932,6 +1961,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   projectChecks(checks, root, { headCount });
   riskMapChecks(checks, root);
   codeownersChecks(checks, root);
+  protectionChecks(checks, root);
   foundationChecks(checks, root);
   shapeChecks(checks, root);
   mirrorChecks(checks, root);
