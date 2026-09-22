@@ -18316,6 +18316,305 @@ test('suggest reviewers: "lists nobody" is hedged when a skipped line may have b
   } finally { r.done(); }
 });
 
+// ---- E69: warn when CODEOWNERS is stale ----------------------------------------------------------
+// `yad codeowners check` and a `yad doctor` line per connected repo. FACTS only in both — a line that
+// matches no file, a file the platform never reads or will not load, a line yad cannot read — plus, in
+// the command alone, a HINT: the @logins no recent noreply commit names. Nothing is ever written: there
+// is no `--write` (the user's decision, 2026-09-22), because a name yad wrote would become an owner the
+// platform can enforce.
+
+test('codeowners check: a line that matches no file is found, and a submodule is never called empty', async () => {
+  const { parseCodeowners, deadLines } = await import('./codeowners.mjs');
+  const files = ['src/a.js', 'docs/guide/x.md', 'README.md', 'vendor/lib'];
+  const gh = parseCodeowners('* @a\nsrc/ @a\n/legacy/ @a\ndocs/*.md @a\ndocs/ @a\nvendor/lib/ @a\nvendor/lib/*.js @a\nvendor/other/ @a\n', 'github');
+  assert.deepEqual(gh.rules.map((r) => r.pattern), ['*', 'src/', '/legacy/', 'docs/*.md', 'docs/', 'vendor/lib/', 'vendor/lib/*.js', 'vendor/other/'], 'each rule keeps its pattern as written');
+  assert.deepEqual(deadLines(gh, files, { submodules: ['vendor/lib'] }).map((d) => d.line), [3, 4, 7, 8],
+    '`docs/*.md` never reaches `docs/guide/`; a submodule\'s folder line is not dead, but no file inside one is ever in the list');
+  assert.deepEqual(deadLines(gh, files).map((d) => d.line), [3, 4, 6, 7, 8], 'without the submodule probe its folder line reads dead');
+  // GitLab: a path with no leading `/` matches at any depth, and an exclusion that excludes nothing is dead.
+  const gl = parseCodeowners('[Docs] @writers\ndocs/\n!docs/gone.md\n!docs/guide/x.md\nguide/x.md @a\n/guide/x.md @a\n', 'gitlab');
+  assert.deepEqual(deadLines(gl, files), [{ line: 3, pattern: 'docs/gone.md', negate: true }, { line: 6, pattern: '/guide/x.md', negate: false }]);
+  assert.deepEqual(deadLines(parseCodeowners('* @a\n', 'github'), []).map((d) => d.line), [1], 'a repo with no file: every line is dead');
+});
+
+test('codeowners check: the file on disk is picked in the platform\'s order; one GitHub will not load is a fact', async () => {
+  const { diskCodeowners } = await import('./codeowners.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e69-disk-'));
+  const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
+  try {
+    assert.match(diskCodeowners(T, 'github').none, /no CODEOWNERS \(\.github\/CODEOWNERS, CODEOWNERS, docs\/CODEOWNERS\)/);
+    assert.match(diskCodeowners(T, 'bitbucket').unknown, /no CODEOWNERS locations are known/);
+    put('docs/CODEOWNERS', '* @d\n');
+    put('CODEOWNERS', '* @r\n');
+    put('.gitlab/CODEOWNERS', '* @l\n');
+    assert.deepEqual(diskCodeowners(T, 'github'), { path: 'CODEOWNERS', text: '* @r\n', ignored: ['docs/CODEOWNERS'] }, 'GitHub never reads `.gitlab/`');
+    assert.deepEqual(diskCodeowners(T, 'gitlab'), { path: 'CODEOWNERS', text: '* @r\n', ignored: ['docs/CODEOWNERS', '.gitlab/CODEOWNERS'] });
+    fs.mkdirSync(path.join(T, '.github/CODEOWNERS'), { recursive: true });
+    assert.match(diskCodeowners(T, 'github').unknown, /\.github\/CODEOWNERS is not a regular file/, 'a first location the platform cannot use is not known, never skipped');
+    fs.rmSync(path.join(T, '.github'), { recursive: true });
+    fs.rmSync(path.join(T, 'CODEOWNERS'));
+    fs.symlinkSync('docs/CODEOWNERS', path.join(T, 'CODEOWNERS'));
+    assert.match(diskCodeowners(T, 'github').unknown, /CODEOWNERS is not a regular file/, 'a symlink is stored by git as its target\'s name');
+    fs.rmSync(path.join(T, 'CODEOWNERS'));
+    put('CODEOWNERS', '* @r\n');
+    fs.rmSync(path.join(T, 'docs/CODEOWNERS'));
+    fs.mkdirSync(path.join(T, 'docs/CODEOWNERS'));                       // a folder at a later location is no file
+    assert.deepEqual(diskCodeowners(T, 'gitlab').ignored, ['.gitlab/CODEOWNERS']);
+    fs.rmSync(path.join(T, 'docs/CODEOWNERS'), { recursive: true });
+    put('docs/CODEOWNERS', '* @d\n');
+    fs.rmSync(path.join(T, 'CODEOWNERS'));
+    put('.github/CODEOWNERS', `* @x\n${'#'.repeat(3_000_000)}\n`);
+    assert.deepEqual(diskCodeowners(T, 'github'), { path: '.github/CODEOWNERS', tooBig: true, ignored: ['docs/CODEOWNERS'] });
+    put('CODEOWNERS', `* @x\n${'#'.repeat(3_000_000)}\n`);
+    assert.deepEqual([diskCodeowners(T, 'gitlab').path, diskCodeowners(T, 'gitlab').tooBig], ['CODEOWNERS', undefined], 'GitLab documents no size limit');
+    fs.rmSync(path.join(T, 'CODEOWNERS'));
+    fs.writeFileSync(path.join(T, '.github/CODEOWNERS'), '#'.repeat(3_000_000));
+    assert.equal(diskCodeowners(T, 'github').tooBig, true, 'exactly 3 000 000 bytes is not loaded');
+    fs.writeFileSync(path.join(T, '.github/CODEOWNERS'), '#'.repeat(2_999_999));
+    assert.equal(diskCodeowners(T, 'github').tooBig, undefined, 'just under 3 000 000 bytes is loaded');
+    fs.rmSync(path.join(T, '.github'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.github'), 'x');                     // a FILE named .github: nothing can be under it
+    assert.equal(diskCodeowners(T, 'github').path, 'docs/CODEOWNERS');
+    fs.rmSync(path.join(T, '.github'));
+    fs.chmodSync(path.join(T, 'docs/CODEOWNERS'), 0o000);
+    try {
+      assert.match(diskCodeowners(T, 'github').unknown, /docs\/CODEOWNERS could not be read \(EACCES\)/, 'a file that cannot be read is not known, never "none"');
+    } finally { fs.chmodSync(path.join(T, 'docs/CODEOWNERS'), 0o644); }
+    fs.chmodSync(path.join(T, 'docs'), 0o000);
+    try {
+      assert.match(diskCodeowners(T, 'github').unknown, /docs\/CODEOWNERS could not be read \(EACCES\)/, 'a location that cannot be looked at is not known, never skipped');
+    } finally { fs.chmodSync(path.join(T, 'docs'), 0o755); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('codeowners check: the real repo — files on disk count, the platform must be known, a submodule is kept', async () => {
+  const { checkCodeowners } = await import('./codeowners-command.mjs');
+  const r = authoredRepo();
+  const S = authoredRepo();
+  try {
+    r.as('Ana', 'ana@corp.io', 3, { 'src/a.js': '1', 'CODEOWNERS': 'src/ @ana\n*.md @ana\n/legacy/ @ana\nvendor/lib/ @ana\nsrc/a.js/ @ana\n' });
+    assert.deepEqual(checkCodeowners(r.T, { remote: '' }), { git: true, platform: null, ignored: [], notRead: [], dead: [],
+      unknown: 'yad cannot tell whether this repo is on GitHub or GitLab (no `platform` in repos.json, and the origin remote names neither) — pass --platform' });
+    assert.equal(checkCodeowners(r.T, { remote: 'https://github.com/a/b.git' }).platform, 'github', 'the remote names the platform');
+    assert.equal(checkCodeowners(r.T, { platform: 'gitlab', remote: 'https://github.com/a/b.git' }).platform, 'gitlab', 'a named platform wins');
+    const got = checkCodeowners(r.T, { platform: 'github', remote: '' });
+    assert.deepEqual(got.dead.map((d) => d.line), [2, 3, 4, 5], 'a folder line naming a file matches nothing');
+    assert.equal(got.inactive, undefined, 'the hint is read only when asked for');
+    fs.writeFileSync(path.join(r.T, 'NOTES.md'), 'x');                  // not committed yet: on disk, like the risk map
+    S.as('Bo', 'bo@corp.io', 1, { 'lib.js': '1' });
+    execFileSync('git', ['-c', 'protocol.file.allow=always', 'submodule', '-q', 'add', S.T, 'vendor/lib'], { cwd: r.T, stdio: 'pipe' });
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'github', remote: '' }).dead.map((d) => d.line), [3, 5], 'only a submodule is probed as a folder');
+    const N = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e69-nogit-'));
+    assert.deepEqual(checkCodeowners(N, { platform: 'github' }), { git: false });
+    fs.rmSync(N, { recursive: true, force: true });
+  } finally { r.done(); S.done(); }
+});
+
+test('codeowners check: the inactive hint — a noreply login on the same public host, 90 days, hedged', async () => {
+  const { checkCodeowners } = await import('./codeowners-command.mjs');
+  const r = authoredRepo();
+  try {
+    // Oldest first: git's date-limited walk stops at the first commit older than the window (E67's limit).
+    r.as('Old', '2+leaver@users.noreply.github.com', 120, { 'src/o.js': '1' });
+    r.as('Gl', '9-carol@users.noreply.gitlab.com', 20, { 'src/g.js': '1' });  // a GitLab account, not GitHub's @carol
+    r.as('Bob', 'bob@corp.io', 20, { 'src/b.js': '1' });
+    r.as('bot', '4+renovate[bot]@users.noreply.github.com', 5, { 'src/r.js': '1' });
+    r.as('Ana', '1+Ana@users.noreply.github.com', 60, { 'src/a.js': '1',
+      'CODEOWNERS': 'src/ @ANA @leaver @bob @carol @org/payments lead@corp.io x@corp.io\n*.js @Ana @org/payments\n' });
+    const gh = checkCodeowners(r.T, { platform: 'github', remote: 'https://github.com/acme/app.git', hint: true });
+    assert.deepEqual(gh.inactive, { quiet: ['@leaver', '@bob', '@carol'], checked: 4, notChecked: { team: 1, email: 2 } },
+      'a login matches whatever its case; 120 days is outside; a work address is no evidence; a GitLab login is not a GitHub account');
+    assert.match(checkCodeowners(r.T, { platform: 'github', remote: 'https://ghe.corp.io/acme/app.git', hint: true }).inactive.unknown,
+      /the origin remote is not on github\.com, and a noreply address is evidence only for a github\.com account/);
+    const gl = checkCodeowners(r.T, { platform: 'gitlab', remote: 'git@gitlab.com:acme/app.git', hint: true });
+    assert.deepEqual(gl.inactive.quiet, ['@ANA', '@leaver', '@bob'], 'on GitLab only a gitlab.com noreply counts');
+    assert.deepEqual(gl.inactive.notChecked, { group: 1, email: 2 });
+    // The caller's git settings cannot blank the answer (E68's lessons).
+    git(r.T, 'config', 'log.showSignature', 'true');
+    git(r.T, 'config', 'log.follow', 'true');
+    const saved = process.env.GIT_LITERAL_PATHSPECS;
+    process.env.GIT_LITERAL_PATHSPECS = '1';
+    try {
+      assert.deepEqual(checkCodeowners(r.T, { platform: 'github', remote: 'https://github.com/acme/app.git', hint: true }).inactive.quiet, ['@leaver', '@bob', '@carol']);
+    } finally { if (saved === undefined) delete process.env.GIT_LITERAL_PATHSPECS; else process.env.GIT_LITERAL_PATHSPECS = saved; }
+    // A GitLab exclusion takes the section's default owners in the parse, but it names no owner.
+    fs.writeFileSync(path.join(r.T, 'CODEOWNERS'), '[S] @def\n!src/a.js\n');
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'gitlab', remote: 'https://gitlab.corp.io/a/b', hint: true }).inactive, { quiet: [], checked: 0, notChecked: {} });
+    // No person listed: nothing to look up, so no history is read.
+    fs.writeFileSync(path.join(r.T, 'CODEOWNERS'), '* @org/payments\n');
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'github', remote: 'https://ghe.corp.io/a/b', hint: true }).inactive, { quiet: [], checked: 0, notChecked: { team: 1 } });
+  } finally { r.done(); }
+});
+
+test('codeowners check: a shallow clone and a repo with no commits say "not known", never that someone is inactive', async () => {
+  const { checkCodeowners } = await import('./codeowners-command.mjs');
+  const r = authoredRepo();
+  const C = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e69shallow-'));
+  const U = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e69unborn-'));
+  try {
+    // More commits than the depth: a `--depth 2` clone of a two-commit repo is not shallow.
+    for (let i = 0; i < 4; i++) r.as('Ana', '1+ana@users.noreply.github.com', 20 - i, { 'a.js': String(i), 'CODEOWNERS': '* @ana\n' });
+    execFileSync('git', ['clone', '-q', '--depth', '2', `file://${r.T}`, C], { stdio: 'pipe' });
+    const sh = checkCodeowners(C, { platform: 'github', remote: 'https://github.com/a/b.git', hint: true });
+    assert.deepEqual(sh.inactive, { unknown: 'this is a shallow clone — it does not hold the history of this branch' });
+    assert.deepEqual(sh.dead, [], 'the facts need no history, so a shallow clone still gets them');
+    git(U, 'init', '-q');
+    fs.writeFileSync(path.join(U, 'CODEOWNERS'), '* @ana\n');
+    assert.match(checkCodeowners(U, { platform: 'github', remote: 'https://github.com/a/b.git', hint: true }).inactive.unknown, /git could not read the history of 'HEAD'/);
+    // A history git cannot walk (an old commit's object is gone) is not known — never "nobody committed".
+    const first = git(r.T, 'rev-list', '--max-parents=0', 'HEAD').toString().trim();
+    fs.rmSync(path.join(r.T, '.git/objects', first.slice(0, 2), first.slice(2)));
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'github', remote: 'https://github.com/a/b.git', hint: true }).inactive, { unknown: "git could not read the history of 'HEAD'" });
+  } finally { r.done(); fs.rmSync(C, { recursive: true, force: true }); fs.rmSync(U, { recursive: true, force: true }); }
+});
+
+test('yad codeowners: check prints facts and the hint, never an address, never fails; --write is refused', async () => {
+  const { runCodeowners } = await import('./codeowners-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e69-cmd-'));
+  const repo = path.join(T, 'repos/backend');
+  const run = async (fn) => {
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    const out = await grab(fn);
+    const failed = process.exitCode === 1;
+    process.exitCode = code;
+    return { out, failed };
+  };
+  try {
+    fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'src/a.js'), 'x');
+    fs.writeFileSync(path.join(repo, 'CODEOWNERS'), 'src/ @carol lead@corp.io\n/legacy/ @carol\ndocs/al@corp.io @carol\n!x.js @carol\n');
+    fs.mkdirSync(path.join(repo, 'docs'));
+    fs.writeFileSync(path.join(repo, 'docs/CODEOWNERS'), '* @old\n');
+    git(repo, 'init', '-q');
+    git(repo, 'remote', 'add', 'origin', 'https://github.com/acme/backend.git');
+    git(repo, 'add', '-A');
+    git(repo, '-c', 'user.name=Carol', '-c', 'user.email=carol@corp.io', 'commit', '-q', '-m', 'seed');
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'repos/backend', platform: 'github' }] }));
+    const other = (name, files) => {
+      const d = path.join(T, 'repos', name);
+      fs.mkdirSync(d, { recursive: true });
+      for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(d, rel), text);
+      git(d, 'init', '-q');
+      git(d, 'remote', 'add', 'origin', 'https://github.com/acme/x.git');
+      git(d, 'add', '-A');
+      git(d, '-c', 'user.name=Dee', '-c', 'user.email=7+dee@users.noreply.github.com', 'commit', '-q', '-m', 'seed');
+      return d;
+    };
+    other('fine', { 'a.js': 'x', 'CODEOWNERS': '* @dee @org/t\n' });
+    other('bare', { 'a.js': 'x' });
+    const quiet = await run(() => runCodeowners(T, { action: 'check', name: 'repos/fine' }));
+    assert.match(quiet.out, /✓ CODEOWNERS: every line yad can read matches a file/);
+    assert.match(quiet.out, /every @login CODEOWNERS lists has a commit in the last 90 days with its github\.com noreply address/);
+    assert.match(quiet.out, /not checked for recent commits: 1 team/);
+    assert.doesNotMatch(quiet.out, /through a PR/, 'nothing to fix, so no fix is suggested');
+    const none = await run(() => runCodeowners(T, { action: 'check', name: 'repos/bare' }));
+    assert.match(none.out, /none — no CODEOWNERS \(\.github\/CODEOWNERS, CODEOWNERS, docs\/CODEOWNERS\); nothing to check/);
+    const lab = other('lab', { 'a.js': 'x', 'CODEOWNERS': '[S]\n!gone.md\n* @zed\n' });
+    git(lab, 'remote', 'set-url', 'origin', 'git@gitlab.com:acme/lab.git');
+    const labOut = await run(() => runCodeowners(T, { action: 'check', name: 'repos/lab' }));
+    assert.match(labOut.out, /line 2 \(`!gone\.md`\) excludes no file in this repo/);
+    assert.match(labOut.out, /gitlab\.com noreply address for @zed — a hint only: .* so this does not mean they have left; on GitLab an @name can also be a group, which never commits/);
+    const sym = other('sym', { 'owners.txt': '* @dee\n' });
+    fs.symlinkSync('owners.txt', path.join(sym, 'CODEOWNERS'));
+    const linked = await run(() => runCodeowners(T, { action: 'check', name: 'repos/sym' }));
+    assert.match(linked.out, /CODEOWNERS: not known — CODEOWNERS is not a regular file/);
+    assert.doesNotMatch(linked.out, /every line|none —/, 'not known is never "fine" and never "none"');
+
+    let r = await run(() => runCodeowners(T, { action: 'check', name: 'backend' }));
+    assert.equal(r.failed, false, 'warnings are advisory — never a failing exit');
+    assert.match(r.out, /docs\/CODEOWNERS is never read — GitHub reads CODEOWNERS first/);
+    assert.match(r.out, /line 2 \(`\/legacy\/`\) matches no file in this repo/);
+    assert.match(r.out, /line 3 matches no file in this repo/, 'a pattern holding an @ is never printed');
+    assert.match(r.out, /line 4 not read — `!x\.js` is a `!` pattern/);
+    assert.match(r.out, /no commit on the checked-out branch in the last 90 days carries a github\.com noreply address for @carol \(from the lines yad could read\) — a hint only: they may commit under another address or work in other repos, so this does not mean they have left/,
+      'a line yad skipped may name someone too');
+    assert.match(r.out, /not checked for recent commits: 1 e-mail address — the hint reads only @logins/);
+    assert.match(r.out, /through a PR — the warnings are advisory: CODEOWNERS is a hint, and yad never enforces it/);
+    assert.doesNotMatch(r.out, /corp\.io/, 'no e-mail address is ever printed');
+
+    r = await run(() => runCodeowners(T, { action: 'check', json: true }));   // no name: every connected repo
+    const out = JSON.parse(r.out);
+    assert.deepEqual(out.repos[0].findings.map((f) => `${f.code} ${f.line ?? f.target}`), ['never-read docs/CODEOWNERS', 'not-read 4', 'matches-nothing 2', 'matches-nothing 3']);
+    assert.deepEqual(out.repos[0].inactive, { quiet: ['@carol'], checked: 1, notChecked: { email: 1 } });
+    assert.doesNotMatch(r.out, /corp\.io/);
+
+    for (const [action, name] of [['write', undefined], ['--write', undefined], ['check', '--write']]) {
+      r = await run(() => runCodeowners(T, { action, name }));
+      assert.equal(r.failed, true);
+      assert.match(r.out, /yad never writes CODEOWNERS — any name it wrote would become an owner the platform can enforce/);
+    }
+    assert.equal(fs.readFileSync(path.join(repo, 'CODEOWNERS'), 'utf8').startsWith('src/ @carol'), true, 'the file is untouched');
+    r = await run(() => runCodeowners(T, { action: 'bogus' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /unknown action: bogus/);
+    r = await run(() => runCodeowners(T, { action: 'check', name: 'nope' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /unknown repo: nope/);
+    r = await run(() => runCodeowners(T, { action: 'check', name: 'nope', json: true }));
+    assert.equal(r.failed, true);
+    assert.deepEqual(JSON.parse(r.out), { ok: false, error: 'unknown repo: nope', hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad doctor: the codeowners section — facts warn, no file is a note, the inactive hint never prints here', async () => {
+  const { codeownersChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e69-doc-'));
+  try {
+    const mk = (name, files, remote = 'https://github.com/acme/x.git') => {
+      const repo = path.join(T, name);
+      fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(repo, 'src/a.js'), 'x');
+      for (const [rel, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); fs.writeFileSync(path.join(repo, rel), text); }
+      git(repo, 'init', '-q');
+      if (remote) git(repo, 'remote', 'add', 'origin', remote);
+      git(repo, 'add', '-A');
+      git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'seed');
+    };
+    mk('none', {});
+    mk('clean', { '.github/CODEOWNERS': 'src/ @gone\n' });
+    mk('stale', { 'CODEOWNERS': 'src/ @a\na/ @a\nb/ @a\nc/ @a\nd/ @a\n!x @a\n', 'docs/CODEOWNERS': '* @a\n' });
+    mk('lab', { 'CODEOWNERS': 'src/ @a\n' }, '');
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [
+      { name: 'none', path: 'none' }, { name: 'clean', path: 'clean' }, { name: 'stale', path: 'stale' },
+      { name: 'lab', path: 'lab' }, { name: 'absent', path: 'absent' }, { name: 'bad' },
+    ] }));
+    let checks = [];
+    codeownersChecks(checks, T);
+    const by = Object.fromEntries(checks.map((x) => [x.id, x]));
+    assert.deepEqual(Object.keys(by), ['codeowners:none', 'codeowners:clean', 'codeowners:stale', 'codeowners:lab'], 'a repo not on disk is the repos check\'s to report');
+    assert.deepEqual([by['codeowners:none'].status, by['codeowners:none'].message], ['ok', 'none: no CODEOWNERS — nothing to check']);
+    assert.deepEqual([by['codeowners:clean'].status, by['codeowners:clean'].message], ['ok', 'clean: every .github/CODEOWNERS line yad can read matches a file'],
+      '@gone has no recent commit — but that is a hint, and the doctor prints facts only');
+    assert.equal(by['codeowners:stale'].status, 'warn');
+    assert.equal(by['codeowners:stale'].message, 'stale: CODEOWNERS may be out of date — docs/CODEOWNERS is never read (CODEOWNERS is read first); in CODEOWNERS, 4 lines match no file (lines 2, 3, 4 +1 more); in CODEOWNERS, 1 line yad could not read (line 6)');
+    assert.match(by['codeowners:stale'].hint, /`yad codeowners check stale` lists each one; fix it in stale through a PR \(advisory/);
+    assert.equal(by['codeowners:stale'].findings.length, 6);
+    assert.equal(by['codeowners:lab'].status, 'warn');
+    assert.match(by['codeowners:lab'].message, /^lab: CODEOWNERS could not be checked — yad cannot tell whether this repo is on GitHub or GitLab/);
+    assert.ok(checks.every((x) => !/noreply|90 days/.test(`${x.message} ${x.hint || ''}`)), 'the inactive hint is a guess: never in the doctor');
+    // The registry's platform is used, and a GitHub file of 3 MB or more is a fact the doctor says.
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'lab', path: 'lab', platform: 'gitlab' }, { name: 'big', path: 'big' }] }));
+    mk('big', { 'CODEOWNERS': `* @x\n${'#'.repeat(3_000_000)}\n` });
+    checks = [];
+    codeownersChecks(checks, T);
+    assert.deepEqual(checks.map((x) => [x.status, x.message]), [
+      ['ok', 'lab: every CODEOWNERS line yad can read matches a file'],
+      ['warn', 'big: CODEOWNERS may be out of date — CODEOWNERS is 3 MB or more, so GitHub does not load it'],
+    ]);
+    // One of each, in the singular; and a repo whose file list git cannot read is left to the repos check.
+    mk('one', { 'CODEOWNERS': 'src/ @a\ngone/ @a\n!x @a\nfoo[a] @a\n' });
+    mk('broken', { 'CODEOWNERS': 'gone/ @a\n' });
+    fs.writeFileSync(path.join(T, 'broken/.git/index'), 'not an index');
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'one', path: 'one' }, { name: 'broken', path: 'broken' }] }));
+    checks = [];
+    codeownersChecks(checks, T);
+    assert.deepEqual(checks.map((x) => x.message), ['one: CODEOWNERS may be out of date — in CODEOWNERS, 1 line matches no file (line 2); in CODEOWNERS, 2 lines yad could not read (lines 3, 4)']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // ---- E71: counting active people -----------------------------------------------------------------
 //
 // THE ONE RULE THESE TESTS EXIST FOR: an input that cannot be read must produce `active: null`, never a

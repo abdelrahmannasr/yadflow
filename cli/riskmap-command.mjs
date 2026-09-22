@@ -38,7 +38,8 @@ export function readRiskMap(repoRoot) {
 // code repo; with neither, every connected repo — or the directory itself, but ONLY when there is no
 // registry file at all (run inside a code repo). A registry that is empty or does not parse is a Product
 // with no repos to name, and `draft` must never fall back to writing a map into the Product itself.
-function targets(root, name) {
+// Each entry carries the registry's `platform` when it has one (`yad codeowners check` reads it).
+export function targets(root, name) {
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   const hasRegistry = fs.existsSync(regFile);
   let registry = { repos: [] };
@@ -52,12 +53,12 @@ function targets(root, name) {
   const repos = Array.isArray(registry?.repos) ? registry.repos.filter((r) => r && typeof r.name === 'string' && typeof r.path === 'string' && r.path) : [];
   if (name) {
     const hit = repos.find((r) => r.name === name);
-    if (hit) return { list: [{ name: hit.name, root: path.resolve(root, hit.path) }] };
+    if (hit) return { list: [{ name: hit.name, root: path.resolve(root, hit.path), platform: hit.platform || null }] };
     const p = path.resolve(root, name);
     if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return { list: [{ name, root: p }] };
     return { error: `unknown repo: ${name}`, hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' };
   }
-  if (repos.length) return { list: repos.map((r) => ({ name: r.name, root: path.resolve(root, r.path) })) };
+  if (repos.length) return { list: repos.map((r) => ({ name: r.name, root: path.resolve(root, r.path), platform: r.platform || null })) };
   if (hasRegistry) return { error: `no repos in ${PROJECT_FILES.reposRegistry}`, hint: 'connect one (`yad setup`), or name the path to a code repo' };
   return { list: [{ name: path.basename(path.resolve(root)), root: path.resolve(root) }] };
 }
@@ -133,10 +134,11 @@ export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window =
 // here" would be a guess — or { own, authorRecords }: the addresses of the change's own authors (left out
 // of every answer: an approval, and a suggestion, have to be someone else), and a function that runs ONE
 // log on the base branch for a set of pathspecs and returns its author records, or null when git fails.
-function historyReader(repoRoot, baseRef) {
+// `what` names what a shallow clone lacks, for the sentence (E69 reads a whole branch, not directories).
+function historyReader(repoRoot, baseRef, { what = 'those directories' } = {}) {
   const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30, env: gitEnv() });
   if (/true/.test(git(['rev-parse', '--is-shallow-repository']).stdout || '')) {
-    return { unknown: 'this is a shallow clone — it does not hold the history of those directories' };
+    return { unknown: `this is a shallow clone — it does not hold the history of ${what}` };
   }
   const own = git(['log', `${baseRef}..HEAD`, '--no-merges', '--format=%ae']);
   if (own.status !== 0) return { unknown: `git could not read the history of '${baseRef}'` };
@@ -189,6 +191,23 @@ export function suggestedAuthorsFor(repoRoot, baseRef, { changed, window = HISTO
   const got = h.authorRecords(folders.map(folderPathspec), window);
   if (!got) return { unknown: `git could not read the history of '${baseRef}'` };
   return { authors: rankAuthors(got, h.own), folders: folders.length, skipped: all.length - folders.length };
+}
+
+// E69's window for the "owner seems inactive" hint: longer than E67's 30 days, so a person on leave or
+// busy in another repo for a month is not named.
+export const OWNER_WINDOW = '90 days ago';
+
+// E69 — the platform logins that committed on `ref` in the window, read from noreply commit addresses:
+// [{ login, host }], host 'github' or 'gitlab'. The whole history of `ref` (no pathspec — work anywhere in
+// the repo counts), through the one reader E67 and E68 share, so the shallow-clone refusal and the robot
+// rule are the same code. With `ref` HEAD there is no change of one's own to leave out. { unknown: why }
+// for a history it cannot read, never an empty list.
+export function recentLoginsFor(repoRoot, ref = 'HEAD', { window = OWNER_WINDOW } = {}) {
+  const h = historyReader(repoRoot, ref, { what: 'this branch' });
+  if (h.unknown) return h;
+  const got = h.authorRecords([], window);
+  if (!got) return { unknown: `git could not read the history of '${ref}'` };
+  return { logins: rankAuthors(got).filter((a) => a.login).map((a) => ({ login: a.login, host: a.loginHost })) };
 }
 
 export function checkRepo(repoRoot) {

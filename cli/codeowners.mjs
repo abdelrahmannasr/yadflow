@@ -33,6 +33,8 @@
 //
 // NO E-MAIL ADDRESS IS EVER PRINTED (E67's rule): an address owner is kept as "an e-mail address".
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gitEnv } from './riskmap-command.mjs';
 
@@ -116,7 +118,7 @@ export function patternOf(raw, platform) {
   return { re: new RegExp(`^${anchored ? '' : '(?:.*/)?'}${body}$`), dirs: dirOnly || !/[*?]/.test(lastSeg), fileToo: !dirOnly };
 }
 
-function matches(pat, file) {
+export function matches(pat, file) {
   if (pat.all) return true;
   if (pat.fileToo && pat.re.test(file)) return true;
   if (!pat.dirs) return false;
@@ -125,9 +127,10 @@ function matches(pat, file) {
   return false;
 }
 
-// The file's text → { rules, skipped }. A rule is { line, section, negate, pat, owners }; `section` is the
-// lower-cased name ('' for the unnamed one) and `optional` a per-section fact kept in `sections`. `skipped`
-// is every line this reader did not use, with why — printed, never dropped quietly.
+// The file's text → { rules, skipped }. A rule is { line, section, negate, pattern, pat, owners }; `pattern`
+// is the path as written (without a GitLab `!`), `section` the lower-cased name ('' for the unnamed one)
+// and `optional` a per-section fact kept in `sections`. `skipped` is every line this reader did not use,
+// with why — printed, never dropped quietly.
 export function parseCodeowners(text, platform) {
   const rules = [];
   const skipped = [];
@@ -169,7 +172,7 @@ export function parseCodeowners(text, platform) {
       if (!negate && rest.length && !own.length) {
         skipped.push({ line: n, why: `\`${pattern}\` is read as having no owner: none of its owner words is one this reader can read${defaults.length ? ', and the section\'s default owners do not apply to it' : ''}` });
       }
-      rules.push({ line: n, section, negate, pat, owners: rest.length ? own : defaults });
+      rules.push({ line: n, section, negate, pattern, pat, owners: rest.length ? own : defaults });
       return;
     }
     const words = line.trim().split(/[ \t]+/);
@@ -187,7 +190,7 @@ export function parseCodeowners(text, platform) {
       skipped.push({ line: n, why: `${shown} is not an owner (@user, @org/team or an e-mail address)` });
       return;
     }
-    rules.push({ line: n, section: '', negate: false, pat, owners });
+    rules.push({ line: n, section: '', negate: false, pattern, pat, owners });
   });
   return { rules, skipped, sections };
 }
@@ -250,4 +253,45 @@ export function baseCodeowners(repoRoot, baseRef, platform) {
     return { path: p, text: show.stdout.toString('utf8') };
   }
   return { none: `no CODEOWNERS on ${baseRef} (${paths.join(', ')})` };
+}
+
+// E69 — the lines that match no file: a fact about the file list, never a guess about a person. A GitLab
+// `!` line that excludes nothing is one too. `files` is every file the repo holds; `submodules` the paths
+// of its submodules, whose contents are not in that list — so a line that could reach into one is never
+// called dead (the probe name is a NUL, which no pattern this reader accepts can spell but `*` matches).
+// Returns [{ line, pattern, negate }] in file order.
+export function deadLines(parsed, files, { submodules = [] } = {}) {
+  const probes = submodules.map((g) => `${g}/\u0000`);
+  return parsed.rules
+    .filter((r) => !files.some((f) => matches(r.pat, f)) && !probes.some((f) => matches(r.pat, f)))
+    .map((r) => ({ line: r.line, pattern: r.pattern, negate: r.negate }));
+}
+
+// E69 — the CODEOWNERS file on DISK (the working tree, like `yad risk-map check`), as its platform would
+// pick it: the first of its locations that exists. Returns { path, text, ignored } — `ignored` the other
+// locations that hold a file the platform never reads — or { path, tooBig, ignored } for a GitHub file of
+// 3 MB or more, { none } when there is none, or { unknown: why }. A first location that is not a regular
+// file is `unknown`: the platform reads the blob git stores, and a symlink's blob is its target's name.
+export function diskCodeowners(repoRoot, platform) {
+  const paths = CODEOWNERS_PATHS[platform];
+  if (!paths) return { unknown: `no CODEOWNERS locations are known for platform '${platform}'` };
+  const found = [];
+  for (const p of paths) {
+    try {
+      found.push({ p, st: fs.lstatSync(path.join(repoRoot, p)) });
+    } catch (e) {
+      if (e.code === 'ENOENT' || e.code === 'ENOTDIR') continue;
+      return { unknown: `${p} could not be read (${e.code})` };
+    }
+  }
+  if (!found.length) return { none: `no CODEOWNERS (${paths.join(', ')})` };
+  const [first, ...rest] = found;
+  if (!first.st.isFile()) return { unknown: `${first.p} is not a regular file` };
+  const ignored = rest.filter((x) => !x.st.isDirectory()).map((x) => x.p);
+  if (platform === 'github' && first.st.size >= GITHUB_MAX_BYTES) return { path: first.p, tooBig: true, ignored };
+  try {
+    return { path: first.p, text: fs.readFileSync(path.join(repoRoot, first.p), 'utf8'), ignored };
+  } catch (e) {
+    return { unknown: `${first.p} could not be read (${e.code})` };
+  }
 }
