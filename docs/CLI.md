@@ -170,7 +170,8 @@ yadflow never joins a name and a login without proof, so that person counts twic
 | What-if | The cap lowered the count, and the approvals do not show more people than were counted | `! if the risk step were enforced: with no cap, the full count of 3 is more than 2 active people can give (one seat is left for the author), so if nobody else joins, this gate could not pass. Nothing beyond the one enforced approval is needed today` |
 | What-if | Some people are not matched to a platform login and at least one is a login, and the smallest possible team could not give the approvals asked | `! if the risk step were enforced: 2 of the 4 people counted are not matched to a platform login, and up to 2 of them may be the same people as the logins, so the team may be as small as 2. That leaves room for 1 of the 3 approvals asked, so if the team is that small, this gate could not pass. Nothing beyond the one enforced approval is needed today` |
 
-A what-if line is not printed when a today line is.
+A what-if line is not printed when a today line is. When the cap lowered the count, the last line says
+"approvals asked after the cap", because the full-count line above it quotes the number before the cap.
 
 "Not matched to a platform login" means yadflow knows the person only by a name: a git author name, or an
 approval record that carries no login (an older hand-written one, or an engineer-review record, even when
