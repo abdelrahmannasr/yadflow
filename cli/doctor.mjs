@@ -1899,7 +1899,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
   const emit = (id, name, target) => {
     const r = readProtection(target, opts);
     const line = protectionLine(r, { name, solo });
-    check(checks, id, 'protection', line.status, line.message, line.hint || '', { protection: protectionJSON(r) });
+    check(checks, id, 'protection', line.status, line.message, line.hint || '', { protection: protectionJSON(r), alwaysHint: true });
   };
   if (isPlainObject(hub)) {
     // `protection` alone, never `protection:hub`: a connected repo may be named `hub`.
@@ -1915,8 +1915,8 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     if (!repo || typeof repo.name !== 'string' || !repo.name) continue;
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
     const onDisk = repoRoot && exists(repoRoot) && gitHead(repoRoot);
-    // A name with an `@` is hidden in the id too; its place in repos.json keeps the id one word, and `#`
-    // cannot appear in a repo name, so the stand-in can never collide with a real one.
+    // A name with an `@` is hidden in the id too; its place in repos.json keeps the id one word. Nothing
+    // validates a repo's name, so a repo literally named `#1` could take the same id — it only labels a line.
     emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, repo.name, {
       platform: repo.platform || null,
       gitUrl: (typeof repo.git_url === 'string' && repo.git_url) || (onDisk ? origin(repoRoot) : null),
@@ -1999,9 +1999,9 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
     for (const x of checks) {
       if (x.section !== section) { section = x.section; log(`\n  ${c.bold(section)}`); }
       ({ ok, warn, fail })[x.status](x.message);
-      // A `protection` line is `ok` in solo mode even when the platform could not be read (E70), and its
-      // hint is the fix ("run `gh auth login` …") — so that section prints its hint whatever the level.
-      if (x.hint && (x.status !== 'ok' || x.section === 'protection')) hand(x.hint);
+      // A check may ask for its hint whatever its level (`alwaysHint`): an E70 `protection` line is `ok` in
+      // solo mode even when the platform could not be read, and its hint is the fix ("run `gh auth login` …").
+      if (x.hint && (x.status !== 'ok' || x.alwaysHint)) hand(x.hint);
     }
     log('');
     if (failed.length) fail(`${failed.length} problem(s) found`);

@@ -394,19 +394,29 @@ function lineFor(r, { name, solo = false } = {}) {
       : 'you cannot approve your own pull request, so the merge is blocked unless you may bypass the rule (who may bypass is not read)';
     // A rule on a branch that is NOT protected covers a merge request only: a direct push skips it. (GitLab:
     // a rule with no branch listed covers every branch. On GitHub a count always comes with protection.)
-    if (r.protected !== true) {
+    if (r.protected === false) {
       return {
         status: 'warn',
-        message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? `, and ${own}` : ''}`,
-        hint: `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
+        message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? ` — ${own}` : ''}`,
+        hint: solo ? `relax the required approvals in ${setting} ${from}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
       };
     }
+    if (r.protected === null) {
+      const msg = `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}; whether the branch is protected is not known — ${r.protectedWhy}`;
+      return { status: 'warn', message: solo ? `${msg}, and ${own}` : msg, hint: `ask someone who can see ${P}'s settings for ${br}` };
+    }
     if (solo) {
-      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n}${owners} — ${own}`, hint: `relax the required approvals in ${setting} ${from}` };
+      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners} — ${own}`, hint: `relax the required approvals in ${setting}` };
     }
     return { status: 'ok', message: `${name}: a ${request} into ${br} on ${where} needs ${n} ${from}${note ? `; ${note}` : ''}${owners} — yad reports this and enforces nothing` };
   }
   if (r.approvals === 0 && r.protected === false) {
+    // A rule for SOME files is still an approval rule (round 4), so the banner's "no approval rules" half
+    // is not proven while a scoped fact is true: that case gets its own sentence instead.
+    if (scoped.length) {
+      const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly; no rule requires an approval on every change, and only some changes need one (${scoped.join('; ')})`;
+      return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
+    }
     if (solo) return { status: 'ok', message: `${name}: ${where} has no approval rules and no branch protection on ${br}${branchNote} — expected in solo mode; yad records what happens, but cannot stop anything here` };
     return { status: 'warn', message: `${name} (${where}, branch ${br}${note ? `; ${note}` : ''}): ${BANNER}`, hint: `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
   }
@@ -419,8 +429,10 @@ function lineFor(r, { name, solo = false } = {}) {
   }
   // approvals not known
   if (r.protected === false) {
-    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly; whether a merge needs an approval is not known — ${r.approvalsWhy}`;
-    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: r.platform === 'gitlab' ? 'on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in' : `ask someone who can see ${P}'s settings for ${br}` };
+    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly; whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`;
+    const why = r.platform === 'gitlab' ? 'on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in' : `ask someone who can see ${P}'s settings for ${br}`;
+    // A line that could not be read keeps its hint in solo mode too: it names how to read it.
+    return { status: solo ? 'ok' : 'warn', message: msg, hint: why };
   }
   const msg = r.protected === true
     ? `${name}: ${br} is protected on ${where}${branchNote}, but whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`
@@ -428,7 +440,7 @@ function lineFor(r, { name, solo = false } = {}) {
   const hint = r.platform === 'gitlab'
     ? `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
     : `ask a repo admin to check the required approvals for ${br} in ${P}'s settings`;
-  return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint };
+  return { status: solo ? 'ok' : 'warn', message: msg, hint };
 }
 
 function unknownHint(r) {

@@ -262,8 +262,8 @@ deadlock them. Opt in (`yad setup --solo`, recorded as `solo: true` in `.sdlc/hu
 **waives the approval requirement only** — the review PR/MR and its merge stay, so CI still runs on the
 PR and the **merge** advances the step. Net: the gate passes on *merged + all threads resolved*. It's a
 documented, reversible relaxation; `yad doctor` warns if the platform still requires an approval — in
-classic branch protection, a GitHub ruleset or a GitLab approval rule — which would block the solo dev's
-own merge (see [the `protection` section](#the-protection-section--does-the-platform-require-an-approval-e70)). Switch it later with `yad mode solo --reason "<why>"` or
+classic branch protection, a GitHub ruleset or a GitLab approval rule — which blocks the solo dev's own
+merge unless they may bypass the rule, which yad does not read (see [the `protection` section](#the-protection-section--does-the-platform-require-an-approval-e70)). Switch it later with `yad mode solo --reason "<why>"` or
 `yad mode team`, which records who, when and why; each gate that passes in solo mode records
 `waived: "solo"` on its closing record.
 
@@ -1209,7 +1209,7 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
 
-Three real lines, each from a different team Product (the arrow line is the first one's hint):
+Three real lines, each from a different team Product (each has a hint; only the first one's is shown):
 
 ```text
   ! Product hub (GitHub acme/app, branch `main`): This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.
@@ -1221,7 +1221,8 @@ Three real lines, each from a different team Product (the arrow line is the firs
 | Line | Level (team) | Level (solo) |
 |---|---|---|
 | A pull request (GitLab: merge request) into a protected branch needs N approvals | ok | **warn** — you cannot approve your own pull request, so the merge is blocked unless you may bypass the rule (who may bypass is not read); on GitLab the merge may be blocked, by a project setting yad does not read |
-| No approval rule **and** no branch protection, both proven — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
+| No approval rule **and** no branch protection, both proven, and no rule covering only some files — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
+| Not protected, and only some changes need an approval (a code owner or a named reviewer) | **warn** | ok |
 | Protected, but no rule requires an approval (or none on every change, when a code owner or a named reviewer covers some files) | **warn** | ok |
 | Not protected, or not known whether it needs an approval | **warn** | ok |
 | A merge request needs N approvals, but the branch is not protected, so a direct push skips them (GitLab) | **warn** | **warn** |
@@ -1233,9 +1234,9 @@ their approvers may overlap. A count must be a whole number the platform gave; a
 `2.5`, `true`, `"2"`) is "could not read", never 0 and never 1.
 
 **It is advisory.** A line is a warning at most, never a failure: the platform holds a merge, and yad only
-reports what is set. How to set up branch protection is not documented here. In solo mode a "not known"
-line is `ok`, and this section still prints its fix-it hint, which `yad doctor` otherwise shows only for a
-line that is not `ok`.
+reports what is set. How to set up branch protection is not documented here. In solo mode a line that
+could not be read is `ok`, and this section still prints its fix-it hint, which `yad doctor` otherwise
+shows only for a line that is not `ok`.
 
 **How it reads.** With your own `gh` or `glab` login, from the repo's own host — nothing is written,
 and nothing is sent anywhere else. `gh auth status --hostname <host>` (or `glab`) is asked once per host.
