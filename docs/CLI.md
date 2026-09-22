@@ -1036,6 +1036,7 @@ prints the hint: it warns only on facts.
 |---|---|
 | No CODEOWNERS file | `none` — a note, not a warning. (A repo with no review rules at all is E70's warning.) |
 | The first location is a symlink or a folder, or cannot be read | `not known` with the reason — never `none`, never fine |
+| git cannot list the repo's files (a broken index) | `not known` — in `yad doctor` too, a warning rather than a quiet skip |
 | yad cannot tell GitHub from GitLab (no `platform` in `repos.json`, and the remote names neither) | `not known` — pass `--platform` |
 
 **Why there is no `--write`.** The roadmap title named one. It was dropped (2026-09-22): GitHub and GitLab
