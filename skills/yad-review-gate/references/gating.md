@@ -164,6 +164,12 @@ Solo mode waives approvals entirely, exactly as before, and reports no shortfall
 written in solo mode. The merge and the
 resolved threads still advance the step, and the review step's closing record carries `waived: "solo"`
 (E10). Switch with `yad mode solo --reason "<why>"` / `yad mode team`.
+In solo mode, `yad gate status`, `yad mode`, `yad next` and `yad doctor` count the active people and print
+`! solo mode is on, but …` when more than one person may work on the Product (E74): 2 or more platform
+logins, or 2 or more names not matched to a login, or an approval in the counting window with more than
+one person counted. It only suggests `yad mode team`; nothing switches by itself, and it never suggests
+solo mode. It says "may", because one person with two accounts or two spellings of their name also reads
+as two. When the people could not be counted, nothing is suggested.
 
 **Engagement (the Review Companion).** Each approval carries `engagement: verified | none` —
 `verified` when it was recorded through the companion (a real trailer/cards/chat session), `none` for a
