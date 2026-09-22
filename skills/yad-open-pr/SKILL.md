@@ -111,6 +111,8 @@ files. Relay both as they are. It is a **suggestion only**:
 - CODEOWNERS is a hint: these files go stale. A `CODEOWNERS line N not read — …` line is a line yadflow
   could not match safely (the first three get a reason, the rest a count, and the list then says it
   `may be wrong`); mention it, do not guess what it meant.
+  If the author asks whether CODEOWNERS is out of date, run `yad codeowners check <repo>` (E69) and relay
+  it. Never edit CODEOWNERS for them: a name written there becomes an owner the platform can enforce.
 - The same person can appear in both lists under two names (a git name, a platform login). Do not join
   them unless the output says `also in the 30-day history` (only a `noreply` login of the same platform counts, and only on github.com or gitlab.com).
 - `not read` (a shallow clone, a missing base) is never "nobody". Say it as the CLI says it.
