@@ -208,9 +208,10 @@ function readGitHub(base, runner, unknown) {
         out.from.push(`${RULESET_OF[r.ruleset_source_type] || 'a ruleset'}${count(r.ruleset_id) !== null ? ` (id ${r.ruleset_id})` : ''}`);
       }
     }
-    // GitHub's own flag is the protection fact, and it counts rulesets. If it says no while GitHub also
-    // lists ACTIVE rules on the branch, the two answers disagree: that is "not known", never "protected"
-    // (which would go quiet about a branch anyone can push to) and never "no protection" either.
+    // GitHub's own flag is the starting point, but yad never takes "not protected" from it alone: it
+    // confirms with the rules on the branch. If the flag says no while GitHub also lists ACTIVE rules, the
+    // two answers disagree — that is "not known", never "protected" (which would go quiet about a branch
+    // anyone can push to) and never "no protection" either.
     if (rules.body.length && out.protected === false) {
       out.protected = null;
       out.protectedWhy = 'GitHub\'s branch flag says no, but GitHub also lists active rules on the branch';
@@ -227,7 +228,7 @@ function readGitHub(base, runner, unknown) {
     const why = whyFailed(rules.ok ? { unreadable: true } : rules, { platform: 'github', host, what: 'the rulesets on the branch' });
     rs = { floor: 0, exact: false, why };
     // `protected: false` may not count a ruleset, so with the rulesets unread it proves nothing.
-    if (out.protected === false) { out.protected = null; out.protectedWhy = 'GitHub\'s branch flag says no, but that flag may not count a ruleset, and the rulesets could not be read'; }
+    if (out.protected === false) { out.protected = null; out.protectedWhy = 'GitHub\'s branch flag says no, and the rulesets that could confirm it could not be read'; }
   }
   // Classic protection. GitHub's flag is false only when the branch has no classic protection, so there
   // is nothing classic to read — and asking would only earn a 404 that proves nothing.
@@ -323,7 +324,10 @@ function readGitLab(base, runner, unknown) {
     };
   }
   Object.assign(out, settle([src]));
-  if (elsewhere.size) out.rulesElsewhere = [...elsewhere].join(', and others ');
+  if (elsewhere.size) {
+    const how = [...elsewhere];
+    out.rulesElsewhere = how.length > 1 ? `some of them ${how[0]}, and others ${how[1]}` : how[0];
+  }
   // Each GitLab rule must be met on its own, and their approvers may overlap: two or more is a floor.
   if (out.approvals > 0 && out.from.length > 1) out.atLeast = true;
   return out;
@@ -432,14 +436,14 @@ function lineFor(r, { name, solo = false } = {}) {
   if (r.approvals === 0 && r.protected === false && r.rulesElsewhere) {
     // The platform DID return approval rules; they do not reach this branch. "No approval rules" would be
     // false, so the banner is not printed, and the sentence says which way they miss it.
-    const only = scoped.length ? `; only some changes need one (${scoped.join('; ')})` : '';
+    const only = scoped.length ? `; only some changes need an approval (${scoped.join('; ')})` : '';
     const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rules ${P} has ${r.rulesElsewhere}, so none of them holds a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === null) {
     // The count was read; the protection was not. Both are said, and neither borrows the other's answer.
     const only = scoped.length ? ' on every change — only some changes need one (' + scoped.join('; ') + ')' : '';
-    const msg = `${name}: no rule on ${where} requires an approval to merge into ${br}${branchNote}${only || (unknownScoped.length ? ' on every change' : '')}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}; whether the branch is protected is not known — ${r.protectedWhy}`;
+    const msg = `${name}: no rule on ${where}${branchNote} requires an approval to merge into ${br}${only || (unknownScoped.length ? ' on every change' : '')}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}; whether the branch is protected is not known — ${r.protectedWhy}`;
     return solo ? { status: 'ok', message: msg, hint: unread } : { status: 'warn', message: msg, hint: unread };
   }
   if (r.approvals === 0 && r.protected === false) {

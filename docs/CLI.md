@@ -1185,9 +1185,9 @@ protected at all (for example, limits on who may push to it); that a code owner 
 CODEOWNERS lists; and, on GitHub, that a ruleset names a reviewer who must approve a change to some files.
 Whether the branch is protected comes from the branch's own `protected` flag (`GET
 repos/{owner}/{repo}/branches/{branch}` on GitHub, `GET projects/{id}/repository/branches/{branch}` on
-GitLab — GitLab's flag also covers protection set for a whole group). If GitHub's flag says a branch is
-not protected while GitHub also lists active rules on it, the two answers disagree, so the line says it is
-not known. The branch must exist: a branch
+GitLab — GitLab's flag also covers protection set for a whole group). On GitHub, "not protected" is never
+taken from that flag alone: it is confirmed against the active rules on the branch, and if the two answers
+disagree, or the rules cannot be read, the line says the protection is not known. The branch must exist: a branch
 that yad's files name but the platform does not have is "not known", never "unprotected". A line states
 only what the platform answered: who may merge into a protected branch, or push to it directly, is not
 read, so no line says who can merge, or that the platform holds a merge. A fact that could not be read
@@ -1229,8 +1229,9 @@ Three real lines from team Products, each with its hint:
 | No approval rule **and** no branch protection, both proven, and no rule covering only some files — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
 | Not protected, and only some changes need an approval (a code owner or a named reviewer) | **warn** | ok |
 | Protected, but no rule requires an approval — "on every change" when a rule covering only some files is true, or could not be read | **warn** | ok (with its hint, when something could not be read) |
+| Protected, and whether a merge needs an approval could not be read | **warn** | ok |
 | Not protected, and whether a merge needs an approval could not be read | **warn** | ok |
-| Not protected, and the platform's approval rules reach protected branches only, so none reaches this one | **warn** | ok |
+| Not protected, and the approval rules the platform has miss this branch — they reach protected branches only, or they name other branches | **warn** | ok |
 | Whether the branch is protected could not be read, and neither could the approval | **warn** | ok |
 | A count was read, but whether the branch is protected could not be | **warn** | **warn** |
 | No rule requires an approval, and whether the branch is protected could not be read | **warn** | ok |
@@ -1243,9 +1244,9 @@ their approvers may overlap. A count must be a whole number the platform gave; a
 `2.5`, `true`, `"2"`) is "could not read", never 0 and never 1.
 
 **It is advisory.** A line is a warning at most, never a failure: the platform holds a merge, and yad only
-reports what is set. How to set up branch protection is not documented here. In solo mode a line that
-could not be read is `ok`, and this section still prints its fix-it hint, which `yad doctor` otherwise
-shows only for a line that is not `ok`.
+reports what is set. How to set up branch protection is not documented here. Every line in this
+section prints its fix-it hint, whatever its level — `yad doctor` otherwise shows a hint only for a line
+that is not `ok`. That matters most in solo mode, where a line that could not be read is `ok`.
 
 **How it reads.** With your own `gh` or `glab` login, from the repo's own host — nothing is written,
 and nothing is sent anywhere else. `gh auth status --hostname <host>` (or `glab`) is asked once per host.
@@ -1269,10 +1270,10 @@ says not known.
 - GitLab's tier (Free, Premium, Ultimate) is never guessed.
 - In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
   then says not known (HTTP 403 or 404), never "no rules".
-- GitHub's own `protected` flag counts rulesets as well as classic protection, so it is the protection
-  fact. When it says "not protected" while GitHub also lists active rules on the branch, the two answers
-  disagree and the line says the protection is not known — beside whatever it did read about the approval.
-  The same when the rulesets cannot be read at all.
+- GitHub's own `protected` flag is the starting point, but yad never takes "not protected" from it alone.
+  It confirms with the active rules on the branch. If the flag says "not protected" while GitHub also lists
+  active rules, the two answers disagree, and the line says the protection is not known — beside whatever
+  it did read about the approval. The same when the rules cannot be read at all.
 - A GitLab report rule (such as Coverage-Check or License-Check) asks for an approval only when its report
   fails, so it is not counted as an approval rule. A GitLab approval rule that does not say which branches
   it covers makes the count not known — or "at least N" when another rule applies.

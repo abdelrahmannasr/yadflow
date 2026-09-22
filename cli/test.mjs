@@ -18828,6 +18828,7 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   // …and a rule for SOME files is still a rule, here as everywhere: "on every change".
   assert.match(protectionLine({ ...r, codeOwners: true }, { name: 'b' }).message, /requires an approval to merge into `main` on every change — only some changes need one \(a code owner must approve a change to a file CODEOWNERS lists\); whether the branch is protected/);
   assert.match(protectionLine({ ...r, codeOwners: null }, { name: 'b' }).message, /to merge into `main` on every change; whether a code owner must approve some files is not known; whether the branch is protected/);
+  assert.match(protectionLine({ ...r, branch: 'develop' }, { name: 'b' }).message, /^b: no rule on GitHub acme\/app \(GitHub's own default branch is `main`\) requires an approval to merge into `develop`; whether the branch/, 'the branch note sits beside the repo here too');
   ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals], [null, 2]);
   line = protectionLine(r, { name: 'b' });
@@ -18838,7 +18839,7 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   // flag may not count a ruleset.
   ({ r } = ghRead([[/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals, r.codeOwners], [null, null, null]);
-  assert.equal(r.protectedWhy, 'GitHub\'s branch flag says no, but that flag may not count a ruleset, and the rulesets could not be read');
+  assert.equal(r.protectedWhy, 'GitHub\'s branch flag says no, and the rulesets that could confirm it could not be read');
   assert.match(r.approvalsWhy, /^GitHub refused to show the rulesets on the branch \(HTTP 403/);
   assert.match(r.approvalsWhy, /refused to show the rulesets on the branch \(HTTP 403/);
   ({ r } = ghRead([[/\/rules\//, 200, 'garbage'], [/\/branches\/main$/, 200, { protected: false }]]));
@@ -18999,11 +19000,11 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.equal(r.rulesElsewhere, 'name other branches');
   assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has name other branches, so none of them holds a merge into it$/);
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Rel', approvals_required: 2, protected_branches: [{ name: 'release-*' }] }, { name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, []]]));
-  assert.equal(r.rulesElsewhere, 'name other branches, and others reach protected branches only');
+  assert.equal(r.rulesElsewhere, 'some of them name other branches, and others reach protected branches only', 'never "only" of all of them');
   // A code-owner fact the reader proved is still said beside them (the round-5 rule).
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, [{ name: '*', code_owner_approval_required: true }]]]));
   assert.deepEqual([r.codeOwners, r.rulesElsewhere], [true, 'reach protected branches only']);
-  assert.match(protectionLine(r, { name: 'web' }).message, /so none of them holds a merge into it; only some changes need one \(a code owner must approve a change to a file CODEOWNERS lists\)$/);
+  assert.match(protectionLine(r, { name: 'web' }).message, /so none of them holds a merge into it; only some changes need an approval \(a code owner must approve a change to a file CODEOWNERS lists\)$/);
   // A rule on an UNprotected branch: a count, and `protected: false` beside it (the line says a push skips it).
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
   assert.deepEqual([r.protected, r.approvals], [false, 2]);
