@@ -113,6 +113,8 @@ function loggedIn(runner, cli, host, authCache) {
 //   { …, known: true,
 //     protected: true|false|null, protectedWhy,            — is the branch protected at all?
 //     approvals: n|null, atLeast, approvalsWhy, from: [..],— the required approval count, and where
+//     rulesElsewhere: '<how they miss this branch>',        — GitLab only: rules the project has that do
+//                                                            not reach this branch
 //     codeOwners: true|false|null,                         — a code-owner review is required (a fact beside)
 //     fileReviewers: true|false|null }                     — a named reviewer for some files (GitHub only:
 //                                                            a GitLab answer carries no such key)
@@ -287,6 +289,7 @@ function readGitLab(base, runner, unknown) {
   else if (out.protected === false) out.codeOwners = false;
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
+  const elsewhere = new Set();
   if (ar.ok && Array.isArray(ar.body)) {
     let floor = 0;
     const whys = [];
@@ -302,7 +305,10 @@ function readGitLab(base, runner, unknown) {
       else if (Array.isArray(r.protected_branches)) applies = r.protected_branches.length ? r.protected_branches.some((p) => branchMatches(p?.name, branch)) : true; // none listed: every branch
       else applies = null;
       if (applies === null) { whys.push('GitLab did not say which branches an approval rule covers'); continue; }
-      if (applies) { floor = Math.max(floor, n); out.from.push(`approval rule ${JSON.stringify(String(r.name ?? r.id))}`); } else out.rulesElsewhere = true;
+      if (applies) { floor = Math.max(floor, n); out.from.push(`approval rule ${JSON.stringify(String(r.name ?? r.id))}`); }
+      // A rule the platform DID return that does not reach this branch: say which way it misses, so the
+      // line never claims "no approval rules", nor that protecting the branch would bring this one to it.
+      else elsewhere.add(r.applies_to_all_protected_branches === true ? 'reach protected branches only' : 'name other branches');
     }
     if (ar.body.length >= PAGE) whys.push(`the project has ${PAGE} or more approval rules and yad reads only the first ${PAGE}`);
     src = { floor, exact: !whys.length, why: whys.join('; ') };
@@ -317,6 +323,7 @@ function readGitLab(base, runner, unknown) {
     };
   }
   Object.assign(out, settle([src]));
+  if (elsewhere.size) out.rulesElsewhere = [...elsewhere].join(', and others ');
   // Each GitLab rule must be met on its own, and their approvers may overlap: two or more is a floor.
   if (out.approvals > 0 && out.from.length > 1) out.atLeast = true;
   return out;
@@ -410,18 +417,30 @@ function lineFor(r, { name, solo = false } = {}) {
         hint: solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
       };
     }
+    // Whether the branch is protected may be unknown beside a count that was read: say so, never silently.
+    const unsure = r.protected === null ? `; whether the branch is protected is not known — ${r.protectedWhy}` : '';
     if (solo) {
-      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners} — ${own}`, hint: `relax the required approvals in ${setting}` };
+      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure} — ${own}`, hint: `relax the required approvals in ${setting}` };
+    }
+    if (unsure) {
+      return { status: 'warn', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}`, hint: unread };
     }
     const said = { status: 'ok', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners} — yad reports this and enforces nothing` };
     // A line that is partly unread carries its hint, as every other partly unread line does.
     return unknownScoped.length || r.atLeast ? { ...said, hint: unread } : said;
   }
   if (r.approvals === 0 && r.protected === false && r.rulesElsewhere) {
-    // The platform DID return an approval rule; it covers only protected branches, and this one is not
-    // protected. "No approval rules" would be false, so the banner is not printed.
-    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and ${P}'s approval rules reach only protected branches, so none of them holds a merge into it`;
-    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `protecting ${br} in ${P}'s settings is what brings an approval rule to it; yad only reports what is set` };
+    // The platform DID return approval rules; they do not reach this branch. "No approval rules" would be
+    // false, so the banner is not printed, and the sentence says which way they miss it.
+    const only = scoped.length ? `; only some changes need one (${scoped.join('; ')})` : '';
+    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rules ${P} has ${r.rulesElsewhere}, so none of them holds a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
+    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
+  }
+  if (r.approvals === 0 && r.protected === null) {
+    // The count was read; the protection was not. Both are said, and neither borrows the other's answer.
+    const only = scoped.length ? ' on every change — only some changes need one (' + scoped.join('; ') + ')' : '';
+    const msg = `${name}: no rule on ${where} requires an approval to merge into ${br}${branchNote}${only || (unknownScoped.length ? ' on every change' : '')}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}; whether the branch is protected is not known — ${r.protectedWhy}`;
+    return solo ? { status: 'ok', message: msg, hint: unread } : { status: 'warn', message: msg, hint: unread };
   }
   if (r.approvals === 0 && r.protected === false) {
     // A rule for SOME files is still an approval rule (round 4), so the banner's "no approval rules" half
@@ -442,7 +461,7 @@ function lineFor(r, { name, solo = false } = {}) {
     const msg = `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval${scoped.length || unknownScoped.length ? ' on every change' : ''}${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     // A line that is partly unread keeps its hint in solo mode, as every could-not-read line does.
     const advice = `only ${P} can require an approval, in ${setting}; yad only reports what is set`;
-    const hint = unknownScoped.length ? `${advice}. And ${unread}` : advice;
+    const hint = unknownScoped.length ? `${advice}, and ${unread}` : advice;
     if (solo) return unknownScoped.length ? { status: 'ok', message: msg, hint } : { status: 'ok', message: msg };
     return { status: 'warn', message: msg, hint };
   }

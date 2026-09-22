@@ -18819,6 +18819,21 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   ({ r } = ghRead([[/\/rules\//, 200, [{ type: 'deletion' }]], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals], [null, 0]);
   assert.equal(r.protectedWhy, 'GitHub\'s branch flag says no, but GitHub also lists active rules on the branch');
+  // …and every line that state can produce says BOTH answers: the count that was read, and the protection
+  // that was not. Never a raw `null`, never "not known" about a count the platform gave.
+  let line = protectionLine(r, { name: 'b' });
+  assert.deepEqual([line.status, line.message], ['warn', 'b: no rule on GitHub acme/app requires an approval to merge into `main`; whether the branch is protected is not known — GitHub\'s branch flag says no, but GitHub also lists active rules on the branch']);
+  assert.ok(line.hint && !/null|undefined/.test(`${line.message} ${line.hint}`));
+  assert.equal(protectionLine(r, { name: 'b', solo: true }).status, 'ok');
+  // …and a rule for SOME files is still a rule, here as everywhere: "on every change".
+  assert.match(protectionLine({ ...r, codeOwners: true }, { name: 'b' }).message, /requires an approval to merge into `main` on every change — only some changes need one \(a code owner must approve a change to a file CODEOWNERS lists\); whether the branch is protected/);
+  assert.match(protectionLine({ ...r, codeOwners: null }, { name: 'b' }).message, /to merge into `main` on every change; whether a code owner must approve some files is not known; whether the branch is protected/);
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: false }]]));
+  assert.deepEqual([r.protected, r.approvals], [null, 2]);
+  line = protectionLine(r, { name: 'b' });
+  assert.deepEqual([line.status, line.message], ['warn', 'b: a pull request into `main` on GitHub acme/app needs 2 approvals (from: a repo ruleset (id 7)); whether the branch is protected is not known — GitHub\'s branch flag says no, but GitHub also lists active rules on the branch']);
+  assert.ok(line.hint, 'a line with a half it could not read carries a hint');
+  assert.match(protectionLine(r, { name: 'b', solo: true }).message, /needs 2 approvals \(from: a repo ruleset \(id 7\)\); whether the branch is protected is not known — .* — you cannot approve your own pull request/);
   // The rulesets cannot be read: approvals not known — and neither is "not protected", because GitHub's
   // flag may not count a ruleset.
   ({ r } = ghRead([[/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: false }]]));
@@ -18977,9 +18992,18 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.deepEqual([r.protected, r.approvals], [false, 0]);
   // A rule the platform DID return, which reaches only protected branches: not "no approval rules".
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Devs', approvals_required: 2, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, []]]));
-  assert.deepEqual([r.protected, r.approvals, r.rulesElsewhere], [false, 0, true]);
+  assert.deepEqual([r.protected, r.approvals, r.rulesElsewhere], [false, 0, 'reach protected branches only']);
+  assert.match(protectionLine(r, { name: 'web' }).message, /and the approval rules GitLab has reach protected branches only, so none of them holds a merge into it$/);
+  // A rule scoped by NAME misses this branch a different way, and protecting the branch would not bring it.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Rel', approvals_required: 2, protected_branches: [{ name: 'release-*' }] }]], [/\/protected_branches/, 200, []]]));
-  assert.equal(r.rulesElsewhere, true, 'a rule listing another branch is one yad read, too');
+  assert.equal(r.rulesElsewhere, 'name other branches');
+  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has name other branches, so none of them holds a merge into it$/);
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Rel', approvals_required: 2, protected_branches: [{ name: 'release-*' }] }, { name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, []]]));
+  assert.equal(r.rulesElsewhere, 'name other branches, and others reach protected branches only');
+  // A code-owner fact the reader proved is still said beside them (the round-5 rule).
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, [{ name: '*', code_owner_approval_required: true }]]]));
+  assert.deepEqual([r.codeOwners, r.rulesElsewhere], [true, 'reach protected branches only']);
+  assert.match(protectionLine(r, { name: 'web' }).message, /so none of them holds a merge into it; only some changes need one \(a code owner must approve a change to a file CODEOWNERS lists\)$/);
   // A rule on an UNprotected branch: a count, and `protected: false` beside it (the line says a push skips it).
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
   assert.deepEqual([r.protected, r.approvals], [false, 2]);
@@ -19033,7 +19057,9 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.deepEqual([l.status, l.message], ['ok', 'backend: GitHub acme/app has no approval rules and no branch protection on `main` — expected in solo mode; yad records what happens, but cannot stop anything here']);
   // No banner unless BOTH are proven.
   for (const r of [{ ...base, protected: true }, { ...base, protected: null, protectedWhy: 'x' }, { ...base, approvals: null, approvalsWhy: 'y' }, { ...base, known: false, why: 'z' }]) {
-    assert.ok(!protectionLine(r, { name: 'b' }).message.includes(BANNER), JSON.stringify(r));
+    const out = protectionLine(r, { name: 'b' });
+    assert.ok(!out.message.includes(BANNER), JSON.stringify(r));
+    assert.ok(!/\bnull\b|\bundefined\b/.test(`${out.message} ${out.hint || ''}`), out.message);
   }
   l = protectionLine({ ...base, protected: true }, { name: 'b' });
   assert.deepEqual([l.status, l.message], ['warn', 'b: `main` is protected on GitHub acme/app, but no rule requires an approval'], 'who may merge is not read, so nothing is said about it');
@@ -19041,7 +19067,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   l = protectionLine({ ...base, protected: true, codeOwners: null, fileReviewers: null }, { name: 'b' });
   assert.equal(l.message, 'b: `main` is protected on GitHub acme/app, but no rule requires an approval on every change; whether a code owner must approve some files is not known; whether a named reviewer must approve some files is not known');
   assert.equal(protectionLine({ ...base, protected: true, codeOwners: null }, { name: 'b' }).hint,
-    'only GitHub can require an approval, in GitHub\'s branch protection or a ruleset for `main`; yad only reports what is set. And ask someone who can see GitHub\'s settings for `main` about what yad could not read',
+    'only GitHub can require an approval, in GitHub\'s branch protection or a ruleset for `main`; yad only reports what is set, and ask someone who can see GitHub\'s settings for `main` about what yad could not read',
     'the advice stays, and the hint names what was not read');
   assert.ok(protectionLine({ ...base, protected: true, codeOwners: null }, { name: 'b', solo: true }).hint, 'a partly unread line keeps its hint in solo mode');
   assert.ok(!protectionLine({ ...base, protected: true }, { name: 'b', solo: true }).hint, 'a line that was fully read does not');
@@ -19076,11 +19102,11 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, with no merge request; a merge request into it needs 2 approvals (from: approval rule "A"); a code owner must also approve a change to a file CODEOWNERS lists — GitLab may not let you approve your own merge request (a project setting yad does not read), so the merge may be blocked');
   assert.equal(l.hint, 'relax the required approvals in an approval rule (GitLab Premium or Ultimate) for `main`', 'the sources are in the message, not twice');
   // A rule the platform returned that reaches only protected branches: its own sentence, not the banner.
-  l = protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: true }, { name: 'web' });
+  l = protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'reach protected branches only' }, { name: 'web' });
   assert.ok(!l.message.includes(BANNER));
-  assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, and GitLab\'s approval rules reach only protected branches, so none of them holds a merge into it');
-  assert.match(l.hint, /^protecting `main` in GitLab's settings is what brings an approval rule to it/);
-  assert.equal(protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: true }, { name: 'web', solo: true }).status, 'ok');
+  assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, and the approval rules GitLab has reach protected branches only, so none of them holds a merge into it');
+  assert.match(l.hint, /^only GitLab can require an approval/);
+  assert.equal(protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'name other branches' }, { name: 'web', solo: true }).status, 'ok');
   // A partly read count line carries a hint, as every other partly read line does.
   assert.ok(protectionLine({ ...base, protected: true, approvals: 2, atLeast: true, from: ['x'] }, { name: 'b' }).hint, 'at least N is a partial read');
   assert.ok(protectionLine({ ...base, protected: true, approvals: 2, from: ['x'], codeOwners: null }, { name: 'b' }).hint);

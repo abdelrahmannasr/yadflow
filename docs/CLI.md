@@ -1212,7 +1212,7 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
 
-Three real lines, each from a different team Product, each with its hint:
+Three real lines from team Products, each with its hint:
 
 ```text
   ! Product hub (GitHub acme/app, branch `main`): This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.
@@ -1232,6 +1232,8 @@ Three real lines, each from a different team Product, each with its hint:
 | Not protected, and whether a merge needs an approval could not be read | **warn** | ok |
 | Not protected, and the platform's approval rules reach protected branches only, so none reaches this one | **warn** | ok |
 | Whether the branch is protected could not be read, and neither could the approval | **warn** | ok |
+| A count was read, but whether the branch is protected could not be | **warn** | **warn** |
+| No rule requires an approval, and whether the branch is protected could not be read | **warn** | ok |
 | A merge request needs N approvals, but the branch is not protected, so a direct push skips them (GitLab) | **warn** | **warn** |
 | Not known at all, with why | **warn** | ok |
 
@@ -1267,9 +1269,10 @@ says not known.
 - GitLab's tier (Free, Premium, Ultimate) is never guessed.
 - In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
   then says not known (HTTP 403 or 404), never "no rules".
-- A GitHub branch that GitHub reports as not protected, but that has an active ruleset, counts as
-  protected. When the rulesets cannot be read, GitHub's "not protected" flag proves nothing, so whether the
-  branch is protected is not known.
+- GitHub's own `protected` flag counts rulesets as well as classic protection, so it is the protection
+  fact. When it says "not protected" while GitHub also lists active rules on the branch, the two answers
+  disagree and the line says the protection is not known — beside whatever it did read about the approval.
+  The same when the rulesets cannot be read at all.
 - A GitLab report rule (such as Coverage-Check or License-Check) asks for an approval only when its report
   fails, so it is not counted as an approval rule. A GitLab approval rule that does not say which branches
   it covers makes the count not known — or "at least N" when another rule applies.
