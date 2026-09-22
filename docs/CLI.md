@@ -1216,32 +1216,41 @@ Three real lines, each from a different team Product (the arrow line is the firs
 | No approval rule **and** no branch protection, both proven — Part 3's banner, word for word | **warn** | ok, worded for solo mode |
 | Protected, but no rule requires an approval | **warn** | ok |
 | Not protected, or not known whether it needs an approval | **warn** | ok |
+| No rule requires an approval, but not known whether the branch is protected (GitLab) | **warn** | ok |
 | Not known at all, with why | **warn** | ok |
 
-"At least N" means part of the answer could not be read (for example classic protection, while a ruleset
-asks for N), or that several GitLab rules each ask for approvals and their approvers may overlap.
+"At least N" means part of the answer could not be read — for example classic protection, while a ruleset
+asks for N, or a list that filled a whole page — or that several GitLab rules each ask for approvals and
+their approvers may overlap. A count must be a whole number the platform gave; anything else (missing,
+`2.5`, `true`, `"2"`) is "could not read", never 0 and never 1.
 
 **It is advisory.** A line is a warning at most, never a failure: the platform holds a merge, and yad only
 reports what is set. How to set up branch protection is not documented here.
 
 **How it reads.** With your own `gh` or `glab` login, from the repo's own host — nothing is written,
-and nothing is sent anywhere else. Per repo: `gh auth status --hostname <host>` (or `glab`), then up to
-four read-only calls on GitHub (the repo, the branch, its rulesets, and classic protection when the
-branch is protected) and three on GitLab (the project, its protected branches, its approval rules). Each
-call has a 10-second limit. `YAD_PLATFORM_READ=0` turns the reads off, for example offline; every line then
+and nothing is sent anywhere else. `gh auth status --hostname <host>` (or `glab`) is asked once per host.
+Then, per repo, up to four read-only calls on GitHub (the repo, the branch, its rulesets, and classic
+protection when GitHub's own flag says the branch is protected) and three on GitLab (the project, its
+protected branches, its approval rules). Each call has a 10-second limit. `YAD_PLATFORM_READ=0` turns the reads off, for example offline; every line then
 says not known.
 
 **Limits.**
 
-- A list is read one page of 100 entries at a time. If a full page does not already hold the answer, the
-  line says not known.
+- Only the first 100 entries of each list are read. When a full page leaves the answer open, the line says
+  not known, or "at least N" when it found a count.
 - GitHub rulesets in "evaluate" or "disabled" mode are not active, so they are not counted.
 - Who may bypass a rule (for example an admin) is not read.
 - GitLab's tier (Free, Premium, Ultimate) is never guessed.
 - In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
   then says not known (HTTP 403 or 404), never "no rules".
 - A GitHub branch that GitHub reports as not protected, but that has an active ruleset, counts as
-  protected.
+  protected. When the rulesets cannot be read, GitHub's "not protected" flag proves nothing, so whether the
+  branch is protected is not known.
+- A GitLab report rule (such as Coverage-Check or License-Check) asks for an approval only when its report
+  fails, so it is not counted as an approval rule. A GitLab approval rule that does not say which branches
+  it covers makes the count not known.
+- A GitLab server served under a sub-path (`https://host/gitlab/group/project`) is not supported: the
+  sub-path is read as part of the project's path, and GitLab answers 404.
 
 ### Gate-integrity findings (no code — the message names the epic and step)
 

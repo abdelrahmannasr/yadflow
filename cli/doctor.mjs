@@ -1901,7 +1901,8 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     check(checks, id, 'protection', line.status, line.message, line.hint || '', { protection: protectionJSON(r) });
   };
   if (isPlainObject(hub)) {
-    emit('protection:hub', 'Product hub', {
+    // `protection` alone, never `protection:hub`: a connected repo may be named `hub`.
+    emit('protection', 'Product hub', {
       platform: hub.platform || null,
       gitUrl: hub.git_url || origin(root),
       branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : null,
