@@ -83,6 +83,10 @@ function whyFailed(res, { platform, host, what, plural = false }) {
   // A repo, a project or a GitLab branch reaches this arm, and each can genuinely be absent. GitHub's
   // BRANCH names its own cause at the call site, because one permission covers the repo read before it and
   // the branch; GitLab's does not, because reading a project and reading its repository are two settings.
+  // Proven, not assumed: GitLab's `require_repository_enabled!` answers `not_found!("Repository")`, so a
+  // login that may read the project and not its repository gets a 404, never a 403. Checked live on
+  // gitlab.com 2026-09-23 — project 86809638 answers 200, and its `repository/branches/main` answers
+  // 404 `{"message":"404 Repository Not Found"}`. That is why GitLab's branch 404 keeps its hedge.
   // Every LIST this file reads names its own cause too, because "they do not exist" is what an empty list
   // says, not a 404.
   if (res.status === 404) return `${name} answered 404 for ${what} (it does not exist, or your login may not see it)`;
