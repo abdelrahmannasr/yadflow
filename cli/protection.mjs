@@ -61,13 +61,32 @@ export function httpStatus(r) {
   return m ? Number(m[1]) : null;
 }
 
+// A failed call keeps its body too (E109): both CLIs print the platform's answer on stdout, so a caller
+// can read WHY it failed. A body that is not JSON is null, never an error. Only the GitLab branch read
+// looks at it today — see `gitlabBranchCause`.
 function api(runner, cli, host, pathname) {
   const r = runner(cli, ['api', '--hostname', host, pathname], { timeout: TIMEOUT });
   if (r.ok) {
     try { return { ok: true, body: JSON.parse(r.stdout) }; } catch { return { ok: false, status: null, unreadable: true }; }
   }
-  return { ok: false, status: httpStatus(r) };
+  let body = null;
+  try { body = JSON.parse(r.stdout); } catch { /* no body yad can read: the status is all there is */ }
+  return { ok: false, status: httpStatus(r), body };
 }
+
+// E109 — which of the two causes a GitLab branch 404 proved, from the body's `message`, or null.
+// GitLab's branches API runs `require_repository_enabled!` before it looks the branch up, and that answers
+// `not_found!("Repository")` when `feature_available?(:repository, user)` is false — the repository is
+// turned off for the project, or this login's access is too low to read it. Only after that does a
+// missing branch answer `not_found!("Branch")`. Both checked live on gitlab.com, 2026-09-23 (glab 1.77
+// prints the body on stdout): project 86809638's `main` answers `404 Repository Not Found`, and a branch
+// gitlab-org/gitlab does not have answers `404 Branch Not Found`.
+// A message is not an API contract, so only EXACT equality counts: a reworded message, another language
+// on a self-hosted server, or no body at all is null, and the caller keeps its hedge word for word. A body
+// may only REMOVE a cause from a sentence, never add certainty.
+const GITLAB_404 = { '404 Repository Not Found': 'repository', '404 Branch Not Found': 'branch' };
+const gitlabBranchCause = (res) => (res.status === 404 && typeof res.body?.message === 'string'
+  && Object.hasOwn(GITLAB_404, res.body.message) ? GITLAB_404[res.body.message] : null);
 
 // One page of 100 is read, never more. A FULL page proves nothing about what is past it, so a list that
 // comes back with exactly PAGE entries and does not already hold the answer is "not known".
@@ -86,7 +105,8 @@ function whyFailed(res, { platform, host, what, plural = false }) {
   // Proven, not assumed: GitLab's `require_repository_enabled!` answers `not_found!("Repository")`, so a
   // login that may read the project and not its repository gets a 404, never a 403. Checked live on
   // gitlab.com 2026-09-23 — project 86809638 answers 200, and its `repository/branches/main` answers
-  // 404 `{"message":"404 Repository Not Found"}`. That is why GitLab's branch 404 keeps its hedge.
+  // 404 `{"message":"404 Repository Not Found"}`. Since E109 the GitLab branch read names the cause when
+  // the body says which (`gitlabBranchCause`), and reaches this arm — the hedge — only when it does not.
   // Every LIST this file reads names its own cause too, because "they do not exist" is what an empty list
   // says, not a 404.
   if (res.status === 404) return `${name} answered 404 for ${what} (it does not exist, or your login may not see it)`;
@@ -119,7 +139,12 @@ function loggedIn(runner, cli, host, authCache) {
 
 // The answer, for one repo and one branch. Every field that could not be read is null with a reason:
 //   { platform, host, repo, branch, branchFrom, platformDefault,
-//     known: false, why, kind }                            — nothing could be asked at all, or
+//     known: false, why, kind, cause }                     — nothing could be asked at all, or
+//                                                            (`cause`, E109: set only when a branch 404
+//                                                            PROVED why — 'branch' when the branch is not
+//                                                            there, 'repository' when the login cannot
+//                                                            read the project's repository; absent when
+//                                                            the 404 left both open),
 //   { …, known: true,
 //     protected: true|false|null, protectedWhy,            — is the branch protected at all?
 //     approvals: n|null, atLeast, approvalsWhy, from: [..],— the required approval count, and where
@@ -170,7 +195,8 @@ function repoAndBranch(base, runner, unknown, { cli, platform, at, what }) {
 // itself just named this branch as the repo's default, a repo with no commits yet. That turns on what the
 // repo read PROVED, never on where yad got the name, because yad's files may name the default too. On
 // GitLab add "or one the login cannot read", because reading a project and reading its repository are two
-// settings there; on GitHub one permission covers both, so the repo read before this one rules it out.
+// settings there — unless the answer's body names the cause (`gitlabBranchCause`, E109); on GitHub one
+// permission covers both, so the repo read before this one rules it out.
 const namedByPlatform = (branch, platformDefault) => platformDefault !== null && branch === platformDefault;
 const branchMissing = (res, branch, platformDefault) => (res.status !== 404 ? 'other'
   : namedByPlatform(branch, platformDefault) ? 'empty' : 'no-branch');
@@ -210,7 +236,9 @@ function readGitHub(base, runner, unknown) {
         // GitHub named this branch as the repo's default moments ago, so the repo does not lack it.
         ? `GitHub answered 404 for the branch ${shown(branch)}, so this repo has no commits on it yet`
         : `GitHub answered 404 for the branch ${shown(branch)}, so this repo does not have it`;
-    return { ...out, known: false, kind: branchMissing(b, branch, platformDefault), why };
+    // `cause: 'branch'`: one GitHub permission covers the repo read just made and the branch, so a 404
+    // here proves the branch cause — the fact the hints turn on, never the platform's name (E109).
+    return { ...out, known: false, kind: branchMissing(b, branch, platformDefault), why, ...(b.status === 404 ? { cause: 'branch' } : {}) };
   }
   if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'no-flag', why: 'GitHub did not say whether the branch is protected' };
   out.protected = b.body.protected;
@@ -332,6 +360,20 @@ function readGitLab(base, runner, unknown) {
   // and its `protected` flag is GitLab's own answer — wildcards and group-level protection included.
   const b = api(runner, 'glab', host, `${at}/repository/branches/${encodeURIComponent(branch)}`);
   if (!b.ok) {
+    // E109: the body may name which of the 404's two causes it was. Each sentence says what that body
+    // proved and no more; a body yad does not recognise keeps the hedge below, word for word.
+    const cause = gitlabBranchCause(b);
+    if (cause === 'repository') {
+      // The branch was never looked up, so nothing is said about it — whoever named it.
+      return { ...out, known: false, kind: 'no-repository', cause, why: `GitLab answered 404 for the branch ${shown(branch)} because this project's repository could not be read (it is turned off for the project, or your access is too low to read it)` };
+    }
+    if (cause === 'branch') {
+      const why = namedByPlatform(branch, platformDefault)
+        // GitLab named this branch as the project's default moments ago, so the project does not lack it.
+        ? `GitLab answered 404 for the branch ${shown(branch)}, so this project has no commits on it yet`
+        : `GitLab answered 404 for the branch ${shown(branch)}, so this project does not have it`;
+      return { ...out, known: false, kind: branchMissing(b, branch, platformDefault), cause, why };
+    }
     const why = whyFailed(b, { platform: 'gitlab', host, what: `the branch ${shown(branch)}` });
     return { ...out, known: false, kind: branchMissing(b, branch, platformDefault), why };
   }
@@ -622,8 +664,15 @@ function unknownHint(r) {
     case 'no-login': return `run \`${cli} auth login --hostname ${r.host}\`, then \`yad doctor\` again`;
     case 'no-platform': return 'set `platform` (github or gitlab) in yad\'s files — `yad setup` for the Product, `yad repo connect` for a code repo';
     case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
-    case 'no-branch': return `check that \`default_branch\` in yad's files names a branch that exists on the platform${r.platform === 'github' ? '' : ', or ask for access to the project\'s repository'}`;
-    case 'empty': return r.platform === 'github'
+    // The access tail turns on what the read PROVED (`cause`), never on the platform: a 404 whose body was
+    // not recognised leaves a permission open, and one that named the branch closes it (E109).
+    // The tail's noun is GitLab's: GitHub never reaches it, because its reader sets `cause: 'branch'` on
+    // every branch 404.
+    case 'no-branch': return `check that \`default_branch\` in yad's files names a branch that exists on the platform${r.cause === 'branch' ? '' : ', or ask for access to the project\'s repository'}`;
+    // One action per open cause: the repository is turned off (an Owner — perhaps you — turns it on), or
+    // the login's access is too low (a Maintainer or Owner raises it).
+    case 'no-repository': return 'if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
+    case 'empty': return r.cause === 'branch'
       ? 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again'
       : 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again';
     case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch) === r.branch ? `\`${r.branch}\`` : shown(r.branch)}`;
