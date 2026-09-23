@@ -19082,12 +19082,15 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // A listed branch yad cannot read settles nothing: "no match" needs every entry to be readable.
   for (const bad of [{ id: 5 }, { name: null }, { name: 7 }, null]) {
     ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, bad] }]], [/\/protected_branches/, 200, []]], {}, P));
-    assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab did not say which branches an approval rule covers'], JSON.stringify(bad));
+    assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab listed a branch in an approval rule that yad could not read'], JSON.stringify(bad));
   }
+  // Two rules, two different gaps: each keeps its own reason.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, { id: 5 }] }, { name: 'B', approvals_required: 3 }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.equal(r.approvalsWhy, 'GitLab listed a branch in an approval rule that yad could not read; GitLab did not say which branches an approval rule covers');
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, { id: 5 }] }, { name: 'B', approvals_required: 3, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [3, true], 'a rule whose reach is not known leaves a floor, never an exact count');
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'main' }, { id: 5 }] }]], [/\/protected_branches/, 200, []]], {}, P));
-  assert.equal(r.approvals, 2, 'a readable match still wins');
+  assert.deepEqual([r.approvals, r.atLeast, r.partlyRead, r.approvalsWhy], [2, false, false, null], 'a readable match still wins, and settles it');
   // No `protected_branches` key at all is not "every branch".
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'x', approvals_required: 2 }]], [/\/protected_branches/, 200, []]]));
   assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab did not say which branches an approval rule covers']);
@@ -19388,7 +19391,8 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
       for (const ar of [[200, []], [200, [AR(2)]], [200, [AR(0)]], [200, [AR('x')]], [200, [AR(1, { protected_branches: [{ name: 'release-*' }] })]],
         [200, [AR(1, { protected_branches: undefined })]], [200, [AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
         [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
-        [200, [AR(1), AR(2)]], [200, [AR(1), AR('x')]], [200, [AR(1, { name: '', id: 9 })]], [200, [AR(1, { name: 'owner a@b.com' })]],
+        [200, [AR(1), AR(2)]], [200, [AR(1), AR('x')]], [200, [AR(1, { name: '', id: 9 })]],
+        [200, [AR(1, { protected_branches: [{ name: 'main' }, { id: 5 }] })]], [200, [AR(1, { protected_branches: [{ name: 'release-*' }, { id: 5 }] })]], [200, [AR(1, { name: 'owner a@b.com' })]],
         [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { protected_branches: [{ name: 'dev' }] })]],
         [200, Array.from({ length: PAGE }, () => AR(0))], [403], [404], [401], [null], [200, 'junk'], [200, {}]]) {
         shapes.push(GL([[/\/repository\/branches\//, 200, { protected: flag }], [/\/protected_branches/, ...pb], [/\/approval_rules/, ...ar]]));
@@ -19434,10 +19438,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           assert.ok(r.known === false || r.partlyRead === true || r.codeOwners === null || r.fileReviewers === null,
             `the hint claims something was unread, and nothing was: ${line.message}`);
         }
-        // …and any line from a partly read answer must point at what is missing — except a GitLab refusal,
-        // whose hint names the tier that refusal leaves open.
-        if (r.known && r.partlyRead && line.hint && !r.rulesRefused) {
-          assert.match(line.hint, /could not read|ask someone|ask a repo admin|Maintainer/, `part of the read is missing, and the hint neither names it nor says who can settle it: ${line.message}`);
+        // …and any line from a partly read answer must point at what is missing, or at who can settle it.
+        if (r.known && r.partlyRead) {
+          assert.match(line.hint || '', /could not read|ask someone|ask a repo admin|Maintainer/, `part of the read is missing, and the hint neither names it nor says who can settle it: ${line.message}`);
         }
         if (r.known && r.partlyRead && r.approvals > 0) {
           assert.match(line.hint || '', /could not read/, `a count was partly read, and nothing points at the part that was not: ${line.message}`);
@@ -19454,7 +19457,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
   // The measured count, exactly: the grid is deterministic, so any drop is a shape that stopped saying
   // something of its own. It says nothing about two hints merging — that is the hint rules' job above.
-  assert.ok(distinct.size >= 830, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
+  assert.ok(distinct.size >= 858, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {

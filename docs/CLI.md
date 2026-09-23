@@ -1287,7 +1287,8 @@ says not known.
   it did read about the approval. The same when the rules cannot be read at all.
 - A GitLab report rule (such as Coverage-Check or License-Check) asks for an approval only when its report
   fails, so it is not counted as an approval rule. A GitLab approval rule that does not say which branches
-  it covers makes the count not known — or "at least N" when another rule applies.
+  it covers, or that lists a branch yad cannot read, makes the count not known — or "at least N" when
+  another rule applies. A branch it lists that yad CAN read still settles it.
 - A GitLab server served under a sub-path (`https://host/gitlab/group/project`) is not supported: the
   sub-path is read as part of the project's path, and GitLab answers 404.
 
