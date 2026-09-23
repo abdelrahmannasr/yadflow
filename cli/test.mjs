@@ -19015,6 +19015,7 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.equal(r.why, 'GitLab answered 404 for the branch mian (it does not exist, or your login may not see it)', 'reading a project and reading its repository are two GitLab settings, so a permission is still live');
   ({ r } = glRead([[/\/repository\/branches\//, 404]], { branch: null }));
   assert.deepEqual([r.known, r.kind, r.branchFrom], [false, 'empty', 'platform'], 'the platform\'s own default with no commits yet');
+  assert.match(protectionLine(r, { name: 'b' }).hint, /\(or your login cannot see it\)/, 'the message beside it leaves a permission open');
   ({ r } = glRead([[/\/repository\/branches\//, 200, { name: 'main' }]]));
   assert.deepEqual([r.known, r.kind, r.why], [false, 'no-flag', 'GitLab did not say whether the branch is protected']);
   assert.match(protectionLine(r, { name: 'b' }).hint, /^ask someone who can see GitLab's settings for `main`$/);
@@ -19300,7 +19301,9 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('no-branch').hint, /names a branch that exists/);
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
   assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for `main`$/);
-  assert.equal(unknown('empty').hint, 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again', 'the message already ruled a permission out, so the hint may not offer it back');
+  assert.equal(unknown('empty').hint, 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again', 'GitHub\'s message already ruled a permission out, so the hint may not offer it back');
+  assert.equal(unknown('empty', 'x', { platform: 'gitlab' }).hint, 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, then run `yad doctor` again', 'GitLab\'s message leaves a permission open, so the hint may not settle it');
+  assert.equal(unknown('no-branch', 'x', { platform: 'gitlab' }).hint, 'check that `default_branch` in yad\'s files names a branch that exists on the platform, or ask for access to the project\'s repository', 'a GitLab reader who finds the branch does exist still has something to do');
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^fix what the message names, then run `yad doctor` again/);
   assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /names a branch that exists/);
   // A "not known" line still names the platform's own default when it differs (the typo case).
@@ -19460,6 +19463,10 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
         }
         assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
         assert.ok(!/\. [a-z]/.test(line.hint || ''), `a sentence that starts lower case: ${line.hint}`);
+        // A hint may not settle a cause its own message left open, whichever arm printed them.
+        if (/, or your login may not see it\)/.test(line.message)) {
+          assert.ok(!/but it has no commits yet —/.test(line.hint || ''), `the message left two causes open, and the hint settles one: ${line.hint}`);
+        }
         // A hint may claim something went unread only when the read says so…
         if (/about what yad could not read/.test(line.hint || '')) {
           assert.ok(r.known === false || r.partlyRead === true || r.codeOwners === null || r.fileReviewers === null,

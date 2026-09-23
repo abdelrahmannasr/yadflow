@@ -1291,7 +1291,9 @@ says not known.
   it did read about the approval. The same when the rules gave no answer: a call that failed, or a 404,
   which on that endpoint is a host without the rulesets API.
 - On a GitHub host that has no rulesets API (an older GitHub Enterprise Server), every read goes through
-  that 404, so the protection is always "not known" and Part 3's banner is never printed there.
+  that 404, so "not protected" is never proven there: a branch GitHub's own flag calls protected still
+  prints as protected, and any other branch prints as not known. Part 3's banner, which needs a branch
+  proven unprotected, is therefore never printed on such a host.
 - A GitLab report rule (such as Coverage-Check or License-Check) asks for an approval only when its report
   fails, so it is not counted as an approval rule. A GitLab approval rule that does not say which branches
   it covers, or that lists a branch yad cannot read, makes the count not known — or "at least N" when

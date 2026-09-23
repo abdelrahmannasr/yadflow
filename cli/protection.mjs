@@ -163,7 +163,9 @@ function repoAndBranch(base, runner, unknown, { cli, platform, at, what }) {
 }
 
 // A 404 on the branch: yad's files name one the platform does not have — or, when the branch IS the
-// platform's own default, a repo with no commits yet (or one the login cannot see).
+// platform's own default, a repo with no commits yet. On GitLab add "or one the login cannot read",
+// because reading a project and reading its repository are two settings there; on GitHub one
+// permission covers both, so the repo read before this one rules that cause out.
 const branchMissing = (res, branchFrom) => (res.status !== 404 ? 'other' : branchFrom === 'platform' ? 'empty' : 'no-branch');
 const RULESET_OF = { Organization: 'an organisation ruleset', Repository: 'a repo ruleset' };
 // What the platform calls a change asking to be merged.
@@ -613,8 +615,8 @@ function unknownHint(r) {
     case 'no-login': return `run \`${cli} auth login --hostname ${r.host}\`, then \`yad doctor\` again`;
     case 'no-platform': return 'set `platform` (github or gitlab) in yad\'s files — `yad setup` for the Product, `yad repo connect` for a code repo';
     case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
-    case 'no-branch': return 'check that `default_branch` in yad\'s files names a branch that exists on the platform';
-    case 'empty': return 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again';
+    case 'no-branch': return `check that \`default_branch\` in yad's files names a branch that exists on the platform${r.platform === 'github' ? '' : ', or ask for access to the project\'s repository'}`;
+    case 'empty': return `the platform names this default branch, but it has no commits yet${r.platform === 'github' ? '' : ' (or your login cannot see it)'} — push a first commit, then run \`yad doctor\` again`;
     case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch) === r.branch ? `\`${r.branch}\`` : shown(r.branch)}`;
     case 'no-default': return 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
     default: return 'fix what the message names, then run `yad doctor` again; nothing about this repo\'s protection is assumed meanwhile';
