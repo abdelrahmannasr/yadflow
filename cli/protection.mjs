@@ -139,12 +139,14 @@ function loggedIn(runner, cli, host, authCache) {
 
 // The answer, for one repo and one branch. Every field that could not be read is null with a reason:
 //   { platform, host, repo, branch, branchFrom, platformDefault,
-//     known: false, why, kind, cause }                     — nothing could be asked at all, or
+//     known: false, why, kind, cause, defaultMayBeHidden } — nothing could be asked at all, or
 //                                                            (`cause`, E109: set only when a branch 404
 //                                                            PROVED why — 'branch' when the branch is not
 //                                                            there, 'repository' when the login cannot
 //                                                            read the project's repository; absent when
-//                                                            the 404 left both open),
+//                                                            the 404 left both open; `defaultMayBeHidden`,
+//                                                            E110: GitLab named no default, which it also
+//                                                            does for a login that cannot read the code),
 //   { …, known: true,
 //     protected: true|false|null, protectedWhy,            — is the branch protected at all?
 //     approvals: n|null, atLeast, approvalsWhy, from: [..],— the required approval count, and where
@@ -187,7 +189,18 @@ function repoAndBranch(base, runner, unknown, { cli, platform, at, what }) {
   if (!meta.ok) return { fail: unknown(meta.status === 404 ? 'no-repo' : 'other', whyFailed(meta, { platform, host: base.host, what })) };
   const platformDefault = typeof meta.body?.default_branch === 'string' ? meta.body.default_branch : null;
   if (base.branch) return { branch: base.branch, branchFrom: base.branchFrom, platformDefault };
-  if (!platformDefault) return { fail: unknown('no-default', `no default branch is set in yad's files, and ${PLATFORM_NAME[platform]} named none`) };
+  if (!platformDefault) {
+    // E110: GitLab shows a project's default branch only to a login that may read its code (`expose
+    // :default_branch_or_main … if: … :read_code` in `basic_project_details.rb`; live, project 86809638
+    // answers 200 with no such key). So on GitLab "named none" is also what an unreadable repository looks
+    // like, and both causes stay open. Nothing is guessed from the missing key: it proves only that GitLab
+    // did not show one. `defaultMayBeHidden` is the fact the hint turns on, never the platform's name.
+    // GitHub shows the default to anyone who may read the repo, which the answer above just proved.
+    if (platform === 'gitlab') {
+      return { fail: unknown('no-default', "no default branch is set in yad's files, and GitLab named none (GitLab names it only to a login that can read the project's repository)", { defaultMayBeHidden: true }) };
+    }
+    return { fail: unknown('no-default', `no default branch is set in yad's files, and ${PLATFORM_NAME[platform]} named none`) };
+  }
   return { branch: platformDefault, branchFrom: 'platform', platformDefault };
 }
 
@@ -676,7 +689,11 @@ function unknownHint(r) {
       ? 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again'
       : 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again';
     case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch) === r.branch ? `\`${r.branch}\`` : shown(r.branch)}`;
-    case 'no-default': return 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
+    // One action per open cause (E110): yad's files name no branch, and on GitLab the repository may be
+    // unreadable — turned off (an Owner turns it on) or too little access (a Maintainer or Owner grants it).
+    case 'no-default': return `set \`default_branch\` in yad's files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)${r.defaultMayBeHidden
+      ? '. GitLab also hides the default from a login that cannot read the repository: if you own the project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner for access to it'
+      : ''}`;
     case 'no-repo': return `check \`git_url\` in yad's files, or ask for access to the ${r.platform === 'gitlab' ? 'project' : 'repo'}`;
     default: return 'fix what the message names, then run `yad doctor` again; nothing about this repo\'s protection is assumed meanwhile';
   }
