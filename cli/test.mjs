@@ -18933,6 +18933,9 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   // A plural subject keeps its number in the reason.
   ({ r } = ghRead([[/\/rules\//, 404], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.match(r.approvalsWhy, /^GitHub answered 404 for the rules on the branch \(they do not exist, or your login may not see them\)/);
+  // One source is named once: a hundred rules of one ruleset are one source, not a hundred.
+  ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, Array.from({ length: 100 }, () => PR_RULE(1))], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual(r.from, ['a repo ruleset (id 7)']);
   // A ruleset id that is not a number is not printed.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [{ ...PR_RULE(1), ruleset_id: 'bob@x.com' }]], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual(r.from, ['a repo ruleset']);
@@ -19093,6 +19096,9 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'B', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, [{ name: 'main', code_owner_approval_required: true }]]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast, r.partlyRead, r.codeOwners], [1, true, false, true]);
   assert.ok(!protectionLine(r, { name: 'web' }).hint, 'every call succeeded: nothing to point at');
+  // …and on GitLab, two rules the project gave the same name are one name in the line.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'A', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.from, r.approvals], [['approval rule "A"'], 2]);
   // A rule that reaches the branch leaves `rulesElsewhere` unset.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
   assert.equal(r.rulesElsewhere, undefined);
@@ -19114,7 +19120,7 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.match(protectionLine(r, { name: 'web' }).hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate/);
   ({ r } = glRead([[/\/approval_rules/, null], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.rulesAnswered, r.rulesRefused], [undefined, undefined], 'offline refuses nothing');
-  assert.equal(protectionLine(r, { name: 'web' }).hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings');
+  assert.match(protectionLine(r, { name: 'web' }).hint, /about what yad could not read$/, 'a read that answered nothing points at what was not read');
   ({ r } = glRead([[/\/approval_rules/, 200, Array.from({ length: PAGE }, () => ({ name: 'z', approvals_required: 0, protected_branches: [] }))], [/\/protected_branches/, 200, []]]));
   assert.match(protectionLine(r, { name: 'web' }).hint, /about what yad could not read$/, 'an unprotected branch, with Free ruled out');
   // A self-managed host and a subgroup: the host is asked, and the whole path is the project.
@@ -19230,7 +19236,9 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'refused', rulesRefused: true }, { name: 'b' });
   assert.match(l.hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see/);
   l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'offline' }, { name: 'b' });
-  assert.equal(l.hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings', 'offline says nothing about a tier');
+  assert.match(l.hint, /about what yad could not read$/, 'a read that answered nothing names no tier, and points at what it could not read');
+  l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'x', rulesAnswered: true }, { name: 'b' });
+  assert.equal(l.hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings', 'a list that came back settles the tier');
   l = protectionLine({ ...base, protected: null, protectedWhy: 'p', approvals: null, approvalsWhy: 'a' }, { name: 'b' });
   assert.equal(l.message, 'b: whether `main` is protected on GitHub acme/app is not known (p), and neither is whether a merge needs an approval — a');
   l = protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b' });
@@ -19379,6 +19387,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
     return (out.match(/ — /g) || []).length;
   };
   let seen = 0;
+  const distinct = new Set(); // what the grid SAYS, not how many times it was asked
   for (const { platform, gitUrl, calls } of shapes) {
     for (const branch of ['main', 'develop', null]) {
       const r = readProtection({ platform, gitUrl, branch }, { runner: fakePlatform({ calls }).runner, env: ON });
@@ -19386,6 +19395,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
         const line = protectionLine(r, { name: 'backend', solo });
         const parts = [line.message, ...(line.hint ? [line.hint] : [])];
         seen += 1;
+        distinct.add(`${line.status}\u0000${line.message}\u0000${line.hint || ''}`);
         assert.ok(['ok', 'warn'].includes(line.status), `a status this section never sets: ${line.status}`);
         for (const said of parts) {
           assert.ok(!/\bnull\b|\bundefined\b|\bNaN\b|\[object/.test(said), `a value the platform did not send: ${said}`);
@@ -19418,6 +19428,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
     }
   }
   assert.ok(seen >= 2100, `the grid shrank: ${seen} lines`);
+  // …and the count of DISTINCT lines, because a shape that collapses into another's answer leaves the
+  // count above untouched — which is how a fifth of this grid once said nothing (review 21).
+  assert.ok(distinct.size >= 800, `the grid says less than it did: ${distinct.size} distinct lines`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {

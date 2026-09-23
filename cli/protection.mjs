@@ -282,6 +282,7 @@ function readGitHub(base, runner, unknown) {
     }
   }
   // GitHub applies the strictest of the layered rules, so the count is exact only when both were read.
+  out.from = [...new Set(out.from)]; // one source, said once: 100 rules of one ruleset are one source
   Object.assign(out, settle([rs, cl]));
   out.codeOwners = rulesetCodeOwners || classicCodeOwners ? true : (rs.exact && cl.exact ? false : null);
   out.fileReviewers = rulesetReviewers === true ? true : (rs.exact && rulesetReviewers === false ? false : null);
@@ -358,6 +359,7 @@ function readGitLab(base, runner, unknown) {
           : whyFailed(ar, { platform: 'gitlab', host, what: 'the approval rules', plural: true })),
     };
   }
+  out.from = [...new Set(out.from)]; // one source, said once
   Object.assign(out, settle([src]));
   // The approval-rules endpoint answers on Premium and Ultimate only, so a list that came back settles the
   // tier: a hint must not go on offering Free as the explanation (the round-15 rule, on the GitLab side).
@@ -548,9 +550,11 @@ function lineFor(r, { name, solo = false } = {}) {
     ? `${name}: ${br} is protected on ${where}${branchNote}, but whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`
     : `${name}: whether ${br} is protected on ${where}${branchNote} is not known (${r.protectedWhy}), and neither is whether a merge needs an approval — ${r.approvalsWhy}${clauses(false)}`;
   const hint = r.platform === 'gitlab'
+    // A refusal leaves the tier open; a list that came back settles it; anything else answered nothing,
+    // so that line points at what was not read, exactly as its twin above does.
     ? (r.rulesRefused
       ? `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
-      : `a Maintainer can see the approval rules for ${br} in the project's merge request settings`)
+      : (r.rulesAnswered ? `a Maintainer can see the approval rules for ${br} in the project's merge request settings` : unread))
     : `ask a repo admin to check the required approvals for ${br} in ${P}'s settings`;
   return { status: solo ? 'ok' : 'warn', message: msg, hint };
 }

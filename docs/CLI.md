@@ -1271,9 +1271,12 @@ says not known.
   leaves out protection set for a whole group — and a group's setting takes precedence over the project's.
   So only an entry for the branch that says yes is proof; an entry that says no proves nothing, and only a
   branch that is not protected proves that no code owner is needed. Anything else is "not known".
-- GitLab's tier (Free, Premium, Ultimate) is never guessed. A list of approval rules that came back does
-  settle it, though: that endpoint answers on Premium and Ultimate only, so the hint stops offering Free
-  as the explanation.
+- GitLab's tier (Free, Premium, Ultimate) is never guessed. Only two answers say anything about it: a list
+  of approval rules that came back settles it (that endpoint answers on Premium and Ultimate only), and a
+  refusal (401, 403 or 404) leaves it open, which is the one case a hint mentions Free. An answer that
+  settles nothing — offline, a server error, a body yad could not read — names no tier, and its line points
+  at what could not be read.
+- One source is named once. A hundred rules from one ruleset are one source.
 - In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
   then says not known (HTTP 403 or 404), never "no rules".
 - GitHub's own `protected` flag is the starting point, but yad never takes "not protected" from it alone.
