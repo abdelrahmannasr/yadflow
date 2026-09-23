@@ -193,7 +193,9 @@ function readGitHub(base, runner, unknown) {
   const out = { ...base, branch, branchFrom, platformDefault, known: true, protected: null, protectedWhy: null, approvals: null, atLeast: false, approvalsWhy: null, from: [], codeOwners: null };
   const b = api(runner, 'gh', host, `${at}/branches/${segment(branch)}`);
   if (!b.ok) {
-    const why = whyFailed(b, { platform: 'github', host, what: `the branch ${shown(branch)}` });
+    const why = b.status === 404
+      ? `GitHub answered 404 for the branch ${shown(branch)}, so this repo does not have it`
+      : whyFailed(b, { platform: 'github', host, what: `the branch ${shown(branch)}` });
     return { ...out, known: false, kind: branchMissing(b, branchFrom), why };
   }
   if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'no-flag', why: 'GitHub did not say whether the branch is protected' };
@@ -201,13 +203,11 @@ function readGitHub(base, runner, unknown) {
   // Rulesets: every ACTIVE rule on the branch ("evaluate" and "disabled" rulesets are not returned).
   const rules = api(runner, 'gh', host, `${at}/rules/branches/${segment(branch)}?per_page=${PAGE}`);
   let rs;
-  let rulesRead = false; // the rules call answered with a list, and how many rules were on the branch
-  let rulesCount = 0;
+  let noRulesets = false; // this branch cannot have a ruleset: the list came back empty, or the host has none
   let rulesetCodeOwners = false;
   let rulesetReviewers = false; // true, false, or null (a reviewer's count could not be read)
   if (rules.ok && Array.isArray(rules.body)) {
-    rulesRead = true;
-    rulesCount = rules.body.length;
+    noRulesets = rules.body.length === 0;
     let floor = 0;
     let unreadable = false;
     for (const r of rules.body) {
@@ -251,6 +251,7 @@ function readGitHub(base, runner, unknown) {
     // A 404 here is not "no rules" (that answer is an empty list) and not a permission (the repo and the
     // branch were just read with this login): it is a host whose API has no rulesets, such as an older
     // GitHub Enterprise Server.
+    if (rules.status === 404) noRulesets = true;
     const why = rules.status === 404
       ? 'GitHub answered 404 for the rules on the branch, which a host without the rulesets API does'
       : whyFailed(rules.ok ? { unreadable: true } : rules, { platform: 'github', host, what: 'the rules on the branch', plural: true });
@@ -284,7 +285,9 @@ function readGitHub(base, runner, unknown) {
         why: p.status === 404
           // "or a ruleset protects it" is only a live cause while a ruleset could be there: with the rules
           // read and empty, the branch has none, so that arm would send the reader hunting for nothing.
-          ? `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin${rulesRead && !rulesCount ? '' : ', or the branch is protected by rulesets alone'})`
+          // The ruleset arm goes whenever the rules read ruled rulesets out — proven empty, or a host
+          // whose API has none. Offering it there would send the reader hunting for what cannot exist.
+          ? `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin${noRulesets ? '' : ', or the branch is protected by rulesets alone'})`
           : whyFailed(p, { platform: 'github', host, what: 'classic branch protection' }),
       };
     }
@@ -308,7 +311,10 @@ function readGitLab(base, runner, unknown) {
   // and its `protected` flag is GitLab's own answer — wildcards and group-level protection included.
   const b = api(runner, 'glab', host, `${at}/repository/branches/${encodeURIComponent(branch)}`);
   if (!b.ok) {
-    return { ...out, known: false, kind: branchMissing(b, branchFrom), why: whyFailed(b, { platform: 'gitlab', host, what: `the branch ${shown(branch)}` }) };
+    const why = b.status === 404
+      ? `GitLab answered 404 for the branch ${shown(branch)}, so this project does not have it`
+      : whyFailed(b, { platform: 'gitlab', host, what: `the branch ${shown(branch)}` });
+    return { ...out, known: false, kind: branchMissing(b, branchFrom), why };
   }
   if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'no-flag', why: 'GitLab did not say whether the branch is protected' };
   out.protected = b.body.protected;
@@ -349,7 +355,7 @@ function readGitLab(base, runner, unknown) {
       if (applies === null) {
         // Two different gaps: GitLab gave no list of branches, or its list holds one yad could not read.
         whys.add(unreadableReach
-          ? 'GitLab listed an approval rule whose list of branches yad could not read'
+          ? 'GitLab listed an approval rule whose branch list holds a name yad could not read'
           : 'GitLab did not say which branches an approval rule covers');
         continue;
       }
@@ -599,7 +605,7 @@ function unknownHint(r) {
     case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
     case 'no-branch': return 'check that `default_branch` in yad\'s files names a branch that exists on the platform';
     case 'empty': return 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, then run `yad doctor` again';
-    case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch)} — the answer yad read did not say whether the branch is protected`;
+    case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch) === r.branch ? `\`${r.branch}\`` : shown(r.branch)}`;
     case 'no-default': return 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
     default: return 'fix what the message names, then run `yad doctor` again; nothing about this repo\'s protection is assumed meanwhile';
   }

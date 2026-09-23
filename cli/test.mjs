@@ -18954,7 +18954,7 @@ test('E70 readProtection: every way of not being able to ask is not known, with 
     [readProtection(t, { runner: fakePlatform({ authed: false }).runner, env: ON }), /^gh is not logged in for github\.com/],
     [readProtection(t, { runner: fakePlatform({ calls: [[/./, null]] }).runner, env: ON }), /^yad could not reach github\.com to read the repo acme\/app \(offline/],
     [ghRead([[/\/branches\/main$/, null]]).r, /^yad could not reach github\.com to read the branch main \(offline/],
-    [ghRead([[/\/branches\/main$/, 404]]).r, /^GitHub answered 404 for the branch main \(it does not exist, or your login may not see it\)$/],
+    [ghRead([[/\/branches\/main$/, 404]]).r, /^GitHub answered 404 for the branch main, so this repo does not have it$/],
     [ghRead([[/\/branches\/main$/, 401]]).r, /HTTP 401 — the login may have expired/],
     [ghRead([[/\/branches\/main$/, 500]]).r, /answered HTTP 500 for the branch main/],
     [ghRead([[/\/branches\/main$/, 200, 'not json']]).r, /with something yad could not read/],
@@ -18963,7 +18963,7 @@ test('E70 readProtection: every way of not being able to ask is not known, with 
   // …and an answer with no flag has its own kind, so its hint names someone rather than "fix what the
   // message names" — the message names nothing the reader can fix.
   assert.equal(ghRead([[/\/branches\/main$/, 200, { name: 'main' }]]).r.kind, 'no-flag');
-  assert.match(protectionLine(ghRead([[/\/branches\/main$/, 200, { name: 'main' }]]).r, { name: 'b' }).hint, /^ask someone who can see GitHub's settings for main/);
+  assert.match(protectionLine(ghRead([[/\/branches\/main$/, 200, { name: 'main' }]]).r, { name: 'b' }).hint, /^ask someone who can see GitHub's settings for `main`$/);
   for (const [r, why] of cases) {
     assert.equal(r.known, false, String(why));
     assert.match(r.why, why);
@@ -19008,7 +19008,7 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.deepEqual([r.known, r.kind, r.branchFrom], [false, 'empty', 'platform'], 'the platform\'s own default with no commits yet');
   ({ r } = glRead([[/\/repository\/branches\//, 200, { name: 'main' }]]));
   assert.deepEqual([r.known, r.kind, r.why], [false, 'no-flag', 'GitLab did not say whether the branch is protected']);
-  assert.match(protectionLine(r, { name: 'b' }).hint, /^ask someone who can see GitLab's settings for main/);
+  assert.match(protectionLine(r, { name: 'b' }).hint, /^ask someone who can see GitLab's settings for `main`$/);
   // GitLab's own flag decides "protected" — group-level protection included, which the project list omits.
   // …so a protected branch with no entry in the list may be protected by its group: code owners not known.
   ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, []]], {}, P));
@@ -19087,11 +19087,11 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // A listed branch yad cannot read settles nothing: "no match" needs every entry to be readable.
   for (const bad of [{ id: 5 }, { name: null }, { name: 7 }, null]) {
     ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, bad] }]], [/\/protected_branches/, 200, []]], {}, P));
-    assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab listed an approval rule whose list of branches yad could not read'], JSON.stringify(bad));
+    assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab listed an approval rule whose branch list holds a name yad could not read'], JSON.stringify(bad));
   }
   // Two rules, two different gaps: each keeps its own reason.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, { id: 5 }] }, { name: 'B', approvals_required: 3 }]], [/\/protected_branches/, 200, []]], {}, P));
-  assert.equal(r.approvalsWhy, 'GitLab listed an approval rule whose list of branches yad could not read; GitLab did not say which branches an approval rule covers');
+  assert.equal(r.approvalsWhy, 'GitLab listed an approval rule whose branch list holds a name yad could not read; GitLab did not say which branches an approval rule covers');
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, { id: 5 }] }, { name: 'B', approvals_required: 3, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [3, true], 'a rule whose reach is not known leaves a floor, never an exact count');
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'main' }, { id: 5 }] }]], [/\/protected_branches/, 200, []]], {}, P));
@@ -19290,7 +19290,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('no-url').hint, /\.sdlc\/repos\.json/);
   assert.match(unknown('no-branch').hint, /names a branch that exists/);
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
-  assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for main — the answer yad read did not say whether the branch is protected$/);
+  assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for `main`$/);
   assert.match(unknown('empty').hint, /^the platform names this default branch, but it has no commits yet/);
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^fix what the message names, then run `yad doctor` again/);
   assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /names a branch that exists/);
@@ -19447,6 +19447,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           assert.ok(!/\b1 approvals\b|\b(?!1\b)\d+ approval\b/.test(said), `a count and its noun disagree: ${said}`);
           assert.ok(!/\bthe approval rules [A-Za-z]+ has misses\b|\bthe approval rule [A-Za-z]+ has miss\b/.test(said), `a subject and its verb disagree: ${said}`);
           assert.ok(!/\b(rules|branches|reviewers|approval rules)\b[^.]{0,80}?(may not read it\b|it does not exist)/.test(said), `a plural subject with a singular pronoun: ${said}`);
+          assert.ok(!(/host without the rulesets API/.test(said) && /rulesets alone/.test(said)), `a cause this sentence already ruled out, offered again: ${said}`);
         }
         assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
         assert.ok(!/\. [a-z]/.test(line.hint || ''), `a sentence that starts lower case: ${line.hint}`);

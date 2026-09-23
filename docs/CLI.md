@@ -1207,9 +1207,11 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | Not logged in for that host | `gh is not logged in for github.com (or github.com did not answer)` |
 | No remote URL | `no git remote URL yad can read, so it cannot tell which repo to ask about` |
 | Offline | `yad could not reach github.com to read the repo acme/app (offline, or the host did not answer)` |
-| Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin)`. The reason adds `, or the branch is protected by rulesets alone` unless the rules were read and the branch has none |
+| Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin)`. The reason adds `, or the branch is protected by rulesets alone` unless this branch cannot hold a ruleset, which is what an empty rules list, or a host without the rulesets API, proves |
+| A GitHub host with no rulesets API | `GitHub answered 404 for the rules on the branch, which a host without the rulesets API does` |
 | GitLab approval rules refused | `GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them` |
-| A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
+| A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian, so this repo does not have it` |
+| A GitLab rule whose branch list yad cannot read | `GitLab listed an approval rule whose branch list holds a name yad could not read` |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
 
 Three real lines from team Products, each with its hint:
