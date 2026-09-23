@@ -21422,3 +21422,100 @@ test('E19 indexFreshness: none, missing, current, behind, unreadable', () => {
     try { assert.deepEqual(indexFreshness(U), { state: 'missing' }); } finally { fs.rmSync(U, { recursive: true, force: true }); }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// `yad index`: the default branch only on a local Product; nothing written on a verified one; --json is a
+// read on any branch. Every arm is pinned, because each is a twin of another (local/verified, the default
+// branch/another, write/read).
+const { runIndex } = await import('./index-command.mjs');
+
+function indexProduct({ ledger } = {}) {
+  const T = productForCheckpoint(); // hub.json (default_branch main) + a seed commit on main
+  if (ledger) {
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, ledger }));
+  }
+  fs.mkdirSync(path.join(T, 'epics/EP-a/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/.sdlc/state.json'), JSON.stringify(E19_STATE()));
+  fs.mkdirSync(path.join(T, 'epics/EP-bad/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-bad/.sdlc/state.json'), '{ broken');
+  return T;
+}
+
+test('E19 yad index: writes on the default branch of a local Product, says what it could not read', async () => {
+  const T = indexProduct();
+  const exit = process.exitCode;
+  try {
+    let out = await grab(() => runIndex(T, {}));
+    assert.match(out, /wrote \.sdlc\/index\.json \(2 work items, 1 unreadable\) — commit it with the change it describes/);
+    assert.match(out, /epics\/EP-bad: listed as unreadable — \.sdlc\/state\.json does not parse/);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    out = await grab(() => runIndex(T, {}));
+    assert.match(out, /is already current/, 'a rebuild of an unchanged Product writes nothing');
+    assert.equal(git(T, 'status', '--porcelain', '--', '.sdlc/index.json').toString().trim(), '?? .sdlc/index.json', 'written, never committed');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index: refuses another branch (unless --allow-branch), and writes nothing there', async () => {
+  const T = indexProduct();
+  const exit = process.exitCode;
+  try {
+    git(T, 'checkout', '-q', '-b', 'feat/x');
+    process.exitCode = 0;
+    const out = await grab(() => runIndex(T, {}));
+    assert.match(out, /on 'feat\/x', not the default branch 'main' — yad index commits go to the default branch/);
+    assert.equal(process.exitCode, 1);
+    assert.ok(!fs.existsSync(indexPath(T)), 'nothing written on a branch');
+    process.exitCode = 0;
+    await grab(() => runIndex(T, { allowBranch: true }));
+    assert.ok(fs.existsSync(indexPath(T)), '--allow-branch is the one override');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index: on a verified Product it writes nothing and says CI rebuilds it', async () => {
+  const T = indexProduct({ ledger: 'verified' });
+  const exit = process.exitCode;
+  try {
+    process.exitCode = 0;
+    const out = await grab(() => runIndex(T, {}));
+    assert.match(out, /this Product's ledger is verified: CI rebuilds \.sdlc\/index\.json when it records a merge on the default branch, and a local write could not be committed — nothing written/);
+    assert.match(out, /\.sdlc\/index\.json is not built yet; the next review CI records rebuilds it/);
+    assert.match(out, /epics\/EP-bad: listed as unreadable/, 'the gap is said in the verified arm too');
+    assert.ok(!fs.existsSync(indexPath(T)));
+    assert.equal(process.exitCode, 0, 'a warning, never a failure');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index --json: a read on any branch, the file\'s shape, nothing written', async () => {
+  const T = indexProduct({ ledger: 'verified' });
+  const orig = process.stdout.write.bind(process.stdout);
+  let printed = '';
+  try {
+    git(T, 'checkout', '-q', '-b', 'feat/y');
+    process.stdout.write = (s) => { printed += s; return true; };
+    try { await runIndex(T, { json: true }); } finally { process.stdout.write = orig; }
+    const j = JSON.parse(printed);
+    assert.deepEqual(Object.keys(j), ['schemaVersion', 'inputs', 'items']);
+    assert.deepEqual(j.items.map((i) => [i.id, !!i.unreadable]), [['EP-a', false], ['EP-bad', true]]);
+    assert.equal(j.inputs, buildIndex(T).inputs);
+    assert.ok(!fs.existsSync(indexPath(T)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index: outside a Product, and outside git, it refuses rather than guessing', async () => {
+  const exit = process.exitCode;
+  const N = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e19-none-'));
+  const G = indexFixture({ '.sdlc/hub.json': { default_branch: 'main' }, 'epics/EP-a/.sdlc/state.json': E19_STATE() });
+  try {
+    process.exitCode = 0;
+    assert.match(await grab(() => runIndex(N, {})), /no Product here/);
+    assert.equal(process.exitCode, 1);
+    process.exitCode = 0;
+    assert.match(await grab(() => runIndex(G, {})), /not a git repo, so yad cannot tell whether this is the default branch/);
+    assert.equal(process.exitCode, 1);
+    assert.ok(!fs.existsSync(indexPath(G)));
+  } finally {
+    process.exitCode = exit;
+    fs.rmSync(N, { recursive: true, force: true });
+    fs.rmSync(G, { recursive: true, force: true });
+  }
+});
