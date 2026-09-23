@@ -3564,6 +3564,36 @@ export function themeOf(fm = {}) {
 // only: there is nothing here to compare.
 export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
+// ---- the title (E111) --------------------------------------------------------------------------
+// A work item's one-line name, for a reader that lists many (E20's `yad history list`, through E19's
+// index). The user's decisions (2026-09-24):
+//   - It is the `title:` key in `epic.md` frontmatter, which `yad-epic`, `yad-change` and `yad-stub`
+//     write. Not the first `# ` heading: the template has none, and a heading is prose, reworded freely.
+//   - A change item written before the key existed falls back to the `title` its `change.json` already
+//     holds (`yad-change` has required one from the start). The frontmatter key wins when both exist.
+//   - No title is `null`, never a guess (not the Goal's first sentence, not the id): a screen prints the
+//     id in its place, and nothing warns. Approved `epic.md` files are NOT back-filled — the epic review
+//     is bound to a hash of the file, so adding a line would drop the approval as stale.
+//   - The Foundation has no `epic.md`, so its title is a constant.
+//
+// Normalized HERE, once, like the theme. `readFrontmatter` keeps the rest of the line as written, so a
+// title quoted the YAML way (`title: "Queue: untested"`) would keep its quotes: one matching pair around
+// the whole value is taken off. A value the reader turned into a list (`title: [WIP]`) is not a title.
+export const FOUNDATION_TITLE = 'Foundation';
+
+const titleText = (v) => {
+  if (typeof v !== 'string') return null;
+  let t = v.trim();
+  if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t.at(-1) === t[0]) t = t.slice(1, -1).trim();
+  return t || null;
+};
+
+// `fm`: the item's `epic.md` frontmatter. `change`: its parsed `change.json`, or null — any JSON value is
+// safe, since only a string `title` counts.
+export function titleOf(fm = {}, change = null) {
+  return titleText(fm?.title) ?? titleText(change?.title);
+}
+
 // The lineage of an epic from epic.md frontmatter. `type` defaults to `feature` (genesis) when
 // absent, so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
 export function epicLineage(root, epic) {
