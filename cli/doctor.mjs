@@ -21,6 +21,7 @@ import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses } from './protection.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
+import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 
 const MIN_NODE = 18;
 
@@ -1965,7 +1966,8 @@ export function indexChecks(checks, root) {
   if (!exists(productConfigPath(root))) return;
   const fresh = indexFreshness(root);
   if (fresh.state === 'none') return; // no work items and no index: nothing to be behind
-  const verified = isVerifiedLedger(readJSON(productConfigPath(root), null));
+  const hubNow = readJSON(productConfigPath(root), null);
+  const verified = isVerifiedLedger(hubNow);
   const hint = verified
     ? 'CI rebuilds it when it records the next merged review; on a verified Product a local write could not be committed'
     : 'run `yad index` on the default branch, then commit it';
@@ -1973,11 +1975,23 @@ export function indexChecks(checks, root) {
     check(checks, 'index', 'index', 'ok', `${INDEX_FILE} is current`);
     return;
   }
+  // Off the default branch a difference is EXPECTED: the index is written there only, so a branch that
+  // changes a work item always differs from it until the work merges. Saying "behind — run `yad index`"
+  // here would point at the one act the rule forbids (E19 review). An unreadable file is still a finding.
+  if (fresh.state !== 'unreadable' && exists(path.join(root, '.git'))) {
+    const git = productGit(root);
+    const head = git('rev-parse', '--abbrev-ref', 'HEAD');
+    const main = resolveDefaultBranch(git, hubNow);
+    if (head.ok && head.stdout && head.stdout !== main) {
+      check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'differs from the work items on this branch'} — expected on '${head.stdout}': it is written on '${main}' only, once this work merges`);
+      return;
+    }
+  }
   const message = fresh.state === 'missing'
     ? `${INDEX_FILE} has not been built yet`
     : fresh.state === 'behind'
       // The fact the read proved, and no cause: `yad epic new`, `yad skip`, a skill that still writes
-      // state.json by hand (E17b), a branch merged in, or a checkout that rewrote line endings all do it.
+      // state.json by hand (E17b), or a branch merged in all do it.
       ? `${INDEX_FILE} is behind: the work items on disk differ from what it was built from`
       : `${INDEX_FILE} cannot be read — ${fresh.why}`;
   check(checks, 'index', 'index', 'warn', message, hint);

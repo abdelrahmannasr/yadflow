@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { isPlainObject, writeJSON, info, warn } from './lib.mjs';
 import { isVerifiedLedger } from './manifest.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
@@ -35,9 +36,14 @@ export const INDEX_FORMAT = 'e19-1';
 
 // One input file's bytes, or why there are none. `absent` is a fact, not an error: an epic folder with no
 // `epic.md` (the Foundation, always) is a normal shape.
+//
+// Line endings are made `\n` before anything else: a checkout with `core.autocrlf` (the Windows default)
+// holds CRLF where git stores LF, and the same Product must hash the same on every machine — and parse
+// the same, since the frontmatter reader expects `\n`. Nothing else in the bytes is touched.
 function readInput(file) {
   try {
-    return { bytes: fs.readFileSync(file) };
+    const raw = fs.readFileSync(file);
+    return { bytes: raw.includes(13) ? Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : raw };
   } catch (e) {
     return e.code === 'ENOENT' ? { absent: true } : { error: e.code || e.message };
   }
@@ -45,15 +51,16 @@ function readInput(file) {
 
 // The hash of everything the index reads, length-prefixed so two inputs can never run together
 // (`a` + `bc` never collides with `ab` + `c`), and naming each input's place so a file moved from one
-// epic to another reads as a change.
-function hashInputs(parts) {
+// epic to another reads as a change. Every name is JSON-quoted, so no folder name can imitate a separator.
+// `format` is the summary's own version: exported so a test can show it is in the hash.
+export function indexHash(parts, format = INDEX_FORMAT) {
   const h = createHash('sha256');
-  h.update(`format:${INDEX_FORMAT}\n`);
+  h.update(`format:${JSON.stringify(format)}\n`);
   for (const { name, input } of parts) {
     if (input.bytes) {
-      h.update(`${name}:${input.bytes.length}\n`);
+      h.update(`${JSON.stringify(name)}:${input.bytes.length}\n`);
       h.update(input.bytes);
-    } else h.update(`${name}:${input.absent ? 'absent' : `unreadable ${input.error}`}\n`);
+    } else h.update(`${JSON.stringify(name)}:${input.absent ? 'absent' : `unreadable ${JSON.stringify(input.error)}`}\n`);
   }
   return `sha256:${h.digest('hex')}`;
 }
@@ -120,7 +127,7 @@ function summarize(id, state, fm) {
 export function buildIndex(root) {
   const ids = epicIds(root);
   const unlisted = unlistedLedgerDirs(root, ids).map((e) => `epics/${e}`);
-  const parts = [{ name: `ids:${ids.join(',')}|unlisted:${unlisted.join(',')}`, input: { absent: true } }];
+  const parts = [{ name: JSON.stringify({ ids, unlisted }), input: { absent: true } }];
   const items = [];
   for (const id of ids) {
     const dir = epicRoot(root, id);
@@ -133,7 +140,7 @@ export function buildIndex(root) {
     const fm = epicIn.bytes ? parseFrontmatter(epicIn.bytes.toString('utf8')) : {};
     items.push(summarize(id, read.state, fm));
   }
-  const inputs = hashInputs(parts);
+  const inputs = indexHash(parts);
   return { index: { inputs, items, ...(unlisted.length ? { unlisted } : {}) }, inputs };
 }
 
@@ -149,13 +156,16 @@ export function writeIndex(root, built = buildIndex(root)) {
 // How the committed index compares with the Product on disk:
 //   { state: 'current' | 'behind' | 'missing' | 'unreadable' | 'none', why? }
 // `none` — there are no work items and no index: nothing to be behind.
-export function indexFreshness(root) {
+// `prebuilt`: an index the caller already built, so one command does not walk every work item twice.
+export function indexFreshness(root, prebuilt = null) {
   const file = indexPath(root);
-  let built;
-  try {
-    built = buildIndex(root);
-  } catch (e) {
-    return { state: 'unreadable', why: `the epics folder could not be listed (${e.code || e.message})` };
+  let built = prebuilt;
+  if (!built) {
+    try {
+      built = buildIndex(root);
+    } catch (e) {
+      return { state: 'unreadable', why: `the epics folder could not be listed (${e.code || e.message})` };
+    }
   }
   if (!fs.existsSync(file)) {
     return built.index.items.length || built.index.unlisted ? { state: 'missing' } : { state: 'none' };
@@ -169,7 +179,65 @@ export function indexFreshness(root) {
   if (!isPlainObject(onDisk) || typeof onDisk.inputs !== 'string') {
     return { state: 'unreadable', why: '.sdlc/index.json records no input hash' };
   }
-  return onDisk.inputs === built.inputs ? { state: 'current' } : { state: 'behind' };
+  if (onDisk.inputs !== built.inputs) return { state: 'behind' };
+  // The same inputs, and yet a summary that is not what they build: a hand edit. Behind, because
+  // `yad index` puts it right.
+  const content = { ...onDisk };
+  delete content.schemaVersion;
+  return JSON.stringify(content) === JSON.stringify(built.index) ? { state: 'current' } : { state: 'behind' };
+}
+
+// ---- may the index ride this commit? ------------------------------------------------------------
+// The index hashes files ON DISK, so it may be committed only when every one of them is exactly what the
+// commit will hold — otherwise it describes work the commit does not carry, and every clean checkout
+// after it reads "behind". Returns the paths that are not (sorted), [] when all are, or null when git
+// cannot say. Run AFTER the caller has staged what it commits. `commits`: the paths a pathspec-limited
+// commit will hold (`gate repair`), or null for a commit of everything staged (`gate ci`).
+//
+// Two questions, because neither alone is enough:
+//   1. What differs from what is staged. Git is spawned directly with `-z`, never through `run()`, which
+//      trims its output — and a trim eats the leading space of a porcelain line, turning the first
+//      unstaged edit into a staged one (E19 review). `-z` also gives paths unquoted. EVERY path under
+//      `epics/` and `foundation/` counts, not only the files the index reads: erring wide only ever
+//      leaves the index out, and says so.
+//   2. What exists on disk but not in git at all. `git status` never lists an ignored file or an empty
+//      folder, yet `epicIds` lists every folder with a valid name — so a folder holding only an ignored
+//      `.DS_Store`, or a work item `.gitignore` excludes, would be indexed and never committed. Every
+//      input the index read must be tracked or staged, and every folder it listed must hold a file that is.
+export function uncommittedIndexInputs(root, commits = null) {
+  const git = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const st = git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', 'epics', 'foundation']);
+  const ls = git(['ls-files', '-z', '--cached', '--', 'epics', 'foundation']);
+  if (st.status !== 0 || ls.status !== 0) return null;
+  const held = commits ? new Set(commits) : null;
+  const out = new Set();
+  const entries = st.stdout.split('\0');
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.length < 4) continue;
+    const x = e[0];
+    const y = e[1];
+    const p = e.slice(3);
+    if (x === 'R' || x === 'C') i += 1; // `-z` puts a rename's source in the next entry
+    if (y !== ' ' || (held && x !== ' ' && !held.has(p))) out.add(p);
+  }
+  const tracked = new Set(ls.stdout.split('\0').filter(Boolean));
+  const holds = (prefix) => [...tracked].some((t) => t.startsWith(prefix));
+  let ids;
+  try {
+    ids = epicIds(root);
+  } catch {
+    return null;
+  }
+  for (const id of ids) {
+    const rel = epicRel(id);
+    for (const f of [`${rel}/.sdlc/state.json`, ...(id === FOUNDATION_EPIC ? [] : [`${rel}/epic.md`])]) {
+      if (fs.existsSync(path.join(root, f)) && !tracked.has(f)) out.add(f);
+    }
+    if (!holds(`${rel}/`)) out.add(rel);
+  }
+  for (const e of unlistedLedgerDirs(root, ids)) if (!holds(`epics/${e}/.sdlc/`)) out.add(`epics/${e}`);
+  return [...out].sort();
 }
 
 // Rebuild the index after a LOCAL write — a gate write, a `yad migrate --apply` — on the default branch

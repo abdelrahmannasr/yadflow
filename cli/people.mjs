@@ -36,7 +36,7 @@ import { spawnSync } from 'node:child_process';
 
 import { c, info, readJSONStrict, warn } from './lib.mjs';
 import { PROJECT_FILES, epicFiles } from './manifest.mjs';
-import { epicIds, epicRoot, unlistedLedgerDirs, ledgerPersonLogin, legacyLogins, capLimit, capSeat, smallestTeam } from './epic-state.mjs';
+import { epicIds, epicRoot, unlistedLedgerDirs, FOUNDATION_EPIC, FOUNDATION_DIR, ledgerPersonLogin, legacyLogins, capLimit, capSeat, smallestTeam } from './epic-state.mjs';
 import { corruptShards, readShips } from './ledger.mjs';
 import { isBot, loginFromEmail } from './riskmap.mjs';
 
@@ -167,7 +167,10 @@ function ledgerEvidence(root, aliases) {
   // holding a `.sdlc/` that the enumerator did not name is reported.
   try {
     for (const e of unlistedLedgerDirs(root, ids)) {
-      unknown.push(`epics/${e} holds a ledger but is not a readable epic id — its people are not counted`);
+      // EP-foundation IS a valid id — its folder is foundation/, so the one under epics/ is never read.
+      unknown.push(e === FOUNDATION_EPIC
+        ? `epics/${e} holds a ledger, but ${FOUNDATION_EPIC} lives in ${FOUNDATION_DIR}/ — this folder is never read, so its people are not counted`
+        : `epics/${e} holds a ledger but is not a readable epic id — its people are not counted`);
     }
   } catch (e) {
     unknown.push(`the epics folder could not be listed: ${e.code || e.message}`);

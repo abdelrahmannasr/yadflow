@@ -39,6 +39,7 @@ import {
   seedState, staleFoundationGuards, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
+import { refreshIndexAfterWrite } from './product-index.mjs';
 
 // `foo`, `EP-foo` and `epics/EP-foo` all name the same epic. Accepting only one spelling would make the
 // command reject the id the user just read out of `yad next`.
@@ -207,6 +208,9 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
 
   const state = seedState({ epic, profile, type, today, stub });
   writeState(files.state, state);
+  // E19: the index lists the new work item — on the default branch of a local Product only; `quiet`
+  // keeps a --json stdout one document.
+  refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null), { quiet: json });
   // The two ledgers the gate appends to, and the folder its markdown lands in. Empty is their correct
   // starting value: an approval is written only by a real review, never by a seed.
   for (const f of [files.approvals, files.comments]) if (!fs.existsSync(f)) writeJSON(f, []);
@@ -302,6 +306,7 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
   }
 
   writeState(files.state, plan.state);
+  refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null), { quiet: json }); // E19, as above
   writeJSON(files.approvals, plan.approvals);
   if (!fs.existsSync(files.comments)) writeJSON(files.comments, []);
   fs.mkdirSync(path.join(dir, 'reviews'), { recursive: true });
@@ -380,6 +385,7 @@ export async function runFoundationNew(root, { today, json = false } = {}) {
 
   const state = seedFoundationState({ today });
   writeState(files.state, state);
+  refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null), { quiet: json }); // E19, as above
   for (const f of [files.approvals, files.comments]) if (!fs.existsSync(f)) writeJSON(f, []);
   fs.mkdirSync(path.join(epicRoot(root, FOUNDATION_EPIC), 'reviews'), { recursive: true });
 

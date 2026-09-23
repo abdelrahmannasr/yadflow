@@ -20,6 +20,7 @@ import path from 'node:path';
 import { ok, info, hand, fail, readJSON, readJSONStrict, warn, writeJSON } from './lib.mjs';
 import { epicRel, epicRoot, epicStories, loadLedger, skipLane, skipStep, unskipLane, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
+import { refreshIndexAfterWrite } from './product-index.mjs';
 import { readShips } from './ledger.mjs';
 import { loadProduct } from './gate.mjs';
 import { seededSlugs } from './hook.mjs';
@@ -104,6 +105,7 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
     // The same for `--debt`: putting a step back is how a debt is PAID, so the flag means nothing here (E41).
     if (debt === true) info('--debt is not used when putting a step back: a debt is set with `yad defer --debt`, and putting the step back starts paying it');
     writeState(ledger.files.state, ledger.state);
+    refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null)); // E19: the default branch of a local Product only
     // A deferral put back after later work finished RE-OPENS beside that work (E41), and `currentStep`
     // stays where the chain is — so "back in the chain" and a currentStep line would both mislead.
     if (isReopenedStep(ledger.state, step)) {
@@ -125,6 +127,7 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
   const owedBefore = before?.debt === true;
   V.set(ledger.state, step, { reason, by, at: today, debt: debt === true });
   writeState(ledger.files.state, ledger.state);
+  refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null)); // E19, as above
   const after = ledger.state.steps.find((s) => s?.id === step);
   const owed = after?.debt === true;
   if (already) {
@@ -206,6 +209,7 @@ export async function runUnblock(root, { epic, step, runner } = {}) {
   const was = steps.find((s) => s?.id === step)?.record?.reason || null;
   unblockStep(ledger.state, step);
   writeState(ledger.files.state, ledger.state);
+  refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null)); // E19, as above
   ok(`${step} unblocked — now ${ledger.state.steps.find((s) => s?.id === step).status}`);
   if (was) info(`cleared: ${was}`);
   hand(`see what to do now: yad next ${epic}`);

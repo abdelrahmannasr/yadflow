@@ -183,8 +183,8 @@ ${c.bold('Build helpers')}
                                        ledger, as one chore(hub) commit — the manual "pack it up"
                                        for the shard files; a no-op when nothing is foldable
   yad index [--json]                   Rebuild .sdlc/index.json — one summary line per work item,
-                                       derived from their own files; the default branch only
-                                       (--allow-branch to override); on a verified Product CI writes it.
+                                       derived from their own files; the default branch only, with no
+                                       override; on a verified Product CI writes it.
                                        --json prints it, built live, and writes nothing
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
@@ -559,7 +559,7 @@ async function main() {
       break;
     }
     case 'index':
-      await commands.runIndex(o.dir, { json: o.json, allowBranch: o.allowBranch });
+      await commands.runIndex(o.dir, { json: o.json });
       break;
     case 'repo': {
       const [, action, name] = o._;

@@ -1,6 +1,9 @@
 // `yad index` — rebuild `.sdlc/index.json`, the Product's one-file front door (E19), on demand.
 //
-//   yad index                 rebuild and write it — the default branch only, on a local Product
+//   yad index                 rebuild and write it — the default branch only, on a local Product. There is
+//                             no override: a branch never carries the index (E19 review — `--allow-branch`
+//                             was the one way round the user's decision, and `gate repair` already keeps
+//                             the index off a branch even when it allows one)
 //   yad index --json          print what it holds, built live from the files; writes nothing, any branch
 //
 // WHO WRITES IT (the user's decision): the default branch only, so a branch never carries a rewrite of a
@@ -12,10 +15,10 @@ import { c, log, ok, info, warn, fail, hand, exists } from './lib.mjs';
 import path from 'node:path';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 import { buildIndex, writeIndex, indexFreshness, INDEX_FILE } from './product-index.mjs';
 
-export async function runIndex(root, { json = false, allowBranch = false } = {}) {
+export async function runIndex(root, { json = false } = {}) {
   if (!exists(productConfigPath(root))) {
     fail('no Product here (.sdlc/product.json) — run `yad index` from the Product');
     process.exitCode = 1;
@@ -43,7 +46,7 @@ export async function runIndex(root, { json = false, allowBranch = false } = {})
   const unreadable = items.filter((i) => i.unreadable);
   const summary = `${items.length} work item${items.length === 1 ? '' : 's'}${unreadable.length ? `, ${unreadable.length} unreadable` : ''}`;
   if (isVerifiedLedger(hub)) {
-    const fresh = indexFreshness(root);
+    const fresh = indexFreshness(root, built);
     info(`this Product's ledger is verified: CI rebuilds ${INDEX_FILE} when it records a merge on the default branch, and a local write could not be committed — nothing written`);
     if (fresh.state === 'current') ok(`${INDEX_FILE} is current (${summary})`);
     else warn(`${INDEX_FILE} is ${fresh.state === 'missing' ? 'not built yet' : fresh.state === 'unreadable' ? `unreadable — ${fresh.why}` : 'behind the work items'}; the next review CI records rebuilds it`);
@@ -58,8 +61,20 @@ export async function runIndex(root, { json = false, allowBranch = false } = {})
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, hub);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad index' })) return;
-  const changed = writeIndex(root, built);
+  if (branch !== defaultBranch) {
+    fail(`on '${branch}', not the default branch '${defaultBranch}' — ${INDEX_FILE} is written on the default branch only, so a branch never carries it`);
+    hand(`switch to '${defaultBranch}' and re-run (set default_branch in .sdlc/product.json if '${defaultBranch}' is wrong); \`yad index --json\` prints it here without writing`);
+    process.exitCode = 1;
+    return;
+  }
+  let changed;
+  try {
+    changed = writeIndex(root, built);
+  } catch (e) {
+    fail(`${INDEX_FILE} could not be written (${e.code || e.message})`);
+    process.exitCode = 1;
+    return;
+  }
   if (changed) ok(`wrote ${INDEX_FILE} (${summary}) — commit it with the change it describes`);
   else ok(`${INDEX_FILE} is already current (${summary})`);
   reportUnreadable(built.index);

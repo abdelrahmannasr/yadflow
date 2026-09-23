@@ -26,7 +26,7 @@ import {
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { sequenceDiff } from './walkthrough.mjs';
 import { syncStatuses } from './artifact-status.mjs';
-import { writeIndex, refreshIndexAfterWrite, INDEX_FILE } from './product-index.mjs';
+import { writeIndex, refreshIndexAfterWrite, uncommittedIndexInputs, INDEX_FILE } from './product-index.mjs';
 import { err } from './errors.mjs';
 
 // Who WRITES a closing record (E18): the platform login, else the raw git user.name, else null
@@ -595,34 +595,17 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
   return { targets: entry(found.number, found.url), discovered: true };
 }
 
-// The paths under `epics/` and `foundation/` that the commit about to be made will NOT hold as they are on
-// disk: changed in the working tree, untracked, or — for a commit limited to named paths (`commits`) —
-// staged but outside those paths. EVERY path there counts, not only the files the index hashes: the index
-// also hashes WHICH work-item folders exist (`epicIds`, `unlistedLedgerDirs`), so an untracked folder
-// changes it as surely as an edited state.json. Erring wide only ever leaves the index out, and says so.
-// Run after the caller has staged what it commits. Null when git cannot say.
-function uncommittedIndexInputs(git, commits = null) {
-  const st = git('status', '--porcelain', '--untracked-files=all', '--', 'epics', 'foundation');
-  if (!st.ok) return null;
-  const held = commits ? new Set(commits) : null;
-  return st.stdout.split('\n').filter((l) => l.length > 3)
-    .map((l) => ({ x: l[0], y: l[1], p: l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() }))
-    .filter(({ x, y, p }) => y !== ' ' || (held && x !== ' ' && !held.has(p)))
-    .map(({ p }) => p)
-    .sort();
-}
-
 // Rebuild the index and stage it — but ONLY when every file it reads is exactly what the commit will
 // hold. The index hashes the files ON DISK, so in a checkout carrying someone's half-written epic.md (the
 // documented manual recovery, `yad gate ci … --merged` run by a person) it would describe work that is
 // not in the commit, and read as behind on every clean checkout after it. Then it stays out and says so.
 // Derived, so a failure is said and never stops the commit it would have ridden.
 // `commits`: the paths a pathspec-limited commit will hold (`gate repair`), or null for a commit of
-// everything staged (`gate ci`).
+// everything staged (`gate ci`). The check itself is `uncommittedIndexInputs` (cli/product-index.mjs).
 function stageIndexIfClean(root, git, commits = null) {
-  const dirty = uncommittedIndexInputs(git, commits);
+  const dirty = uncommittedIndexInputs(root, commits);
   if (dirty === null || dirty.length) {
-    warn(`${INDEX_FILE} not rebuilt: ${dirty === null ? 'git could not list the working tree' : `${dirty.join(', ')} ha${dirty.length === 1 ? 's' : 've'} changes this commit does not carry`} — run \`yad index\` on a clean checkout`);
+    warn(`${INDEX_FILE} left out of this commit: ${dirty === null ? 'git could not list the working tree' : `${dirty.join(', ')} ${dirty.length === 1 ? 'is' : 'are'} not in it as on disk`} — run \`yad index\` on a clean checkout`);
     return false;
   }
   try {
@@ -633,7 +616,10 @@ function stageIndexIfClean(root, git, commits = null) {
   }
   // Staged when it differs from what is committed — not "when this write changed the bytes": a caller
   // may have rebuilt it a moment earlier (`gate repair`), and that rebuild still belongs in the commit.
-  if (!git('add', '--', INDEX_FILE).ok) return false;
+  if (!git('add', '--', INDEX_FILE).ok) {
+    warn(`${INDEX_FILE} could not be staged — the ledger is committed without it`);
+    return false;
+  }
   return !git('diff', '--cached', '--quiet', '--', INDEX_FILE).ok;
 }
 
@@ -1180,7 +1166,6 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   }
   const target = defaultBranch; // CI only ever commits the ledger to the default branch
 
-
   // Stage what this merge-phase run owns, per epic, by an EXPLICIT ALLOWLIST — never `git add -A`
   // over the whole epic directory:
   //  - always → the ledger (.sdlc) + the generated reviews/ summaries.
@@ -1205,14 +1190,25 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   }
   // E19: the Product index, rebuilt from the ledger this run just staged and carried in the same commit —
   // the one writer, on the default branch, as the user's decision asks. Only here, past the read-only
-  // pre-merge return above. See `stageIndexIfClean` for the one case it stays out.
-  stageIndexIfClean(root, git);
+  // pre-merge return above, and only when HEAD really IS the default branch: `defaultBranch` above falls
+  // back to the current branch when hub.json names none, and a person may run this from any checkout
+  // (E19 review). `stageIndexIfClean` keeps it out of a commit that does not hold what it read.
+  const onDefault = (() => {
+    const head = git('rev-parse', '--abbrev-ref', 'HEAD');
+    return head.ok && head.stdout === resolveDefaultBranch(git, hub);
+  })();
+  const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
+  if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
   if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard
   // sibling workflows. CI never pushes the review branch (Path B), so there is no synchronize loop.
-  const sync = !branch
-    ? 'scheduled gate sync' // sweep is a batch; one subject for the run
-    : `advance ${jobs[0].epic}/${jobs[0].base} on merge`;
+  // Only the index staged (the ledger this run wrote was already committed): say that, not an advance.
+  const indexOnly = indexStaged && git('diff', '--cached', '--name-only').stdout.split('\n').filter(Boolean).every((f) => f === INDEX_FILE);
+  const sync = indexOnly
+    ? 'rebuild the Product index'
+    : !branch
+      ? 'scheduled gate sync' // sweep is a batch; one subject for the run
+      : `advance ${jobs[0].epic}/${jobs[0].base} on merge`;
   // The move, when there is one, is the subject: it is the change a reader of the default branch most
   // needs to find, and a sync subject would name a folder the same commit deletes. The sync goes in the body.
   const subject = moved
@@ -1379,8 +1375,10 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   const closed = repairState(ledger.state, { by: closingActor(root, readJSON(productConfigPath(root), null)), date: today });
   if (dryRun) { info('dry run — nothing written'); return { closed }; }
   writeState(ledger.files.state, ledger.state);
-  // Lenient, as above: a broken hub.json reads as a local Product, and must not stop the repair.
-  const indexRebuilt = refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null));
+  // Lenient, as above: a broken hub.json reads as a local Product, and must not stop the repair. With
+  // --push the rebuild happens in `stageIndexIfClean` below, which checks the commit will hold what it
+  // reads — rebuilding here too would leave a half-true index on disk when it cannot (E19 review).
+  const indexRebuilt = push ? false : refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null));
   ok(`closed ${closed.length} stranded author step(s): ${c.dim(closed.join(', '))}`);
   if (!push) {
     hand(`re-run \`yad doctor\` to confirm, then commit epics/*/.sdlc/state.json${indexRebuilt ? ` and ${INDEX_FILE}` : ''} (or re-run with --push)`);
