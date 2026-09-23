@@ -24,6 +24,7 @@ import {
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
+import { refreshIndexAfterWrite } from './product-index.mjs';
 import {
   artifactHash, canonicalApprovals, canonicalComments, canonicalHubPrs, DISCOVERY_EPIC, epicIds, epicRel,
   epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isGateStep, isPassed, stampProfile, stampStepStates, stampWorkItemType, writeState,
@@ -931,6 +932,10 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       }
     }
   }
+  // E19: the index summarizes the files just rewritten, so it is rebuilt with them — on the default branch
+  // of a local Product only (the rule every writer of it keeps). It is never MIGRATED: it is derived, so a
+  // rebuild is its migration. `yad doctor` says when it is behind anywhere this does not reach.
+  if (apply && (written.length || move)) refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null), { quiet: json });
 
   if (json) {
     log(JSON.stringify({

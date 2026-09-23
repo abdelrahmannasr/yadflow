@@ -45,6 +45,7 @@ no clone needed.
 | `yad checkpoint [--push]` | Commit the **machine-written Build state on the Product** — `trust-log.json`, `build-log.json`, `build-state/<story>.json` — **plus any story `status:` flip** (`approved → in-build/shipped`) that now has a `build-log` ship, as one `chore(hub): sync Build state — <epic>/<story> by @<login>` audit-trail commit (no `Task` trailer, no AI footer). The Build analogue of `yad gate ci`: it stages **only** those ledgers + ship-backed story flips by an explicit allowlist (never a Shape gate file, so `ledger-guard` never trips) and commits **only on the default branch** (so the commit never enters a PR range where its `[skip ci]` would strand checks). Carrying the story flip is what keeps the story artifact from drifting from `build-log.json` — so no operator ever falls back to a raw `git push origin main` (#112). A **no-op** when nothing changed; `--push` lands it on `origin/<default>`; `--allow-branch` overrides the default-branch guard. The SDLC Build (`yad-run`, `yad-engineer-review`) calls it so teammates never have to hand-commit machine audit state. |
 | `yad checkpoint --retro-ship <epic>/<story> --repo <r>` | Reconcile a **pre-tracking** story — merged and shipped **before** the Build ledger existed, so it has no `build-log` ship and plain `checkpoint` can't carry its `status: shipped` flip (#142). Records **one** retroactive ship shard marked `retroactive: true` (`--task <t>` overrides the default `retro` sentinel; `--merge-commit <sha>` records the SHA — never invented; `shippedAt` is the backfill date), then runs the normal checkpoint so the story's already-made flip rides the **same** `chore(hub)` commit. **One repo per run:** a story that shipped in several repos is recorded by re-running once per `--repo` (the flip rides the first commit; each later run lands only its own shard) — the guard is per **(story, repo)**, so recording one repo never locks out the rest (#166), and after each run it names the story's declared repos that still have no evidence. Because a ship is permanent audit evidence, `--repo` must be one the story's `repos:` frontmatter declares (or, when it declares none, one the Product's `.sdlc/repos.json` connects) — a typo'd or invented repo is **refused**, not recorded — and a name that would share a build-log **shard filename** with an already-recorded repo (`api.v2` vs `api_v2`, both sanitized to `api_v2`) is refused too, so a retro ship can never overwrite another repo's record. **Refuses** when the story already has a ship **in that repo** (then it isn't pre-tracking there — use the normal flow); does **not** author the story frontmatter and **refuses unless you have already set a Build `status:`** — `in-build` or `shipped` — (so a ship is never committed while the artifact still says `approved` — evidence and flip stay atomic); `--push`/`--allow-branch`/`--dry-run` behave as for `checkpoint`. **Where the record lands:** like every ship, it is written as a **shard** under `.sdlc/build-log/` — the folded `.sdlc/build-log.json` is *not* appended to (that is what would make concurrent shippers conflict). Readers **union** the folded file with every shard, so the ship is fully visible immediately; `yad tidy up` folds it into `build-log.json` once the story is `shipped` (a backfill against an `in-build` story stays a loose shard until then). An empty `build-log.json` right after a backfill is the design, not a lost write (#167). This is the supported alternative to a raw `git push origin main` for a legacy shipped story. |
 | `yad tidy up [<epic>] [--push]` | Fold a **shipped story's** finished `trust-log`/`build-log` **shards** back into the single folded ledger file, as one `chore(hub)` commit — the manual "pack it up" companion to the shard-then-fold storage (like `git gc` for its loose objects). Concurrent Build writers each write their own shard file (so parallel stories of one epic never conflict), and readers union the folded file + loose shards; `tidy up` is the on-demand compaction. A fold reads shards, merges them, then deletes them, so it holds the ledger's exclusive lock for that whole span — a ship written or stamped mid-fold can never be folded away without its change, or deleted without being folded (`YAD-STATE-006` if another writer holds it). Default branch only; `--push` lands it on `origin/<default>`; a **no-op** when nothing is foldable. |
+| `yad index [--json]` | **Rebuild the Product index, `.sdlc/index.json` (E19)** — one summary per work item, so a reader opens one file instead of walking `epics/*`. The index is **derived**: it is rebuilt from each item's own `.sdlc/state.json` and `epic.md`, and never edited by hand. It is written **on the default branch only**, with no override, and the command never commits it: commit it with the change it describes. On a **verified** Product it writes nothing, because CI rebuilds the index in the commit that records a merge. `--json` prints the index built live from the files, on any branch, and writes nothing. See [the Product index](#the-product-index-sdlcindexjson). |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo refresh [name] --push` | After the re-pack (and the AI regenerating the code-map), commit the tracked code-maps + `.sdlc/repos.json` as an audit-trail `chore(hub): sync code-context … [skip ci]` commit and push it straight to the Product's **default branch** (`--allow-branch` to override). The code-context analogue of `yad checkpoint`. |
 | `yad risk-map check [repo] [--json]` | Check a code repo's **risk map** (`.sdlc/risk-map`: a risk level per directory, no names — see [The risk map](#the-risk-map-a-level-per-directory)). Warns about a directory no line covers, a line whose directory is gone, a line still `unset` or `guessed`, and a line it cannot read. `repo` is a name from `.sdlc/repos.json` or a path; with none, every connected repo — or the current directory, but only when there is no `repos.json` at all (an empty or unreadable registry is refused, so a map is never written into the Product). **Advisory:** it never sets a failing exit code for a warning. The PR check `checks/risk-map-check.sh` says the same about one change. |
@@ -1067,6 +1068,54 @@ pattern whose last part has no wildcard also covers a folder of that name). Find
 plain paths, but a wildcard line may be tested against every file: on a repo with hundreds of thousands of
 files, hundreds of dead wildcard lines can take several seconds, in `yad doctor` too.
 
+## The Product index: `.sdlc/index.json`
+
+`.sdlc/index.json` is the Product's front door (E19). It holds one short summary for every work item, so
+an app, a CI job, an agent or a person can read one file instead of opening every folder under `epics/`.
+
+**It is derived, never the source of truth.** Each work item's own `.sdlc/state.json` and `epic.md` stay
+the truth. The index is rebuilt from them and can always be rebuilt again. Do not edit it by hand.
+
+**What one entry holds:**
+
+| Field | Where it comes from |
+|---|---|
+| `id`, `dir` | the work item's id and folder (`foundation/` for `EP-foundation`) |
+| `kind`, `profile`, `currentStep`, `createdAt` | `state.json`, as written — a date is copied, never parsed |
+| `type`, `theme`, `parent`, `thread`, `repos` | `epic.md` frontmatter. The Foundation has no `epic.md`, so its `type` is null |
+| `steps` | how many steps are in each of the eight step states, read the way the gates read them (`blocked` with no record counts as `todo`). An `unknown` count appears only when a step holds a state this release does not know |
+| `lastClosed` | the last closed step in the chain's order, with its `date` and `by` |
+
+A work item whose files cannot be read is **still listed**, as `{ "id", "dir", "unreadable": true, "why" }`.
+It is never dropped, and it never stops the rest of the file. A folder under `epics/` that holds a `.sdlc/`
+but whose name is not a work-item id is listed under `unlisted`. The index has no title field yet (E111).
+
+**Who writes it — the default branch only.** A file that every branch rewrote would conflict at every
+merge, the same problem the Build ledgers were sharded to avoid. So:
+
+| Product | When the index is rebuilt |
+|---|---|
+| local ledger | after any yad command that writes a work item's state on the default branch — `yad gate sync`, `yad gate open`, `yad gate repair`, `yad epic new`, `yad foundation new`, `yad skip`/`defer` (and their `--undo`), `yad unblock`, `yad migrate --apply` — and whenever you run `yad index` there |
+| verified ledger | by CI, in the same commit that records a merged review (`yad gate ci --merged`). A local write could not be committed, and the ledger guard rejects it |
+
+The index is committed only when every file it reads is exactly what that commit holds. If the checkout
+has other changes under `epics/` or `foundation/` — an edit, an untracked file, a work item `.gitignore`
+excludes, or a folder that holds only an ignored file such as `.DS_Store` — the index stays out of the
+commit and yad names the files. Line endings do not count: a CRLF checkout (Windows `core.autocrlf`)
+builds the same index as an LF one.
+
+**If two people rebuild it at once.** On a local Product, two gate writes on the default branch each
+rewrite the index, so a `git pull --rebase` can stop on `.sdlc/index.json`. Keep either side, finish the
+rebase, then run `yad index` — it rebuilds the file from the work items, so which side you kept does not
+matter. On a verified Product, a push that CI retries after a rebase can carry an index built just before
+someone else's merge landed; `yad doctor` then says it is behind, and the next merged review rebuilds it.
+
+**Knowing whether it is current.** The index records `inputs`, a hash of the exact bytes it was built from.
+`yad doctor` rebuilds that hash and says when the index is behind. It can fall behind in ordinary use: a
+skill that still writes `state.json` by hand (E17b) does not rebuild it, and nor does any change made on a
+branch until it merges. On a verified Product, a new work item merged by PR waits for the next merged
+review.
+
 ## File shape: `schemaVersion`
 
 Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **10**
@@ -1082,6 +1131,9 @@ You do not have to do anything about it. Three things are worth knowing:
 - **It is not the CLI version.** `.sdlc/cli-version.json` says which release of `yad` set the project
   up and moves with every release. `schemaVersion` describes the file itself and moves only when the
   shape genuinely changes.
+
+`.sdlc/index.json` carries the key like any other object, but `yad migrate` never lists it: it is derived,
+so rebuilding it (`yad index`) is its migration.
 
 Files `yad` writes that are not part of a project — your editor's `.claude/settings.json`, the daily
 update-check cache in your home directory — are never stamped.
@@ -1158,6 +1210,20 @@ When something is off, run `yad doctor` first — it checks the environment (git
 version), the project state (`.sdlc/*.json` parse and point at real repos), and every epic ledger,
 with a fix-it hint per finding. Failures carry stable, greppable codes, also printed by any failing
 `yad` command:
+
+### The `index` section — is the Product index current? (E19)
+
+One line about [`.sdlc/index.json`](#the-product-index-sdlcindexjson). It warns and never fails, because
+nothing is lost while a derived file is behind. Nothing is said on a Product with no work items and no
+index. On any branch other than the default one, a difference is expected — the index is written only on
+the default branch — so the line says so and stays `ok`; only an unreadable file still warns there.
+
+| What it says | What to do on a local Product | What to do on a verified Product |
+|---|---|---|
+| `.sdlc/index.json is current` | nothing | nothing |
+| `… has not been built yet` | run `yad index` on the default branch, then commit it | nothing: CI builds it when it records the next merged review |
+| `… is behind: the work items on disk differ from what it was built from` | the same | the same |
+| `… cannot be read — <why>` | the same | the same |
 
 ### The `protection` section — does the platform require an approval? (E70)
 

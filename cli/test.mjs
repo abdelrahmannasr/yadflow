@@ -4818,7 +4818,8 @@ test('gate repair --push commits ONLY state.json to the default branch and pushe
     const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
     assert.match(subject, /^chore\(gate\): repair epic state/);
     const files = git(T, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
-    assert.deepEqual(files, ['epics/EP-x/.sdlc/state.json'], 'only the repaired ledger is committed');
+    // …and the Product index (E19), which summarizes that very file, on the default branch of a clean tree.
+    assert.deepEqual(files, ['.sdlc/index.json', 'epics/EP-x/.sdlc/state.json'], 'only the repaired ledger and its index are committed');
     assert.ok(fs.existsSync(path.join(T, 'unrelated.md')), 'the unrelated file is left in the working tree');
     assert.match(git(T, 'status', '--short').toString(), /^A\s+unrelated\.md/m, 'and is still staged, not swept into the commit');
     // it reached origin/main
@@ -14105,6 +14106,31 @@ test('protectedLedgerPath matches the CI gate\'s scope, including its glob depth
   ]) assert.equal(protectedLedgerPath(rel), null, rel);
 });
 
+test('ledger hook (E19): the Product index is refused on a verified Product — exactly that path, no carve-out', () => {
+  assert.deepEqual(protectedLedgerPath('.sdlc/index.json'), { epic: null, rel: '.sdlc/index.json', kind: 'index' });
+  for (const rel of ['.sdlc/hub.json', '.sdlc/product.json', '.sdlc/repos.json', '.sdlc/index.json.bak', 'docs/.sdlc/index.json', 'index.json']) {
+    assert.equal(protectedLedgerPath(rel), null, `${rel} is a person's to edit`);
+  }
+  const T = hookProduct();
+  try {
+    const v = decide(T, '.sdlc/index.json');
+    assert.equal(v.allow, false);
+    assert.equal(v.epic, null);
+    assert.match(v.message, /\.sdlc\/index\.json is the Product index — derived from every work item's files, and CI-owned here/);
+    assert.match(v.message, /yad index --json/);
+    assert.match(v.message, /YAD_HOOK_DISABLE=1/);
+    // No seed carve-out: it belongs to no epic, so the seeded set is never even asked.
+    const runner = fakeGit([]);
+    assert.equal(decide(T, '.sdlc/index.json', { runner }).allow, false);
+    assert.ok(!runner.calls.some((c) => c.includes('ls-tree')), runner.calls.join('\n'));
+    assert.equal(decide(T, '.sdlc/hub.json').allow, true, 'its neighbour is a person\'s');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  const L = hookProduct({ hub: { platform: 'gitlab', default_branch: 'main' } });
+  try {
+    assert.equal(decide(L, '.sdlc/index.json').allow, true, 'a local Product: a person writes it (with `yad index`)');
+  } finally { fs.rmSync(L, { recursive: true, force: true }); }
+});
+
 test('payloadPaths reads every tool shape a harness sends, and shrugs at the rest', () => {
   assert.deepEqual(payloadPaths({ tool_input: { file_path: 'a.md' } }), ['a.md']);
   assert.deepEqual(payloadPaths({ tool_input: { notebook_path: 'n.ipynb' } }), ['n.ipynb']);
@@ -19974,6 +20000,25 @@ test('E71 unknown: an approvals file that does not parse is NOT zero approvers',
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
 
+test('E71 unknown: a ledger folder the enumerator does not name is NOT an empty one (shared with E19)', () => {
+  // A name that is not a valid id — and, since E19 shared the rule, an `epics/EP-foundation` beside a
+  // real `foundation/`: that folder is never read (the id's folder is foundation/), so the approvals in it
+  // were lost without a word before.
+  for (const [dir, why] of [['epics/Not_An_Id/.sdlc/approvals.json', 'a bad name'], ['epics/EP-foundation/.sdlc/approvals.json', 'a stray EP-foundation']]) {
+    const fx = peopleFixture();
+    try {
+      for (const f of ['foundation/.sdlc/state.json', dir]) fs.mkdirSync(path.dirname(path.join(fx.T, f)), { recursive: true });
+      fx.write('foundation/.sdlc/state.json', JSON.stringify({ steps: [] }));
+      fx.write(dir, '[]');
+      const r = activePeople(fx.T, { today: P_TODAY });
+      assertUnknown(r, why);
+      assert.ok(r.unknown.some((u) => u.startsWith(`${dir.split('/.sdlc')[0]} holds a ledger`)), r.unknown.join('\n'));
+      // …and says WHY for each: EP-foundation is a valid id whose folder is foundation/.
+      if (why === 'a stray EP-foundation') assert.ok(r.unknown.some((u) => u.includes('EP-foundation lives in foundation/ — this folder is never read')), r.unknown.join('\n'));
+    } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+  }
+});
+
 test('E71 unknown: a repos.json that does not parse is NOT "no repos" (the E65 bug, inverted)', () => {
   const fx = peopleFixture();
   try {
@@ -21259,4 +21304,590 @@ test('E74 probe: the real reader marks a person whose only record is a mistyped 
     assert.equal(counted.capacity.people.find((p) => p.login === 'bo-gh').future, true);
     assert.deepEqual(_teamHint(counted), { known: true, line: null }, 'so the suggestion does not stay on screen for good');
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+// ---- E19: `.sdlc/index.json`, the one-file front door ----------------------------------------------
+// A DERIVED summary of every work item, never the system of record. An item that cannot be read is
+// listed as unreadable, never dropped; staleness is a hash of the exact input bytes.
+const { buildIndex, writeIndex, indexFreshness, indexPath, INDEX_FORMAT } = await import('./product-index.mjs');
+
+// A Product on disk: `files` is { relative path: content }.
+function indexFixture(files = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e19-'));
+  for (const [rel, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+    fs.writeFileSync(path.join(T, rel), typeof body === 'string' ? body : `${JSON.stringify(body, null, 2)}\n`);
+  }
+  return T;
+}
+const E19_STATE = (extra = {}) => ({
+  schemaVersion: 10, epicId: 'EP-a', createdAt: '2026-9-4', type: 'feature', profile: 'classic', currentStep: 'architecture',
+  steps: [
+    { id: 'epic', status: 'done', closed: { by: 'ada', date: '2026-09-01', via: 'gate' } },
+    { id: 'epic-review', status: 'done', closed: { by: 'bo', date: '2026-09-02', via: 'gate' } },
+    { id: 'architecture', status: 'in_progress' },
+    { id: 'ui', status: 'blocked' }, // no record: reads todo (E38)
+    { id: 'stories', status: 'skipped', record: { by: 'ada', date: '2026-09-03', reason: 'x' } },
+    { id: 'odd', status: 'wobbly' },
+  ],
+  ...extra,
+});
+
+test('E19 buildIndex: a summary per work item, the Foundation included, read through stepStatus', () => {
+  const T = indexFixture({
+    'epics/EP-a/.sdlc/state.json': E19_STATE(),
+    'epics/EP-a/epic.md': '---\nid: EP-a\nkind: change\nparent: EP-root\nthread: EP-root\ntheme: Checkout\nrepos: [api, web]\n---\n# A\n',
+    'epics/EP-b/.sdlc/state.json': { epicId: 'EP-b', kind: 'stub', currentStep: 'epic', steps: [] },
+    'foundation/.sdlc/state.json': { epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep: 'foundation-done', steps: [{ id: 'purpose', status: 'done' }] },
+  });
+  try {
+    const { index } = buildIndex(T);
+    assert.deepEqual(index.items.map((i) => i.id), ['EP-a', 'EP-b', 'EP-foundation'], 'one enumerator, sorted, the product level included');
+    const [a, b, f] = index.items;
+    assert.deepEqual(a, {
+      id: 'EP-a', dir: 'epics/EP-a', kind: null, type: 'change', theme: 'Checkout', parent: 'EP-root', thread: 'EP-root',
+      profile: 'classic', currentStep: 'architecture', createdAt: '2026-9-4', repos: ['api', 'web'],
+      steps: { todo: 1, in_progress: 1, in_review: 0, done: 2, skipped: 1, deferred: 0, satisfied: 0, blocked: 0, unknown: 1 },
+      lastClosed: { step: 'epic-review', date: '2026-09-02', by: 'bo' },
+    });
+    assert.equal(b.type, 'feature', 'an epic.md-less feature epic reads as a genesis, as `epicLineage` does');
+    assert.deepEqual([b.kind, b.lastClosed, b.repos, 'unknown' in b.steps], ['stub', null, [], false]);
+    assert.deepEqual([f.dir, f.type, f.theme, f.kind, f.repos], ['foundation', null, null, 'foundation', []], 'the Foundation has no work-item type (E75)');
+    assert.equal(Object.keys(index).join(','), 'inputs,items', 'no timestamp, and no `unlisted` when there is none');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 buildIndex: an item that cannot be read is LISTED as unreadable, never dropped, never fatal', () => {
+  const T = indexFixture({
+    'epics/EP-ok/.sdlc/state.json': E19_STATE(),
+    'epics/EP-corrupt/.sdlc/state.json': '{ not json',
+    'epics/EP-array/.sdlc/state.json': [],
+    'epics/EP-nosteps/.sdlc/state.json': { epicId: 'EP-nosteps' },
+    'epics/EP-bare/epic.md': '# no ledger yet\n',
+    'epics/Bad_Name/.sdlc/state.json': E19_STATE(),
+    'epics/EP-foundation/.sdlc/state.json': E19_STATE(),
+    'foundation/.sdlc/state.json': { steps: [] },
+  });
+  try {
+    fs.mkdirSync(path.join(T, 'epics', 'EP-dir-md', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', 'EP-dir-md', '.sdlc', 'state.json'), JSON.stringify({ steps: [] }));
+    fs.mkdirSync(path.join(T, 'epics', 'EP-dir-md', 'epic.md')); // a folder where the file should be
+    const { index } = buildIndex(T);
+    const by = Object.fromEntries(index.items.map((i) => [i.id, i]));
+    assert.deepEqual(Object.keys(by).sort(), ['EP-array', 'EP-bare', 'EP-corrupt', 'EP-dir-md', 'EP-foundation', 'EP-nosteps', 'EP-ok']);
+    assert.deepEqual(by['EP-corrupt'], { id: 'EP-corrupt', dir: 'epics/EP-corrupt', unreadable: true, why: '.sdlc/state.json does not parse' });
+    assert.equal(by['EP-array'].why, '.sdlc/state.json is not an object');
+    assert.equal(by['EP-nosteps'].why, '.sdlc/state.json has no list of steps');
+    assert.equal(by['EP-bare'].why, 'it has no .sdlc/state.json');
+    assert.equal(by['EP-dir-md'].why, 'epic.md could not be read (EISDIR)');
+    assert.ok(!by['EP-ok'].unreadable && !by['EP-foundation'].unreadable, 'one bad item does not spoil the rest');
+    // What `epicIds` does not name is reported, not lost: a bad name, and an EP-foundation folder under
+    // epics/ that is never read (its id's folder is foundation/).
+    assert.deepEqual(index.unlisted, ['epics/Bad_Name', 'epics/EP-foundation']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 index hash: the exact input bytes, nothing else; writing it twice changes nothing', () => {
+  const T = indexFixture({
+    'epics/EP-a/.sdlc/state.json': E19_STATE(),
+    'epics/EP-a/epic.md': '---\nkind: feature\n---\n',
+  });
+  try {
+    const h0 = buildIndex(T).inputs;
+    assert.match(h0, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(buildIndex(T).inputs, h0, 'deterministic');
+    // Files the index does not read do not move it: a story, the approvals, a review summary.
+    fs.mkdirSync(path.join(T, 'epics', 'EP-a', 'stories'));
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', 'stories', 'EP-a-S01.md'), 'x');
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'approvals.json'), '[]');
+    assert.equal(buildIndex(T).inputs, h0, 'a file the index does not read');
+    // Every input it DOES read moves it: the state's bytes (even a re-indent), the epic.md, a new item,
+    // an unlisted folder, and an epic.md appearing.
+    const moves = [
+      () => fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE())),
+      () => fs.writeFileSync(path.join(T, 'epics', 'EP-a', 'epic.md'), '---\nkind: change\n---\n'),
+      () => { fs.mkdirSync(path.join(T, 'epics', 'EP-b', '.sdlc'), { recursive: true }); },
+      () => { fs.mkdirSync(path.join(T, 'epics', 'odd', '.sdlc'), { recursive: true }); },
+      () => fs.writeFileSync(path.join(T, 'epics', 'EP-b', 'epic.md'), '# b\n'),
+    ];
+    const seen = new Set([h0]);
+    for (const move of moves) {
+      move();
+      const h = buildIndex(T).inputs;
+      assert.ok(!seen.has(h), `an input changed and the hash did not: ${move}`);
+      seen.add(h);
+    }
+    // No timestamp: an unchanged Product writes the same bytes, so git never sees a change.
+    assert.equal(writeIndex(T), true, 'the first write');
+    assert.equal(writeIndex(T), false, 'the second write changes nothing');
+    const onDisk = JSON.parse(fs.readFileSync(indexPath(T), 'utf8'));
+    assert.equal(Number.isInteger(onDisk.schemaVersion), true, 'stamped like every file under .sdlc/');
+    assert.equal(typeof INDEX_FORMAT, 'string');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 indexFreshness: none, missing, current, behind, unreadable', () => {
+  const T = indexFixture({});
+  try {
+    assert.deepEqual(indexFreshness(T), { state: 'none' }, 'no work items and no index');
+    fs.mkdirSync(path.join(T, 'epics', 'EP-a', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE()));
+    assert.deepEqual(indexFreshness(T), { state: 'missing' });
+    writeIndex(T);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE({ currentStep: 'ui' })));
+    assert.deepEqual(indexFreshness(T), { state: 'behind' }, 'a skill that hand-writes state.json (E17b) leaves it behind');
+    fs.writeFileSync(indexPath(T), '{ nope');
+    assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: '.sdlc/index.json does not parse' });
+    fs.writeFileSync(indexPath(T), '{"items":[]}');
+    assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: '.sdlc/index.json records no input hash' });
+    // A corrupt ITEM is still a current index once rebuilt: the file lists it, so nothing is hidden.
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), '{ broken');
+    writeIndex(T);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    // Only an unlisted folder and no index: still something to be missing.
+    const U = indexFixture({ 'epics/Bad/.sdlc/state.json': '{}' });
+    try { assert.deepEqual(indexFreshness(U), { state: 'missing' }); } finally { fs.rmSync(U, { recursive: true, force: true }); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// `yad index`: the default branch only on a local Product; nothing written on a verified one; --json is a
+// read on any branch. Every arm is pinned, because each is a twin of another (local/verified, the default
+// branch/another, write/read).
+const { runIndex } = await import('./index-command.mjs');
+
+function indexProduct({ ledger } = {}) {
+  const T = productForCheckpoint(); // hub.json (default_branch main) + a seed commit on main
+  if (ledger) {
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, ledger }));
+  }
+  fs.mkdirSync(path.join(T, 'epics/EP-a/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/.sdlc/state.json'), JSON.stringify(E19_STATE()));
+  fs.mkdirSync(path.join(T, 'epics/EP-bad/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-bad/.sdlc/state.json'), '{ broken');
+  return T;
+}
+
+test('E19 yad index: writes on the default branch of a local Product, says what it could not read', async () => {
+  const T = indexProduct();
+  const exit = process.exitCode;
+  try {
+    let out = await grab(() => runIndex(T, {}));
+    assert.match(out, /wrote \.sdlc\/index\.json \(2 work items, 1 unreadable\) — commit it with the change it describes/);
+    assert.match(out, /epics\/EP-bad: listed as unreadable — \.sdlc\/state\.json does not parse/);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    out = await grab(() => runIndex(T, {}));
+    assert.match(out, /is already current/, 'a rebuild of an unchanged Product writes nothing');
+    assert.equal(git(T, 'status', '--porcelain', '--', '.sdlc/index.json').toString().trim(), '?? .sdlc/index.json', 'written, never committed');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index: refuses another branch, with NO override, and writes nothing there', async () => {
+  const T = indexProduct();
+  const exit = process.exitCode;
+  try {
+    git(T, 'checkout', '-q', '-b', 'feat/x');
+    for (const opts of [{}, { allowBranch: true }]) {
+      process.exitCode = 0;
+      const out = await grab(() => runIndex(T, opts));
+      assert.match(out, /on 'feat\/x', not the default branch 'main' — \.sdlc\/index\.json is written on the default branch only, so a branch never carries it/);
+      assert.match(out, /`yad index --json` prints it here without writing/);
+      assert.doesNotMatch(out, /commit/, 'yad index never commits, so it never speaks of one');
+      assert.equal(process.exitCode, 1);
+      assert.ok(!fs.existsSync(indexPath(T)), `nothing written on a branch (${JSON.stringify(opts)})`);
+    }
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index: on a verified Product it writes nothing and says CI rebuilds it', async () => {
+  const T = indexProduct({ ledger: 'verified' });
+  const exit = process.exitCode;
+  try {
+    process.exitCode = 0;
+    const out = await grab(() => runIndex(T, {}));
+    assert.match(out, /this Product's ledger is verified: CI rebuilds \.sdlc\/index\.json when it records a merge on the default branch, and a local write could not be committed — nothing written/);
+    assert.match(out, /\.sdlc\/index\.json is not built yet; the next review CI records rebuilds it/);
+    assert.match(out, /epics\/EP-bad: listed as unreadable/, 'the gap is said in the verified arm too');
+    assert.ok(!fs.existsSync(indexPath(T)));
+    assert.equal(process.exitCode, 0, 'a warning, never a failure');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index --json: a read on any branch, the file\'s shape, nothing written', async () => {
+  const T = indexProduct({ ledger: 'verified' });
+  const orig = process.stdout.write.bind(process.stdout);
+  let printed = '';
+  try {
+    git(T, 'checkout', '-q', '-b', 'feat/y');
+    process.stdout.write = (s) => { printed += s; return true; };
+    try { await runIndex(T, { json: true }); } finally { process.stdout.write = orig; }
+    const j = JSON.parse(printed);
+    assert.deepEqual(Object.keys(j), ['schemaVersion', 'inputs', 'items']);
+    assert.deepEqual(j.items.map((i) => [i.id, !!i.unreadable]), [['EP-a', false], ['EP-bad', true]]);
+    assert.equal(j.inputs, buildIndex(T).inputs);
+    assert.ok(!fs.existsSync(indexPath(T)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad index: outside a Product, and outside git, it refuses rather than guessing', async () => {
+  const exit = process.exitCode;
+  const N = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e19-none-'));
+  const G = indexFixture({ '.sdlc/hub.json': { default_branch: 'main' }, 'epics/EP-a/.sdlc/state.json': E19_STATE() });
+  try {
+    process.exitCode = 0;
+    assert.match(await grab(() => runIndex(N, {})), /no Product here/);
+    assert.equal(process.exitCode, 1);
+    process.exitCode = 0;
+    assert.match(await grab(() => runIndex(G, {})), /not a git repo, so yad cannot tell whether this is the default branch/);
+    assert.equal(process.exitCode, 1);
+    assert.ok(!fs.existsSync(indexPath(G)));
+  } finally {
+    process.exitCode = exit;
+    fs.rmSync(N, { recursive: true, force: true });
+    fs.rmSync(G, { recursive: true, force: true });
+  }
+});
+
+// The gate hooks (E19): the index is written after a PERSON's local gate write on the default branch, in
+// CI's merge commit, and nowhere else — never on another branch, never on a verified Product locally,
+// never in the read-only pre-merge run, and never into a commit whose other inputs are not in it.
+test('E19 gate sync (a person, local Product): rebuilds the index on the default branch only', async () => {
+  const { T } = scaffoldEpic();
+  try {
+    git(T, 'init', '-q');
+    git(T, 'config', 'user.email', 'a@b.c');
+    git(T, 'config', 'user.name', 'x');
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', 'seed');
+    git(T, 'branch', '-q', '-M', 'main');
+    git(T, 'checkout', '-q', '-b', 'feat/x');
+    await grab(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval, local: true }));
+    assert.ok(!fs.existsSync(indexPath(T)), 'a branch never carries the index');
+    git(T, 'checkout', '-q', 'main');
+    await grab(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }));
+    assert.ok(!fs.existsSync(indexPath(T)), 'not `local`: gateCi calls this, and rebuilds the index itself');
+    const out = await grab(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval, local: true }));
+    assert.match(out, /rebuilt \.sdlc\/index\.json/);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    // A verified Product: the person's sync is read-only, so it writes no index either.
+    fs.rmSync(indexPath(T));
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, ledger: 'verified' }));
+    await grab(() => gateSync(T, { epic: 'EP-test', today: '2026-06-10', reader: () => fullApproval, local: true }));
+    assert.ok(!fs.existsSync(indexPath(T)), 'CI is the one writer on a verified Product');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 gate ci --merged: the index rides the ledger commit; the pre-merge run leaves no file behind', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  try {
+    // Pre-merge: read-only, and the checkout stays clean — no index.
+    await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, today: '2026-06-08', push: false, reader: () => ({ ...fullApproval, merged: false }) }));
+    assert.ok(!fs.existsSync(indexPath(ci)), 'the pre-merge run writes no index');
+    assert.equal(git(ci, 'status', '--porcelain').toString(), '', 'and leaves the checkout clean');
+    // The merge: the index is in the same commit as the ledger, and matches it.
+    git(author, 'checkout', '-q', 'trunk');
+    git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge');
+    git(author, 'push', '-q', 'origin', 'trunk');
+    git(ci, 'pull', '-q', 'origin', 'trunk');
+    await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    const committed = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.ok(committed.includes('.sdlc/index.json'), committed.join('\n'));
+    assert.ok(committed.includes('epics/EP-test/.sdlc/state.json'));
+    assert.equal(git(ci, 'status', '--porcelain').toString(), '', 'nothing left uncommitted');
+    assert.deepEqual(indexFreshness(ci), { state: 'current' });
+    const idx = JSON.parse(fs.readFileSync(indexPath(ci), 'utf8'));
+    assert.equal(idx.items.find((i) => i.id === 'EP-test').currentStep, JSON.parse(fs.readFileSync(path.join(ci, 'epics/EP-test/.sdlc/state.json'), 'utf8')).currentStep);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 gate ci --merged: a half-written epic.md in the checkout keeps the index OUT of the commit, and says so', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  try {
+    git(author, 'checkout', '-q', 'trunk');
+    git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge');
+    git(author, 'push', '-q', 'origin', 'trunk');
+    git(ci, 'pull', '-q', 'origin', 'trunk');
+    fs.writeFileSync(path.join(ci, 'epics/EP-test/epic.md'), '---\nid: EP-test\nkind: change\n---\nhalf-written\n');
+    // …and an UNTRACKED work item: a new folder nobody has committed yet counts the same way.
+    fs.mkdirSync(path.join(ci, 'epics/EP-new/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(ci, 'epics/EP-new/.sdlc/state.json'), JSON.stringify({ steps: [] }));
+    const out = await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    const committed = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString();
+    assert.ok(!committed.includes('.sdlc/index.json'), 'the index would describe work the commit does not hold');
+    assert.ok(committed.includes('epics/EP-test/.sdlc/state.json'), 'the ledger is still committed');
+    assert.match(out, /\.sdlc\/index\.json left out of this commit: epics\/EP-new, epics\/EP-new\/\.sdlc\/state\.json, epics\/EP-test\/epic\.md are not in it as on disk — run `yad index` on a clean checkout/);
+    assert.ok(!committed.includes('epics/EP-new'), 'the untracked work item is not swept into the commit either');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 gate repair --push --allow-branch: the repair is committed on the branch, the index is not', async () => {
+  const prev = process.exitCode;
+  const { T } = hubWithStrandedEpic();
+  try {
+    git(T, 'checkout', '-q', '-b', 'fix/x');
+    process.exitCode = 0;
+    await grab(() => gateRepair(T, { epic: 'EP-x', push: true, allowBranch: true }));
+    const files = git(T, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.deepEqual(files, ['epics/EP-x/.sdlc/state.json'], 'the index is written on the default branch only');
+    assert.ok(!fs.existsSync(indexPath(T)), 'and not even left on disk here');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 yad doctor: the index section — each answer, on a local and a verified Product; warns, never fails', async () => {
+  const { indexChecks, collectDoctor } = await import('./doctor.mjs');
+  const LOCAL = 'run `yad index` on the default branch, then commit it';
+  const VERIFIED = 'CI rebuilds it when it records the next merged review; on a verified Product a local write could not be committed';
+  for (const [ledger, hint] of [[undefined, LOCAL], ['verified', VERIFIED]]) {
+    const T = indexFixture({ '.sdlc/hub.json': { platform: 'github', default_branch: 'main', ...(ledger ? { ledger } : {}) } });
+    try {
+      const run = () => { const checks = []; indexChecks(checks, T); return checks; };
+      assert.deepEqual(run(), [], `no work items and no index: nothing to say (${ledger})`);
+      fs.mkdirSync(path.join(T, 'epics/EP-a/.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'epics/EP-a/.sdlc/state.json'), JSON.stringify(E19_STATE()));
+      assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'warn', message: '.sdlc/index.json has not been built yet', hint }]);
+      writeIndex(T);
+      assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'ok', message: '.sdlc/index.json is current' }]);
+      fs.writeFileSync(path.join(T, 'epics/EP-a/.sdlc/state.json'), JSON.stringify(E19_STATE({ currentStep: 'ui' })));
+      assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'warn', message: '.sdlc/index.json is behind: the work items on disk differ from what it was built from', hint }]);
+      fs.writeFileSync(indexPath(T), '{ nope');
+      assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'warn', message: '.sdlc/index.json cannot be read — .sdlc/index.json does not parse', hint }]);
+      // It rides the whole doctor run, in its own section, and never turns it red.
+      const all = collectDoctor(T);
+      assert.ok(all.checks.some((x) => x.section === 'index'));
+      assert.ok(!all.checks.some((x) => x.section === 'index' && x.status === 'fail'));
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  // Outside a Product: silent.
+  const N = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e19-doc-'));
+  try { const checks = []; indexChecks(checks, N); assert.deepEqual(checks, []); } finally { fs.rmSync(N, { recursive: true, force: true }); }
+});
+
+test('E19 gate repair --push: a PRE-STAGED epic.md the commit will not hold keeps the index out', async () => {
+  // `gate repair` commits by pathspec, so a file staged beforehand stays out of the commit — and an index
+  // built from it would describe work the commit does not hold.
+  const prev = process.exitCode;
+  const { T } = hubWithStrandedEpic();
+  try {
+    fs.mkdirSync(path.join(T, 'epics/EP-y'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-y/epic.md'), '---\nkind: feature\n---\n');
+    git(T, 'add', 'epics/EP-y/epic.md');
+    process.exitCode = 0;
+    const out = await grab(() => gateRepair(T, { epic: 'EP-x', push: true }));
+    const files = git(T, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.deepEqual(files, ['epics/EP-x/.sdlc/state.json']);
+    assert.match(out, /\.sdlc\/index\.json left out of this commit: epics\/EP-y\/epic\.md is not in it as on disk/);
+    assert.ok(!fs.existsSync(indexPath(T)), 'and no half-true index is left on disk either (E19 review)');
+    assert.match(git(T, 'status', '--short').toString(), /^A\s+epics\/EP-y\/epic\.md/m, 'still staged, untouched');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 gate ci sweep with no merged review commits nothing — the index waits for the next merge (known limit)', async () => {
+  // The user's decision: CI rebuilds the index when it RECORDS a merge. A work item seeded by a merged PR
+  // (`yad epic new`, exempt from the ledger guard) therefore leaves a verified Product's index behind until
+  // the next merged review — `yad doctor` says so. Pinned so a change to it is a decision, not an accident.
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const head = git(ci, 'rev-parse', 'HEAD').toString();
+    await grab(() => gateCi(ci, { push: false, today: '2026-06-09', reader: () => ({ ...fullApproval, merged: false }) }));
+    assert.equal(git(ci, 'rev-parse', 'HEAD').toString(), head, 'no commit');
+    assert.ok(!fs.existsSync(indexPath(ci)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E19 review round 1: each finding, pinned so a revert fails -------------------------------------
+test('E19 review: an unstaged edit that sorts FIRST is still not in the commit (the trimmed-porcelain bug)', async () => {
+  // `run()` trims its output, which ate the leading space of the first porcelain line and turned the first
+  // unstaged edit into a staged one. `EP-a` sorts before the merged `EP-test`, so its line came first.
+  const { T, author, ci } = scaffoldCiHub();
+  try {
+    fs.mkdirSync(path.join(author, 'epics/EP-a/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(author, 'epics/EP-a/epic.md'), '---\nkind: feature\n---\n');
+    fs.writeFileSync(path.join(author, 'epics/EP-a/.sdlc/state.json'), JSON.stringify({ steps: [] }));
+    git(author, 'checkout', '-q', 'trunk');
+    git(author, 'add', '-A');
+    git(author, 'commit', '-q', '-m', 'EP-a');
+    git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge');
+    git(author, 'push', '-q', 'origin', 'trunk');
+    git(ci, 'pull', '-q', 'origin', 'trunk');
+    fs.writeFileSync(path.join(ci, 'epics/EP-a/epic.md'), '---\nkind: defect\n---\nhalf-written\n'); // unstaged
+    const out = await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    assert.ok(!git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().includes('.sdlc/index.json'), out);
+    assert.match(out, /left out of this commit: epics\/EP-a\/epic\.md is not in it as on disk/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 review: a work-item folder git cannot see — ignored, or holding only an ignored .DS_Store — keeps the index out', async () => {
+  for (const [label, setup, named] of [
+    ['a .gitignored work item', (ci) => {
+      fs.writeFileSync(path.join(ci, '.gitignore'), 'epics/EP-draft/\n');
+      fs.mkdirSync(path.join(ci, 'epics/EP-draft/.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(ci, 'epics/EP-draft/.sdlc/state.json'), JSON.stringify({ steps: [] }));
+    }, 'epics/EP-draft, epics/EP-draft/.sdlc/state.json'],
+    ['a folder holding only an ignored .DS_Store', (ci) => {
+      fs.writeFileSync(path.join(ci, '.gitignore'), '.DS_Store\n');
+      fs.mkdirSync(path.join(ci, 'epics/EP-ghost'), { recursive: true });
+      fs.writeFileSync(path.join(ci, 'epics/EP-ghost/.DS_Store'), 'x');
+    }, 'epics/EP-ghost'],
+  ]) {
+    const { T, author, ci } = scaffoldCiHub();
+    try {
+      git(author, 'checkout', '-q', 'trunk');
+      git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge');
+      git(author, 'push', '-q', 'origin', 'trunk');
+      git(ci, 'pull', '-q', 'origin', 'trunk');
+      setup(ci);
+      const out = await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+      assert.ok(!git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().includes('.sdlc/index.json'), `${label}: ${out}`);
+      assert.ok(out.includes(`left out of this commit: ${named} `), `${label}: ${out}`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('E19 review: gate ci --merged on a checkout that is not the default branch commits no index', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  try {
+    git(author, 'checkout', '-q', 'trunk');
+    git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge');
+    git(author, 'push', '-q', 'origin', 'trunk');
+    git(ci, 'pull', '-q', 'origin', 'trunk');
+    git(ci, 'checkout', '-q', '-b', 'feat/x');
+    const out = await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    assert.ok(!git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().includes('.sdlc/index.json'));
+    assert.ok(!fs.existsSync(indexPath(ci)));
+    assert.match(out, /\.sdlc\/index\.json not rebuilt — this checkout is not on the default branch, the only place it is written/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 review: an index-only commit says so in its subject', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  try {
+    git(author, 'checkout', '-q', 'trunk');
+    git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge');
+    git(author, 'push', '-q', 'origin', 'trunk');
+    git(ci, 'pull', '-q', 'origin', 'trunk');
+    await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    // The ledger is committed with its index. Now the index alone falls behind (a hand edit), and the
+    // re-run of the same merge — the wired reconcile — writes the index and nothing else.
+    fs.writeFileSync(indexPath(ci), '{"inputs":"x","items":[]}\n');
+    git(ci, 'commit', '-q', '-am', 'someone touched the index');
+    await grab(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    assert.equal(git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().trim(), '.sdlc/index.json');
+    assert.equal(git(ci, 'log', '-1', '--format=%s').toString().trim(), 'chore(gate): rebuild the Product index [skip ci]');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 review: CRLF and LF checkouts of one Product hash and parse the same', () => {
+  const lf = { 'epics/EP-a/.sdlc/state.json': '{\n  "steps": []\n}\n', 'epics/EP-a/epic.md': '---\nkind: change\nparent: EP-root\nrepos: [api]\n---\n# A\n' };
+  const crlf = Object.fromEntries(Object.entries(lf).map(([k, v]) => [k, v.replace(/\n/g, '\r\n')]));
+  const A = indexFixture(lf);
+  const B = indexFixture(crlf);
+  try {
+    const a = buildIndex(A);
+    const b = buildIndex(B);
+    assert.equal(a.inputs, b.inputs, 'core.autocrlf must not make two machines disagree');
+    assert.deepEqual(b.index.items[0], a.index.items[0]);
+    assert.deepEqual([b.index.items[0].type, b.index.items[0].repos], ['change', ['api']], 'the frontmatter is read on a CRLF checkout');
+  } finally { fs.rmSync(A, { recursive: true, force: true }); fs.rmSync(B, { recursive: true, force: true }); }
+});
+
+test('E19 review: the summary format is in the hash, and a hand-edited index reads behind', async () => {
+  const { indexHash } = await import('./product-index.mjs');
+  const parts = [{ name: 'x', input: { bytes: Buffer.from('y') } }];
+  assert.notEqual(indexHash(parts, 'e19-2'), indexHash(parts), 'a new summary format must read the old file as behind');
+  const T = indexFixture({ 'epics/EP-a/.sdlc/state.json': E19_STATE() });
+  try {
+    writeIndex(T);
+    const onDisk = JSON.parse(fs.readFileSync(indexPath(T), 'utf8'));
+    onDisk.items[0].currentStep = 'shipped'; // same inputs hash, different summary
+    fs.writeFileSync(indexPath(T), JSON.stringify(onDisk, null, 2));
+    assert.deepEqual(indexFreshness(T), { state: 'behind' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 review: the guards no test reached — verified, no .git, gate open, repair without --push', async () => {
+  const { refreshIndexAfterWrite } = await import('./product-index.mjs');
+  // No `.git`: nothing is written, whatever the Product.
+  const N = indexFixture({ '.sdlc/hub.json': { platform: 'github', default_branch: 'main' }, 'epics/EP-a/.sdlc/state.json': E19_STATE() });
+  try {
+    assert.equal(refreshIndexAfterWrite(N, { platform: 'github', default_branch: 'main' }), false);
+    assert.ok(!fs.existsSync(indexPath(N)));
+  } finally { fs.rmSync(N, { recursive: true, force: true }); }
+  // Verified, on the default branch: `gate repair` (which does not refuse a verified Product) writes none.
+  const { T } = hubWithStrandedEpic();
+  try {
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, platform: hub.platform || 'github', ledger: 'verified' }));
+    await grab(() => gateRepair(T, { epic: 'EP-x' }));
+    assert.ok(!fs.existsSync(indexPath(T)), 'a verified Product: CI is the one writer');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // Local, default branch, no --push: rebuilt, and the hint names it.
+  const R = hubWithStrandedEpic().T;
+  try {
+    const out = await grab(() => gateRepair(R, { epic: 'EP-x' }));
+    assert.ok(fs.existsSync(indexPath(R)));
+    assert.match(out, /commit epics\/\*\/\.sdlc\/state\.json and \.sdlc\/index\.json \(or re-run with --push\)/);
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
+  // `gate open` on a local Product, on the default branch: the in_review mark rebuilds it.
+  const { T: O } = scaffoldEpic();
+  try {
+    git(O, 'init', '-q'); git(O, 'config', 'user.email', 'a@b.c'); git(O, 'config', 'user.name', 'x');
+    const hub = JSON.parse(fs.readFileSync(path.join(O, '.sdlc/hub.json'), 'utf8'));
+    delete hub.platform;
+    fs.writeFileSync(path.join(O, '.sdlc/hub.json'), JSON.stringify(hub));
+    // The fixture's review is already open; put it back to `todo` so there is a review to open.
+    const sp = path.join(O, 'epics/EP-test/.sdlc/state.json');
+    const st = JSON.parse(fs.readFileSync(sp, 'utf8'));
+    st.steps.find((x) => x.id === 'architecture-review').status = 'todo';
+    fs.writeFileSync(sp, JSON.stringify(st));
+    git(O, 'add', '-A'); git(O, 'commit', '-q', '-m', 'seed'); git(O, 'branch', '-q', '-M', 'main');
+    const out = await grab(() => gateOpen(O, { epic: 'EP-test', artifact: 'architecture.md' }));
+    assert.equal(JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((x) => x.id === 'architecture-review').status, 'in_review', out);
+    assert.ok(fs.existsSync(indexPath(O)), `gate open rebuilt the index: ${out}`);
+    assert.deepEqual(indexFreshness(O), { state: 'current' });
+  } finally { fs.rmSync(O, { recursive: true, force: true }); }
+});
+
+test('E19 review: yad epic new and yad skip rebuild the index on the default branch, and only there', async () => {
+  const { runEpicNew } = await import('./epic.mjs');
+  const T = productForCheckpoint();
+  const exit = process.exitCode;
+  try {
+    git(T, 'checkout', '-q', '-b', 'feat/x');
+    await grab(() => runEpicNew(T, { slug: 'first', today: '2026-01-02' }));
+    assert.ok(!fs.existsSync(indexPath(T)), 'a branch never carries it');
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'first');
+    git(T, 'checkout', '-q', 'main');
+    git(T, 'merge', '-q', 'feat/x');
+    await grab(() => runEpicNew(T, { slug: 'second', today: '2026-01-02' }));
+    const idx = JSON.parse(fs.readFileSync(indexPath(T), 'utf8'));
+    assert.deepEqual(idx.items.map((i) => i.id), ['EP-first', 'EP-second']);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    // skip on the default branch: the step count moves, and the index with it.
+    const before = JSON.parse(fs.readFileSync(indexPath(T), 'utf8')).items.find((i) => i.id === 'EP-second').steps.skipped;
+    process.exitCode = 0;
+    const out = await grab(() => runSkip(T, { epic: 'EP-second', step: 'ui-design', reason: 'no UI', today: '2026-01-03' }));
+    assert.notEqual(process.exitCode, 1, out);
+    assert.deepEqual(indexFreshness(T), { state: 'current' }, 'skip rebuilt it');
+    assert.ok(JSON.parse(fs.readFileSync(indexPath(T), 'utf8')).items.find((i) => i.id === 'EP-second').steps.skipped > before, 'and the count moved');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 review: yad doctor on a branch says a difference is expected, instead of pointing at yad index', async () => {
+  const { indexChecks } = await import('./doctor.mjs');
+  const T = indexProduct();
+  try {
+    await grab(() => runIndex(T, {}));
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'index');
+    git(T, 'checkout', '-q', '-b', 'feat/x');
+    fs.writeFileSync(path.join(T, 'epics/EP-a/.sdlc/state.json'), JSON.stringify(E19_STATE({ currentStep: 'ui' })));
+    let checks = [];
+    indexChecks(checks, T);
+    assert.deepEqual(checks, [{ id: 'index', section: 'index', status: 'ok', message: ".sdlc/index.json differs from the work items on this branch — expected on 'feat/x': it is written on 'main' only, once this work merges" }]);
+    fs.writeFileSync(indexPath(T), '{ nope');
+    checks = [];
+    indexChecks(checks, T);
+    assert.equal(checks[0].status, 'warn', 'an unreadable file is still a finding on a branch');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

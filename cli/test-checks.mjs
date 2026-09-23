@@ -1808,6 +1808,32 @@ test('ledger-guard: with a verified ledger ON, a non-bot commit MUTATING an exis
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// E19: the Product index is CI-written on a verified Product, so a person's commit that changes it FAILS —
+// with no seed carve-out, since it belongs to no epic. And the arm is EXACTLY that path: the files beside
+// it at the Product root are a person's to edit (`yad mode`, `yad setup`), so a wider arm would refuse them.
+test('ledger-guard: a non-bot commit to .sdlc/index.json FAILS; the Product config beside it PASSES (E19)', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  commit(T, 'hand-edit the index', { '.sdlc/index.json': '{"inputs":"x","items":[]}\n' });
+  let r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /→ \.sdlc\/index\.json/);
+  fs.rmSync(T, { recursive: true, force: true });
+  // Its neighbours: a person's, and never refused.
+  const U = scaffoldRepo();
+  seedLedgerOnBase(U);
+  commit(U, 'switch mode', {
+    '.sdlc/hub.json': '{"platform":"github","bridge_enabled":true,"mode":"team"}\n',
+    '.sdlc/product.json': '{"platform":"github","bridge_enabled":true}\n',
+    '.sdlc/repos.json': '{"repos":[]}\n',
+    '.sdlc/index.json.bak': 'x\n',
+    'docs/.sdlc/index.json': '{}\n',
+  });
+  r = runGate(LEDGER_GUARD, U);
+  assert.equal(r.code, 0, r.out);
+  fs.rmSync(U, { recursive: true, force: true });
+});
+
 // #162: no CI path can seed a new epic's ledger (gate-sync only ADVANCES an existing chain, at merge,
 // on the default branch), so the seed can only reach the trunk through the first review PR/MR — the
 // one place this gate runs. Creation is exempt; mutation stays guarded by the test above.

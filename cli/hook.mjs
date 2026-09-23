@@ -48,7 +48,13 @@ const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', '
 // The Foundation (E75) is the same rule in its own folder: `foundation/.sdlc/<ledger>.json` and
 // `foundation/reviews/*.md`, under the fixed id `EP-foundation`. The gate's arms for it are globs of the
 // same depth-blind kind, so the same depth-blind match is used here.
+//
+// The Product index (E19) is the one protected path outside an epic: `.sdlc/index.json`, exactly, and
+// nothing else at the Product root (product.json, hub.json, repos.json are a person's to edit). It belongs
+// to no epic and is never a seed, so it is returned with `epic: null` and no carve-out applies.
+export const INDEX_REL = '.sdlc/index.json';
 export function protectedLedgerPath(rel) {
+  if (rel === INDEX_REL) return { epic: null, rel, kind: 'index' };
   const ledgers = [...LEDGER_FILES].map((f) => f.replace('.', '\\.')).join('|');
   const classify = (epic) => {
     if (new RegExp(`/\\.sdlc/(?:${ledgers})$`).test(rel)) return { epic, rel, kind: 'state' };
@@ -280,6 +286,21 @@ export function denyMessage({ epic, rel, productRoot }) {
   ].join('\n');
 }
 
+// The index is derived — the hint is to read it, or rebuild it the one way that can be committed.
+export function indexDenyMessage({ rel, productRoot }) {
+  return [
+    `[yad] Blocked: ${rel} is the Product index — derived from every work item's files, and CI-owned here.`,
+    '',
+    'This Product runs in verified mode. CI rebuilds the index in the same commit that records a merged',
+    'review, and the `ledger-guard` check rejects any other commit that changes it.',
+    '',
+    'To read it as the files say it is now:   yad index --json',
+    'To see whether the committed one is behind:   yad doctor',
+    '',
+    `hub: ${productRoot}   ·   override for one command: YAD_HOOK_DISABLE=1`,
+  ].join('\n');
+}
+
 // The decision, with git injectable so the tests can drive every branch. Returns
 // `{ allow: true }` or `{ allow: false, message, epic, rel }`.
 export function ledgerGuardDecision(paths, { env = process.env, runner = run, payloadCwd = null } = {}) {
@@ -300,6 +321,7 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run, pa
     const rel = path.relative(productRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
     if (!hit) continue;
+    if (hit.kind === 'index') return { allow: false, epic: null, rel, message: indexDenyMessage({ rel, productRoot }) };
     if (!seededByHub.has(productRoot)) seededByHub.set(productRoot, seededSlugs(productRoot, hub, runner));
     const seeded = seededByHub.get(productRoot);
     if (seeded === null) continue;                      // base unreadable — unknown allows

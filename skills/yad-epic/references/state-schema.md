@@ -36,6 +36,29 @@ Three rules go with it, and they are permanent (`docs/roadmap-idea-1.md`, Part 2
    shape and changes only when that shape really changes — which is rare, and always paired with a
    `yad migrate` step that moves existing projects onto it.
 
+## The Product index — `.sdlc/index.json` (derived; never write it by hand)
+
+One file at the Product root that summarizes every work item (E19). It is **derived** from each item's
+`state.json` and `epic.md`, and rebuilt by `yad index` or a gate write on the default branch. On a
+verified Product only CI writes it, and the ledger guard rejects anyone else. **A skill never writes
+it.** A skill that writes `state.json` by hand leaves it behind, and `yad doctor` says so. To read it
+as the files say it is now, run `yad index --json`.
+
+```json
+{
+  "schemaVersion": 10,
+  "inputs": "sha256:…",
+  "items": [
+    { "id": "EP-checkout", "dir": "epics/EP-checkout", "kind": null, "type": "feature", "theme": null,
+      "parent": null, "thread": "EP-checkout", "profile": "classic", "currentStep": "architecture",
+      "createdAt": "2026-06-04", "repos": ["backend"],
+      "steps": { "todo": 3, "in_progress": 1, "in_review": 0, "done": 2, "skipped": 0, "deferred": 0, "satisfied": 0, "blocked": 0 },
+      "lastClosed": { "step": "epic-review", "date": "2026-06-05", "by": "ada" } },
+    { "id": "EP-broken", "dir": "epics/EP-broken", "unreadable": true, "why": ".sdlc/state.json does not parse" }
+  ]
+}
+```
+
 ## `state.json`
 The per-epic state machine.
 

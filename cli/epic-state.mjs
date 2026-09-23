@@ -347,6 +347,20 @@ export function epicIds(root) {
   return ids.sort();
 }
 
+// The folders under `epics/` that hold a `.sdlc/` but that `epicIds` did not name: a name that is not a
+// valid id, a symlinked epic (`Dirent.isDirectory()` is false for a symlink), and `epics/EP-foundation`.
+// That guard is right for an enumerator that turns a name into a path segment, and wrong for anything
+// that must not lose what is inside — a count (E71) or the index (E19) — so both REPORT these. Sorted.
+// Throws when `epics/` cannot be listed; the caller decides what that means.
+export function unlistedLedgerDirs(root, ids = epicIds(root)) {
+  const epicsDir = path.join(root, 'epics');
+  if (!fs.existsSync(epicsDir)) return [];
+  const named = new Set(ids);
+  return fs.readdirSync(epicsDir)
+    .filter((e) => !(named.has(e) && e !== FOUNDATION_EPIC) && fs.existsSync(path.join(epicsDir, e, '.sdlc')))
+    .sort();
+}
+
 // The wired checks that protect `foundation/`, and the line each one needs to know the folder. They are
 // committed in the user's repo and refreshed by `yad update` — not by `yad migrate` — so a copy older
 // than E75 guards `epics/` only. One list for every place that asks, so `yad doctor`, `yad foundation
@@ -3447,7 +3461,13 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
 // the thread helpers and the gate agree on the same parse; shared here as the lineage source.
 export function readFrontmatter(file) {
   if (!fs.existsSync(file)) return {};
-  const m = fs.readFileSync(file, 'utf8').match(/^---\n([\s\S]*?)\n---/);
+  return parseFrontmatter(fs.readFileSync(file, 'utf8'));
+}
+
+// The same parse, on text already read — for a caller that must parse the very bytes it hashed
+// (the index, E19), rather than read the file a second time.
+export function parseFrontmatter(text) {
+  const m = String(text).match(/^---\n([\s\S]*?)\n---/);
   if (!m) return {};
   const out = {};
   for (const line of m[1].split('\n')) {
@@ -3547,7 +3567,11 @@ export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{
 // The lineage of an epic from epic.md frontmatter. `type` defaults to `feature` (genesis) when
 // absent, so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
 export function epicLineage(root, epic) {
-  const fm = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md'));
+  return lineageFrom(readFrontmatter(path.join(epicRoot(root, epic), 'epic.md')));
+}
+
+// The lineage from frontmatter already parsed (E19's index parses the bytes it hashed).
+export function lineageFrom(fm = {}) {
   const type = workItemType(fm);
   return {
     type,
