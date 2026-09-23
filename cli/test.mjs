@@ -19323,6 +19323,85 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
   for (const [res, kind] of kinds) assert.equal(res.kind, kind, res.why);
 });
 
+test('E70: every printed line obeys the rules a reader would notice, over every shape the reader can return', () => {
+  // Rounds 10 to 18 each found a sentence that broke one of these by hand. This drives every shape the
+  // reader can return and checks them mechanically, so a wording slip fails here instead of in a review.
+  const GH = (calls) => ({ platform: 'github', gitUrl: GH_URL, calls: [[/^repos\/acme\/app$/, 200, { default_branch: 'main' }], ...calls] });
+  const GL = (calls) => ({ platform: 'gitlab', gitUrl: GL_URL, calls: [[/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], ...calls] });
+  const RULE = (n, extra = {}) => ({ type: 'pull_request', ruleset_source_type: 'Repository', ruleset_id: 7, parameters: { required_approving_review_count: n, ...extra } });
+  const AR = (n, extra = {}) => ({ name: 'A', approvals_required: n, protected_branches: [], ...extra });
+  const shapes = [];
+  // GitHub: the branch flag × what the rules and classic protection answer.
+  for (const flag of [true, false]) {
+    for (const rules of [[200, []], [200, [RULE(0)]], [200, [RULE(2)]], [200, [RULE(2, { require_code_owner_review: true })]], [200, [RULE(0, { require_code_owner_review: true })]], [200, [RULE(0, { required_reviewers: 'x' })]],
+      [200, [RULE(2, { require_code_owner_review: true, required_reviewers: [{ minimum_approvals: 1 }] }), RULE('x')]],
+      [200, [RULE(2, { required_reviewers: [{ minimum_approvals: 1 }] })]], [200, [RULE('x')]], [200, [{ type: 'deletion' }]],
+      [200, Array.from({ length: PAGE }, () => RULE(1))], [403], [404], [null], [200, 'junk']]) {
+      for (const classic of [[200, {}], [200, { required_pull_request_reviews: { required_approving_review_count: 1 } }],
+        [200, { required_pull_request_reviews: { required_approving_review_count: 'x', require_code_owner_reviews: true } }], [404], [403]]) {
+        shapes.push(GH([[/\/protection$/, ...classic], [/\/rules\//, ...rules], [/\/branches\/main$/, 200, { protected: flag }]]));
+      }
+    }
+  }
+  // GitLab: the branch flag × the protected-branch list × what the approval rules answer.
+  for (const flag of [true, false]) {
+    for (const pb of [[200, []], [200, [{ name: 'main' }]], [200, [{ name: 'ma*', code_owner_approval_required: true }]], [403]]) {
+      for (const ar of [[200, []], [200, [AR(2)]], [200, [AR(0)]], [200, [AR('x')]], [200, [AR(1, { protected_branches: [{ name: 'release-*' }] })]],
+        [200, [AR(1, { protected_branches: undefined })]], [200, [AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
+        [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
+        [200, [AR(1), AR(2)]], [200, Array.from({ length: PAGE }, () => AR(0))], [403], [404], [null]]) {
+        shapes.push(GL([[/\/repository\/branches\//, 200, { protected: flag }], [/\/protected_branches/, ...pb], [/\/approval_rules/, ...ar]]));
+      }
+    }
+  }
+  // And every way the read cannot be made at all.
+  shapes.push(GH([[/\/branches\/main$/, 404]]), GH([[/\/branches\/main$/, 502]]), GH([[/^repos\/acme\/app$/, 200, {}]]),
+    GL([[/\/repository\/branches\//, 404]]), GL([[/^projects\/acme%2Fapp$/, 404]]));
+  const dashes = (line) => {
+    // Count em dashes at the top level: a dash inside brackets or backticks is at another level.
+    let out = line;
+    for (let i = 0; i < 5; i++) out = out.replace(/\([^()]*\)/g, ' ').replace(/`[^`]*`/g, ' ');
+    return (out.match(/ — /g) || []).length;
+  };
+  let seen = 0;
+  for (const { platform, gitUrl, calls } of shapes) {
+    for (const branch of ['main', null]) {
+      const r = readProtection({ platform, gitUrl, branch }, { runner: fakePlatform({ calls }).runner, env: ON });
+      for (const solo of [false, true]) {
+        const line = protectionLine(r, { name: 'backend', solo });
+        const parts = [line.message, ...(line.hint ? [line.hint] : [])];
+        seen += 1;
+        assert.ok(['ok', 'warn'].includes(line.status), `a status this section never sets: ${line.status}`);
+        for (const said of parts) {
+          assert.ok(!/\bnull\b|\bundefined\b|\bNaN\b|\[object/.test(said), `a value the platform did not send: ${said}`);
+          assert.ok(!/\s{2}|\s[;,.]|;;|\.\.|,,|\(\)|——/.test(said), `punctuation a reader would notice: ${said}`);
+          assert.ok(!/[;,:]$/.test(said), `a sentence that stops mid-clause: ${said}`);
+          assert.ok(dashes(said) <= 1, `two em dashes at one level: ${said}`);
+          assert.ok(!said.split(/\s+/).some((w) => w.replace(/^[`"'([]+/, '').indexOf('@', 1) >= 0), `an address-like word: ${said}`);
+          assert.ok(!/\b1 approvals\b|\b(?!1\b)\d+ approval\b/.test(said), `a count and its noun disagree: ${said}`);
+          assert.ok(!/\bthe approval rules [A-Za-z]+ has misses\b|\bthe approval rule [A-Za-z]+ has miss\b/.test(said), `a subject and its verb disagree: ${said}`);
+          assert.ok(!/\b(rules|branches|reviewers|approval rules)\b[^.]{0,80}?(may not read it\b|it does not exist)/.test(said), `a plural subject with a singular pronoun: ${said}`);
+          assert.ok(!/(could not read|not known)/.test(line.hint || '') || /(could not read|not known|Ask someone|ask someone|ask a repo admin|Maintainer|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit)/.test(line.hint || ''), `a hint that names nothing to do: ${line.hint}`);
+        }
+        // A hint may claim something went unread only when the read says so…
+        if (/about what yad could not read/.test(line.hint || '')) {
+          assert.ok(r.known === false || r.partlyRead === true || r.codeOwners === null || r.fileReviewers === null,
+            `the hint claims something was unread, and nothing was: ${line.message}`);
+        }
+        // …and a line that gives a count while part of the read is missing must point at what is missing.
+        if (r.known && r.partlyRead && r.approvals > 0) {
+          assert.match(line.hint || '', /could not read/, `a count was partly read, and nothing points at the part that was not: ${line.message}`);
+        }
+        // One rule is never read as many.
+        if (r.rulesElsewhereOne) {
+          assert.ok(!/the approval rules .* miss it|\bthey (name|reach)\b|none of them holds/.test(line.message), `one rule read as many: ${line.message}`);
+        }
+      }
+    }
+  }
+  assert.ok(seen >= 800, `the grid shrank: ${seen} lines`);
+});
+
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {
   const { protectionChecks, collectDoctor } = await import('./doctor.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e70-doc-'));
