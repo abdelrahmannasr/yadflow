@@ -18727,7 +18727,9 @@ const {
 } = await import('./protection.mjs');
 
 // A fake `gh`/`glab`: `calls` is [[regex on the API path, status, body]]; status null is "no answer"
-// (offline). Every call is recorded, so a test can say what was — and was NOT — asked.
+// (offline). A failed call with a body prints it as the real CLIs do (E109, checked with glab 1.77): the
+// JSON on stdout, and `glab: <message> (HTTP <code>)` on stderr. Every call is recorded, so a test can
+// say what was — and was NOT — asked.
 function fakePlatform({ installed = true, authed = true, calls = [] } = {}) {
   const asked = [];
   const runner = (cmd, args) => {
@@ -18739,6 +18741,10 @@ function fakePlatform({ installed = true, authed = true, calls = [] } = {}) {
       if (!re.test(p)) continue;
       if (code === 200) return { ok: true, stdout: typeof body === 'string' ? body : JSON.stringify(body), stderr: '' };
       if (code === null) return { ok: false, code: 1, stdout: '', stderr: 'error connecting to api.github.com' };
+      if (body !== undefined) {
+        const msg = typeof body?.message === 'string' ? body.message : `${code} Error`;
+        return { ok: false, code: 1, stdout: typeof body === 'string' ? body : JSON.stringify(body), stderr: cmd === 'gh' ? `gh: ${msg} (HTTP ${code})` : `glab: ${msg} (HTTP ${code})` };
+      }
       return { ok: false, code: 1, stdout: JSON.stringify({ message: 'x', status: String(code) }), stderr: cmd === 'gh' ? `gh: Error (HTTP ${code})` : `glab: ${code} Error (HTTP ${code})` };
     }
     return { ok: false, code: 1, stdout: '', stderr: cmd === 'gh' ? 'gh: Not Found (HTTP 404)' : 'glab: 404 Not Found (HTTP 404)' };
@@ -19168,6 +19174,82 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.match(readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: null }, { runner: g.runner, env: ON }).why, /GitLab named none/);
 });
 
+// ---- E109: name the cause behind a GitLab 404 by reading the answer's body --------------------------
+// GitLab's branches API answers `404 Repository Not Found` before it looks the branch up, and `404 Branch
+// Not Found` after (both checked live, 2026-09-23). A body may only REMOVE a cause, and one yad does not
+// recognise keeps E70's hedge word for word.
+const REPO_404 = { message: '404 Repository Not Found' };
+const BRANCH_404 = { message: '404 Branch Not Found' };
+const HEDGE = (b) => `GitLab answered 404 for the branch ${b} (it does not exist, or your login may not see it)`;
+
+test('E109 GitLab branch 404: the body names the cause; anything else keeps the hedge word for word', () => {
+  // The real bodies still parse as a 404 (the status is read before the body is).
+  assert.equal(httpStatus({ stdout: JSON.stringify(REPO_404), stderr: 'glab: 404 Repository Not Found (HTTP 404)' }), 404);
+  assert.equal(httpStatus({ stdout: JSON.stringify(BRANCH_404), stderr: 'glab: 404 Branch Not Found (HTTP 404)' }), 404);
+  // A branch the project does not have: said as plainly as GitHub says it, and no access tail in the hint.
+  let { r } = glRead([[/\/repository\/branches\//, 404, BRANCH_404]], { branch: 'mian' });
+  assert.deepEqual([r.known, r.kind, r.cause], [false, 'no-branch', 'branch']);
+  assert.equal(r.why, 'GitLab answered 404 for the branch mian, so this project does not have it');
+  assert.equal(protectionLine(r, { name: 'b' }).hint, 'check that `default_branch` in yad\'s files names a branch that exists on the platform');
+  // The project's own default: no commits yet, and the hint settles it the way GitHub's does.
+  ({ r } = glRead([[/\/repository\/branches\//, 404, BRANCH_404]], { branch: null }));
+  assert.deepEqual([r.known, r.kind, r.cause, r.branchFrom], [false, 'empty', 'branch', 'platform']);
+  assert.equal(r.why, 'GitLab answered 404 for the branch main, so this project has no commits on it yet');
+  assert.equal(protectionLine(r, { name: 'b' }).hint, 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again');
+  // yad's files name the platform's default too: the proof turns on what GitLab named, not on where the name came from.
+  ({ r } = glRead([[/\/repository\/branches\//, 404, BRANCH_404]], { branch: 'main' }));
+  assert.deepEqual([r.kind, r.why], ['empty', 'GitLab answered 404 for the branch main, so this project has no commits on it yet']);
+  // The repository could not be read: the branch was never looked up, so nothing is said about it — for
+  // yad's name, a typo, and the platform's own default alike.
+  for (const branch of ['main', 'mian', null]) {
+    ({ r } = glRead([[/\/repository\/branches\//, 404, REPO_404]], { branch }));
+    const b = branch || 'main';
+    assert.deepEqual([r.known, r.kind, r.cause], [false, 'no-repository', 'repository'], String(branch));
+    assert.equal(r.why, `GitLab answered 404 for the branch ${b} because your login cannot read this project's repository (it is turned off for the project, or your access is too low to read it)`);
+    const line = protectionLine(r, { name: 'b' });
+    assert.equal(line.hint, 'ask a Maintainer or Owner of the GitLab project to give your login access to its repository (or to turn the repository on), then run `yad doctor` again');
+    assert.doesNotMatch(`${line.message} ${line.hint}`, /does not exist|does not have it|no commits/, 'the branch was never looked up');
+  }
+  // Every body yad does not recognise keeps today's hedge and today's hints, word for word: the fake's
+  // default body, a reworded or lower-case message, another language, extra words, a message that is not a
+  // string, a body that is not JSON, and no body at all.
+  const unknownBodies = [undefined, { message: '404 repository not found' }, { message: '404 Repository not found' }, { message: '404 Dépôt introuvable' },
+    { message: '404 Branch Not Found.' }, { message: ' 404 Branch Not Found' }, { message: ['404 Branch Not Found'] }, { error: '404 Branch Not Found' },
+    { message: '404 Not Found' }, { message: '404 Project Not Found' }, { message: 'toString' }, { message: 'constructor' }, 'not json', ''];
+  for (const body of unknownBodies) {
+    for (const [branch, kind] of [['mian', 'no-branch'], [null, 'empty']]) {
+      ({ r } = glRead([[/\/repository\/branches\//, 404, body]], { branch }));
+      const tag = `${JSON.stringify(body)} ${branch}`;
+      assert.deepEqual([r.known, r.kind, 'cause' in r], [false, kind, false], tag);
+      assert.equal(r.why, HEDGE(branch || 'main'), tag);
+    }
+  }
+  ({ r } = glRead([[/\/repository\/branches\//, 404, { message: 'x' }]], { branch: 'mian' }));
+  assert.equal(protectionLine(r, { name: 'b' }).hint, 'check that `default_branch` in yad\'s files names a branch that exists on the platform, or ask for access to the project\'s repository');
+  ({ r } = glRead([[/\/repository\/branches\//, 404, { message: 'x' }]], { branch: null }));
+  assert.match(protectionLine(r, { name: 'b' }).hint, /\(or your login cannot see it\)/);
+  // The body names a cause only on a 404: the same words under another status settle nothing.
+  for (const code of [403, 500]) {
+    ({ r } = glRead([[/\/repository\/branches\//, code, BRANCH_404]], { branch: 'mian' }));
+    assert.deepEqual([r.kind, 'cause' in r], ['other', false], String(code));
+  }
+  // Not here: the PROJECT read and the approval rules keep E70's reading, whatever the body says.
+  const proj = readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: 'main' }, { runner: fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 404, REPO_404]] }).runner, env: ON });
+  assert.deepEqual([proj.kind, 'cause' in proj, proj.why], ['no-repo', false, 'GitLab answered 404 for the project acme/app (it does not exist, or your login may not see it)']);
+  ({ r } = glRead([[/\/approval_rules/, 404, REPO_404], [/\/protected_branches/, 200, []]]));
+  assert.match(r.approvalsWhy, /^GitLab refused to show the approval rules \(HTTP 404\): they need GitLab Premium/);
+  // GitHub is unchanged, and now carries the fact its sentence always asserted: one permission covers both.
+  ({ r } = ghRead([[/\/branches\/mian$/, 404]], { branch: 'mian' }));
+  assert.deepEqual([r.kind, r.cause, r.why], ['no-branch', 'branch', 'GitHub answered 404 for the branch mian, so this repo does not have it']);
+  ({ r } = ghRead([[/\/branches\/mian$/, 502]], { branch: 'mian' }));
+  assert.deepEqual([r.kind, 'cause' in r], ['other', false]);
+  // --json carries the cause, and the answer still holds no address.
+  ({ r } = glRead([[/\/repository\/branches\//, 404, REPO_404]], { branch: 'me@corp.com' }));
+  const json = JSON.stringify(protectionJSON(r));
+  assert.match(json, /"cause":"repository"/);
+  assert.ok(!json.includes('me@corp.com'), json);
+});
+
 test('E70 protectionLine: the Part 3 banner word for word only when both halves are proven; solo prints facts', () => {
   const base = { platform: 'github', host: 'github.com', repo: 'acme/app', branch: 'main', branchFrom: 'registry', platformDefault: 'main', known: true, protected: false, approvals: 0, from: [], codeOwners: false };
   assert.equal(BANNER, 'This repo has no approval rules and no branch protection. Anyone with write access can merge anything. yad will record what happens, but it cannot stop anything here.');
@@ -19303,7 +19385,11 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('no-branch').hint, /names a branch that exists/);
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
   assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for `main`$/);
-  assert.equal(unknown('empty').hint, 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again', 'GitHub\'s message already ruled a permission out, so the hint may not offer it back');
+  // Since E109 the access tail turns on `cause` — what the 404 PROVED — never on the platform's name. The
+  // GitHub reader always sets `cause: 'branch'` on a branch 404, because one permission covers both reads.
+  assert.equal(unknown('empty', 'x', { cause: 'branch' }).hint, 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again', 'GitHub\'s message already ruled a permission out, so the hint may not offer it back');
+  assert.equal(unknown('empty', 'x', { platform: 'gitlab', cause: 'branch' }).hint, unknown('empty', 'x', { cause: 'branch' }).hint, 'the same proof reads the same on either platform');
+  assert.equal(unknown('no-branch', 'x', { cause: 'branch' }).hint, 'check that `default_branch` in yad\'s files names a branch that exists on the platform');
   assert.equal(unknown('empty', 'x', { platform: 'gitlab' }).hint, 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again', 'GitLab\'s message leaves a permission open, so the hint may not settle it');
   assert.equal(unknown('no-branch', 'x', { platform: 'gitlab' }).hint, 'check that `default_branch` in yad\'s files names a branch that exists on the platform, or ask for access to the project\'s repository', 'a GitLab reader who finds the branch does exist still has something to do');
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^fix what the message names, then run `yad doctor` again/);
@@ -19431,6 +19517,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   // And every way the read cannot be made at all.
   shapes.push(GH([[/\/branches\/main$/, 404]]), GH([[/\/branches\/main$/, 502]]), GH([[/^repos\/acme\/app$/, 200, {}]]),
     GL([[/\/repository\/branches\//, 404]]), GL([[/^projects\/acme%2Fapp$/, 404]]),
+    // E109: a GitLab branch 404 whose body names the cause, each way, and one it does not recognise.
+    GL([[/\/repository\/branches\//, 404, { message: '404 Repository Not Found' }]]), GL([[/\/repository\/branches\//, 404, { message: '404 Branch Not Found' }]]),
+    GL([[/\/repository\/branches\//, 404, { message: '404 Dépôt introuvable' }]]), GL([[/^projects\/acme%2Fapp$/, 404, { message: '404 Repository Not Found' }]]),
     // a branch answered without the flag, and a project that names no default branch of its own
     GH([[/\/branches\/[^/]+$/, 200, { name: 'main' }], [/\/rules\//, 200, []]]),
     GL([[/\/repository\/branches\//, 200, { name: 'main' }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]]),
@@ -19443,6 +19532,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   };
   let seen = 0;
   let twoCause = 0; // the rule below is keyed on a wording, so count its firings: an edit must not silence it
+  let proved = 0; // …and so is E109's reverse of it
   const distinct = new Set(); // what the grid SAYS, not how many times it was asked
   for (const { platform, gitUrl, calls } of shapes) {
     for (const branch of ['main', 'develop', 'me@corp.com', null]) {
@@ -19469,8 +19559,17 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
         assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
         assert.ok(!/\. [a-z]/.test(line.hint || ''), `a sentence that starts lower case: ${line.hint}`);
         // A branch the platform named as its own default is a repo with no commits, whatever yad's files say.
-        if (r.known === false && r.platformDefault !== null && r.branch === r.platformDefault && /answered 404 for the branch/.test(r.why || '')) {
+        // (E109: unless the 404 proved the REPOSITORY could not be read — then the branch was never looked up.)
+        if (r.known === false && r.platformDefault !== null && r.branch === r.platformDefault && /answered 404 for the branch/.test(r.why || '') && r.cause !== 'repository') {
           assert.equal(r.kind, 'empty', `the platform named this branch its default, and the line says the repo lacks it: ${r.why}`);
+        }
+        // E109: a 404 whose body proved the cause says it without the hedge, and its hint does not reopen the
+        // cause the message ruled out — nor settle the branch when only the repository was proved.
+        if (r.cause) {
+          proved += 1;
+          assert.ok(!/may not see it|cannot see it/.test(`${line.message} ${line.hint || ''}`), `the body proved the cause, and the line still hedges: ${line.message} / ${line.hint}`);
+          if (r.cause === 'branch') assert.ok(!/ask for access|access to its repository/.test(line.hint || ''), `the branch is proven missing, and the hint offers access: ${line.hint}`);
+          if (r.cause === 'repository') assert.ok(!/does not have it|no commits|names a branch that exists/.test(`${line.message} ${line.hint || ''}`), `only the repository was proved, and the line settles the branch: ${line.message} / ${line.hint}`);
         }
         // A hint may not settle a cause its own message left open, whichever arm printed them.
         if (/, or your login may not see it\)/.test(line.message)) {
@@ -19498,11 +19597,12 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   }
   assert.ok(seen >= 4200, `the grid shrank: ${seen} lines`);
   assert.ok(twoCause >= 16, `the two-cause rule stopped firing (${twoCause} lines) — a reworded message may have silenced it`);
+  assert.ok(proved >= 34, `the proved-cause rule stopped firing (${proved} lines) — a reader that stopped setting \`cause\` would silence it`);
   // …and the count of DISTINCT lines, because a shape that collapses into another's answer leaves the
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
   // The measured count, exactly: the grid is deterministic, so any drop is a shape that stopped saying
   // something of its own. It says nothing about two hints merging — that is the hint rules' job above.
-  assert.ok(distinct.size >= 1358, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
+  assert.ok(distinct.size >= 1374, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {
