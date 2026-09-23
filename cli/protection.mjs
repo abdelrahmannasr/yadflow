@@ -80,7 +80,9 @@ function whyFailed(res, { platform, host, what, plural = false }) {
   if (res.status == null) return `yad could not reach ${host} to read ${what} (offline, or the host did not answer)`;
   if (res.status === 401) return `${name} refused to show ${what} (HTTP 401 — the login may have expired)`;
   if (res.status === 403) return `${name} refused to show ${what} (HTTP 403 — your login may not read ${plural ? 'them' : 'it'})`;
-  if (res.status === 404) return `${name} answered 404 for ${what} (${plural ? 'they do not exist, or your login may not see them' : 'it does not exist, or your login may not see it'})`;
+  // The plural subject here is a LIST the platform answers empty when there is nothing in it, so "they do
+  // not exist" is a cause this read already ruled out; only "your login may not see them" is live.
+  if (res.status === 404) return `${name} answered 404 for ${what} (${plural ? 'your login may not see them' : 'it does not exist, or your login may not see it'})`;
   return `${name} answered HTTP ${res.status} for ${what}`;
 }
 
@@ -327,7 +329,7 @@ function readGitLab(base, runner, unknown) {
       if (n === null) { whys.add('GitLab listed an approval rule whose count yad could not read'); continue; }
       if (n === 0) continue;
       let applies;
-      let unreadableReach = false; // this rule named a branch yad could not read, rather than naming none
+      let unreadableReach = false; // this rule's list holds a name yad could not read, rather than no list
       if (r.applies_to_all_protected_branches === true) applies = out.protected;
       else if (Array.isArray(r.protected_branches)) {
         // A listed branch yad cannot read settles nothing: a match wins, but "no match" is an answer only
@@ -339,9 +341,9 @@ function readGitLab(base, runner, unknown) {
         else { applies = null; unreadableReach = true; }
       } else applies = null;
       if (applies === null) {
-        // Two different gaps: GitLab named no branches at all, or it named one yad could not read.
+        // Two different gaps: GitLab gave no list of branches, or its list holds one yad could not read.
         whys.add(unreadableReach
-          ? 'GitLab listed an approval rule naming a branch yad could not read'
+          ? 'GitLab listed an approval rule whose list of branches yad could not read'
           : 'GitLab did not say which branches an approval rule covers');
         continue;
       }

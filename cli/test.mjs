@@ -18932,7 +18932,7 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   assert.deepEqual([r.approvals, r.partlyRead], [1, false], 'every call answered: nothing was left unread');
   // A plural subject keeps its number in the reason.
   ({ r } = ghRead([[/\/rules\//, 404], [/\/branches\/main$/, 200, { protected: true }]]));
-  assert.match(r.approvalsWhy, /^GitHub answered 404 for the rules on the branch \(they do not exist, or your login may not see them\)/);
+  assert.match(r.approvalsWhy, /^GitHub answered 404 for the rules on the branch \(your login may not see them\)/);
   // One source is named once: a hundred rules of one ruleset are one source, not a hundred.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, Array.from({ length: 100 }, () => PR_RULE(1))], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual(r.from, ['a repo ruleset (id 7)']);
@@ -19082,11 +19082,11 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // A listed branch yad cannot read settles nothing: "no match" needs every entry to be readable.
   for (const bad of [{ id: 5 }, { name: null }, { name: 7 }, null]) {
     ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, bad] }]], [/\/protected_branches/, 200, []]], {}, P));
-    assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab listed an approval rule naming a branch yad could not read'], JSON.stringify(bad));
+    assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab listed an approval rule whose list of branches yad could not read'], JSON.stringify(bad));
   }
   // Two rules, two different gaps: each keeps its own reason.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, { id: 5 }] }, { name: 'B', approvals_required: 3 }]], [/\/protected_branches/, 200, []]], {}, P));
-  assert.equal(r.approvalsWhy, 'GitLab listed an approval rule naming a branch yad could not read; GitLab did not say which branches an approval rule covers');
+  assert.equal(r.approvalsWhy, 'GitLab listed an approval rule whose list of branches yad could not read; GitLab did not say which branches an approval rule covers');
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, { id: 5 }] }, { name: 'B', approvals_required: 3, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [3, true], 'a rule whose reach is not known leaves a floor, never an exact count');
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'main' }, { id: 5 }] }]], [/\/protected_branches/, 200, []]], {}, P));
@@ -19378,8 +19378,10 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
       [200, [{ ...RULE(2), ruleset_source_type: 'Organization', ruleset_id: 3 }]], [200, [{ ...RULE(2), ruleset_source_type: 'Enterprise', ruleset_id: 'x' }]],
       [200, [{ type: 'pull_request' }]], [401],
       [200, [RULE(2, { required_reviewers: [{ minimum_approvals: 1 }] })]], [200, [RULE('x')]], [200, [{ type: 'deletion' }]],
-      [200, Array.from({ length: PAGE }, () => RULE(1))], [403], [404], [null], [200, 'junk'], [200, {}]]) {
-      for (const classic of [[200, {}], [200, { required_pull_request_reviews: { required_approving_review_count: 1 } }],
+      [200, Array.from({ length: PAGE }, () => RULE(1))], [200, Array.from({ length: PAGE }, () => ({ type: 'deletion' }))],
+      [200, [{ type: 'pull_request', parameters: { required_approving_review_count: 1 } }, { type: 'pull_request', parameters: {} }]],
+      [403], [404], [null], [200, 'junk'], [200, {}]]) {
+      for (const classic of [[200, {}], [200, []], [200, 'junk'], [200, { required_pull_request_reviews: { required_approving_review_count: 1 } }],
         [200, { required_pull_request_reviews: { required_approving_review_count: 'x', require_code_owner_reviews: true } }], [404], [403]]) {
         shapes.push(GH([[/\/protection$/, ...classic], [/\/rules\//, ...rules], [/\/branches\/[^/]+$/, 200, { protected: flag }]]));
       }
@@ -19394,6 +19396,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
         [200, [AR(1), AR(2)]], [200, [AR(1), AR('x')]], [200, [AR(1, { name: '', id: 9 })]],
         [200, [AR(1, { protected_branches: [{ name: 'main' }, { id: 5 }] })]], [200, [AR(1, { protected_branches: [{ name: 'release-*' }, { id: 5 }] })]],
         [200, [AR(1, { protected_branches: [{ name: 'x' }] }), AR(1, { protected_branches: [{ name: 'y' }] }), AR(1, { applies_to_all_protected_branches: true, protected_branches: [] }), AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
+        [200, [AR(1, { applies_to_all_protected_branches: true, protected_branches: [] }), AR(1, { protected_branches: [{ name: 'x' }] }), AR(1, { protected_branches: [{ name: 'y' }] })]],
+        [200, [AR(1, { protected_branches: [{ name: 'x' }] }), AR(1, { protected_branches: [{ name: 'y' }] }), AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
+        [200, [AR(1, { name: undefined, id: 'x' })]],
         [200, [AR(1, { protected_branches: [{ name: 'release-*' }, { id: 5 }] }), AR(1, { protected_branches: undefined })]], [200, [AR(1, { name: 'owner a@b.com' })]],
         [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { protected_branches: [{ name: 'dev' }] })]],
         [200, Array.from({ length: PAGE }, () => AR(0))], [403], [404], [401], [null], [200, 'junk'], [200, {}]]) {
@@ -19403,7 +19408,11 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   }
   // And every way the read cannot be made at all.
   shapes.push(GH([[/\/branches\/main$/, 404]]), GH([[/\/branches\/main$/, 502]]), GH([[/^repos\/acme\/app$/, 200, {}]]),
-    GL([[/\/repository\/branches\//, 404]]), GL([[/^projects\/acme%2Fapp$/, 404]]));
+    GL([[/\/repository\/branches\//, 404]]), GL([[/^projects\/acme%2Fapp$/, 404]]),
+    // a branch answered without the flag, and a project that names no default branch of its own
+    GH([[/\/branches\/[^/]+$/, 200, { name: 'main' }], [/\/rules\//, 200, []]]),
+    GL([[/\/repository\/branches\//, 200, { name: 'main' }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]]),
+    GL([[/^projects\/acme%2Fapp$/, 200, {}], [/\/repository\/branches\//, 200, { protected: false }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]]));
   const dashes = (line) => {
     // Count em dashes at the top level: a dash inside brackets or backticks is at another level.
     let out = line;
@@ -19413,7 +19422,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   let seen = 0;
   const distinct = new Set(); // what the grid SAYS, not how many times it was asked
   for (const { platform, gitUrl, calls } of shapes) {
-    for (const branch of ['main', 'develop', null]) {
+    for (const branch of ['main', 'develop', 'me@corp.com', null]) {
       const r = readProtection({ platform, gitUrl, branch }, { runner: fakePlatform({ calls }).runner, env: ON });
       for (const solo of [false, true]) {
         const line = protectionLine(r, { name: 'backend', solo });
@@ -19454,12 +19463,12 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
       }
     }
   }
-  assert.ok(seen >= 2100, `the grid shrank: ${seen} lines`);
+  assert.ok(seen >= 4200, `the grid shrank: ${seen} lines`);
   // …and the count of DISTINCT lines, because a shape that collapses into another's answer leaves the
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
   // The measured count, exactly: the grid is deterministic, so any drop is a shape that stopped saying
   // something of its own. It says nothing about two hints merging — that is the hint rules' job above.
-  assert.ok(distinct.size >= 892, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
+  assert.ok(distinct.size >= 1356, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {
