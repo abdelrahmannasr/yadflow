@@ -20,6 +20,7 @@ import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses } from './protection.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
+import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 
 const MIN_NODE = 18;
 
@@ -1955,6 +1956,33 @@ export function threadChecks(checks, root) {
   }
 }
 
+// E19 — is the Product index (`.sdlc/index.json`) what its work items say today? Its OWN section: the
+// golden freezes `epics` and `threads`, and this is the one line that makes the index's correctness
+// visible, since nothing else in this release reads it. A warning, never a failure: the index is derived,
+// and nothing is lost while it is behind. The hint turns on who may write it — a person on a local
+// Product, CI alone on a verified one — so each of the four answers is said both ways.
+export function indexChecks(checks, root) {
+  if (!exists(productConfigPath(root))) return;
+  const fresh = indexFreshness(root);
+  if (fresh.state === 'none') return; // no work items and no index: nothing to be behind
+  const verified = isVerifiedLedger(readJSON(productConfigPath(root), null));
+  const hint = verified
+    ? 'CI rebuilds it when it records the next merged review; on a verified Product a local write could not be committed'
+    : 'run `yad index` on the default branch, then commit it';
+  if (fresh.state === 'current') {
+    check(checks, 'index', 'index', 'ok', `${INDEX_FILE} is current`);
+    return;
+  }
+  const message = fresh.state === 'missing'
+    ? `${INDEX_FILE} has not been built yet`
+    : fresh.state === 'behind'
+      // The fact the read proved, and no cause: `yad epic new`, `yad skip`, a skill that still writes
+      // state.json by hand (E17b), a branch merged in, or a checkout that rewrote line endings all do it.
+      ? `${INDEX_FILE} is behind: the work items on disk differ from what it was built from`
+      : `${INDEX_FILE} cannot be read — ${fresh.why}`;
+  check(checks, 'index', 'index', 'warn', message, hint);
+}
+
 // Run every check section and return the diagnostic object without printing. The shared core of
 // `runDoctor`, and the same shape `--json` prints. Checks carry names and paths, so anything that
 // leaves the machine must scrub them — `yad report` does NOT consume this; it builds its own
@@ -1968,6 +1996,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   protectionChecks(checks, root);
   foundationChecks(checks, root);
   shapeChecks(checks, root);
+  indexChecks(checks, root);
   mirrorChecks(checks, root);
   dialChecks(checks, root);
   automationChecks(checks, root);

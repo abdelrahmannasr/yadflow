@@ -1592,3 +1592,35 @@ test('migrate 9 -> 10: moves the number and nothing else — no step gains a `de
     assert.deepEqual({ ...after, schemaVersion: 9 }, state, 'a plain deferral is not turned into a debt');
   } finally { cleanup(T); }
 });
+
+// E19: `yad migrate --apply` rebuilds the Product index with the files it rewrote — on the default
+// branch of a local Product only — and never lists the index as a file to migrate (it is derived).
+test('migrate --apply rebuilds .sdlc/index.json on the default branch; the index is never a migrate row', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' }).toString();
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "epicId": "EP-x",\n  "steps": []\n}\n' } });
+  try {
+    git(T, 'init', '-q');
+    git(T, 'config', 'user.email', 'a@b.c');
+    git(T, 'config', 'user.name', 'x');
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', 'seed');
+    git(T, 'branch', '-q', '-M', 'main');
+    const { indexPath, indexFreshness } = await import('./product-index.mjs');
+    // Another branch: the migration applies, the index is not written there.
+    git(T, 'checkout', '-q', '-b', 'feat/x');
+    const out = JSON.parse(await grabOut(() => runMigrate(T, { apply: true, json: true })));
+    assert.ok(out.changed.length, 'the migration itself applied');
+    assert.ok(!fs.existsSync(indexPath(T)), 'a branch never carries the index');
+    // The default branch: rebuilt, and --json stdout stays one JSON document. (The branch's migration is
+    // thrown away first, or it would follow the checkout and leave nothing to migrate on main.)
+    git(T, 'checkout', '-q', '--', '.');
+    git(T, 'checkout', '-q', 'main');
+    const printed = await grabOut(() => runMigrate(T, { apply: true, json: true }));
+    JSON.parse(printed);
+    assert.ok(fs.existsSync(indexPath(T)));
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    // Derived, never migrated: it is not a row on the plan, even once it exists.
+    assert.ok(!projectJsonFiles(T).some((f) => f.endsWith(path.join('.sdlc', 'index.json'))));
+  } finally { cleanup(T); }
+});

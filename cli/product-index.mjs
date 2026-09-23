@@ -18,7 +18,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { isPlainObject, writeJSON } from './lib.mjs';
+import { isPlainObject, writeJSON, info, warn } from './lib.mjs';
+import { isVerifiedLedger } from './manifest.mjs';
+import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 import {
   epicIds, epicRel, epicRoot, unlistedLedgerDirs, parseFrontmatter, lineageFrom, stepStatus, STEP_STATES,
   FOUNDATION_EPIC,
@@ -168,4 +170,28 @@ export function indexFreshness(root) {
     return { state: 'unreadable', why: '.sdlc/index.json records no input hash' };
   }
   return onDisk.inputs === built.inputs ? { state: 'current' } : { state: 'behind' };
+}
+
+// Rebuild the index after a LOCAL write — a gate write, a `yad migrate --apply` — on the default branch
+// only, and never on a verified Product, where CI is the ledger's one writer (it rebuilds the index in
+// `gateCi`'s merge commit instead). A branch never carries a rewrite of the file every other branch rewrites too. No `.git` means
+// the branch cannot be known, so nothing is written: the golden fixture is copied into a folder with no
+// `.git` of its own, and asking git there would read yadflow's own branch (E71 finding c).
+// The index is derived: a failure to rebuild it is said, and never stops the gate write it follows.
+// Returns whether the file changed, so a caller that commits can carry it in the same commit. `quiet`
+// for a caller whose stdout is JSON: the warning still goes to stderr.
+export function refreshIndexAfterWrite(root, hub, { quiet = false } = {}) {
+  if (isVerifiedLedger(hub) || !fs.existsSync(path.join(root, '.git'))) return false;
+  const git = productGit(root);
+  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+  if (!branch || branch !== resolveDefaultBranch(git, hub)) return false;
+  try {
+    const changed = writeIndex(root);
+    if (changed && !quiet) info(`rebuilt ${INDEX_FILE}`);
+    return changed;
+  } catch (e) {
+    const why = `${INDEX_FILE} was not rebuilt (${e.code || e.message}) — run \`yad index\``;
+    if (quiet) process.stderr.write(`${why}\n`); else warn(why);
+    return false;
+  }
 }
