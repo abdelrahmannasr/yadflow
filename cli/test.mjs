@@ -18932,7 +18932,7 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   assert.deepEqual([r.approvals, r.partlyRead], [1, false], 'every call answered: nothing was left unread');
   // A plural subject keeps its number in the reason.
   ({ r } = ghRead([[/\/rules\//, 404], [/\/branches\/main$/, 200, { protected: true }]]));
-  assert.match(r.approvalsWhy, /^GitHub answered 404 for the rules on the branch \(your login may not see them\)/);
+  assert.match(r.approvalsWhy, /^GitHub answered 404 for the rules on the branch, which a host without the rulesets API does/, 'the repo and the branch were just read with this login, so a permission is not the live cause');
   // One source is named once: a hundred rules of one ruleset are one source, not a hundred.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, Array.from({ length: 100 }, () => PR_RULE(1))], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual(r.from, ['a repo ruleset (id 7)']);
@@ -18960,6 +18960,10 @@ test('E70 readProtection: every way of not being able to ask is not known, with 
     [ghRead([[/\/branches\/main$/, 200, 'not json']]).r, /with something yad could not read/],
     [ghRead([[/\/branches\/main$/, 200, { name: 'main' }]]).r, /did not say whether the branch is protected/],
   ];
+  // …and an answer with no flag has its own kind, so its hint names someone rather than "fix what the
+  // message names" — the message names nothing the reader can fix.
+  assert.equal(ghRead([[/\/branches\/main$/, 200, { name: 'main' }]]).r.kind, 'no-flag');
+  assert.match(protectionLine(ghRead([[/\/branches\/main$/, 200, { name: 'main' }]]).r, { name: 'b' }).hint, /^ask someone who can see GitHub's settings for main/);
   for (const [r, why] of cases) {
     assert.equal(r.known, false, String(why));
     assert.match(r.why, why);
@@ -19003,7 +19007,8 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   ({ r } = glRead([[/\/repository\/branches\//, 404]], { branch: null }));
   assert.deepEqual([r.known, r.kind, r.branchFrom], [false, 'empty', 'platform'], 'the platform\'s own default with no commits yet');
   ({ r } = glRead([[/\/repository\/branches\//, 200, { name: 'main' }]]));
-  assert.deepEqual([r.known, r.why], [false, 'GitLab did not say whether the branch is protected']);
+  assert.deepEqual([r.known, r.kind, r.why], [false, 'no-flag', 'GitLab did not say whether the branch is protected']);
+  assert.match(protectionLine(r, { name: 'b' }).hint, /^ask someone who can see GitLab's settings for main/);
   // GitLab's own flag decides "protected" — group-level protection included, which the project list omits.
   // …so a protected branch with no entry in the list may be protected by its group: code owners not known.
   ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, []]], {}, P));
@@ -19285,6 +19290,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('no-url').hint, /\.sdlc\/repos\.json/);
   assert.match(unknown('no-branch').hint, /names a branch that exists/);
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
+  assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for main — the answer yad read did not say whether the branch is protected$/);
   assert.match(unknown('empty').hint, /^the platform names this default branch, but it has no commits yet/);
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^fix what the message names, then run `yad doctor` again/);
   assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /names a branch that exists/);

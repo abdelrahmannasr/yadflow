@@ -34,8 +34,8 @@ const TIMEOUT = 10_000;
 export const shown = (w) => (typeof w === 'string' && w.indexOf('@', 1) >= 0 ? 'a name with an @ in it' : `${w}`);
 
 // The repo's path on its host (`owner/repo`, or `group/sub/project` on GitLab), from a git remote URL in
-// either form. Not doctor's `repoSlug`, which keeps only the last two parts and so names the wrong GitLab
-// project under a subgroup.
+// either form. Not the `repoSlug` the doctor used to carry, which kept only the last two parts and so named
+// the wrong GitLab project under a subgroup.
 export function repoPathFromGitUrl(url = '') {
   if (typeof url !== 'string' || !url.trim()) return null;
   const u = url.trim();
@@ -80,9 +80,10 @@ function whyFailed(res, { platform, host, what, plural = false }) {
   if (res.status == null) return `yad could not reach ${host} to read ${what} (offline, or the host did not answer)`;
   if (res.status === 401) return `${name} refused to show ${what} (HTTP 401 — the login may have expired)`;
   if (res.status === 403) return `${name} refused to show ${what} (HTTP 403 — your login may not read ${plural ? 'them' : 'it'})`;
-  // The plural subject here is a LIST the platform answers empty when there is nothing in it, so "they do
-  // not exist" is a cause this read already ruled out; only "your login may not see them" is live.
-  if (res.status === 404) return `${name} answered 404 for ${what} (${plural ? 'your login may not see them' : 'it does not exist, or your login may not see it'})`;
+  // Only a single subject reaches this arm — a repo, a project or a branch, each of which can genuinely be
+  // absent. Every LIST this file reads names its own live cause at the call site, because "they do not
+  // exist" is what an empty list says and a permission was proven by the calls before it.
+  if (res.status === 404) return `${name} answered 404 for ${what} (it does not exist, or your login may not see it)`;
   return `${name} answered HTTP ${res.status} for ${what}`;
 }
 
@@ -195,7 +196,7 @@ function readGitHub(base, runner, unknown) {
     const why = whyFailed(b, { platform: 'github', host, what: `the branch ${shown(branch)}` });
     return { ...out, known: false, kind: branchMissing(b, branchFrom), why };
   }
-  if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'other', why: 'GitHub did not say whether the branch is protected' };
+  if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'no-flag', why: 'GitHub did not say whether the branch is protected' };
   out.protected = b.body.protected;
   // Rulesets: every ACTIVE rule on the branch ("evaluate" and "disabled" rulesets are not returned).
   const rules = api(runner, 'gh', host, `${at}/rules/branches/${segment(branch)}?per_page=${PAGE}`);
@@ -247,7 +248,12 @@ function readGitHub(base, runner, unknown) {
       ].filter(Boolean).join('; '),
     };
   } else {
-    const why = whyFailed(rules.ok ? { unreadable: true } : rules, { platform: 'github', host, what: 'the rules on the branch', plural: true });
+    // A 404 here is not "no rules" (that answer is an empty list) and not a permission (the repo and the
+    // branch were just read with this login): it is a host whose API has no rulesets, such as an older
+    // GitHub Enterprise Server.
+    const why = rules.status === 404
+      ? 'GitHub answered 404 for the rules on the branch, which a host without the rulesets API does'
+      : whyFailed(rules.ok ? { unreadable: true } : rules, { platform: 'github', host, what: 'the rules on the branch', plural: true });
     rs = { floor: 0, exact: false, why };
     // `protected: false` may not count a ruleset, so with the rulesets unread it proves nothing.
     if (out.protected === false) { out.protected = null; out.protectedWhy = 'GitHub\'s branch flag says no, and the rulesets that could confirm it could not be read'; }
@@ -304,7 +310,7 @@ function readGitLab(base, runner, unknown) {
   if (!b.ok) {
     return { ...out, known: false, kind: branchMissing(b, branchFrom), why: whyFailed(b, { platform: 'gitlab', host, what: `the branch ${shown(branch)}` }) };
   }
-  if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'other', why: 'GitLab did not say whether the branch is protected' };
+  if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'no-flag', why: 'GitLab did not say whether the branch is protected' };
   out.protected = b.body.protected;
   // The project's protected branches, for the code-owner fact only. The list leaves out protection set
   // for a whole group, and a group's setting takes precedence over the project's — so an entry saying "no"
@@ -593,6 +599,7 @@ function unknownHint(r) {
     case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
     case 'no-branch': return 'check that `default_branch` in yad\'s files names a branch that exists on the platform';
     case 'empty': return 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, then run `yad doctor` again';
+    case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch)} — the answer yad read did not say whether the branch is protected`;
     case 'no-default': return 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
     default: return 'fix what the message names, then run `yad doctor` again; nothing about this repo\'s protection is assumed meanwhile';
   }

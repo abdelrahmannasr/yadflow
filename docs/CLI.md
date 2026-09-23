@@ -1176,7 +1176,7 @@ default is read, and the line says that too.
 
 | Platform | Read from | Who may read it |
 |---|---|---|
-| GitHub | a ruleset's `pull_request` rule — every active rule on the branch, from the repo or its organisation (`GET repos/{owner}/{repo}/rules/branches/{branch}`) | anyone who can see the repo |
+| GitHub | a ruleset's `pull_request` rule — every active rule on the branch, from the repo or its organisation (`GET repos/{owner}/{repo}/rules/branches/{branch}`) | anyone who can see the repo. A host whose API has no rulesets, such as an older GitHub Enterprise Server, answers 404, and the line says so |
 | GitHub | classic branch protection's required reviews (`GET …/branches/{branch}/protection`) | **repo admins only** |
 | GitLab | a project approval rule that applies to the branch (`GET projects/{id}/approval_rules`) | GitLab **Premium and Ultimate** only |
 
