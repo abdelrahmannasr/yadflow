@@ -18804,7 +18804,7 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   // cli/cli's real shape (2026-09-22): protected, no review ruleset, classic 404 → NOT KNOWN, never 0.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [{ type: 'copilot_code_review', parameters: {} }]], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual([r.known, r.protected, r.approvals], [true, true, null]);
-  assert.match(r.approvalsWhy, /only a repo admin can read classic branch protection, and GitHub answered 404/);
+  assert.equal(r.approvalsWhy, 'only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin, or the branch is protected by rulesets alone)', 'the list came back with a ruleset on the branch, so that arm is a live cause');
   // The 404 reason does not offer a cause this read ruled out: with the rules read and EMPTY, the branch
   // has no ruleset, so only "your login is not an admin" is left.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: true }]]));
@@ -18933,6 +18933,14 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   // A plural subject keeps its number in the reason.
   ({ r } = ghRead([[/\/rules\//, 404], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.match(r.approvalsWhy, /^GitHub answered 404 for the rules on the branch, which a host without the rulesets API does/, 'the repo and the branch were just read with this login, so a permission is not the live cause');
+  // A 404 on the rules beside a flag saying "not protected": the protection sentence names the gap and
+  // offers no hunt, because the reason beside it says a 404 there is a host without the rulesets API.
+  ({ r } = ghRead([[/\/rules\//, 404], [/\/branches\/main$/, 200, { protected: false }]]));
+  assert.deepEqual([r.protected, r.approvals], [null, null]);
+  assert.equal(r.protectedWhy, 'GitHub\'s branch flag says no, and only the rules on the branch could confirm it');
+  assert.equal(r.approvalsWhy, 'GitHub answered 404 for the rules on the branch, which a host without the rulesets API does');
+  ({ r } = ghRead([[/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: false }]]));
+  assert.equal(r.protectedWhy, 'GitHub\'s branch flag says no, and the rulesets that could confirm it could not be read', 'a 403 IS an unread list, so that wording stays');
   // One source is named once: a hundred rules of one ruleset are one source, not a hundred.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, Array.from({ length: 100 }, () => PR_RULE(1))], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual(r.from, ['a repo ruleset (id 7)']);
@@ -18955,6 +18963,7 @@ test('E70 readProtection: every way of not being able to ask is not known, with 
     [readProtection(t, { runner: fakePlatform({ calls: [[/./, null]] }).runner, env: ON }), /^yad could not reach github\.com to read the repo acme\/app \(offline/],
     [ghRead([[/\/branches\/main$/, null]]).r, /^yad could not reach github\.com to read the branch main \(offline/],
     [ghRead([[/\/branches\/main$/, 404]]).r, /^GitHub answered 404 for the branch main, so this repo does not have it$/],
+    [ghRead([[/\/branches\/main$/, 404]], { branch: null }).r, /^GitHub answered 404 for the branch main, so this repo has no commits on it yet$/],
     [ghRead([[/\/branches\/main$/, 401]]).r, /HTTP 401 — the login may have expired/],
     [ghRead([[/\/branches\/main$/, 500]]).r, /answered HTTP 500 for the branch main/],
     [ghRead([[/\/branches\/main$/, 200, 'not json']]).r, /with something yad could not read/],
@@ -19003,7 +19012,7 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // The branch must exist: a typo in yad's files is never "nothing protects it".
   ({ r } = glRead([[/\/repository\/branches\//, 404]], { branch: 'mian' }));
   assert.deepEqual([r.known, r.kind, r.platformDefault], [false, 'no-branch', 'main']);
-  assert.match(r.why, /^GitLab answered 404 for the branch mian/);
+  assert.equal(r.why, 'GitLab answered 404 for the branch mian (it does not exist, or your login may not see it)', 'reading a project and reading its repository are two GitLab settings, so a permission is still live');
   ({ r } = glRead([[/\/repository\/branches\//, 404]], { branch: null }));
   assert.deepEqual([r.known, r.kind, r.branchFrom], [false, 'empty', 'platform'], 'the platform\'s own default with no commits yet');
   ({ r } = glRead([[/\/repository\/branches\//, 200, { name: 'main' }]]));
@@ -19291,7 +19300,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('no-branch').hint, /names a branch that exists/);
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
   assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for `main`$/);
-  assert.match(unknown('empty').hint, /^the platform names this default branch, but it has no commits yet/);
+  assert.equal(unknown('empty').hint, 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again', 'the message already ruled a permission out, so the hint may not offer it back');
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^fix what the message names, then run `yad doctor` again/);
   assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /names a branch that exists/);
   // A "not known" line still names the platform's own default when it differs (the typo case).
@@ -19447,7 +19456,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           assert.ok(!/\b1 approvals\b|\b(?!1\b)\d+ approval\b/.test(said), `a count and its noun disagree: ${said}`);
           assert.ok(!/\bthe approval rules [A-Za-z]+ has misses\b|\bthe approval rule [A-Za-z]+ has miss\b/.test(said), `a subject and its verb disagree: ${said}`);
           assert.ok(!/\b(rules|branches|reviewers|approval rules)\b[^.]{0,80}?(may not read it\b|it does not exist)/.test(said), `a plural subject with a singular pronoun: ${said}`);
-          assert.ok(!(/host without the rulesets API/.test(said) && /rulesets alone/.test(said)), `a cause this sentence already ruled out, offered again: ${said}`);
+          assert.ok(!(/host without the rulesets API/.test(said) && /rulesets? (alone|that could confirm)/.test(said)), `a cause this sentence already ruled out, offered again: ${said}`);
         }
         assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
         assert.ok(!/\. [a-z]/.test(line.hint || ''), `a sentence that starts lower case: ${line.hint}`);

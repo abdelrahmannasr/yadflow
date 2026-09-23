@@ -1187,7 +1187,7 @@ Whether the branch is protected comes from the branch's own `protected` flag (`G
 repos/{owner}/{repo}/branches/{branch}` on GitHub, `GET projects/{id}/repository/branches/{branch}` on
 GitLab — GitLab's flag also covers protection set for a whole group). On GitHub, "not protected" is never
 taken from that flag alone: it is confirmed against the active rules on the branch, and if the two answers
-disagree, or the rules cannot be read, the line says the protection is not known. The branch must exist: a branch
+disagree, or the rules gave no answer, the line says the protection is not known. The branch must exist: a branch
 that yad's files name but the platform does not have is "not known", never "unprotected". A line states
 only what the platform answered: who may merge into a protected branch, or push to it directly, is not
 read, so no line says who can merge, or that the platform holds a merge. A fact that could not be read
@@ -1207,10 +1207,12 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | Not logged in for that host | `gh is not logged in for github.com (or github.com did not answer)` |
 | No remote URL | `no git remote URL yad can read, so it cannot tell which repo to ask about` |
 | Offline | `yad could not reach github.com to read the repo acme/app (offline, or the host did not answer)` |
-| Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin)`. The reason adds `, or the branch is protected by rulesets alone` unless this branch cannot hold a ruleset, which is what an empty rules list, or a host without the rulesets API, proves |
+| Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin)`. The reason adds `, or the branch is protected by rulesets alone` only while a ruleset could be there — an empty rules list, or a host with no rulesets API, leaves it out |
 | A GitHub host with no rulesets API | `GitHub answered 404 for the rules on the branch, which a host without the rulesets API does` |
 | GitLab approval rules refused | `GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them` |
-| A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian, so this repo does not have it` |
+| A branch yad's files name that GitHub does not have | `GitHub answered 404 for the branch mian, so this repo does not have it` — the repo was read with the same login moments before, and one permission covers both |
+| A GitHub repo with no commits yet (yad's files name no branch, so GitHub's own default was read) | `GitHub answered 404 for the branch main, so this repo has no commits on it yet` |
+| A branch GitLab answered 404 for | `GitLab answered 404 for the branch mian (it does not exist, or your login may not see it)` — reading a project and reading its repository are two GitLab settings, so a permission is still a live cause |
 | A GitLab rule whose branch list yad cannot read | `GitLab listed an approval rule whose branch list holds a name yad could not read` |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
 
@@ -1286,7 +1288,10 @@ says not known.
 - GitHub's own `protected` flag is the starting point, but yad never takes "not protected" from it alone.
   It confirms with the active rules on the branch. If the flag says "not protected" while GitHub also lists
   active rules, the two answers disagree, and the line says the protection is not known — beside whatever
-  it did read about the approval. The same when the rules cannot be read at all.
+  it did read about the approval. The same when the rules gave no answer: a call that failed, or a 404,
+  which on that endpoint is a host without the rulesets API.
+- On a GitHub host that has no rulesets API (an older GitHub Enterprise Server), every read goes through
+  that 404, so the protection is always "not known" and Part 3's banner is never printed there.
 - A GitLab report rule (such as Coverage-Check or License-Check) asks for an approval only when its report
   fails, so it is not counted as an approval rule. A GitLab approval rule that does not say which branches
   it covers, or that lists a branch yad cannot read, makes the count not known — or "at least N" when
