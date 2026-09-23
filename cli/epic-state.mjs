@@ -3581,20 +3581,24 @@ export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{
 // becomes one space (NEL, U+0085, is a line break too), because a list prints one title per row. Control
 // characters are dropped: a title is printed to other people's terminals (E20), and an ESC or a BEL
 // there would rewrite or ring them. So are the bidi controls, which reverse how the rest of a row is
-// SHOWN, so one title can pass for another. The zero-width joiners are kept: emoji and several scripts
-// (Persian among them) need them.
+// SHOWN, so one title can pass for another. Zero-width characters (the joiners among them) are kept:
+// emoji and several scripts (Persian among them) need them.
 //
 // The frontmatter value is also unquoted, because `readFrontmatter` keeps the rest of the line as
 // written: `title: "Queue: untested"` is `Queue: untested`. A single-quoted value undoes YAML's one
 // escape (`'It''s done'` is `It's done`). A double-quoted value is read with JSON's escapes (`\"`, `\\`,
-// `\n`, `\t`, `\u00e9` …), which YAML's double-quoted style also has; one using any other escape is kept
-// as written (quotes and backslashes included), never half-read. Only a value that IS one quoted string is unquoted — `"Login" is broken
-// on "Safari"` is not, and stays as written, and so does `"x" # note`. The value is made one clean line
-// BEFORE it is unquoted, and again after (an escape such as `\n` or `\u001b` can add what was cleaned). The checks for "no title" below
-// run BEFORE unquoting: a quoted `'null'` or `">"` is text, as in YAML. The `change.json` title is JSON, already
-// unquoted, and is never touched this way. Three frontmatter values are no title at all: a list
-// (`readFrontmatter` turns any value that begins with `[` and ends with `]` into one), a YAML block marker
-// (`>` or `|` — the reader keeps one line, so the block's text is lost), and YAML's null (`~`, `null`).
+// `\n`, `\t`, `\u00e9` …), which YAML's double-quoted style also has; one using any other escape is
+// kept as written (quotes and backslashes included), never half-read. Only a value that IS one quoted
+// string is unquoted — `"Login" is broken on "Safari"` is not, and stays as written, and so does
+// `"x" # note`. The `change.json` title is JSON, already unquoted, and is never touched this way.
+//
+// The ORDER: the value is made one clean line first, then checked for "no title", then unquoted, then
+// cleaned again (an escape such as `\n` or `\u001b` can add what was cleaned). So the check sees the
+// cleaned value — `nu<NUL>ll` is YAML's null, which YAML itself would reject anyway — and never the
+// unquoted one: a quoted `'null'` or `">"` is text, as in YAML. Three frontmatter values are no title at
+// all: a list (`readFrontmatter` turns any value that begins with `[` and ends with `]` into one), a YAML
+// block marker (`>` or `|` — the reader keeps one line, so the block's text is lost), and YAML's null
+// (`~`, `null`, `Null`, `NULL`, the whole value).
 export const FOUNDATION_TITLE = 'Foundation';
 
 // eslint-disable-next-line no-control-regex -- matching control characters is the point

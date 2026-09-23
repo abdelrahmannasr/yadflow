@@ -21951,6 +21951,9 @@ test('E111 titleOf: the frontmatter key, then change.json, then null — normali
   assert.equal(titleOf({ title: 'abc\u202efed\u2066\u2069\u200e\u200f\u061c' }), 'abcfed');
   assert.equal(titleOf({ title: '"\\u202eX"' }), 'X', 'an escaped RLO too');
   assert.equal(titleOf({ title: 'a\u200db\u200cc' }), 'a\u200db\u200cc');
+  // The ORDER: cleaned first, then checked for "no title" — and a quoted value is still text (review 5).
+  for (const none of ['nu\u0000ll', '>\u0000', 'null\u0085', '\u202e~']) assert.equal(titleOf({ title: none }), null, JSON.stringify(none));
+  assert.equal(titleOf({ title: '"nu\u0000ll"' }), 'null', 'quoted, it is text');
   assert.equal(titleOf({ title: ['x'] }, { title: 'y' }), 'y', 'a list falls through to change.json');
   // Through the real reader: any value that begins with `[` and ends with `]` is a list; quoted, it is a title.
   assert.equal(titleOf(parseFrontmatter('---\ntitle: [Mobile] Checkout [v2]\n---\n')), null);
