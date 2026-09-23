@@ -314,7 +314,6 @@ function readGitLab(base, runner, unknown) {
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
   const elsewhere = new Map(); // how the rules that do not reach this branch miss it → how many do
-  let unreadableReach = false; // this rule named a branch yad could not read, rather than naming none
   let applied = 0; // rules that apply AND ask for an approval: each is met on its own, so 2 is a floor
   let elsewhereRules = 0; // how many rules the project has that do not reach this branch (1 reads differently)
   if (ar.ok && Array.isArray(ar.body)) {
@@ -328,6 +327,7 @@ function readGitLab(base, runner, unknown) {
       if (n === null) { whys.add('GitLab listed an approval rule whose count yad could not read'); continue; }
       if (n === 0) continue;
       let applies;
+      let unreadableReach = false; // this rule named a branch yad could not read, rather than naming none
       if (r.applies_to_all_protected_branches === true) applies = out.protected;
       else if (Array.isArray(r.protected_branches)) {
         // A listed branch yad cannot read settles nothing: a match wins, but "no match" is an answer only
@@ -341,9 +341,8 @@ function readGitLab(base, runner, unknown) {
       if (applies === null) {
         // Two different gaps: GitLab named no branches at all, or it named one yad could not read.
         whys.add(unreadableReach
-          ? 'GitLab listed a branch in an approval rule that yad could not read'
+          ? 'GitLab listed an approval rule naming a branch yad could not read'
           : 'GitLab did not say which branches an approval rule covers');
-        unreadableReach = false;
         continue;
       }
       if (applies) {
