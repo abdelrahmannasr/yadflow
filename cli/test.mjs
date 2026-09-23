@@ -19974,6 +19974,23 @@ test('E71 unknown: an approvals file that does not parse is NOT zero approvers',
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
 });
 
+test('E71 unknown: a ledger folder the enumerator does not name is NOT an empty one (shared with E19)', () => {
+  // A name that is not a valid id — and, since E19 shared the rule, an `epics/EP-foundation` beside a
+  // real `foundation/`: that folder is never read (the id's folder is foundation/), so the approvals in it
+  // were lost without a word before.
+  for (const [dir, why] of [['epics/Not_An_Id/.sdlc/approvals.json', 'a bad name'], ['epics/EP-foundation/.sdlc/approvals.json', 'a stray EP-foundation']]) {
+    const fx = peopleFixture();
+    try {
+      for (const f of ['foundation/.sdlc/state.json', dir]) fs.mkdirSync(path.dirname(path.join(fx.T, f)), { recursive: true });
+      fx.write('foundation/.sdlc/state.json', JSON.stringify({ steps: [] }));
+      fx.write(dir, '[]');
+      const r = activePeople(fx.T, { today: P_TODAY });
+      assertUnknown(r, why);
+      assert.ok(r.unknown.some((u) => u.startsWith(`${dir.split('/.sdlc')[0]} holds a ledger`)), r.unknown.join('\n'));
+    } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+  }
+});
+
 test('E71 unknown: a repos.json that does not parse is NOT "no repos" (the E65 bug, inverted)', () => {
   const fx = peopleFixture();
   try {
@@ -21259,4 +21276,149 @@ test('E74 probe: the real reader marks a person whose only record is a mistyped 
     assert.equal(counted.capacity.people.find((p) => p.login === 'bo-gh').future, true);
     assert.deepEqual(_teamHint(counted), { known: true, line: null }, 'so the suggestion does not stay on screen for good');
   } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+// ---- E19: `.sdlc/index.json`, the one-file front door ----------------------------------------------
+// A DERIVED summary of every work item, never the system of record. An item that cannot be read is
+// listed as unreadable, never dropped; staleness is a hash of the exact input bytes.
+const { buildIndex, writeIndex, indexFreshness, indexPath, INDEX_FORMAT } = await import('./product-index.mjs');
+
+// A Product on disk: `files` is { relative path: content }.
+function indexFixture(files = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e19-'));
+  for (const [rel, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+    fs.writeFileSync(path.join(T, rel), typeof body === 'string' ? body : `${JSON.stringify(body, null, 2)}\n`);
+  }
+  return T;
+}
+const E19_STATE = (extra = {}) => ({
+  schemaVersion: 10, epicId: 'EP-a', createdAt: '2026-9-4', type: 'feature', profile: 'classic', currentStep: 'architecture',
+  steps: [
+    { id: 'epic', status: 'done', closed: { by: 'ada', date: '2026-09-01', via: 'gate' } },
+    { id: 'epic-review', status: 'done', closed: { by: 'bo', date: '2026-09-02', via: 'gate' } },
+    { id: 'architecture', status: 'in_progress' },
+    { id: 'ui', status: 'blocked' }, // no record: reads todo (E38)
+    { id: 'stories', status: 'skipped', record: { by: 'ada', date: '2026-09-03', reason: 'x' } },
+    { id: 'odd', status: 'wobbly' },
+  ],
+  ...extra,
+});
+
+test('E19 buildIndex: a summary per work item, the Foundation included, read through stepStatus', () => {
+  const T = indexFixture({
+    'epics/EP-a/.sdlc/state.json': E19_STATE(),
+    'epics/EP-a/epic.md': '---\nid: EP-a\nkind: change\nparent: EP-root\nthread: EP-root\ntheme: Checkout\nrepos: [api, web]\n---\n# A\n',
+    'epics/EP-b/.sdlc/state.json': { epicId: 'EP-b', kind: 'stub', currentStep: 'epic', steps: [] },
+    'foundation/.sdlc/state.json': { epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep: 'foundation-done', steps: [{ id: 'purpose', status: 'done' }] },
+  });
+  try {
+    const { index } = buildIndex(T);
+    assert.deepEqual(index.items.map((i) => i.id), ['EP-a', 'EP-b', 'EP-foundation'], 'one enumerator, sorted, the product level included');
+    const [a, b, f] = index.items;
+    assert.deepEqual(a, {
+      id: 'EP-a', dir: 'epics/EP-a', kind: null, type: 'change', theme: 'Checkout', parent: 'EP-root', thread: 'EP-root',
+      profile: 'classic', currentStep: 'architecture', createdAt: '2026-9-4', repos: ['api', 'web'],
+      steps: { todo: 1, in_progress: 1, in_review: 0, done: 2, skipped: 1, deferred: 0, satisfied: 0, blocked: 0, unknown: 1 },
+      lastClosed: { step: 'epic-review', date: '2026-09-02', by: 'bo' },
+    });
+    assert.equal(b.type, 'feature', 'an epic.md-less feature epic reads as a genesis, as `epicLineage` does');
+    assert.deepEqual([b.kind, b.lastClosed, b.repos, 'unknown' in b.steps], ['stub', null, [], false]);
+    assert.deepEqual([f.dir, f.type, f.theme, f.kind, f.repos], ['foundation', null, null, 'foundation', []], 'the Foundation has no work-item type (E75)');
+    assert.equal(Object.keys(index).join(','), 'inputs,items', 'no timestamp, and no `unlisted` when there is none');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 buildIndex: an item that cannot be read is LISTED as unreadable, never dropped, never fatal', () => {
+  const T = indexFixture({
+    'epics/EP-ok/.sdlc/state.json': E19_STATE(),
+    'epics/EP-corrupt/.sdlc/state.json': '{ not json',
+    'epics/EP-array/.sdlc/state.json': [],
+    'epics/EP-nosteps/.sdlc/state.json': { epicId: 'EP-nosteps' },
+    'epics/EP-bare/epic.md': '# no ledger yet\n',
+    'epics/Bad_Name/.sdlc/state.json': E19_STATE(),
+    'epics/EP-foundation/.sdlc/state.json': E19_STATE(),
+    'foundation/.sdlc/state.json': { steps: [] },
+  });
+  try {
+    fs.mkdirSync(path.join(T, 'epics', 'EP-dir-md', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', 'EP-dir-md', '.sdlc', 'state.json'), JSON.stringify({ steps: [] }));
+    fs.mkdirSync(path.join(T, 'epics', 'EP-dir-md', 'epic.md')); // a folder where the file should be
+    const { index } = buildIndex(T);
+    const by = Object.fromEntries(index.items.map((i) => [i.id, i]));
+    assert.deepEqual(Object.keys(by).sort(), ['EP-array', 'EP-bare', 'EP-corrupt', 'EP-dir-md', 'EP-foundation', 'EP-nosteps', 'EP-ok']);
+    assert.deepEqual(by['EP-corrupt'], { id: 'EP-corrupt', dir: 'epics/EP-corrupt', unreadable: true, why: '.sdlc/state.json does not parse' });
+    assert.equal(by['EP-array'].why, '.sdlc/state.json is not an object');
+    assert.equal(by['EP-nosteps'].why, '.sdlc/state.json has no list of steps');
+    assert.equal(by['EP-bare'].why, 'it has no .sdlc/state.json');
+    assert.equal(by['EP-dir-md'].why, 'epic.md could not be read (EISDIR)');
+    assert.ok(!by['EP-ok'].unreadable && !by['EP-foundation'].unreadable, 'one bad item does not spoil the rest');
+    // What `epicIds` does not name is reported, not lost: a bad name, and an EP-foundation folder under
+    // epics/ that is never read (its id's folder is foundation/).
+    assert.deepEqual(index.unlisted, ['epics/Bad_Name', 'epics/EP-foundation']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 index hash: the exact input bytes, nothing else; writing it twice changes nothing', () => {
+  const T = indexFixture({
+    'epics/EP-a/.sdlc/state.json': E19_STATE(),
+    'epics/EP-a/epic.md': '---\nkind: feature\n---\n',
+  });
+  try {
+    const h0 = buildIndex(T).inputs;
+    assert.match(h0, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(buildIndex(T).inputs, h0, 'deterministic');
+    // Files the index does not read do not move it: a story, the approvals, a review summary.
+    fs.mkdirSync(path.join(T, 'epics', 'EP-a', 'stories'));
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', 'stories', 'EP-a-S01.md'), 'x');
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'approvals.json'), '[]');
+    assert.equal(buildIndex(T).inputs, h0, 'a file the index does not read');
+    // Every input it DOES read moves it: the state's bytes (even a re-indent), the epic.md, a new item,
+    // an unlisted folder, and an epic.md appearing.
+    const moves = [
+      () => fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE())),
+      () => fs.writeFileSync(path.join(T, 'epics', 'EP-a', 'epic.md'), '---\nkind: change\n---\n'),
+      () => { fs.mkdirSync(path.join(T, 'epics', 'EP-b', '.sdlc'), { recursive: true }); },
+      () => { fs.mkdirSync(path.join(T, 'epics', 'odd', '.sdlc'), { recursive: true }); },
+      () => fs.writeFileSync(path.join(T, 'epics', 'EP-b', 'epic.md'), '# b\n'),
+    ];
+    const seen = new Set([h0]);
+    for (const move of moves) {
+      move();
+      const h = buildIndex(T).inputs;
+      assert.ok(!seen.has(h), `an input changed and the hash did not: ${move}`);
+      seen.add(h);
+    }
+    // No timestamp: an unchanged Product writes the same bytes, so git never sees a change.
+    assert.equal(writeIndex(T), true, 'the first write');
+    assert.equal(writeIndex(T), false, 'the second write changes nothing');
+    const onDisk = JSON.parse(fs.readFileSync(indexPath(T), 'utf8'));
+    assert.equal(Number.isInteger(onDisk.schemaVersion), true, 'stamped like every file under .sdlc/');
+    assert.equal(typeof INDEX_FORMAT, 'string');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E19 indexFreshness: none, missing, current, behind, unreadable', () => {
+  const T = indexFixture({});
+  try {
+    assert.deepEqual(indexFreshness(T), { state: 'none' }, 'no work items and no index');
+    fs.mkdirSync(path.join(T, 'epics', 'EP-a', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE()));
+    assert.deepEqual(indexFreshness(T), { state: 'missing' });
+    writeIndex(T);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE({ currentStep: 'ui' })));
+    assert.deepEqual(indexFreshness(T), { state: 'behind' }, 'a skill that hand-writes state.json (E17b) leaves it behind');
+    fs.writeFileSync(indexPath(T), '{ nope');
+    assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: '.sdlc/index.json does not parse' });
+    fs.writeFileSync(indexPath(T), '{"items":[]}');
+    assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: '.sdlc/index.json records no input hash' });
+    // A corrupt ITEM is still a current index once rebuilt: the file lists it, so nothing is hidden.
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), '{ broken');
+    writeIndex(T);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    // Only an unlisted folder and no index: still something to be missing.
+    const U = indexFixture({ 'epics/Bad/.sdlc/state.json': '{}' });
+    try { assert.deepEqual(indexFreshness(U), { state: 'missing' }); } finally { fs.rmSync(U, { recursive: true, force: true }); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
