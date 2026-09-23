@@ -17,6 +17,10 @@
 # finds the file it knows. Guarding only one name would leave the other open to a hand-edit on a
 # verified product — the exact thing this gate exists to refuse.
 #   epics/*/reviews/*.md
+#   .sdlc/index.json — the Product index (E19): derived from the ledgers above, and rebuilt by CI in the
+#   same commit that records a merge. Exactly that one path: the files beside it (product.json, hub.json,
+#   repos.json…) are a person's to edit, and a wider arm would refuse `yad mode` and `yad setup` commits.
+#   It is never a seed, so no carve-out applies to it.
 # NOT protected:
 #   epics/*/.sdlc/contract-lock.json — artifact-side: the architect locks the contract surface in
 #   `gate open`, so a human legitimately commits it alongside the architecture artifact.
@@ -276,6 +280,10 @@ for sha in $commits; do
   while IFS= read -r -d '' f; do
     [ -n "$f" ] || continue
     case "$f" in
+      .sdlc/index.json)                    # the Product index (E19) — derived, CI-written, never a seed
+        touches_ledger=1
+        echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+        ;;
       epics/*/.sdlc/contract-lock.json) ;; # artifact-side — allowed
       epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/product-prs.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
         _slug="${f#epics/}"; _slug="${_slug%%/*}"

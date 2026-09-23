@@ -14106,6 +14106,31 @@ test('protectedLedgerPath matches the CI gate\'s scope, including its glob depth
   ]) assert.equal(protectedLedgerPath(rel), null, rel);
 });
 
+test('ledger hook (E19): the Product index is refused on a verified Product — exactly that path, no carve-out', () => {
+  assert.deepEqual(protectedLedgerPath('.sdlc/index.json'), { epic: null, rel: '.sdlc/index.json', kind: 'index' });
+  for (const rel of ['.sdlc/hub.json', '.sdlc/product.json', '.sdlc/repos.json', '.sdlc/index.json.bak', 'docs/.sdlc/index.json', 'index.json']) {
+    assert.equal(protectedLedgerPath(rel), null, `${rel} is a person's to edit`);
+  }
+  const T = hookProduct();
+  try {
+    const v = decide(T, '.sdlc/index.json');
+    assert.equal(v.allow, false);
+    assert.equal(v.epic, null);
+    assert.match(v.message, /\.sdlc\/index\.json is the Product index — derived from every work item's files, and CI-owned here/);
+    assert.match(v.message, /yad index --json/);
+    assert.match(v.message, /YAD_HOOK_DISABLE=1/);
+    // No seed carve-out: it belongs to no epic, so the seeded set is never even asked.
+    const runner = fakeGit([]);
+    assert.equal(decide(T, '.sdlc/index.json', { runner }).allow, false);
+    assert.ok(!runner.calls.some((c) => c.includes('ls-tree')), runner.calls.join('\n'));
+    assert.equal(decide(T, '.sdlc/hub.json').allow, true, 'its neighbour is a person\'s');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  const L = hookProduct({ hub: { platform: 'gitlab', default_branch: 'main' } });
+  try {
+    assert.equal(decide(L, '.sdlc/index.json').allow, true, 'a local Product: a person writes it (with `yad index`)');
+  } finally { fs.rmSync(L, { recursive: true, force: true }); }
+});
+
 test('payloadPaths reads every tool shape a harness sends, and shrugs at the rest', () => {
   assert.deepEqual(payloadPaths({ tool_input: { file_path: 'a.md' } }), ['a.md']);
   assert.deepEqual(payloadPaths({ tool_input: { notebook_path: 'n.ipynb' } }), ['n.ipynb']);
