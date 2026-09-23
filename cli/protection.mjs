@@ -533,7 +533,7 @@ function lineFor(r, { name, solo = false } = {}) {
   if (r.protected === false) {
     const msg = `${name}: ${br} is not protected on ${where}${branchNote}: anyone with write access can push to it directly; whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`;
     const why = r.platform === 'gitlab' && !r.rulesAnswered
-      ? 'on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in'
+      ? `on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
       : unread;
     // A line that could not be read keeps its hint in solo mode too: it names how to read it.
     return { status: solo ? 'ok' : 'warn', message: msg, hint: why };

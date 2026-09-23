@@ -19326,8 +19326,10 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
 test('E70: every printed line obeys the rules a reader would notice, over every shape the reader can return', () => {
   // Rounds 10 to 18 each found a sentence that broke one of these by hand. This drives every shape the
   // reader can return and checks them mechanically, so a wording slip fails here instead of in a review.
-  const GH = (calls) => ({ platform: 'github', gitUrl: GH_URL, calls: [[/^repos\/acme\/app$/, 200, { default_branch: 'main' }], ...calls] });
-  const GL = (calls) => ({ platform: 'gitlab', gitUrl: GL_URL, calls: [[/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }], ...calls] });
+  // A shape's own answers come FIRST: the fake runner takes the first match, so a shape that wants the repo
+  // read to fail is not shadowed by the default answer below it.
+  const GH = (calls) => ({ platform: 'github', gitUrl: GH_URL, calls: [...calls, [/^repos\/acme\/app$/, 200, { default_branch: 'main' }]] });
+  const GL = (calls) => ({ platform: 'gitlab', gitUrl: GL_URL, calls: [...calls, [/^projects\/acme%2Fapp$/, 200, { default_branch: 'main' }]] });
   const RULE = (n, extra = {}) => ({ type: 'pull_request', ruleset_source_type: 'Repository', ruleset_id: 7, parameters: { required_approving_review_count: n, ...extra } });
   const AR = (n, extra = {}) => ({ name: 'A', approvals_required: n, protected_branches: [], ...extra });
   const shapes = [];
@@ -19335,6 +19337,8 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   for (const flag of [true, false]) {
     for (const rules of [[200, []], [200, [RULE(0)]], [200, [RULE(2)]], [200, [RULE(2, { require_code_owner_review: true })]], [200, [RULE(0, { require_code_owner_review: true })]], [200, [RULE(0, { required_reviewers: 'x' })]],
       [200, [RULE(2, { require_code_owner_review: true, required_reviewers: [{ minimum_approvals: 1 }] }), RULE('x')]],
+      [200, [{ ...RULE(2), ruleset_source_type: 'Organization', ruleset_id: 3 }]], [200, [{ ...RULE(2), ruleset_source_type: 'Enterprise', ruleset_id: 'x' }]],
+      [200, [{ type: 'pull_request' }]], [401],
       [200, [RULE(2, { required_reviewers: [{ minimum_approvals: 1 }] })]], [200, [RULE('x')]], [200, [{ type: 'deletion' }]],
       [200, Array.from({ length: PAGE }, () => RULE(1))], [403], [404], [null], [200, 'junk']]) {
       for (const classic of [[200, {}], [200, { required_pull_request_reviews: { required_approving_review_count: 1 } }],
@@ -19349,7 +19353,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
       for (const ar of [[200, []], [200, [AR(2)]], [200, [AR(0)]], [200, [AR('x')]], [200, [AR(1, { protected_branches: [{ name: 'release-*' }] })]],
         [200, [AR(1, { protected_branches: undefined })]], [200, [AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
         [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
-        [200, [AR(1), AR(2)]], [200, Array.from({ length: PAGE }, () => AR(0))], [403], [404], [null]]) {
+        [200, [AR(1), AR(2)]], [200, [AR(1), AR('x')]], [200, [AR(1, { name: '', id: 9 })]],
+        [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { protected_branches: [{ name: 'dev' }] })]],
+        [200, Array.from({ length: PAGE }, () => AR(0))], [403], [404], [401], [null], [200, 'junk']]) {
         shapes.push(GL([[/\/repository\/branches\//, 200, { protected: flag }], [/\/protected_branches/, ...pb], [/\/approval_rules/, ...ar]]));
       }
     }
@@ -19365,7 +19371,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   };
   let seen = 0;
   for (const { platform, gitUrl, calls } of shapes) {
-    for (const branch of ['main', null]) {
+    for (const branch of ['main', 'develop', null]) {
       const r = readProtection({ platform, gitUrl, branch }, { runner: fakePlatform({ calls }).runner, env: ON });
       for (const solo of [false, true]) {
         const line = protectionLine(r, { name: 'backend', solo });
@@ -19374,14 +19380,14 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
         assert.ok(['ok', 'warn'].includes(line.status), `a status this section never sets: ${line.status}`);
         for (const said of parts) {
           assert.ok(!/\bnull\b|\bundefined\b|\bNaN\b|\[object/.test(said), `a value the platform did not send: ${said}`);
-          assert.ok(!/\s{2}|\s[;,.]|;;|\.\.|,,|\(\)|——/.test(said), `punctuation a reader would notice: ${said}`);
+          assert.ok(!/\s{2}|\s[;,]|\s\.(?!\w)|;;|\.\.|,,|\(\)|——|\s:/.test(said), `punctuation a reader would notice: ${said}`);
           assert.ok(!/[;,:]$/.test(said), `a sentence that stops mid-clause: ${said}`);
           assert.ok(dashes(said) <= 1, `two em dashes at one level: ${said}`);
           assert.ok(!said.split(/\s+/).some((w) => w.replace(/^[`"'([]+/, '').indexOf('@', 1) >= 0), `an address-like word: ${said}`);
           assert.ok(!/\b1 approvals\b|\b(?!1\b)\d+ approval\b/.test(said), `a count and its noun disagree: ${said}`);
           assert.ok(!/\bthe approval rules [A-Za-z]+ has misses\b|\bthe approval rule [A-Za-z]+ has miss\b/.test(said), `a subject and its verb disagree: ${said}`);
           assert.ok(!/\b(rules|branches|reviewers|approval rules)\b[^.]{0,80}?(may not read it\b|it does not exist)/.test(said), `a plural subject with a singular pronoun: ${said}`);
-          assert.ok(!/(could not read|not known)/.test(line.hint || '') || /(could not read|not known|Ask someone|ask someone|ask a repo admin|Maintainer|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit)/.test(line.hint || ''), `a hint that names nothing to do: ${line.hint}`);
+          assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
         }
         // A hint may claim something went unread only when the read says so…
         if (/about what yad could not read/.test(line.hint || '')) {
