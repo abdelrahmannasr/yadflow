@@ -1276,7 +1276,9 @@ says not known.
   refusal (401, 403 or 404) leaves it open, which is the one case a hint mentions Free. An answer that
   settles nothing — offline, a server error, a body yad could not read — names no tier, and its line points
   at what could not be read.
-- One source is named once. A hundred rules from one ruleset are one source.
+- A source named the same way is named once: a hundred rules from one ruleset read as one source. The
+  count beside it does not change — two GitLab rules that share a name are still two rules, so the line
+  still says "at least".
 - In CI, `gh` logs in with the job's token, which usually cannot read classic branch protection: the line
   then says not known (HTTP 403 or 404), never "no rules".
 - GitHub's own `protected` flag is the starting point, but yad never takes "not protected" from it alone.

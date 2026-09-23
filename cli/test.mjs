@@ -19037,6 +19037,11 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   }
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: { a: 1 }, id: 7, approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual(r.from, ['an approval rule (id 7)'], 'a name that is not a name falls back to the id');
+  // Two rules the project named the same are still two rules: the floor survives the name being said once.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', id: 1, approvals_required: 1, protected_branches: [] }, { name: 'A', id: 2, approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.from, r.approvals, r.atLeast], [['approval rule "A"'], 2, true]);
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ approvals_required: 2, protected_branches: [] }, { approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.from, r.approvals, r.atLeast], [['an approval rule'], 2, true], 'two nameless rules are two rules');
   // Two rules: each is met on its own and their approvers may overlap — the largest is a floor.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'B', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [2, true]);
@@ -19114,7 +19119,7 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // A list that came back proves the project is not on GitLab Free, so no hint offers Free as the reason.
   ({ r } = glRead([[/\/approval_rules/, 200, Array.from({ length: PAGE }, () => ({ name: 'z', approvals_required: 0, protected_branches: [] }))], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.rulesAnswered], [null, true]);
-  assert.equal(protectionLine(r, { name: 'web' }).hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings');
+  assert.match(protectionLine(r, { name: 'web' }).hint, /about what yad could not read$/, 'a list came back, and something in it was still unread');
   ({ r } = glRead([[/\/approval_rules/, 403], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.rulesAnswered, r.rulesRefused], [undefined, true]);
   assert.match(protectionLine(r, { name: 'web' }).hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate/);
@@ -19237,8 +19242,12 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(l.hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see/);
   l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'offline' }, { name: 'b' });
   assert.match(l.hint, /about what yad could not read$/, 'a read that answered nothing names no tier, and points at what it could not read');
-  l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'x', rulesAnswered: true }, { name: 'b' });
-  assert.equal(l.hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings', 'a list that came back settles the tier');
+  // Both GitLab twins say the same thing: a refusal leaves the tier open, everything else points at what
+  // was not read (a count that is not known means something was).
+  for (const protec of [true, false]) {
+    assert.match(protectionLine({ ...base, platform: 'gitlab', protected: protec, approvals: null, approvalsWhy: 'x', rulesAnswered: true }, { name: 'b' }).hint, /about what yad could not read$/);
+    assert.match(protectionLine({ ...base, platform: 'gitlab', protected: protec, approvals: null, approvalsWhy: 'x', rulesRefused: true }, { name: 'b' }).hint, /^on GitLab Free an approval never blocks a merge; on Premium/);
+  }
   l = protectionLine({ ...base, protected: null, protectedWhy: 'p', approvals: null, approvalsWhy: 'a' }, { name: 'b' });
   assert.equal(l.message, 'b: whether `main` is protected on GitHub acme/app is not known (p), and neither is whether a merge needs an approval — a');
   l = protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b' });
@@ -19430,7 +19439,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   assert.ok(seen >= 2100, `the grid shrank: ${seen} lines`);
   // …and the count of DISTINCT lines, because a shape that collapses into another's answer leaves the
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
-  assert.ok(distinct.size >= 800, `the grid says less than it did: ${distinct.size} distinct lines`);
+  // Set from the measured 830, with room for a wording change that merges a line or two. A shape that
+  // collapses into another's answer costs 6 (3 branches × 2 modes), so it cannot slip under this.
+  assert.ok(distinct.size >= 827, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {

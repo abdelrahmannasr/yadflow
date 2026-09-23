@@ -314,6 +314,7 @@ function readGitLab(base, runner, unknown) {
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
   const elsewhere = new Map(); // how the rules that do not reach this branch miss it → how many do
+  let applied = 0; // how many rules apply to this branch: each must be met on its own, so 2 is a floor
   let elsewhereRules = 0; // how many rules the project has that do not reach this branch (1 reads differently)
   if (ar.ok && Array.isArray(ar.body)) {
     let floor = 0;
@@ -331,6 +332,7 @@ function readGitLab(base, runner, unknown) {
       else applies = null;
       if (applies === null) { whys.add('GitLab did not say which branches an approval rule covers'); continue; }
       if (applies) {
+        applied += 1;
         floor = Math.max(floor, n);
         // A name the platform did not give is never printed as if it had: its id, else no name at all.
         const named = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : null;
@@ -359,7 +361,7 @@ function readGitLab(base, runner, unknown) {
           : whyFailed(ar, { platform: 'gitlab', host, what: 'the approval rules', plural: true })),
     };
   }
-  out.from = [...new Set(out.from)]; // one source, said once
+  out.from = [...new Set(out.from)]; // a source named the same way is named once (the count is above)
   Object.assign(out, settle([src]));
   // The approval-rules endpoint answers on Premium and Ultimate only, so a list that came back settles the
   // tier: a hint must not go on offering Free as the explanation (the round-15 rule, on the GitLab side).
@@ -376,8 +378,9 @@ function readGitLab(base, runner, unknown) {
       : `${one ? 'it' : 'they'} ${MISSES[how[0][0]][one ? 0 : 1]}`;
     out.rulesElsewhereOne = one;
   }
-  // Each GitLab rule must be met on its own, and their approvers may overlap: two or more is a floor.
-  if (out.approvals > 0 && out.from.length > 1) out.atLeast = true;
+  // Each GitLab rule must be met on its own, and their approvers may overlap: two or more is a floor. It
+  // counts the rules that APPLIED — two rules can print the same name, and a floor is not a label count.
+  if (out.approvals > 0 && applied > 1) out.atLeast = true;
   return out;
 }
 
@@ -499,7 +502,9 @@ function lineFor(r, { name, solo = false } = {}) {
     // false, so the banner is not printed, and the sentence says which way they miss it.
     const only = scoped.length ? `; only some changes need an approval (${scoped.join('; ')})` : '';
     const many = !r.rulesElsewhereOne;
-    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rule${many ? 's' : ''} ${P} has miss${many ? '' : 'es'} it: ${r.rulesElsewhere}, so ${many ? 'none of them holds' : 'it does not hold'} a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
+    // No `unknownScoped` clause: this sentence is GitLab-only and needs `protected === false`, where the
+    // reader always proves `codeOwners` and never sets `fileReviewers`.
+    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rule${many ? 's' : ''} ${P} has miss${many ? '' : 'es'} it: ${r.rulesElsewhere}, so ${many ? 'none of them holds' : 'it does not hold'} a merge into it${only}`;
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === null) {
@@ -552,9 +557,11 @@ function lineFor(r, { name, solo = false } = {}) {
   const hint = r.platform === 'gitlab'
     // A refusal leaves the tier open; a list that came back settles it; anything else answered nothing,
     // so that line points at what was not read, exactly as its twin above does.
+    // The twins say the same thing: a refusal leaves the tier open, and every other answer left something
+    // unread, which is what the reader needs pointed at.
     ? (r.rulesRefused
       ? `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
-      : (r.rulesAnswered ? `a Maintainer can see the approval rules for ${br} in the project's merge request settings` : unread))
+      : unread)
     : `ask a repo admin to check the required approvals for ${br} in ${P}'s settings`;
   return { status: solo ? 'ok' : 'warn', message: msg, hint };
 }
