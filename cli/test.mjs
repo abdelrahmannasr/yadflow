@@ -19079,6 +19079,15 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // One rule's reach unknown, another applying: the count is a floor, never exact.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'a', approvals_required: 3 }, { name: 'b', approvals_required: 1, protected_branches: [{ name: 'main' }] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [1, true]);
+  // A listed branch yad cannot read settles nothing: "no match" needs every entry to be readable.
+  for (const bad of [{ id: 5 }, { name: null }, { name: 7 }, null]) {
+    ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, bad] }]], [/\/protected_branches/, 200, []]], {}, P));
+    assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab did not say which branches an approval rule covers'], JSON.stringify(bad));
+  }
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'release-*' }, { id: 5 }] }, { name: 'B', approvals_required: 3, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.approvals, r.atLeast], [3, true], 'a rule whose reach is not known leaves a floor, never an exact count');
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [{ name: 'main' }, { id: 5 }] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.equal(r.approvals, 2, 'a readable match still wins');
   // No `protected_branches` key at all is not "every branch".
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'x', approvals_required: 2 }]], [/\/protected_branches/, 200, []]]));
   assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab did not say which branches an approval rule covers']);
@@ -19425,7 +19434,11 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           assert.ok(r.known === false || r.partlyRead === true || r.codeOwners === null || r.fileReviewers === null,
             `the hint claims something was unread, and nothing was: ${line.message}`);
         }
-        // …and a line that gives a count while part of the read is missing must point at what is missing.
+        // …and any line from a partly read answer must point at what is missing — except a GitLab refusal,
+        // whose hint names the tier that refusal leaves open.
+        if (r.known && r.partlyRead && line.hint && !r.rulesRefused) {
+          assert.match(line.hint, /could not read|ask someone|ask a repo admin|Maintainer/, `part of the read is missing, and the hint neither names it nor says who can settle it: ${line.message}`);
+        }
         if (r.known && r.partlyRead && r.approvals > 0) {
           assert.match(line.hint || '', /could not read/, `a count was partly read, and nothing points at the part that was not: ${line.message}`);
         }
@@ -19439,9 +19452,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   assert.ok(seen >= 2100, `the grid shrank: ${seen} lines`);
   // …and the count of DISTINCT lines, because a shape that collapses into another's answer leaves the
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
-  // Set from the measured 830, with room for a wording change that merges a line or two. A shape that
-  // collapses into another's answer costs 6 (3 branches × 2 modes), so it cannot slip under this.
-  assert.ok(distinct.size >= 827, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
+  // The measured count, exactly: the grid is deterministic, so any drop is a shape that stopped saying
+  // something of its own. It says nothing about two hints merging — that is the hint rules' job above.
+  assert.ok(distinct.size >= 830, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {

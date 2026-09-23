@@ -314,7 +314,7 @@ function readGitLab(base, runner, unknown) {
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
   const elsewhere = new Map(); // how the rules that do not reach this branch miss it → how many do
-  let applied = 0; // how many rules apply to this branch: each must be met on its own, so 2 is a floor
+  let applied = 0; // rules that apply AND ask for an approval: each is met on its own, so 2 is a floor
   let elsewhereRules = 0; // how many rules the project has that do not reach this branch (1 reads differently)
   if (ar.ok && Array.isArray(ar.body)) {
     let floor = 0;
@@ -328,7 +328,14 @@ function readGitLab(base, runner, unknown) {
       if (n === 0) continue;
       let applies;
       if (r.applies_to_all_protected_branches === true) applies = out.protected;
-      else if (Array.isArray(r.protected_branches)) applies = r.protected_branches.length ? r.protected_branches.some((p) => branchMatches(p?.name, branch)) : true; // none listed: every branch
+      else if (Array.isArray(r.protected_branches)) {
+        // A listed branch yad cannot read settles nothing: a match wins, but "no match" is an answer only
+        // when every entry was readable.
+        const listed = r.protected_branches;
+        if (!listed.length) applies = true;
+        else if (listed.some((x) => branchMatches(x?.name, branch))) applies = true;
+        else applies = listed.every((x) => typeof x?.name === 'string') ? false : null;
+      } // none listed: every branch
       else applies = null;
       if (applies === null) { whys.add('GitLab did not say which branches an approval rule covers'); continue; }
       if (applies) {
@@ -366,8 +373,9 @@ function readGitLab(base, runner, unknown) {
   // The approval-rules endpoint answers on Premium and Ultimate only, so a list that came back settles the
   // tier: a hint must not go on offering Free as the explanation (the round-15 rule, on the GitLab side).
   if (ar.ok && Array.isArray(ar.body)) out.rulesAnswered = true;
-  // A refusal is the only answer that leaves the tier open: offline, or a body yad could not read, says
-  // nothing about Premium at all, so those lines point at what was not read instead.
+  // `rulesAnswered` is a fact for `--json` and nothing else: the hints turn on `rulesRefused`, the one
+  // answer that leaves the tier open — offline, or a body yad could not read, says nothing about Premium,
+  // and those lines point at what was not read instead.
   else if (!ar.ok && [401, 403, 404].includes(ar.status)) out.rulesRefused = true;
   if (elsewhere.size) {
     const how = [...elsewhere];
@@ -472,7 +480,9 @@ function lineFor(r, { name, solo = false } = {}) {
         status: 'warn',
         message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? `; and ${own}` : ''}`,
         // …and a part that went unread is pointed at here too, as on every other partly read line.
-        hint: `${solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`}${unknownScoped.length || r.partlyRead ? `. ${Unread}` : ''}`,
+        // No `unknownScoped` here: this arm is GitLab-only, where a branch proven unprotected always has
+        // its code-owner fact settled and carries no named-reviewer fact at all.
+        hint: `${solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`}${r.partlyRead ? `. ${Unread}` : ''}`,
       };
     }
     // Whether the branch is protected may be unknown beside a count that was read: say so, never silently.
@@ -555,8 +565,6 @@ function lineFor(r, { name, solo = false } = {}) {
     ? `${name}: ${br} is protected on ${where}${branchNote}, but whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`
     : `${name}: whether ${br} is protected on ${where}${branchNote} is not known (${r.protectedWhy}), and neither is whether a merge needs an approval — ${r.approvalsWhy}${clauses(false)}`;
   const hint = r.platform === 'gitlab'
-    // A refusal leaves the tier open; a list that came back settles it; anything else answered nothing,
-    // so that line points at what was not read, exactly as its twin above does.
     // The twins say the same thing: a refusal leaves the tier open, and every other answer left something
     // unread, which is what the reader needs pointed at.
     ? (r.rulesRefused
