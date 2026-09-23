@@ -74,13 +74,13 @@ function api(runner, cli, host, pathname) {
 export const PAGE = 100;
 
 // Why a call gave no answer, as a clause that finishes "not known — ".
-function whyFailed(res, { platform, host, what }) {
+function whyFailed(res, { platform, host, what, plural = false }) {
   const name = PLATFORM_NAME[platform];
   if (res.unreadable) return `${name} answered ${what} with something yad could not read`;
   if (res.status == null) return `yad could not reach ${host} to read ${what} (offline, or the host did not answer)`;
   if (res.status === 401) return `${name} refused to show ${what} (HTTP 401 — the login may have expired)`;
   if (res.status === 403) return `${name} refused to show ${what} (HTTP 403 — your login may not read it)`;
-  if (res.status === 404) return `${name} answered 404 for ${what} (it does not exist, or your login may not see it)`;
+  if (res.status === 404) return `${name} answered 404 for ${what} (${plural ? 'they do not exist, or your login may not see them' : 'it does not exist, or your login may not see it'})`;
   return `${name} answered HTTP ${res.status} for ${what}`;
 }
 
@@ -115,8 +115,10 @@ function loggedIn(runner, cli, host, authCache) {
 //     protected: true|false|null, protectedWhy,            — is the branch protected at all?
 //     approvals: n|null, atLeast, approvalsWhy, from: [..],— the required approval count, and where
 //     rulesElsewhere: '<clause: how they miss it>',        — GitLab only: rules the project has that do
-//                                                            not reach this branch ("they name other
-//                                                            branches", "some of them …, and others …")
+//                                                            not reach this branch ("it names other
+//                                                            branches", "one of them …, and another …"),
+//     rulesElsewhereOne: true|false,                       — whether that clause speaks of one rule,
+//     partlyRead: true|false,                              — something the platform holds was not read
 //     codeOwners: true|false|null,                         — a code-owner review is required (a fact beside)
 //     fileReviewers: true|false|null }                     — a named reviewer for some files (GitHub only:
 //                                                            a GitLab answer carries no such key)
@@ -168,8 +170,10 @@ const settle = (sources) => {
   const floor = Math.max(0, ...sources.map((s) => s.floor));
   const exact = sources.every((s) => s.exact);
   const why = sources.filter((s) => !s.exact).map((s) => s.why).join('; ');
-  return floor > 0 ? { approvals: floor, atLeast: !exact, approvalsWhy: null }
-    : (exact ? { approvals: 0, atLeast: false, approvalsWhy: null } : { approvals: null, atLeast: false, approvalsWhy: why });
+  // `partlyRead` is the fact a hint keys on: something the platform holds was NOT read. `atLeast` also
+  // turns true for GitLab rules that overlap, where every call succeeded — that is not a partial read.
+  return floor > 0 ? { approvals: floor, atLeast: !exact, partlyRead: !exact, approvalsWhy: null }
+    : (exact ? { approvals: 0, atLeast: false, partlyRead: false, approvalsWhy: null } : { approvals: null, atLeast: false, partlyRead: true, approvalsWhy: why });
 };
 
 function readGitHub(base, runner, unknown) {
@@ -236,7 +240,7 @@ function readGitHub(base, runner, unknown) {
       ].filter(Boolean).join('; '),
     };
   } else {
-    const why = whyFailed(rules.ok ? { unreadable: true } : rules, { platform: 'github', host, what: 'the rulesets on the branch' });
+    const why = whyFailed(rules.ok ? { unreadable: true } : rules, { platform: 'github', host, what: 'the rules on the branch', plural: true });
     rs = { floor: 0, exact: false, why };
     // `protected: false` may not count a ruleset, so with the rulesets unread it proves nothing.
     if (out.protected === false) { out.protected = null; out.protectedWhy = 'GitHub\'s branch flag says no, and the rulesets that could confirm it could not be read'; }
@@ -303,23 +307,23 @@ function readGitLab(base, runner, unknown) {
   else if (out.protected === false) out.codeOwners = false;
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
-  const elsewhere = new Set();
+  const elsewhere = new Map(); // how the rules that do not reach this branch miss it → how many do
   let elsewhereRules = 0; // how many rules the project has that do not reach this branch (1 reads differently)
   if (ar.ok && Array.isArray(ar.body)) {
     let floor = 0;
-    const whys = [];
+    const whys = new Set();
     for (const r of ar.body) {
       // A report rule (Coverage-Check, License-Check…) asks for an approval only when its report fails,
       // so it does not hold every merge: not an approval rule here.
       if (r?.rule_type === 'report_approver') continue;
       const n = count(r?.approvals_required);
-      if (n === null) { whys.push('GitLab listed an approval rule whose count yad could not read'); continue; }
+      if (n === null) { whys.add('GitLab listed an approval rule whose count yad could not read'); continue; }
       if (n === 0) continue;
       let applies;
       if (r.applies_to_all_protected_branches === true) applies = out.protected;
       else if (Array.isArray(r.protected_branches)) applies = r.protected_branches.length ? r.protected_branches.some((p) => branchMatches(p?.name, branch)) : true; // none listed: every branch
       else applies = null;
-      if (applies === null) { whys.push('GitLab did not say which branches an approval rule covers'); continue; }
+      if (applies === null) { whys.add('GitLab did not say which branches an approval rule covers'); continue; }
       if (applies) {
         floor = Math.max(floor, n);
         // A name the platform did not give is never printed as if it had: its id, else no name at all.
@@ -333,11 +337,12 @@ function readGitLab(base, runner, unknown) {
       // line never claims "no approval rules", nor that protecting the branch would bring this one to it.
       else {
         elsewhereRules += 1;
-        elsewhere.add(r.applies_to_all_protected_branches === true ? 'protected-only' : 'named');
+        const kind = r.applies_to_all_protected_branches === true ? 'protected-only' : 'named';
+        elsewhere.set(kind, (elsewhere.get(kind) || 0) + 1);
       }
     }
-    if (ar.body.length >= PAGE) whys.push(`the project has ${PAGE} or more approval rules and yad reads only the first ${PAGE}`);
-    src = { floor, exact: !whys.length, why: whys.join('; ') };
+    if (ar.body.length >= PAGE) whys.add(`the project has ${PAGE} or more approval rules and yad reads only the first ${PAGE}`);
+    src = { floor, exact: !whys.size, why: [...whys].join('; ') };
   } else {
     src = {
       floor: 0, exact: false,
@@ -345,16 +350,17 @@ function readGitLab(base, runner, unknown) {
         ? 'GitLab answered the approval rules with something yad could not read'
         : ([401, 403, 404].includes(ar.status)
           ? `GitLab refused to show the approval rules (HTTP ${ar.status}): they need GitLab Premium or Ultimate, or your login may not read them`
-          : whyFailed(ar, { platform: 'gitlab', host, what: 'the approval rules' })),
+          : whyFailed(ar, { platform: 'gitlab', host, what: 'the approval rules', plural: true })),
     };
   }
   Object.assign(out, settle([src]));
   if (elsewhere.size) {
     const how = [...elsewhere];
+    const said = ([kind, n], first) => `${n === 1 ? (first ? 'one of them' : 'another') : (first ? 'some of them' : 'others')} ${MISSES[kind][n === 1 ? 0 : 1]}`;
     const one = elsewhereRules === 1;
     out.rulesElsewhere = how.length > 1
-      ? `some of them ${MISSES[how[0]][1]}, and others ${MISSES[how[1]][1]}`
-      : `${one ? 'it' : 'they'} ${MISSES[how[0]][one ? 0 : 1]}`;
+      ? `${said(how[0], true)}, and ${said(how[1], false)}`
+      : `${one ? 'it' : 'they'} ${MISSES[how[0][0]][one ? 0 : 1]}`;
     out.rulesElsewhereOne = one;
   }
   // Each GitLab rule must be met on its own, and their approvers may overlap: two or more is a floor.
@@ -460,7 +466,7 @@ function lineFor(r, { name, solo = false } = {}) {
     }
     const said = { status: 'ok', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners} — yad reports this and enforces nothing` };
     // A line that is partly unread carries its hint, as every other partly unread line does.
-    return unknownScoped.length || r.atLeast ? { ...said, hint: unread } : said;
+    return unknownScoped.length || r.partlyRead ? { ...said, hint: unread } : said;
   }
   if (r.approvals === 0 && r.protected === false && r.rulesElsewhere) {
     // The platform DID return approval rules; they do not reach this branch. "No approval rules" would be
@@ -476,9 +482,9 @@ function lineFor(r, { name, solo = false } = {}) {
     // one level let a reader take the middle as an aside.
     const only = scoped.length ? ' on every change: only some changes need an approval (' + scoped.join('; ') + ')' : '';
     const msg = `${name}: no rule on ${where}${branchNote} requires an approval to merge into ${br}${only || (unknownScoped.length ? ' on every change' : '')}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}; whether the branch is protected is not known — ${r.protectedWhy}`;
-    // Nothing failed on this path — the platform gave two answers that disagree — so the hint does not
-    // say "what yad could not read"; it names who can settle it.
-    const ask = `ask someone who can see ${P}'s settings for ${br}`;
+    // The PROTECTION read did not fail here — the platform gave two answers that disagree — so the hint
+    // names who can settle it. A scoped fact that could not be read keeps its own pointer.
+    const ask = unknownScoped.length ? unread : `ask someone who can see ${P}'s settings for ${br}`;
     return { status: solo ? 'ok' : 'warn', message: msg, hint: ask };
   }
   if (r.approvals === 0 && r.protected === false) {

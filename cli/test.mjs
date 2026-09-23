@@ -18834,8 +18834,12 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   // …and a rule for SOME files is still a rule, here as everywhere: "on every change".
   assert.match(protectionLine({ ...r, codeOwners: true }, { name: 'b' }).message, /requires an approval to merge into `main` on every change: only some changes need an approval \(a code owner must approve a change to a file CODEOWNERS lists\); whether the branch is protected/);
   assert.match(protectionLine({ ...r, codeOwners: null }, { name: 'b' }).message, /to merge into `main` on every change; whether a code owner must approve some files is not known; whether the branch is protected/);
-  // Nothing failed on this path — two answers disagree — so the hint does not say "could not read".
+  // Nothing failed on this path — two answers disagree — so the hint does not say "could not read"…
   assert.equal(protectionLine(r, { name: 'b' }).hint, 'ask someone who can see GitHub\'s settings for `main`');
+  // …but a scoped fact that could not be read keeps its own pointer.
+  const unreadScoped = ghRead([[/\/rules\//, 200, [PR_RULE(0, { required_reviewers: { bad: 1 } })]], [/\/branches\/main$/, 200, { protected: false }]]).r;
+  assert.deepEqual([unreadScoped.protected, unreadScoped.approvals, unreadScoped.fileReviewers], [null, 0, null]);
+  assert.match(protectionLine(unreadScoped, { name: 'b' }).hint, /about what yad could not read$/);
   assert.match(protectionLine({ ...r, branch: 'develop' }, { name: 'b' }).message, /^b: no rule on GitHub acme\/app \(GitHub's own default branch is `main`\) requires an approval to merge into `develop`; whether the branch/, 'the branch note sits beside the repo here too');
   ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals], [null, 2]);
@@ -18848,13 +18852,13 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   ({ r } = ghRead([[/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals, r.codeOwners], [null, null, null]);
   assert.equal(r.protectedWhy, 'GitHub\'s branch flag says no, and the rulesets that could confirm it could not be read');
-  assert.match(r.approvalsWhy, /^GitHub refused to show the rulesets on the branch \(HTTP 403/);
-  assert.match(r.approvalsWhy, /refused to show the rulesets on the branch \(HTTP 403/);
+  assert.match(r.approvalsWhy, /^GitHub refused to show the rules on the branch \(HTTP 403/);
+  assert.match(r.approvalsWhy, /refused to show the rules on the branch \(HTTP 403/);
   ({ r } = ghRead([[/\/rules\//, 200, 'garbage'], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals], [null, null]);
   assert.match(r.approvalsWhy, /with something yad could not read/);
   ({ r } = ghRead([[/\/rules\//, 200, {}], [/\/branches\/main$/, 200, { protected: true }], [/\/protection$/, 200, {}]]));
-  assert.equal(r.approvalsWhy, 'GitHub answered the rulesets on the branch with something yad could not read', 'valid JSON that is not a list');
+  assert.equal(r.approvalsWhy, 'GitHub answered the rules on the branch with something yad could not read', 'valid JSON that is not a list');
   // A ruleset from a source yad does not name is "a ruleset"; a named reviewer for some files is a fact.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [{ ...PR_RULE(1), ruleset_source_type: 'Enterprise', ruleset_id: 5 }]], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual(r.from, ['a ruleset (id 5)']);
@@ -18901,6 +18905,17 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   }
   ({ r } = ghRead([[/\/protection$/, 200, { required_pull_request_reviews: null }], [/\/rules\//, 200, []], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual([r.approvals, r.codeOwners], [0, false]);
+  // `partlyRead` is the fact a hint keys on, and it comes from the read, not from `atLeast` alone.
+  ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.approvals, r.atLeast, r.partlyRead], [2, true, true]);
+  assert.ok(protectionLine(r, { name: 'b' }).hint, 'classic protection went unread');
+  ({ r } = ghRead([[/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.approvals, r.partlyRead], [null, true]);
+  ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(1)]], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.deepEqual([r.approvals, r.partlyRead], [1, false], 'every call answered: nothing was left unread');
+  // A plural subject keeps its number in the reason.
+  ({ r } = ghRead([[/\/rules\//, 404], [/\/branches\/main$/, 200, { protected: true }]]));
+  assert.match(r.approvalsWhy, /^GitHub answered 404 for the rules on the branch \(they do not exist, or your login may not see them\)/);
   // A ruleset id that is not a number is not printed.
   ({ r } = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [{ ...PR_RULE(1), ruleset_id: 'bob@x.com' }]], [/\/branches\/main$/, 200, { protected: true }]]));
   assert.deepEqual(r.from, ['a repo ruleset']);
@@ -19020,9 +19035,9 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.equal(r.rulesElsewhere, 'it names other branches');
   assert.match(protectionLine(r, { name: 'web' }).message, /the approval rule GitLab has misses it: it names other branches, so it does not hold a merge into it$/);
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Rel', approvals_required: 2, protected_branches: [{ name: 'release-*' }] }, { name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, []]]));
-  assert.equal(r.rulesElsewhere, 'some of them name other branches, and others reach protected branches only', 'never "only" of all of them');
+  assert.equal(r.rulesElsewhere, 'one of them names other branches, and another reaches protected branches only', 'a group of one is not "some of them"');
   assert.equal(r.rulesElsewhereOne, false);
-  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has miss it: some of them name other branches, and others reach protected branches only, so none of them holds a merge into it$/, 'the joined phrase reads as a sentence');
+  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has miss it: one of them names other branches, and another reaches protected branches only, so none of them holds a merge into it$/, 'the joined phrase reads as a sentence');
   // A code-owner fact the reader proved is still said beside them (the round-5 rule).
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, [{ name: '*', code_owner_approval_required: true }]]]));
   assert.deepEqual([r.codeOwners, r.rulesElsewhere], [true, 'it reaches protected branches only']);
@@ -19044,6 +19059,17 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
     ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'x', approvals_required: bad, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
     assert.deepEqual([r.approvals, r.approvalsWhy], [null, 'GitLab listed an approval rule whose count yad could not read'], String(bad));
   }
+  // The same reason is given once, however many rules earned it.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'a', approvals_required: '2', protected_branches: [] }, { name: 'b', approvals_required: '3', protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.equal(r.approvalsWhy, 'GitLab listed an approval rule whose count yad could not read');
+  // Two rules of one kind: the plural, through the real read.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'a', approvals_required: 1, protected_branches: [{ name: 'x' }] }, { name: 'b', approvals_required: 1, protected_branches: [{ name: 'y' }] }]], [/\/protected_branches/, 200, []]]));
+  assert.deepEqual([r.rulesElsewhere, r.rulesElsewhereOne], ['they name other branches', false]);
+  assert.match(protectionLine(r, { name: 'web' }).message, /the approval rules GitLab has miss it: they name other branches, so none of them holds a merge into it$/);
+  // Two rules that both apply: "at least" from overlap, with nothing left unread.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'B', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, [{ name: 'main', code_owner_approval_required: true }]]], {}, P));
+  assert.deepEqual([r.approvals, r.atLeast, r.partlyRead, r.codeOwners], [1, true, false, true]);
+  assert.ok(!protectionLine(r, { name: 'web' }).hint, 'every call succeeded: nothing to point at');
   // A rule that reaches the branch leaves `rulesElsewhere` unset.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
   assert.equal(r.rulesElsewhere, undefined);
@@ -19133,7 +19159,9 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(l.hint, /^only GitLab can require an approval/);
   assert.equal(protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'it names other branches', rulesElsewhereOne: true }, { name: 'web', solo: true }).status, 'ok');
   // A partly read count line carries a hint, as every other partly read line does.
-  assert.ok(protectionLine({ ...base, protected: true, approvals: 2, atLeast: true, from: ['x'] }, { name: 'b' }).hint, 'at least N is a partial read');
+  assert.ok(protectionLine({ ...base, protected: true, approvals: 2, atLeast: true, partlyRead: true, from: ['x'] }, { name: 'b' }).hint, 'a count that was partly read carries the pointer');
+  // "at least" ALSO means two GitLab rules that overlap, where every call succeeded: nothing to point at.
+  assert.ok(!protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: 1, atLeast: true, from: ['approval rule "A"', 'approval rule "B"'] }, { name: 'b' }).hint, 'overlap is not a partial read');
   assert.ok(protectionLine({ ...base, protected: true, approvals: 2, from: ['x'], codeOwners: null }, { name: 'b' }).hint);
   assert.ok(!protectionLine({ ...base, protected: true, approvals: 2, from: ['x'] }, { name: 'b' }).hint, 'a line read in full does not');
   // The branch note sits beside the repo, never inside the list of approval clauses.

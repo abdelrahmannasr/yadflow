@@ -1231,7 +1231,7 @@ Three real lines from team Products, each with its hint:
 | Protected, but no rule requires an approval — "on every change" when a rule covering only some files is true, or could not be read | **warn** | ok (with its hint, when something could not be read) |
 | Protected, and whether a merge needs an approval could not be read | **warn** | ok |
 | Not protected, and whether a merge needs an approval could not be read | **warn** | ok |
-| Not protected, and the approval rules the platform has miss this branch — they reach protected branches only, or they name other branches | **warn** | ok |
+| Not protected, and the approval rules the platform has miss this branch — they reach protected branches only, or they name other branches (one rule reads in the singular) | **warn** | ok |
 | Whether the branch is protected could not be read, and neither could the approval | **warn** | ok |
 | A count was read, but whether the branch is protected could not be | **warn** | **warn** |
 | No rule requires an approval, and whether the branch is protected could not be read | **warn** | ok |
