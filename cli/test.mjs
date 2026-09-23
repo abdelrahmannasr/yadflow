@@ -19199,17 +19199,31 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
   // yad's files name the platform's default too: the proof turns on what GitLab named, not on where the name came from.
   ({ r } = glRead([[/\/repository\/branches\//, 404, BRANCH_404]], { branch: 'main' }));
   assert.deepEqual([r.kind, r.why], ['empty', 'GitLab answered 404 for the branch main, so this project has no commits on it yet']);
-  // The repository could not be read: the branch was never looked up, so nothing is said about it — for
-  // yad's name, a typo, and the platform's own default alike.
-  for (const branch of ['main', 'mian', null]) {
-    ({ r } = glRead([[/\/repository\/branches\//, 404, REPO_404]], { branch }));
-    const b = branch || 'main';
-    assert.deepEqual([r.known, r.kind, r.cause], [false, 'no-repository', 'repository'], String(branch));
-    assert.equal(r.why, `GitLab answered 404 for the branch ${b} because this project's repository could not be read (it is turned off for the project, or your access is too low to read it)`);
-    const line = protectionLine(r, { name: 'b' });
-    assert.equal(line.hint, 'ask a Maintainer or Owner of the GitLab project to give your login access to its repository (or to turn the repository on), then run `yad doctor` again');
-    assert.doesNotMatch(`${line.message} ${line.hint}`, /does not exist|does not have it|no commits/, 'the branch was never looked up');
+  // The repository could not be read: the branch was never looked up, so nothing is said about it.
+  // GitLab shows a project's `default_branch` only to a login that may read its code (`read_code`, in
+  // `basic_project_details.rb`; checked live on 86809638, 2026-09-23, whose answer has no such key). So the
+  // REAL shape is a project answer with no default, and the branch is always one yad's files named.
+  const REPO_HINT = 'if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
+  const noDefault = (calls, branch) => readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch }, { runner: fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, {}], ...calls] }).runner, env: ON });
+  for (const branch of ['main', 'mian']) {
+    r = noDefault([[/\/repository\/branches\//, 404, REPO_404]], branch);
+    assert.deepEqual([r.known, r.kind, r.cause, r.platformDefault], [false, 'no-repository', 'repository', null], branch);
+    assert.equal(r.why, `GitLab answered 404 for the branch ${branch} because this project's repository could not be read (it is turned off for the project, or your access is too low to read it)`);
+    for (const solo of [false, true]) {
+      const line = protectionLine(r, { name: 'b', solo });
+      assert.equal(line.hint, REPO_HINT, `one action per open cause, solo ${solo}`);
+      assert.doesNotMatch(`${line.message} ${line.hint}`, /does not exist|does not have it|no commits/, 'the branch was never looked up');
+    }
   }
+  // A SYNTHETIC shape GitLab does not send (a default named beside `Repository Not Found`), kept as a
+  // defence: even then the branch is never settled, and `empty` is not claimed for the platform's default.
+  ({ r } = glRead([[/\/repository\/branches\//, 404, REPO_404]], { branch: null }));
+  assert.deepEqual([r.kind, r.cause, r.branch], ['no-repository', 'repository', 'main'], 'synthetic: GitLab hides the default from this login');
+  // What the REAL shape gives when yad's files name no branch either: `no-default`, before any branch is
+  // asked, so the body is never seen. Pinned as it is today; roadmap row E110 is to keep the access cause
+  // open there, since on GitLab "named none" is also what an unreadable repository looks like.
+  r = noDefault([[/\/repository\/branches\//, 404, REPO_404]], null);
+  assert.deepEqual([r.kind, 'cause' in r, r.why], ['no-default', false, 'no default branch is set in yad\'s files, and GitLab named none']);
   // Every body yad does not recognise keeps today's hedge and today's hints, word for word: the fake's
   // default body, a reworded or lower-case message, another language, extra words, a message that is not a
   // string, a body that is not JSON, and no body at all.
@@ -19382,7 +19396,8 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('off').hint, /^unset YAD_PLATFORM_READ/);
   assert.match(unknown('no-platform', 'x', { platform: null }).hint, /^set `platform`/);
   assert.match(unknown('no-url').hint, /\.sdlc\/repos\.json/);
-  assert.match(unknown('no-branch').hint, /names a branch that exists/);
+  // `cause: 'branch'` is what the GitHub reader always sets on a branch 404 (E109): the shape it produces.
+  assert.match(unknown('no-branch', 'x', { cause: 'branch' }).hint, /names a branch that exists on the platform$/);
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
   assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for `main`$/);
   // Since E109 the access tail turns on `cause` — what the 404 PROVED — never on the platform's name. The
@@ -19393,7 +19408,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.equal(unknown('empty', 'x', { platform: 'gitlab' }).hint, 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again', 'GitLab\'s message leaves a permission open, so the hint may not settle it');
   assert.equal(unknown('no-branch', 'x', { platform: 'gitlab' }).hint, 'check that `default_branch` in yad\'s files names a branch that exists on the platform, or ask for access to the project\'s repository', 'a GitLab reader who finds the branch does exist still has something to do');
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^fix what the message names, then run `yad doctor` again/);
-  assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /names a branch that exists/);
+  assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)', { cause: 'branch' }).hint, /names a branch that exists on the platform$/);
   // A "not known" line still names the platform's own default when it differs (the typo case).
   assert.equal(unknown('no-branch', 'GitHub answered 404', { branch: 'mian' }).message, 'b: not known whether `mian` requires an approval (GitHub\'s own default branch is `main`) — GitHub answered 404');
   assert.equal(protectionLine({ ...base, known: false, why: 'x', branch: null, platform: null }, { name: 'b' }).message, 'b: not known whether the default branch requires an approval — x');

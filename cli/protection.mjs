@@ -195,7 +195,8 @@ function repoAndBranch(base, runner, unknown, { cli, platform, at, what }) {
 // itself just named this branch as the repo's default, a repo with no commits yet. That turns on what the
 // repo read PROVED, never on where yad got the name, because yad's files may name the default too. On
 // GitLab add "or one the login cannot read", because reading a project and reading its repository are two
-// settings there; on GitHub one permission covers both, so the repo read before this one rules it out.
+// settings there — unless the answer's body names the cause (`gitlabBranchCause`, E109); on GitHub one
+// permission covers both, so the repo read before this one rules it out.
 const namedByPlatform = (branch, platformDefault) => platformDefault !== null && branch === platformDefault;
 const branchMissing = (res, branch, platformDefault) => (res.status !== 404 ? 'other'
   : namedByPlatform(branch, platformDefault) ? 'empty' : 'no-branch');
@@ -668,7 +669,9 @@ function unknownHint(r) {
     // The tail's noun is GitLab's: GitHub never reaches it, because its reader sets `cause: 'branch'` on
     // every branch 404.
     case 'no-branch': return `check that \`default_branch\` in yad's files names a branch that exists on the platform${r.cause === 'branch' ? '' : ', or ask for access to the project\'s repository'}`;
-    case 'no-repository': return 'ask a Maintainer or Owner of the GitLab project to give your login access to its repository (or to turn the repository on), then run `yad doctor` again';
+    // One action per open cause: the repository is turned off (an Owner — perhaps you — turns it on), or
+    // the login's access is too low (a Maintainer or Owner raises it).
+    case 'no-repository': return 'if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
     case 'empty': return r.cause === 'branch'
       ? 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again'
       : 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again';
