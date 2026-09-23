@@ -156,6 +156,11 @@ const branchMissing = (res, branchFrom) => (res.status !== 404 ? 'other' : branc
 const RULESET_OF = { Organization: 'an organisation ruleset', Repository: 'a repo ruleset' };
 // What the platform calls a change asking to be merged.
 const REQUEST = { github: 'pull request', gitlab: 'merge request' };
+// How a GitLab approval rule misses this branch, [one rule, more than one].
+const MISSES = {
+  'protected-only': ['reaches protected branches only', 'reach protected branches only'],
+  named: ['names other branches', 'name other branches'],
+};
 
 // One source of required approvals, as { floor, exact, why }: `floor` is the most it proved; `exact` says
 // nothing was left unread; `why` says what was, when it was not.
@@ -184,9 +189,13 @@ function readGitHub(base, runner, unknown) {
   // Rulesets: every ACTIVE rule on the branch ("evaluate" and "disabled" rulesets are not returned).
   const rules = api(runner, 'gh', host, `${at}/rules/branches/${segment(branch)}?per_page=${PAGE}`);
   let rs;
+  let rulesRead = false; // the rules call answered with a list, and how many rules were on the branch
+  let rulesCount = 0;
   let rulesetCodeOwners = false;
   let rulesetReviewers = false; // true, false, or null (a reviewer's count could not be read)
   if (rules.ok && Array.isArray(rules.body)) {
+    rulesRead = true;
+    rulesCount = rules.body.length;
     let floor = 0;
     let unreadable = false;
     for (const r of rules.body) {
@@ -256,7 +265,9 @@ function readGitHub(base, runner, unknown) {
       cl = {
         floor: 0, exact: false,
         why: p.status === 404
-          ? 'only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin, or the branch is protected by rulesets alone)'
+          // "or a ruleset protects it" is only a live cause while a ruleset could be there: with the rules
+          // read and empty, the branch has none, so that arm would send the reader hunting for nothing.
+          ? `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin${rulesRead && !rulesCount ? '' : ', or the branch is protected by rulesets alone'})`
           : whyFailed(p, { platform: 'github', host, what: 'classic branch protection' }),
       };
     }
@@ -293,6 +304,7 @@ function readGitLab(base, runner, unknown) {
   const ar = api(runner, 'glab', host, `${at}/approval_rules?per_page=${PAGE}`);
   let src;
   const elsewhere = new Set();
+  let elsewhereRules = 0; // how many rules the project has that do not reach this branch (1 reads differently)
   if (ar.ok && Array.isArray(ar.body)) {
     let floor = 0;
     const whys = [];
@@ -319,7 +331,10 @@ function readGitLab(base, runner, unknown) {
       }
       // A rule the platform DID return that does not reach this branch: say which way it misses, so the
       // line never claims "no approval rules", nor that protecting the branch would bring this one to it.
-      else elsewhere.add(r.applies_to_all_protected_branches === true ? 'they reach protected branches only' : 'they name other branches');
+      else {
+        elsewhereRules += 1;
+        elsewhere.add(r.applies_to_all_protected_branches === true ? 'protected-only' : 'named');
+      }
     }
     if (ar.body.length >= PAGE) whys.push(`the project has ${PAGE} or more approval rules and yad reads only the first ${PAGE}`);
     src = { floor, exact: !whys.length, why: whys.join('; ') };
@@ -336,9 +351,11 @@ function readGitLab(base, runner, unknown) {
   Object.assign(out, settle([src]));
   if (elsewhere.size) {
     const how = [...elsewhere];
+    const one = elsewhereRules === 1;
     out.rulesElsewhere = how.length > 1
-      ? `some of them ${how[0].replace('they ', '')}, and others ${how[1].replace('they ', '')}`
-      : how[0];
+      ? `some of them ${MISSES[how[0]][1]}, and others ${MISSES[how[1]][1]}`
+      : `${one ? 'it' : 'they'} ${MISSES[how[0]][one ? 0 : 1]}`;
+    out.rulesElsewhereOne = one;
   }
   // Each GitLab rule must be met on its own, and their approvers may overlap: two or more is a floor.
   if (out.approvals > 0 && out.from.length > 1) out.atLeast = true;
@@ -449,7 +466,8 @@ function lineFor(r, { name, solo = false } = {}) {
     // The platform DID return approval rules; they do not reach this branch. "No approval rules" would be
     // false, so the banner is not printed, and the sentence says which way they miss it.
     const only = scoped.length ? `; only some changes need an approval (${scoped.join('; ')})` : '';
-    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rules ${P} has miss it: ${r.rulesElsewhere}, so none of them holds a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
+    const many = !r.rulesElsewhereOne;
+    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rule${many ? 's' : ''} ${P} has miss${many ? '' : 'es'} it: ${r.rulesElsewhere}, so ${many ? 'none of them holds' : 'it does not hold'} a merge into it${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === null) {
@@ -458,7 +476,10 @@ function lineFor(r, { name, solo = false } = {}) {
     // one level let a reader take the middle as an aside.
     const only = scoped.length ? ' on every change: only some changes need an approval (' + scoped.join('; ') + ')' : '';
     const msg = `${name}: no rule on ${where}${branchNote} requires an approval to merge into ${br}${only || (unknownScoped.length ? ' on every change' : '')}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}; whether the branch is protected is not known — ${r.protectedWhy}`;
-    return solo ? { status: 'ok', message: msg, hint: unread } : { status: 'warn', message: msg, hint: unread };
+    // Nothing failed on this path — the platform gave two answers that disagree — so the hint does not
+    // say "what yad could not read"; it names who can settle it.
+    const ask = `ask someone who can see ${P}'s settings for ${br}`;
+    return { status: solo ? 'ok' : 'warn', message: msg, hint: ask };
   }
   if (r.approvals === 0 && r.protected === false) {
     // A rule for SOME files is still an approval rule (round 4), so the banner's "no approval rules" half

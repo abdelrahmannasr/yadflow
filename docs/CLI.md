@@ -1207,7 +1207,7 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | Not logged in for that host | `gh is not logged in for github.com (or github.com did not answer)` |
 | No remote URL | `no git remote URL yad can read, so it cannot tell which repo to ask about` |
 | Offline | `yad could not reach github.com to read the repo acme/app (offline, or the host did not answer)` |
-| Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin, or the branch is protected by rulesets alone)` |
+| Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin)`. The reason adds `, or the branch is protected by rulesets alone` unless the rules were read and the branch has none |
 | GitLab approval rules refused | `GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them` |
 | A branch that does not exist (GitHub or GitLab) | `GitHub answered 404 for the branch mian (it does not exist, or your login may not see it)` |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
