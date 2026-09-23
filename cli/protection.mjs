@@ -669,6 +669,12 @@ function lineFor(r, { name, solo = false } = {}) {
   return { status: solo ? 'ok' : 'warn', message: msg, hint };
 }
 
+// The two actions for a GitLab repository yad could not read (E109's `no-repository`) or may not be able
+// to (E110's hidden default): turned off — an Owner turns it on, or a non-owner asks for that; access too
+// low — a Maintainer or Owner grants it. ONE string for both hints, so the twins cannot drift apart (they
+// did once: E110's review).
+const REPO_ACTIONS = 'if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on';
+
 function unknownHint(r) {
   const cli = cliFor(r.platform);
   switch (r.kind) {
@@ -684,7 +690,7 @@ function unknownHint(r) {
     case 'no-branch': return `check that \`default_branch\` in yad's files names a branch that exists on the platform${r.cause === 'branch' ? '' : ', or ask for access to the project\'s repository'}`;
     // One action per open cause: the repository is turned off (an Owner — perhaps you — turns it on), or
     // the login's access is too low (a Maintainer or Owner raises it).
-    case 'no-repository': return 'if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
+    case 'no-repository': return `${REPO_ACTIONS} — then run \`yad doctor\` again`;
     case 'empty': return r.cause === 'branch'
       ? 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again'
       : 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again';
@@ -692,7 +698,7 @@ function unknownHint(r) {
     // One action per open cause (E110): yad's files name no branch, and on GitLab the repository may be
     // unreadable — turned off (an Owner turns it on) or too little access (a Maintainer or Owner grants it).
     case 'no-default': return `set \`default_branch\` in yad's files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)${r.defaultMayBeHidden
-      ? '. GitLab also hides the default from a login that cannot read the repository: if you own the project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner for access to it'
+      ? `. GitLab also hides the default from a login that cannot read the repository: ${REPO_ACTIONS} — then run \`yad doctor\` again`
       : ''}`;
     case 'no-repo': return `check \`git_url\` in yad's files, or ask for access to the ${r.platform === 'gitlab' ? 'project' : 'repo'}`;
     default: return 'fix what the message names, then run `yad doctor` again; nothing about this repo\'s protection is assumed meanwhile';

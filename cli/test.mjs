@@ -19269,7 +19269,9 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
 test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', () => {
   const GL_NONE = "no default branch is set in yad's files, and GitLab named none (GitLab names it only to a login that can read the project's repository)";
   const FILES = 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
-  const HIDDEN = '. GitLab also hides the default from a login that cannot read the repository: if you own the project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner for access to it';
+  // The same two actions as E109's `no-repository`, word for word — a non-owner can ask for the repository
+  // to be turned on, since more access cannot help while it is off (E110's review).
+  const HIDDEN = '. GitLab also hides the default from a login that cannot read the repository: if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
   // The project answer GitLab really sends to a login that cannot read the code: no `default_branch` key.
   // A null or empty value reads the same way: nothing is guessed from what the key holds either.
   for (const project of [{}, { default_branch: null }, { default_branch: '' }]) {
@@ -19587,6 +19589,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   let twoCause = 0; // the rule below is keyed on a wording, so count its firings: an edit must not silence it
   let proved = 0; // …and so is E109's reverse of it
   let hidden = 0; // …and E110's
+  // The two actions for a repository that is off or out of reach, as ONE clause both hints must carry
+  // whole: checking the words one by one let a hint drop the non-owner's "or to turn it on" (E110 review).
+  const REPO_ACTIONS = 'if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on';
   const distinct = new Set(); // what the grid SAYS, not how many times it was asked
   for (const { platform, gitUrl, calls } of shapes) {
     for (const branch of ['main', 'develop', 'me@corp.com', null]) {
@@ -19632,7 +19637,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
             // …and the message leaves two causes open (turned off, or access too low), so the hint names an
             // action for EACH — rule 3 of E70, on E109's own two-cause sentence.
             assert.match(line.message, /it is turned off for the project, or your access is too low/, `the repository sentence stopped naming its two causes: ${line.message}`);
-            assert.ok(/\bturn it on\b/.test(line.hint || '') && /\baccess\b/.test(line.hint || ''), `the message left two causes open, and the hint names an action for only one: ${line.hint}`);
+            assert.ok((line.hint || '').includes(REPO_ACTIONS), `the message left two causes open, and the hint does not name an action for each: ${line.hint}`);
           }
         }
         // A hint may not settle a cause its own message left open, whichever arm printed them.
@@ -19646,11 +19651,13 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           if (r.defaultMayBeHidden) {
             hidden += 1;
             assert.match(r.why, /named none \(GitLab names it only to a login that can read/, `the second cause is not said: ${r.why}`);
-            assert.ok(/set `default_branch`/.test(line.hint) && /\bturn it on\b/.test(line.hint) && /\baccess\b/.test(line.hint), `two causes open, and the hint names an action for only one: ${line.hint}`);
+            assert.ok(/set `default_branch`/.test(line.hint) && line.hint.includes(REPO_ACTIONS), `two causes open, and the hint does not name an action for each: ${line.hint}`);
           } else {
             assert.ok(!/\baccess\b|turn it on/.test(line.hint || ''), `no second cause is open, and the hint offers access: ${line.hint}`);
           }
         }
+        // …and the fact belongs to that one answer: a flag on any other kind would change its --json.
+        assert.ok(r.kind === 'no-default' || !('defaultMayBeHidden' in r), `defaultMayBeHidden on a ${r.kind} answer`);
         // A hint may claim something went unread only when the read says so…
         if (/about what yad could not read/.test(line.hint || '')) {
           assert.ok(r.known === false || r.partlyRead === true || r.codeOwners === null || r.fileReviewers === null,
