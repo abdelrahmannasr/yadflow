@@ -3578,21 +3578,24 @@ export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{
 //   - The Foundation has no `epic.md`, so its title is a constant.
 //
 // Normalized HERE, once, like the theme. It is ONE line: every run of whitespace, a newline included,
-// becomes one space, because a list prints one title per row.
+// becomes one space, because a list prints one title per row. Control characters are dropped: a title
+// is printed to other people's terminals (E20), and an ESC or a BEL there would rewrite or ring them.
 //
 // The frontmatter value is also unquoted, because `readFrontmatter` keeps the rest of the line as
 // written: `title: "Queue: untested"` is `Queue: untested`. A single-quoted value undoes YAML's one
 // escape (`'It''s done'` is `It's done`). A double-quoted value is read with JSON's escapes (`\"`, `\\`,
 // `\n`, `\t`, `\u00e9` …), which YAML's double-quoted style also has; one using any other escape is kept
-// as written, never half-read. Only a value that IS one quoted string is unquoted — `"Login" is broken
-// on "Safari"` is not, and stays as written, and so does `"x" # note`. The checks for "no title" below
+// as written (quotes and backslashes included), never half-read. Only a value that IS one quoted string is unquoted — `"Login" is broken
+// on "Safari"` is not, and stays as written, and so does `"x" # note`. ("As written" still means one
+// line with no control characters.) The checks for "no title" below
 // run BEFORE unquoting: a quoted `'null'` or `">"` is text, as in YAML. The `change.json` title is JSON, already
 // unquoted, and is never touched this way. Three frontmatter values are no title at all: a list
 // (`readFrontmatter` turns any value that begins with `[` and ends with `]` into one), a YAML block marker
 // (`>` or `|` — the reader keeps one line, so the block's text is lost), and YAML's null (`~`, `null`).
 export const FOUNDATION_TITLE = 'Foundation';
 
-const oneLine = (t) => t.replace(/\s+/gu, ' ').trim() || null;
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const oneLine = (t) => t.replace(/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/gu, '').replace(/\s+/gu, ' ').trim() || null;
 
 // One quoted string, unquoted — or the value unchanged when it is not exactly one. A raw tab is not
 // allowed inside a JSON string, so it is made a space first (it would become one anyway).

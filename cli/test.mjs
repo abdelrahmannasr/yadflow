@@ -21936,6 +21936,11 @@ test('E111 titleOf: the frontmatter key, then change.json, then null — normali
   assert.equal(titleOf({ title: '"~"' }), '~');
   assert.equal(titleOf({ title: '">"' }), '>');
   assert.equal(titleOf({ title: 'a\u00a0\u00a0b' }), 'a b', 'a no-break space is whitespace too');
+  // Control characters never reach a terminal that prints the title (E111 review 3).
+  assert.equal(titleOf({ title: '"\\u001b[31mRed\\u0007"' }), '[31mRed', 'an escaped ESC and BEL');
+  assert.equal(titleOf({ title: 'a\u0000b\u007f\u009bc' }), 'abc', 'raw NUL, DEL and a C1 control');
+  assert.equal(titleOf({ title: '"\\b"' }), null, 'nothing left but a backspace is no title');
+  assert.equal(titleOf({}, { title: 'x\u001by' }), 'xy', 'a change.json title too');
   assert.equal(titleOf({ title: ['x'] }, { title: 'y' }), 'y', 'a list falls through to change.json');
   // Through the real reader: any value that begins with `[` and ends with `]` is a list; quoted, it is a title.
   assert.equal(titleOf(parseFrontmatter('---\ntitle: [Mobile] Checkout [v2]\n---\n')), null);
