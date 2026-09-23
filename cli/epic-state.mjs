@@ -3578,16 +3578,19 @@ export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{
 //   - The Foundation has no `epic.md`, so its title is a constant.
 //
 // Normalized HERE, once, like the theme. It is ONE line: every run of whitespace, a newline included,
-// becomes one space, because a list prints one title per row. Control characters are dropped: a title
-// is printed to other people's terminals (E20), and an ESC or a BEL there would rewrite or ring them.
+// becomes one space (NEL, U+0085, is a line break too), because a list prints one title per row. Control
+// characters are dropped: a title is printed to other people's terminals (E20), and an ESC or a BEL
+// there would rewrite or ring them. So are the bidi controls, which reverse how the rest of a row is
+// SHOWN, so one title can pass for another. The zero-width joiners are kept: emoji and several scripts
+// (Persian among them) need them.
 //
 // The frontmatter value is also unquoted, because `readFrontmatter` keeps the rest of the line as
 // written: `title: "Queue: untested"` is `Queue: untested`. A single-quoted value undoes YAML's one
 // escape (`'It''s done'` is `It's done`). A double-quoted value is read with JSON's escapes (`\"`, `\\`,
 // `\n`, `\t`, `\u00e9` …), which YAML's double-quoted style also has; one using any other escape is kept
 // as written (quotes and backslashes included), never half-read. Only a value that IS one quoted string is unquoted — `"Login" is broken
-// on "Safari"` is not, and stays as written, and so does `"x" # note`. ("As written" still means one
-// line with no control characters.) The checks for "no title" below
+// on "Safari"` is not, and stays as written, and so does `"x" # note`. The value is made one clean line
+// BEFORE it is unquoted, and again after (an escape such as `\n` or `\u001b` can add what was cleaned). The checks for "no title" below
 // run BEFORE unquoting: a quoted `'null'` or `">"` is text, as in YAML. The `change.json` title is JSON, already
 // unquoted, and is never touched this way. Three frontmatter values are no title at all: a list
 // (`readFrontmatter` turns any value that begins with `[` and ends with `]` into one), a YAML block marker
@@ -3595,16 +3598,17 @@ export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{
 export const FOUNDATION_TITLE = 'Foundation';
 
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
-const oneLine = (t) => t.replace(/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/gu, '').replace(/\s+/gu, ' ').trim() || null;
+const CONTROLS = /[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const oneLine = (t) => t.replace(CONTROLS, '').replace(/[\s\u0085]+/gu, ' ').trim() || null;
 
-// One quoted string, unquoted — or the value unchanged when it is not exactly one. A raw tab is not
-// allowed inside a JSON string, so it is made a space first (it would become one anyway).
+// One quoted string, unquoted — or the value unchanged when it is not exactly one. It is given a value
+// `oneLine` has already cleaned, so no raw control character (which JSON refuses) is left to stop it.
 function unquoteYaml(t) {
   const single = t.match(/^'((?:[^']|'')*)'$/u);
   if (single) return single[1].replace(/''/g, "'");
   if (t[0] === '"') {
     try {
-      return JSON.parse(t.replace(/\t/g, ' '));
+      return JSON.parse(t);
     } catch {
       return t;
     }
@@ -3614,7 +3618,8 @@ function unquoteYaml(t) {
 
 const titleFromFrontmatter = (v) => {
   if (typeof v !== 'string') return null;
-  const t = v.trim();
+  const t = oneLine(v);
+  if (t === null) return null;
   if (/^[>|][+-]?[0-9]?[+-]?$/.test(t) || /^(~|null|Null|NULL)$/.test(t)) return null;
   return oneLine(unquoteYaml(t));
 };
