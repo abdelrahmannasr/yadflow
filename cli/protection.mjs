@@ -551,7 +551,7 @@ function lineFor(r, { name, solo = false } = {}) {
     // No `unknownScoped` clause: this sentence is GitLab-only and needs `protected === false`, where the
     // reader always proves `codeOwners` and never sets `fileReviewers`.
     const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rule${many ? 's' : ''} ${P} has miss${many ? '' : 'es'} it: ${r.rulesElsewhere}, so ${many ? 'none of them holds' : 'it does not hold'} a merge into it${only}`;
-    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
+    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `protecting ${br} in ${P}'s settings limits who may push to it directly; only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === null) {
     // The count was read; the protection was not. Both are said, and neither borrows the other's answer.
@@ -570,7 +570,7 @@ function lineFor(r, { name, solo = false } = {}) {
     // is not proven while a scoped fact is true: that case gets its own sentence instead.
     if (scoped.length) {
       const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly; no rule requires an approval on every change, and only some changes need one (${scoped.join('; ')})`;
-      return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
+      return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `protecting ${br} in ${P}'s settings limits who may push to it directly; only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
     }
     if (solo) return { status: 'ok', message: `${name}: ${where} has no approval rules and no branch protection on ${br}${branchNote} — expected in solo mode; yad records what happens, but cannot stop anything here` };
     return { status: 'warn', message: `${name} (${where}, branch ${br}${note ? `; ${note}` : ''}): ${BANNER}`, hint: `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };

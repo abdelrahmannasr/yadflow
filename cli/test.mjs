@@ -19231,7 +19231,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.ok(!l.message.includes(BANNER));
   assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, and the approval rules GitLab has miss it: they reach protected branches only, so none of them holds a merge into it');
   assert.match(protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'it names other branches', rulesElsewhereOne: true }, { name: 'web' }).message, /and the approval rule GitLab has misses it: it names other branches, so it does not hold a merge into it$/);
-  assert.match(l.hint, /^only GitLab can require an approval/);
+  assert.equal(l.hint, 'protecting `main` in GitLab\'s settings limits who may push to it directly; only GitLab can require an approval before a merge, in an approval rule (GitLab Premium or Ultimate) for `main`; yad only reports what is set', 'a branch proven unprotected carries the same fact its twin above does');
   assert.equal(protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'it names other branches', rulesElsewhereOne: true }, { name: 'web', solo: true }).status, 'ok');
   // A partly read count line carries a hint, as every other partly read line does.
   assert.ok(protectionLine({ ...base, protected: true, approvals: 2, atLeast: true, partlyRead: true, from: ['x'] }, { name: 'b' }).hint, 'a count that was partly read carries the pointer');
@@ -19442,6 +19442,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
     return (out.match(/ — /g) || []).length;
   };
   let seen = 0;
+  let twoCause = 0; // the rule below is keyed on a wording, so count its firings: an edit must not silence it
   const distinct = new Set(); // what the grid SAYS, not how many times it was asked
   for (const { platform, gitUrl, calls } of shapes) {
     for (const branch of ['main', 'develop', 'me@corp.com', null]) {
@@ -19473,6 +19474,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
         }
         // A hint may not settle a cause its own message left open, whichever arm printed them.
         if (/, or your login may not see it\)/.test(line.message)) {
+          twoCause += 1;
           assert.ok(!/but it has no commits yet —/.test(line.hint || ''), `the message left two causes open, and the hint settles one: ${line.hint}`);
         }
         // A hint may claim something went unread only when the read says so…
@@ -19495,6 +19497,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
     }
   }
   assert.ok(seen >= 4200, `the grid shrank: ${seen} lines`);
+  assert.ok(twoCause >= 16, `the two-cause rule stopped firing (${twoCause} lines) — a reworded message may have silenced it`);
   // …and the count of DISTINCT lines, because a shape that collapses into another's answer leaves the
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
   // The measured count, exactly: the grid is deterministic, so any drop is a shape that stopped saying
