@@ -19585,7 +19585,17 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           proved += 1;
           assert.ok(!/may not see it|cannot see it/.test(`${line.message} ${line.hint || ''}`), `the body proved the cause, and the line still hedges: ${line.message} / ${line.hint}`);
           if (r.cause === 'branch') assert.ok(!/ask for access|access to its repository/.test(line.hint || ''), `the branch is proven missing, and the hint offers access: ${line.hint}`);
-          if (r.cause === 'repository') assert.ok(!/does not have it|no commits|names a branch that exists/.test(`${line.message} ${line.hint || ''}`), `only the repository was proved, and the line settles the branch: ${line.message} / ${line.hint}`);
+          if (r.cause === 'repository') {
+            // Keyed on the FIELD, not a wording (review round 1 found a rule keyed on words let a changed
+            // hint through): the branch was never looked up, so the hint does not speak of a branch at all,
+            // and the message says nothing about it past naming it…
+            assert.ok(!/\bbranch/.test(line.hint || ''), `only the repository was proved, and the hint speaks of a branch: ${line.hint}`);
+            assert.ok(!/does not exist|does not have it|no commits/.test(line.message), `only the repository was proved, and the message settles the branch: ${line.message}`);
+            // …and the message leaves two causes open (turned off, or access too low), so the hint names an
+            // action for EACH — rule 3 of E70, on E109's own two-cause sentence.
+            assert.match(line.message, /it is turned off for the project, or your access is too low/, `the repository sentence stopped naming its two causes: ${line.message}`);
+            assert.ok(/\bturn it on\b/.test(line.hint || '') && /\baccess\b/.test(line.hint || ''), `the message left two causes open, and the hint names an action for only one: ${line.hint}`);
+          }
         }
         // A hint may not settle a cause its own message left open, whichever arm printed them.
         if (/, or your login may not see it\)/.test(line.message)) {
