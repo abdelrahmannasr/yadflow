@@ -18835,6 +18835,7 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   assert.match(protectionLine({ ...r, codeOwners: true }, { name: 'b' }).message, /requires an approval to merge into `main` on every change: only some changes need an approval \(a code owner must approve a change to a file CODEOWNERS lists\); whether the branch is protected/);
   assert.match(protectionLine({ ...r, codeOwners: null }, { name: 'b' }).message, /to merge into `main` on every change; whether a code owner must approve some files is not known; whether the branch is protected/);
   // Nothing failed on this path — two answers disagree — so the hint does not say "could not read"…
+  assert.equal(r.partlyRead, false);
   assert.equal(protectionLine(r, { name: 'b' }).hint, 'ask someone who can see GitHub\'s settings for `main`');
   // …but a scoped fact that could not be read keeps its own pointer.
   const unreadScoped = ghRead([[/\/rules\//, 200, [PR_RULE(0, { required_reviewers: { bad: 1 } })]], [/\/branches\/main$/, 200, { protected: false }]]).r;
@@ -18848,9 +18849,20 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   // Every call succeeded here — the two answers simply disagree — so the hint names who can settle it…
   assert.equal(line.hint, 'ask someone who can see GitHub\'s settings for `main`');
   // …and it points at an unread part only when there is one.
-  const partly = ghRead([[/\/rules\//, 200, [PR_RULE(2), { type: 'pull_request', parameters: {} }]], [/\/branches\/main$/, 200, { protected: false }]]).r;
-  assert.deepEqual([partly.protected, partly.approvals, partly.partlyRead], [null, 2, true]);
+  // …pinned on a read where every scoped fact is KNOWN and the count is not, so it cannot pass by way of
+  // `unknownScoped` (review 18: a rule that sets a scoped fact makes it true, not unknown).
+  const partly = ghRead([[/\/rules\//, 200, [PR_RULE(2, { require_code_owner_review: true, required_reviewers: [{ minimum_approvals: 1 }] }), { type: 'pull_request', parameters: { required_approving_review_count: 'x' } }]], [/\/branches\/main$/, 200, { protected: false }]]).r;
+  assert.deepEqual([partly.protected, partly.approvals, partly.partlyRead, partly.codeOwners, partly.fileReviewers], [null, 2, true, true, true]);
   assert.match(protectionLine(partly, { name: 'b' }).hint, /about what yad could not read$/);
+  // The solo twin says it too, beside its own "relax the required approvals".
+  assert.match(protectionLine(partly, { name: 'b', solo: true }).hint, /^relax the required approvals in .*\. Ask someone who can see GitHub's settings for `main` about what yad could not read$/);
+  // A solo line whose protection is not known, with everything read, names who can settle it.
+  const unsureSolo = ghRead([[/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: false }]]).r;
+  assert.deepEqual([unsureSolo.protected, unsureSolo.partlyRead], [null, false]);
+  assert.match(protectionLine(unsureSolo, { name: 'b', solo: true }).hint, /\. Ask someone who can see GitHub's settings for `main`$/);
+  // A solo count line with classic protection unread points at it.
+  const soloUnread = ghRead([[/\/protection$/, 404], [/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: true }]]).r;
+  assert.match(protectionLine(soloUnread, { name: 'b', solo: true }).hint, /about what yad could not read$/);
   assert.match(protectionLine(r, { name: 'b', solo: true }).message, /needs 2 approvals \(from: a repo ruleset \(id 7\)\); whether the branch is protected is not known — .*; and you cannot approve your own pull request/);
   // The rulesets cannot be read: approvals not known — and neither is "not protected", because GitHub's
   // flag may not count a ruleset.
@@ -19093,6 +19105,15 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // Nothing at all, proven.
   ({ r } = glRead([[/\/approval_rules/, 200, []], [/\/protected_branches/, 200, []]]));
   assert.deepEqual([r.protected, r.approvals], [false, 0]);
+  // A list that came back proves the project is not on GitLab Free, so no hint offers Free as the reason.
+  ({ r } = glRead([[/\/approval_rules/, 200, Array.from({ length: PAGE }, () => ({ name: 'z', approvals_required: 0, protected_branches: [] }))], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.approvals, r.rulesAnswered], [null, true]);
+  assert.equal(protectionLine(r, { name: 'web' }).hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings');
+  ({ r } = glRead([[/\/approval_rules/, 403], [/\/protected_branches/, 200, []]], {}, P));
+  assert.equal(r.rulesAnswered, undefined);
+  assert.match(protectionLine(r, { name: 'web' }).hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate/);
+  ({ r } = glRead([[/\/approval_rules/, 200, Array.from({ length: PAGE }, () => ({ name: 'z', approvals_required: 0, protected_branches: [] }))], [/\/protected_branches/, 200, []]]));
+  assert.match(protectionLine(r, { name: 'web' }).hint, /about what yad could not read$/, 'an unprotected branch, with Free ruled out');
   // A self-managed host and a subgroup: the host is asked, and the whole path is the project.
   const f = fakePlatform({ calls: [[/^projects\/group%2Fsub%2Fproj$/, 200, { default_branch: 'trunk' }], [/\/repository\/branches\/trunk$/, 200, { protected: false }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]] });
   r = readProtection({ platform: 'gitlab', gitUrl: 'https://git.corp.example/group/sub/proj.git', branch: null }, { runner: f.runner, env: ON });

@@ -118,7 +118,9 @@ function loggedIn(runner, cli, host, authCache) {
 //                                                            not reach this branch ("it names other
 //                                                            branches", "one of them …, and another …"),
 //     rulesElsewhereOne: true|false,                       — whether that clause speaks of one rule,
-//     partlyRead: true|false,                              — something the platform holds was not read
+//     partlyRead: true|false,                              — something the platform holds was not read,
+//     rulesAnswered: true,                                 — GitLab only: the approval-rules endpoint
+//                                                            answered, so the project is not on Free
 //     codeOwners: true|false|null,                         — a code-owner review is required (a fact beside)
 //     fileReviewers: true|false|null }                     — a named reviewer for some files (GitHub only:
 //                                                            a GitLab answer carries no such key)
@@ -354,6 +356,9 @@ function readGitLab(base, runner, unknown) {
     };
   }
   Object.assign(out, settle([src]));
+  // The approval-rules endpoint answers on Premium and Ultimate only, so a list that came back settles the
+  // tier: a hint must not go on offering Free as the explanation (the round-15 rule, on the GitLab side).
+  if (ar.ok && Array.isArray(ar.body)) out.rulesAnswered = true;
   if (elsewhere.size) {
     const how = [...elsewhere];
     const said = ([kind, n], first) => `${n === 1 ? (first ? 'one of them' : 'another') : (first ? 'some of them' : 'others')} ${MISSES[kind][n === 1 ? 0 : 1]}`;
@@ -412,6 +417,8 @@ function lineFor(r, { name, solo = false } = {}) {
   const branchNote = note ? ` (${note})` : '';
   const team = solo ? 'ok' : 'warn';
   const unread = `ask someone who can see ${P}'s settings for ${br} about what yad could not read`;
+  const Unread = `${unread[0].toUpperCase()}${unread.slice(1)}`;
+  const settleIt = `ask someone who can see ${P}'s settings for ${br}`;
   // The platform's own name for the setting that requires an approval (named, never explained: that is
   // documentation's job, not the doctor's).
   const setting = r.platform === 'gitlab'
@@ -454,20 +461,25 @@ function lineFor(r, { name, solo = false } = {}) {
         status: 'warn',
         message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? `; and ${own}` : ''}`,
         // …and a part that went unread is pointed at here too, as on every other partly read line.
-        hint: `${solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`}${unknownScoped.length || r.partlyRead ? `. ${unread[0].toUpperCase()}${unread.slice(1)}` : ''}`,
+        hint: `${solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`}${unknownScoped.length || r.partlyRead ? `. ${Unread}` : ''}`,
       };
     }
     // Whether the branch is protected may be unknown beside a count that was read: say so, never silently.
     const unsure = r.protected === null ? `; whether the branch is protected is not known — ${r.protectedWhy}` : '';
     if (solo) {
-      return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}${unsure ? '; and ' : ' — '}${own}`, hint: `relax the required approvals in ${setting}` };
+      return {
+        status: 'warn',
+        message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}${unsure ? '; and ' : ' — '}${own}`,
+        // …and what went unread, or who can settle a protection that is not known, as the team twins say.
+        hint: `relax the required approvals in ${setting}${unknownScoped.length || r.partlyRead ? `. ${Unread}` : (unsure ? `. ${settleIt[0].toUpperCase()}${settleIt.slice(1)}` : '')}`,
+      };
     }
     if (unsure) {
-      // The protection is not known because two answers disagree, not because a call failed: the pointer
-      // to "what yad could not read" belongs here only when something really was not read. A part left
-      // unread on THIS path always leaves a scoped fact unknown with it (an inexact ruleset read makes
-      // `codeOwners` null), so that one test carries both.
-      const why = unknownScoped.length ? unread : `ask someone who can see ${P}'s settings for ${br}`;
+      // The protection is not known because two answers disagree, not because a call failed — so the
+      // pointer to "what yad could not read" belongs here only when something really was not read. Both
+      // terms are needed: a rule that sets a scoped fact makes it TRUE, not unknown, while its count is
+      // still unread (review 18).
+      const why = unknownScoped.length || r.partlyRead ? unread : settleIt;
       return { status: 'warn', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}`, hint: why };
     }
     const said = { status: 'ok', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners} — yad reports this and enforces nothing` };
@@ -489,8 +501,9 @@ function lineFor(r, { name, solo = false } = {}) {
     const only = scoped.length ? ' on every change: only some changes need an approval (' + scoped.join('; ') + ')' : '';
     const msg = `${name}: no rule on ${where}${branchNote} requires an approval to merge into ${br}${only || (unknownScoped.length ? ' on every change' : '')}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}; whether the branch is protected is not known — ${r.protectedWhy}`;
     // The PROTECTION read did not fail here — the platform gave two answers that disagree — so the hint
-    // names who can settle it. A scoped fact that could not be read keeps its own pointer.
-    const ask = unknownScoped.length ? unread : `ask someone who can see ${P}'s settings for ${br}`;
+    // names who can settle it. A scoped fact that could not be read keeps its own pointer. (A count of 0
+    // is only ever set from a complete read, so `partlyRead` is false on this path and is not tested.)
+    const ask = unknownScoped.length ? unread : settleIt;
     return { status: solo ? 'ok' : 'warn', message: msg, hint: ask };
   }
   if (r.approvals === 0 && r.protected === false) {
@@ -519,7 +532,9 @@ function lineFor(r, { name, solo = false } = {}) {
   // approvals not known
   if (r.protected === false) {
     const msg = `${name}: ${br} is not protected on ${where}${branchNote}: anyone with write access can push to it directly; whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`;
-    const why = r.platform === 'gitlab' ? 'on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in' : unread;
+    const why = r.platform === 'gitlab' && !r.rulesAnswered
+      ? 'on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in'
+      : unread;
     // A line that could not be read keeps its hint in solo mode too: it names how to read it.
     return { status: solo ? 'ok' : 'warn', message: msg, hint: why };
   }
@@ -527,7 +542,9 @@ function lineFor(r, { name, solo = false } = {}) {
     ? `${name}: ${br} is protected on ${where}${branchNote}, but whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`
     : `${name}: whether ${br} is protected on ${where}${branchNote} is not known (${r.protectedWhy}), and neither is whether a merge needs an approval — ${r.approvalsWhy}${clauses(false)}`;
   const hint = r.platform === 'gitlab'
-    ? `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
+    ? (r.rulesAnswered
+      ? `a Maintainer can see the approval rules for ${br} in the project's merge request settings`
+      : `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`)
     : `ask a repo admin to check the required approvals for ${br} in ${P}'s settings`;
   return { status: solo ? 'ok' : 'warn', message: msg, hint };
 }
