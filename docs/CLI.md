@@ -1210,10 +1210,11 @@ protected. So yad says "no rules" only when every call it needed succeeded. Othe
 | Not an admin (GitHub classic protection) | `only a repo admin can read classic branch protection, and GitHub answered 404 (your login is not an admin)`. The reason adds `, or the branch is protected by rulesets alone` only while a ruleset could be there — an empty rules list, or a host with no rulesets API, leaves it out |
 | A GitHub host with no rulesets API | `GitHub answered 404 for the rules on the branch, which a host without the rulesets API does` |
 | GitLab approval rules refused | `GitLab refused to show the approval rules (HTTP 403): they need GitLab Premium or Ultimate, or your login may not read them` |
-| A branch yad's files name that GitHub does not have | `GitHub answered 404 for the branch mian, so this repo does not have it` — the repo was read with the same login moments before, and one permission covers both |
-| A GitHub repo with no commits yet (yad's files name no branch, so GitHub's own default was read) | `GitHub answered 404 for the branch main, so this repo has no commits on it yet` |
+| A branch yad's files name that GitHub does not have, and that GitHub does not call the repo's default | `GitHub answered 404 for the branch mian, so this repo does not have it` — the repo was read with the same login moments before, and one permission covers both |
+| A GitHub repo with no commits yet — the branch GitHub itself names as the repo's default, whether yad's files name it too or not | `GitHub answered 404 for the branch main, so this repo has no commits on it yet` |
 | A branch GitLab answered 404 for | `GitLab answered 404 for the branch mian (it does not exist, or your login may not see it)` — reading a project and reading its repository are two GitLab settings, so a permission is still a live cause |
 | A GitLab rule whose branch list yad cannot read | `GitLab listed an approval rule whose branch list holds a name yad could not read` |
+| A repo or project answered 404 | `GitHub answered 404 for the repo acme/app (it does not exist, or your login may not see it)`. The hint names an action for each cause: check `git_url`, or ask for access |
 | Reads turned off | `platform reads are turned off (YAD_PLATFORM_READ=0)` |
 
 Three real lines from team Products, each with its hint:

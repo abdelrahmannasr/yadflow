@@ -155,18 +155,21 @@ export function readProtection({ platform, gitUrl, branch = null, branchFrom = '
 // Read the repo, then settle the branch: yad's, else the platform's default (said in the line).
 function repoAndBranch(base, runner, unknown, { cli, platform, at, what }) {
   const meta = api(runner, cli, base.host, at);
-  if (!meta.ok) return { fail: unknown('other', whyFailed(meta, { platform, host: base.host, what })) };
+  if (!meta.ok) return { fail: unknown(meta.status === 404 ? 'no-repo' : 'other', whyFailed(meta, { platform, host: base.host, what })) };
   const platformDefault = typeof meta.body?.default_branch === 'string' ? meta.body.default_branch : null;
   if (base.branch) return { branch: base.branch, branchFrom: base.branchFrom, platformDefault };
   if (!platformDefault) return { fail: unknown('no-default', `no default branch is set in yad's files, and ${PLATFORM_NAME[platform]} named none`) };
   return { branch: platformDefault, branchFrom: 'platform', platformDefault };
 }
 
-// A 404 on the branch: yad's files name one the platform does not have — or, when the branch IS the
-// platform's own default, a repo with no commits yet. On GitLab add "or one the login cannot read",
-// because reading a project and reading its repository are two settings there; on GitHub one
-// permission covers both, so the repo read before this one rules that cause out.
-const branchMissing = (res, branchFrom) => (res.status !== 404 ? 'other' : branchFrom === 'platform' ? 'empty' : 'no-branch');
+// A 404 on the branch: the platform does not have the branch yad's files name — or, when the platform
+// itself just named this branch as the repo's default, a repo with no commits yet. That turns on what the
+// repo read PROVED, never on where yad got the name, because yad's files may name the default too. On
+// GitLab add "or one the login cannot read", because reading a project and reading its repository are two
+// settings there; on GitHub one permission covers both, so the repo read before this one rules it out.
+const namedByPlatform = (branch, platformDefault) => platformDefault !== null && branch === platformDefault;
+const branchMissing = (res, branch, platformDefault) => (res.status !== 404 ? 'other'
+  : namedByPlatform(branch, platformDefault) ? 'empty' : 'no-branch');
 const RULESET_OF = { Organization: 'an organisation ruleset', Repository: 'a repo ruleset' };
 // What the platform calls a change asking to be merged.
 const REQUEST = { github: 'pull request', gitlab: 'merge request' };
@@ -199,11 +202,11 @@ function readGitHub(base, runner, unknown) {
   if (!b.ok) {
     const why = b.status !== 404
       ? whyFailed(b, { platform: 'github', host, what: `the branch ${shown(branch)}` })
-      : branchFrom === 'platform'
+      : namedByPlatform(branch, platformDefault)
         // GitHub named this branch as the repo's default moments ago, so the repo does not lack it.
         ? `GitHub answered 404 for the branch ${shown(branch)}, so this repo has no commits on it yet`
         : `GitHub answered 404 for the branch ${shown(branch)}, so this repo does not have it`;
-    return { ...out, known: false, kind: branchMissing(b, branchFrom), why };
+    return { ...out, known: false, kind: branchMissing(b, branch, platformDefault), why };
   }
   if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'no-flag', why: 'GitHub did not say whether the branch is protected' };
   out.protected = b.body.protected;
@@ -326,7 +329,7 @@ function readGitLab(base, runner, unknown) {
   const b = api(runner, 'glab', host, `${at}/repository/branches/${encodeURIComponent(branch)}`);
   if (!b.ok) {
     const why = whyFailed(b, { platform: 'gitlab', host, what: `the branch ${shown(branch)}` });
-    return { ...out, known: false, kind: branchMissing(b, branchFrom), why };
+    return { ...out, known: false, kind: branchMissing(b, branch, platformDefault), why };
   }
   if (typeof b.body?.protected !== 'boolean') return { ...out, known: false, kind: 'no-flag', why: 'GitLab did not say whether the branch is protected' };
   out.protected = b.body.protected;
@@ -548,7 +551,7 @@ function lineFor(r, { name, solo = false } = {}) {
     // No `unknownScoped` clause: this sentence is GitLab-only and needs `protected === false`, where the
     // reader always proves `codeOwners` and never sets `fileReviewers`.
     const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, and the approval rule${many ? 's' : ''} ${P} has miss${many ? '' : 'es'} it: ${r.rulesElsewhere}, so ${many ? 'none of them holds' : 'it does not hold'} a merge into it${only}`;
-    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval, in ${setting}; yad only reports what is set` };
+    return solo ? { status: 'ok', message: msg } : { status: 'warn', message: msg, hint: `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set` };
   }
   if (r.approvals === 0 && r.protected === null) {
     // The count was read; the protection was not. Both are said, and neither borrows the other's answer.
@@ -580,7 +583,7 @@ function lineFor(r, { name, solo = false } = {}) {
     const only = scoped.length ? ` — only some changes need one (${scoped.join('; ')})` : '';
     const msg = `${name}: ${br} is protected on ${where}${branchNote}, but no rule requires an approval${scoped.length || unknownScoped.length ? ' on every change' : ''}${only}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}`;
     // A line that is partly unread keeps its hint in solo mode, as every could-not-read line does.
-    const advice = `only ${P} can require an approval, in ${setting}; yad only reports what is set`;
+    const advice = `only ${P} can require an approval before a merge, in ${setting}; yad only reports what is set`;
     const hint = unknownScoped.length ? `${advice}. ${unread[0].toUpperCase()}${unread.slice(1)}` : advice;
     if (solo) return unknownScoped.length ? { status: 'ok', message: msg, hint } : { status: 'ok', message: msg };
     return { status: 'warn', message: msg, hint };
@@ -616,9 +619,12 @@ function unknownHint(r) {
     case 'no-platform': return 'set `platform` (github or gitlab) in yad\'s files — `yad setup` for the Product, `yad repo connect` for a code repo';
     case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
     case 'no-branch': return `check that \`default_branch\` in yad's files names a branch that exists on the platform${r.platform === 'github' ? '' : ', or ask for access to the project\'s repository'}`;
-    case 'empty': return `the platform names this default branch, but it has no commits yet${r.platform === 'github' ? '' : ' (or your login cannot see it)'} — push a first commit, then run \`yad doctor\` again`;
+    case 'empty': return r.platform === 'github'
+      ? 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again'
+      : 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again';
     case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch) === r.branch ? `\`${r.branch}\`` : shown(r.branch)}`;
     case 'no-default': return 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
+    case 'no-repo': return `check \`git_url\` in yad's files, or ask for access to the ${r.platform === 'gitlab' ? 'project' : 'repo'}`;
     default: return 'fix what the message names, then run `yad doctor` again; nothing about this repo\'s protection is assumed meanwhile';
   }
 }

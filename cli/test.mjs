@@ -18962,8 +18962,10 @@ test('E70 readProtection: every way of not being able to ask is not known, with 
     [readProtection(t, { runner: fakePlatform({ authed: false }).runner, env: ON }), /^gh is not logged in for github\.com/],
     [readProtection(t, { runner: fakePlatform({ calls: [[/./, null]] }).runner, env: ON }), /^yad could not reach github\.com to read the repo acme\/app \(offline/],
     [ghRead([[/\/branches\/main$/, null]]).r, /^yad could not reach github\.com to read the branch main \(offline/],
-    [ghRead([[/\/branches\/main$/, 404]]).r, /^GitHub answered 404 for the branch main, so this repo does not have it$/],
+    [ghRead([[/\/branches\/mian$/, 404]], { branch: 'mian' }).r, /^GitHub answered 404 for the branch mian, so this repo does not have it$/],
     [ghRead([[/\/branches\/main$/, 404]], { branch: null }).r, /^GitHub answered 404 for the branch main, so this repo has no commits on it yet$/],
+    // yad's files may name the platform's default too: what the repo read PROVED decides, not where the name came from.
+    [ghRead([[/\/branches\/main$/, 404]]).r, /^GitHub answered 404 for the branch main, so this repo has no commits on it yet$/],
     [ghRead([[/\/branches\/main$/, 401]]).r, /HTTP 401 — the login may have expired/],
     [ghRead([[/\/branches\/main$/, 500]]).r, /answered HTTP 500 for the branch main/],
     [ghRead([[/\/branches\/main$/, 200, 'not json']]).r, /with something yad could not read/],
@@ -19174,7 +19176,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.equal(l.message, `backend (GitHub acme/app, branch \`main\`): ${BANNER}`);
   assert.equal(l.hint, 'only GitHub can require an approval before a merge, in GitHub\'s branch protection or a ruleset for `main`; yad only reports what is set');
   assert.equal(protectionLine({ ...base, platform: 'gitlab' }, { name: 'b' }).hint, 'only GitLab can require an approval before a merge, in an approval rule (GitLab Premium or Ultimate) for `main`; yad only reports what is set', 'GitLab has no rulesets');
-  assert.equal(protectionLine({ ...base, platform: 'gitlab', protected: true }, { name: 'b' }).hint, 'only GitLab can require an approval, in an approval rule (GitLab Premium or Ultimate) for `main`; yad only reports what is set');
+  assert.equal(protectionLine({ ...base, platform: 'gitlab', protected: true }, { name: 'b' }).hint, 'only GitLab can require an approval before a merge, in an approval rule (GitLab Premium or Ultimate) for `main`; yad only reports what is set');
   l = protectionLine(base, { name: 'backend', solo: true });
   assert.deepEqual([l.status, l.message], ['ok', 'backend: GitHub acme/app has no approval rules and no branch protection on `main` — expected in solo mode; yad records what happens, but cannot stop anything here']);
   // No banner unless BOTH are proven.
@@ -19189,7 +19191,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   l = protectionLine({ ...base, protected: true, codeOwners: null, fileReviewers: null }, { name: 'b' });
   assert.equal(l.message, 'b: `main` is protected on GitHub acme/app, but no rule requires an approval on every change; whether a code owner must approve some files is not known; whether a named reviewer must approve some files is not known');
   assert.equal(protectionLine({ ...base, protected: true, codeOwners: null }, { name: 'b' }).hint,
-    'only GitHub can require an approval, in GitHub\'s branch protection or a ruleset for `main`; yad only reports what is set. Ask someone who can see GitHub\'s settings for `main` about what yad could not read',
+    'only GitHub can require an approval before a merge, in GitHub\'s branch protection or a ruleset for `main`; yad only reports what is set. Ask someone who can see GitHub\'s settings for `main` about what yad could not read',
     'the advice stays, and the hint names what was not read');
   assert.ok(protectionLine({ ...base, protected: true, codeOwners: null }, { name: 'b', solo: true }).hint, 'a partly unread line keeps its hint in solo mode');
   assert.ok(!protectionLine({ ...base, protected: true }, { name: 'b', solo: true }).hint, 'a line that was fully read does not');
@@ -19302,7 +19304,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   assert.match(unknown('no-default').hint, /^set `default_branch`/);
   assert.match(unknown('no-flag', 'GitHub did not say whether the branch is protected').hint, /^ask someone who can see GitHub's settings for `main`$/);
   assert.equal(unknown('empty').hint, 'the platform names this default branch, but it has no commits yet — push a first commit, then run `yad doctor` again', 'GitHub\'s message already ruled a permission out, so the hint may not offer it back');
-  assert.equal(unknown('empty', 'x', { platform: 'gitlab' }).hint, 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, then run `yad doctor` again', 'GitLab\'s message leaves a permission open, so the hint may not settle it');
+  assert.equal(unknown('empty', 'x', { platform: 'gitlab' }).hint, 'the platform names this default branch, but it has no commits yet (or your login cannot see it) — push a first commit, or ask for access to the project\'s repository, then run `yad doctor` again', 'GitLab\'s message leaves a permission open, so the hint may not settle it');
   assert.equal(unknown('no-branch', 'x', { platform: 'gitlab' }).hint, 'check that `default_branch` in yad\'s files names a branch that exists on the platform, or ask for access to the project\'s repository', 'a GitLab reader who finds the branch does exist still has something to do');
   assert.match(unknown('other', 'GitHub answered HTTP 502 for the branch main').hint, /^fix what the message names, then run `yad doctor` again/);
   assert.match(unknown('no-branch', 'platform reads are turned off (YAD_PLATFORM_READ=0)').hint, /names a branch that exists/);
@@ -19371,9 +19373,11 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
     [readProtection({ platform: 'github', gitUrl: GH_URL }, { runner: f.runner, env: { YAD_PLATFORM_READ: '0' } }), 'off'],
     [readProtection({ platform: 'github', gitUrl: null }, { runner: f.runner, env: ON }), 'no-url'],
     [readProtection({ platform: 'github', gitUrl: GH_URL }, { runner: fakePlatform({ installed: false }).runner, env: ON }), 'no-cli'],
-    [ghRead([[/\/branches\/main$/, 404]]).r, 'no-branch'],
+    [ghRead([[/\/branches\/mian$/, 404]], { branch: 'mian' }).r, 'no-branch'],
     [ghRead([[/\/branches\/main$/, 502]]).r, 'other'],
     [ghRead([[/\/branches\/main$/, 404]], { branch: null }).r, 'empty'],
+    [ghRead([[/\/branches\/main$/, 404]]).r, 'empty', 'yad names the branch GitHub also calls its default'],
+    [readProtection({ platform: 'github', gitUrl: GH_URL }, { runner: fakePlatform({ calls: [[/^repos\/acme\/app$/, 404]] }).runner, env: ON }), 'no-repo'],
     [readProtection({ platform: 'github', gitUrl: GH_URL, branch: null }, { runner: fakePlatform({ calls: [[/^repos\/acme\/app$/, 200, { default_branch: '' }]] }).runner, env: ON }), 'no-default'],
   ];
   for (const [res, kind] of kinds) assert.equal(res.kind, kind, res.why);
@@ -19463,6 +19467,10 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
         }
         assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
         assert.ok(!/\. [a-z]/.test(line.hint || ''), `a sentence that starts lower case: ${line.hint}`);
+        // A branch the platform named as its own default is a repo with no commits, whatever yad's files say.
+        if (r.known === false && r.platformDefault !== null && r.branch === r.platformDefault && /answered 404 for the branch/.test(r.why || '')) {
+          assert.equal(r.kind, 'empty', `the platform named this branch its default, and the line says the repo lacks it: ${r.why}`);
+        }
         // A hint may not settle a cause its own message left open, whichever arm printed them.
         if (/, or your login may not see it\)/.test(line.message)) {
           assert.ok(!/but it has no commits yet —/.test(line.hint || ''), `the message left two causes open, and the hint settles one: ${line.hint}`);
@@ -19491,7 +19499,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
   // The measured count, exactly: the grid is deterministic, so any drop is a shape that stopped saying
   // something of its own. It says nothing about two hints merging — that is the hint rules' job above.
-  assert.ok(distinct.size >= 1356, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
+  assert.ok(distinct.size >= 1358, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {
