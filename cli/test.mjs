@@ -19220,10 +19220,9 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
   ({ r } = glRead([[/\/repository\/branches\//, 404, REPO_404]], { branch: null }));
   assert.deepEqual([r.kind, r.cause, r.branch], ['no-repository', 'repository', 'main'], 'synthetic: GitLab hides the default from this login');
   // What the REAL shape gives when yad's files name no branch either: `no-default`, before any branch is
-  // asked, so the body is never seen. Pinned as it is today; roadmap row E110 is to keep the access cause
-  // open there, since on GitLab "named none" is also what an unreadable repository looks like.
+  // asked, so the body is never seen. Since E110 the access cause stays open there (see the E110 test).
   r = noDefault([[/\/repository\/branches\//, 404, REPO_404]], null);
-  assert.deepEqual([r.kind, 'cause' in r, r.why], ['no-default', false, 'no default branch is set in yad\'s files, and GitLab named none']);
+  assert.deepEqual([r.kind, 'cause' in r, r.defaultMayBeHidden], ['no-default', false, true]);
   // Every body yad does not recognise keeps today's hedge and today's hints, word for word: the fake's
   // default body, a reworded or lower-case message, another language, extra words, a message that is not a
   // string, a body that is not JSON, and no body at all.
@@ -19262,6 +19261,44 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
   const json = JSON.stringify(protectionJSON(r));
   assert.match(json, /"cause":"repository"/);
   assert.ok(!json.includes('me@corp.com'), json);
+});
+
+// ---- E110: on GitLab, a project answer with no default branch keeps the access cause open ---------------
+// GitLab names a project's default only to a login that may read its code, so "GitLab named none" is also
+// what an unreadable repository looks like. Both causes are said, and the hint names an action for each.
+test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', () => {
+  const GL_NONE = "no default branch is set in yad's files, and GitLab named none (GitLab names it only to a login that can read the project's repository)";
+  const FILES = 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
+  // The same two actions as E109's `no-repository`, word for word — a non-owner can ask for the repository
+  // to be turned on, since more access cannot help while it is off (E110's review).
+  const HIDDEN = '. GitLab also hides the default from a login that cannot read the repository: if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
+  // The project answer GitLab really sends to a login that cannot read the code: no `default_branch` key.
+  // A null or empty value reads the same way: nothing is guessed from what the key holds either.
+  for (const project of [{}, { default_branch: null }, { default_branch: '' }]) {
+    const r = readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: null }, { runner: fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, project]] }).runner, env: ON });
+    assert.deepEqual([r.known, r.kind, r.defaultMayBeHidden, 'cause' in r, r.why], [false, 'no-default', true, false, GL_NONE], JSON.stringify(project));
+    for (const solo of [false, true]) {
+      const line = protectionLine(r, { name: 'b', solo });
+      assert.equal(line.status, solo ? 'ok' : 'warn');
+      assert.equal(line.message, `b: not known whether the default branch requires an approval — ${GL_NONE}`);
+      assert.equal(line.hint, FILES + HIDDEN, `one action per open cause, solo ${solo}`);
+    }
+  }
+  // GitHub names the default to anyone who may read the repo, which its repo read just proved: one cause,
+  // one action, word for word as before.
+  const gh = readProtection({ platform: 'github', gitUrl: GH_URL, branch: null }, { runner: fakePlatform({ calls: [[/^repos\/acme\/app$/, 200, {}]] }).runner, env: ON });
+  assert.deepEqual([gh.kind, 'defaultMayBeHidden' in gh, gh.why], ['no-default', false, "no default branch is set in yad's files, and GitHub named none"]);
+  assert.equal(protectionLine(gh, { name: 'b' }).hint, FILES);
+  // The hint turns on the FIELD, not on the platform's name: the same fact reads the same either way.
+  const hand = (extra) => protectionLine({ platform: 'github', branch: null, known: false, kind: 'no-default', why: 'x', ...extra }, { name: 'b' }).hint;
+  assert.equal(hand({ defaultMayBeHidden: true }), FILES + HIDDEN);
+  assert.equal(hand({ platform: 'gitlab' }), FILES);
+  // A branch yad's files name is asked for directly, so the missing default changes nothing there.
+  const named = readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: 'main' }, { runner: fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, {}], [/\/repository\/branches\//, 404, { message: '404 Repository Not Found' }]] }).runner, env: ON });
+  assert.deepEqual([named.kind, 'defaultMayBeHidden' in named], ['no-repository', false]);
+  // --json carries the fact.
+  const gl = readProtection({ platform: 'gitlab', gitUrl: GL_URL, branch: null }, { runner: fakePlatform({ calls: [[/^projects\/acme%2Fapp$/, 200, {}]] }).runner, env: ON });
+  assert.match(JSON.stringify(protectionJSON(gl)), /"defaultMayBeHidden":true/);
 });
 
 test('E70 protectionLine: the Part 3 banner word for word only when both halves are proven; solo prints facts', () => {
@@ -19536,6 +19573,8 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
     // E109: a GitLab branch 404 whose body names the cause, each way, and one it does not recognise.
     GL([[/\/repository\/branches\//, 404, { message: '404 Repository Not Found' }]]), GL([[/\/repository\/branches\//, 404, { message: '404 Branch Not Found' }]]),
     GL([[/\/repository\/branches\//, 404, { message: '404 Dépôt introuvable' }]]), GL([[/^projects\/acme%2Fapp$/, 404, { message: '404 Repository Not Found' }]]),
+    // E110: a GitLab project answer that names no default — no key (the real shape), null, or empty.
+    GL([[/^projects\/acme%2Fapp$/, 200, { default_branch: null }]]), GL([[/^projects\/acme%2Fapp$/, 200, { default_branch: '' }]]),
     // a branch answered without the flag, and a project that names no default branch of its own
     GH([[/\/branches\/[^/]+$/, 200, { name: 'main' }], [/\/rules\//, 200, []]]),
     GL([[/\/repository\/branches\//, 200, { name: 'main' }], [/\/protected_branches/, 200, []], [/\/approval_rules/, 200, []]]),
@@ -19549,6 +19588,10 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   let seen = 0;
   let twoCause = 0; // the rule below is keyed on a wording, so count its firings: an edit must not silence it
   let proved = 0; // …and so is E109's reverse of it
+  let hidden = 0; // …and E110's
+  // The two actions for a repository that is off or out of reach, as ONE clause both hints must carry
+  // whole: checking the words one by one let a hint drop the non-owner's "or to turn it on" (E110 review).
+  const REPO_ACTIONS = 'if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on';
   const distinct = new Set(); // what the grid SAYS, not how many times it was asked
   for (const { platform, gitUrl, calls } of shapes) {
     for (const branch of ['main', 'develop', 'me@corp.com', null]) {
@@ -19594,7 +19637,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
             // …and the message leaves two causes open (turned off, or access too low), so the hint names an
             // action for EACH — rule 3 of E70, on E109's own two-cause sentence.
             assert.match(line.message, /it is turned off for the project, or your access is too low/, `the repository sentence stopped naming its two causes: ${line.message}`);
-            assert.ok(/\bturn it on\b/.test(line.hint || '') && /\baccess\b/.test(line.hint || ''), `the message left two causes open, and the hint names an action for only one: ${line.hint}`);
+            assert.ok((line.hint || '').includes(REPO_ACTIONS), `the message left two causes open, and the hint does not name an action for each: ${line.hint}`);
           }
         }
         // A hint may not settle a cause its own message left open, whichever arm printed them.
@@ -19602,6 +19645,19 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           twoCause += 1;
           assert.ok(!/but it has no commits yet —/.test(line.hint || ''), `the message left two causes open, and the hint settles one: ${line.hint}`);
         }
+        // E110: a missing GitLab default leaves two causes open, so the hint names an action for each; a
+        // default missing where no second cause exists offers no access at all. Keyed on the field.
+        if (r.kind === 'no-default') {
+          if (r.defaultMayBeHidden) {
+            hidden += 1;
+            assert.match(r.why, /named none \(GitLab names it only to a login that can read/, `the second cause is not said: ${r.why}`);
+            assert.ok(/set `default_branch`/.test(line.hint) && line.hint.includes(REPO_ACTIONS), `two causes open, and the hint does not name an action for each: ${line.hint}`);
+          } else {
+            assert.ok(!/\baccess\b|turn it on/.test(line.hint || ''), `no second cause is open, and the hint offers access: ${line.hint}`);
+          }
+        }
+        // …and the fact belongs to that one answer: a flag on any other kind would change its --json.
+        assert.ok(r.kind === 'no-default' || !('defaultMayBeHidden' in r), `defaultMayBeHidden on a ${r.kind} answer`);
         // A hint may claim something went unread only when the read says so…
         if (/about what yad could not read/.test(line.hint || '')) {
           assert.ok(r.known === false || r.partlyRead === true || r.codeOwners === null || r.fileReviewers === null,
@@ -19623,12 +19679,13 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   }
   assert.ok(seen >= 4200, `the grid shrank: ${seen} lines`);
   assert.ok(twoCause >= 16, `the two-cause rule stopped firing (${twoCause} lines) — a reworded message may have silenced it`);
+  assert.ok(hidden >= 6, `the missing-default rule stopped firing (${hidden} lines) — a reader that stopped setting \`defaultMayBeHidden\` would silence it`);
   assert.ok(proved >= 34, `the proved-cause rule stopped firing (${proved} lines) — a reader that stopped setting \`cause\` would silence it`);
   // …and the count of DISTINCT lines, because a shape that collapses into another's answer leaves the
   // count above untouched — which is how a fifth of this grid once said nothing (review 21).
   // The measured count, exactly: the grid is deterministic, so any drop is a shape that stopped saying
   // something of its own. It says nothing about two hints merging — that is the hint rules' job above.
-  assert.ok(distinct.size >= 1374, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
+  assert.ok(distinct.size >= 1380, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {
