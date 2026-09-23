@@ -19205,7 +19205,7 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
     ({ r } = glRead([[/\/repository\/branches\//, 404, REPO_404]], { branch }));
     const b = branch || 'main';
     assert.deepEqual([r.known, r.kind, r.cause], [false, 'no-repository', 'repository'], String(branch));
-    assert.equal(r.why, `GitLab answered 404 for the branch ${b} because your login cannot read this project's repository (it is turned off for the project, or your access is too low to read it)`);
+    assert.equal(r.why, `GitLab answered 404 for the branch ${b} because this project's repository could not be read (it is turned off for the project, or your access is too low to read it)`);
     const line = protectionLine(r, { name: 'b' });
     assert.equal(line.hint, 'ask a Maintainer or Owner of the GitLab project to give your login access to its repository (or to turn the repository on), then run `yad doctor` again');
     assert.doesNotMatch(`${line.message} ${line.hint}`, /does not exist|does not have it|no commits/, 'the branch was never looked up');
@@ -19461,6 +19461,7 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
     [readProtection({ platform: 'github', gitUrl: GH_URL }, { runner: fakePlatform({ installed: false }).runner, env: ON }), 'no-cli'],
     [ghRead([[/\/branches\/mian$/, 404]], { branch: 'mian' }).r, 'no-branch'],
     [ghRead([[/\/branches\/main$/, 502]]).r, 'other'],
+    [glRead([[/\/repository\/branches\//, 404, { message: '404 Repository Not Found' }]]).r, 'no-repository'],
     [ghRead([[/\/branches\/main$/, 404]], { branch: null }).r, 'empty'],
     [ghRead([[/\/branches\/main$/, 404]]).r, 'empty', 'yad names the branch GitHub also calls its default'],
     [readProtection({ platform: 'github', gitUrl: GH_URL }, { runner: fakePlatform({ calls: [[/^repos\/acme\/app$/, 404]] }).runner, env: ON }), 'no-repo'],

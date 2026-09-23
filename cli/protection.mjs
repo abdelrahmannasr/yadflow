@@ -364,7 +364,7 @@ function readGitLab(base, runner, unknown) {
     const cause = gitlabBranchCause(b);
     if (cause === 'repository') {
       // The branch was never looked up, so nothing is said about it — whoever named it.
-      return { ...out, known: false, kind: 'no-repository', cause, why: `GitLab answered 404 for the branch ${shown(branch)} because your login cannot read this project's repository (it is turned off for the project, or your access is too low to read it)` };
+      return { ...out, known: false, kind: 'no-repository', cause, why: `GitLab answered 404 for the branch ${shown(branch)} because this project's repository could not be read (it is turned off for the project, or your access is too low to read it)` };
     }
     if (cause === 'branch') {
       const why = namedByPlatform(branch, platformDefault)
@@ -665,6 +665,8 @@ function unknownHint(r) {
     case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
     // The access tail turns on what the read PROVED (`cause`), never on the platform: a 404 whose body was
     // not recognised leaves a permission open, and one that named the branch closes it (E109).
+    // The tail's noun is GitLab's: GitHub never reaches it, because its reader sets `cause: 'branch'` on
+    // every branch 404.
     case 'no-branch': return `check that \`default_branch\` in yad's files names a branch that exists on the platform${r.cause === 'branch' ? '' : ', or ask for access to the project\'s repository'}`;
     case 'no-repository': return 'ask a Maintainer or Owner of the GitLab project to give your login access to its repository (or to turn the repository on), then run `yad doctor` again';
     case 'empty': return r.cause === 'branch'
