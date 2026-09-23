@@ -18845,14 +18845,19 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   assert.deepEqual([r.protected, r.approvals], [null, 2]);
   line = protectionLine(r, { name: 'b' });
   assert.deepEqual([line.status, line.message], ['warn', 'b: a pull request into `main` on GitHub acme/app needs 2 approvals (from: a repo ruleset (id 7)); whether the branch is protected is not known — GitHub\'s branch flag says no, but GitHub also lists active rules on the branch']);
-  assert.ok(line.hint, 'a line with a half it could not read carries a hint');
+  // Every call succeeded here — the two answers simply disagree — so the hint names who can settle it…
+  assert.equal(line.hint, 'ask someone who can see GitHub\'s settings for `main`');
+  // …and it points at an unread part only when there is one.
+  const partly = ghRead([[/\/rules\//, 200, [PR_RULE(2), { type: 'pull_request', parameters: {} }]], [/\/branches\/main$/, 200, { protected: false }]]).r;
+  assert.deepEqual([partly.protected, partly.approvals, partly.partlyRead], [null, 2, true]);
+  assert.match(protectionLine(partly, { name: 'b' }).hint, /about what yad could not read$/);
   assert.match(protectionLine(r, { name: 'b', solo: true }).message, /needs 2 approvals \(from: a repo ruleset \(id 7\)\); whether the branch is protected is not known — .*; and you cannot approve your own pull request/);
   // The rulesets cannot be read: approvals not known — and neither is "not protected", because GitHub's
   // flag may not count a ruleset.
   ({ r } = ghRead([[/\/rules\//, 403], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals, r.codeOwners], [null, null, null]);
   assert.equal(r.protectedWhy, 'GitHub\'s branch flag says no, and the rulesets that could confirm it could not be read');
-  assert.match(r.approvalsWhy, /^GitHub refused to show the rules on the branch \(HTTP 403/);
+  assert.equal(r.approvalsWhy, 'GitHub refused to show the rules on the branch (HTTP 403 — your login may not read them)', 'a plural subject on the 403 arm too');
   assert.match(r.approvalsWhy, /refused to show the rules on the branch \(HTTP 403/);
   ({ r } = ghRead([[/\/rules\//, 200, 'garbage'], [/\/branches\/main$/, 200, { protected: false }]]));
   assert.deepEqual([r.protected, r.approvals], [null, null]);
@@ -19042,6 +19047,12 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'Devs', approvals_required: 1, applies_to_all_protected_branches: true }]], [/\/protected_branches/, 200, [{ name: '*', code_owner_approval_required: true }]]]));
   assert.deepEqual([r.codeOwners, r.rulesElsewhere], [true, 'it reaches protected branches only']);
   assert.match(protectionLine(r, { name: 'web' }).message, /so it does not hold a merge into it; only some changes need an approval \(a code owner must approve a change to a file CODEOWNERS lists\)$/);
+  // A count on an unprotected branch, with a rule that could not be read: the hint points at it.
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'a', approvals_required: 2, protected_branches: [] }, { name: 'b', approvals_required: '9', protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
+  assert.deepEqual([r.protected, r.approvals, r.partlyRead], [false, 2, true]);
+  for (const solo of [false, true]) assert.match(protectionLine(r, { name: 'web', solo }).hint, /\. Ask someone who can see GitLab's settings for `main` about what yad could not read$/);
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'a', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
+  assert.ok(!/could not read/.test(protectionLine(r, { name: 'web' }).hint), 'nothing unread: no pointer');
   // A rule on an UNprotected branch: a count, and `protected: false` beside it (the line says a push skips it).
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
   assert.deepEqual([r.protected, r.approvals], [false, 2]);

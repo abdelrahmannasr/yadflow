@@ -79,7 +79,7 @@ function whyFailed(res, { platform, host, what, plural = false }) {
   if (res.unreadable) return `${name} answered ${what} with something yad could not read`;
   if (res.status == null) return `yad could not reach ${host} to read ${what} (offline, or the host did not answer)`;
   if (res.status === 401) return `${name} refused to show ${what} (HTTP 401 — the login may have expired)`;
-  if (res.status === 403) return `${name} refused to show ${what} (HTTP 403 — your login may not read it)`;
+  if (res.status === 403) return `${name} refused to show ${what} (HTTP 403 — your login may not read ${plural ? 'them' : 'it'})`;
   if (res.status === 404) return `${name} answered 404 for ${what} (${plural ? 'they do not exist, or your login may not see them' : 'it does not exist, or your login may not see it'})`;
   return `${name} answered HTTP ${res.status} for ${what}`;
 }
@@ -453,7 +453,8 @@ function lineFor(r, { name, solo = false } = {}) {
       return {
         status: 'warn',
         message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? `; and ${own}` : ''}`,
-        hint: solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
+        // …and a part that went unread is pointed at here too, as on every other partly read line.
+        hint: `${solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`}${unknownScoped.length || r.partlyRead ? `. ${unread[0].toUpperCase()}${unread.slice(1)}` : ''}`,
       };
     }
     // Whether the branch is protected may be unknown beside a count that was read: say so, never silently.
@@ -462,7 +463,12 @@ function lineFor(r, { name, solo = false } = {}) {
       return { status: 'warn', message: `${name}: solo mode, but a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}${unsure ? '; and ' : ' — '}${own}`, hint: `relax the required approvals in ${setting}` };
     }
     if (unsure) {
-      return { status: 'warn', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}`, hint: unread };
+      // The protection is not known because two answers disagree, not because a call failed: the pointer
+      // to "what yad could not read" belongs here only when something really was not read. A part left
+      // unread on THIS path always leaves a scoped fact unknown with it (an inexact ruleset read makes
+      // `codeOwners` null), so that one test carries both.
+      const why = unknownScoped.length ? unread : `ask someone who can see ${P}'s settings for ${br}`;
+      return { status: 'warn', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners}${unsure}`, hint: why };
     }
     const said = { status: 'ok', message: `${name}: a ${request} into ${br} on ${where}${branchNote} needs ${n} ${from}${owners} — yad reports this and enforces nothing` };
     // A line that is partly unread carries its hint, as every other partly unread line does.
