@@ -17,6 +17,8 @@ import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 // account — the answer would differ per machine — so the lookup is off for every test in this file and
 // every CLI it spawns. The lookup's own tests pass `env` explicitly.
 process.env.YAD_PLATFORM_LOGIN = '0';
+// E70: `yad doctor` reads each repo's branch protection with the same `gh`/`glab` login — off here too.
+process.env.YAD_PLATFORM_READ = '0';
 
 const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const write = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s); };

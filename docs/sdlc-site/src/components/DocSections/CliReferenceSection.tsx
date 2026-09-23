@@ -10,7 +10,7 @@ const GROUPS = [
       'npx yadflow setup — guided first-run wizard',
       'npx yadflow check [--fix] — report / reconcile drift vs the manifest',
       'npx yadflow update — apply drift only (also migrates pre-2.0 sdlc-* installs)',
-      'npx yadflow doctor [--json] — environment + state health (exit 1 on failure)',
+      'npx yadflow doctor [--json] — environment + state health (exit 1 on failure); its protection section says whether each repo\'s branch requires an approval on GitHub or GitLab, or that it is not known and why (E70) — a warning at most',
       'npx yadflow migrate [--apply] — move state files onto this release\'s file shape (previews by default, backs up before writing)',
       'yad skill list | bind <step> <skill>… | unbind <step> — choose which skill runs a lifecycle step (.sdlc/skills.json); several skills run as a chain, each costing another model run',
     ],
