@@ -19110,8 +19110,11 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   assert.deepEqual([r.approvals, r.rulesAnswered], [null, true]);
   assert.equal(protectionLine(r, { name: 'web' }).hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings');
   ({ r } = glRead([[/\/approval_rules/, 403], [/\/protected_branches/, 200, []]], {}, P));
-  assert.equal(r.rulesAnswered, undefined);
+  assert.deepEqual([r.rulesAnswered, r.rulesRefused], [undefined, true]);
   assert.match(protectionLine(r, { name: 'web' }).hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate/);
+  ({ r } = glRead([[/\/approval_rules/, null], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual([r.rulesAnswered, r.rulesRefused], [undefined, undefined], 'offline refuses nothing');
+  assert.equal(protectionLine(r, { name: 'web' }).hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings');
   ({ r } = glRead([[/\/approval_rules/, 200, Array.from({ length: PAGE }, () => ({ name: 'z', approvals_required: 0, protected_branches: [] }))], [/\/protected_branches/, 200, []]]));
   assert.match(protectionLine(r, { name: 'web' }).hint, /about what yad could not read$/, 'an unprotected branch, with Free ruled out');
   // A self-managed host and a subgroup: the host is asked, and the whole path is the project.
@@ -19223,13 +19226,19 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   l = protectionLine({ ...base, protected: true, approvals: null, approvalsWhy: 'only a repo admin can read it' }, { name: 'b' });
   assert.deepEqual([l.status, l.message], ['warn', 'b: `main` is protected on GitHub acme/app, but whether a merge needs an approval is not known — only a repo admin can read it']);
   assert.match(l.hint, /ask a repo admin/);
-  l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'refused' }, { name: 'b' });
+  // A refusal is the one answer that leaves the tier open; anything else names no tier.
+  l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'refused', rulesRefused: true }, { name: 'b' });
   assert.match(l.hint, /^on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see/);
+  l = protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: null, approvalsWhy: 'offline' }, { name: 'b' });
+  assert.equal(l.hint, 'a Maintainer can see the approval rules for `main` in the project\'s merge request settings', 'offline says nothing about a tier');
   l = protectionLine({ ...base, protected: null, protectedWhy: 'p', approvals: null, approvalsWhy: 'a' }, { name: 'b' });
   assert.equal(l.message, 'b: whether `main` is protected on GitHub acme/app is not known (p), and neither is whether a merge needs an approval — a');
   l = protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b' });
   assert.equal(l.message, 'b: `main` is not protected on GitHub acme/app: anyone with write access can push to it directly; whether a merge needs an approval is not known — a');
-  assert.match(protectionLine({ ...base, platform: 'gitlab', approvals: null, approvalsWhy: 'a' }, { name: 'b' }).hint, /on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in/);
+  // The tier framing belongs to a refusal, and it no longer repeats the clause its own message carries.
+  assert.equal(protectionLine({ ...base, platform: 'gitlab', approvals: null, approvalsWhy: 'a', rulesRefused: true }, { name: 'b' }).hint,
+    'on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for `main` in the project\'s merge request settings');
+  assert.match(protectionLine({ ...base, platform: 'gitlab', approvals: null, approvalsWhy: 'a' }, { name: 'b' }).hint, /about what yad could not read$/);
   for (const solo of [true, false]) {
     assert.equal(protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b', solo }).status, solo ? 'ok' : 'warn');
     assert.equal(protectionLine({ ...base, protected: true, approvals: null, approvalsWhy: 'a' }, { name: 'b', solo }).status, solo ? 'ok' : 'warn');
@@ -19340,10 +19349,10 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
       [200, [{ ...RULE(2), ruleset_source_type: 'Organization', ruleset_id: 3 }]], [200, [{ ...RULE(2), ruleset_source_type: 'Enterprise', ruleset_id: 'x' }]],
       [200, [{ type: 'pull_request' }]], [401],
       [200, [RULE(2, { required_reviewers: [{ minimum_approvals: 1 }] })]], [200, [RULE('x')]], [200, [{ type: 'deletion' }]],
-      [200, Array.from({ length: PAGE }, () => RULE(1))], [403], [404], [null], [200, 'junk']]) {
+      [200, Array.from({ length: PAGE }, () => RULE(1))], [403], [404], [null], [200, 'junk'], [200, {}]]) {
       for (const classic of [[200, {}], [200, { required_pull_request_reviews: { required_approving_review_count: 1 } }],
         [200, { required_pull_request_reviews: { required_approving_review_count: 'x', require_code_owner_reviews: true } }], [404], [403]]) {
-        shapes.push(GH([[/\/protection$/, ...classic], [/\/rules\//, ...rules], [/\/branches\/main$/, 200, { protected: flag }]]));
+        shapes.push(GH([[/\/protection$/, ...classic], [/\/rules\//, ...rules], [/\/branches\/[^/]+$/, 200, { protected: flag }]]));
       }
     }
   }
@@ -19353,9 +19362,9 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
       for (const ar of [[200, []], [200, [AR(2)]], [200, [AR(0)]], [200, [AR('x')]], [200, [AR(1, { protected_branches: [{ name: 'release-*' }] })]],
         [200, [AR(1, { protected_branches: undefined })]], [200, [AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
         [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { applies_to_all_protected_branches: true, protected_branches: [] })]],
-        [200, [AR(1), AR(2)]], [200, [AR(1), AR('x')]], [200, [AR(1, { name: '', id: 9 })]],
+        [200, [AR(1), AR(2)]], [200, [AR(1), AR('x')]], [200, [AR(1, { name: '', id: 9 })]], [200, [AR(1, { name: 'owner a@b.com' })]],
         [200, [AR(1, { protected_branches: [{ name: 'release-*' }] }), AR(1, { protected_branches: [{ name: 'dev' }] })]],
-        [200, Array.from({ length: PAGE }, () => AR(0))], [403], [404], [401], [null], [200, 'junk']]) {
+        [200, Array.from({ length: PAGE }, () => AR(0))], [403], [404], [401], [null], [200, 'junk'], [200, {}]]) {
         shapes.push(GL([[/\/repository\/branches\//, 200, { protected: flag }], [/\/protected_branches/, ...pb], [/\/approval_rules/, ...ar]]));
       }
     }
@@ -19384,11 +19393,14 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
           assert.ok(!/[;,:]$/.test(said), `a sentence that stops mid-clause: ${said}`);
           assert.ok(dashes(said) <= 1, `two em dashes at one level: ${said}`);
           assert.ok(!said.split(/\s+/).some((w) => w.replace(/^[`"'([]+/, '').indexOf('@', 1) >= 0), `an address-like word: ${said}`);
+          assert.ok(!/^\s|\s$/.test(said), `a line padded with space: ${JSON.stringify(said)}`);
+          assert.ok(!/\b(\w+) \1\b/.test(said), `a word said twice: ${said}`);
           assert.ok(!/\b1 approvals\b|\b(?!1\b)\d+ approval\b/.test(said), `a count and its noun disagree: ${said}`);
           assert.ok(!/\bthe approval rules [A-Za-z]+ has misses\b|\bthe approval rule [A-Za-z]+ has miss\b/.test(said), `a subject and its verb disagree: ${said}`);
           assert.ok(!/\b(rules|branches|reviewers|approval rules)\b[^.]{0,80}?(may not read it\b|it does not exist)/.test(said), `a plural subject with a singular pronoun: ${said}`);
-          assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
         }
+        assert.ok(!line.hint || /(ask someone|Ask someone|ask a repo admin|Maintainer|relax the required|protecting |only \w+ can|unset YAD_PLATFORM_READ|install |auth login|default_branch|git_url|set `platform`|push a first commit|run `yad doctor`|fix what the message names)/.test(line.hint), `a hint that names nothing to do: ${line.hint}`);
+        assert.ok(!/\. [a-z]/.test(line.hint || ''), `a sentence that starts lower case: ${line.hint}`);
         // A hint may claim something went unread only when the read says so…
         if (/about what yad could not read/.test(line.hint || '')) {
           assert.ok(r.known === false || r.partlyRead === true || r.codeOwners === null || r.fileReviewers === null,
@@ -19405,7 +19417,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
       }
     }
   }
-  assert.ok(seen >= 800, `the grid shrank: ${seen} lines`);
+  assert.ok(seen >= 2100, `the grid shrank: ${seen} lines`);
 });
 
 test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {

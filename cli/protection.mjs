@@ -120,7 +120,10 @@ function loggedIn(runner, cli, host, authCache) {
 //     rulesElsewhereOne: true|false,                       — whether that clause speaks of one rule,
 //     partlyRead: true|false,                              — something the platform holds was not read,
 //     rulesAnswered: true,                                 — GitLab only: the approval-rules endpoint
-//                                                            answered, so the project is not on Free
+//                                                            answered with a list, so the project is not
+//                                                            on Free,
+//     rulesRefused: true,                                  — GitLab only: it refused (401/403/404), which
+//                                                            is the one answer that leaves the tier open
 //     codeOwners: true|false|null,                         — a code-owner review is required (a fact beside)
 //     fileReviewers: true|false|null }                     — a named reviewer for some files (GitHub only:
 //                                                            a GitLab answer carries no such key)
@@ -359,6 +362,9 @@ function readGitLab(base, runner, unknown) {
   // The approval-rules endpoint answers on Premium and Ultimate only, so a list that came back settles the
   // tier: a hint must not go on offering Free as the explanation (the round-15 rule, on the GitLab side).
   if (ar.ok && Array.isArray(ar.body)) out.rulesAnswered = true;
+  // A refusal is the only answer that leaves the tier open: offline, or a body yad could not read, says
+  // nothing about Premium at all, so those lines point at what was not read instead.
+  else if (!ar.ok && [401, 403, 404].includes(ar.status)) out.rulesRefused = true;
   if (elsewhere.size) {
     const how = [...elsewhere];
     const said = ([kind, n], first) => `${n === 1 ? (first ? 'one of them' : 'another') : (first ? 'some of them' : 'others')} ${MISSES[kind][n === 1 ? 0 : 1]}`;
@@ -532,8 +538,8 @@ function lineFor(r, { name, solo = false } = {}) {
   // approvals not known
   if (r.protected === false) {
     const msg = `${name}: ${br} is not protected on ${where}${branchNote}: anyone with write access can push to it directly; whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`;
-    const why = r.platform === 'gitlab' && !r.rulesAnswered
-      ? `on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
+    const why = r.platform === 'gitlab' && r.rulesRefused
+      ? `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
       : unread;
     // A line that could not be read keeps its hint in solo mode too: it names how to read it.
     return { status: solo ? 'ok' : 'warn', message: msg, hint: why };
@@ -542,9 +548,9 @@ function lineFor(r, { name, solo = false } = {}) {
     ? `${name}: ${br} is protected on ${where}${branchNote}, but whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`
     : `${name}: whether ${br} is protected on ${where}${branchNote} is not known (${r.protectedWhy}), and neither is whether a merge needs an approval — ${r.approvalsWhy}${clauses(false)}`;
   const hint = r.platform === 'gitlab'
-    ? (r.rulesAnswered
-      ? `a Maintainer can see the approval rules for ${br} in the project's merge request settings`
-      : `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`)
+    ? (r.rulesRefused
+      ? `on GitLab Free an approval never blocks a merge; on Premium or Ultimate, a Maintainer can see the approval rules for ${br} in the project's merge request settings`
+      : `a Maintainer can see the approval rules for ${br} in the project's merge request settings`)
     : `ask a repo admin to check the required approvals for ${br} in ${P}'s settings`;
   return { status: solo ? 'ok' : 'warn', message: msg, hint };
 }
