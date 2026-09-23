@@ -21909,17 +21909,33 @@ test('E111 titleOf: the frontmatter key, then change.json, then null — normali
   assert.equal(titleOf({ title: '"Login" is broken on "Safari"' }), '"Login" is broken on "Safari"', 'two quoted words are not one scalar');
   assert.equal(titleOf({ title: "'Buy' button missing in 'Cart'" }), "'Buy' button missing in 'Cart'");
   assert.equal(titleOf({ title: "'It''s done'" }), "It's done", 'YAML single-quote escape');
-  assert.equal(titleOf({ title: '"a \\"b\\" \\\\ c"' }), 'a "b" \\ c', 'YAML double-quote escapes for a quote and a backslash');
+  assert.equal(titleOf({ title: "'It''s ''done'''" }), "It's 'done'", 'every escape, not the first');
+  // Double quotes: JSON's escapes, which YAML's double-quoted style also has.
+  assert.equal(titleOf({ title: '"a \\"b\\" \\\\ c"' }), 'a "b" \\ c', 'a quote and a backslash');
+  assert.equal(titleOf({ title: '"Caf\\u00e9"' }), 'Café');
+  assert.equal(titleOf({ title: '"a\\tb\\nc"' }), 'a b c', 'a tab and a newline escape, then one line');
+  assert.equal(titleOf({ title: '"a\tb"' }), 'a b', 'a raw tab inside the quotes');
+  assert.equal(titleOf({ title: '"\\\\"' }), '\\', 'an escaped backslash alone');
+  // Not one quoted string: kept exactly as written, never half-read.
+  for (const kept of ['"a\\"', '"\\"', '"a\\ b"', '"x" # note', "'a''", "'''"]) {
+    assert.equal(titleOf({ title: kept }), kept, `kept as written: ${kept}`);
+  }
   assert.equal(titleOf({ title: '"' }), '"', 'a lone quote is text');
   assert.equal(titleOf({}, { title: '"Quoted in JSON"' }), '"Quoted in JSON"', 'a change.json title is JSON, never unquoted again');
   // One line: a list prints one title per row.
   assert.equal(titleOf({}, { title: 'line one\n  line two\t end ' }), 'line one line two end');
   assert.equal(titleOf({ title: 'a    b' }), 'a b');
   // Values that are no title, so the fallback shows through.
-  for (const none of ['>', '|', '>-', '|+', '|2', '>2-', '~', 'null', 'NULL']) {
+  for (const none of ['>', '|', '>-', '|+', '|2', '>2-', '>+2', '|-1', '~', 'null', 'Null', 'NULL']) {
     assert.equal(titleOf({ title: none }, { title: 'From intake' }), 'From intake', `no title: ${none}`);
   }
   assert.equal(titleOf({ title: '> more' }), '> more', 'a `>` with words after it is text');
+  // Only the WHOLE value is null or a marker, and a quoted one is text, as in YAML.
+  for (const text of ['Nullable fields on checkout', 'null value', '~x', 'nULL']) assert.equal(titleOf({ title: text }), text, `text: ${text}`);
+  assert.equal(titleOf({ title: "'null'" }), 'null');
+  assert.equal(titleOf({ title: '"~"' }), '~');
+  assert.equal(titleOf({ title: '">"' }), '>');
+  assert.equal(titleOf({ title: 'a\u00a0\u00a0b' }), 'a b', 'a no-break space is whitespace too');
   assert.equal(titleOf({ title: ['x'] }, { title: 'y' }), 'y', 'a list falls through to change.json');
   // Through the real reader: any value that begins with `[` and ends with `]` is a list; quoted, it is a title.
   assert.equal(titleOf(parseFrontmatter('---\ntitle: [Mobile] Checkout [v2]\n---\n')), null);
@@ -22024,7 +22040,7 @@ test('E111 uncommittedIndexInputs: an ignored or untracked change.json keeps the
   }
 });
 
-test('E111 review: the twin checks no more than buildIndex reads — the Foundation\'s epic.md and change.json never block', async () => {
+test('E111 review: the twin adds no file buildIndex does not read — the Foundation\'s IGNORED epic.md and change.json are not added', async () => {
   const { uncommittedIndexInputs } = await import('./product-index.mjs');
   for (const ignore of ['epic.md\nchange.json\n', '# nothing\n']) {
     const T = indexFixture({ 'foundation/.sdlc/state.json': { steps: [] }, '.gitignore': ignore });

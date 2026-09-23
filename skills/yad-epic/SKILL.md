@@ -120,8 +120,9 @@ the line, so a comment becomes part of the value and the gates stop recognising 
 - `title` is the epic's **one-line name** — the name a list of work items shows for it (E111; it is carried in `.sdlc/index.json`). Plain words,
   such as `Checkout from the mobile app`, on ONE line. Quotes are optional: a title quoted the YAML way
   (`"…"` or `'…'`) is read without them. If the title begins with `[` and ends with `]` (such as
-  `[Mobile] Checkout [v2]`), wrap it in double quotes — otherwise it is read as a list, which is not a
-  title. Never end it with a `#` comment (the comment becomes part of the title), and never use a YAML
+  `[Mobile] Checkout [v2]`), wrap it in double quotes, writing an inner `"` as `\"` — otherwise it is
+  read as a list, which is not a title. The full rules are the `title` row of the frontmatter table in
+  `references/state-schema.md`. Never end it with a `#` comment (the comment becomes part of the title), and never use a YAML
   block (`>` or `|`): only one line is read. Set it NOW, for the same reason as the theme below: the epic review gate is bound to a hash of
   the file, so a title added or reworded after that gate is approved drops the approval as stale. An
   epic with no title is shown by its id.

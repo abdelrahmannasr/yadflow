@@ -89,7 +89,8 @@ thread off it, `promote` is what makes that anchor real — run it once the feat
   and `yad thread` / `yad-status` (read `epic.md`) will disagree about whether the epic is still a stub.
   - **`epic.md`:** set `verified: true`, **remove** the `stub:` marker, and add a `backfill:` block linking
     the approved spec, e.g. `backfill: { spec: specs/backfill/<feature>/spec.md, promoted: <YYYY-MM-DD> }`.
-    Keep the stub's `title:`; set one now if it has none (the one-line name of the feature).
+    Keep the stub's `title:`; set one now if it has none (the one-line name of the feature), by the
+    rules in the `title` row of the `epic.md` frontmatter table in `../yad-epic/references/state-schema.md`.
   - **`state.json`:** **remove** the top-level `kind: "stub"`, and move `currentStep` off the
     `backfill-pending` sentinel (per the promote flavour below). **Leave the top-level `type` exactly
     as it is.** `kind` and `type` are two different things in this file: `kind: "stub"` is the

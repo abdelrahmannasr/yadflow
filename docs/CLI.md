@@ -1116,8 +1116,8 @@ someone else's merge landed; `yad doctor` then says it is behind, and the next m
 skill that still writes `state.json` by hand (E17b) does not rebuild it — nor does `yad-change`, which
 writes `epic.md` and `change.json` by hand — and nor does any change made on a branch until it merges.
 Upgrading yadflow can do it too: when a release changes what the index holds (E111 added `title`), every
-index built by the older release reads as behind. Run `yad index` on the default branch; on a verified
-Product it waits for the next merged review. On a verified Product, a new work item merged by PR waits for the next merged
+index built by the older release reads as behind. Run `yad index` on the default branch. On a verified
+Product only CI writes the index, so it — and a new work item merged by PR — waits for the next merged
 review.
 
 ## File shape: `schemaVersion`

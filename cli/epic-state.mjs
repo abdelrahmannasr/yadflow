@@ -3580,10 +3580,13 @@ export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{
 // Normalized HERE, once, like the theme. It is ONE line: every run of whitespace, a newline included,
 // becomes one space, because a list prints one title per row.
 //
-// The frontmatter value is also read the way YAML reads a quoted scalar, because `readFrontmatter` keeps
-// the rest of the line as written: `title: "Queue: untested"` is `Queue: untested`, `'It''s done'` is
-// `It's done`, and `"a \"b\""` is `a "b"`. Only a value that IS one quoted scalar is unquoted —
-// `"Login" is broken on "Safari"` is not, and stays as written. The `change.json` title is JSON, already
+// The frontmatter value is also unquoted, because `readFrontmatter` keeps the rest of the line as
+// written: `title: "Queue: untested"` is `Queue: untested`. A single-quoted value undoes YAML's one
+// escape (`'It''s done'` is `It's done`). A double-quoted value is read with JSON's escapes (`\"`, `\\`,
+// `\n`, `\t`, `\u00e9` …), which YAML's double-quoted style also has; one using any other escape is kept
+// as written, never half-read. Only a value that IS one quoted string is unquoted — `"Login" is broken
+// on "Safari"` is not, and stays as written, and so does `"x" # note`. The checks for "no title" below
+// run BEFORE unquoting: a quoted `'null'` or `">"` is text, as in YAML. The `change.json` title is JSON, already
 // unquoted, and is never touched this way. Three frontmatter values are no title at all: a list
 // (`readFrontmatter` turns any value that begins with `[` and ends with `]` into one), a YAML block marker
 // (`>` or `|` — the reader keeps one line, so the block's text is lost), and YAML's null (`~`, `null`).
@@ -3591,12 +3594,18 @@ export const FOUNDATION_TITLE = 'Foundation';
 
 const oneLine = (t) => t.replace(/\s+/gu, ' ').trim() || null;
 
-// A YAML quoted scalar, unquoted — or the value unchanged when it is not exactly one.
+// One quoted string, unquoted — or the value unchanged when it is not exactly one. A raw tab is not
+// allowed inside a JSON string, so it is made a space first (it would become one anyway).
 function unquoteYaml(t) {
-  const single = t.match(/^'((?:[^']|'')*)'$/su);
+  const single = t.match(/^'((?:[^']|'')*)'$/u);
   if (single) return single[1].replace(/''/g, "'");
-  const double = t.match(/^"((?:[^"\\]|\\.)*)"$/su);
-  if (double) return double[1].replace(/\\(["\\])/g, '$1');
+  if (t[0] === '"') {
+    try {
+      return JSON.parse(t.replace(/\t/g, ' '));
+    } catch {
+      return t;
+    }
+  }
   return t;
 }
 
