@@ -34,7 +34,8 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
 
 - `parent` — **required.** The `EP-<slug>` this change evolves (the thread predecessor; usually the
   feature's current tip).
-- `title` — **required.** One line describing the change.
+- `title` — **required.** One line describing the change. It is written twice, with the same words:
+  as `title:` in `epic.md` (Step 4) and as `title` in `change.json` (Step 6).
 - `kind` (also accepted as `type`) — the work-item **type**: `change` | `defect` | `hotfix`
   (default `change`). Both input names mean the same thing, the same way both frontmatter keys do.
   `feature` and
@@ -105,10 +106,16 @@ theme — `yad doctor` reports that, because two spellings group as two themes. 
 no `#`: `yad next` and `yad thread` print it as `#checkout-revamp`, but that `#` is decoration on the
 screen and is kept as part of the value if it lands in the file.
 
+**Write `title:` in `epic.md` too**, with the same words as the `title` input. It is the name a list of
+work items shows for this change (E111). Write it bare: a trailing `#` comment becomes part of the
+title, and a value wrapped whole in `[ ]` is read as a list, which is not a title. Set it now — the
+review gate is bound to a hash of the file, so a title changed after approval drops the approval.
+
 
 ```markdown
 ---
 id: EP-<slug>
+title: <the title input, exactly as it goes into change.json>
 status: draft
 kind: <change|defect|hotfix>
 type: <the same value as kind>
