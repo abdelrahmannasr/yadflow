@@ -1264,8 +1264,9 @@ says not known.
 - Who may bypass a rule (for example an admin) is not read.
 - Who may push directly to a protected branch is not read (GitLab's `push_access_levels`). On GitLab a
   direct push by someone allowed to push skips the merge request, and with it the approval rule.
-- On GitLab, a line about a **protected** branch does not mention the project's approval rules that reach
-  other branches only; it says what does and does not hold a merge into this branch.
+- On GitLab, a line does not mention the project's approval rules that reach other branches only, except
+  on an unprotected branch where nothing else requires an approval; it says what does and does not hold a
+  merge into this branch.
 - On GitLab, whether a code owner must approve is read from the project's own protected-branch list, which
   leaves out protection set for a whole group — and a group's setting takes precedence over the project's.
   So only an entry for the branch that says yes is proof; an entry that says no proves nothing, and only a

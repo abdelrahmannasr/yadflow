@@ -454,7 +454,9 @@ function lineFor(r, { name, solo = false } = {}) {
   }
   if (r.approvals === 0 && r.protected === null) {
     // The count was read; the protection was not. Both are said, and neither borrows the other's answer.
-    const only = scoped.length ? ' on every change — only some changes need one (' + scoped.join('; ') + ')' : '';
+    // A colon, not a dash: this sentence already ends with a dash before the reason, and two dashes at
+    // one level let a reader take the middle as an aside.
+    const only = scoped.length ? ' on every change: only some changes need an approval (' + scoped.join('; ') + ')' : '';
     const msg = `${name}: no rule on ${where}${branchNote} requires an approval to merge into ${br}${only || (unknownScoped.length ? ' on every change' : '')}${unknownScoped.length ? `; ${unknownScoped.join('; ')}` : ''}; whether the branch is protected is not known — ${r.protectedWhy}`;
     return solo ? { status: 'ok', message: msg, hint: unread } : { status: 'warn', message: msg, hint: unread };
   }

@@ -18826,7 +18826,7 @@ test('E70 readProtection on GitHub: "none" only from answers that succeeded; a 4
   assert.ok(line.hint && !/null|undefined/.test(`${line.message} ${line.hint}`));
   assert.equal(protectionLine(r, { name: 'b', solo: true }).status, 'ok');
   // …and a rule for SOME files is still a rule, here as everywhere: "on every change".
-  assert.match(protectionLine({ ...r, codeOwners: true }, { name: 'b' }).message, /requires an approval to merge into `main` on every change — only some changes need one \(a code owner must approve a change to a file CODEOWNERS lists\); whether the branch is protected/);
+  assert.match(protectionLine({ ...r, codeOwners: true }, { name: 'b' }).message, /requires an approval to merge into `main` on every change: only some changes need an approval \(a code owner must approve a change to a file CODEOWNERS lists\); whether the branch is protected/);
   assert.match(protectionLine({ ...r, codeOwners: null }, { name: 'b' }).message, /to merge into `main` on every change; whether a code owner must approve some files is not known; whether the branch is protected/);
   assert.match(protectionLine({ ...r, branch: 'develop' }, { name: 'b' }).message, /^b: no rule on GitHub acme\/app \(GitHub's own default branch is `main`\) requires an approval to merge into `develop`; whether the branch/, 'the branch note sits beside the repo here too');
   ({ r } = ghRead([[/\/protection$/, 200, {}], [/\/rules\//, 200, [PR_RULE(2)]], [/\/branches\/main$/, 200, { protected: false }]]));
