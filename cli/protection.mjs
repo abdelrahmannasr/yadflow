@@ -94,8 +94,9 @@ export function branchMatches(pattern, branch) {
   return re.test(branch);
 }
 
-// A count, only when the platform gave a whole number: `true`, `"2"`, `2.5` and a missing value are not
-// counts (`Number(true)` is 1), so each is "could not read", never 0 and never 1.
+// A whole number the platform gave, or null: `true`, `"2"`, `2.5` and a missing value are none (and
+// `Number(true)` is 1, which is why a bare `Number()` will not do). Used for an approval count — where
+// null means "could not read", never 0 and never 1 — and for an id, which is printed only when it is one.
 const count = (v) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 
 // `gh auth status` is asked once per CLI and host per doctor run (`authCache`, which the caller makes
@@ -310,8 +311,11 @@ function readGitLab(base, runner, unknown) {
       if (applies) {
         floor = Math.max(floor, n);
         // A name the platform did not give is never printed as if it had: its id, else no name at all.
-        const named = typeof r.name === 'string' && r.name.trim() ? r.name : (count(r.id) !== null ? String(r.id) : null);
-        out.from.push(named === null ? 'an approval rule' : `approval rule ${JSON.stringify(named)}`);
+        const named = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : null;
+        // A rule NAMED "42" and a rule with ID 42 must not read the same, so an id is printed as an id —
+        // the shape the GitHub side already uses ("a repo ruleset (id 7)").
+        if (named !== null) out.from.push(`approval rule ${JSON.stringify(named)}`);
+        else out.from.push(count(r.id) !== null ? `an approval rule (id ${r.id})` : 'an approval rule');
       }
       // A rule the platform DID return that does not reach this branch: say which way it misses, so the
       // line never claims "no approval rules", nor that protecting the branch would bring this one to it.
@@ -425,7 +429,7 @@ function lineFor(r, { name, solo = false } = {}) {
     if (r.protected === false) {
       return {
         status: 'warn',
-        message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? ` — ${own}` : ''}`,
+        message: `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly, with no ${request}; a ${request} into it needs ${n} ${from}${owners}${solo ? `; and ${own}` : ''}`,
         hint: solo ? `relax the required approvals in ${setting}` : `protecting ${br} in ${P}'s settings limits who may push to it directly; yad only reports what is set`,
       };
     }
@@ -479,7 +483,7 @@ function lineFor(r, { name, solo = false } = {}) {
   }
   // approvals not known
   if (r.protected === false) {
-    const msg = `${name}: ${br} is not protected on ${where}${branchNote} — anyone with write access can push to it directly; whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`;
+    const msg = `${name}: ${br} is not protected on ${where}${branchNote}: anyone with write access can push to it directly; whether a merge needs an approval is not known — ${r.approvalsWhy}${clauses(false)}`;
     const why = r.platform === 'gitlab' ? 'on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in' : unread;
     // A line that could not be read keeps its hint in solo mode too: it names how to read it.
     return { status: solo ? 'ok' : 'warn', message: msg, hint: why };

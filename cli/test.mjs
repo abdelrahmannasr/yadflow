@@ -18980,15 +18980,20 @@ test('E70 readProtection on GitLab: the branch\'s own flag, code owners from the
   // Premium: a rule scoped to no branch applies to every branch; a rule named by nothing is named by its id.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ id: 1, name: 'All', approvals_required: 2, protected_branches: [] }, { id: 2, name: 'Zero', approvals_required: 0 }]], [/\/protected_branches/, 200, [{ name: 'main' }]]], {}, P));
   assert.deepEqual([r.approvals, !!r.atLeast, r.from], [2, false, ['approval rule "All"']]);
+  // A rule NAMED "42" and a rule with ID 42 must not read the same.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ id: 42, approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual(r.from, ['an approval rule (id 42)']);
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: '42', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual(r.from, ['approval rule "42"']);
+  ({ r } = glRead([[/\/approval_rules/, 200, [{ name: '  Devs  ', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
+  assert.deepEqual(r.from, ['approval rule "Devs"'], 'the padding is not part of the name');
   // A rule with neither: named as a rule, never as the word the platform did not send.
   for (const rule of [{ approvals_required: 1, protected_branches: [] }, { name: '', id: null, approvals_required: 1, protected_branches: [] }, { name: { a: 1 }, approvals_required: 1, protected_branches: [] }]) {
     ({ r } = glRead([[/\/approval_rules/, 200, [rule]], [/\/protected_branches/, 200, []]], {}, P));
     assert.deepEqual(r.from, ['an approval rule'], JSON.stringify(rule));
   }
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: { a: 1 }, id: 7, approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
-  assert.deepEqual(r.from, ['approval rule "7"'], 'a name that is not a name falls back to the id');
+  assert.deepEqual(r.from, ['an approval rule (id 7)'], 'a name that is not a name falls back to the id');
   // Two rules: each is met on its own and their approvers may overlap — the largest is a floor.
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'A', approvals_required: 1, protected_branches: [] }, { name: 'B', approvals_required: 2, protected_branches: [] }]], [/\/protected_branches/, 200, []]], {}, P));
   assert.deepEqual([r.approvals, r.atLeast], [2, true]);
@@ -19108,7 +19113,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   l = protectionLine({ ...base, protected: true, approvals: 1, from: ['x'], codeOwners: null, fileReviewers: true }, { name: 'b', solo: true });
   assert.match(l.message, /needs 1 approval \(from: x\); a named reviewer must also approve a change to some files; whether a code owner must approve some files is not known — you cannot approve/);
   l = protectionLine({ ...base, platform: 'gitlab', protected: false, approvals: 2, from: ['approval rule "A"'], codeOwners: true }, { name: 'web', solo: true });
-  assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, with no merge request; a merge request into it needs 2 approvals (from: approval rule "A"); a code owner must also approve a change to a file CODEOWNERS lists — GitLab may not let you approve your own merge request (a project setting yad does not read), so the merge may be blocked');
+  assert.equal(l.message, 'web: `main` is not protected on GitLab acme/app — anyone with write access can push to it directly, with no merge request; a merge request into it needs 2 approvals (from: approval rule "A"); a code owner must also approve a change to a file CODEOWNERS lists; and GitLab may not let you approve your own merge request (a project setting yad does not read), so the merge may be blocked');
   assert.equal(l.hint, 'relax the required approvals in an approval rule (GitLab Premium or Ultimate) for `main`', 'the sources are in the message, not twice');
   // A rule the platform returned that reaches only protected branches: its own sentence, not the banner.
   l = protectionLine({ ...base, platform: 'gitlab', approvals: 0, rulesElsewhere: 'they reach protected branches only' }, { name: 'web' });
@@ -19152,7 +19157,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   l = protectionLine({ ...base, protected: null, protectedWhy: 'p', approvals: null, approvalsWhy: 'a' }, { name: 'b' });
   assert.equal(l.message, 'b: whether `main` is protected on GitHub acme/app is not known (p), and neither is whether a merge needs an approval — a');
   l = protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b' });
-  assert.equal(l.message, 'b: `main` is not protected on GitHub acme/app — anyone with write access can push to it directly; whether a merge needs an approval is not known — a');
+  assert.equal(l.message, 'b: `main` is not protected on GitHub acme/app: anyone with write access can push to it directly; whether a merge needs an approval is not known — a');
   assert.match(protectionLine({ ...base, platform: 'gitlab', approvals: null, approvalsWhy: 'a' }, { name: 'b' }).hint, /on GitLab Free an approval never blocks a merge, and with no protected branch any push goes straight in/);
   for (const solo of [true, false]) {
     assert.equal(protectionLine({ ...base, approvals: null, approvalsWhy: 'a' }, { name: 'b', solo }).status, solo ? 'ok' : 'warn');
