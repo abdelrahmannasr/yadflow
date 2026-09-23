@@ -63,7 +63,7 @@ makes `lineage-check` refuse every commit that links a story to this epic. What 
 
 | Key | Why it is here |
 |---|---|
-| `title` | the feature's one-line name, as the code shows it (such as `Order checkout`) — the name a list of work items shows for this stub. No invented behaviour; no `#` comment; never wrap the whole value in `[ ]`. Leave it empty if you cannot name it from the code: the stub is then shown by its id |
+| `title` | the feature's one-line name, as the code shows it (such as `Order checkout`) — the name a list of work items shows for this stub. No invented behaviour. One line; no `#` comment; a title that begins with `[` and ends with `]` goes in double quotes, or it is read as a list. Leave it empty if you cannot name it from the code: the stub is then shown by its id |
 | `kind` + `type` | the work-item type, the same value under both names — `feature`, because a stub is a genesis / thread root and a valid parent for `lineage-check` |
 | `thread` | `thread == id` for a genesis |
 | `theme` | the optional grouping tag — one word or short phrase, in any language, shared by every epic in the group. Usually **empty here**: a stub is minted from code that already exists, not shaped in conversation, so there is normally nobody to say which group it is in. Fill it only if the user names one, and then copy an existing spelling exactly — `yad doctor` reports one theme spelled two ways, because two spellings group as two. One tag, never a list, and no `#` (the readers keep the whole rest of the line; the `#` the commands print is decoration on the screen) |

@@ -118,10 +118,11 @@ frontmatter readers (`readFrontmatter` in the CLI, `fm_val` in the check gates) 
 the line, so a comment becomes part of the value and the gates stop recognising it:
 
 - `title` is the epic's **one-line name** — the name a list of work items shows for it (E111; it is carried in `.sdlc/index.json`). Plain words,
-  such as `Checkout from the mobile app`. Wrap it in quotes only if you want to; one pair of quotes
-  around the whole value is taken off. Never wrap the WHOLE title in `[ ]` (`title: [WIP]` is read as a
-  list, which is not a title), and never end it with a `#` comment — the comment becomes part of the
-  title. Set it NOW, for the same reason as the theme below: the epic review gate is bound to a hash of
+  such as `Checkout from the mobile app`, on ONE line. Quotes are optional: a title quoted the YAML way
+  (`"…"` or `'…'`) is read without them. If the title begins with `[` and ends with `]` (such as
+  `[Mobile] Checkout [v2]`), wrap it in double quotes — otherwise it is read as a list, which is not a
+  title. Never end it with a `#` comment (the comment becomes part of the title), and never use a YAML
+  block (`>` or `|`): only one line is read. Set it NOW, for the same reason as the theme below: the epic review gate is bound to a hash of
   the file, so a title added or reworded after that gate is approved drops the approval as stale. An
   epic with no title is shown by its id.
 - `kind` and `type` are the **work-item type**, and both carry the same value. `kind:` is the name

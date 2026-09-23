@@ -1081,7 +1081,7 @@ an app, a CI job, an agent or a person can read one file instead of opening ever
 | Field | Where it comes from |
 |---|---|
 | `id`, `dir` | the work item's id and folder (`foundation/` for `EP-foundation`) |
-| `title` | the `title:` key in `epic.md` (E111). A change item without one falls back to the `title` in its `.sdlc/change.json`. With neither it is `null`, and a screen shows the id instead. The Foundation's title is always `Foundation`. A `change.json` that cannot be read leaves the title `null`; `yad doctor` reports the broken file |
+| `title` | the `title:` key in `epic.md` (E111), read as one line, with YAML-style quotes taken off. An item without one falls back to the `title` in its `.sdlc/change.json` (only change items have one). With neither it is `null`, and a screen shows the id instead. The Foundation's title is always `Foundation`. A `change.json` that cannot be read or does not parse leaves the title `null`, and `yad doctor` fails that file. The full rules for writing the key are in `state-schema.md` (the `epic.md` frontmatter table) |
 | `kind`, `profile`, `currentStep`, `createdAt` | `state.json`, as written — a date is copied, never parsed |
 | `type`, `theme`, `parent`, `thread`, `repos` | `epic.md` frontmatter. The Foundation has no `epic.md`, so its `type` is null |
 | `steps` | how many steps are in each of the eight step states, read the way the gates read them (`blocked` with no record counts as `todo`). An `unknown` count appears only when a step holds a state this release does not know |
@@ -1113,8 +1113,11 @@ someone else's merge landed; `yad doctor` then says it is behind, and the next m
 
 **Knowing whether it is current.** The index records `inputs`, a hash of the exact bytes it was built from.
 `yad doctor` rebuilds that hash and says when the index is behind. It can fall behind in ordinary use: a
-skill that still writes `state.json` by hand (E17b) does not rebuild it, and nor does any change made on a
-branch until it merges. On a verified Product, a new work item merged by PR waits for the next merged
+skill that still writes `state.json` by hand (E17b) does not rebuild it — nor does `yad-change`, which
+writes `epic.md` and `change.json` by hand — and nor does any change made on a branch until it merges.
+Upgrading yadflow can do it too: when a release changes what the index holds (E111 added `title`), every
+index built by the older release reads as behind. Run `yad index` on the default branch; on a verified
+Product it waits for the next merged review. On a verified Product, a new work item merged by PR waits for the next merged
 review.
 
 ## File shape: `schemaVersion`
@@ -1223,7 +1226,7 @@ the default branch — so the line says so and stays `ok`; only an unreadable fi
 |---|---|---|
 | `.sdlc/index.json is current` | nothing | nothing |
 | `… has not been built yet` | run `yad index` on the default branch, then commit it | nothing: CI builds it when it records the next merged review |
-| `… is behind: the work items on disk differ from what it was built from` | the same | the same |
+| `… is behind: it is not what this yadflow builds from the work items on disk` | the same | the same |
 | `… cannot be read — <why>` | the same | the same |
 
 ### The `protection` section — does the platform require an approval? (E70)

@@ -11,10 +11,10 @@
 //      under-count E71 warned about), and never allowed to stop the whole file.
 //   3. STALENESS is a hash of the exact bytes the index was built from (`inputs`), the `docs-build.json`
 //      precedent — not a HEAD sha, which moves on commits that touch no work item. `yad doctor` checks it.
-//   4. The TITLE is `titleOf` (E111): the `title:` key in `epic.md`, else a change item's
-//      `change.json` title, else null. `change.json` is read only for that fallback, so one that cannot
-//      be read or parsed leaves the title null rather than the item unreadable — `yad doctor` already
-//      fails a `change.json` that does not parse. Its bytes are hashed either way.
+//   4. The TITLE is `titleOf` (E111): the `title:` key in `epic.md`, else the item's `change.json`
+//      title (only change items have one), else null. `change.json` is read only for that fallback,
+//      so one that cannot be read or parsed leaves the title null rather than the item unreadable —
+//      `yad doctor` already fails such a file. Its bytes are hashed either way.
 //
 // There is NO timestamp in the file: `writeJSON` skips identical bytes, so an unchanged Product never
 // dirties git, and the hash is the version.
@@ -137,8 +137,9 @@ function summarize(id, state, fm, change) {
 
 // Build the index from the Product on disk: { index, inputs }. Never throws for a work item — each one
 // that cannot be read is listed as unreadable. Throws only when the `epics/` folder itself cannot be
-// listed, because then there is no honest list to write at all.
-export function buildIndex(root) {
+// listed, because then there is no honest list to write at all. `format`: for a test that builds the
+// index an older engine wrote.
+export function buildIndex(root, { format = INDEX_FORMAT } = {}) {
   const ids = epicIds(root);
   const unlisted = unlistedLedgerDirs(root, ids).map((e) => `epics/${e}`);
   const parts = [{ name: JSON.stringify({ ids, unlisted }), input: { absent: true } }];
@@ -159,7 +160,7 @@ export function buildIndex(root) {
     const fm = epicIn.bytes ? parseFrontmatter(epicIn.bytes.toString('utf8')) : {};
     items.push(summarize(id, read.state, fm, readChange(changeIn)));
   }
-  const inputs = indexHash(parts);
+  const inputs = indexHash(parts, format);
   return { index: { inputs, items, ...(unlisted.length ? { unlisted } : {}) }, inputs };
 }
 

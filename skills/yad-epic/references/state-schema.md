@@ -39,7 +39,7 @@ Three rules go with it, and they are permanent (`docs/roadmap-idea-1.md`, Part 2
 ## The Product index — `.sdlc/index.json` (derived; never write it by hand)
 
 One file at the Product root that summarizes every work item (E19). It is **derived** from each item's
-`state.json`, `epic.md` and, for a change item's title, `change.json`, and rebuilt by `yad index` or a gate write on the default branch. On a
+`state.json`, `epic.md` and, for the title of an item with none in `epic.md`, `change.json`, and rebuilt by `yad index` or a gate write on the default branch. On a
 verified Product only CI writes it, and the ledger guard rejects anyone else. **A skill never writes
 it.** A skill that writes `state.json` by hand leaves it behind, and `yad doctor` says so. To read it
 as the files say it is now, run `yad index --json`.
@@ -60,8 +60,8 @@ as the files say it is now, run `yad index --json`.
 }
 ```
 
-`title` (E111) is the `title:` key in `epic.md`; if that is missing, a change item's `change.json`
-`title`; if both are missing, `null`. A screen prints the id when the title is `null`. The Foundation's
+`title` (E111) is the `title:` key in `epic.md`; if that is missing, the `title` in the item's
+`change.json` (only change items have one); if both are missing, `null`. It is always one line. A screen prints the id when the title is `null`. The Foundation's
 title is always `"Foundation"`, because it has no `epic.md`.
 
 ## `state.json`
@@ -872,7 +872,7 @@ stops requiring the `parent:` those three must have. `yad doctor` fails on it (`
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `title` | one line of plain text, e.g. `Checkout from the mobile app` | **The work item's one-line name** (E111), written by `yad-epic`, `yad-change` and `yad-stub`. Optional: an item without one is shown by its id. One pair of quotes around the whole value is taken off; a value wrapped whole in `[ ]` is read as a list and counts as no title; a trailing `#` comment becomes part of the title. A change item with no `title:` falls back to the `title` in its `change.json`. The epic review is bound to a hash of this file, so adding or rewording a title after approval drops the approval — set it while the file is written, and do not add one to an already-approved epic just to fill the gap. Read by `.sdlc/index.json`. |
+| `title` | one line of plain text, e.g. `Checkout from the mobile app` | **The work item's one-line name** (E111), written by `yad-epic`, `yad-change` and `yad-stub`. Optional: an item without one is shown by its id. A title quoted the YAML way (`"…"`, `'…'`) is read without its quotes, and its `''` / `\"` escapes are undone; a value that is not one quoted string (`"Login" is broken on "Safari"`) is kept as written. **No title** is read from a value that begins with `[` and ends with `]` (the reader turns it into a list — quote such a title), from a YAML block marker (`>`, `|`: only one line is read) or from YAML's null (`~`, `null`). A trailing `#` comment becomes part of the title. Whitespace runs, a newline included, become one space. An item with no `title:` falls back to the `title` in its `change.json` (only change items have one). The epic review is bound to a hash of this file, so adding or rewording a title after approval drops the approval — set it while the file is written, and do not add one to an already-approved epic just to fill the gap. Read by `.sdlc/index.json`. |
 | `kind` | `feature` \| `change` \| `defect` \| `hotfix` \| `chore` | The work-item type, under the name that is still read. Genesis is `feature` (default when absent). |
 | `type` | the same five values | The same value under the name from shape 5 on. Write it beside `kind`, never instead of it. |
 | `theme` | any word or short phrase, in any language, e.g. `checkout-revamp` | **Optional grouping tag.** Puts several epics under one heading. It is what this method has instead of a rung above the Epic: the ladder stays Product → Epic → Story → Task, and grouping is a label rather than a level. No fixed list and nothing to register. **One tag, never a list** — `theme: [a, b]` is read as no theme at all. Spell an existing theme exactly as the other epics do; `yad doctor` reports one theme spelled two ways (`theme:variants`), because two spellings group as two, and a `#` inside the value (`theme:commented`), because the reader keeps the whole rest of the line. Lives only in `epic.md` — there is no copy in `state.json`, so no file shape changed. Read by `yad next` (printed) and `yad thread --json`. |

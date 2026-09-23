@@ -1983,7 +1983,7 @@ export function indexChecks(checks, root) {
     const head = git('rev-parse', '--abbrev-ref', 'HEAD');
     const main = resolveDefaultBranch(git, hubNow);
     if (head.ok && head.stdout && head.stdout !== main) {
-      check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'differs from the work items on this branch'} — expected on '${head.stdout}': it is written on '${main}' only, once this work merges`);
+      check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'is not what this yadflow builds from the work items on this branch'} — expected on '${head.stdout}': it is written on '${main}' only, once this work merges`);
       return;
     }
   }
@@ -1991,8 +1991,9 @@ export function indexChecks(checks, root) {
     ? `${INDEX_FILE} has not been built yet`
     : fresh.state === 'behind'
       // The fact the read proved, and no cause: `yad epic new`, `yad skip`, a skill that still writes
-      // state.json by hand (E17b), or a branch merged in all do it.
-      ? `${INDEX_FILE} is behind: the work items on disk differ from what it was built from`
+      // state.json by hand (E17b), a branch merged in, or a yadflow that builds a different summary
+      // (`INDEX_FORMAT`, E111 review) all do it — so it never says the work items changed.
+      ? `${INDEX_FILE} is behind: it is not what this yadflow builds from the work items on disk`
       : `${INDEX_FILE} cannot be read — ${fresh.why}`;
   check(checks, 'index', 'index', 'warn', message, hint);
 }

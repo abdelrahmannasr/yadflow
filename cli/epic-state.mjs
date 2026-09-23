@@ -3569,29 +3569,48 @@ export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{
 // index). The user's decisions (2026-09-24):
 //   - It is the `title:` key in `epic.md` frontmatter, which `yad-epic`, `yad-change` and `yad-stub`
 //     write. Not the first `# ` heading: the template has none, and a heading is prose, reworded freely.
-//   - A change item written before the key existed falls back to the `title` its `change.json` already
-//     holds (`yad-change` has required one from the start). The frontmatter key wins when both exist.
+//   - An item with no key falls back to the `title` its `change.json` holds — only change items have
+//     one (`yad-change` has required a title from the start), so this covers the change items written
+//     before the key existed. The frontmatter key wins when both exist.
 //   - No title is `null`, never a guess (not the Goal's first sentence, not the id): a screen prints the
 //     id in its place, and nothing warns. Approved `epic.md` files are NOT back-filled — the epic review
 //     is bound to a hash of the file, so adding a line would drop the approval as stale.
 //   - The Foundation has no `epic.md`, so its title is a constant.
 //
-// Normalized HERE, once, like the theme. `readFrontmatter` keeps the rest of the line as written, so a
-// title quoted the YAML way (`title: "Queue: untested"`) would keep its quotes: one matching pair around
-// the whole value is taken off. A value the reader turned into a list (`title: [WIP]`) is not a title.
+// Normalized HERE, once, like the theme. It is ONE line: every run of whitespace, a newline included,
+// becomes one space, because a list prints one title per row.
+//
+// The frontmatter value is also read the way YAML reads a quoted scalar, because `readFrontmatter` keeps
+// the rest of the line as written: `title: "Queue: untested"` is `Queue: untested`, `'It''s done'` is
+// `It's done`, and `"a \"b\""` is `a "b"`. Only a value that IS one quoted scalar is unquoted —
+// `"Login" is broken on "Safari"` is not, and stays as written. The `change.json` title is JSON, already
+// unquoted, and is never touched this way. Three frontmatter values are no title at all: a list
+// (`readFrontmatter` turns any value that begins with `[` and ends with `]` into one), a YAML block marker
+// (`>` or `|` — the reader keeps one line, so the block's text is lost), and YAML's null (`~`, `null`).
 export const FOUNDATION_TITLE = 'Foundation';
 
-const titleText = (v) => {
+const oneLine = (t) => t.replace(/\s+/gu, ' ').trim() || null;
+
+// A YAML quoted scalar, unquoted — or the value unchanged when it is not exactly one.
+function unquoteYaml(t) {
+  const single = t.match(/^'((?:[^']|'')*)'$/su);
+  if (single) return single[1].replace(/''/g, "'");
+  const double = t.match(/^"((?:[^"\\]|\\.)*)"$/su);
+  if (double) return double[1].replace(/\\(["\\])/g, '$1');
+  return t;
+}
+
+const titleFromFrontmatter = (v) => {
   if (typeof v !== 'string') return null;
-  let t = v.trim();
-  if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t.at(-1) === t[0]) t = t.slice(1, -1).trim();
-  return t || null;
+  const t = v.trim();
+  if (/^[>|][+-]?[0-9]?[+-]?$/.test(t) || /^(~|null|Null|NULL)$/.test(t)) return null;
+  return oneLine(unquoteYaml(t));
 };
 
 // `fm`: the item's `epic.md` frontmatter. `change`: its parsed `change.json`, or null — any JSON value is
 // safe, since only a string `title` counts.
 export function titleOf(fm = {}, change = null) {
-  return titleText(fm?.title) ?? titleText(change?.title);
+  return titleFromFrontmatter(fm?.title) ?? (typeof change?.title === 'string' ? oneLine(change.title) : null);
 }
 
 // The lineage of an epic from epic.md frontmatter. `type` defaults to `feature` (genesis) when
