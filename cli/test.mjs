@@ -8448,6 +8448,36 @@ test('E112 comment: --new-round opens a round only when the artifact changed sin
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E112 comment: a late comment after an edit joins the old round with the OLD fingerprint, so the next round still opens (review 2)', async () => {
+  const { T, ep, read } = localEpic();
+  try {
+    const { artifactHash } = await import('./epic-state.mjs');
+    const h1 = artifactHash(ep, 'epic.md');
+    await comment(T, { by: 'bob', count: '3' });
+    fs.appendFileSync(path.join(ep, 'epic.md'), '\nAddressed.\n');
+    const late = await comment(T, { by: 'dave', count: '1' });
+    assert.equal(late.value.round, 1, 'no --new-round: dave joins round 1');
+    assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round, c.artifactHash === h1]), [['bob', 1, true], ['dave', 1, true]], 'the round keeps the fingerprint it opened with');
+    const next = await comment(T, { by: 'bob', count: '2', newRound: true });
+    assert.equal(next.value.round, 2, 'the edit still opens round 2');
+    assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round, c.count]), [['bob', 1, 3], ['dave', 1, 1], ['bob', 2, 2]], "bob's round-1 count is kept");
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112: the spelling check spans approvals and comments, and a spelling already on the step is always accepted (review 2)', async () => {
+  const { T, ep } = localEpic();
+  try {
+    await comment(T, { by: 'Bob' });
+    const r = await approve(T, { by: 'bob' });
+    assert.equal(r.code, 1, 'a commenter\'s spelling holds for their approval too');
+    assert.match(r.out, /differs only by case from Bob/);
+    // An older ledger that already holds both spellings: each may still be used, or nobody could approve.
+    fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([{ artifact: 'epic.md', step: 'epic-review', approver: 'bob', status: 'approved', date: '2026-09-01' }]));
+    assert.equal((await approve(T, { by: 'Bob' })).code, 0);
+    assert.equal((await approve(T, { by: 'bob' })).code, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E112 comment: a round written by hand as text is the same round as the number', async () => {
   const { T, ep, read } = localEpic();
   try {

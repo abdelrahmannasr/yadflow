@@ -78,15 +78,23 @@ function refuseUnopened(g, { epic, artifact, verb }) {
 // One person, one spelling. The gate counts distinct names exactly (`gatePredicate`), so `Bob` after `bob`
 // would be a second approver — and once the full count is enforced (E108), one person could meet a
 // two-approver gate. A name that differs from one already on the step only by case is refused, naming
-// the spelling to use (E112 review).
+// the spelling to use (E112 review). `names` is everyone on the step — approvers AND commenters, so the
+// named record never shows one person twice. A spelling already on the step is always accepted: when an
+// older ledger holds both `Bob` and `bob`, refusing each in favour of the other would let nobody approve.
 function refuseRespelled(names, name, { epic, artifact, verb }) {
-  const other = names.find((n) => typeof n === 'string' && n !== name && n.toLowerCase() === name.toLowerCase());
+  if (names.includes(name)) return false;
+  const other = names.find((n) => typeof n === 'string' && n.toLowerCase() === name.toLowerCase());
   if (!other) return false;
   fail(`${name} differs only by case from ${printable(other) ?? 'a name'} already recorded on this step — one person must have one spelling`);
   hand(`yad gate ${verb} ${epic} ${artifact} --by ${printable(other) ?? '<name>'}`);
   process.exitCode = 1;
   return true;
 }
+
+const peopleOnStep = (g) => [
+  ...g.ledger.approvals.filter((a) => a.step === g.step.id).map((a) => a.approver),
+  ...g.ledger.comments.filter((cm) => cm.step === g.step.id).map((cm) => cm.commenter),
+];
 
 // The one count every verb reports, read once per command (E71) — or handed in by a test, which must not
 // walk git from inside a fixture.
@@ -150,7 +158,7 @@ export async function gateApprove(root, { epic, artifact, by, engagement = null,
     return;
   }
   if (refuseUnopened(g, { epic, artifact, verb: 'approve' })) return;
-  if (refuseRespelled(g.ledger.approvals.filter((a) => a.step === g.step.id).map((a) => a.approver), name, { epic, artifact, verb: 'approve' })) return;
+  if (refuseRespelled(peopleOnStep(g), name, { epic, artifact, verb: 'approve' })) return;
   const { epicDir, ledger, step } = g;
   const hash = artifactHash(epicDir, step.artifact);
   const eng = engagement || 'none';
@@ -190,7 +198,7 @@ export async function gateApprove(root, { epic, artifact, by, engagement = null,
 
 // `yad gate comment <epic> <artifact> --by <name> [--count N] [--new-round]` — record who took part in a
 // round of comments. One record per (step, commenter, round). The round is the step's latest; with
-// `--new-round`, the next one — but only for someone already in the latest round (see below).
+// `--new-round`, the next one — but only when the artifact changed since that round began (see below).
 export async function gateComment(root, { epic, artifact, by, count = null, newRound = false, today } = {}) {
   const g = localGate(root, { epic, artifact, verb: 'comment' });
   if (!g) return;
@@ -208,7 +216,7 @@ export async function gateComment(root, { epic, artifact, by, count = null, newR
     return;
   }
   if (refuseUnopened(g, { epic, artifact, verb: 'comment' })) return;
-  if (refuseRespelled(g.ledger.comments.filter((cm) => cm.step === g.step.id).map((cm) => cm.commenter), name, { epic, artifact, verb: 'comment' })) return;
+  if (refuseRespelled(peopleOnStep(g), name, { epic, artifact, verb: 'comment' })) return;
   const { epicDir, ledger, step } = g;
   // A round written by hand as text (`"round": "1"`) is the same round as the number — read it as one, or
   // the same person gets two records for one round.
@@ -216,20 +224,26 @@ export async function gateComment(root, { epic, artifact, by, count = null, newR
   const onStep = ledger.comments.filter((cm) => cm.step === step.id);
   const latest = onStep.reduce((m, cm) => Math.max(m, roundOf(cm)), 0);
   // A round is one version of the artifact: the owner addresses the comments by editing it, and the next
-  // round reviews the edit. So each record carries the fingerprint it was made against, and `--new-round`
-  // opens the next round only when the artifact has CHANGED since the latest round's records. Otherwise it
-  // joins the latest round: a retry of the same command is a no-op, and a second reviewer who also types
-  // `--new-round` lands beside the first, instead of a round that never happened (E112 review). A round
-  // written before E112 carries no fingerprint, so after it `--new-round` opens the next round, as asked.
+  // round reviews the edit. So a round keeps the fingerprint it was OPENED with, and every record that
+  // joins it later carries that same one — never today's, or a late comment after an edit would pin the
+  // new version to the old round (E112 review 2). `--new-round` opens the next round only when the
+  // artifact has changed since the latest round was opened. Otherwise it joins the latest round: a retry of
+  // the same command is a no-op, and a second reviewer who also types `--new-round` lands beside the first,
+  // instead of a round that never happened. A round written before E112 carries no fingerprint, so its
+  // later records carry none either, and after it `--new-round` opens the next round, as asked.
   const hash = artifactHash(epicDir, step.artifact);
-  const latestHashes = onStep.filter((cm) => roundOf(cm) === latest).map((cm) => cm.artifactHash);
-  const changed = !latestHashes.includes(hash);
+  const opened = onStep.find((cm) => roundOf(cm) === latest && typeof cm.artifactHash === 'string')?.artifactHash ?? null;
+  const changed = opened !== hash;
   const round = latest === 0 ? 1 : newRound && changed ? latest + 1 : latest;
   if (newRound && latest > 0 && !changed) info(`${step.artifact} has not changed since round ${latest} began — this joins round ${latest}`);
+  const roundHash = round === latest ? opened : hash;
   const mine = (cm) => cm.step === step.id && cm.commenter === name && roundOf(cm) === round;
   const was = ledger.comments.find(mine);
-  const same = was && was.count === n && was.round === round && was.artifactHash === hash;
-  const record = same ? was : { artifact: step.artifact, step: step.id, commenter: name, round, count: n, date: today, artifactHash: hash };
+  const same = was && was.count === n && was.round === round && (was.artifactHash ?? null) === roundHash;
+  const record = same ? was : {
+    artifact: step.artifact, step: step.id, commenter: name, round, count: n, date: today,
+    ...(roundHash ? { artifactHash: roundHash } : {}),
+  };
   ledger.comments = canonicalComments([...ledger.comments.filter((cm) => !mine(cm)), record]);
   if (!same) {
     writeJSON(ledger.files.comments, ledger.comments);

@@ -626,7 +626,7 @@ Append-only ledger (an array), the machine-readable counterpart to the `reviews/
 
 `commenter` is the platform login (on a Product with no platform, the name the reviewer gave). An entry
 written by `yad gate comment` (E112, no platform) also carries `artifactHash`, the fingerprint of the
-artifact it was made against: a round is one version, so `--new-round` opens the next only after an edit. An older entry may still carry `role` and `domain`; the gate never reads them, and while the roster is on disk the next sync write records the login on it, keeping the old name in `rosterName` — unless two records in one round would then name the same login (E64).
+artifact its round was opened with (a late record joining the round carries the same one): a round is one version, so `--new-round` opens the next only after an edit. An older entry may still carry `role` and `domain`; the gate never reads them, and while the roster is on disk the next sync write records the login on it, keeping the old name in `rosterName` — unless two records in one round would then name the same login (E64).
 
 ## `hub-prs.json`
 Present only when the Shape review runs through the platform bridge. Per review step, the review
