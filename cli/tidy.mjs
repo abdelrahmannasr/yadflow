@@ -68,7 +68,7 @@ export async function runTidy(root, opts = {}) {
       info(`${epic}: ${opts.dryRun ? 'would fold' : 'folded'} ${t.folded} trust + ${b.folded} build shard(s)`);
     }
   }
-  if (!folded) { info('nothing to tidy — no finished shards to fold'); return { folded: 0 }; }
+  if (!folded) { info('nothing to tidy — no finished shards to fold'); return { folded: 0, epics: [], message: null, committed: false, pushed: false, dryRun: !!opts.dryRun }; }
 
   const author = checkpointAuthor(platformLogin(root, hub?.platform), git('config', 'user.name').stdout);
   const label = touched.length === 1 ? touched[0] : `${touched.length} epics`;
@@ -77,7 +77,7 @@ export async function runTidy(root, opts = {}) {
   if (opts.dryRun) {
     log('\n' + c.dim(message) + '\n');
     info('dry run — nothing folded or committed');
-    return { message, folded };
+    return { message, folded, epics: touched, committed: false, pushed: false, dryRun: true };
   }
 
   // Stage the fold (modified folded files + deleted shards) under each touched epic's ledger paths.
@@ -90,11 +90,11 @@ export async function runTidy(root, opts = {}) {
   });
   const pathspecs = candidates.filter((spec) =>
     exists(path.join(root, spec)) || git('ls-files', '--error-unmatch', '--', spec).ok);
-  if (!pathspecs.length) { info('fold produced no stageable change'); return { folded }; }
+  if (!pathspecs.length) { info('fold produced no stageable change'); return { message: null, folded, epics: touched, committed: false, pushed: false, dryRun: false }; }
   const add = git('add', '-A', '--', ...pathspecs);
-  if (!add.ok) { fail(`git add failed — ${add.stderr.split('\n')[0] || add.code}`); process.exitCode = 1; return { folded }; }
+  if (!add.ok) { fail(`git add failed — ${add.stderr.split('\n')[0] || add.code}`); process.exitCode = 1; return { message: null, folded, epics: touched, committed: false, pushed: false, dryRun: false }; }
   const staged = git('diff', '--cached', '--name-only', '--', ...pathspecs).stdout.split('\n').filter(Boolean);
-  if (!staged.length) { info('fold produced no net change — nothing to commit'); return { folded }; }
+  if (!staged.length) { info('fold produced no net change — nothing to commit'); return { message: null, folded, epics: touched, committed: false, pushed: false, dryRun: false }; }
 
   const cm = git('commit', '-m', message, '--', ...staged);
   if (!cm.ok) {
@@ -103,14 +103,14 @@ export async function runTidy(root, opts = {}) {
     fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     hand('the fold is staged — re-run `yad tidy up`, or `yad checkpoint` to land it');
     process.exitCode = 1;
-    return { message, folded };
+    return { message, folded, epics: touched, committed: false, pushed: false, dryRun: false };
   }
   ok(`tidied ${folded} shard(s) into ${touched.length} epic ledger(s): ${c.dim(label)}`);
 
-  if (!opts.push) return { message, folded };
-  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { message, folded }; }
+  if (!opts.push) return { message, folded, epics: touched, committed: true, pushed: false, dryRun: false };
+  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { message, folded, epics: touched, committed: true, pushed: true, dryRun: false }; }
   fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
   hand(`run \`git pull --rebase\` and re-run \`yad tidy up --push\``);
   process.exitCode = 1;
-  return { message, folded };
+  return { message, folded, epics: touched, committed: true, pushed: false, dryRun: false };
 }

@@ -231,9 +231,9 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
       info(`target ${c.cyan(docs.target)}  scope ${docs.scope}  base ${docs.basePath}  ${docs.source === 'unavailable' ? c.yellow('(build-only)') : ''}`);
     }
     log(c.bold('\ngenerated sites'));
-    if (!targets.length) { info('none generated yet'); return { sites: 0 }; }
+    if (!targets.length) { info('none generated yet'); return { action, target: docs?.target ?? null, sites: [] }; }
     for (const t of targets) reportFreshness(root, t);
-    return { sites: targets.length };
+    return { action, target: docs?.target ?? null, sites: targets.map((t) => label(t)) };
   }
 
   if (action === 'build' || action === 'deploy') {
@@ -251,7 +251,7 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
         if (docs?.basePath) info(`will publish under ${docs.basePath}`);
       }
     }
-    return { built };
+    return { action, built };
   }
 
   if (action === 'sync') {
@@ -268,12 +268,12 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
       } else ok(`${label(t)} ${c.dim('— fresh')}`);
     }
     if (stale && sync !== 'refresh') hand('regenerate content with the yad-docs / yad-docs-overview skill (the AI step), then `yad docs deploy`');
-    return { stale };
+    return { action, sync, stale };
   }
 
   fail(`unknown docs action: ${action} (list | build | deploy | sync)`);
   process.exitCode = 1;
-  return {};
+  return { action };
 }
 
 // ---- helpers ------------------------------------------------------------------------------------

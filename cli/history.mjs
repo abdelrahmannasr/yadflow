@@ -20,10 +20,9 @@
 //   5. "SHAPE DONE", never "finished" (the PR review): an item's `state.json` holds its Shape steps only —
 //      Build (the code, the checks, the code review) is tracked elsewhere — so an item whose Shape steps
 //      are all closed may have shipped nothing. `--open` / `--done` and `shapeDone` say Shape only.
-//   6. `--json` refusals are `{ ok: false, error, hint }` — `yad next --json`'s shape — and every key of
-//      an answer is ALWAYS present (null, false or [] when there is nothing), so a script never has to
-//      ask whether a key exists. `schemaVersion` is the file shape, as in `yad index --json`; a version
-//      for this output is E1's to decide.
+//   6. `--json` answers are E1's one format: `{ jsonVersion, version, command, ok, … }`, a refusal adding
+//      `error`, `code` and `hint` — and every key of an answer is ALWAYS present (null, false or [] when
+//      there is nothing), so a script never has to ask whether a key exists.
 //
 // What it reads: each work item's `state.json`, `epic.md` and `change.json` (the summary), and for `show`
 // and `search` its `state.json` again and its `approvals.json`; `--thread` also reads the `epic.md` of
@@ -39,8 +38,8 @@
 // status or date only when it is text, a PR only when it is a whole number) — never a value re-typed.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, info, warn, fail, hand, exists, isPlainObject } from './lib.mjs';
-import { productConfigPath, SCHEMA_VERSION } from './manifest.mjs';
+import { c, log, info, warn, fail, hand, exists, isPlainObject, emitJSON } from './lib.mjs';
+import { productConfigPath } from './manifest.mjs';
 import { buildIndex } from './product-index.mjs';
 import {
   epicRoot, isValidEpicId, FOUNDATION_EPIC, stepStatus, acceptedHashes, isStaleHash,
@@ -359,9 +358,8 @@ function printUnreadable({ unreadable, unlisted }) {
   if (unreadable.length || unlisted.length) hand('fix or restore the files named above — `yad doctor` checks them');
 }
 
-function printJson(obj) {
-  process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ...obj }, null, 2)}\n`);
-}
+// The one JSON answer (E1's envelope: `jsonVersion`, `version`, `command`, `ok`, `warnings`).
+const printJson = (obj) => emitJSON(obj);
 
 // A refusal, in the form the caller asked for (rule 6): JSON under `--json`, a line and a hint otherwise.
 function refuse(json, error, hint = null) {

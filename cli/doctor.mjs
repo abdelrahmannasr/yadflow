@@ -5,7 +5,7 @@
 // `--json` emits the checks for CI / bug reports.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
@@ -2038,7 +2038,7 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
   if (json) {
     // `alwaysHint` tells the printer below to show a hint on an `ok` line; it is not part of the shape a
     // script reads, so it does not travel in `--json`.
-    log(JSON.stringify({ version: VERSION, ok: failed.length === 0, checks: checks.map((c) => { const out = { ...c }; delete out.alwaysHint; return out; }) }, null, 2));
+    emitJSON({ ok: failed.length === 0, checks: checks.map((c) => { const out = { ...c }; delete out.alwaysHint; return out; }) });
   } else {
     log(c.bold(`\nyad doctor  ${c.dim('v' + VERSION)}`));
     let section = '';

@@ -338,11 +338,13 @@ export async function runCheckpoint(root, opts = {}) {
   // plain `yad checkpoint` as permanent `retroactive: true` audit evidence nobody chose to record.
   // A real run deliberately keeps its shard on a failure (see the commit-failed path below).
   const rollbackRetro = () => { if (opts.dryRun && retroFile) cleanupRetroShard(retroFile); };
+  // The --json answer (E1) of a run that had nothing to commit.
+  const nothing = () => ({ message: null, files: [], committed: false, pushed: false, dryRun: !!opts.dryRun, retroShip: null });
 
   // The machine ledgers PLUS any build-log-backed story `status:` flip (#112) — one commit records
   // both, so the story artifact never drifts from build-log and no raw git-to-main push is needed.
   const pathspecs = [...buildLedgerPathspecs(root), ...storyStatusPathspecs(root)];
-  if (!pathspecs.length) { rollbackRetro(); info('no Build ledgers found — nothing to checkpoint'); return; }
+  if (!pathspecs.length) { rollbackRetro(); info('no Build ledgers found — nothing to checkpoint'); return nothing(); }
 
   // Stage the allowlist. `git add -- <spec>` picks up new + modified files, and deletions of tracked
   // files WITHIN a still-present spec (e.g. a removed build-state/<story>.json). A wholesale-deleted
@@ -366,7 +368,7 @@ export async function runCheckpoint(root, opts = {}) {
   if (git('diff', '--cached', '--quiet', '--', ...pathspecs).ok) {
     rollbackRetro();
     info('Build state unchanged — nothing to commit');
-    return;
+    return nothing();
   }
   // The exact files staged from the allowlist — all known to git by construction, so they are the
   // pathspec for the commit (a directory spec like build-state/ would make `git commit -- <dir>` fail
@@ -385,7 +387,7 @@ export async function runCheckpoint(root, opts = {}) {
     // run leaves no side effect on disk (git reset only unstaged it, back to untracked).
     rollbackRetro();
     info('dry run — not committed');
-    return { message };
+    return { message, files: staged, committed: false, pushed: false, dryRun: true, retroShip: null };
   }
 
   const cm = git('commit', '-m', message, '--', ...staged);
@@ -398,14 +400,15 @@ export async function runCheckpoint(root, opts = {}) {
     return { message };
   }
   ok(`checkpointed ${staged.length} file(s): ${c.dim(label)}`);
+  const done = { message, files: staged, committed: true, dryRun: false, retroShip: retroFile ? path.relative(root, retroFile) : null };
 
-  if (!opts.push) return { message };
+  if (!opts.push) return { ...done, pushed: false };
   // Push HEAD to its OWN branch — never to `defaultBranch` blindly. On the default branch these are the
   // same; with --allow-branch on a WIP branch, pushing HEAD:defaultBranch would publish the whole WIP
   // branch to the default branch (bypassing review), so the target is always the branch we are on.
-  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { message }; }
+  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { ...done, pushed: true }; }
   fail(`could not push to origin/${branch} — a protected branch, or the append-only ledgers hit an unresolvable rebase conflict`);
   hand(`run \`git pull --rebase\` and re-run \`yad checkpoint --push\``);
   process.exitCode = 1;
-  return { message };
+  return { ...done, pushed: false };
 }

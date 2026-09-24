@@ -15,7 +15,7 @@
 // `writeJSON` stamps the shape like every other engine-written file, and gives the cost warning a
 // place to appear at the moment somebody opts into a chain.
 import path from 'node:path';
-import { c, exists, fail, hand, info, log, ok, readJSONStrict, warn, writeJSON } from './lib.mjs';
+import { c, exists, fail, hand, info, log, ok, readJSONStrict, warn, writeJSON, emitJSON } from './lib.mjs';
 import { loadSkillBindings, stepDef, stepSkills, STEPS } from './epic-state.mjs';
 import { PROJECT_FILES, SCHEMA_VERSION } from './manifest.mjs';
 
@@ -102,7 +102,7 @@ export function runSkillList(root, { json = false } = {}) {
       default: null,
     }));
 
-  if (json) return log(JSON.stringify({ ok: true, file: PROJECT_FILES.skillsConfig, steps: [...rows, ...extra] }, null, 2));
+  if (json) return emitJSON({ ok: true, file: PROJECT_FILES.skillsConfig, steps: [...rows, ...extra] });
 
   if (error) warn(`${PROJECT_FILES.skillsConfig} ${error} — showing the engine's defaults`);
   log(`\n  ${c.bold('step')}                 ${c.bold('skill(s)')}`);
@@ -157,6 +157,7 @@ export function runSkillBind(root, { step, skills = [] } = {}) {
     info('they chain: each sees what the one before it produced, and the last output is the artifact');
   }
   hand(`written to ${PROJECT_FILES.skillsConfig} — \`yad next\` names it from now on (undo with \`yad skill unbind ${step}\`)`);
+  return { step, skills: names, known: !!def, file: PROJECT_FILES.skillsConfig };
 }
 
 export function runSkillUnbind(root, { step } = {}) {
@@ -175,4 +176,5 @@ export function runSkillUnbind(root, { step } = {}) {
   // What runs it now: the engine's default, or nothing at all if this engine does not know the step.
   const fallback = stepSkills(step, null);
   ok(`${step} unbound${fallback.length ? ` — back to the engine's default (${fallback.join(' → ')})` : ' — this yadflow runs no skill for it'}`);
+  return { step, skills: fallback, file: PROJECT_FILES.skillsConfig };
 }

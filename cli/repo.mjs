@@ -38,35 +38,41 @@ function defaultBranch(cwd, repo) {
 
 export async function runRepo(root, { action = 'list', name, today, push = false, allowBranch = false } = {}) {
   const { regPath, registry } = load(root);
-  if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { repos: 0 }; }
+  if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { action, repos: [] }; }
 
   if (action === 'list') {
     log(c.bold('\nconnected repos'));
     let staleCount = 0;
+    const rows = [];   // the --json answer (E1): each repo, as the list reads it
     for (const repo of registry.repos) {
-      const { stale, unknown, neverPacked } = staleness(root, repo);
+      const { head, stale, unknown, neverPacked } = staleness(root, repo);
+      rows.push({ name: repo.name ?? null, path: repo.path ?? null, head: head || null, syncedHead: repo.syncedHead ?? null,
+        state: unknown ? 'unreadable' : neverPacked ? 'no-pack' : stale ? 'stale' : 'fresh' });
       if (unknown) { warn(`${repo.name} ${c.dim(`(${repo.path})`)} — HEAD unreadable`); continue; }
       if (neverPacked) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('no code-context pack yet')} (registered without one)`); }
       else if (stale) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('stale')} (HEAD moved since last pack)`); }
       else ok(`${repo.name} ${c.dim('— fresh')}`);
     }
     if (staleCount) hand(`refresh with \`yad repo refresh${registry.repos.length > 1 ? ' <name>' : ''}\` (or \`yad repo refresh\` for all)`);
-    return { repos: registry.repos.length, stale: staleCount };
+    return { action, repos: rows, stale: staleCount };
   }
 
   if (action === 'refresh') {
     const targets = name ? registry.repos.filter((r) => r.name === name) : registry.repos;
-    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { refreshed: 0 }; }
+    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { action, refreshed: 0, repos: [] }; }
     let refreshed = 0;
+    const rows = [];
     for (const repo of targets) {
       const { head, unknown } = staleness(root, repo);
-      if (unknown) { warn(`${repo.name}: HEAD unreadable — skipped`); continue; }
+      if (unknown) { warn(`${repo.name}: HEAD unreadable — skipped`); rows.push({ name: repo.name ?? null, refreshed: false, head: null }); continue; }
       log(`  ${c.bold(repo.name)}`);
-      if (packRepo(root, repo)) {
+      const packed = !!packRepo(root, repo);
+      if (packed) {
         repo.syncedHead = head;
         if (today) repo.lastSyncedAt = today;   // always stamp when a date is supplied (the CLI passes today)
         refreshed++;
       }
+      rows.push({ name: repo.name ?? null, refreshed: packed, head: head || null });
     }
     writeJSON(regPath, registry);
     refreshed ? ok(`refreshed ${refreshed} repo(s)`) : info('nothing refreshed');
@@ -81,12 +87,12 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       hand('regenerate the code-map in your AI agent (yad-connect-repos) — the pack is cached, the map is the AI step');
       hand('then publish it to the Product default branch with `yad repo refresh --push`');
     }
-    return { refreshed };
+    return { action, refreshed, repos: rows, pushed: !!push };
   }
 
   if (action === 'sync') {
     const targets = name ? registry.repos.filter((r) => r.name === name) : registry.repos;
-    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { synced: 0 }; }
+    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { action, synced: 0, skipped: 0, repos: [] }; }
     log(c.bold('\nsync connected repos'));
     let synced = 0, skipped = 0;
     for (const repo of targets) {
@@ -118,10 +124,10 @@ export async function runRepo(root, { action = 'list', name, today, push = false
     const staleCount = registry.repos.filter((r) => staleness(root, r).stale).length;
     info(`synced ${synced}, skipped ${skipped}`);
     if (staleCount) hand(`${staleCount} repo(s) now have a stale code-context pack — \`yad repo refresh\` to repack`);
-    return { synced, skipped, stale: staleCount };
+    return { action, synced, skipped, stale: staleCount };
   }
 
   fail(`unknown repo action: ${action} (list | refresh | sync)`);
   process.exitCode = 1;
-  return {};
+  return { action };
 }

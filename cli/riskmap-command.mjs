@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok, readJSONStrict, run, warn } from './lib.mjs';
+import { c, fail, hand, info, log, ok, readJSONStrict, run, warn, emitJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { changeLevel, draftRiskMap, folderPathspec, highTouched, parseRiskMap, pathspecsFor, rankAuthors, recentAuthors, RISK_MAP_FILE, riskMapFindings, touchedFolders } from './riskmap.mjs';
 
@@ -225,7 +225,7 @@ const findingLine = (f) => `${c.bold(f.code)}${f.target ? ` ${f.target}` : ''}: 
 export async function runRiskMap(root, { action = 'check', name, json = false, dryRun = false } = {}) {
   const t = targets(root, name);
   if (t.error) {
-    if (json) log(JSON.stringify({ ok: false, error: t.error, hint: t.hint }, null, 2));
+    if (json) emitJSON({ ok: false, error: t.error, hint: t.hint });
     else { fail(t.error); hand(t.hint); }
     process.exitCode = 1;
     return { ok: false };
@@ -235,7 +235,7 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
   if (action === 'check') {
     const repos = list.map((t) => ({ name: t.name, root: t.root, ...checkRepo(t.root) }));
     if (json) {
-      log(JSON.stringify({ ok: true, repos: repos.map((r) => ({ name: r.name, git: r.git, map: r.map, findings: r.findings })) }, null, 2));
+      emitJSON({ ok: true, repos: repos.map((r) => ({ name: r.name, git: r.git, map: r.map, findings: r.findings })) });
       return { ok: true, repos };
     }
     for (const r of repos) {
@@ -264,7 +264,7 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
       results.push({ name: t.name, git: true, added: d.added, unwritable: d.unwritable, refused: d.refused, written: changed && !dryRun });
     }
     if (json) {
-      log(JSON.stringify({ ok: !results.some((r) => r.refused), dryRun, repos: results }, null, 2));
+      emitJSON({ ok: !results.some((r) => r.refused), dryRun, repos: results });
     } else {
       for (const r of results) {
         log(c.bold(`\nrisk map — ${r.name}`));

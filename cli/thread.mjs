@@ -4,7 +4,7 @@
 // this only DISCOVERS, exactly as yad-docs-sync flags and the build gates block. Node built-ins only.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
+import { c, log, ok, info, warn, hand, readJSON, exists, emitJSON, refuse } from './lib.mjs';
 import { readShips } from './ledger.mjs';
 import {
   epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun, currentPhase, isProductLevel,
@@ -94,7 +94,7 @@ export async function runThread(root, { epic, json = false } = {}) {
   if (!epic) {
     // List every distinct thread root in the project.
     const dir = path.join(root, 'epics');
-    if (!exists(dir)) { log(c.red('no epics/ directory')); process.exitCode = 1; return; }
+    if (!exists(dir)) return refuse('no epics/ directory', null, { json });
     const roots = new Set();
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.isDirectory() && isValidEpicId(e.name) && exists(path.join(dir, e.name, 'epic.md'))) {
@@ -102,8 +102,11 @@ export async function runThread(root, { epic, json = false } = {}) {
       }
     }
     log(c.bold('\nFeature threads'));
+    // The --json answer (E1): one line per thread, as the list prints it.
+    const threads = [];
     for (const r of [...roots].sort()) {
       const s = threadSummary(root, r);
+      threads.push({ thread: r, theme: s.nodes[0]?.theme ?? null, epics: s.nodes.length, stub: !!s.nodes[0]?.stub, openDebt: s.openDebt.length });
       const debt = s.openDebt.length ? c.red(`  ⚠ ${s.openDebt.length} open reconcile-debt`) : '';
       const stub = s.nodes[0]?.stub ? c.yellow('  [stub · backfill pending]') : '';
       // The genesis epic's grouping theme (E31). This list is where a person looks to see which
@@ -112,11 +115,12 @@ export async function runThread(root, { epic, json = false } = {}) {
       log(`  ${c.bold(r)}${theme}  ${c.dim(`${s.nodes.length} epic(s)`)}${stub}${debt}`);
     }
     log(c.dim('\n  yad thread <epic>   show one thread in full'));
-    return;
+    if (json) return emitJSON({ threads });
+    return { threads };
   }
-  if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic}`)); process.exitCode = 1; return; }
+  if (!isValidEpicId(epic)) return refuse(`invalid epic id: ${epic}`, null, { json });
   const s = threadSummary(root, epic);
-  if (json) { log(JSON.stringify(s, null, 2)); return; }
+  if (json) { emitJSON(s); return; }
 
   log(c.bold(`\nThread ${s.thread}`) + c.dim('  (genesis → tip)'));
   if (s.broken) log(c.red(`  ✗ broken lineage: ${s.broken}`));
@@ -168,16 +172,18 @@ function threadRoots(root) {
 
 export async function runReconcile(root, { action = 'check', thread = null } = {}) {
   const roots = thread ? [resolveThread(root, thread).rootId] : threadRoots(root);
-  if (!roots.length) { info('no feature threads found (no epics with epic.md yet)'); return; }
+  if (!roots.length) { info('no feature threads found (no epics with epic.md yet)'); return { action, flags: 0, threads: [] }; }
 
   log(c.bold(`\nChange reconcile  ${c.dim(action)}`));
   let flags = 0;
+  const threads = [];   // the --json answer (E1)
   for (const r of roots) {
     const s = threadSummary(root, r);
     const issues = [];
     if (s.broken) issues.push(`broken lineage: ${s.broken}`);
     for (const n of s.nodes) if (n.brokenThread) issues.push(`${n.id}: ${n.brokenThread}`);
     for (const d of s.openDebt) issues.push(`open reconcile debt on ${d.epicId} — next change blocked until paid`);
+    threads.push({ thread: r, clean: !issues.length, issues });
     if (!issues.length) { ok(`${r} — clean`); continue; }
     flags += issues.length;
     warn(`${r}`);
@@ -200,4 +206,5 @@ export async function runReconcile(root, { action = 'check', thread = null } = {
   log('');
   if (flags) { warn(`${flags} item(s) need attention — reconcile is advisory; the gates block at merge`); }
   else { ok('all threads reconciled — no drift, no open debt'); }
+  return { action, flags, threads };
 }

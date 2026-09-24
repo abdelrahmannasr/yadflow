@@ -17,7 +17,7 @@
 // optional — the same split as `yad kill` / `yad unkill`.
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok, readJSONStrict, warn, writeProductConfig } from './lib.mjs';
+import { c, fail, hand, info, ok, readJSONStrict, warn, writeProductConfig, emitJSON } from './lib.mjs';
 import { isVerifiedLedger, productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { epicIds, epicRoot, loadLedger, stepStatus } from './epic-state.mjs';
 import { isSolo } from './gate.mjs';
@@ -88,7 +88,7 @@ export function openReviews(root) {
 }
 
 const makeBail = (json) => (message, hint) => {
-  if (json) log(JSON.stringify({ ok: false, error: message, hint: hint || null }, null, 2));
+  if (json) emitJSON({ ok: false, error: message, hint: hint || null });
   else { fail(message); if (hint) hand(hint); }
   process.exitCode = 1;
 };
@@ -126,7 +126,7 @@ export async function runMode(root, { to = null, reason = null, json = false, to
     const name = isObj(hub) && hub.mode !== undefined ? hub.mode : null;
     const set = isObj(hub) && isObj(hub.mode_set) ? hub.mode_set : null;
     const hint = soloTeamHint(root, hub, { solo: mode === 'solo', headCount, today });
-    if (json) return log(JSON.stringify({ ok: true, mode, name, agrees: name === null || name === mode, set, suggest: hint }, null, 2));
+    if (json) return emitJSON({ ok: true, mode, name, agrees: name === null || name === mode, set, suggest: hint });
     ok(`mode: ${mode} — ${MEANING[mode]}`);
     if (!hub) info('no Product config yet — team mode is the default; `yad setup` records it');
     if (set) info(setLine(set));
@@ -146,7 +146,7 @@ export async function runMode(root, { to = null, reason = null, json = false, to
   const verified = isVerifiedLedger(hub);
   const open = plan.flipped && !verified ? openReviews(root) : [];
   if (json) {
-    return log(JSON.stringify({ ok: true, mode: to, changed: plan.changed, flipped: plan.flipped, set: plan.flipped ? plan.hub.mode_set : null, openReviews: open, openReviewsKnown: !verified }, null, 2));
+    return emitJSON({ ok: true, mode: to, changed: plan.changed, flipped: plan.flipped, set: plan.flipped ? plan.hub.mode_set : null, openReviews: open, openReviewsKnown: !verified });
   }
   if (!plan.changed) return ok(`already ${to} — nothing changed`);
   if (!plan.flipped) {

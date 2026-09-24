@@ -29,7 +29,7 @@
 // a login.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, note, readJSON, run } from './lib.mjs';
+import { c, log, ok, note, readJSON, run, emitJSON } from './lib.mjs';
 import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { epicRoot, ledgerPersonLogin, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
@@ -375,10 +375,17 @@ export function runUsage(root, { out, since, until, all, member, format = 'html'
   for (const [flag, val] of [['--since', since], ['--until', until]]) {
     if (val && !DATE_RE.test(val)) note(c.yellow(`${flag} ${val} is not YYYY-MM-DD — dates compare lexically, so a non-padded value may filter incorrectly`));
   }
-  let fmt = json ? 'json' : format;
+  // `--json` is the command's answer in E1's envelope; `--format json` is a REPORT format — the bare model,
+  // written to --out or printed — and stays that. With both, the report is written and the answer says where.
+  let fmt = format;
   if (!['html', 'json', 'md'].includes(fmt)) { note(c.yellow(`unknown --format ${fmt} (html|json|md) — using html`)); fmt = 'html'; }
   const model = buildModel(root, { since, until, repos, member });
 
+  if (json) {
+    if (out) { writeReport(out, fmt === 'json' ? `${JSON.stringify(model, null, 2)}\n` : fmt === 'md' ? renderMarkdown(model, today) : renderHtml(model, today)); note(`wrote ${fmt.toUpperCase()} report → ${out}`); }
+    emitJSON({ ...model, out: out || null });
+    return model;
+  }
   if (fmt === 'json') {
     const s = JSON.stringify(model, null, 2);
     if (out) { writeReport(out, s + '\n'); note(`wrote JSON → ${out}`); } else { log(s); } // stdout stays pure JSON

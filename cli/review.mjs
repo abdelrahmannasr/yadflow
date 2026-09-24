@@ -6,7 +6,7 @@
 // The CLI never calls an LLM: the skill (yad-review-companion / yad-engineer-review) generates the
 // trailer/cards/chat text and posts it via these primitives, all to the PLATFORM (never a ledger file).
 import path from 'node:path';
-import { log, ok, info, warn, fail, note, run, readJSON } from './lib.mjs';
+import { log, ok, info, warn, fail, note, run, readJSON, emitJSON, refuse, inJSON } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
@@ -73,8 +73,8 @@ function contextBundle(root, { repo, dir, pr, runner = run } = {}) {
 // the trailer / cards and run the chat over the CODE diff (grounded in the repo code-map + the PR).
 export async function reviewContext(root, { repo, dir, pr, runner = run } = {}) {
   const r = contextBundle(root, { repo, dir, pr, runner });
-  if (r.error) { fail(r.error); process.exitCode = 1; return; }
-  log(JSON.stringify(r.bundle, null, 2));
+  if (r.error) { refuse(r.error, null, { json: true }); return; }
+  emitJSON(r.bundle);
   return r.bundle;
 }
 
@@ -84,7 +84,7 @@ export async function reviewContext(root, { repo, dir, pr, runner = run } = {}) 
 // the per-stop briefing + Socratic question, and runs the two-way session. No LLM here, no ledger write.
 export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = {}) {
   const r = contextBundle(root, { repo, dir, pr, runner });
-  if (r.error) { fail(r.error); process.exitCode = 1; return; }
+  if (r.error) { refuse(r.error, null, { json: true }); return; }
   const { bundle, repoRoot, base } = r;
   const diff = runner('git', ['-C', repoRoot, 'diff', `${base}...HEAD`]);
   // Diagnostics go to STDERR so STDOUT stays pure JSON (the skill / e2e parse it). The empty `stops: []`
@@ -92,7 +92,7 @@ export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = 
   if (!diff.ok) note(`could not read the diff (${base}...HEAD) in ${repoRoot} — is the branch pushed and the base correct?`);
   const stops = sequenceDiff(diff.ok ? diff.stdout : '', { contractPath: bundle.contract });
   const out = { ...bundle, stops };
-  log(JSON.stringify(out, null, 2));
+  emitJSON(out);
   if (!stops.length) note('no stops — the diff is empty (nothing to walk through)');
   return out;
 }
@@ -112,7 +112,7 @@ export async function reviewTrailer(root, { repo, dir, pr, body, getBody = getPr
   const r = editBody(platform, pr, upsertTrailerBlock(cur.body, String(body).trim()), { cwd: repoRoot });
   if (!r.ok) { fail(`could not update PR #${pr}: ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`trailer posted to ${platform === 'gitlab' ? 'MR' : 'PR'} #${pr}`);
-  return { number: pr };
+  return { number: pr, posted: true };
 }
 
 // `yad review nudge --repo <r> --pr <n>` — friendly public @-mention on a bare approve (engagement none)
@@ -125,7 +125,7 @@ export async function reviewNudge(root, { repo, dir, pr, reader = readPr, poster
   const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const pull = reader(platform, pr, { cwd: repoRoot });
-  if (!pull.ok) { warn(`could not read PR #${pr}: ${pull.reason}`); process.exitCode = 1; return; }
+  if (!pull.ok) { fail(`could not read PR #${pr}: ${pull.reason}`); process.exitCode = 1; return; }
   let nudged = 0;
   for (const rv of pull.reviews) {
     if (rv.state !== 'APPROVED' || parseEngagement(rv.body) === 'verified' || !rv.login) continue;
@@ -173,7 +173,8 @@ export async function reviewReconcile(root, { epic, repo, dir, pr, reader = read
   );
   if (!res.found) {
     warn(`no build-log ship record matches PR #${pr} in ${epic} — attach this at ship time:`);
-    log(JSON.stringify({ engineer_review: engineerReview }, null, 2));
+    // The block to attach, for a person to copy. Under --json the answer carries it as `engineerReview`.
+    if (!inJSON()) log(`  ${JSON.stringify({ engineer_review: engineerReview })}`);
     return { engineerReview, written: false };
   }
   ok(`stamped engagement onto ${epic} ship ${res.ship.story || ''}${res.ship.task ? '/' + res.ship.task : ''} (PR #${pr})`);

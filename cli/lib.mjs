@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
 import { err } from './errors.mjs';
-import { MIRRORED_FILES, SCHEMA_VERSION } from './manifest.mjs';
+import { MIRRORED_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -13,9 +13,69 @@ import path from 'node:path';
 // resolve from HERE, never from the user's cwd.
 export const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 
+// ---- --json (E1) ---------------------------------------------------------
+// Every command answers `--json` with ONE object on stdout, built here and nowhere else:
+//   { jsonVersion, version, command, ok, ...the command's own keys, warnings }
+// and a refusal adds `error`, `code` (a `YAD-` code, or null) and `hint` (or null). `jsonVersion` is
+// the contract's own number: adding a key keeps it, renaming or removing one — or changing what a key
+// means — bumps it. `version` is the package that answered.
+//
+// While a `--json` run is on, `log` (and so every helper built on it) writes to STDERR, so stdout
+// holds the one object and nothing else — a progress line printed before the answer would otherwise
+// make the whole output unparseable. Each `warn` is also collected into `warnings`, as plain text.
+// A command never calls JSON.stringify toward stdout itself; a test greps for it.
+export const JSON_VERSION = 1;
+const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
+let jsonRun = null;
+export function beginJSON(command) { jsonRun = { command, emitted: false, warnings: [], failures: [] }; }
+export const inJSON = () => jsonRun !== null;
+export const jsonEmitted = () => jsonRun?.emitted === true;
+// The refusal a command SAID in prose (`fail`, then the `hand` under it), for the run that ends with a
+// non-zero exit and no answer: most refusals are written that way, and turning each by hand into a
+// JSON one is how one arm gets fixed and its twin missed. `bin/yad.mjs` answers with the first.
+export const jsonFailure = () => {
+  const f = jsonRun?.failures[0];
+  if (!f) return null;
+  const code = /\b(YAD-[A-Z]+-\d{3})\b/.exec(f.error)?.[1] ?? null;
+  return { error: f.error, hint: f.hint, code };
+};
+// For a test that drives several commands in one process.
+export function endJSON() { jsonRun = null; }
+// eslint-disable-next-line no-control-regex -- removing the colour codes is the point
+export const stripAnsi = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, '');
+
+// Written with console.log, which is stdout: during a --json run `log` has moved to stderr, so the
+// answer is the only thing left there. Called outside a run (a test calling a command with
+// `json: true`), it still answers, with `command: null` and no collected warnings.
+export function emitJSON(payload = {}) {
+  const command = jsonRun?.command ?? null;
+  // A second answer would make stdout two documents; a bug, and said as one.
+  if (jsonRun?.emitted) throw new Error(`yad ${command}: a second JSON answer`);
+  const clash = ENVELOPE_KEYS.filter((k) => Object.hasOwn(payload, k));
+  if (clash.length) throw new Error(`yad ${command}: the answer sets the envelope key(s) ${clash.join(', ')}`);
+  if (jsonRun) jsonRun.emitted = true;
+  const { ok = true, warnings, ...rest } = payload;
+  // A refusal always carries all three keys, so a reader never tests whether one exists.
+  const refusal = ok === false && typeof rest.error === 'string'
+    ? { error: stripAnsi(rest.error), code: rest.code ?? null, hint: rest.hint == null ? null : stripAnsi(rest.hint) } : {};
+  const all = [...(jsonRun?.warnings ?? []), ...(Array.isArray(warnings) ? warnings.map(stripAnsi) : [])];
+  console.log(JSON.stringify({ jsonVersion: JSON_VERSION, version: VERSION, command, ok, ...rest, ...refusal, warnings: all }, null, 2));
+}
+
+// A refusal: one object under --json, the red line and its hint otherwise. Exit code 1 either way.
+// `json` answers in JSON outside a CLI run too (a command called with `json: true`); `extra` carries
+// keys a command adds to its refusal (never an envelope key).
+export function refuse(message, hint = null, { code = null, json = false, ...extra } = {}) {
+  process.exitCode = 1;
+  if (jsonRun || json) return emitJSON({ ok: false, error: stripAnsi(message), code, hint: hint === null || hint === undefined ? null : stripAnsi(hint), ...extra });
+  log(c.red(message));
+  if (hint) log(c.yellow(`  → ${hint}`));
+}
+
 // ---- output -------------------------------------------------------------
-const useColor = output.isTTY && !process.env.NO_COLOR;
-const paint = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
+// Colour follows the stream the prose goes to: stderr during a --json run, stdout otherwise.
+const useColor = () => (jsonRun ? process.stderr.isTTY : output.isTTY) && !process.env.NO_COLOR;
+const paint = (code, s) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s);
 export const c = {
   bold: (s) => paint('1', s),
   dim: (s) => paint('2', s),
@@ -24,13 +84,28 @@ export const c = {
   red: (s) => paint('31', s),
   cyan: (s) => paint('36', s),
 };
-export const log = (s = '') => console.log(s);
+export const log = (s = '') => {
+  if (!jsonRun) return console.log(s);
+  jsonRun.afterFail = false;
+  console.error(s);
+};
 export const step = (n, total, title) => log(`\n${c.cyan(`[${n}/${total}]`)} ${c.bold(title)}`);
 export const ok = (s) => log(`  ${c.green('✓')} ${s}`);
 export const info = (s) => log(`  ${c.dim('•')} ${s}`);
-export const warn = (s) => log(`  ${c.yellow('!')} ${s}`);
-export const fail = (s) => log(`  ${c.red('✗')} ${s}`);
-export const hand = (s) => log(`  ${c.yellow('→')} ${s}`);
+export const warn = (s) => {
+  if (jsonRun) jsonRun.warnings.push(stripAnsi(s));
+  log(`  ${c.yellow('!')} ${s}`);
+};
+export const fail = (s) => {
+  log(`  ${c.red('✗')} ${s}`);
+  if (jsonRun) { jsonRun.failures.push({ error: stripAnsi(s), hint: null }); jsonRun.afterFail = true; }
+};
+// A hint belongs to a failure only when it is the very next line under it — never a later `hand`.
+export const hand = (s) => {
+  const attach = jsonRun?.afterFail ? jsonRun.failures.at(-1) : null;
+  log(`  ${c.yellow('→')} ${s}`);
+  if (attach) attach.hint = stripAnsi(s);
+};
 // Like `info`, but to STDERR — for diagnostics emitted by commands whose STDOUT must stay pure (e.g. a
 // JSON bundle a tool parses). Keeps the human hint visible without corrupting machine-readable output.
 export const note = (s) => console.error(`  ${c.dim('•')} ${s}`);
@@ -45,14 +120,20 @@ export function closePrompts() {
   rl?.close();
   rl = undefined;
 }
+// A --json run never prompts: its stdin is a program's, and a question on stderr would hang it.
+const noPromptInJSON = (question) => {
+  if (jsonRun) throw err('YAD-CLI-001', `a --json run cannot ask: ${stripAnsi(question)}`, 'pass the answer as a flag (`yad --help` lists them), or run without --json');
+};
 export async function ask(question, def = '') {
   if (process.env.SDLC_NONINTERACTIVE) return def;
+  noPromptInJSON(question);
   const suffix = def ? c.dim(` (${def})`) : '';
   const a = (await getRl().question(`  ${question}${suffix}: `)).trim();
   return a || def;
 }
 export async function askYesNo(question, def = true) {
   if (process.env.SDLC_NONINTERACTIVE) return def;
+  noPromptInJSON(question);
   const hint = def ? 'Y/n' : 'y/N';
   const a = (await getRl().question(`  ${question} ${c.dim(`(${hint})`)} `)).trim().toLowerCase();
   if (!a) return def;
@@ -202,7 +283,10 @@ export function writeJSON(p, obj) {
 // ---- subprocess ---------------------------------------------------------
 // Returns { ok, stdout, stderr, code }. Never throws on non-zero exit.
 export function run(cmd, args = [], opts = {}) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts });
+  // A subprocess that shares our stdout (`npm run build`) would print into a --json answer: during a
+  // --json run its stdout is our stderr instead (E1).
+  const stdio = jsonRun && opts.stdio === 'inherit' ? ['inherit', 2, 'inherit'] : opts.stdio;
+  const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts, ...(stdio === undefined ? {} : { stdio }) });
   return {
     ok: r.status === 0,
     code: r.status,

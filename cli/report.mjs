@@ -7,7 +7,7 @@
 // no absolute paths, hostnames, git URLs, repo names, logins/emails, epic/story IDs, branch
 // names, or flag values ever leave the machine. The user sees the exact payload and confirms before
 // anything is posted. See memory: no-private-data-in-reports.
-import { c, log, info, ok, warn, note, ask, askYesNo, has, readJSON, run } from './lib.mjs';
+import { c, log, info, ok, warn, note, ask, askYesNo, has, readJSON, run, inJSON } from './lib.mjs';
 import { VERSION, UPSTREAM_REPO , productConfigPath } from './manifest.mjs';
 import { createIssue, searchIssues, issueUrl, platformAuthed } from './platform.mjs';
 
@@ -156,7 +156,8 @@ export async function runReport(dir, opts = {}) {
     opener = openUrl,
     authed = () => platformAuthed(UPSTREAM_PLATFORM),
     argv = process.argv.slice(2),
-    interactive = !process.env.SDLC_NONINTERACTIVE,
+    // A --json run never prompts, and so never posts (E1): it answers with the payload and the prefilled URL.
+    interactive = !process.env.SDLC_NONINTERACTIVE && !inJSON(),
   } = opts;
 
   try {
@@ -176,8 +177,10 @@ export async function runReport(dir, opts = {}) {
     // Dedup — search open issues by the error code (or the first summary word). Advisory: a failed
     // search just skips this step, it never blocks filing.
     const query = ctx.error?.code || (summary.split(/\s+/)[0] || '').replace(/[^\w-]/g, '');
+    let related = [];
     if (query) {
       const { ok: searchedOk, matches } = searcher(UPSTREAM_PLATFORM, UPSTREAM_REPO, `${query} in:title`);
+      if (searchedOk) related = matches.map((m) => ({ number: m.number, title: m.title, url: m.url }));
       if (searchedOk && matches.length) {
         log(c.bold(`\nFound ${matches.length} possibly-related open issue(s):`));
         for (const m of matches) info(`#${m.number} — ${m.title}  ${c.dim(m.url)}`);
@@ -203,7 +206,8 @@ export async function runReport(dir, opts = {}) {
       const url = issueUrl(UPSTREAM_PLATFORM, UPSTREAM_REPO, { title, body, labels });
       note(interactive ? 'Not posted. You can file it yourself here (prefilled):' : 'Non-interactive — not posted. File it here (prefilled):');
       log(`  → ${c.cyan(url)}`);
-      return { filed: false, url };
+      // The payload exactly as it would be posted, for a --json caller to show or file itself.
+      return { filed: false, url, title, body, labels, related };
     }
 
     // File directly when the CLI is authenticated; otherwise fall back to the prefilled URL.

@@ -11,7 +11,7 @@
 // rebuilds the index when it records a merge, and a local write could not be committed past the ledger
 // guard — so this command writes nothing there and says so, the way a local `gate open` does.
 // It never commits: the index rides the commit that carries the change, like the ledger it summarizes.
-import { c, log, ok, info, warn, fail, hand, exists } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, exists, emitJSON } from './lib.mjs';
 import path from 'node:path';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
@@ -35,11 +35,9 @@ export async function runIndex(root, { json = false } = {}) {
   }
   // A read: the index as the files say it is right now, on whatever branch this is. Nothing is written,
   // so no branch or ledger rule applies.
-  // The same shape as the file, `schemaVersion` first, as `writeJSON` stamps it.
-  if (json) {
-    process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ...built.index }, null, 2)}\n`);
-    return;
-  }
+  // The same keys as the file, `schemaVersion` first as `writeJSON` stamps it, inside E1's envelope:
+  // this answer IS a file, so it keeps the file's shape number beside the contract's own.
+  if (json) return emitJSON({ schemaVersion: SCHEMA_VERSION, ...built.index });
 
   log(c.bold('\nyad index'));
   const { hub } = loadProduct(root);

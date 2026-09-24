@@ -21,6 +21,9 @@ import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
+// The --json answer's list (E1): every managed item, as the report groups it — never the apply step.
+const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status }));
+
 export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
@@ -167,7 +170,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (!fix) {
     if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
-    return { counts, gaps, applied: 0, modified: modified.length };
+    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length };
   }
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
@@ -231,5 +234,5 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       },
     });
   }
-  return { counts, gaps, applied, modified: modified.length };
+  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length };
 }
