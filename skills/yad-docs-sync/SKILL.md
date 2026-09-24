@@ -63,7 +63,9 @@ A missing `docs-build.json` (a site never generated) counts as **stale → needs
   manifest / diagram / skill-count changed*, or *shell upgraded* (`shellVersion`, per-epic only). Writes nothing.
 - **`refresh`** — for each stale site, re-run the generator (`yad-docs` for an epic site, `yad-docs-overview`
   for the overview) to regenerate `src/data/*.ts` + theme + manifest, then redeploy via `yad docs deploy`
-  (degrading to build-only when no platform CLI). Report every site refreshed. **Never silent** — refresh
+  (degrading to build-only when no platform CLI). Report every site refreshed, and every site whose
+  rebuild failed: `yad docs sync --refresh` exits 1 when a stale site's npm install or build fails, and
+  its `--json` `sites` rows say which (`built: false` with an `error`). **Never silent** — refresh
   is a deliberate human/CI act, surfaced exactly like `yad repo refresh`.
 - **`wire`** — commit the CI workflow (Step 4) that automates the check + rebuild.
 

@@ -67,7 +67,7 @@ Generate the site into `epics/<scope>/defects-site/` with sections:
 6. **Recommendations** — which originating stage to harden, derived from the top escape-stages.
 
 Also write a plain `epics/<scope>/DEFECTS.md` mirror. On `action: deploy`, `yad docs deploy` the site
-(build-only when no target).
+(build-only when no target); if it exits 1 the site did not build — report that, not a deploy.
 
 ## Hard rules
 

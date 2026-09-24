@@ -67,7 +67,7 @@ is the file the next `yad-change` / `yad-epic` reads as "the feature's current t
 
 ### Step 5 — Emit `TIMELINE.md` + (optional) deploy
 Write a short `epics/<thread>/TIMELINE.md` (the chain, what each node changed, ships, open debt) for a
-plain-text read — head each node with its type noun (Change request / Defect / Hotfix / Chore / Epic) + id. On `action: deploy`, `yad docs deploy` the site (build-only when no target).
+plain-text read — head each node with its type noun (Change request / Defect / Hotfix / Chore / Epic) + id. On `action: deploy`, `yad docs deploy` the site (build-only when no target); if it exits 1 the site did not build — report that, not a deploy.
 
 ## Hard rules
 
