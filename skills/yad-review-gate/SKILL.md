@@ -85,8 +85,9 @@ and nothing else.
 > same files under `foundation/`), local `yad gate
 > sync` is advisory, and `yad gate ci --merged` writes the whole transition when the review PR merges.
 > So every "set / append / write" instruction below is the **local, or a platform with no
-> gate-sync CI** path — and the `yad gate approve` / `comment` / `advance` commands are the **no-platform**
-> path only: with a platform they refuse, and the PR/MR carries the review. In verified mode do the human-facing half — present the artifact, say how many
+> gate-sync CI** path. Recording approvals, comments and the advance yourself is the **no-platform**
+> path only (`yad gate approve` / `comment` / `advance`, E112): with a platform those commands refuse, the
+> PR/MR carries the review, and `yad gate sync` writes it into a local ledger. In verified mode do the human-facing half — present the artifact, say how many
 > approvers the step needs, help the owner address comments — and let the platform PR/MR carry the review
 > state; the approvals, comments, review records and the advance all land through CI at merge.
 
@@ -145,7 +146,9 @@ Then record the round with the engine — **never append to `.sdlc/comments.json
 yad gate comment <epic> <artifact> --by <name> --count <comments this round>          # the round in progress
 yad gate comment <epic> <artifact> --by <name> --count <n> --new-round                # after the owner addressed the last round
 ```
-It writes one participation record per `(step, commenter, round)` — the markdown stays the human-readable
+`--new-round` opens the next round only when the artifact has changed since the latest round (the owner
+addressed it by editing); otherwise it joins the latest round, so a retry or a second reviewer never opens
+a round that did not happen. It writes one participation record per `(step, commenter, round)` — the markdown stays the human-readable
 record, this makes commenter names queryable, the counterpart to `approvals.json`. It records no `role` or
 `domain` (older records may carry them; nothing reads them). This is the **no-platform** path (E112): with
 a platform the comments are the PR/MR's threads, and the command refuses and names `yad gate sync`.
@@ -172,9 +175,9 @@ command refuses and names `yad gate sync`; on a verified ledger CI writes them a
 (a real trailer/cards/chat session = `verified`) or as a bare click (`none`). It is soft by default
 (both count; a bare approve draws a friendly nudge) and only gates when `hub.review.requireEngagement`
 is on — see `references/gating.md`. The signal is gameable by design ("visible, not impossible").
-The command writes `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` with the `Approved by` list.
-Refresh that file into the full **named record**, with three sections, so every participant is
-attributable in one place:
+Then write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named record** — the command
+writes the ledger only, never this file, so rewrite it after every `yad gate approve`. It has three
+sections, so every participant is attributable in one place:
 
 ```markdown
 # Approval record — <artifact> — <YYYY-MM-DD>
@@ -244,9 +247,6 @@ The step may advance **iff ALL hold**:
    `../yad-architecture/references/contract-format.md`): if it no longer matches
    `.sdlc/contract-lock.json`, the surface changed → approvals stale → return to `comment` and re-lock.
 
-If the predicate **fails**: report exactly which approvals are still missing and STOP. Do not modify
-`currentStep`.
-
 If the predicate **passes**, advance with the engine — **never edit `state.json` by hand**:
 
 ```bash
@@ -267,11 +267,15 @@ narrating the result — not steps to perform:
 - `stories-review` sets `currentStep: "ready-for-build"` and opens the parallel `test-cases` track;
   `test-cases-review` leaves `currentStep` at `ready-for-build`; `foundation-review` ends at
   `foundation-done` (the old `discovery-review` at `discovery-done`);
-- any other review step opens the next step that has not already passed (skipped, deferred, inherited and
-  done steps stay as they are), or sets `ready-for-build` when none is left; a gate that passed behind the
-  chain (a step re-opened with a late `yad undefer`) moves nothing else.
+- any other review step moves `currentStep` to the next step that has not already passed (skipped,
+  deferred, inherited and done steps are stepped over), or to `ready-for-build` when none is left. That
+  step is set `in_progress` (authoring) or `in_review` **only if it is `todo`**: one already started keeps
+  its status, and a `blocked` step **with** a `record` (waiting on someone outside the workflow) is left
+  as it is. A gate that passed behind the chain (a step re-opened with a late `yad undefer`) moves
+  nothing else.
 
-If the predicate **fails**, `yad gate advance` writes nothing, exits 1 and lists what is still missing.
+If the predicate **fails**, report exactly which approvals are still missing and stop: `yad gate advance`
+writes nothing, exits 1 and lists them, and `currentStep` does not move.
 A step already `done` is never advanced again; a `deferred` step is put back with `yad undefer` first.
 
 One other skill still writes a chain by hand, and it is not an oversight: `yad-backfill promote` rewrites
@@ -318,7 +322,8 @@ write path.
 
 ### Hard rules (build plan §1, §5)
 - **The merge click is the human approval act.** A Shape step advances only when a human merges the
-  approved, fully-resolved review PR — there is no machine-driven advance. A step `locked: true` may not
+  approved, fully-resolved review PR — or, on a Product with no platform, when a person runs
+  `yad gate advance` — there is no machine-driven advance. A step `locked: true` may not
   be switched to `advance: auto`; refuse such a request.
 - **Approvals are revoked when the reviewed artifact changes.** `sync` re-hashes the artifact (the locked
   contract surface for architecture; every other file without its frontmatter `status:` line, which the

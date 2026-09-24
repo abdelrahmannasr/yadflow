@@ -221,7 +221,8 @@ drifted from its lock — run it rather than recomputing by hand.
 2. Reviewer *bob* leaves comments → captured in the comments file; the author *alice* (pm-assisted)
    edits `epic.md`.
 3. Predicate before any approval: `|approvers|=0` → **fails**. Gate reports "missing: 1 approval(s)".
-   *alice* wrote the artifact, so her own approval is not recorded.
+   *alice* wrote the artifact, so her own approval is not recorded (`yad gate approve` would record it,
+   and warns that she is the epic's owner).
 4. `action: approve` approver *bob* (`yad gate approve EP-x epic.md --by bob` with no platform) → ledger entry added. Predicate: `|approvers|=1` → **base pass**
    (`epic-review` has no risk tags, so the full count is also 1 and nothing is short).
 5. `action: advance` (`yad gate advance EP-x epic.md`) → `epic-review.status=done`, `architecture.status=in_progress`,
@@ -249,7 +250,8 @@ marker and blocks normally, exactly as a `CHANGES_REQUESTED` or any unresolved h
 
 ## Platform-backed input (the verified ledger)
 When the Product has a platform (`.sdlc/hub.json`), reviewers can approve/comment
-on a real PR/MR instead of (or as well as) the skill recording it directly. The sync reads that platform
+on a real PR/MR instead — and only there: with a platform, `yad gate approve` / `comment` / `advance`
+refuse. The sync reads that platform
 state with the local user's own `gh`/`glab` and writes the **same**
 `approvals.json` / `comments.json` / `reviews/*.md` records the manual path writes — bridge approvals
 tagged `"source": "bridge"`. With a local ledger `yad gate sync` writes them; with a verified ledger

@@ -8191,7 +8191,9 @@ test('E112 approve: records one approval bound to the artifact, never advances, 
     assert.match(r.out, /the gate would pass — advance it with: yad gate advance EP-test epic\.md/);
     assert.equal(r.value.changed, true);
     assert.equal(r.value.gate.passed, true);
-    assert.match(fs.readFileSync(path.join(ep, 'reviews/epic--2026-09-24--approved.md'), 'utf8'), /- bob — approved 2026-09-24/);
+    // The dated review record is the skill's full named record: the command writes the ledger only, or the
+    // short list would erase that record on every approval of the day (E112 review).
+    assert.ok(!fs.existsSync(path.join(ep, 'reviews')), 'no reviews/*--approved.md written');
     // The same person, the same content, another day: nothing changes, the first date included.
     const once = bytes('approvals.json');
     const again = await approve(T, { by: 'bob', today: '2026-09-25' });
@@ -8379,11 +8381,12 @@ test('E112 advance: a deferred step is refused and pointed at `yad undefer`', as
 });
 
 test('E112 comment: one record per (step, commenter, round); a repeat changes nothing; --new-round starts the next', async () => {
-  const { T, read, bytes } = localEpic();
+  const { T, ep, read, bytes } = localEpic();
   try {
+    const { artifactHash } = await import('./epic-state.mjs');
     const first = await comment(T, { by: 'bob', count: '3' });
     assert.equal(first.code, 0, first.out);
-    assert.deepEqual(read('comments.json'), [{ artifact: 'epic.md', step: 'epic-review', commenter: 'bob', round: 1, count: 3, date: '2026-09-24' }]);
+    assert.deepEqual(read('comments.json'), [{ artifact: 'epic.md', step: 'epic-review', commenter: 'bob', round: 1, count: 3, date: '2026-09-24', artifactHash: artifactHash(ep, 'epic.md') }]);
     assert.match(first.out, /a comment never holds the gate here/);
     const once = bytes('comments.json');
     const same = await comment(T, { by: 'bob', count: '3', today: '2026-09-25' });
@@ -8392,6 +8395,8 @@ test('E112 comment: one record per (step, commenter, round); a repeat changes no
     await comment(T, { by: 'bob', count: '4' });
     await comment(T, { by: 'carol' });
     assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round, c.count]), [['bob', 1, 4], ['carol', 1, 1]]);
+    // The owner addresses the round by editing the artifact; the next round reviews the edit.
+    fs.appendFileSync(path.join(ep, 'epic.md'), '\nAddressed.\n');
     const next = await comment(T, { by: 'bob', count: '2', newRound: true });
     assert.equal(next.value.round, 2);
     assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round, c.count]), [['bob', 1, 4], ['carol', 1, 1], ['bob', 2, 2]], 'sorted by round, then name');
@@ -8403,6 +8408,53 @@ test('E112 comment: one record per (step, commenter, round); a repeat changes no
     const noBy = await comment(T, {});
     assert.match(noBy.out, /who commented\? `--by <name>` is required/);
     assert.equal(read('state.json').steps[1].status, 'in_review', 'a comment never moves the gate');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112: a name that differs only by case from one already on the step is refused, for approve and comment alike', async () => {
+  const { T, read, bytes } = localEpic();
+  try {
+    await approve(T, { by: 'Bob' });
+    await comment(T, { by: 'Bob' });
+    const before = [bytes('approvals.json'), bytes('comments.json')];
+    for (const [verb, run] of [['approve', () => approve(T, { by: 'bob' })], ['comment', () => comment(T, { by: 'BOB' })]]) {
+      const r = await run();
+      assert.equal(r.code, 1, verb);
+      assert.match(r.out, /differs only by case from Bob already recorded on this step — one person must have one spelling/);
+      assert.match(r.out, new RegExp(`yad gate ${verb} EP-test epic\\.md --by Bob`));
+    }
+    assert.deepEqual([bytes('approvals.json'), bytes('comments.json')], before, 'nothing written');
+    assert.equal((await approve(T, { by: 'Bob' })).code, 0, 'the recorded spelling is still accepted');
+    assert.equal(read('approvals.json').length, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 comment: --new-round opens a round only when the artifact changed since the latest one — a retry or a second reviewer joins it', async () => {
+  const { T, ep, read, bytes } = localEpic();
+  try {
+    await comment(T, { by: 'amy', count: '1' });
+    const early = await comment(T, { by: 'ben', count: '1', newRound: true });
+    assert.equal(early.value.round, 1, 'nothing changed yet: no new round');
+    assert.match(early.out, /epic\.md has not changed since round 1 began — this joins round 1/);
+    fs.appendFileSync(path.join(ep, 'epic.md'), '\nAddressed.\n');
+    await comment(T, { by: 'amy', count: '2', newRound: true });
+    const once = bytes('comments.json');
+    const retry = await comment(T, { by: 'amy', count: '2', newRound: true });
+    assert.equal(retry.value.round, 2, 'the retry is round 2 again, not round 3');
+    assert.equal(bytes('comments.json'), once, 'byte-identical');
+    const second = await comment(T, { by: 'ben', count: '1', newRound: true });
+    assert.equal(second.value.round, 2, 'a second reviewer joins the round the first one opened');
+    assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round]), [['amy', 1], ['ben', 1], ['amy', 2], ['ben', 2]]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 comment: a round written by hand as text is the same round as the number', async () => {
+  const { T, ep, read } = localEpic();
+  try {
+    fs.writeFileSync(path.join(ep, '.sdlc/comments.json'), JSON.stringify([{ artifact: 'epic.md', step: 'epic-review', commenter: 'amy', round: '1', count: 1, date: '2026-09-01' }]));
+    const r = await comment(T, { by: 'amy', count: '3' });
+    assert.equal(r.value.round, 1);
+    assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round, c.count]), [['amy', 1, 3]], 'one record, now a number');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
