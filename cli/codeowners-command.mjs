@@ -14,7 +14,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
-import { c, fail, hand, info, log, ok, run, warn } from './lib.mjs';
+import { c, fail, hand, info, log, ok, run, warn, emitJSON } from './lib.mjs';
 import { deadLines, diskCodeowners, parseCodeowners } from './codeowners.mjs';
 import { OWNER_WINDOW, recentLoginsFor, repoFiles, targets } from './riskmap-command.mjs';
 import { PUBLIC_HOST, remoteHost } from './openpr.mjs';
@@ -143,26 +143,26 @@ export async function runCodeowners(root, { action = 'check', name, json = false
     const error = refused ? 'yad never writes CODEOWNERS — any name it wrote would become an owner the platform can enforce'
       : `unknown action: ${action} (use: yad codeowners check [repo])`;
     const hint = refused ? 'edit CODEOWNERS by hand and commit it through a PR; `yad codeowners check` shows which lines look stale' : '';
-    if (json) log(JSON.stringify({ ok: false, error, ...(hint ? { hint } : {}) }, null, 2));
+    if (json) emitJSON({ ok: false, error, ...(hint ? { hint } : {}) });
     else { fail(error); if (hint) hand(hint); }
     process.exitCode = 1;
     return { ok: false };
   }
   const t = targets(root, name);
   if (t.error) {
-    if (json) log(JSON.stringify({ ok: false, error: t.error, hint: t.hint }, null, 2));
+    if (json) emitJSON({ ok: false, error: t.error, hint: t.hint });
     else { fail(t.error); hand(t.hint); }
     process.exitCode = 1;
     return { ok: false };
   }
   const repos = t.list.map((x) => ({ name: x.name, root: x.root, ...checkCodeowners(x.root, { platform: platform || x.platform, hint: true }) }));
   if (json) {
-    log(JSON.stringify({ ok: true, repos: repos.map((r) => ({
+    emitJSON({ ok: true, repos: repos.map((r) => ({
       name: r.name, git: r.git, platform: r.platform ?? null, path: r.path ?? null,
       ...(r.none ? { none: r.none } : {}), ...(r.unknown ? { unknown: r.unknown } : {}),
       findings: r.git && !r.unknown && !r.none ? codeownersFindings(r) : [],
       ...(r.inactive ? { inactive: r.inactive } : {}),
-    })) }, null, 2));
+    })) });
     return { ok: true, repos };
   }
   for (const r of repos) printRepo(r.name, r);

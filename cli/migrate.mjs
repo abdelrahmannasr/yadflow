@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig } from './lib.mjs';
+import { c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig, emitJSON, collectWarning } from './lib.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
   MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES, preferring, productConfigPath, SCHEMA_VERSION,
@@ -808,6 +808,7 @@ export function projectShapeAhead(root) {
 export function warnIfProjectAhead(root, { out = (s) => console.error(s) } = {}) {
   const ahead = projectShapeAhead(root);
   if (!ahead) return false;
+  collectWarning(`this project is on file shape ${ahead}, and this yadflow (v${VERSION}) only knows shape ${SCHEMA_VERSION} — it may misread the newer files. Upgrade yadflow before relying on what it says; \`yad doctor\` lists them.`);
   out(c.yellow(`! this project is on file shape ${ahead}, and this yadflow (v${VERSION}) only knows shape ${SCHEMA_VERSION} — it may misread the newer files. Upgrade yadflow before relying on what it says; \`yad doctor\` lists them.`));
   return true;
 }
@@ -866,7 +867,7 @@ function printProductMove(p, { apply }) {
 export async function runMigrate(root, { apply = false, json = false } = {}, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
   if (!exists(path.join(root, PROJECT_FILES.version)) && !exists(productConfigPath(root))) {
     const message = 'no yad project here (.sdlc/ not initialised)';
-    if (json) { log(JSON.stringify({ version: VERSION, ok: false, error: message }, null, 2)); }
+    if (json) { emitJSON({ ok: false, error: message }); }
     else { fail(message); hand('run `yad setup` to start one'); }
     process.exitCode = 1;
     return { ok: false };
@@ -892,7 +893,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       try {
         written.push(...applyProductMove(root, move, { migrations, copy }));
       } catch (e) {
-        if (json) log(JSON.stringify({ version: VERSION, ok: false, error: `the product level was not moved: ${e.message}` }, null, 2));
+        if (json) emitJSON({ ok: false, error: `the product level was not moved: ${e.message}` });
         else { fail(`the product level was not moved: ${e.message}`); hand('every file is where it was — fix the cause, then run `yad migrate --apply` again'); }
         process.exitCode = 1;
         return { ok: false, rows: plan.rows, written: [] };
@@ -938,8 +939,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
   if (apply && (written.length || move)) refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null), { quiet: json });
 
   if (json) {
-    log(JSON.stringify({
-      version: VERSION,
+    emitJSON({
       ok: blocked.length === 0 && !productBlocked,
       engine: plan.engine,
       applied: apply,
@@ -955,7 +955,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       rows: plan.rows,
       // The product-level move (shape 8), or null when the project has no old-spelling product level.
       product: plan.product,
-    }, null, 2));
+    });
   } else {
     log(c.bold(`\nyad migrate  ${c.dim(`shape ${plan.engine}`)}`));
     log(c.dim(`target: ${root}\n`));

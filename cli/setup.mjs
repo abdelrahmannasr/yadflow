@@ -639,6 +639,13 @@ export async function runSetup(root, opts = {}) {
   }
   log('');
   log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));
+  // The --json answer (E1). A --json setup never prompts: every answer comes from a flag, or the run is
+  // refused (YAD-CLI-001) at the first question it would have asked — which can come after an earlier
+  // step has written, so a scripted setup passes every flag (or SDLC_NONINTERACTIVE for the defaults).
+  return {
+    profile: { solo, team_size, codebase, repo_layout }, ideTargets,
+    repos: registry.repos.map((r) => r.name ?? null), next: epicSkill,
+  };
 }
 
 // The repomix pack is a large, regenerable artifact — the Product tracks the AI-authored code-map, not the

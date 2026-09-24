@@ -45,6 +45,8 @@
     "epics/EP-checkout-queue-filter/test-cases.md": "sha256:b89ae988123e74d3b73f13f0ac86f68831a0994c60e8b151ed37a12be25a0baa"
   },
   "next": {
+    "jsonVersion": 1,
+    "command": null,
     "ok": true,
     "actions": [
       {
@@ -92,7 +94,8 @@
         "why": "Shape approved — Build can run",
         "lineageKind": "defect"
       }
-    ]
+    ],
+    "warnings": []
   },
   "doctor": [
     {

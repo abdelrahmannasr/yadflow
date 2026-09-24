@@ -5,8 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject,
-  writeMirrored,
+  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject, writeMirrored, emitJSON, refuse, collectWarning,
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
@@ -635,7 +634,7 @@ function stageIndexIfClean(root, git, commits = null) {
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null } = {}) {
   const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
+  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
   const platform = hub.platform;
   const aliases = legacyLogins(hub);
   const clashed = ambiguousLegacyNames(hub);
@@ -651,7 +650,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   const by = readOnly ? null : closingActor(root, hub);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
-  if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
+  if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
 
   let { approvals, comments, hubPrs, state } = ledger;
   // Migration (see stampLegacyPr): an approval written before PR provenance existed carries no `pr`,
@@ -699,7 +698,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     }
     warn(`no review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''}${resolved.reason ? ` — ${resolved.reason}` : ''}`);
     hand(`run \`yad gate open ${epic} ${artifact || '<artifact>'}\`, or name the PR: \`yad gate sync ${epic} ${artifact || '<artifact>'} --pr <n>\``);
-    return { synced: 0 };
+    return { epic, synced: 0, advanced: 0, written: false, gates: [] };
   }
   // A pointer resolved from the platform is adopted into the ledger on the WRITER path only. In
   // verified mode this run is advisory and writes nothing, so the human never ends up with a gate-state
@@ -708,6 +707,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 
   let synced = 0;
   let advanced = 0;
+  const gates = [];
   // E71 — said ONCE, before the per-artifact lines, because it is a fact about the PRODUCT and not
   // about any one gate (rule 6: say the arithmetic, not just the verdict). Since E72 it caps the count
   // each gate below ASKS for — reported, and not enforced until E108.
@@ -740,7 +740,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const pull = reader(platform, pr.number, { cwd: root });
     // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
     // (the wired workflow's reconcile/sweep aggregates this exit) instead of silently not advancing.
-    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (local)`); process.exitCode = 1; continue; }
+    if (!pull.ok) { fail(`${pr.artifact}: ${pull.reason} — skipping (local)`); process.exitCode = 1; continue; }
 
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);
@@ -804,6 +804,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       ? 'approvals not counted here'
       : `${pred.have} approved; count: ${gateRuleSum(pred.gateRule)}${gateRuleEnforced(pred.gateRule, pred.cap)}${pred.short ? ` — ${pred.short} short` : ''}`;
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
+    // The --json answer (E1): each gate this run read, as the predicate judged it.
+    gates.push({
+      step: step.id, artifact: pr.artifact, pr: pr.number ?? null, merged: !!pull.merged, rule: pred.rule,
+      passed: !!pred.passed, alreadyDone: !!alreadyDone, have: pred.have, gateRule: pred.gateRule ?? null,
+      cap: pred.cap ?? null, short: pred.short ?? null, missing: pred.missing, staleDropped: pred.staleDropped ?? 0,
+    });
     // E73: why this gate may not pass — reported only, never enforced. Only on a gate that counted
     // (`rule: 'count'`, so never in solo mode) and is still open: not one already done (`alreadyDone` —
     // a deferred step, or a done step whose approvals went stale, is not reopened by a sync) and not one
@@ -861,7 +867,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 
   if (readOnly) {
     info('verified mode: advisory view — CI owns the ledger, nothing written locally');
-    return { synced, advanced };
+    return { epic, synced, advanced, written: false, gates };
   }
   // Belt-and-braces: the upserts above already return canonical order, but a ledger this run only
   // READ (no matching target, or a pre-canonical file written by an older release) still gets sorted
@@ -878,7 +884,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   // Only a PERSON's sync (`local`): `gateCi` calls this too, and rebuilds the index itself, inside the
   // one allowlisted commit it makes on a merge — and never in its read-only pre-merge run.
   if (local) refreshIndexAfterWrite(root, hub);
-  return { synced, advanced };
+  return { epic, synced, advanced, written: true, currentStep: state.currentStep ?? null, gates };
 }
 
 // `yad gate ci` — the self-sufficient entry point Product CI calls on platform events. Path B: CI
@@ -952,7 +958,7 @@ export function convertProductLevel(root, hub, { git = (...a) => run('git', a, {
 
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
+  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = hub.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
@@ -973,7 +979,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const jobs = [];
   if (branch) {
     const parsed = parseReviewBranch(branch);
-    if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0 }; }
+    if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
     // A review branch named for the OLD spelling whose ledger has already moved (shape 8) is the
     // Foundation's review: its steps keep `artifact: "discovery/"`, so the job resolves to them there.
     // Without this, that merge finds no ledger at `epics/EP-discovery/` and is dropped.
@@ -991,7 +997,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       try {
         ledger = loadLedger(epicRoot(root, e));
       } catch (err) {
-        warn(`${e}: ${err.message} — skipping this epic`);
+        fail(`${e}: ${err.message} — skipping this epic`);
         process.exitCode = 1;
         continue;
       }
@@ -1025,14 +1031,14 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       ledger = loadLedger(epicDir);
     } catch (err) {
       if (branch) throw err;
-      warn(`${job.epic}: ${err.message} — skipping this epic`);
+      fail(`${job.epic}: ${err.message} — skipping this epic`);
       process.exitCode = 1;
       continue;
     }
     if (!ledger.state) {
-      warn(`${job.epic}: no epic state on the checked-out branch — the review branch is cut from the default branch, so it should carry it`);
       // Red on a named merge: that review's approval would otherwise be dropped by a run that ends green,
       // and the scheduled reconcile would repeat the same silent no-op for as long as it looks back.
+      (branch && merged ? fail : warn)(`${job.epic}: no epic state on the checked-out branch — the review branch is cut from the default branch, so it should carry it`);
       if (branch && merged) process.exitCode = 1;
       continue;
     }
@@ -1090,7 +1096,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       }
     } catch (err) {
       if (branch) throw err; // event mode: one epic — surface the failure
-      warn(`${job.epic}: sync failed — ${err.message} — skipping this epic`);
+      fail(`${job.epic}: sync failed — ${err.message} — skipping this epic`);
       process.exitCode = 1;
       failed = true;
     }
@@ -1137,7 +1143,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const moved = (merged || !branch)
     ? convertProductLevel(root, hub, { git, defaultBranch, dirty: legacyDirtyBefore })
     : null;
-  if (!touched.size && !moved) return { synced };
+  if (!touched.size && !moved) return { synced, committed: false, pushed: false };
 
   // Path B: CI never writes the ledger to the review branch. A held step that did not advance is
   // read-only here — during review the platform PR/MR is the source of truth (native approvals/
@@ -1172,7 +1178,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       }
     }
     info('pre-merge: gate evaluated; the ledger reconciles on the default branch at merge — nothing pushed');
-    return { synced };
+    return { synced, committed: false, pushed: false };
   }
   const target = defaultBranch; // CI only ever commits the ledger to the default branch
 
@@ -1209,7 +1215,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   })();
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
-  if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
+  if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced, committed: false, pushed: false }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard
   // sibling workflows. CI never pushes the review branch (Path B), so there is no synchronize loop.
   // Only the index staged (the ledger this run wrote was already committed): say that, not an advance.
@@ -1226,28 +1232,35 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     : `chore(gate): ${sync} [skip ci]`;
   const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
     ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : []));
-  if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
+  if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
   ok(`committed gate update: ${c.dim(subject)}`);
-  if (!push) return { synced };
+  if (!push) return { synced, committed: true, pushed: false };
 
-  if (pushWithRebase(root, target).ok) { ok(`pushed to origin/${target}`); return { synced }; }
+  if (pushWithRebase(root, target).ok) { ok(`pushed to origin/${target}`); return { synced, committed: true, pushed: true }; }
   fail(`could not push to origin/${target}${merged ? ' — protected default branch? allow the gate bot to push the merge advance (see yad-hub-bridge references/bridge.md)' : ''} — or run \`yad gate sync\` locally`);
   process.exitCode = 1;
-  return { synced };
+  return { synced, committed: true, pushed: false };
 }
 
 export async function gateComments(root, { epic, artifact, today, reader = readPr } = {}) {
   const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured — nothing to fetch'); return; }
+  // The --json answer (E1): each review PR, and what still blocks it.
+  const prs = [];
+  if (!hub?.platform) { warn('no Product platform configured — nothing to fetch'); return { epic, prs }; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   const targets = (ledger.hubPrs || []).filter((p) => !artifact || p.artifact === artifact);
-  if (!targets.length) { warn('no review PR recorded — run `yad gate open` first'); return; }
+  if (!targets.length) { warn('no review PR recorded — run `yad gate open` first'); return { epic, prs }; }
   for (const pr of targets) {
     const pull = reader(hub.platform, pr.number, { cwd: root });
-    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason}`); continue; }
+    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason}`); prs.push({ artifact: pr.artifact, pr: pr.number, read: false, reason: pull.reason ?? null }); continue; }
     const cr = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     const unresolved = (pull.threads || []).filter((t) => !t.resolved);
+    prs.push({
+      artifact: pr.artifact, pr: pr.number, read: true,
+      changesRequested: cr.map((r) => r.login ?? null),
+      unresolved: unresolved.map((t) => ({ login: t.login ?? null, body: (t.body || '').split('\n')[0] })),
+    });
     log(`\n  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number})`)}`);
     if (!cr.length && !unresolved.length) { ok('no unresolved comments — clear to approve/merge'); continue; }
     for (const r of cr) hand(`${r.login}: changes requested ${c.red('(blocking)')}`);
@@ -1258,6 +1271,7 @@ export async function gateComments(root, { epic, artifact, today, reader = readP
     ]);
     hand('address them in the artifact, reply on the PR, then ask reviewers to resolve their threads');
   }
+  return { epic, prs };
 }
 
 export async function gateStatus(root, { epic, headCount: given = null } = {}) {
@@ -1285,6 +1299,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // An unknown count is already said by `activeSum` just above, so only a known suggestion prints.
   printTeamHint(soloTeamHint(root, hub, { solo, headCount }));
   const reachSeen = new Set();   // E73: each warning line once per view, not once per step
+  const gates = [];              // the --json answer (E1): each review step as this view reads it
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const accepted = acceptedHashes(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
@@ -1346,10 +1361,25 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     // (inherited, skipped, deferred) step, and not on one that passed. Every other review step counts,
     // including one not reached yet — so a line about the whole Product (the base, one person) prints
     // once, under the first step it applies to (`uniqueReach`), not under every step after it.
+    const reach = [];
     if (!solo && !waived && !isPassed(s)) {
-      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly, approvers: approverCount(headCount), days: headCount.capacity.days }), reachSeen)) log(`      ${c.yellow('!')} ${c.dim(why)}`);
+      for (const why of uniqueReach(gateReach(rule, cap, { have: people, nameOnly: headCount.capacity.nameOnly, approvers: approverCount(headCount), days: headCount.capacity.days }), reachSeen)) {
+        reach.push(why);
+        log(`      ${c.yellow('!')} ${c.dim(why)}`);
+      }
     }
+    gates.push({
+      step: s.id ?? null, artifact: s.artifact ?? null, state: state || null, passed: isPassed(s),
+      approvals: live.length, people, stale, notEngaged: unengaged, escalated: isEscalated(s),
+      // No count on a waived step, as the prose prints none (`have: null` is E7's "nothing counted here").
+      waived: waived ? (claimsInherited(s) ? 'inherited' : claimsSkipped(s) ? 'skipped' : 'deferred') : null,
+      gateRule: waived ? null : rule, cap: waived ? null : (cap ?? null), short: waived ? null : short,
+      debt: s.debt === true, closed: s.closed && typeof s.closed === 'object' && !Array.isArray(s.closed) ? s.closed : null, reach,
+    });
   }
+  // The count, not the people: the names behind it are `yad history`'s and the platform's to show.
+  const { days, from, active, basis } = headCount.capacity;
+  return { epic, currentStep: ledger.state.currentStep ?? null, solo, active: { active, days, from, basis, unknown: headCount.unknown }, gates };
 }
 
 // PURE — the audit-trail commit message for a state repair (mirrors buildCheckpointMessage). The
@@ -1374,16 +1404,18 @@ export function buildRepairMessage({ epic, steps }) {
 export async function gateRepair(root, { epic, push = false, allowBranch = false, dryRun = false, today = new Date().toISOString().slice(0, 10) } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
-  if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { closed: [] }; }
+  if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { epic, closed: [], dryRun, written: false, committed: false, pushed: false }; }
 
   log(c.bold(`\nyad gate repair  ${c.dim(epic)}`));
   const violations = stateInvariants(ledger.state);
-  if (!violations.length) { ok('epic state is consistent — nothing to repair'); return { closed: [] }; }
+  if (!violations.length) { ok('epic state is consistent — nothing to repair'); return { epic, closed: [], dryRun, written: false, committed: false, pushed: false }; }
   for (const v of violations) warn(`${v.message} [${v.code}]`);
 
   // Read leniently: a repair heals a broken ledger, and a broken hub.json must not stop it (E18).
   const closed = repairState(ledger.state, { by: closingActor(root, readJSON(productConfigPath(root), null)), date: today });
-  if (dryRun) { info('dry run — nothing written'); return { closed }; }
+  // The --json answer (E1): what this run did, so a dry run and a real one never read the same.
+  const did = (written, committed = false, pushed = false) => ({ epic, closed, dryRun, written, committed, pushed });
+  if (dryRun) { info('dry run — nothing written'); return did(false); }
   writeState(ledger.files.state, ledger.state);
   // Lenient, as above: a broken hub.json reads as a local Product, and must not stop the repair. With
   // --push the rebuild happens in `stageIndexIfClean` below, which checks the commit will hold what it
@@ -1392,7 +1424,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   ok(`closed ${closed.length} stranded author step(s): ${c.dim(closed.join(', '))}`);
   if (!push) {
     hand(`re-run \`yad doctor\` to confirm, then commit epics/*/.sdlc/state.json${indexRebuilt ? ` and ${INDEX_FILE}` : ''} (or re-run with --push)`);
-    return { closed };
+    return did(true);
   }
 
   // --- publish: narrow, default-branch-only commit of the one repaired file ---
@@ -1400,11 +1432,11 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, loadProduct(root).hub);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair' })) return { closed };
+  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair' })) return did(true);
 
   const spec = path.relative(root, ledger.files.state);
-  if (!git('add', '--', spec).ok) { fail(`git add failed for ${spec}`); process.exitCode = 1; return { closed }; }
-  if (git('diff', '--cached', '--quiet', '--', spec).ok) { info('state.json unchanged on disk — nothing to commit'); return { closed }; }
+  if (!git('add', '--', spec).ok) { fail(`git add failed for ${spec}`); process.exitCode = 1; return did(true); }
+  if (git('diff', '--cached', '--quiet', '--', spec).ok) { info('state.json unchanged on disk — nothing to commit'); return did(true); }
   // The index rides the same narrow commit (E19): it summarizes this very file — when the working tree
   // holds nothing else it reads (`stageIndexIfClean`), on the default branch only (`--allow-branch`
   // commits the repair elsewhere, and the index is never written on a branch), and never on a verified
@@ -1417,16 +1449,16 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
     git('reset', '-q', '--', ...specs); // never leave them staged for an unrelated commit to sweep up
     fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
-    return { closed };
+    return did(true);
   }
   ok(`committed the repair: ${c.dim(message.split('\n')[0])}`);
   // Push HEAD to its OWN branch — with --allow-branch we are not on the default branch, and pushing
   // HEAD:defaultBranch would publish a WIP branch straight to it.
-  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { closed }; }
+  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return did(true, true, true); }
   fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
   hand('run `git pull --rebase` and re-run `yad gate repair <epic> --push`');
   process.exitCode = 1;
-  return { closed };
+  return did(true, true, false);
 }
 
 // `head` overrides the review branch the PR is opened against — `open-pr` delegates here after pushing
@@ -1495,7 +1527,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   if (!hub?.platform) {
     warn('no Product platform — marked in_review locally (no PR opened)');
     ok(`${step.id} → in_review`);
-    return;
+    return { epic, step: step.id, artifact, branch, opened: false, url: null, markedInReview: true };
   }
 
   // Open the PR. In verified mode CI records the hub-prs entry (and advances) on the default branch at
@@ -1521,7 +1553,10 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   const labels = domains.map((d) => `domain:${d}`); // empty unless the step names its repos (touchedDomains)
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
   const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, assignees, labels, cwd: root });
-  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`); return; }
+  if (!r.ok) {
+    warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`);
+    return { epic, step: step.id, artifact, branch, opened: false, url: null, markedInReview: !verified, reason: r.reason || null };
+  }
 
   if (!verified) {
     // The PR number from its path segment — the first number in the URL can be the repo (`acme/2048/pull/9`).
@@ -1553,7 +1588,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   hand(verified
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
-  return { url: r.url };
+  return { epic, step: step.id, artifact, branch, opened: true, url: r.url, markedInReview: !verified };
 }
 
 // `yad gate review <epic> [artifact]` — assemble + print the grounding bundle the companion skill uses
@@ -1610,8 +1645,8 @@ function reviewBundle(root, { epic, artifact, headCount = null } = {}) {
 
 export async function gateReview(root, { epic, artifact, headCount = null } = {}) {
   const r = reviewBundle(root, { epic, artifact, headCount });
-  if (r.error) { fail(r.error); process.exitCode = 1; return; }
-  log(JSON.stringify(r.bundle, null, 2));
+  if (r.error) { refuse(r.error, null, { json: true }); return; }
+  emitJSON(r.bundle);
   return r.bundle;
 }
 
@@ -1620,7 +1655,7 @@ export async function gateReview(root, { epic, artifact, headCount = null } = {}
 // walks the stops and runs the two-way teaching session. Deterministic sequencing only — no LLM here.
 export async function gateWalkthrough(root, { epic, artifact, runner = run } = {}) {
   const r = reviewBundle(root, { epic, artifact });
-  if (r.error) { fail(r.error); process.exitCode = 1; return; }
+  if (r.error) { refuse(r.error, null, { json: true }); return; }
   const { bundle, hub } = r;
   const defaultBranch = hub?.default_branch || 'main';
   let stops = [];
@@ -1630,11 +1665,11 @@ export async function gateWalkthrough(root, { epic, artifact, runner = run } = {
     if (diff.ok && diff.stdout.trim()) {
       stops = sequenceDiff(diff.stdout, { contractPath: bundle.contractPath });
     } else if (!diff.ok) {
-      note(`could not read the artifact diff (${defaultBranch}...HEAD) in ${root} — is the review branch checked out and the base correct?`);
+      { const w = `could not read the artifact diff (${defaultBranch}...HEAD) in ${root} — is the review branch checked out and the base correct?`; collectWarning(w); note(w); }
     }
   }
   const out = { ...bundle, stops };
-  log(JSON.stringify(out, null, 2));
+  emitJSON(out);
   // Diagnostics to STDERR so STDOUT stays pure JSON (the skill / e2e parse it).
   if (!stops.length) note('no stops from the artifact diff — walk the artifact by section (see yad-pair-review)');
   return out;
@@ -1645,19 +1680,19 @@ export async function gateWalkthrough(root, { epic, artifact, runner = run } = {
 // delimited block, so regenerating on every artifact change never duplicates it. A platform write only.
 export async function gateTrailer(root, { epic, artifact, body, number, getBody = getPrBody, editBody = editPrBody } = {}) {
   const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured — the trailer posts to the PR/MR (local has none)'); return; }
+  if (!hub?.platform) { warn('no Product platform configured — the trailer posts to the PR/MR (local has none)'); return { number: null, posted: false }; }
   if (!body || !String(body).trim()) { fail('trailer body is required: `yad gate trailer <epic> <artifact> --body <text>` (the companion generates it)'); process.exitCode = 1; return; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   const pr = (ledger.hubPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
   const n = number || pr?.number;
-  if (!n) { warn('no PR number — pass `--pr <n>` (in verified mode the PR is recorded in the ledger only at merge)'); return; }
+  if (!n) { warn('no PR number — pass `--pr <n>` (in verified mode the PR is recorded in the ledger only at merge)'); return { number: null, posted: false }; }
   const cur = getBody(hub.platform, n, { cwd: root });
   if (!cur.ok) { fail(`could not read PR #${n} description: ${cur.reason || 'unknown'}`); process.exitCode = 1; return; }
   const r = editBody(hub.platform, n, upsertTrailerBlock(cur.body, String(body).trim()), { cwd: root });
   if (!r.ok) { fail(`could not update PR #${n}: ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`trailer posted to PR #${n}`);
-  return { number: n };
+  return { number: n, posted: true };
 }
 
 // ---- helpers ------------------------------------------------------------------------------------

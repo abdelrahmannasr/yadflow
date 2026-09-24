@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
-import { VERSION, SCHEMA_VERSION } from '../cli/manifest.mjs';
-import { c, log, closePrompts, askYesNo } from '../cli/lib.mjs';
+import { VERSION } from '../cli/manifest.mjs';
+import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
 import { runLedgerGuardHook } from '../cli/hook.mjs';
 
 const helpText = (profiles) => `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
+
+${c.dim('Every command but `yad hook` takes --json: one JSON object on stdout, every other line on stderr')}
+${c.dim('(docs/CLI.md, "--json on every command").')}
 
 ${c.bold('Setup & maintenance')}
   yad setup            Guided first-run setup (profile interview, install, connect & wire repos)
@@ -324,6 +327,8 @@ function parseArgs(argv) {
   } catch (e) {
     // The command read so far, so the error handler knows WHICH command failed — the parse did not finish.
     e.parsedCmd = o._[0] ?? null;
+    // The words read so far, so a refusal names `history show`, not the default action (E1 review).
+    e.parsedWords = o._.slice(0, 2);
     throw e;
   }
   return o;
@@ -331,6 +336,35 @@ function parseArgs(argv) {
 
 // The command `main` is running, for the error handler (set once the arguments are read).
 let runningCmd = null;
+
+// The `command` a --json answer names: the command word, plus its action where it has one, as the
+// user would type it (`gate status`, `history show`). An action left out is the one that ran
+// (`yad skill` is `skill list`); a word that is not one of the command's actions is not added, so a
+// refusal of `yad gate frobnicate` names `gate`, not a command that does not exist.
+const ACTIONS = {
+  epic: { known: ['new'] },
+  foundation: { known: ['new', 'status'] },
+  skill: { known: ['list', 'bind', 'unbind'], default: 'list' },
+  gate: { known: ['open', 'sync', 'comments', 'status', 'repair', 'review', 'walkthrough', 'trailer', 'ci'] },
+  review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
+  tidy: { known: ['up'] },
+  history: { known: ['list', 'show', 'search'], default: 'list' },
+  repo: { known: ['list', 'refresh', 'sync'], default: 'list' },
+  'risk-map': { known: ['check', 'draft'], default: 'check' },
+  codeowners: { known: ['check'], default: 'check' },
+  docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
+  reconcile: { known: ['check', 'refresh', 'wire'] },
+  hook: { known: ['ledger-guard'] },
+};
+const ALWAYS_JSON = new Set(['gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough']);
+export function commandName(words) {
+  const [cmd, action] = words;
+  if (!cmd) return null;
+  const a = ACTIONS[cmd];
+  if (!a) return cmd;
+  if (action === undefined) return a.default ? `${cmd} ${a.default}` : cmd;
+  return a.known.includes(action) ? `${cmd} ${action}` : cmd;
+}
 
 // A value flag must be followed by a token; erroring beats silently passing `undefined` downstream.
 function takeValue(argv, i, flag) {
@@ -340,10 +374,16 @@ function takeValue(argv, i, flag) {
 }
 
 async function main() {
+  // `--json` is read from the raw arguments too, so a refusal from the parser itself (a flag with no
+  // value) still answers as one object.
+  if (process.argv.slice(2).includes('--json')) beginJSON(null);
   const o = parseArgs(process.argv.slice(2));
   const cmd = o._[0];
   runningCmd = cmd ?? null;
-  if (o.version) return log(VERSION);
+  // The grounding bundles a skill parses are JSON with or without the flag, so they are always a
+  // --json run: one object on stdout, a refusal included, and every other line on stderr.
+  if (o.json || ALWAYS_JSON.has(commandName(o._))) beginJSON(commandName(o._));
+  if (o.version) return inJSON() ? emitJSON({}) : log(VERSION);
 
   // THE HOT PATH, handled before anything heavy is loaded. `yad hook ledger-guard` runs inside the
   // agent's tool loop on every file-editing call, and it needs `cli/hook.mjs` alone. Everything else
@@ -355,27 +395,31 @@ async function main() {
   // reaches the model on.
   if (cmd === 'hook') {
     const [, action] = o._;
-    if (action !== 'ledger-guard') {
-      log(c.red(`unknown hook: ${action ?? '(none)'} (ledger-guard)`));
-      process.exitCode = 1;
-      return;
-    }
+    // Its stdout is already a protocol (Claude Code reads the exit code, Cursor a permission object),
+    // so it takes no --json (E1).
+    if (inJSON()) return refuse('yad hook takes no --json — its output is the protocol the agent reads', 'run it without --json');
+    if (action !== 'ledger-guard') return refuse(`unknown hook: ${action ?? '(none)'} (ledger-guard)`);
     runLedgerGuardHook({ paths: o.path ? [o.path] : [], format: o.format });
     return;
   }
 
   // Every other command. One await, once, for a process that is about to do real work anyway.
   const commands = await import('./commands.mjs');
-  if (o.help || !cmd) return log(helpText(commands.seedableProfiles()));
+  if (o.help || !cmd) {
+    const text = helpText(commands.seedableProfiles());
+    return inJSON() ? emitJSON({ help: stripAnsi(text) }) : log(text);
+  }
   // A project written by a newer yadflow is warned about before any command reads it (docs/migrations/
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
   if (!['hook', 'doctor', 'migrate', 'setup', 'report'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
 
   const today = new Date().toISOString().slice(0, 10);
+  // What the command returned: under --json, a command that did not answer itself answers with it.
+  let result;
   switch (cmd) {
     case 'setup':
-      await commands.runSetup(o.dir, {
+      result = await commands.runSetup(o.dir, {
         today, force: o.force,
         solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
         monorepo: o.monorepo, separate: o.separate, tools: o.tools,
@@ -390,30 +434,30 @@ async function main() {
       });
       break;
     case 'check':
-      await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
+      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
       break;
     case 'update':
-      await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
+      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
       break;
     case 'doctor':
-      await commands.runDoctor(o.dir, { json: o.json });
+      result = await commands.runDoctor(o.dir, { json: o.json });
       break;
     case 'migrate':
-      await commands.runMigrate(o.dir, { apply: o.apply, json: o.json });
+      result = await commands.runMigrate(o.dir, { apply: o.apply, json: o.json });
       break;
     case 'report':
-      await commands.runReport(o.dir, { message: o.message });
+      result = await commands.runReport(o.dir, { message: o.message });
       break;
     case 'usage':
-      commands.runUsage(o.dir, {
+      result = commands.runUsage(o.dir, {
         out: o.out, since: o.since, until: o.until, all: o.all, member: o.member,
         format: o.format, repos: o.repos, json: o.json, today,
       });
       break;
     case 'sync-status': {
       const [, epic] = o._;
-      if (epic && !commands.isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-      await commands.syncStatuses(o.dir, { epic, dryRun: o.dryRun });
+      if (epic && !commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`); break; }
+      result = await commands.syncStatuses(o.dir, { epic, dryRun: o.dryRun });
       break;
     }
     case 'epic': {
@@ -421,43 +465,38 @@ async function main() {
       // A stray word is refused rather than dropped: `--inherits epic architecture` takes only `epic` as
       // the value, and silently seeding without `architecture` would carry less than the author asked.
       if (action === 'new' && extra.length) {
-        log(c.red(`unexpected argument(s): ${extra.join(' ')} — a list takes commas, e.g. --inherits epic,architecture`));
-        process.exitCode = 1; break;
+        refuse(`unexpected argument(s): ${extra.join(' ')} — a list takes commas, e.g. --inherits epic,architecture`); break;
       }
       if (action !== 'new') {
-        log(c.red(`unknown epic action: ${action ?? '(none)'} (new)`));
-        log(`usage: yad epic new <slug> [--type feature|chore|change|defect|hotfix] [--profile ${commands.seedableProfiles().join('|')}] [--parent EP-<slug> --inherits <bases>]`);
-        process.exitCode = 1; break;
+        refuse(`unknown epic action: ${action ?? '(none)'} (new)`, `usage: yad epic new <slug> [--type feature|chore|change|defect|hotfix] [--profile ${commands.seedableProfiles().join('|')}] [--parent EP-<slug> --inherits <bases>]`);
+        break;
       }
-      await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
+      result = await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
       break;
     }
     case 'foundation': {
       const [, action] = o._;
-      if (action === 'status') { await commands.runFoundationStatus(o.dir, { json: o.json }); break; }
+      if (action === 'status') { result = await commands.runFoundationStatus(o.dir, { json: o.json }); break; }
       if (action !== 'new') {
-        log(c.red(`unknown foundation action: ${action ?? '(none)'} (new, status)`));
-        log('usage: yad foundation new [--json] | yad foundation status [--json]');
-        process.exitCode = 1; break;
+        refuse(`unknown foundation action: ${action ?? '(none)'} (new, status)`, 'usage: yad foundation new [--json] | yad foundation status [--json]');
+        break;
       }
-      await commands.runFoundationNew(o.dir, { today, json: o.json });
+      result = await commands.runFoundationNew(o.dir, { today, json: o.json });
       break;
     }
     case 'skill': {
       const [, action, step, ...rest] = o._;
-      if (action === 'list' || action === undefined) { commands.runSkillList(o.dir, { json: o.json }); break; }
-      if (action === 'bind') { commands.runSkillBind(o.dir, { step, skills: rest }); break; }
-      if (action === 'unbind') { commands.runSkillUnbind(o.dir, { step }); break; }
-      log(c.red(`unknown skill action: ${action} (list, bind, unbind)`));
-      log('usage: yad skill list [--json] | yad skill bind <step> <skill> [<skill> ...] | yad skill unbind <step>');
-      process.exitCode = 1;
+      if (action === 'list' || action === undefined) { result = commands.runSkillList(o.dir, { json: o.json }); break; }
+      if (action === 'bind') { result = commands.runSkillBind(o.dir, { step, skills: rest }); break; }
+      if (action === 'unbind') { result = commands.runSkillUnbind(o.dir, { step }); break; }
+      refuse(`unknown skill action: ${action} (list, bind, unbind)`, 'usage: yad skill list [--json] | yad skill bind <step> <skill> [<skill> ...] | yad skill unbind <step>');
       break;
     }
     case 'next': {
       const [, epic] = o._;
       // `--check` with no step is a malformed guard call — fail loudly rather than silently print.
-      if (o.check === true) { log(c.red('usage: yad next <epic> --check <step>')); process.exitCode = 1; break; }
-      await commands.runNext(o.dir, { epic, check: typeof o.check === 'string' ? o.check : undefined, all: o.all, json: o.json });
+      if (o.check === true) { refuse('usage: yad next <epic> --check <step>'); break; }
+      result = await commands.runNext(o.dir, { epic, check: typeof o.check === 'string' ? o.check : undefined, all: o.all, json: o.json });
       break;
     }
     case 'skip':
@@ -465,121 +504,125 @@ async function main() {
     case 'defer':
     case 'undefer': {
       const [verb, epic, step] = o._;
-      if (!epic || !commands.isValidEpicId(epic)) { log(c.red(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      if (!epic || !commands.isValidEpicId(epic)) { refuse(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`); break; }
       // A STORY id where the step goes names a whole Build lane (E39), with --repo naming the repo. No Shape
       // step id ends in -S<n>, so the two never overlap. A lane is skipped, never deferred.
       if (step && /-S\d+$/i.test(step)) {
         if (verb === 'defer' || verb === 'undefer') {
-          log(c.red(`a Build lane is skipped whole, never deferred: yad skip ${epic} ${step} --repo <name> --reason "<why>"`));
-          process.exitCode = 1; break;
+          refuse(`a Build lane is skipped whole, never deferred: yad skip ${epic} ${step} --repo <name> --reason "<why>"`); break;
         }
-        if (o.debt) log(c.yellow('--debt is not used on a Build lane: a lane is skipped whole, never owed back'));
-        await commands.runLaneSkip(o.dir, { epic, story: step, repo: o.repo, reason: o.reason, undo: verb === 'unskip' || o.undo, today });
+        if (o.debt) warn('--debt is not used on a Build lane: a lane is skipped whole, never owed back');
+        result = await commands.runLaneSkip(o.dir, { epic, story: step, repo: o.repo, reason: o.reason, undo: verb === 'unskip' || o.undo, today });
         break;
       }
-      if (o.repo) log(c.yellow(`--repo is only for a Build lane (yad ${verb} ${epic} <story> --repo <name>) — ignored for a Shape step`));
+      if (o.repo) warn(`--repo is only for a Build lane (yad ${verb} ${epic} <story> --repo <name>) — ignored for a Shape step`);
       // `unskip` / `undefer` are the verbs E36 / E37 named; `--undo` is the spelling that shipped first and stays.
       const runVerb = verb === 'defer' || verb === 'undefer' ? commands.runDefer : commands.runSkip;
-      await runVerb(o.dir, { epic, step, reason: o.reason, debt: o.debt, undo: verb.startsWith('un') || o.undo, today });
+      result = await runVerb(o.dir, { epic, step, reason: o.reason, debt: o.debt, undo: verb.startsWith('un') || o.undo, today });
       break;
     }
     case 'dial': {
       // One word names a Shape author step (project-wide). Three name a Build lane step: epic, story, step.
       const args = o._.slice(1);
       if (args.length === 1) {
-        await commands.runDial(o.dir, { step: args[0], to: o.to, json: o.json });
+        result = await commands.runDial(o.dir, { step: args[0], to: o.to, json: o.json });
       } else if (args.length === 3) {
-        if (!commands.isValidEpicId(args[0])) { log(c.red(`invalid epic id: ${args[0]} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-        await commands.runDial(o.dir, { epic: args[0], story: args[1], step: args[2], repo: o.repo, to: o.to, json: o.json });
+        if (!commands.isValidEpicId(args[0])) { refuse(`invalid epic id: ${args[0]} (expected EP-<slug>, [a-z0-9-] only)`); break; }
+        result = await commands.runDial(o.dir, { epic: args[0], story: args[1], step: args[2], repo: o.repo, to: o.to, json: o.json });
       } else {
-        log(c.red('usage: yad dial <step> [--to auto|human]   |   yad dial <epic> <story> --repo <name> <step> [--to auto|human]'));
-        process.exitCode = 1;
+        refuse('usage: yad dial <step> [--to auto|human]   |   yad dial <epic> <story> --repo <name> <step> [--to auto|human]');
       }
       break;
     }
     case 'mode': {
-      if (o._.length > 2) { log(c.red(`unexpected argument(s): ${o._.slice(2).join(' ')}`)); process.exitCode = 1; break; }
-      await commands.runMode(o.dir, { to: o._[1] ?? null, reason: o.reason, json: o.json, today });
+      if (o._.length > 2) { refuse(`unexpected argument(s): ${o._.slice(2).join(' ')}`); break; }
+      result = await commands.runMode(o.dir, { to: o._[1] ?? null, reason: o.reason, json: o.json, today });
       break;
     }
     case 'kill':
     case 'unkill': {
-      if (o._.length > 1) { log(c.red(`unexpected argument(s): ${o._.slice(1).join(' ')}`)); process.exitCode = 1; break; }
-      await commands.runKill(o.dir, { on: o._[0] === 'kill', reason: o.reason, json: o.json, today });
+      if (o._.length > 1) { refuse(`unexpected argument(s): ${o._.slice(1).join(' ')}`); break; }
+      result = await commands.runKill(o.dir, { on: o._[0] === 'kill', reason: o.reason, json: o.json, today });
       break;
     }
     case 'unblock': {
       const [, epic, step] = o._;
-      if (!epic || !commands.isValidEpicId(epic)) { log(c.red(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-      await commands.runUnblock(o.dir, { epic, step });
+      if (!epic || !commands.isValidEpicId(epic)) { refuse(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`); break; }
+      result = await commands.runUnblock(o.dir, { epic, step });
       break;
     }
     case 'gate': {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
-      if (action === 'ci') { await commands.gateCi(o.dir, { branch: o.branch, pr: o.pr, merged: o.merged, push: !o.noPush, today }); break; }
-      if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|repair|review|walkthrough|trailer|ci> <epic> [artifact]')); process.exitCode = 1; break; }
+      if (action === 'ci') { result = await commands.gateCi(o.dir, { branch: o.branch, pr: o.pr, merged: o.merged, push: !o.noPush, today }); break; }
+      if (!epic) { refuse('usage: yad gate <open|sync|comments|status|repair|review|walkthrough|trailer|ci> <epic> [artifact]'); break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
-      if (!commands.isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      if (!commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`); break; }
       // In verified mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
       // CI's job at merge — never wired into the local gate. Local mode keeps local writes.
-      if (action === 'open') await commands.gateOpen(o.dir, { epic, artifact, today });
-      else if (action === 'sync') await commands.gateSync(o.dir, { epic, artifact, today, number: o.pr, local: true });
-      else if (action === 'comments') await commands.gateComments(o.dir, { epic, artifact, today });
-      else if (action === 'status') await commands.gateStatus(o.dir, { epic });
-      else if (action === 'repair') await commands.gateRepair(o.dir, { epic, push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun, today });
-      else if (action === 'review') await commands.gateReview(o.dir, { epic, artifact });
-      else if (action === 'walkthrough') await commands.gateWalkthrough(o.dir, { epic, artifact });
-      else if (action === 'trailer') await commands.gateTrailer(o.dir, { epic, artifact, body: o.body || o.message, number: o.pr });
-      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|repair|review|walkthrough|trailer|ci)`)); process.exitCode = 1; }
+      if (action === 'open') result = await commands.gateOpen(o.dir, { epic, artifact, today });
+      else if (action === 'sync') result = await commands.gateSync(o.dir, { epic, artifact, today, number: o.pr, local: true });
+      else if (action === 'comments') result = await commands.gateComments(o.dir, { epic, artifact, today });
+      else if (action === 'status') result = await commands.gateStatus(o.dir, { epic });
+      else if (action === 'repair') result = await commands.gateRepair(o.dir, { epic, push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun, today });
+      else if (action === 'review') result = await commands.gateReview(o.dir, { epic, artifact });
+      else if (action === 'walkthrough') result = await commands.gateWalkthrough(o.dir, { epic, artifact });
+      else if (action === 'trailer') result = await commands.gateTrailer(o.dir, { epic, artifact, body: o.body || o.message, number: o.pr });
+      else { refuse(`unknown gate action: ${action} (open|sync|comments|status|repair|review|walkthrough|trailer|ci)`); }
       break;
     }
     case 'review': {
       const [, action] = o._;
-      if (action === 'trailer') await commands.reviewTrailer(o.dir, { repo: o.repo, pr: o.pr, body: o.body || o.message });
-      else if (action === 'context' || action === 'chat' || action === 'cards') await commands.reviewContext(o.dir, { repo: o.repo, pr: o.pr });
-      else if (action === 'walkthrough') await commands.reviewWalkthrough(o.dir, { repo: o.repo, pr: o.pr });
-      else if (action === 'nudge') await commands.reviewNudge(o.dir, { repo: o.repo, pr: o.pr });
+      if (action === 'trailer') result = await commands.reviewTrailer(o.dir, { repo: o.repo, pr: o.pr, body: o.body || o.message });
+      else if (action === 'context' || action === 'chat' || action === 'cards') result = await commands.reviewContext(o.dir, { repo: o.repo, pr: o.pr });
+      else if (action === 'walkthrough') result = await commands.reviewWalkthrough(o.dir, { repo: o.repo, pr: o.pr });
+      else if (action === 'nudge') result = await commands.reviewNudge(o.dir, { repo: o.repo, pr: o.pr });
       else if (action === 'reconcile') {
         // The epic becomes a path segment under epics/ — reject anything but EP-<slug> (no `../` escape).
-        if (!o.epic || !commands.isValidEpicId(o.epic)) { log(c.red(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-        await commands.reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
+        if (!o.epic || !commands.isValidEpicId(o.epic)) { refuse(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`); break; }
+        result = await commands.reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
       }
-      else { log(c.red('usage: yad review <trailer|context|walkthrough|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]')); process.exitCode = 1; }
+      else { refuse('usage: yad review <trailer|context|walkthrough|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]'); }
       break;
     }
     case 'commit':
-      await commands.runCommit(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force });
+      result = await commands.runCommit(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force });
       break;
     case 'open-pr':
-      await commands.runOpenPr(o.dir, { repo: o.repo, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange });
+      result = await commands.runOpenPr(o.dir, { repo: o.repo, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange });
       break;
     case 'ship':
-      await commands.runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
+      result = await commands.runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
       break;
     case 'checkpoint': {
       let retroShip;
       if (o['retro-ship']) {
         const [epic, story] = String(o['retro-ship']).split('/');
-        if (!epic || !commands.isValidEpicId(epic)) { log(c.red(`invalid --retro-ship: expected <epic>/<story> with epic EP-<slug> (got ${o['retro-ship']})`)); process.exitCode = 1; break; }
+        if (!epic || !commands.isValidEpicId(epic)) { refuse(`invalid --retro-ship: expected <epic>/<story> with epic EP-<slug> (got ${o['retro-ship']})`); break; }
         // The story id becomes a path element (stories/<story>.md) — pin it to the id shape (and to its
         // own epic) so a `..` or a slash can never traverse out of the epic's stories dir, and a typo'd
         // cross-epic id is caught here rather than failing obscurely later.
-        if (!story || !/^EP-[a-z0-9-]+-S\d+$/.test(story) || !story.startsWith(`${epic}-S`)) { log(c.red(`invalid --retro-ship: expected <epic>/<story> with story <epic>-S<NN> (got ${o['retro-ship']})`)); process.exitCode = 1; break; }
+        if (!story || !/^EP-[a-z0-9-]+-S\d+$/.test(story) || !story.startsWith(`${epic}-S`)) { refuse(`invalid --retro-ship: expected <epic>/<story> with story <epic>-S<NN> (got ${o['retro-ship']})`); break; }
         retroShip = { epic, story, repo: o.repo, task: o.task, mergeCommit: o['merge-commit'], today };
       }
-      await commands.runCheckpoint(o.dir, { push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun, retroShip });
+      result = await commands.runCheckpoint(o.dir, { push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun, retroShip });
       break;
     }
     case 'tidy': {
       const [, action, epic] = o._;
-      if (action !== 'up') { log(`usage: yad tidy up [<epic>] [--push] [--dry-run]`); process.exitCode = action ? 1 : 0; break; }
-      await commands.runTidy(o.dir, { epic: epic || o.epic, push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun });
+      if (action !== 'up') {
+        // A bare `yad tidy` is a request for the usage, not a mistake: exit 0.
+        if (action) refuse(`unknown tidy action: ${action} (up)`, 'usage: yad tidy up [<epic>] [--push] [--dry-run]');
+        else if (inJSON()) emitJSON({ usage: 'yad tidy up [<epic>] [--push] [--dry-run]' });
+        else log(`usage: yad tidy up [<epic>] [--push] [--dry-run]`);
+        break;
+      }
+      result = await commands.runTidy(o.dir, { epic: epic || o.epic, push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun });
       break;
     }
     case 'index':
-      await commands.runIndex(o.dir, { json: o.json });
+      result = await commands.runIndex(o.dir, { json: o.json });
       break;
     case 'history': {
       const [, action, ...args] = o._;
@@ -593,7 +636,7 @@ async function main() {
         .filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t))
         .map((t) => t.split('=')[0])
         .filter((f) => !HISTORY_OWN.has(f)))];
-      await commands.runHistory(o.dir, {
+      result = await commands.runHistory(o.dir, {
         action: action || 'list', args, json: !!o.json, unknownFlags,
         type: o.type ?? null, theme: o.theme ?? null, thread: o.thread ?? null, open: !!o.open, done: !!o.done,
       });
@@ -601,71 +644,89 @@ async function main() {
     }
     case 'repo': {
       const [, action, name] = o._;
-      await commands.runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });
+      result = await commands.runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });
       break;
     }
     case 'risk-map': {
       const [, action, name] = o._;
-      await commands.runRiskMap(o.dir, { action: action || 'check', name, json: o.json, dryRun: o.dryRun });
+      result = await commands.runRiskMap(o.dir, { action: action || 'check', name, json: o.json, dryRun: o.dryRun });
       break;
     }
     case 'codeowners': {
       const [, action, name] = o._;
       // `--write` was dropped (E69); wherever it is typed, it is refused with the reason — never ignored.
-      await commands.runCodeowners(o.dir, { action: action || 'check', name, json: o.json, platform: o.platform, write: o._.some((a) => a === '--write' || a.startsWith('--write=')) });
+      result = await commands.runCodeowners(o.dir, { action: action || 'check', name, json: o.json, platform: o.platform, write: o._.some((a) => a === '--write' || a.startsWith('--write=')) });
       break;
     }
     case 'roster':
       // Removed in E62. Kept as a word for one major so a script or a habit gets told where it went
       // instead of "unknown command".
-      log(c.red('yad roster was removed — yadflow keeps no list of people'));
-      log('  A gate needs one approval (not the author\'s own) from anyone with access to the repo; the platform records who approved.');
-      log('  Request reviewers on the PR itself. Keep an existing `roster` in hub.json until every review with older approvals is closed:');
-      log('  it decides nothing, but the first sync uses its name → login pairs to recognise those approvals.');
-      process.exitCode = 1;
+      refuse('yad roster was removed — yadflow keeps no list of people',
+        'A gate needs one approval (not the author\'s own) from anyone with access to the repo; the platform records who approved. '
+        + 'Request reviewers on the PR itself. Keep an existing `roster` in hub.json until every review with older approvals is closed: '
+        + 'it decides nothing, but the first sync uses its name → login pairs to recognise those approvals.');
       break;
     case 'docs': {
       const [, action] = o._;
-      if (o.epic && !commands.isValidEpicId(o.epic)) { log(c.red(`invalid epic id: ${o.epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      if (o.epic && !commands.isValidEpicId(o.epic)) { refuse(`invalid epic id: ${o.epic} (expected EP-<slug>, [a-z0-9-] only)`); break; }
       const sync = o.wire ? 'wire' : o.refresh ? 'refresh' : 'check';
-      await commands.runDocs(o.dir, { action: action || 'list', epic: o.epic, overview: o.overview, sync, today });
+      result = await commands.runDocs(o.dir, { action: action || 'list', epic: o.epic, overview: o.overview, sync, today });
       break;
     }
     case 'thread': {
       const [, epic] = o._;
-      if (epic && !commands.isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-      await commands.runThread(o.dir, { epic, json: o.json });
+      if (epic && !commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`); break; }
+      result = await commands.runThread(o.dir, { epic, json: o.json });
       break;
     }
     case 'reconcile': {
       const [, action] = o._;
       const thread = o.epic || o.thread || null;
-      if (thread && !commands.isValidEpicId(thread)) { log(c.red(`invalid epic id: ${thread} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      if (thread && !commands.isValidEpicId(thread)) { refuse(`invalid epic id: ${thread} (expected EP-<slug>, [a-z0-9-] only)`); break; }
       const act = action || (o.wire ? 'wire' : o.refresh ? 'refresh' : 'check');
       if (!['check', 'refresh', 'wire'].includes(act)) {
-        log(c.red(`unknown reconcile action: ${act} (check|refresh|wire)`)); process.exitCode = 1; break;
+        refuse(`unknown reconcile action: ${act} (check|refresh|wire)`); break;
       }
-      await commands.runReconcile(o.dir, { action: act, thread });
+      result = await commands.runReconcile(o.dir, { action: act, thread });
       break;
     }
     default:
+      if (inJSON()) { refuse(`unknown command: ${cmd}`, '`yad --help` lists the commands'); break; }
       log(c.red(`unknown command: ${cmd}`));
       log(helpText(commands.seedableProfiles()));
       process.exitCode = 1;
   }
+  return result;
 }
 
 main()
+  // A command that finished a --json run without answering is a yadflow bug. Stdout still gets one
+  // object saying so, never an empty stream a parser chokes on — and never a guessed `ok: true`.
+  .then((result) => {
+    if (!inJSON() || jsonEmitted()) return;
+    // A refusal said in prose (`fail` + its `hint`) becomes the JSON refusal.
+    // What the command DID rides along: a push that failed after the commit landed must not read as
+    // "nothing happened" (E1 review) — `ship` answers `committed: true` beside the refusal.
+    const said = process.exitCode ? jsonFailure() : null;
+    if (said) {
+      // Never a key the envelope or the refusal owns: a clash would throw inside the answer and lose the
+      // real refusal, and a `json` key is an option of `refuse`, not data.
+      const owned = new Set([...ENVELOPE_KEYS, 'ok', 'error', 'code', 'hint', 'warnings', 'json']);
+      const did = Object.fromEntries(Object.entries(isPlainObject(result) ? result : {}).filter(([k]) => !owned.has(k)));
+      return refuse(said.error, said.hint, { code: said.code, ...did });
+    }
+    // Otherwise the command's result object IS the answer — `ok` follows the exit code, as everywhere.
+    if (isPlainObject(result)) return emitJSON({ ...result, ok: !process.exitCode });
+    refuse(`yad ${runningCmd ?? ''} gave no JSON answer — this is a yadflow bug`.replace('  ', ' '), 'run it without --json to see what it printed, and report it with `yad report`');
+  })
   .catch(async (err) => {
-    // `yad history --json` promises JSON for every refusal (E20), and a flag given with no value is
-    // refused here, by the parser, before the command runs. Other commands keep their text until E1
-    // settles one format for all of them.
-    // Only when the command IS history — never because the word `history` is some flag's value.
-    if ((err?.parsedCmd ?? runningCmd) === 'history' && process.argv.slice(2).includes('--json')) {
+    // Under --json every failure is still one object on stdout (E1) — a refusal from the parser, a
+    // thrown YadError, a bug. The `code` is the `YAD-` code README "Troubleshooting" is keyed on.
+    // If the command had already answered, stdout holds its object, and the failure goes to stderr.
+    if (inJSON() && !jsonEmitted()) {
+      if (err?.parsedCmd !== undefined && runningCmd === null) beginJSON(commandName(err.parsedWords ?? []));
       const hint = err?.hint || (/expects a value$/.test(String(err?.message)) ? '`yad --help` lists the flags of each command' : null);
-      // Exactly the documented refusal shape — { schemaVersion, ok, error, hint } — and nothing else.
-      process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ok: false, error: String(err?.message || err), hint }, null, 2)}\n`);
-      process.exitCode = 1;
+      refuse(String(err?.message || err), hint, { code: err?.code && /^YAD-/.test(err.code) ? err.code : null });
       return;
     }
     const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';
@@ -677,7 +738,7 @@ main()
     // YAD_NO_REPORT. `report` failing on its own would land here, so never re-offer for it.
     // Require a TTY on BOTH ends: stdout for the message, stdin so the y/N prompt can be answered
     // (a TTY stdout with piped/closed stdin would otherwise hang on readline).
-    const offerReport = process.stdin.isTTY && process.stdout.isTTY && !process.env.SDLC_NONINTERACTIVE
+    const offerReport = !inJSON() && process.stdin.isTTY && process.stdout.isTTY && !process.env.SDLC_NONINTERACTIVE
       && !process.env.YAD_NO_REPORT && process.argv[2] !== 'report';
     if (offerReport) {
       try {

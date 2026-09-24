@@ -1473,7 +1473,8 @@ test('gateOpen: opens the PR against the head override, not its recomputed per-s
   // a per-story review: artifact collapses to stories/, but the pushed head is the -S01 branch
   const res = await gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', head: 'review/EP-demo/stories-S01', creator });
   assert.equal(seenHead, 'review/EP-demo/stories-S01'); // NOT review/EP-demo/stories
-  assert.deepEqual(res, { url: 'https://x/pr/1' });
+  assert.equal(res.url, 'https://x/pr/1');
+  assert.deepEqual([res.opened, res.branch, res.step], [true, 'review/EP-demo/stories-S01', 'stories-review']);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -2166,6 +2167,15 @@ async function grab(fn) {
   try { await fn(); } finally { console.log = orig; }
   return out.join('\n');
 }
+// E1: every `--json` answer is one envelope around the command's own keys. A command called in-process
+// (not through bin/yad.mjs) names no `command` and has collected no warnings. A refusal always carries
+// `error`, `code` and `hint`.
+const { VERSION: CLI_VERSION } = await import('./manifest.mjs');
+const { JSON_VERSION } = await import('./lib.mjs');
+const envelope = (keys, { command = null, warnings = [] } = {}) => ({
+  jsonVersion: JSON_VERSION, version: CLI_VERSION, command, ...keys,
+  ...(keys.ok === false && 'error' in keys ? { code: keys.code ?? null, hint: keys.hint ?? null } : {}), warnings,
+});
 // The same capture for a SYNCHRONOUS call — returns what was printed.
 function grabSync(fn) {
   const orig = console.log;
@@ -4784,6 +4794,7 @@ test('gate repair: closes the stranded author step, is idempotent, and writes no
   const { T, statePath } = hubWithStrandedEpic();
   const r = await gateRepair(T, { epic: 'EP-x' });
   assert.deepEqual(r.closed, ['stories']);
+  assert.deepEqual([r.dryRun, r.written, r.committed, r.pushed], [false, true, false, false], 'the --json answer says what the run did (E1)');
   const state = JSON.parse(fs.readFileSync(statePath));
   assert.equal(state.steps[0].status, 'done');
   assert.equal(state.steps[2].status, 'in_progress', 'the parallel test-cases track is left alone');
@@ -4799,6 +4810,7 @@ test('gate repair --dry-run reports the violation but writes nothing', async () 
   const before = fs.readFileSync(statePath, 'utf8');
   const r = await gateRepair(T, { epic: 'EP-x', dryRun: true });
   assert.deepEqual(r.closed, ['stories']);
+  assert.deepEqual([r.dryRun, r.written], [true, false], 'a dry run never reads like a real one (E1 review)');
   assert.equal(fs.readFileSync(statePath, 'utf8'), before, 'a dry run leaves state.json byte-identical');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -10985,7 +10997,7 @@ test('runDocs: list/sync/wire orchestrate over generated sites and install the P
   fs.writeFileSync(path.join(ep, '.sdlc/docs-build.json'), JSON.stringify({ artifactHash: 'sha256:old' })); // mismatch -> stale
 
   const listed = await runDocs(T, { action: 'list' });
-  assert.equal(listed.sites, 1);
+  assert.deepEqual(listed.sites, ['epic EP-x'], 'one site, named as the list prints it');
 
   const checked = await runDocs(T, { action: 'sync', sync: 'check' });
   assert.equal(checked.stale, 1, 'the changed artifact hash marks the epic site stale');
@@ -15015,7 +15027,7 @@ test('yad dial / kill / unkill write their files, show the run record, and refus
     assert.match(r.out, /no run record exists for a Shape step/);
     assert.match(r.out, /recorded, not acted on yet/);
     r = await run(() => runDial(T, { step: 'architecture', json: true }));
-    assert.deepEqual(JSON.parse(r.out), { ok: true, scope: 'shape', step: 'architecture', set: 'auto', advance: 'auto', why: 'project', changed: false, kill: null, trust: null });
+    assert.deepEqual(JSON.parse(r.out), envelope({ ok: true, scope: 'shape', step: 'architecture', set: 'auto', advance: 'auto', why: 'project', changed: false, kill: null, trust: null }));
     r = await run(() => runDial(T, { step: 'architecture-review', to: 'auto' }));
     assert.equal(r.failed, true);
     assert.match(r.out, /a gate is never auto/);
@@ -15043,8 +15055,8 @@ test('yad dial / kill / unkill write their files, show the run record, and refus
     // A GATE ASKED is answered, not refused: yad-run asks about every step it walks, the merge gate included.
     r = await run(() => runDial(T, { ...lane, step: 'engineer-review', json: true }));
     assert.equal(r.failed, false, r.out);
-    assert.deepEqual(JSON.parse(r.out), { ok: true, scope: 'lane', epic: 'EP-x', story: 'EP-x-S01', repo: 'web', step: 'engineer-review',
-      set: 'human', advance: 'human', why: 'gate', changed: false, kill: null, trust: null });
+    assert.deepEqual(JSON.parse(r.out), envelope({ ok: true, scope: 'lane', epic: 'EP-x', story: 'EP-x-S01', repo: 'web', step: 'engineer-review',
+      set: 'human', advance: 'human', why: 'gate', changed: false, kill: null, trust: null }));
     r = await run(() => runDial(T, { step: 'architecture-review', json: true }));
     assert.equal(r.failed, false, r.out);
     assert.equal(JSON.parse(r.out).why, 'gate');
@@ -16815,7 +16827,7 @@ test('yad foundation status: stories that have not started, a broken ledger, wha
   } finally { cleanTmp(t.T); }
 
   const one = await foundationStatusOn({ ...productLedger('foundation', 'foundation', 'foundation-done'), 'foundation/roadmap.md': '## P\n| Feature | Proposed epic id |\n|---|---|\n| A | EP-a |\n' }, { json: true });
-  try { assert.equal('warnings' in JSON.parse(one.out), false, 'no warnings key when there is nothing to warn about'); } finally { cleanTmp(one.T); }
+  try { assert.deepEqual(JSON.parse(one.out).warnings, [], 'an empty warnings list when there is nothing to warn about (E1: the key is always there)'); } finally { cleanTmp(one.T); }
 
   // `yad next` on an approved Foundation points at this view.
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roadmap-next-'));
@@ -17026,7 +17038,8 @@ test('every command warns first when the project is on a newer file shape than t
     const run = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' });
     const next = run('next', '--json');
     assert.match(next.stderr, /this project is on file shape/, next.stderr);
-    assert.doesNotMatch(next.stdout, /this project is on file shape/);
+    // stdout is one JSON answer, and the warning is inside it, in `warnings` (E1) — never loose text.
+    assert.match(JSON.parse(next.stdout).warnings.join('\n'), /this project is on file shape/);
     assert.doesNotMatch(run('migrate', '--json').stderr, /this project is on file shape/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -18677,7 +18690,7 @@ test('yad codeowners: check prints facts and the hint, never an address, never f
     assert.match(r.out, /unknown repo: nope/);
     r = await run(() => runCodeowners(T, { action: 'check', name: 'nope', json: true }));
     assert.equal(r.failed, true);
-    assert.deepEqual(JSON.parse(r.out), { ok: false, error: 'unknown repo: nope', hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' });
+    assert.deepEqual(JSON.parse(r.out), envelope({ ok: false, error: 'unknown repo: nope', hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' }));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -21521,7 +21534,8 @@ test('E19 yad index --json: a read on any branch, the file\'s shape, nothing wri
   try {
     git(T, 'checkout', '-q', '-b', 'feat/y');
     const j = JSON.parse(await grabStdout(() => runIndex(T, { json: true })));
-    assert.deepEqual(Object.keys(j), ['schemaVersion', 'inputs', 'items']);
+    // E1's envelope first, then the file's own keys in the file's order.
+    assert.deepEqual(Object.keys(j), ['jsonVersion', 'version', 'command', 'ok', 'schemaVersion', 'inputs', 'items', 'warnings']);
     assert.deepEqual(j.items.map((i) => [i.id, !!i.unreadable]), [['EP-a', false], ['EP-bad', true]]);
     assert.equal(j.inputs, buildIndex(T).inputs);
     assert.ok(!fs.existsSync(indexPath(T)));
@@ -22211,7 +22225,7 @@ test('E20 yad history list: every item newest first, titles or ids, unreadable i
     assert.deepEqual(json.items.map((i) => [i.id, i.title]), [['EP-new', 'Fix the queue'], ['EP-old', 'Old checkout']]);
     assert.deepEqual(json.unreadable, [{ id: 'EP-bad', dir: 'epics/EP-bad', why: '.sdlc/state.json does not parse' }]);
     assert.deepEqual(json.unlisted, ['epics/Bad_Name']);
-    assert.deepEqual([json.schemaVersion, json.ok, json.threadBroken], [ENGINE_SHAPE, true, null]);
+    assert.deepEqual([json.jsonVersion, 'schemaVersion' in json, json.ok, json.threadBroken], [JSON_VERSION, false, true, null], 'E1: the contract number, not the file shape');
     assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, done: true }))).items.map((i) => i.id), ['EP-old']);
     assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, open: true }))).items.map((i) => i.id), ['EP-new', 'EP-nodate']);
     assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-old' }))).items.map((i) => i.id), ['EP-new', 'EP-old']);
@@ -22834,12 +22848,12 @@ test('PR270: every key of an answer is always present', async () => {
   try {
     const keys = (o) => Object.keys(o).sort();
     const list = JSON.parse(await grabStdout(() => runHistory(T, { json: true })));
-    assert.deepEqual(keys(list), ['items', 'ok', 'schemaVersion', 'threadBroken', 'unlisted', 'unreadable']);
+    assert.deepEqual(keys(list), ['command', 'items', 'jsonVersion', 'ok', 'threadBroken', 'unlisted', 'unreadable', 'version', 'warnings']);
     const search = JSON.parse(await grabStdout(() => runHistory(T, { action: 'search', args: ['ep'], json: true })));
-    assert.deepEqual(keys(search), ['items', 'ok', 'query', 'schemaVersion', 'summaryOnly', 'threadBroken', 'unlisted', 'unreadable']);
+    assert.deepEqual(keys(search), ['command', 'items', 'jsonVersion', 'ok', 'query', 'summaryOnly', 'threadBroken', 'unlisted', 'unreadable', 'version', 'warnings']);
     assert.deepEqual(keys(search.items[0].matches[0]), ['field', 'step', 'value']);
     const show = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-new'], json: true })));
-    assert.deepEqual(keys(show), ['approvalsWhy', 'hubWhy', 'item', 'ok', 'schemaVersion', 'steps', 'stepsWhy', 'thread']);
+    assert.deepEqual(keys(show), ['approvalsWhy', 'command', 'hubWhy', 'item', 'jsonVersion', 'ok', 'steps', 'stepsWhy', 'thread', 'version', 'warnings']);
     assert.deepEqual(keys(show.steps[0]), ['approvals', 'closed', 'debt', 'id', 'inheritedFrom', 'known', 'notAStep', 'record', 'staleUnknown', 'state', 'type']);
     assert.equal(show.item.shapeDone, false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -22950,13 +22964,13 @@ test('PR270 fix: any flag history does not take is refused — even one the pars
     }
     const noValue = run('--type', '--json');
     assert.deepEqual([noValue.status, JSON.parse(noValue.stdout).ok, JSON.parse(noValue.stdout).error], [1, false, '--type expects a value']);
-    assert.deepEqual(Object.keys(JSON.parse(noValue.stdout)).sort(), ['error', 'hint', 'ok', 'schemaVersion'], 'the documented refusal shape, nothing else');
+    assert.deepEqual(Object.keys(JSON.parse(noValue.stdout)).sort(), ['code', 'command', 'error', 'hint', 'jsonVersion', 'ok', 'version', 'warnings'], 'the documented refusal shape (E1), nothing else');
     const before = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), '--json', 'history', '--dir', T, '--type'], { encoding: 'utf8' });
     assert.equal(JSON.parse(before.stdout).error, '--type expects a value', '--json before the command word');
-    // Only history answers in JSON: another command whose arguments hold the WORD history keeps its text.
+    // E1: every command answers a parser refusal in JSON, and names ITSELF — never `history` because the
+    // word is some flag's value.
     const other = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'kill', '--reason', 'history', '--json', '--title', '--dir', T], { encoding: 'utf8' });
-    assert.match(other.stdout, /yad failed: --title expects a value/);
-    assert.throws(() => JSON.parse(other.stdout));
+    assert.deepEqual([JSON.parse(other.stdout).command, JSON.parse(other.stdout).error], ['kill', '--title expects a value']);
     assert.equal(JSON.parse(run('search', '-dash', '--json').stdout).query, '-dash', 'a single-dash word is text, not a flag');
     assert.equal(JSON.parse(run('--json', '--dir', T).stdout).ok, true, '--dir is its own');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -23009,4 +23023,219 @@ test('PR270 fix: a waived step takes no fingerprint; a thread walk that fails is
     assert.equal(_e20ClosedLine({ via: 'repair', waived: 'x\x1b[2Jy' }), 'closed — via repair; approvals waived (x[2Jy)');
     assert.match(await grab(() => runHistory(T, { thread: null, theme: 'ab' })), /#a b/, 'a NEL in a theme prints as a space');
   } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E1: one JSON contract for every command -----------------------------------------------------
+
+// The mechanical rule: ONE place writes a --json answer. A command that stringified its own answer to
+// stdout would skip the envelope and the one-answer guard, which is how four shapes grew before E1.
+test('E1 only cli/lib.mjs writes a JSON answer to stdout', () => {
+  const offenders = [];
+  for (const dir of ['cli', 'bin']) {
+    for (const f of fs.readdirSync(path.join(ROOT, dir))) {
+      if (!f.endsWith('.mjs') || f.startsWith('test')) continue;
+      const rel = `${dir}/${f}`;
+      fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
+        if (/^\s*\/\//.test(line)) return;
+        // cli/lib.mjs holds the emitter itself, and `log`.
+        const hit = (/log\(JSON\.stringify\(/.test(line) && rel !== 'cli/lib.mjs')
+          || (/console\.log\(/.test(line) && rel !== 'cli/lib.mjs')
+          // yad hook's stdout is Cursor's permission protocol, not a --json answer (E1 decision 4).
+          || (/process\.stdout\.write\(/.test(line) && rel !== 'cli/hook.mjs');
+        if (hit) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+      });
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test('E1 bin/yad.mjs: every refusal and odd case is one envelope on stdout, prose on stderr', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-'));
+  const yad = (...args) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], {
+    encoding: 'utf8', env: { ...process.env, SDLC_NONINTERACTIVE: '', YAD_NO_REPORT: '1', NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1' },
+  });
+  const answer = (r) => { try { return JSON.parse(r.stdout); } catch { assert.fail(`stdout is not one JSON object:\n${r.stdout}\n--- stderr:\n${r.stderr}`); } };
+  try {
+    const keys = (j) => Object.keys(j);
+    let r = yad('--version', '--json');
+    assert.deepEqual([r.status, keys(answer(r))], [0, ['jsonVersion', 'version', 'command', 'ok', 'warnings']]);
+    assert.deepEqual([answer(r).jsonVersion, answer(r).version], [JSON_VERSION, CLI_VERSION]);
+
+    r = yad('frobnicate', '--json');
+    assert.deepEqual([r.status, answer(r).command, answer(r).ok, answer(r).error, answer(r).code], [1, 'frobnicate', false, 'unknown command: frobnicate', null]);
+    assert.deepEqual(keys(answer(r)), ['jsonVersion', 'version', 'command', 'ok', 'error', 'code', 'hint', 'warnings'], 'a refusal: all three keys, always');
+
+    // yad hook takes no --json: its stdout is the agent's protocol (decision 4).
+    r = yad('hook', 'ledger-guard', '--json');
+    assert.deepEqual([r.status, answer(r).command, answer(r).ok], [1, 'hook ledger-guard', false]);
+
+    // An action is named as typed; a default action by the one that ran; a word that is no action is not.
+    assert.equal(answer(yad('gate', 'frob', 'EP-x', '--json')).command, 'gate');
+    assert.equal(answer(yad('skill', '--json')).command, 'skill list');
+
+    // A usage refusal inside the switch is JSON too, with the usage as the hint.
+    r = yad('skill', 'frob', '--json');
+    assert.deepEqual([r.status, answer(r).error, /^usage: yad skill list/.test(answer(r).hint)], [1, 'unknown skill action: frob (list, bind, unbind)', true]);
+
+    // --help is an answer, not prose on stdout.
+    r = yad('--help', '--json');
+    assert.deepEqual([r.status, /yad setup/.test(answer(r).help), answer(r).help.includes('\x1b[')], [0, true, false]);
+
+    // A thrown YadError keeps its code; the prose line goes to stderr, never beside the answer.
+    r = yad('gate', 'status', 'EP-nope', '--json');
+    assert.equal(r.status, 1);
+    assert.equal(answer(r).ok, false);
+    assert.match(answer(r).error, /no epic state/);
+
+    // A warning is collected, as plain text, and still printed to stderr.
+    r = yad('skip', 'EP-nope', 'ui-design', '--repo', 'web', '--json');
+    assert.ok(answer(r).warnings.some((w) => /--repo is only for a Build lane/.test(w)), r.stdout);
+    assert.match(r.stderr, /--repo is only for a Build lane/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E1 lib: a --json run never prompts, answers once, and keeps the envelope keys its own', async () => {
+  const lib = await import('./lib.mjs');
+  const save = process.env.SDLC_NONINTERACTIVE;
+  delete process.env.SDLC_NONINTERACTIVE;
+  const exit = process.exitCode;
+  try {
+    lib.beginJSON('setup');
+    await assert.rejects(() => lib.ask('Product name'), (e) => e.code === 'YAD-CLI-001' && /cannot ask: Product name/.test(e.message));
+    await assert.rejects(() => lib.askYesNo('Continue?'), (e) => e.code === 'YAD-CLI-001');
+    assert.throws(() => lib.emitJSON({ version: 'x' }), /envelope key\(s\) version/);
+    const out = grabSync(() => lib.emitJSON({ done: 1 }));
+    assert.deepEqual(JSON.parse(out).command, 'setup');
+    assert.throws(() => lib.emitJSON({}), /a second JSON answer/);
+  } finally {
+    lib.endJSON();
+    if (save === undefined) delete process.env.SDLC_NONINTERACTIVE; else process.env.SDLC_NONINTERACTIVE = save;
+    process.exitCode = exit;
+  }
+});
+
+// ONE table, every command (E1): on a folder with no project and on a freshly set-up one, each command
+// with --json leaves stdout holding exactly one envelope, whose `ok` is its exit code — never the "no
+// JSON answer" fallback, which is a command that answered in prose only. The commands run in order on
+// the same folder, so later rows see what earlier ones wrote (`epic new` seeds the epic `skip` sets aside).
+test('E1 every command answers --json with one envelope, ok matching its exit code', () => {
+  const CMDS = [
+    ['doctor'], ['migrate'], ['check'], ['update'], ['usage'], ['sync-status'], ['report', '-m', 'x'],
+    ['epic', 'new', 'demo'], ['foundation', 'status'], ['skill', 'list'], ['skill', 'bind', 'epic', 'my-skill'], ['skill', 'unbind', 'epic'],
+    ['next'], ['next', 'EP-demo'], ['skip', 'EP-demo', 'ui-design', '--reason', 'r'], ['unskip', 'EP-demo', 'ui-design'],
+    ['defer', 'EP-demo', 'ui-design', '--reason', 'r'], ['undefer', 'EP-demo', 'ui-design'], ['unblock', 'EP-demo', 'epic'],
+    ['dial', 'architecture'], ['mode'], ['kill', '--reason', 'r'], ['unkill'],
+    ['gate', 'status', 'EP-demo'], ['gate', 'open', 'EP-demo', 'epic'], ['gate', 'sync', 'EP-demo'], ['gate', 'comments', 'EP-demo'],
+    ['gate', 'repair', 'EP-demo'], ['gate', 'review', 'EP-demo', 'epic'], ['gate', 'walkthrough', 'EP-demo', 'epic'],
+    ['gate', 'trailer', 'EP-demo', 'epic', '--body', 'x'], ['gate', 'ci'],
+    ['review', 'context', '--repo', 'nope', '--pr', '1'], ['review', 'trailer', '--repo', 'nope', '--pr', '1', '--body', 'x'],
+    ['review', 'nudge', '--repo', 'nope', '--pr', '1'],
+    ['commit', '-m', 'x'], ['open-pr'], ['ship', '-m', 'x', '--dry-run'], ['checkpoint'], ['tidy', 'up'], ['tidy'], ['index'],
+    ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'sync'],
+    ['risk-map', 'check'], ['codeowners', 'check'], ['roster'], ['docs', 'list'], ['docs', 'sync'], ['thread'], ['thread', 'EP-demo'],
+    ['reconcile'], ['hook', 'ledger-guard'], ['setup', '--solo', '--greenfield', '--monorepo'],
+  ];
+  const env = {
+    ...process.env, SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1', NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1', YAD_PLATFORM_LOGIN: '0',
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+  };
+  const yad = (dir, args, json = true) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, ...(json ? ['--json'] : []), '--dir', dir], { encoding: 'utf8', env, cwd: dir });
+  const bad = [];
+  // `dir` gets --json and its twin `plain` the same commands without it, in the same order, so the two
+  // exit codes can be compared: --json changes the rendering only. `index` is the one documented
+  // exception (its --json is a read on any branch; without the flag it writes, and refuses off the
+  // default branch), and `hook` takes no --json at all.
+  const sweep = (label, dir, plain) => {
+    for (const args of CMDS) {
+      const r = yad(dir, args);
+      const p = yad(plain, args, false);
+      const name = `${label} yad ${args.join(' ')}`;
+      if (!['index', 'hook'].includes(args[0]) && p.status !== r.status) bad.push(`${name}: exit ${r.status} with --json, ${p.status} without`);
+      let j;
+      try { j = JSON.parse(r.stdout); } catch { bad.push(`${name}: stdout is not one JSON object (exit ${r.status})`); continue; }
+      const missing = ['jsonVersion', 'version', 'command', 'ok', 'warnings'].filter((k) => !(k in j));
+      if (missing.length) bad.push(`${name}: no ${missing.join(', ')}`);
+      if (j.ok !== (r.status === 0)) bad.push(`${name}: ok is ${j.ok}, exit ${r.status}`);
+      if (j.ok === false && !['error', 'code', 'hint'].every((k) => k in j) && 'error' in j) bad.push(`${name}: a refusal without error, code and hint`);
+      if (/gave no JSON answer/.test(j.error || '')) bad.push(`${name}: answered in prose only`);
+    }
+  };
+  const dirs = ['empty', 'empty-plain', 'proj', 'proj-plain'].map((n) => fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-e1-${n}-`)));
+  const [empty, emptyPlain, proj, projPlain] = dirs;
+  try {
+    sweep('no project:', empty, emptyPlain);
+    for (const d of [proj, projPlain]) {
+      git(d, 'init', '-q', '-b', 'main');
+      assert.equal(yad(d, ['setup', '--solo', '--greenfield', '--monorepo']).status, 0);
+    }
+    sweep('set-up project:', proj, projPlain);
+    assert.deepEqual(bad, []);
+  } finally {
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// The E1 review's findings, each pinned where it was found.
+test('E1 review: a refusal keeps what was done, every warning is collected, a parse refusal names the action typed', () => {
+  const env = {
+    ...process.env, SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1', NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1', YAD_PLATFORM_LOGIN: '0',
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+  };
+  const yad = (cwd, ...args) => {
+    const r = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--json'], { encoding: 'utf8', env, cwd });
+    return { status: r.status, j: JSON.parse(r.stdout) };
+  };
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-review-'));
+  try {
+    // 1. `ship` whose push fails AFTER the commit landed: the refusal says so, it is not "nothing happened".
+    git(R, 'init', '-q', '-b', 'main');
+    // The repo's own identity: `git()` strips the GIT_AUTHOR/COMMITTER variables, and CI's Linux runner
+    // cannot guess a name the way a Mac can.
+    git(R, 'config', 'user.email', 't@example.com'); git(R, 'config', 'user.name', 't');
+    fs.writeFileSync(path.join(R, 'a'), 'a'); git(R, 'add', 'a'); git(R, 'commit', '-qm', 'init');
+    git(R, 'remote', 'add', 'origin', path.join(R, 'no-such-remote.git'));
+    git(R, 'switch', '-qc', 'feat/x');
+    fs.writeFileSync(path.join(R, 'b'), 'b'); git(R, 'add', 'b');
+    const shipped = yad(R, 'ship', '--type', 'feat', '-m', 'add b', '--task', 'EP-x-S01-T01', '--platform', 'github', '--base', 'main');
+    assert.deepEqual([shipped.status, shipped.j.ok, shipped.j.committed, shipped.j.pr], [1, false, true, null]);
+    assert.match(shipped.j.error, /git push failed/);
+    assert.equal(shipped.j.commit, git(R, 'rev-parse', 'HEAD').toString().trim());
+
+    // 2. The newer-shape warning goes to stderr before any command runs; it is in `warnings` too.
+    fs.mkdirSync(path.join(R, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(R, '.sdlc/cli-version.json'), '{"schemaVersion":999}');
+    assert.match(yad(R, 'next').j.warnings.join('\n'), /this project is on file shape 999/);
+
+    // 3. `usage --json --out` writes the JSON model, as it did before E1, unless --format says otherwise.
+    yad(R, 'usage', '--out', path.join(R, 'u.json'));
+    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(R, 'u.json'), 'utf8')));
+    yad(R, 'usage', '--out', path.join(R, 'u.html'), '--format', 'html');
+    assert.match(fs.readFileSync(path.join(R, 'u.html'), 'utf8'), /^<!doctype html>/i);
+
+    // 6. A flag with no value is refused by the parser; the answer names the action that was typed.
+    assert.equal(yad(R, 'history', 'show', '--type').j.command, 'history show');
+    assert.equal(yad(R, 'gate', 'status', '--pr').j.command, 'gate status');
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
+});
+
+// E1 review 2: a sweep that skips several epics says every one — the first as `error`, the rest in
+// `warnings` — and still answers what it did (`synced`, `committed`, `pushed`).
+test('E1 review: gate ci --json names every epic it skipped', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-ci-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', git_url: 'https://github.com/a/b' }));
+    for (const e of ['EP-alpha', 'EP-beta']) {
+      fs.mkdirSync(path.join(T, 'epics', e, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'epics', e, '.sdlc/state.json'), '{');
+    }
+    git(T, 'init', '-q', '-b', 'main');
+    const r = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'gate', 'ci', '--json', '--dir', T], {
+      encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1', YAD_NO_REPORT: '1' },
+    });
+    const j = JSON.parse(r.stdout);
+    assert.deepEqual([r.status, j.ok, j.synced, j.committed, j.pushed], [1, false, 0, false, false]);
+    assert.match(j.error, /^EP-alpha: .* skipping this epic$/);
+    assert.equal(j.warnings.filter((w) => /^EP-beta: .* skipping this epic$/.test(w)).length, 1, 'the second skip is not lost');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

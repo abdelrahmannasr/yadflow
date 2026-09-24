@@ -8,6 +8,7 @@ const GROUPS = [
     color: '#b7950b',
     items: [
       'npx yadflow setup — guided first-run wizard',
+      '--json on every command but yad hook (E1) — one object on stdout: { jsonVersion, version, command, ok, …the command\'s own keys, warnings }; a refusal adds error, code and hint; every other line goes to stderr; exit codes unchanged',
       'npx yadflow check [--fix] — report / reconcile drift vs the manifest',
       'npx yadflow update — apply drift only (also migrates pre-2.0 sdlc-* installs)',
       'npx yadflow doctor [--json] — environment + state health (exit 1 on failure); its protection section says whether each repo\'s branch requires an approval on GitHub or GitLab, or that it is not known and why (E70) — a warning at most',

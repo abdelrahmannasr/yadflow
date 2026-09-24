@@ -21,6 +21,9 @@ import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
+// The --json answer's list (E1): every managed item, as the report groups it — never the apply step.
+const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status }));
+
 export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
@@ -167,7 +170,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (!fix) {
     if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
-    return { counts, gaps, applied: 0, modified: modified.length };
+    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [] };
   }
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
@@ -207,6 +210,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (gaps.length) hand('one-time setup still missing — run `yad setup`.');
 
   // --- publish: commit each repo's applied changes and push directly to its default branch ---
+  // Each repo's `{ label, committed, pushed }`, for the --json answer (E1): a push that failed after a
+  // commit landed is said per repo.
+  let commits = [];
   if (push) {
     preflightGuardReadiness(root);
     const hub = readJSON(productConfigPath(root), {});
@@ -217,7 +223,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       defByRoot.set(repoRoot, repo.default_branch);
       platformByRoot.set(repoRoot, repo.platform);
     }
-    commitUpdates(root, groupByRoot(appliedActions), {
+    commits = commitUpdates(root, groupByRoot(appliedActions), {
       push: true, allowBranch,
       defaultBranchFor: (r) => defByRoot.get(r),
       // GitLab's yad-update-guard is an includable fragment: unlike a GitHub workflow it does nothing
@@ -231,5 +237,5 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       },
     });
   }
-  return { counts, gaps, applied, modified: modified.length };
+  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits };
 }

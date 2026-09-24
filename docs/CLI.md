@@ -69,6 +69,85 @@ base — only pass it deliberately; a non-default base loses the AI first pass),
 `--title`. `ship` takes the union of the `commit`
 and `open-pr` flags (it runs `open-pr` only if the commit lands).
 
+### `--json` on every command (E1)
+
+`--json` is a flag on **every** command except `yad hook`. It turns the command's answer into one
+JSON object on stdout (standard output), which a script, a CI job or an app can read. This is the
+engine's machine door (rule 8: `--json` and, later, MCP — nothing else).
+
+**One envelope.** Every answer, from every command, is one object with the same five keys around the
+command's own keys:
+
+```jsonc
+{
+  "jsonVersion": 1,            // the number of THIS format — see "What moves the number" below
+  "version": "4.0.0",          // the yadflow package that answered
+  "command": "gate status",    // the command as typed, with its action (`history show`, `skill list`)
+  "ok": true,                  // true exactly when the exit code is 0
+  // …the command's own keys, at the top level (`epic`, `gates`, `actions`, …)
+  "warnings": []               // every warning the run printed, as plain text
+}
+```
+
+A **refusal** (the command would not, or could not, do what was asked) has `"ok": false` and always
+carries three more keys, so a reader never checks whether one exists:
+
+```jsonc
+{ "jsonVersion": 1, "version": "4.0.0", "command": "unskip", "ok": false,
+  "error": "ui-design is not skipped",   // what went wrong, in one line
+  "code": "YAD-STATE-004",               // the error code (see Troubleshooting), or null
+  "hint": "nothing to un-skip",          // what to do next, or null
+  "warnings": [] }
+```
+
+`"ok": false` **without** `error` is an answer, not a refusal: the command ran and its answer is "no"
+— `yad doctor` found a failing check, `yad next --check` found the step blocked. The exit code is 1
+in both cases, exactly as without `--json`.
+
+**A refusal still says what was done.** When a command did part of its work before it failed, the
+refusal carries that too. `yad ship` whose push failed answers `"ok": false` with the push error **and**
+`"committed": true`; `yad checkpoint --push` and `yad tidy up --push` do the same. Read `error` for what
+went wrong and the other keys for what already happened.
+
+**The rules every command keeps:**
+
+| Rule | What it means |
+|---|---|
+| One object on stdout | Under `--json`, stdout holds the answer and nothing else. Every other line — progress, `✓`/`!` lines, a subprocess's output (`npm run build`) — goes to **stderr** (standard error). Parse stdout; show stderr to a person if you like. |
+| Same exit codes | `--json` changes the rendering only. A command exits 0 or 1 exactly as it does without the flag — with one exception that is older than E1: `yad index --json` is a read and never writes, so it answers (exit 0) on a branch where `yad index`, which writes the file, refuses (exit 1). |
+| A failure is still an object | A flag with no value, an unknown command, a thrown error, a refusal — each is one refusal object. An empty stdout never happens. |
+| No prompts | A `--json` run never asks a question. A command that would have to ask is refused with `YAD-CLI-001` at that question. Only some of `yad setup`'s questions have a flag (`--solo`/`--team`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`, `--ide-targets`); the rest do not, so a scripted `yad setup --json` needs `SDLC_NONINTERACTIVE=1`, which takes the usual defaults, as without `--json`. A refusal can come after an earlier step has already written. |
+| Never posts for you | `yad report --json` prints the scrubbed payload (`title`, `body`, `labels`, the prefilled `url`, `related` open issues) and never files an issue. |
+| Always-JSON bundles | `yad gate review`, `yad gate walkthrough`, `yad review context` / `chat` / `cards` / `walkthrough` answer in this envelope with or without the flag — a skill parses them. |
+| `yad hook` takes no `--json` | Its stdout is already the protocol Claude Code and Cursor read. `yad hook … --json` is refused. |
+
+**What moves the number.** `jsonVersion` is the contract's own number, starting at 1. **Adding** a key
+keeps the number, so a reader must ignore keys it does not know. **Renaming or removing** a key, or
+changing what a key means, bumps it — and that is a breaking change of yadflow itself. `version` is
+the package and moves every release; the state-file `schemaVersion` describes files on disk and
+appears in an answer only where the answer IS a file (`yad index --json`).
+
+**What moved in E1 (a breaking change).** Before E1 each command chose its own shape. If a script read
+one of these, update it:
+
+| Command | Before | Now |
+|---|---|---|
+| `yad next`, `yad doctor`, `yad migrate` | `version` first, no `jsonVersion` | the envelope; a refusal gains `code` and `hint` |
+| `yad history` | `schemaVersion` (the file shape) | `jsonVersion`; no `schemaVersion` |
+| `yad index` | `schemaVersion` first | the envelope around the file's own keys, `schemaVersion` kept among them |
+| `yad thread`, `yad gate review` / `walkthrough`, `yad review context` / `walkthrough` | a bare object, no `ok` | the envelope; a bundle's error is a refusal object on stdout (it was a text line) |
+| `yad dial`, `yad kill`, `yad mode`, `yad skill list`, `yad epic new`, `yad foundation`, `yad risk-map`, `yad codeowners` | `ok` without `jsonVersion`; some refusals without `hint` | the envelope |
+| `yad foundation status` | `warnings` only when there was one | `warnings` always present |
+| `yad usage --json` | the bare report model | the envelope around the model, plus `out`. `--format json` is a report FORMAT and still prints (or writes) the bare model |
+| every other command | no `--json` | the envelope around what the command did |
+
+What each command adds is the facts it prints: `yad gate status` a `gates` list (each review step's
+state, approvals, people counted, the rule and its shortfall); `yad gate sync` the `gates` it read and
+whether it wrote; `yad skip` / `defer` / `unblock` the step as the file now holds it; `yad commit` the
+message, files and commit; `yad check` the `counts` and every managed `items` row; and so on. Read the
+keys from one real answer — every key a command sets is always present, as `null`, `false` or `[]`
+when there is nothing.
+
 ### `yad next --json` (the driver, machine-readable)
 
 `yad next` renders coloured English, which is the wrong shape for the agents and CI jobs that drive
@@ -76,17 +155,20 @@ this workflow. `--json` emits the action object the router already computed. One
 every route, so a caller never branches on the output shape:
 
 ```jsonc
+// Every answer is inside the E1 envelope (above); `…` stands for jsonVersion, version, command, and
+// `warnings` closes each one.
+
 // yad next --json  /  yad next <epic> --json
-{ "version": "3.13.1", "ok": true, "actions": [ /* one per epic, the Foundation (EP-foundation) included */ ] }
+{ …, "ok": true, "actions": [ /* one per epic, the Foundation (EP-foundation) included */ ] }
 
 // yad next <epic> --check <step> --json      (exit 1 when the step is blocked, as in prose)
-{ "version": "3.13.1", "ok": false, "check": { "epic": "EP-x", "step": "architecture-review", "ok": false, "reason": "…" } }
+{ …, "ok": false, "check": { "epic": "EP-x", "step": "architecture-review", "ok": false, "reason": "…" } }
 
 // the project has no `yad setup` yet
-{ "version": "3.13.1", "ok": true, "setUp": false, "actions": [] }
+{ …, "ok": true, "setUp": false, "actions": [] }
 
-// bad epic id, or an epic with no state.json
-{ "version": "3.13.1", "ok": false, "error": "invalid epic id: …" }
+// bad epic id, or an epic with no state.json — a refusal
+{ …, "ok": false, "error": "invalid epic id: …", "code": null, "hint": null }
 ```
 
 Each action carries `epicId`, `kind`
@@ -1197,12 +1279,11 @@ reverse how text is shown) removed, because it reaches other people's terminals.
 kept, so a theme spelled with two spaces still looks different. A closing record's fields are printed only
 when they are text, and a PR only when it is a whole number.
 
-**`--json`.** Every answer has `"schemaVersion"` (the file shape, as in `yad index --json`) and
-`"ok": true`; **every other key is always present**, as `null`, `false` or `[]` when there is nothing, so
-a script never has to ask whether a key exists. A refusal is `{ "schemaVersion", "ok": false, "error",
-"hint" }` with exit code 1 — the shape `yad next --json` uses. This holds for a flag given with no value
-(`--type` alone), which the argument reader refuses before the command runs. `error` and `hint` appear only
-when `ok` is `false`.
+**`--json`.** Every answer is in the [one envelope](#--json-on-every-command-e1) (`jsonVersion`,
+`version`, `command`, `ok`, `warnings`); **every other key is always present**, as `null`, `false` or `[]`
+when there is nothing, so a script never has to ask whether a key exists. A refusal is the envelope with
+`"ok": false`, `error`, `code` and `hint`, and exit code 1. This holds for a flag given with no value
+(`--type` alone), which the argument reader refuses before the command runs.
 
 | Command | Keys |
 |---|---|
@@ -1221,8 +1302,7 @@ read; when the fingerprint cannot be taken; and on a step `gatePredicate` (the c
 a gate) waives before it reads an approval — one that claims to be inherited, or skipped where the item's
 route lets that step be skipped. A skip on a step the route requires is not honoured, and its approvals are
 judged. A record that is not an approval is `counted: false`, except on a waived step, where every record is `null`. On a waived step `stale` is `null` too, because that check never judges it — although
-`yad gate status` still prints a stale count there. In solo mode `stale` is still told. A version number
-for this output, apart from `schemaVersion`, is left to E1.
+`yad gate status` still prints a stale count there. In solo mode `stale` is still told.
 
 ## File shape: `schemaVersion`
 
@@ -1515,6 +1595,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-CFG-003` | `testing.json` names an unknown testing tool | expected one of `config.yaml` `testing.tools` (e.g. `playwright`, `cypress`, `pytest`, `maestro`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-004` | `learning.json` names an unknown learning tool | expected one of `config.yaml` `learning.tools` (e.g. `deeptutor`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-005` | `hub.json` sets a platform but is missing `git_url` (needed to scope auth + open PRs) | add `git_url` to `.sdlc/hub.json`, or re-run `yad setup` — it backfills it from the origin remote |
+| `YAD-CLI-001` | a `--json` run needed an answer only a prompt could give (E1) | a `--json` run never asks a question. Pass the answer as a flag (`yad --help` lists them), set `SDLC_NONINTERACTIVE=1` to take the defaults, or run without `--json` |
 
 Filing a bug? The fastest path is **`yad report`** — it files the issue for you in the yadflow repo
 with **auto-scrubbed** diagnostics (versions, tool present+authenticated booleans, the Product platform

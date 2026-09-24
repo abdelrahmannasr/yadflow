@@ -29,7 +29,7 @@
 // a login.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, note, readJSON, run } from './lib.mjs';
+import { c, log, ok, note, readJSON, run, emitJSON, collectWarning } from './lib.mjs';
 import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { epicRoot, ledgerPersonLogin, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
@@ -47,7 +47,7 @@ function readLedger(p, def) {
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch (e) {
-    note(c.yellow(`skipped unreadable ledger ${path.basename(path.dirname(path.dirname(p)))}/${path.basename(p)}: ${e.message}`));
+    { const w = `skipped unreadable ledger ${path.basename(path.dirname(path.dirname(p)))}/${path.basename(p)}: ${e.message}`; collectWarning(w); note(c.yellow(w)); }
     return def;
   }
 }
@@ -369,16 +369,24 @@ function writeReport(dest, content) {
   fs.writeFileSync(dest, content);
 }
 
-export function runUsage(root, { out, since, until, all, member, format = 'html', repos = false, json = false, today = '' } = {}) {
+export function runUsage(root, { out, since, until, all, member, format, repos = false, json = false, today = '' } = {}) {
   if (all) { since = undefined; until = undefined; }
   // Dates compare lexically as strings, so an unpadded value (2026-6-1) silently mis-windows — warn.
   for (const [flag, val] of [['--since', since], ['--until', until]]) {
-    if (val && !DATE_RE.test(val)) note(c.yellow(`${flag} ${val} is not YYYY-MM-DD — dates compare lexically, so a non-padded value may filter incorrectly`));
+    if (val && !DATE_RE.test(val)) { const w = `${flag} ${val} is not YYYY-MM-DD — dates compare lexically, so a non-padded value may filter incorrectly`; collectWarning(w); note(c.yellow(w)); }
   }
-  let fmt = json ? 'json' : format;
-  if (!['html', 'json', 'md'].includes(fmt)) { note(c.yellow(`unknown --format ${fmt} (html|json|md) — using html`)); fmt = 'html'; }
+  // `--json` is the command's answer in E1's envelope; `--format json` is a REPORT format — the bare model,
+  // written to --out or printed — and stays that. With both, the report is written and the answer says where.
+  // With --json and no --format, a report written to --out is the JSON model, as it was before E1.
+  let fmt = json && format === undefined ? 'json' : (format ?? 'html');
+  if (!['html', 'json', 'md'].includes(fmt)) { const w = `unknown --format ${fmt} (html|json|md) — using html`; collectWarning(w); note(c.yellow(w)); fmt = 'html'; }
   const model = buildModel(root, { since, until, repos, member });
 
+  if (json) {
+    if (out) { writeReport(out, fmt === 'json' ? `${JSON.stringify(model, null, 2)}\n` : fmt === 'md' ? renderMarkdown(model, today) : renderHtml(model, today)); note(`wrote ${fmt.toUpperCase()} report → ${out}`); }
+    emitJSON({ ...model, out: out || null });
+    return model;
+  }
   if (fmt === 'json') {
     const s = JSON.stringify(model, null, 2);
     if (out) { writeReport(out, s + '\n'); note(`wrote JSON → ${out}`); } else { log(s); } // stdout stays pure JSON

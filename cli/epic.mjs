@@ -31,7 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok, readJSON, warn } from './lib.mjs';
+import { c, fail, hand, info, log, ok, readJSON, warn, emitJSON } from './lib.mjs';
 import {
   DISCOVERY_EPIC, epicIds, epicLineage, epicRel, epicRoot, epicStories, featureStatus, FOUNDATION_EPIC, FOUNDATION_SECTIONS,
   isGenesisType, isValidEpicId, lifecycleProfile, loadLedger, loadSkillBindings, PRODUCT_DONE, PRODUCT_EPICS,
@@ -53,7 +53,7 @@ export function epicIdFrom(slug) {
 // flag at all — which is what lets an existing `epic.md` supply the answer without overriding the user.
 export async function runEpicNew(root, { slug, type = null, profile = null, stub = false, parent = null, inherits = null, today, json = false } = {}) {
   const bail = (message, hint) => {
-    if (json) log(JSON.stringify({ ok: false, error: message, hint }, null, 2));
+    if (json) emitJSON({ ok: false, error: message, hint });
     else { fail(message); if (hint) hand(hint); }
     process.exitCode = 1;
   };
@@ -229,11 +229,11 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   // `nextSkills` appears only for a bound chain, the same rule `yad next --json` follows — a key that
   // showed up on every seed would be one more always-null field for every reader to ignore.
   if (json) {
-    return log(JSON.stringify({
+    return emitJSON({
       ok: true, epic, type, profile, stub, currentStep: state.currentStep,
       steps: state.steps.map((s) => s.id), next: skill,
       ...(skills.length > 1 ? { nextSkills: skills } : {}),
-    }, null, 2));
+    });
   }
   ok(`${epic} seeded — ${stub ? 'stub anchor' : typeNoun(type)} on the ${c.bold(profile)} route (${state.steps.length} steps)`);
   info(`chain: ${state.steps.map((s) => (!stub && s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
@@ -317,12 +317,12 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
   const skills = stepSkills(first.id, loadSkillBindings(root));
   const carried = state.steps.filter((s) => s.inherited);
   if (json) {
-    return log(JSON.stringify({
+    return emitJSON({
       ok: true, epic, type, profile: plan.profile, stub: false, parent, thread: plan.thread,
       inherits, inheritedFrom: plan.owners, pointerLock: plan.lock ? plan.lock.ref : null, anchor: plan.anchor,
       currentStep: state.currentStep, steps: state.steps.map((s) => s.id), next: skills[0] || null,
       ...(skills.length > 1 ? { nextSkills: skills } : {}),
-    }, null, 2));
+    });
   }
   ok(`${epic} seeded — ${typeNoun(type)} threaded off ${parent}, on its ${c.bold(plan.profile)} route (${state.steps.length} steps, ${carried.length} carried by reference)`);
   info(`chain: ${state.steps.map((s) => (s.inherited ? c.dim(`${s.id}←${s.inheritedFrom}`) : s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
@@ -360,7 +360,7 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
 //     that ledger and cannot be asked to move it.
 export async function runFoundationNew(root, { today, json = false } = {}) {
   const bail = (message, hint) => {
-    if (json) log(JSON.stringify({ ok: false, error: message, hint }, null, 2));
+    if (json) emitJSON({ ok: false, error: message, hint });
     else { fail(message); if (hint) hand(hint); }
     process.exitCode = 1;
   };
@@ -394,12 +394,12 @@ export async function runFoundationNew(root, { today, json = false } = {}) {
   const required = FOUNDATION_SECTIONS.filter((s) => !s.optional).map((s) => s.file);
   const optional = FOUNDATION_SECTIONS.filter((s) => s.optional).map((s) => s.file);
   if (json) {
-    return log(JSON.stringify({
+    return emitJSON({
       ok: true, epic: FOUNDATION_EPIC, profile: state.profile, currentStep: state.currentStep,
       steps: state.steps.map((s) => s.id), next: skill,
       ...(skills.length > 1 ? { nextSkills: skills } : {}),
       sections: { required, optional },
-    }, null, 2));
+    });
   }
   ok(`${FOUNDATION_EPIC} seeded — the Product level, in ${epicRel(FOUNDATION_EPIC)}/ (${state.steps.length} steps)`);
   info(`chain: ${state.steps.map((s, i) => (i === 0 ? c.bold(s.id) : s.id)).join(' → ')}`);
@@ -428,7 +428,7 @@ const writtenDisagrees = (written, status) => {
 
 export async function runFoundationStatus(root, { json = false } = {}) {
   const bail = (message, hint) => {
-    if (json) log(JSON.stringify({ ok: false, error: message, hint }, null, 2));
+    if (json) emitJSON({ ok: false, error: message, hint });
     else { fail(message); if (hint) hand(hint); }
     process.exitCode = 1;
   };
@@ -483,7 +483,7 @@ export async function runFoundationStatus(root, { json = false } = {}) {
   });
 
   if (json) {
-    return log(JSON.stringify({ ok: true, epic: productId, roadmap: rel, approved, features, unlisted, ...(warnings.length ? { warnings } : {}) }, null, 2));
+    return emitJSON({ ok: true, epic: productId, roadmap: rel, approved, features, unlisted, ...(warnings.length ? { warnings } : {}) });
   }
   for (const w of warnings) warn(w);
   log(`\n  ${c.bold(`${productId} roadmap`)}  ${c.dim(`${rel} — each status is read from the epic ledgers`)}`);

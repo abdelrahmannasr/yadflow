@@ -17,11 +17,11 @@ export async function runShip(root, opts = {}) {
     contractChange: opts.contractChange, dryRun: opts.dryRun, force: opts.force,
   });
 
-  if (opts.dryRun) { info('dry run — not committed, PR/MR not opened'); return committed; }
+  if (opts.dryRun) { info('dry run — not committed, PR/MR not opened'); return { ...committed, pr: null }; }
 
   // runCommit signals failure by setting process.exitCode (not by throwing) — honour it and abort the
   // PR step so we never open a PR for a branch whose commit did not land.
-  if (process.exitCode) { info('commit did not land — skipping open-pr'); return committed; }
+  if (process.exitCode) { info('commit did not land — skipping open-pr'); return committed && { ...committed, pr: null }; }
 
   // Step 2 — open the task PR/MR from the committed template (pushes the branch, assigns the committer,
   // requests no reviewers — E62). Pass ONLY an explicit --title: when omitted, runOpenPr derives the title
@@ -33,5 +33,6 @@ export async function runShip(root, opts = {}) {
     risk: opts.risk, contractChange: opts.contractChange,
   });
 
-  return { ...committed, ...opened };
+  // The commit's keys, and the PR open-pr opened (or null when it opened none).
+  return { ...committed, pr: opened ?? null };
 }

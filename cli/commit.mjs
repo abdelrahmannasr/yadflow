@@ -53,7 +53,7 @@ export async function runCommit(root, opts = {}) {
   if (!staged.length) { fail('nothing staged — `git add` your atomic change first'); process.exitCode = 1; return; }
 
   if (staged.length > ATOMIC_FILE_LIMIT && !opts.force) {
-    warn(`${staged.length} files staged (atomic guard: ≤${ATOMIC_FILE_LIMIT}). Split the change, or pass --force.`);
+    fail(`${staged.length} files staged (atomic guard: ≤${ATOMIC_FILE_LIMIT}). Split the change, or pass --force.`);
     for (const f of staged) info(f);
     process.exitCode = 1;
     return;
@@ -78,13 +78,16 @@ export async function runCommit(root, opts = {}) {
     });
   } catch (e) { fail(e.message); process.exitCode = 1; return; }
 
-  if (opts.dryRun) { log('\n' + c.dim(message) + '\n'); info('dry run — not committed'); return { message }; }
+  // The --json answer (E1): what was (or would be) committed.
+  const answer = { message, task: task || null, files: staged, contractChange: !!opts.contractChange };
+  if (opts.dryRun) { log('\n' + c.dim(message) + '\n'); info('dry run — not committed'); return { ...answer, committed: false, dryRun: true }; }
 
   const r = run('git', ['commit', '-m', message], { cwd: root });
-  if (!r.ok) { fail(`git commit failed — ${r.stderr.split('\n')[0] || r.code}`); process.exitCode = 1; return { message }; }
+  if (!r.ok) { fail(`git commit failed — ${r.stderr.split('\n')[0] || r.code}`); process.exitCode = 1; return { ...answer, committed: false, dryRun: false }; }
   ok(`committed ${staged.length} file(s)${task ? ` for ${task}` : ''}`);
   if (opts.contractChange) warn('Contract-Change: yes — this routes back to the architecture gate');
-  return { message };
+  const sha = run('git', ['rev-parse', 'HEAD'], { cwd: root });
+  return { ...answer, committed: true, dryRun: false, commit: sha.ok ? sha.stdout : null };
 }
 
 // installed by yad-implement, but offer it here too for convenience.

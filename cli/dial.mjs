@@ -14,7 +14,7 @@
 // gate` — and never fails because the run record beside the dial cannot be read.
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok, readJSONStrict, warn, writeJSON } from './lib.mjs';
+import { c, fail, hand, info, ok, readJSONStrict, warn, writeJSON, emitJSON } from './lib.mjs';
 import {
   effectiveAdvance, epicRel, epicRoot, epicStories, isGateStep, killSwitchOn, loadAutomation, loadLedger, planKill,
   planLaneDial, planShapeDial, serializeAutomation, stepDef,
@@ -24,7 +24,7 @@ import { readTrustRuns } from './ledger.mjs';
 import { recordActor } from './skip.mjs';
 
 const makeBail = (json) => (message, hint) => {
-  if (json) log(JSON.stringify({ ok: false, error: message, hint: hint || null }, null, 2));
+  if (json) emitJSON({ ok: false, error: message, hint: hint || null });
   else { fail(message); if (hint) hand(hint); }
   process.exitCode = 1;
 };
@@ -55,10 +55,10 @@ export async function runDial(root, { epic = null, story = null, repo = null, st
 // The answer for a gate asked with no `--to`: always a person. Not a refusal (see the header).
 function gateAnswer({ json, automation, scope, fields, label }) {
   if (json) {
-    return log(JSON.stringify({
+    return emitJSON({
       ok: true, scope, ...fields, set: 'human', advance: 'human', why: 'gate', changed: false,
       kill: automation.kill, trust: null, ...errorKey(automation),
-    }, null, 2));
+    });
   }
   ok(`${label} — advance: human (a review gate: always a person)`);
 }
@@ -79,10 +79,10 @@ function dialShape(root, { step, to, json, bail, automation }) {
   if (to && plan.changed) writeJSON(path.join(root, PROJECT_FILES.automationConfig), serializeAutomation(plan.automation));
   const eff = effectiveAdvance({ id: step }, { ...after, error: automation.error });
   if (json) {
-    return log(JSON.stringify({
+    return emitJSON({
       ok: true, scope: 'shape', step, set: eff.set, advance: eff.advance, why: eff.why,
       changed: !!to && plan.changed, kill: automation.kill, trust: null, ...errorKey(automation),
-    }, null, 2));
+    });
   }
   const label = c.bold(step);
   if (!to) ok(`${label} — advance: ${eff.set}${eff.why === 'kill' ? ' (held at human)' : ''}`);
@@ -130,11 +130,11 @@ function dialLane(root, { epic, story, repo, step, to, json, bail, automation })
   const eff = effectiveAdvance(row, automation);
 
   if (json) {
-    return log(JSON.stringify({
+    return emitJSON({
       ok: true, scope: 'lane', epic, story, repo, step, set: eff.set, advance: eff.advance, why: eff.why,
       changed: !!to && plan.changed, kill: automation.kill, trust, ...errorKey(automation),
       ...(trustError ? { trustError } : {}),
-    }, null, 2));
+    });
   }
   if (!to) ok(`${label} — advance: ${eff.set}${eff.why === 'kill' ? ' (held at human)' : ''}`);
   else if (plan.changed && plan.before === to) ok(`${label} was already advance: ${to} — the new dial name was added beside the old one`);
@@ -166,7 +166,7 @@ export async function runKill(root, { on, reason = null, json = false, today = n
   if (!plan.ok) return bail(plan.message, plan.hint);
   if (!plan.already) writeJSON(path.join(root, PROJECT_FILES.automationConfig), serializeAutomation(plan.automation));
   const kill = plan.automation.kill;
-  if (json) return log(JSON.stringify({ ok: true, kill, changed: !plan.already }, null, 2));
+  if (json) return emitJSON({ ok: true, kill, changed: !plan.already });
   if (plan.already) {
     ok(`the kill switch was already ${on ? 'on' : 'off'} — nothing changed`);
     if (on) info(killLine(kill));

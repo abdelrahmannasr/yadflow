@@ -36,6 +36,12 @@ export function recordActor(root) {
   return actorName(root, platform);
 }
 
+// The `--json` answer (E1) of every verb here: the step as the file now holds it.
+function stepAnswer(state, epic, step) {
+  const s = (Array.isArray(state.steps) ? state.steps : []).find((x) => x?.id === step) || null;
+  return { epic, step, state: s ? stepStatus(s) : null, debt: s?.debt === true, record: s?.record ?? null, currentStep: state.currentStep ?? null };
+}
+
 // What differs between the two verbs, as a person reads it.
 const VERBS = {
   skip: {
@@ -108,14 +114,15 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
     refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null)); // E19: the default branch of a local Product only
     // A deferral put back after later work finished RE-OPENS beside that work (E41), and `currentStep`
     // stays where the chain is — so "back in the chain" and a currentStep line would both mislead.
-    if (isReopenedStep(ledger.state, step)) {
+    const answer = { ...stepAnswer(ledger.state, epic, step), changed: true, reopened: isReopenedStep(ledger.state, step) };
+    if (answer.reopened) {
       ok(`${step} ${V.undone} — re-opened beside the work already finished after it, which stays done`);
       hand(`currentStep stays ${ledger.state.currentStep}; see the re-opened lane with: yad next ${epic}`);
-      return;
+      return answer;
     }
     ok(`${step} ${V.undone} — back in the chain`);
     hand(`currentStep is now ${ledger.state.currentStep}`);
-    return;
+    return answer;
   }
 
   const by = recordActor(root);
@@ -134,11 +141,12 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
     const r = after?.record || {};
     ok(`${step} was already ${V.done}${r.by ? ` by ${r.by}` : ''}${r.date ? ` on ${r.date}` : ''}${owed && !owedBefore ? ' — now marked as debt' : ' — nothing changed'}`);
     if (r.reason) info(`reason: ${r.reason}`);
-    return;
+    return { ...stepAnswer(ledger.state, epic, step), changed: owed && !owedBefore };
   }
   ok(`${step} ${V.done}${owed ? ' as debt' : ''}${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
   hand(`${V.gate}; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad ${V.undo} ${epic} ${step}\`)`);
+  return { ...stepAnswer(ledger.state, epic, step), changed: true };
 }
 
 // `yad skip <epic> <story> --repo <name> --reason "<why>"` / `yad unskip <epic> <story> --repo <name>`
@@ -167,7 +175,7 @@ export async function runLaneSkip(root, { epic, story, repo, reason, undo = fals
     if (reason != null && reason !== true) info('--reason is not used when un-skipping: the skip record is removed with the skip');
     ok(`${story} / ${repo} un-skipped — the lane is owed again`);
     hand(`yad-run adds the lane the next time ${story} is driven in ${repo}; commit this with \`yad checkpoint --push\``);
-    return;
+    return { epic, story, repo, skipped: false, changed: true, record: null, file: path.relative(root, file) };
   }
 
   const entry = epicStories(epicDir).find((st) => st.id === story);
@@ -185,12 +193,13 @@ export async function runLaneSkip(root, { epic, story, repo, reason, undo = fals
     const r = current.repos[repo].record || {};
     ok(`${story} / ${repo} was already skipped${r.by ? ` by ${r.by}` : ''}${r.date ? ` on ${r.date}` : ''} — nothing changed`);
     if (r.reason) info(`reason: ${r.reason}`);
-    return;
+    return { epic, story, repo, skipped: true, changed: false, record: current.repos[repo].record ?? null, file: path.relative(root, file) };
   }
   writeJSON(file, buildState);
   ok(`${story} / ${repo} lane skipped — N/A${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
   hand(`the feature can ship without it; commit this with \`yad checkpoint --push\`  (reverse with \`yad unskip ${epic} ${story} --repo ${repo}\`)`);
+  return { epic, story, repo, skipped: true, changed: true, record: buildState.repos?.[repo]?.record ?? null, file: path.relative(root, file) };
 }
 
 export const runSkip = (root, opts) => runSetAside(root, 'skip', opts);
@@ -213,4 +222,5 @@ export async function runUnblock(root, { epic, step, runner } = {}) {
   ok(`${step} unblocked — now ${ledger.state.steps.find((s) => s?.id === step).status}`);
   if (was) info(`cleared: ${was}`);
   hand(`see what to do now: yad next ${epic}`);
+  return { ...stepAnswer(ledger.state, epic, step), changed: true, cleared: was };
 }

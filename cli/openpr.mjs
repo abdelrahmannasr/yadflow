@@ -349,5 +349,7 @@ export async function runOpenPr(root, opts = {}) {
   if (count) for (const [say, line] of count.lines) say(line);
   else if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` to see how many approvers it asks for');
   if (stage === 'code-repo') for (const [say, line] of suggestReviewers(repoRoot, baseBranch, platform, { remote }).lines) say(line);
-  return { url: r.url };
+  // The --json answer (E1). The count and the reviewer suggestion are said in prose, and a warning among
+  // them reaches `warnings`; nothing here is a request — no reviewer is ever asked for (E62).
+  return { url: r.url, platform, stage, base: baseBranch, baseSource, branch, title, task: task || null };
 }
