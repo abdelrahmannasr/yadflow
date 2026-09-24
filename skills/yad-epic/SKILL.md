@@ -113,10 +113,19 @@ branch. Author and commit `epic.md` on it. This is **distinct** from the verifie
 Adopt the **pm** lens and write `{project-root}/epics/EP-<slug>/epic.md`
 using EXACTLY this template (build plan §6b).
 
-**Four of these keys are read by machines, so write them BARE — no trailing `#` comment.** The
+**Five of these keys are read by machines, so write them BARE — no trailing `#` comment.** The
 frontmatter readers (`readFrontmatter` in the CLI, `fm_val` in the check gates) keep the whole rest of
 the line, so a comment becomes part of the value and the gates stop recognising it:
 
+- `title` is the epic's **one-line name** — the name a list of work items shows for it (E111; it is carried in `.sdlc/index.json`). Plain words,
+  such as `Checkout from the mobile app`, on ONE line. Quotes are optional: a title quoted the YAML way
+  (`"…"` or `'…'`) is read without them. If the title begins with `[` and ends with `]` (such as
+  `[Mobile] Checkout [v2]`), wrap it in double quotes, writing an inner `"` as `\"` — otherwise it is
+  read as a list, which is not a title. The full rules are the `title` row of the frontmatter table in
+  `references/state-schema.md`. Never end it with a `#` comment (the comment becomes part of the title), and never use a YAML
+  block (`>` or `|`): only one line is read. Set it NOW, for the same reason as the theme below: the epic review gate is bound to a hash of
+  the file, so a title added or reworded after that gate is approved drops the approval as stale. An
+  epic with no title is shown by its id.
 - `kind` and `type` are the **work-item type**, and both carry the same value. `kind:` is the name
   every reader still uses; `type:` is the name from shape 5 on. Write both. Use `feature` for new
   value, or `chore` for upkeep with no user-visible change — those are the two types allowed to stand
@@ -139,6 +148,7 @@ the line, so a comment becomes part of the value and the gates stop recognising 
 ```markdown
 ---
 id: EP-<slug>
+title: <one line: what this epic delivers>
 status: draft
 kind: feature
 type: feature

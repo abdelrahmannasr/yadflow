@@ -21345,7 +21345,7 @@ test('E19 buildIndex: a summary per work item, the Foundation included, read thr
     assert.deepEqual(index.items.map((i) => i.id), ['EP-a', 'EP-b', 'EP-foundation'], 'one enumerator, sorted, the product level included');
     const [a, b, f] = index.items;
     assert.deepEqual(a, {
-      id: 'EP-a', dir: 'epics/EP-a', kind: null, type: 'change', theme: 'Checkout', parent: 'EP-root', thread: 'EP-root',
+      id: 'EP-a', dir: 'epics/EP-a', title: null, kind: null, type: 'change', theme: 'Checkout', parent: 'EP-root', thread: 'EP-root',
       profile: 'classic', currentStep: 'architecture', createdAt: '2026-9-4', repos: ['api', 'web'],
       steps: { todo: 1, in_progress: 1, in_review: 0, done: 2, skipped: 1, deferred: 0, satisfied: 0, blocked: 0, unknown: 1 },
       lastClosed: { step: 'epic-review', date: '2026-09-02', by: 'bo' },
@@ -21353,6 +21353,8 @@ test('E19 buildIndex: a summary per work item, the Foundation included, read thr
     assert.equal(b.type, 'feature', 'an epic.md-less feature epic reads as a genesis, as `epicLineage` does');
     assert.deepEqual([b.kind, b.lastClosed, b.repos, 'unknown' in b.steps], ['stub', null, [], false]);
     assert.deepEqual([f.dir, f.type, f.theme, f.kind, f.repos], ['foundation', null, null, 'foundation', []], 'the Foundation has no work-item type (E75)');
+    assert.equal(a.title, null, 'the `# A` heading is not a title (E111)');
+    assert.equal(f.title, 'Foundation', 'the Foundation has no epic.md, so its title is a constant (E111)');
     assert.equal(Object.keys(index).join(','), 'inputs,items', 'no timestamp, and no `unlisted` when there is none');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -21650,7 +21652,7 @@ test('E19 yad doctor: the index section — each answer, on a local and a verifi
       writeIndex(T);
       assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'ok', message: '.sdlc/index.json is current' }]);
       fs.writeFileSync(path.join(T, 'epics/EP-a/.sdlc/state.json'), JSON.stringify(E19_STATE({ currentStep: 'ui' })));
-      assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'warn', message: '.sdlc/index.json is behind: the work items on disk differ from what it was built from', hint }]);
+      assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'warn', message: '.sdlc/index.json is behind: it is not what this yadflow builds from the work items on disk', hint }]);
       fs.writeFileSync(indexPath(T), '{ nope');
       assert.deepEqual(run(), [{ id: 'index', section: 'index', status: 'warn', message: '.sdlc/index.json cannot be read — .sdlc/index.json does not parse', hint }]);
       // It rides the whole doctor run, in its own section, and never turns it red.
@@ -21884,10 +21886,209 @@ test('E19 review: yad doctor on a branch says a difference is expected, instead 
     fs.writeFileSync(path.join(T, 'epics/EP-a/.sdlc/state.json'), JSON.stringify(E19_STATE({ currentStep: 'ui' })));
     let checks = [];
     indexChecks(checks, T);
-    assert.deepEqual(checks, [{ id: 'index', section: 'index', status: 'ok', message: ".sdlc/index.json differs from the work items on this branch — expected on 'feat/x': it is written on 'main' only, once this work merges" }]);
+    assert.deepEqual(checks, [{ id: 'index', section: 'index', status: 'ok', message: ".sdlc/index.json is not what this yadflow builds from the work items on this branch — expected on 'feat/x': it is written on 'main' only, once this work merges" }]);
     fs.writeFileSync(indexPath(T), '{ nope');
     checks = [];
     indexChecks(checks, T);
     assert.equal(checks[0].status, 'warn', 'an unreadable file is still a finding on a branch');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E111: a title for every work item -------------------------------------------------------------
+// The `title:` key in epic.md, else a change item's change.json title, else null. The Foundation's is a
+// constant. E19's index carries it, and change.json joins the bytes the index hashes.
+const { titleOf, FOUNDATION_TITLE, parseFrontmatter } = await import('./epic-state.mjs');
+
+test('E111 titleOf: the frontmatter key, then change.json, then null — normalized once', () => {
+  assert.equal(titleOf({ title: 'Checkout from the app' }), 'Checkout from the app');
+  assert.equal(titleOf({ title: '  Padded  ' }), 'Padded');
+  assert.equal(titleOf({ title: '"Queue: untested"' }), 'Queue: untested', 'one YAML-style pair of quotes comes off');
+  assert.equal(titleOf({ title: "'Single'" }), 'Single');
+  assert.equal(titleOf({ title: '"Unmatched\'' }), '"Unmatched\'', 'quotes that do not match are kept');
+  // Only a value that IS one YAML quoted scalar is unquoted (E111 review: both reviewers).
+  assert.equal(titleOf({ title: '"Login" is broken on "Safari"' }), '"Login" is broken on "Safari"', 'two quoted words are not one scalar');
+  assert.equal(titleOf({ title: "'Buy' button missing in 'Cart'" }), "'Buy' button missing in 'Cart'");
+  assert.equal(titleOf({ title: "'It''s done'" }), "It's done", 'YAML single-quote escape');
+  assert.equal(titleOf({ title: "'It''s ''done'''" }), "It's 'done'", 'every escape, not the first');
+  // Double quotes: JSON's escapes, which YAML's double-quoted style also has.
+  assert.equal(titleOf({ title: '"a \\"b\\" \\\\ c"' }), 'a "b" \\ c', 'a quote and a backslash');
+  assert.equal(titleOf({ title: '"Caf\\u00e9"' }), 'Café');
+  assert.equal(titleOf({ title: '"a\\tb\\nc"' }), 'a b c', 'a tab and a newline escape, then one line');
+  assert.equal(titleOf({ title: '"a\tb"' }), 'a b', 'a raw tab inside the quotes');
+  assert.equal(titleOf({ title: '"\\\\"' }), '\\', 'an escaped backslash alone');
+  // Not one quoted string: kept exactly as written, never half-read.
+  for (const kept of ['"a\\"', '"\\"', '"a\\ b"', '"x" # note', "'a''", "'''"]) {
+    assert.equal(titleOf({ title: kept }), kept, `kept as written: ${kept}`);
+  }
+  assert.equal(titleOf({ title: '"' }), '"', 'a lone quote is text');
+  assert.equal(titleOf({}, { title: '"Quoted in JSON"' }), '"Quoted in JSON"', 'a change.json title is JSON, never unquoted again');
+  // One line: a list prints one title per row.
+  assert.equal(titleOf({}, { title: 'line one\n  line two\t end ' }), 'line one line two end');
+  assert.equal(titleOf({ title: 'a    b' }), 'a b');
+  // Values that are no title, so the fallback shows through.
+  for (const none of ['>', '|', '>-', '|+', '|2', '>2-', '>+2', '|-1', '~', 'null', 'Null', 'NULL']) {
+    assert.equal(titleOf({ title: none }, { title: 'From intake' }), 'From intake', `no title: ${none}`);
+  }
+  assert.equal(titleOf({ title: '> more' }), '> more', 'a `>` with words after it is text');
+  // Only the WHOLE value is null or a marker, and a quoted one is text, as in YAML.
+  for (const text of ['Nullable fields on checkout', 'null value', '~x', 'nULL']) assert.equal(titleOf({ title: text }), text, `text: ${text}`);
+  assert.equal(titleOf({ title: "'null'" }), 'null');
+  assert.equal(titleOf({ title: '"~"' }), '~');
+  assert.equal(titleOf({ title: '">"' }), '>');
+  assert.equal(titleOf({ title: 'a\u00a0\u00a0b' }), 'a b', 'a no-break space is whitespace too');
+  // Control characters never reach a terminal that prints the title (E111 review 3).
+  assert.equal(titleOf({ title: '"\\u001b[31mRed\\u0007"' }), '[31mRed', 'an escaped ESC and BEL');
+  assert.equal(titleOf({ title: 'a\u0000b\u007f\u009bc' }), 'abc', 'raw NUL, DEL and a C1 control');
+  assert.equal(titleOf({ title: '"\\b"' }), null, 'nothing left but a backspace is no title');
+  assert.equal(titleOf({}, { title: 'x\u001by' }), 'xy', 'a change.json title too');
+  // The edges of the set: \t..\r and NEL are line breaks or spaces, so they become ONE space; the rest go.
+  assert.equal(titleOf({}, { title: 'a\u000bb\u000cc\rd\u0085e' }), 'a b c d e');
+  assert.equal(titleOf({ title: 'a\u001fb\u009fc\u0084d\u0086e' }), 'abcde');
+  // A raw control byte inside quotes no longer stops the quotes coming off (review 4).
+  assert.equal(titleOf({ title: '"a\u0001b"' }), 'ab');
+  assert.equal(titleOf({ title: '"a\u000bb"' }), 'a b');
+  // Bidi controls are dropped (they reverse what is SHOWN); zero-width joiners are kept (emoji, scripts).
+  assert.equal(titleOf({ title: 'abc\u202efed\u2066\u2069\u200e\u200f\u061c' }), 'abcfed');
+  assert.equal(titleOf({ title: '"\\u202eX"' }), 'X', 'an escaped RLO too');
+  assert.equal(titleOf({ title: 'a\u200db\u200cc' }), 'a\u200db\u200cc');
+  // The ORDER: cleaned first, then checked for "no title" — and a quoted value is still text (review 5).
+  for (const none of ['nu\u0000ll', '>\u0000', 'null\u0085', '\u202e~']) assert.equal(titleOf({ title: none }), null, JSON.stringify(none));
+  assert.equal(titleOf({ title: '"nu\u0000ll"' }), 'null', 'quoted, it is text');
+  assert.equal(titleOf({ title: ['x'] }, { title: 'y' }), 'y', 'a list falls through to change.json');
+  // Through the real reader: any value that begins with `[` and ends with `]` is a list; quoted, it is a title.
+  assert.equal(titleOf(parseFrontmatter('---\ntitle: [Mobile] Checkout [v2]\n---\n')), null);
+  assert.equal(titleOf(parseFrontmatter('---\ntitle: "[Mobile] Checkout [v2]"\n---\n')), '[Mobile] Checkout [v2]');
+  assert.equal(titleOf(parseFrontmatter('---\ntitle: [WIP] Fix login\n---\n')), '[WIP] Fix login');
+  assert.equal(titleOf({ title: 'He said "hi"' }), 'He said "hi"', 'only a pair around the WHOLE value');
+  assert.equal(titleOf({ title: 'Fix #42 in the queue' }), 'Fix #42 in the queue', 'a `#` is text');
+  for (const blank of ['', '   ', '""', "' '"]) assert.equal(titleOf({ title: blank }), null, `blank: ${JSON.stringify(blank)}`);
+  assert.equal(titleOf({ title: ['WIP'] }), null, 'a value the reader turned into a list is not a title');
+  assert.equal(titleOf({}, { title: 'From intake' }), 'From intake', 'a change item written before the key existed');
+  assert.equal(titleOf({ title: 'From epic.md' }, { title: 'From intake' }), 'From epic.md', 'the frontmatter key wins');
+  assert.equal(titleOf({ title: '  ' }, { title: 'From intake' }), 'From intake', 'a blank key falls through');
+  for (const change of [null, [], 'x', { title: 7 }, { title: '' }, {}]) assert.equal(titleOf({}, change), null, `no title in ${JSON.stringify(change)}`);
+  assert.equal(titleOf(), null);
+  assert.equal(FOUNDATION_TITLE, 'Foundation');
+});
+
+test('E111 buildIndex: each item carries its title; a broken change.json leaves it null, never unreadable', () => {
+  const CHANGE = (title) => ({ epicId: 'EP-c', depth: 'defect-fix', title });
+  const T = indexFixture({
+    'epics/EP-a/.sdlc/state.json': E19_STATE(),
+    'epics/EP-a/epic.md': '---\nid: EP-a\ntitle: "Checkout: cart to order"\nkind: feature\n---\n',
+    'epics/EP-b/.sdlc/state.json': E19_STATE(),
+    'epics/EP-b/epic.md': '---\nid: EP-b\ntitle: From epic.md\nkind: defect\n---\n',
+    'epics/EP-b/.sdlc/change.json': CHANGE('From intake'),
+    'epics/EP-c/.sdlc/state.json': E19_STATE(),
+    'epics/EP-c/epic.md': '---\nid: EP-c\nkind: defect\n---\n# Heading is not a title\n',
+    'epics/EP-c/.sdlc/change.json': CHANGE('Pending queue exclusion is untested'),
+    'epics/EP-d/.sdlc/state.json': E19_STATE(),
+    'epics/EP-d/epic.md': '---\nid: EP-d\nkind: feature\n---\n',
+    'epics/EP-e/.sdlc/state.json': E19_STATE(),
+    'epics/EP-e/.sdlc/change.json': '{ not json',
+    'foundation/.sdlc/state.json': { steps: [] },
+    'foundation/.sdlc/change.json': CHANGE('never read'),
+  });
+  try {
+    const by = Object.fromEntries(buildIndex(T).index.items.map((i) => [i.id, i]));
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(by).map(([id, i]) => [id, i.title])),
+      { 'EP-a': 'Checkout: cart to order', 'EP-b': 'From epic.md', 'EP-c': 'Pending queue exclusion is untested', 'EP-d': null, 'EP-e': null, 'EP-foundation': 'Foundation' },
+    );
+    assert.ok(!by['EP-e'].unreadable, 'change.json is a fallback source only; doctor reports one that does not parse');
+    assert.deepEqual(Object.keys(by['EP-a']).slice(0, 3), ['id', 'dir', 'title']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E111 index hash: change.json is an input — adding or editing it moves the hash; the Foundation\'s is not read', () => {
+  const T = indexFixture({
+    'epics/EP-a/.sdlc/state.json': E19_STATE(),
+    'epics/EP-a/epic.md': '---\nkind: defect\n---\n',
+    'foundation/.sdlc/state.json': { steps: [] },
+  });
+  try {
+    const h0 = buildIndex(T).inputs;
+    fs.writeFileSync(path.join(T, 'foundation', '.sdlc', 'change.json'), '{"title":"x"}');
+    assert.equal(buildIndex(T).inputs, h0, 'the Foundation reads no change.json');
+    const file = path.join(T, 'epics', 'EP-a', '.sdlc', 'change.json');
+    fs.writeFileSync(file, '{"title":"One"}');
+    const h1 = buildIndex(T).inputs;
+    assert.notEqual(h1, h0, 'a change.json appearing');
+    writeIndex(T);
+    fs.writeFileSync(file, '{"title":"Two"}');
+    assert.notEqual(buildIndex(T).inputs, h1, 'a change.json edited');
+    assert.deepEqual(indexFreshness(T), { state: 'behind' }, 'so a retitled change leaves the index behind');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E111 review: CRLF and LF change.json files hash and title the same', () => {
+  const lf = {
+    'epics/EP-a/.sdlc/state.json': '{\n  "steps": []\n}\n',
+    'epics/EP-a/epic.md': '---\nkind: defect\n---\n',
+    'epics/EP-a/.sdlc/change.json': '{\n  "title": "Queue"\n}\n',
+  };
+  const crlf = Object.fromEntries(Object.entries(lf).map(([k, v]) => [k, v.replace(/\n/g, '\r\n')]));
+  const A = indexFixture(lf);
+  const B = indexFixture(crlf);
+  try {
+    assert.equal(buildIndex(A).inputs, buildIndex(B).inputs);
+    assert.equal(buildIndex(B).index.items[0].title, 'Queue');
+  } finally { fs.rmSync(A, { recursive: true, force: true }); fs.rmSync(B, { recursive: true, force: true }); }
+});
+
+test('E111 uncommittedIndexInputs: an ignored or untracked change.json keeps the index out of the commit', async () => {
+  const { uncommittedIndexInputs } = await import('./product-index.mjs');
+  // The IGNORED arm is the one that needs change.json in the twin's list: `git status` already names an
+  // untracked file, and never an ignored one.
+  for (const [label, ignore] of [['an ignored change.json', 'change.json\n'], ['an untracked change.json', '']]) {
+    const T = indexFixture({
+      'epics/EP-a/.sdlc/state.json': E19_STATE(),
+      'epics/EP-a/epic.md': '---\nkind: defect\n---\n',
+      '.gitignore': ignore || '# nothing\n',
+    });
+    try {
+      git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+      git(T, 'add', '-A');
+      git(T, 'commit', '-q', '-m', 'seed');
+      assert.deepEqual(uncommittedIndexInputs(T), [], `${label}: a clean checkout`);
+      fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'change.json'), '{"title":"x"}');
+      assert.ok(buildIndex(T).index.items[0].title === 'x', `${label}: the index reads it`);
+      assert.deepEqual(uncommittedIndexInputs(T), ['epics/EP-a/.sdlc/change.json'], `${label}: so the commit must hold it`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('E111 review: the twin adds no file buildIndex does not read — the Foundation\'s IGNORED epic.md and change.json are not added', async () => {
+  const { uncommittedIndexInputs } = await import('./product-index.mjs');
+  for (const ignore of ['epic.md\nchange.json\n', '# nothing\n']) {
+    const T = indexFixture({ 'foundation/.sdlc/state.json': { steps: [] }, '.gitignore': ignore });
+    try {
+      git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+      git(T, 'add', '-A');
+      git(T, 'commit', '-q', '-m', 'seed');
+      fs.writeFileSync(path.join(T, 'foundation', 'epic.md'), '---\ntitle: x\n---\n');
+      fs.writeFileSync(path.join(T, 'foundation', '.sdlc', 'change.json'), '{"title":"x"}');
+      const expected = ignore.startsWith('#') ? ['foundation/.sdlc/change.json', 'foundation/epic.md'] : [];
+      // Untracked files under foundation/ are named by `git status` (erring wide, as E19 chose); ignored
+      // ones are not, and the twin must not add them, since buildIndex never reads them.
+      assert.deepEqual(uncommittedIndexInputs(T), expected, JSON.stringify(ignore));
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('E111 review: an index built by the E19 format reads behind over unchanged work items, and doctor names no changed file', async () => {
+  const { indexChecks } = await import('./doctor.mjs');
+  const T = indexFixture({
+    '.sdlc/hub.json': { platform: 'github', default_branch: 'main' },
+    'epics/EP-a/.sdlc/state.json': E19_STATE(), 'epics/EP-a/epic.md': '---\ntitle: A\n---\n',
+  });
+  try {
+    writeIndex(T, buildIndex(T, { format: 'e19-1' }));
+    assert.deepEqual(indexFreshness(T), { state: 'behind' }, 'the same work items, an older summary format');
+    const checks = [];
+    indexChecks(checks, T);
+    assert.equal(checks[0].message, '.sdlc/index.json is behind: it is not what this yadflow builds from the work items on disk');
+    writeIndex(T);
+    assert.deepEqual(indexFreshness(T), { state: 'current' }, 'a rebuild heals it');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

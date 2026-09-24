@@ -3,7 +3,7 @@
 //
 // THE RULES, each one the user's decision (2026-09-23; the E19 roadmap row has the reasons):
 //   1. DERIVED, never the system of record. It is rebuilt from `epicIds()` plus each item's
-//      `.sdlc/state.json` and `epic.md` frontmatter, and never edited by hand (phase 5's founding rule:
+//      `.sdlc/state.json`, `epic.md` frontmatter and `.sdlc/change.json`, and never edited by hand (phase 5's founding rule:
 //      rebuildable from git). It is committed, but WRITTEN ON THE DEFAULT BRANCH ONLY: an index every
 //      branch rewrites would bring back the merge conflict `cli/ledger.mjs` sharded the ledgers to remove.
 //   2. A SUMMARY per item, not a mirror of every step. An item whose files cannot be read is LISTED,
@@ -11,7 +11,10 @@
 //      under-count E71 warned about), and never allowed to stop the whole file.
 //   3. STALENESS is a hash of the exact bytes the index was built from (`inputs`), the `docs-build.json`
 //      precedent — not a HEAD sha, which moves on commits that touch no work item. `yad doctor` checks it.
-//   4. No title: none exists anywhere yet (E111).
+//   4. The TITLE is `titleOf` (E111): the `title:` key in `epic.md`, else the item's `change.json`
+//      title (only change items have one), else null. `change.json` is read only for that fallback,
+//      so one that cannot be read or parsed leaves the title null rather than the item unreadable —
+//      `yad doctor` already fails such a file. Its bytes are hashed either way.
 //
 // There is NO timestamp in the file: `writeJSON` skips identical bytes, so an unchanged Product never
 // dirties git, and the hash is the version.
@@ -24,7 +27,7 @@ import { isVerifiedLedger } from './manifest.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 import {
   epicIds, epicRel, epicRoot, unlistedLedgerDirs, parseFrontmatter, lineageFrom, stepStatus, STEP_STATES,
-  FOUNDATION_EPIC,
+  FOUNDATION_EPIC, FOUNDATION_TITLE, titleOf,
 } from './epic-state.mjs';
 
 export const INDEX_FILE = path.join('.sdlc', 'index.json');
@@ -32,7 +35,7 @@ export const indexPath = (root) => path.join(root, INDEX_FILE);
 
 // Mixed into the hash, so an engine that builds a DIFFERENT summary from the same inputs reads the old
 // file as behind. Move it whenever `summarize` changes what it writes.
-export const INDEX_FORMAT = 'e19-1';
+export const INDEX_FORMAT = 'e111-1';
 
 // One input file's bytes, or why there are none. `absent` is a fact, not an error: an epic folder with no
 // `epic.md` (the Foundation, always) is a normal shape.
@@ -80,12 +83,22 @@ function readState(input) {
   return { state };
 }
 
+// A change item's intake record, read for its title only (rule 4). `titleOf` takes any JSON value.
+function readChange(input) {
+  if (!input.bytes) return null;
+  try {
+    return JSON.parse(input.bytes.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
 const text = (v) => (typeof v === 'string' && v ? v : null);
 const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : typeof v === 'string' && v ? [v] : []);
 
 // The summary of one work item. Every value is what the files SAY — nothing is parsed further than the
 // field it is (a date is carried as written: E71 met `2026-9-4`, and nothing here needs a date's value).
-function summarize(id, state, fm) {
+function summarize(id, state, fm, change) {
   const counts = Object.fromEntries(STEP_STATES.map((s) => [s.id, 0]));
   let unknown = 0;
   let lastClosed = null;
@@ -107,6 +120,7 @@ function summarize(id, state, fm) {
   return {
     id,
     dir: epicRel(id),
+    title: product ? FOUNDATION_TITLE : titleOf(fm, change),
     kind: text(state.kind),
     type: lineage ? lineage.type : null,
     theme: lineage ? lineage.theme : null,
@@ -123,8 +137,9 @@ function summarize(id, state, fm) {
 
 // Build the index from the Product on disk: { index, inputs }. Never throws for a work item — each one
 // that cannot be read is listed as unreadable. Throws only when the `epics/` folder itself cannot be
-// listed, because then there is no honest list to write at all.
-export function buildIndex(root) {
+// listed, because then there is no honest list to write at all. `format`: for a test that builds the
+// index an older engine wrote.
+export function buildIndex(root, { format = INDEX_FORMAT } = {}) {
   const ids = epicIds(root);
   const unlisted = unlistedLedgerDirs(root, ids).map((e) => `epics/${e}`);
   const parts = [{ name: JSON.stringify({ ids, unlisted }), input: { absent: true } }];
@@ -133,14 +148,19 @@ export function buildIndex(root) {
     const dir = epicRoot(root, id);
     const stateIn = readInput(path.join(dir, '.sdlc', 'state.json'));
     const epicIn = id === FOUNDATION_EPIC ? { absent: true } : readInput(path.join(dir, 'epic.md'));
-    parts.push({ name: `${id}/state.json`, input: stateIn }, { name: `${id}/epic.md`, input: epicIn });
+    const changeIn = id === FOUNDATION_EPIC ? { absent: true } : readInput(path.join(dir, '.sdlc', 'change.json'));
+    parts.push(
+      { name: `${id}/state.json`, input: stateIn },
+      { name: `${id}/epic.md`, input: epicIn },
+      { name: `${id}/change.json`, input: changeIn },
+    );
     const read = readState(stateIn);
     if (read.why) { items.push({ id, dir: epicRel(id), unreadable: true, why: read.why }); continue; }
     if (epicIn.error) { items.push({ id, dir: epicRel(id), unreadable: true, why: `epic.md could not be read (${epicIn.error})` }); continue; }
     const fm = epicIn.bytes ? parseFrontmatter(epicIn.bytes.toString('utf8')) : {};
-    items.push(summarize(id, read.state, fm));
+    items.push(summarize(id, read.state, fm, readChange(changeIn)));
   }
-  const inputs = indexHash(parts);
+  const inputs = indexHash(parts, format);
   return { index: { inputs, items, ...(unlisted.length ? { unlisted } : {}) }, inputs };
 }
 
@@ -231,7 +251,9 @@ export function uncommittedIndexInputs(root, commits = null) {
   }
   for (const id of ids) {
     const rel = epicRel(id);
-    for (const f of [`${rel}/.sdlc/state.json`, ...(id === FOUNDATION_EPIC ? [] : [`${rel}/epic.md`])]) {
+    // The same files `buildIndex` reads, no more and no fewer.
+    const read = [`${rel}/.sdlc/state.json`, ...(id === FOUNDATION_EPIC ? [] : [`${rel}/epic.md`, `${rel}/.sdlc/change.json`])];
+    for (const f of read) {
       if (fs.existsSync(path.join(root, f)) && !tracked.has(f)) out.add(f);
     }
     if (!holds(`${rel}/`)) out.add(rel);

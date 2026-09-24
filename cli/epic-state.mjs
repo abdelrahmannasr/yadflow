@@ -3564,6 +3564,76 @@ export function themeOf(fm = {}) {
 // only: there is nothing here to compare.
 export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
+// ---- the title (E111) --------------------------------------------------------------------------
+// A work item's one-line name, for a reader that lists many (E20's `yad history list`, through E19's
+// index). The user's decisions (2026-09-24):
+//   - It is the `title:` key in `epic.md` frontmatter, which `yad-epic`, `yad-change` and `yad-stub`
+//     write. Not the first `# ` heading: the template has none, and a heading is prose, reworded freely.
+//   - An item with no key falls back to the `title` its `change.json` holds — only change items have
+//     one (`yad-change` has required a title from the start), so this covers the change items written
+//     before the key existed. The frontmatter key wins when both exist.
+//   - No title is `null`, never a guess (not the Goal's first sentence, not the id): a screen prints the
+//     id in its place, and nothing warns. Approved `epic.md` files are NOT back-filled — the epic review
+//     is bound to a hash of the file, so adding a line would drop the approval as stale.
+//   - The Foundation has no `epic.md`, so its title is a constant.
+//
+// Normalized HERE, once, like the theme. It is ONE line: every run of whitespace, a newline included,
+// becomes one space (NEL, U+0085, is a line break too), because a list prints one title per row. Control
+// characters are dropped: a title is printed to other people's terminals (E20), and an ESC or a BEL
+// there would rewrite or ring them. So are the bidi controls, which reverse how the rest of a row is
+// SHOWN, so one title can pass for another. Zero-width characters (the joiners among them) are kept:
+// emoji and several scripts (Persian among them) need them.
+//
+// The frontmatter value is also unquoted, because `readFrontmatter` keeps the rest of the line as
+// written: `title: "Queue: untested"` is `Queue: untested`. A single-quoted value undoes YAML's one
+// escape (`'It''s done'` is `It's done`). A double-quoted value is read with JSON's escapes (`\"`, `\\`,
+// `\n`, `\t`, `\u00e9` …), which YAML's double-quoted style also has; one using any other escape is
+// kept as written (quotes and backslashes included), never half-read. Only a value that IS one quoted
+// string is unquoted — `"Login" is broken on "Safari"` is not, and stays as written, and so does
+// `"x" # note`. The `change.json` title is JSON, already unquoted, and is never touched this way.
+//
+// The ORDER: the value is made one clean line first, then checked for "no title", then unquoted, then
+// cleaned again (an escape such as `\n` or `\u001b` can add what was cleaned). So the check sees the
+// cleaned value — `nu<NUL>ll` is YAML's null, which YAML itself would reject anyway — and never the
+// unquoted one: a quoted `'null'` or `">"` is text, as in YAML. Three frontmatter values are no title at
+// all: a list (`readFrontmatter` turns any value that begins with `[` and ends with `]` into one), a YAML
+// block marker (`>` or `|` — the reader keeps one line, so the block's text is lost), and YAML's null
+// (`~`, `null`, `Null`, `NULL`, the whole value).
+export const FOUNDATION_TITLE = 'Foundation';
+
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROLS = /[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const oneLine = (t) => t.replace(CONTROLS, '').replace(/[\s\u0085]+/gu, ' ').trim() || null;
+
+// One quoted string, unquoted — or the value unchanged when it is not exactly one. It is given a value
+// `oneLine` has already cleaned, so no raw control character (which JSON refuses) is left to stop it.
+function unquoteYaml(t) {
+  const single = t.match(/^'((?:[^']|'')*)'$/u);
+  if (single) return single[1].replace(/''/g, "'");
+  if (t[0] === '"') {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return t;
+    }
+  }
+  return t;
+}
+
+const titleFromFrontmatter = (v) => {
+  if (typeof v !== 'string') return null;
+  const t = oneLine(v);
+  if (t === null) return null;
+  if (/^[>|][+-]?[0-9]?[+-]?$/.test(t) || /^(~|null|Null|NULL)$/.test(t)) return null;
+  return oneLine(unquoteYaml(t));
+};
+
+// `fm`: the item's `epic.md` frontmatter. `change`: its parsed `change.json`, or null — any JSON value is
+// safe, since only a string `title` counts.
+export function titleOf(fm = {}, change = null) {
+  return titleFromFrontmatter(fm?.title) ?? (typeof change?.title === 'string' ? oneLine(change.title) : null);
+}
+
 // The lineage of an epic from epic.md frontmatter. `type` defaults to `feature` (genesis) when
 // absent, so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
 export function epicLineage(root, epic) {
