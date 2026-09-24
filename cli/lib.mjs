@@ -41,7 +41,8 @@ export const jsonEmitted = () => jsonRun?.emitted === true;
 export const jsonFailure = () => {
   const [f, ...more] = jsonRun?.failures ?? [];
   if (!f) return null;
-  for (const m of more) jsonRun.warnings.push(m.error);
+  // With its hint: for a repo whose push failed, the hint is the only recovery step.
+  for (const m of more) jsonRun.warnings.push(m.hint ? `${m.error} — ${m.hint}` : m.error);
   const code = /\b(YAD-[A-Z]+-\d{3})\b/.exec(f.error)?.[1] ?? null;
   return { error: f.error, hint: f.hint, code };
 };

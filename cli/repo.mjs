@@ -59,7 +59,7 @@ export async function runRepo(root, { action = 'list', name, today, push = false
 
   if (action === 'refresh') {
     const targets = name ? registry.repos.filter((r) => r.name === name) : registry.repos;
-    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { action, refreshed: 0, repos: [] }; }
+    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { action, refreshed: 0, repos: [], published: null }; }
     let refreshed = 0;
     let published = null;
     const rows = [];
@@ -88,7 +88,8 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       hand('regenerate the code-map in your AI agent (yad-connect-repos) — the pack is cached, the map is the AI step');
       hand('then publish it to the Product default branch with `yad repo refresh --push`');
     }
-    // `published`: what `--push` did (`{ message, committed, pushed }`), or null when it had nothing to do.
+    // `published`: what `--push` did (`{ message, committed, pushed }`), or null when it committed nothing
+    // — nothing to publish, or a refusal, which the answer's `error` then names.
     return { action, refreshed, repos: rows, published };
   }
 
