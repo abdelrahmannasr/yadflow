@@ -741,7 +741,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const pull = reader(platform, pr.number, { cwd: root });
     // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
     // (the wired workflow's reconcile/sweep aggregates this exit) instead of silently not advancing.
-    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (local)`); process.exitCode = 1; continue; }
+    if (!pull.ok) { fail(`${pr.artifact}: ${pull.reason} — skipping (local)`); process.exitCode = 1; continue; }
 
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);
@@ -998,7 +998,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       try {
         ledger = loadLedger(epicRoot(root, e));
       } catch (err) {
-        warn(`${e}: ${err.message} — skipping this epic`);
+        fail(`${e}: ${err.message} — skipping this epic`);
         process.exitCode = 1;
         continue;
       }
@@ -1032,14 +1032,14 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       ledger = loadLedger(epicDir);
     } catch (err) {
       if (branch) throw err;
-      warn(`${job.epic}: ${err.message} — skipping this epic`);
+      fail(`${job.epic}: ${err.message} — skipping this epic`);
       process.exitCode = 1;
       continue;
     }
     if (!ledger.state) {
-      warn(`${job.epic}: no epic state on the checked-out branch — the review branch is cut from the default branch, so it should carry it`);
       // Red on a named merge: that review's approval would otherwise be dropped by a run that ends green,
       // and the scheduled reconcile would repeat the same silent no-op for as long as it looks back.
+      (branch && merged ? fail : warn)(`${job.epic}: no epic state on the checked-out branch — the review branch is cut from the default branch, so it should carry it`);
       if (branch && merged) process.exitCode = 1;
       continue;
     }
@@ -1097,7 +1097,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       }
     } catch (err) {
       if (branch) throw err; // event mode: one epic — surface the failure
-      warn(`${job.epic}: sync failed — ${err.message} — skipping this epic`);
+      fail(`${job.epic}: sync failed — ${err.message} — skipping this epic`);
       process.exitCode = 1;
       failed = true;
     }
@@ -1405,16 +1405,18 @@ export function buildRepairMessage({ epic, steps }) {
 export async function gateRepair(root, { epic, push = false, allowBranch = false, dryRun = false, today = new Date().toISOString().slice(0, 10) } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
-  if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { closed: [] }; }
+  if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { epic, closed: [], dryRun, written: false, committed: false, pushed: false }; }
 
   log(c.bold(`\nyad gate repair  ${c.dim(epic)}`));
   const violations = stateInvariants(ledger.state);
-  if (!violations.length) { ok('epic state is consistent — nothing to repair'); return { closed: [] }; }
+  if (!violations.length) { ok('epic state is consistent — nothing to repair'); return { epic, closed: [], dryRun, written: false, committed: false, pushed: false }; }
   for (const v of violations) warn(`${v.message} [${v.code}]`);
 
   // Read leniently: a repair heals a broken ledger, and a broken hub.json must not stop it (E18).
   const closed = repairState(ledger.state, { by: closingActor(root, readJSON(productConfigPath(root), null)), date: today });
-  if (dryRun) { info('dry run — nothing written'); return { closed }; }
+  // The --json answer (E1): what this run did, so a dry run and a real one never read the same.
+  const did = (written, committed = false, pushed = false) => ({ epic, closed, dryRun, written, committed, pushed });
+  if (dryRun) { info('dry run — nothing written'); return did(false); }
   writeState(ledger.files.state, ledger.state);
   // Lenient, as above: a broken hub.json reads as a local Product, and must not stop the repair. With
   // --push the rebuild happens in `stageIndexIfClean` below, which checks the commit will hold what it
@@ -1423,7 +1425,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   ok(`closed ${closed.length} stranded author step(s): ${c.dim(closed.join(', '))}`);
   if (!push) {
     hand(`re-run \`yad doctor\` to confirm, then commit epics/*/.sdlc/state.json${indexRebuilt ? ` and ${INDEX_FILE}` : ''} (or re-run with --push)`);
-    return { closed };
+    return did(true);
   }
 
   // --- publish: narrow, default-branch-only commit of the one repaired file ---
@@ -1431,11 +1433,11 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, loadProduct(root).hub);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair' })) return { closed };
+  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair' })) return did(true);
 
   const spec = path.relative(root, ledger.files.state);
-  if (!git('add', '--', spec).ok) { fail(`git add failed for ${spec}`); process.exitCode = 1; return { closed }; }
-  if (git('diff', '--cached', '--quiet', '--', spec).ok) { info('state.json unchanged on disk — nothing to commit'); return { closed }; }
+  if (!git('add', '--', spec).ok) { fail(`git add failed for ${spec}`); process.exitCode = 1; return did(true); }
+  if (git('diff', '--cached', '--quiet', '--', spec).ok) { info('state.json unchanged on disk — nothing to commit'); return did(true); }
   // The index rides the same narrow commit (E19): it summarizes this very file — when the working tree
   // holds nothing else it reads (`stageIndexIfClean`), on the default branch only (`--allow-branch`
   // commits the repair elsewhere, and the index is never written on a branch), and never on a verified
@@ -1448,16 +1450,16 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
     git('reset', '-q', '--', ...specs); // never leave them staged for an unrelated commit to sweep up
     fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
-    return { closed };
+    return did(true);
   }
   ok(`committed the repair: ${c.dim(message.split('\n')[0])}`);
   // Push HEAD to its OWN branch — with --allow-branch we are not on the default branch, and pushing
   // HEAD:defaultBranch would publish a WIP branch straight to it.
-  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { closed }; }
+  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return did(true, true, true); }
   fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
   hand('run `git pull --rebase` and re-run `yad gate repair <epic> --push`');
   process.exitCode = 1;
-  return { closed };
+  return did(true, true, false);
 }
 
 // `head` overrides the review branch the PR is opened against — `open-pr` delegates here after pushing

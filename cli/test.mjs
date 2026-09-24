@@ -17036,7 +17036,8 @@ test('every command warns first when the project is on a newer file shape than t
     const run = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' });
     const next = run('next', '--json');
     assert.match(next.stderr, /this project is on file shape/, next.stderr);
-    assert.doesNotMatch(next.stdout, /this project is on file shape/);
+    // stdout is one JSON answer, and the warning is inside it, in `warnings` (E1) — never loose text.
+    assert.match(JSON.parse(next.stdout).warnings.join('\n'), /this project is on file shape/);
     assert.doesNotMatch(run('migrate', '--json').stderr, /this project is on file shape/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -23136,12 +23137,18 @@ test('E1 every command answers --json with one envelope, ok matching its exit co
     ...process.env, SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1', NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1', YAD_PLATFORM_LOGIN: '0',
     GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
   };
-  const yad = (dir, args) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--json', '--dir', dir], { encoding: 'utf8', env, cwd: dir });
+  const yad = (dir, args, json = true) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, ...(json ? ['--json'] : []), '--dir', dir], { encoding: 'utf8', env, cwd: dir });
   const bad = [];
-  const sweep = (label, dir) => {
+  // `dir` gets --json and its twin `plain` the same commands without it, in the same order, so the two
+  // exit codes can be compared: --json changes the rendering only. `index` is the one documented
+  // exception (its --json is a read on any branch; without the flag it writes, and refuses off the
+  // default branch), and `hook` takes no --json at all.
+  const sweep = (label, dir, plain) => {
     for (const args of CMDS) {
       const r = yad(dir, args);
+      const p = yad(plain, args, false);
       const name = `${label} yad ${args.join(' ')}`;
+      if (!['index', 'hook'].includes(args[0]) && p.status !== r.status) bad.push(`${name}: exit ${r.status} with --json, ${p.status} without`);
       let j;
       try { j = JSON.parse(r.stdout); } catch { bad.push(`${name}: stdout is not one JSON object (exit ${r.status})`); continue; }
       const missing = ['jsonVersion', 'version', 'command', 'ok', 'warnings'].filter((k) => !(k in j));
@@ -23151,16 +23158,57 @@ test('E1 every command answers --json with one envelope, ok matching its exit co
       if (/gave no JSON answer/.test(j.error || '')) bad.push(`${name}: answered in prose only`);
     }
   };
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-empty-'));
-  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-proj-'));
+  const dirs = ['empty', 'empty-plain', 'proj', 'proj-plain'].map((n) => fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-e1-${n}-`)));
+  const [empty, emptyPlain, proj, projPlain] = dirs;
   try {
-    sweep('no project:', empty);
-    git(proj, 'init', '-q', '-b', 'main');
-    assert.equal(yad(proj, ['setup', '--solo', '--greenfield', '--monorepo']).status, 0);
-    sweep('set-up project:', proj);
+    sweep('no project:', empty, emptyPlain);
+    for (const d of [proj, projPlain]) {
+      git(d, 'init', '-q', '-b', 'main');
+      assert.equal(yad(d, ['setup', '--solo', '--greenfield', '--monorepo']).status, 0);
+    }
+    sweep('set-up project:', proj, projPlain);
     assert.deepEqual(bad, []);
   } finally {
-    fs.rmSync(empty, { recursive: true, force: true });
-    fs.rmSync(proj, { recursive: true, force: true });
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
   }
+});
+
+// The E1 review's findings, each pinned where it was found.
+test('E1 review: a refusal keeps what was done, every warning is collected, a parse refusal names the action typed', () => {
+  const env = {
+    ...process.env, SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1', NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1', YAD_PLATFORM_LOGIN: '0',
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+  };
+  const yad = (cwd, ...args) => {
+    const r = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--json'], { encoding: 'utf8', env, cwd });
+    return { status: r.status, j: JSON.parse(r.stdout) };
+  };
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-review-'));
+  try {
+    // 1. `ship` whose push fails AFTER the commit landed: the refusal says so, it is not "nothing happened".
+    git(R, 'init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(R, 'a'), 'a'); git(R, 'add', 'a'); git(R, 'commit', '-qm', 'init');
+    git(R, 'remote', 'add', 'origin', path.join(R, 'no-such-remote.git'));
+    git(R, 'switch', '-qc', 'feat/x');
+    fs.writeFileSync(path.join(R, 'b'), 'b'); git(R, 'add', 'b');
+    const shipped = yad(R, 'ship', '--type', 'feat', '-m', 'add b', '--task', 'EP-x-S01-T01', '--platform', 'github', '--base', 'main');
+    assert.deepEqual([shipped.status, shipped.j.ok, shipped.j.committed, shipped.j.pr], [1, false, true, null]);
+    assert.match(shipped.j.error, /git push failed/);
+    assert.equal(shipped.j.commit, git(R, 'rev-parse', 'HEAD').toString().trim());
+
+    // 2. The newer-shape warning goes to stderr before any command runs; it is in `warnings` too.
+    fs.mkdirSync(path.join(R, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(R, '.sdlc/cli-version.json'), '{"schemaVersion":999}');
+    assert.match(yad(R, 'next').j.warnings.join('\n'), /this project is on file shape 999/);
+
+    // 3. `usage --json --out` writes the JSON model, as it did before E1, unless --format says otherwise.
+    yad(R, 'usage', '--out', path.join(R, 'u.json'));
+    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(R, 'u.json'), 'utf8')));
+    yad(R, 'usage', '--out', path.join(R, 'u.html'), '--format', 'html');
+    assert.match(fs.readFileSync(path.join(R, 'u.html'), 'utf8'), /^<!doctype html>/i);
+
+    // 6. A flag with no value is refused by the parser; the answer names the action that was typed.
+    assert.equal(yad(R, 'history', 'show', '--type').j.command, 'history show');
+    assert.equal(yad(R, 'gate', 'status', '--pr').j.command, 'gate status');
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
 });

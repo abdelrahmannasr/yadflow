@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig, emitJSON } from './lib.mjs';
+import { c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig, emitJSON, collectWarning } from './lib.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
   MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES, preferring, productConfigPath, SCHEMA_VERSION,
@@ -808,6 +808,7 @@ export function projectShapeAhead(root) {
 export function warnIfProjectAhead(root, { out = (s) => console.error(s) } = {}) {
   const ahead = projectShapeAhead(root);
   if (!ahead) return false;
+  collectWarning(`this project is on file shape ${ahead}, and this yadflow (v${VERSION}) only knows shape ${SCHEMA_VERSION} — it may misread the newer files. Upgrade yadflow before relying on what it says; \`yad doctor\` lists them.`);
   out(c.yellow(`! this project is on file shape ${ahead}, and this yadflow (v${VERSION}) only knows shape ${SCHEMA_VERSION} — it may misread the newer files. Upgrade yadflow before relying on what it says; \`yad doctor\` lists them.`));
   return true;
 }

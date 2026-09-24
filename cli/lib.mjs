@@ -29,6 +29,9 @@ const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
 let jsonRun = null;
 export function beginJSON(command) { jsonRun = { command, emitted: false, warnings: [], failures: [] }; }
 export const inJSON = () => jsonRun !== null;
+// A warning said some other way than `warn` (straight to stderr, before a command's own output) still
+// belongs in `warnings`: a --json reader must never read `warnings: []` while stderr warned (E1 review).
+export const collectWarning = (s) => { if (jsonRun) jsonRun.warnings.push(stripAnsi(s)); };
 export const jsonEmitted = () => jsonRun?.emitted === true;
 // The refusal a command SAID in prose (`fail`, then the `hand` under it), for the run that ends with a
 // non-zero exit and no answer: most refusals are written that way, and turning each by hand into a
@@ -122,7 +125,7 @@ export function closePrompts() {
 }
 // A --json run never prompts: its stdin is a program's, and a question on stderr would hang it.
 const noPromptInJSON = (question) => {
-  if (jsonRun) throw err('YAD-CLI-001', `a --json run cannot ask: ${stripAnsi(question)}`, 'pass the answer as a flag (`yad --help` lists them), or run without --json');
+  if (jsonRun) throw err('YAD-CLI-001', `a --json run cannot ask: ${stripAnsi(question)}`, 'pass the answer as a flag where one exists (`yad --help` lists them), set SDLC_NONINTERACTIVE=1 to take every default, or run without --json');
 };
 export async function ask(question, def = '') {
   if (process.env.SDLC_NONINTERACTIVE) return def;

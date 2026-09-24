@@ -327,6 +327,8 @@ function parseArgs(argv) {
   } catch (e) {
     // The command read so far, so the error handler knows WHICH command failed — the parse did not finish.
     e.parsedCmd = o._[0] ?? null;
+    // The words read so far, so a refusal names `history show`, not the default action (E1 review).
+    e.parsedWords = o._.slice(0, 2);
     throw e;
   }
   return o;
@@ -703,8 +705,13 @@ main()
   .then((result) => {
     if (!inJSON() || jsonEmitted()) return;
     // A refusal said in prose (`fail` + its `hint`) becomes the JSON refusal.
+    // What the command DID rides along: a push that failed after the commit landed must not read as
+    // "nothing happened" (E1 review) — `ship` answers `committed: true` beside the refusal.
     const said = process.exitCode ? jsonFailure() : null;
-    if (said) return refuse(said.error, said.hint, { code: said.code });
+    if (said) {
+      const did = Object.fromEntries(Object.entries(isPlainObject(result) ? result : {}).filter(([k]) => !['ok', 'error', 'code', 'hint'].includes(k)));
+      return refuse(said.error, said.hint, { code: said.code, ...did });
+    }
     // Otherwise the command's result object IS the answer — `ok` follows the exit code, as everywhere.
     if (isPlainObject(result)) return emitJSON({ ...result, ok: !process.exitCode });
     refuse(`yad ${runningCmd ?? ''} gave no JSON answer — this is a yadflow bug`.replace('  ', ' '), 'run it without --json to see what it printed, and report it with `yad report`');
@@ -714,7 +721,7 @@ main()
     // thrown YadError, a bug. The `code` is the `YAD-` code README "Troubleshooting" is keyed on.
     // If the command had already answered, stdout holds its object, and the failure goes to stderr.
     if (inJSON() && !jsonEmitted()) {
-      if (err?.parsedCmd !== undefined && runningCmd === null) beginJSON(commandName([err.parsedCmd].filter(Boolean)));
+      if (err?.parsedCmd !== undefined && runningCmd === null) beginJSON(commandName(err.parsedWords ?? []));
       const hint = err?.hint || (/expects a value$/.test(String(err?.message)) ? '`yad --help` lists the flags of each command' : null);
       refuse(String(err?.message || err), hint, { code: err?.code && /^YAD-/.test(err.code) ? err.code : null });
       return;

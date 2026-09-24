@@ -104,14 +104,19 @@ carries three more keys, so a reader never checks whether one exists:
 — `yad doctor` found a failing check, `yad next --check` found the step blocked. The exit code is 1
 in both cases, exactly as without `--json`.
 
+**A refusal still says what was done.** When a command did part of its work before it failed, the
+refusal carries that too. `yad ship` whose push failed answers `"ok": false` with the push error **and**
+`"committed": true`; `yad checkpoint --push` and `yad tidy up --push` do the same. Read `error` for what
+went wrong and the other keys for what already happened.
+
 **The rules every command keeps:**
 
 | Rule | What it means |
 |---|---|
 | One object on stdout | Under `--json`, stdout holds the answer and nothing else. Every other line — progress, `✓`/`!` lines, a subprocess's output (`npm run build`) — goes to **stderr** (standard error). Parse stdout; show stderr to a person if you like. |
-| Same exit codes | `--json` changes the rendering only. A command exits 0 or 1 exactly as it does without the flag. |
+| Same exit codes | `--json` changes the rendering only. A command exits 0 or 1 exactly as it does without the flag — with one exception that is older than E1: `yad index --json` is a read and never writes, so it answers (exit 0) on a branch where `yad index`, which writes the file, refuses (exit 1). |
 | A failure is still an object | A flag with no value, an unknown command, a thrown error, a refusal — each is one refusal object. An empty stdout never happens. |
-| No prompts | A `--json` run never asks a question. A command that would have to ask (`yad setup` without its answers as flags) is refused with `YAD-CLI-001`. With `SDLC_NONINTERACTIVE=1` the usual defaults are taken instead, as without `--json`. |
+| No prompts | A `--json` run never asks a question. A command that would have to ask is refused with `YAD-CLI-001` at that question. Only some of `yad setup`'s questions have a flag (`--solo`/`--team`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`, `--ide-targets`); the rest do not, so a scripted `yad setup --json` needs `SDLC_NONINTERACTIVE=1`, which takes the usual defaults, as without `--json`. A refusal can come after an earlier step has already written. |
 | Never posts for you | `yad report --json` prints the scrubbed payload (`title`, `body`, `labels`, the prefilled `url`, `related` open issues) and never files an issue. |
 | Always-JSON bundles | `yad gate review`, `yad gate walkthrough`, `yad review context` / `chat` / `cards` / `walkthrough` answer in this envelope with or without the flag — a skill parses them. |
 | `yad hook` takes no `--json` | Its stdout is already the protocol Claude Code and Cursor read. `yad hook … --json` is refused. |

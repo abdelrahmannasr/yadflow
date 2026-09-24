@@ -187,7 +187,7 @@ export async function runReport(dir, opts = {}) {
         if (interactive && await prompter('Open an existing issue instead of filing a new one?', true)) {
           opener(matches[0].url);
           log(`\n  → ${c.cyan(matches[0].url)}`);
-          return { filed: false, url: matches[0].url, deduped: true };
+          return { filed: false, url: matches[0].url, deduped: true, title, body, labels, related };
         }
       }
     }
@@ -215,7 +215,7 @@ export async function runReport(dir, opts = {}) {
       const r = filer(UPSTREAM_PLATFORM, UPSTREAM_REPO, { title, body, labels });
       if (r.ok) {
         ok(`Issue filed: ${c.cyan(r.url)}`);
-        return { filed: true, url: r.url };
+        return { filed: true, url: r.url, title, body, labels, related };
       }
       warn(`Could not file automatically: ${r.reason || 'unknown error'}`);
     } else {
@@ -224,10 +224,10 @@ export async function runReport(dir, opts = {}) {
     const url = issueUrl(UPSTREAM_PLATFORM, UPSTREAM_REPO, { title, body, labels });
     opener(url);
     log(`  → ${c.cyan(url)}`);
-    return { filed: false, url };
+    return { filed: false, url, title, body, labels, related };
   } catch (e) {
     // Reporting itself must never crash the CLI.
     note(`could not complete the report (${e?.message || e}) — please file manually at https://github.com/${UPSTREAM_REPO}/issues`);
-    return { filed: false, url: null, failed: true };
+    return { filed: false, url: null, title: null, body: null, labels: [], related: [], failed: true };
   }
 }
