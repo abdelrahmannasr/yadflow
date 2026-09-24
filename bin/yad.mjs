@@ -663,8 +663,8 @@ main()
     // Only when the command IS history — never because the word `history` is some flag's value.
     if ((err?.parsedCmd ?? runningCmd) === 'history' && process.argv.slice(2).includes('--json')) {
       const hint = err?.hint || (/expects a value$/.test(String(err?.message)) ? '`yad --help` lists the flags of each command' : null);
-      const yadCode = err?.code && /^YAD-/.test(err.code) ? { code: err.code } : {};
-      process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ok: false, error: String(err?.message || err), hint, ...yadCode }, null, 2)}\n`);
+      // Exactly the documented refusal shape — { schemaVersion, ok, error, hint } — and nothing else.
+      process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ok: false, error: String(err?.message || err), hint }, null, 2)}\n`);
       process.exitCode = 1;
       return;
     }

@@ -22950,6 +22950,9 @@ test('PR270 fix: any flag history does not take is refused — even one the pars
     }
     const noValue = run('--type', '--json');
     assert.deepEqual([noValue.status, JSON.parse(noValue.stdout).ok, JSON.parse(noValue.stdout).error], [1, false, '--type expects a value']);
+    assert.deepEqual(Object.keys(JSON.parse(noValue.stdout)).sort(), ['error', 'hint', 'ok', 'schemaVersion'], 'the documented refusal shape, nothing else');
+    const before = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), '--json', 'history', '--dir', T, '--type'], { encoding: 'utf8' });
+    assert.equal(JSON.parse(before.stdout).error, '--type expects a value', '--json before the command word');
     // Only history answers in JSON: another command whose arguments hold the WORD history keeps its text.
     const other = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'kill', '--reason', 'history', '--json', '--title', '--dir', T], { encoding: 'utf8' });
     assert.match(other.stdout, /yad failed: --title expects a value/);
