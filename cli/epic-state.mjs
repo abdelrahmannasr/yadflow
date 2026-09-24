@@ -1573,8 +1573,8 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 // so nothing has to remove one; a writer that ever does must take `closed` with it, as `record` goes
 // with `blocked`. No shape change: an older release ignores a key it does not know, and nothing reads
 // `done` differently because this is present. Steps finished before it carry none, and nothing asks.
-// `approved` is the one no engine command writes: the `yad-review-gate` skill passes a gate by hand on a
-// Product with no platform, where `advanceState` has no caller and nothing merges.
+// `approved` is written by `yad gate advance` (E112): a gate passed on recorded approvals on a Product with
+// no platform, where nothing merges. Before E112 the `yad-review-gate` skill wrote it by hand.
 export const CLOSED_VIA = ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human'];
 
 export const closingRecord = ({ by = null, date = null, via, pr = null, commit = null, hash = null, mergedBy = null, run = null, waived = null, capped = null } = {}) => ({
@@ -1756,7 +1756,8 @@ export function gatePredicate({
 // `test-cases` for the tester; completing `test-cases-review` never pulls `currentStep` back from
 // `ready-for-build`. Both rules degrade safely for an old chain that has no test-cases steps.
 // `close` (E18) is what the caller knows about the merge — `{ by, date, pr, commit, hash, mergedBy }`. With
-// it, the review step is stamped `closed` via `merge`, and an author step closed here via `review-passed`.
+// it, the review step is stamped `closed` via `merge` — or `approved` when the caller says so (`yad gate advance`,
+// E112) — and an author step closed here via `review-passed`.
 // Without it nothing is stamped, so a caller that knows nothing invents nothing.
 export function advanceState(state, step, close = null) {
   const i = state.steps.findIndex((s) => s.id === step.id);
@@ -1767,7 +1768,8 @@ export function advanceState(state, step, close = null) {
   const closing = { ...state.steps[i], status: 'done' };
   if (stepStatus(state.steps[i]) === 'blocked') delete closing.record;
   state.steps[i] = closing;
-  if (close) stampClosed(closing, closingRecord({ ...close, via: 'merge' }));
+  // A merge closes it — or, on a Product with no platform, the approval itself (`yad gate advance`, E112).
+  if (close) stampClosed(closing, closingRecord({ ...close, via: close.via === 'approved' ? 'approved' : 'merge' }));
   // Defensive: `markInReview` normally closed the author step when the gate opened, but the CI bridge
   // advances on a merge event without ever running it locally. Close it here too, so a passed gate can
   // never leave its author step behind (issue #131). The merge closed it, but nothing here knows who

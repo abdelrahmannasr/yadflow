@@ -160,7 +160,8 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 - **`yad-hub-bridge`** — The templated PR/MR bridge for the Shape gate. When the Product has a platform
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
-  ledger. The file ledger stays the source of truth; degrades to a local gate with no platform.
+  ledger. The file ledger stays the source of truth; degrades to a local gate with no platform, where
+  `yad gate approve`, `yad gate comment` and `yad gate advance` record the review (E112).
 
 ## Build — turn stories into shipped code (once per story, per repo)
 

@@ -28,7 +28,8 @@ trigger is a parameter, not a hardcoded human.
 ## Inputs
 - `epic`: the `EP-<slug>` to operate on.
 - `artifact`: the file under the epic being reviewed (e.g. `epic.md`).
-- `action`: one of `open` | `comment` | `approve` | `sync` | `advance` (default: `open`).
+- `action`: one of `open` | `comment` | `approve` | `sync` | `advance` (default: `open`). With no platform,
+  `comment` / `approve` / `advance` are the `yad gate comment|approve|advance` commands (E112).
 - For `comment` / `approve`: the reviewer's platform login (or the name they give, when there is no
   platform). No role and no domain. Ask if not provided.
 - `sync` needs no reviewer input — it reads the platform PR/MR review state (via `yad-hub-bridge`).
@@ -84,7 +85,9 @@ and nothing else.
 > same files under `foundation/`), local `yad gate
 > sync` is advisory, and `yad gate ci --merged` writes the whole transition when the review PR merges.
 > So every "set / append / write" instruction below is the **local, or a platform with no
-> gate-sync CI** path. In verified mode do the human-facing half — present the artifact, say how many
+> gate-sync CI** path. Recording approvals, comments and the advance yourself is the **no-platform**
+> path only (`yad gate approve` / `comment` / `advance`, E112): with a platform those commands refuse, the
+> PR/MR carries the review, and `yad gate sync` writes it into a local ledger. In verified mode do the human-facing half — present the artifact, say how many
 > approvers the step needs, help the owner address comments — and let the platform PR/MR carry the review
 > state; the approvals, comments, review records and the advance all land through CI at merge.
 
@@ -138,32 +141,42 @@ CI records the gate at merge.) Opening the PR records no approvals and never adv
 - <comment>
 ```
 
-Also append a **machine-readable** participation record to `.sdlc/comments.json` (create as `[]` if
-absent — the markdown stays the human-readable record, this makes commenter names queryable, the
-counterpart to `approvals.json`):
-```json
-{ "artifact": "<artifact>", "step": "<step id>", "commenter": "<platform login, or the name given with no platform>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
+Then record the round with the engine — **never append to `.sdlc/comments.json` by hand**:
+```bash
+yad gate comment <epic> <artifact> --by <name> --count <comments this round>          # the round in progress
+yad gate comment <epic> <artifact> --by <name> --count <n> --new-round                # after the owner addressed the last round
 ```
-Write no `role` or `domain`. Older records may carry them; nothing reads them.
-`round` increments each comment→address cycle for the artifact; upsert by `(step, commenter, round)`.
+`--new-round` opens the next round only when the artifact has changed since the latest round (the owner
+addressed it by editing); otherwise it joins the latest round, so a retry or a second reviewer never opens
+a round that did not happen. It writes one participation record per `(step, commenter, round)` — the markdown stays the human-readable
+record, this makes commenter names queryable, the counterpart to `approvals.json`. It records no `role` or
+`domain` (older records may carry them; nothing reads them). This is the **no-platform** path (E112): with
+a platform the comments are the PR/MR's threads, and the command refuses and names `yad gate sync`.
+With no platform a comment never holds the gate — there are no threads to resolve.
 
 Then help the **owner address the comments** using the agent lens listed for this step
 (analysis → `analyst`; epic → `pm`; architecture → `architect`; ui-design → `ux-designer`;
 stories → `pm`, with `architect` for technical detail; test-cases → `test architect`). Update the authored artifact in place.
 Repeat comment→address rounds until reviewers are satisfied. **Commenting never advances the gate.**
 
-**`approve`** — Record an approval. Append to `.sdlc/approvals.json`:
-```json
-{ "artifact": "<artifact>", "step": "<step id>", "approver": "<platform login, or the name given with no platform>", "status": "approved", "date": "<YYYY-MM-DD>", "engagement": "<verified|none>" }
+**`approve`** — Record an approval with the engine — **never append to `.sdlc/approvals.json` by hand**:
+```bash
+yad gate approve <epic> <artifact> --by <name> [--engagement verified|none]
 ```
-One record per person. Write no `role` or `domain`. The approver must not be the artifact's author.
-A hand-written approval has no platform evidence and no `artifactHash`, so an edit to the artifact does not
-revoke it — after a real change, remove it and record it again once the reviewer has seen the new content.
+One record per person (a second approval by the same name replaces the first). It records no `role` or
+`domain`. The approver must not be the artifact's author: the command warns when `--by` is the epic's
+`owner:` or the artifact's last git author, and records it anyway (it cannot tell who is typing), so do
+not run it for the author. The record carries the artifact's fingerprint (`artifactHash`), so **an edit to
+the artifact revokes it**, exactly as a platform approval is revoked — the reviewer approves again once they
+have seen the new content. An older hand-written record with no fingerprint still counts until it is
+replaced. This is the **no-platform** path (E112): with a platform the approvals are the PR/MR's, and the
+command refuses and names `yad gate sync`; on a verified ledger CI writes them at merge.
 `engagement` records whether the approval came through the [Review Companion](../yad-review-companion/SKILL.md)
 (a real trailer/cards/chat session = `verified`) or as a bare click (`none`). It is soft by default
 (both count; a bare approve draws a friendly nudge) and only gates when `hub.review.requireEngagement`
 is on — see `references/gating.md`. The signal is gameable by design ("visible, not impossible").
-Also write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named record** with three
+Then write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named record** — the command
+writes the ledger only, never this file, so rewrite it after every `yad gate approve`. It has three
 sections, so every participant is attributable in one place:
 
 ```markdown
@@ -183,8 +196,8 @@ Count: **<have> distinct approver(s)** — <the sum, e.g. `3 approvers = base 1 
 Gate status: **<PASSED | BLOCKED>** — <reason>.
 ```
 
-Then **re-evaluate the rule** (Step 3). Recording an approval does NOT itself advance — advancement is
-a separate, explicit check.
+The command prints the verdict (Step 3) itself. Recording an approval does NOT advance — advancement is a
+separate, explicit act (`advance`), the way approving a PR never merges it.
 
 **`sync`** — (the platform bridge input path) Pull the Product review PR/MR's review state into the ledger,
 then re-evaluate the rule (Step 3). Read the PR for this step from `.sdlc/hub-prs.json` and use
@@ -214,7 +227,8 @@ record, set the PR ledger's `lastSyncedAt`, and **re-evaluate Step 3**. **Never 
 gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-resolved, approved PR
 (the merge is the human act); otherwise it records state and holds the step `in_review`.
 
-**`advance`** — Run the gate predicate (Step 3). Only advance if it passes.
+**`advance`** — Run the gate predicate (Step 3) and advance only if it passes. With no platform that is
+`yad gate advance <epic> <artifact>`; with a platform it is the merge (`yad gate sync` / `yad gate ci`).
 
 ### Step 3 — Gate predicate (the only path that advances)
 The step may advance **iff ALL hold**:
@@ -233,70 +247,45 @@ The step may advance **iff ALL hold**:
    `../yad-architecture/references/contract-format.md`): if it no longer matches
    `.sdlc/contract-lock.json`, the surface changed → approvals stale → return to `comment` and re-lock.
 
-If the predicate **fails**: report exactly which approvals are still missing and STOP. Do not modify
-`currentStep`.
+If the predicate **passes**, advance with the engine — **never edit `state.json` by hand**:
 
-If the predicate **passes**:
+```bash
+yad gate advance <epic> <artifact>     # a Product with no platform (E112)
+```
 
-> **These rules are a TRANSCRIPTION of `advanceState`, and that is deliberate — it is the one
-> transition with no engine verb behind it.** Everything else this skill does now calls the engine, and
-> so do the authoring skills: `yad epic new` seeds a chain, `yad gate open` closes an authoring step and
-> opens its gate. But there is no verb for *"an approval landed, advance the chain"* on a Product with
-> **no platform**: `yad gate sync` and `yad gate ci` both return immediately without one, and
-> `advanceState` — the function holding the rules below — has no other caller. So on a local-only
-> Product these bullets ARE the engine's rules, written out. Keep them in step with `advanceState` in
-> `cli/epic-state.mjs`, including the author-step close, until a local approve verb exists.
->
-> With a platform, you do not perform them at all: `yad gate sync` (local ledger) or `yad gate ci`
-> (verified) runs the same transition from that function.
->
-> One other skill still writes a chain by hand, and it is not an oversight: `yad-backfill promote`
-> rewrites one, and needs its own verb. (`yad-discovery` used to be one; since E75 it runs
-> `yad foundation new`. `yad-change` used to seed a threaded chain by hand; since E42 it runs
-> `yad epic new --parent`.)
+With a platform you do not run it at all: `yad gate sync` (local ledger) or `yad gate ci` (verified) makes
+the same transition when the review PR/MR merges, and `yad gate advance` refuses. Both run one function,
+`advanceState` in `cli/epic-state.mjs`, so the rules below are a description of what it does, for
+narrating the result — not steps to perform:
 
-- Mark this review step `status: "done"` **and give it a closing record** (E18):
-  `"closed": { "by": "<who performs this advance, or null>", "date": "<YYYY-MM-DD>", "via": "approved", "hash": "<the artifact hash the approvals bind to>" }`.
-  `approved`, not `merge`: nothing merged, so there is no `pr` or `commit` to write.
-  **In solo mode** (`solo: true` in `.sdlc/hub.json`, or the older `review_gate.solo: true`), add `"waived": "solo"` to that record: the gate passed
-  without counting approvals, and the record says so (E10). Only on the review step, never on its author step.
-  **In team mode, on a gate that counted approvals, when the cap lowered the ask** (E72), add
-  `"capped": { "needed": <full count>, "to": <capped ask>, "active": <people counted> }` — every cap is
-  recorded. Read `active` and the capped ask from `yad gate status` (its `active people:` line and the
-  step's `capped to N` suffix); write nothing when it prints `NOT COUNTED`. It records what the gate
-  ASKED, not what held it: the base held. `yad gate status` prints it back as
-  `count capped from 3 to 1 (2 active people)`. Absent in solo mode (nothing was counted), on a step that
-  passed by its skip or inherited shortcut (nothing was asked), and when the cap lowered nothing.
-- **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively
-  (issue #131) because a passed gate can never leave its author step behind. Skipping it strands every
-  later step behind `YAD-STATE-005`. Give it `"closed": { "by": …, "date": …, "via": "review-passed" }`.
-- **Never write a `closed` over one already on a step.** The first close wins.
-- **`stories-review`** is the end of the gating chain: set `currentStep: "ready-for-build"` (the Phase 3
-  handoff sentinel; intentionally not a `steps[]` entry) **and** open the parallel **`test-cases`** track
-  (if its step is `todo`, set it to `in_progress`). Build can now start **and** the tester can work
-  `test-cases` at the same time.
-- **`test-cases-review`** is the parallel track's gate: mark it `done` but **leave `currentStep` at
-  `ready-for-build`** — completing test cases must never pull the epic back from Build.
-- **`foundation-review`** (the Product level, `foundation/`) ends at its own sentinel: set
-  `currentStep: "foundation-done"`, never `ready-for-build` — the product level has no Build part. The
-  old spelling does the same: **`discovery-review`** sets `currentStep: "discovery-done"`.
-- **On any review step that passes**, remove `"debt": true` from it, and from its author step once that
-  step is `done` — passing the review is what pays a debt back (E41), and nothing else clears the flag.
-- A review step that passed **behind the chain** — a step re-opened with a late `yad undefer`, where
-  `currentStep` is already past it or is `ready-for-build` — changes nothing else: do not open the step
-  after it (that work is already finished) and do not move `currentStep`.
-- Any **other** review step: find the next step in `steps[]` that has not already passed — not `skipped`,
-  `deferred`, `satisfied` (inherited from a parent epic) or `done` — set
-  it to `in_progress` (authoring) or `in_review` **only if it is `todo`**, and set `currentStep` to it. A
-  skipped step was marked N/A with `yad skip`, and a deferred one set aside for later with `yad defer`;
-  both stay as they are. A step already started or finished keeps its status.
-  If every later step is skipped or deferred, set `currentStep: "ready-for-build"`. A step waiting its turn is `todo` from shape 7 on. An older file may still say
-  `blocked` with no `record` on it, which means the same thing; a `blocked` step **with** a `record` is
-  waiting on someone outside the workflow, so leave it as it is.
-- When a gate **opens** (the review starts), move `currentStep` to it only if it is not already past it:
-  opening the review of a re-opened step never pulls the chain back.
-- Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is
-  now `ready-for-build`, with `test-cases` running in parallel).
+- the review step becomes `done` with a closing record (E18): `via: "approved"` from `yad gate advance`
+  (nothing merged, so no `pr` or `commit`), `via: "merge"` from a merge. In solo mode it carries
+  `waived: "solo"` (E10); in team mode, when the cap lowered the ask, `capped: { needed, to, active }` (E72);
+- the paired authoring step is closed too if it was not already (`via: "review-passed"`, issue #131), and a
+  `closed` record already on a step is never written over;
+- `"debt": true` is removed from both steps — passing the review is what pays a debt back (E41);
+- `stories-review` sets `currentStep: "ready-for-build"` and opens the parallel `test-cases` track;
+  `test-cases-review` leaves `currentStep` at `ready-for-build`; `foundation-review` ends at
+  `foundation-done` (the old `discovery-review` at `discovery-done`);
+- any other review step moves `currentStep` to the next step that has not already passed (skipped,
+  deferred, inherited and done steps are stepped over), or to `ready-for-build` when none is left. That
+  step is set `in_progress` (authoring) or `in_review` **only if it is `todo`**: one already started keeps
+  its status, and a `blocked` step **with** a `record` (waiting on someone outside the workflow) is left
+  as it is. A gate that passed behind the chain (a step re-opened with a late `yad undefer`) moves
+  nothing else.
+
+If the predicate **fails**, report exactly which approvals are still missing and stop: `yad gate advance`
+writes nothing, exits 1 and lists them, and `currentStep` does not move.
+A step already `done` is never advanced again; a `deferred` step is put back with `yad undefer` first.
+
+One other skill still writes a chain by hand, and it is not an oversight: `yad-backfill promote` rewrites
+one, and needs its own verb. (`yad-discovery` used to be one; since E75 it runs `yad foundation new`.
+`yad-change` used to seed a threaded chain by hand; since E42 it runs `yad epic new --parent`. This skill
+used to be one too, transcribing `advanceState` for a Product with no platform; since E112 it runs
+`yad gate advance`.)
+
+Report the advance and what the next authored artifact is (or that the epic is now `ready-for-build`, with
+`test-cases` running in parallel).
 
 ### PR-driven automation (the `yad gate` CLI)
 When the Product has a platform and a **verified** ledger, **CI is the sole writer of the ledger**. (With a
@@ -333,7 +322,8 @@ write path.
 
 ### Hard rules (build plan §1, §5)
 - **The merge click is the human approval act.** A Shape step advances only when a human merges the
-  approved, fully-resolved review PR — there is no machine-driven advance. A step `locked: true` may not
+  approved, fully-resolved review PR — or, on a Product with no platform, when a person runs
+  `yad gate advance` — there is no machine-driven advance. A step `locked: true` may not
   be switched to `advance: auto`; refuse such a request.
 - **Approvals are revoked when the reviewed artifact changes.** `sync` re-hashes the artifact (the locked
   contract surface for architecture; every other file without its frontmatter `status:` line, which the
@@ -343,7 +333,8 @@ write path.
 - **The platform is an input path only.** `open`/`sync` use the local user's own `gh`/`glab` (no stored
   tokens), and the **file ledger remains the source of truth** — the Step 3 predicate is unchanged
   whether approvals arrive manually or via `sync`. With no Product platform / no CLI, the gate runs local
-  with no error (record approvals manually and `advance`).
+  with no error: `yad gate approve`, `yad gate comment` and `yad gate advance` record the review in the
+  engine (E112).
 
 ## Reference
 - Gating details and worked example: `references/gating.md`.
