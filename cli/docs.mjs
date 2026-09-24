@@ -262,11 +262,13 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
     const built = sites.filter((s) => s.built).length;
     if (action === 'deploy') {
       const platform = docs ? (docs.target === 'gitlab-pages' ? 'gitlab' : docs.target === 'github-pages' ? 'github' : null) : null;
+      // Both arms say the same thing about what was built here; only a run where every site built ends on ✓.
+      const all = built > 0 && built === sites.length;
+      const here = all ? null : built ? `only ${built} of ${sites.length} sites built here` : 'nothing was built here';
       if (!platform || !platformReady(platform)) {
-        hand(`no Pages platform/CLI — ${built ? 'built locally only' : 'nothing was built here'}; commit + push so the CI workflow can publish (yad docs sync --wire)`);
+        hand(`no Pages platform/CLI — ${here ?? 'built locally only'}; commit + push so the CI workflow can publish (yad docs sync --wire)`);
       } else {
-        const say = built ? ok : info;
-        say(`${built ? '' : 'nothing was built here; '}deploy via the ${platform} Pages workflow on push (yad docs sync --wire installs it)`);
+        (all ? ok : info)(`${here ? `${here}; ` : ''}deploy via the ${platform} Pages workflow on push (yad docs sync --wire installs it)`);
         if (docs?.basePath) info(`will publish under ${docs.basePath}`);
       }
     }

@@ -67,7 +67,7 @@ is the file the next `yad-change` / `yad-epic` reads as "the feature's current t
 
 ### Step 5 — Emit `TIMELINE.md` + (optional) deploy
 Write a short `epics/<thread>/TIMELINE.md` (the chain, what each node changed, ships, open debt) for a
-plain-text read — head each node with its type noun (Change request / Defect / Hotfix / Chore / Epic) + id. On `action: deploy`, note that `yad docs deploy` does not build this folder yet (it builds only the epic `docs-site/` and the overview) — build it with `npm install && npm run build` inside the folder, and report it as build-only; a failed npm build is reported as a failure, never as a deploy.
+plain-text read — head each node with its type noun (Change request / Defect / Hotfix / Chore / Epic) + id. On `action: deploy`, note that `yad docs deploy` does not build this folder yet (it builds only the epic `docs-site/` and the overview) — build it with `npm ci` (or `npm install` when it has no lockfile) and `npm run build` inside the folder, and report it as build-only; a failed npm build is reported as a failure, never as a deploy.
 
 ## Hard rules
 

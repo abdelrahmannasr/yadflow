@@ -67,7 +67,7 @@ Generate the site into `epics/<scope>/defects-site/` with sections:
 6. **Recommendations** — which originating stage to harden, derived from the top escape-stages.
 
 Also write a plain `epics/<scope>/DEFECTS.md` mirror. On `action: deploy`, note that
-`yad docs deploy` does not build this folder yet (it builds only the epic `docs-site/` and the overview) — build it with `npm install && npm run build` inside the folder, and report it as build-only; a failed npm build is reported as a failure, never as a deploy.
+`yad docs deploy` does not build this folder yet (it builds only the epic `docs-site/` and the overview) — build it with `npm ci` (or `npm install` when it has no lockfile) and `npm run build` inside the folder, and report it as build-only; a failed npm build is reported as a failure, never as a deploy.
 
 ## Hard rules
 

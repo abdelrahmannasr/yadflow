@@ -11090,6 +11090,10 @@ test('docs build/deploy: a failed npm build exits 1, the other sites are still b
     assert.equal(last.error, 'epic EP-b: npm run build failed');
     assert.equal(last.hint, 'fix the error npm printed above, then run the command again');
 
+    // The no-platform twin says the same about a partial build.
+    const partial = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-a' });
+    assert.match(partial.stdout, /no Pages platform\/CLI — only 1 of 2 sites built here;/);
+
     // Twin: a failed install is a failure too, and the build step is never run after it.
     const inst = yad(['docs', 'build', '--json'], { FAKE_NPM_FAIL: 'install' });
     assert.equal(inst.code, 1);
@@ -11108,7 +11112,12 @@ test('docs build/deploy: a failed npm build exits 1, the other sites are still b
     assert.match(none.stdout, /• nothing was built here; deploy via the github Pages workflow on push/);
     assert.doesNotMatch(none.stdout, /✓ deploy via/);
     const some = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-a' });
-    assert.match(some.stdout, /✓ deploy via the github Pages workflow on push/);
+    assert.equal(some.code, 1, 'one site failed, so the deploy fails');
+    assert.match(some.stdout, /• only 1 of 2 sites built here; deploy via the github Pages workflow on push/);
+    assert.doesNotMatch(some.stdout, /✓ deploy via/);
+    const all = yad(['docs', 'deploy']);
+    assert.equal(all.code, 0);
+    assert.match(all.stdout, /✓ deploy via the github Pages workflow on push/, 'only a run where every site built ends on a tick');
     fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'hub', basePath: '/', source: 'unavailable' }));
 
     // Every build passing: exit 0, ok true, the same keys.
