@@ -1767,7 +1767,8 @@ export function advanceState(state, step, close = null) {
   const closing = { ...state.steps[i], status: 'done' };
   if (stepStatus(state.steps[i]) === 'blocked') delete closing.record;
   state.steps[i] = closing;
-  if (close) stampClosed(closing, closingRecord({ ...close, via: 'merge' }));
+  // A merge closes it — or, on a Product with no platform, the approval itself (`yad gate advance`, E112).
+  if (close) stampClosed(closing, closingRecord({ ...close, via: close.via === 'approved' ? 'approved' : 'merge' }));
   // Defensive: `markInReview` normally closed the author step when the gate opened, but the CI bridge
   // advances on a merge event without ever running it locally. Close it here too, so a passed gate can
   // never leave its author step behind (issue #131). The merge closed it, but nothing here knows who

@@ -222,9 +222,9 @@ drifted from its lock — run it rather than recomputing by hand.
    edits `epic.md`.
 3. Predicate before any approval: `|approvers|=0` → **fails**. Gate reports "missing: 1 approval(s)".
    *alice* wrote the artifact, so her own approval is not recorded.
-4. `action: approve` approver *bob* → ledger entry added. Predicate: `|approvers|=1` → **base pass**
+4. `action: approve` approver *bob* (`yad gate approve EP-x epic.md --by bob` with no platform) → ledger entry added. Predicate: `|approvers|=1` → **base pass**
    (`epic-review` has no risk tags, so the full count is also 1 and nothing is short).
-5. `action: advance` → `epic-review.status=done`, `architecture.status=in_progress`,
+5. `action: advance` (`yad gate advance EP-x epic.md`) → `epic-review.status=done`, `architecture.status=in_progress`,
    `currentStep=architecture`. Gate reports the advance. The paired authoring step (`epic`) is closed
    too, if it was not already — a gate cannot have passed on an unauthored artifact. Each step it closes
    gets a `closed` record: `via: "approved"` on the review step, `via: "review-passed"` on the author step (E18). In solo mode the
@@ -233,7 +233,7 @@ drifted from its lock — run it rather than recomputing by hand.
 
 ## Participation record (comments.json)
 `approvals.json` answers "who approved"; `.sdlc/comments.json` answers "who reviewed/commented". The
-gate appends a record per commenter per round on every `comment` action (the machine-readable
+gate records one per commenter per round on every `comment` action (`yad gate comment`, E112, with no platform) (the machine-readable
 counterpart to the `reviews/*--comments.md` markdown). It does **not** feed the predicate — approvals
 alone decide the gate — but it makes the `approved.md` record's "Reviewed / commented by" section
 attributable, and it is the same shape a future service or the platform bridge can write.

@@ -1140,31 +1140,29 @@ test('the skills E17b changed instruct no ledger write at all', () => {
       // tells you where to look, it does not tell you to write anything.
       .filter((l) => !/state\.json`?\s*(shows|says|records|holds|reads|lists|is |has )/i.test(l))
       .filter((l) => WRITE.test(l));
-    // `yad-review-gate` is the one exception and it is deliberate: its `advance` action transcribes
-    // `advanceState`, which has no engine verb on a Product with no platform. Its `open` action must
-    // still be clean, which the next test checks.
-    if (d === 'yad-review-gate') continue;
+    // `yad-review-gate` was the one exception until E112: its `advance` action transcribed `advanceState`,
+    // which had no engine verb on a Product with no platform. Now it runs `yad gate advance`, so it is
+    // held to the same rule as every other skill here.
     assert.deepEqual(offenders, [], `${d}: still instructs a ledger write`);
   }
 });
 
 test('the skills that still write a chain by hand are named, with the reason', () => {
-  // Not "only yad-review-gate", which is what this used to claim and was false. Three others write a
-  // chain too, and each is out of scope for a stated reason rather than by oversight. The claim lives
-  // in the review gate's own banner, so a reader hits it where the transcription is.
+  // Not "only yad-review-gate", which is what this used to claim and was false. The review gate itself left
+  // the list in E112 (`yad gate advance`); the one writer left is named in its banner, with the reason, and
+  // so is where each former writer went — a reader who remembers one as a writer would otherwise go
+  // looking for the JSON block.
   const gate = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
-  assert.match(gate, /TRANSCRIPTION of `advanceState`/);
+  assert.ok(!/TRANSCRIPTION of `advanceState`/.test(gate), 'the review gate no longer transcribes advanceState (E112)');
+  assert.match(gate, /since E112 it runs\s+`yad gate advance`/);
   for (const [skill, why] of [
     ['yad-backfill', /promote/],
   ]) {
     assert.match(gate, new RegExp(skill), `the banner does not name ${skill} as a remaining writer`);
     assert.match(gate, why, `the banner does not say WHY ${skill} is still one`);
   }
-  // `yad-discovery` left the list in E75, and the banner says where it went rather than dropping it
-  // silently — a reader who remembers it as a writer would otherwise go looking for the JSON block.
-  assert.match(gate, /`yad-discovery` used to be one; since E75 it runs\s+> `yad foundation new`/);
-  // `yad-change` left in E42, and the banner says where it went for the same reason.
-  assert.match(gate, /`yad-change` used to seed a threaded chain by hand; since E42 it runs\s+> `yad epic new --parent`/);
+  assert.match(gate, /`yad-discovery` used to be one; since E75 it runs `yad foundation new`/);
+  assert.match(gate, /`yad-change` used to seed a threaded chain by hand; since E42 it runs `yad epic new --parent`/);
   // …and each of those really does still seed or rewrite a chain, so the banner is not naming skills
   // that have already been converted.
   for (const d of ['yad-backfill']) {

@@ -151,6 +151,12 @@ ${c.bold('Review gate (Shape)')}
                                        in verified mode — there, recover with 'yad gate ci' below
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
+  yad gate approve <epic> <artifact> --by <name> [--engagement verified|none]
+                                       No platform only: record an approval, bound to the artifact's
+                                       content (an edit revokes it). Reports the verdict; never advances
+  yad gate comment <epic> <artifact> --by <name> [--count <n>] [--new-round]
+                                       No platform only: record who commented, and how often, this round
+  yad gate advance <epic> <artifact>   No platform only: pass the gate when its approvals hold
   yad gate repair <epic> [--push]      Close an author step stranded behind a passed review gate
                                        (YAD-STATE-005); --push commits state.json to the default branch
   yad gate review <epic> [artifact]    Print the grounding bundle for the review companion
@@ -264,7 +270,7 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -290,6 +296,7 @@ function parseArgs(argv) {
     else if (a === '--done') o.done = true;
     else if (a === '--undo') o.undo = true;
     else if (a === '--debt') o.debt = true;
+    else if (a === '--new-round') o.newRound = true;
     else if (a === '--stub') o.stub = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
@@ -345,7 +352,7 @@ const ACTIONS = {
   epic: { known: ['new'] },
   foundation: { known: ['new', 'status'] },
   skill: { known: ['list', 'bind', 'unbind'], default: 'list' },
-  gate: { known: ['open', 'sync', 'comments', 'status', 'repair', 'review', 'walkthrough', 'trailer', 'ci'] },
+  gate: { known: ['open', 'sync', 'comments', 'status', 'repair', 'review', 'walkthrough', 'trailer', 'ci', 'approve', 'comment', 'advance'] },
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
   tidy: { known: ['up'] },
   history: { known: ['list', 'show', 'search'], default: 'list' },
@@ -555,7 +562,7 @@ async function main() {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
       if (action === 'ci') { result = await commands.gateCi(o.dir, { branch: o.branch, pr: o.pr, merged: o.merged, push: !o.noPush, today }); break; }
-      if (!epic) { refuse('usage: yad gate <open|sync|comments|status|repair|review|walkthrough|trailer|ci> <epic> [artifact]'); break; }
+      if (!epic) { refuse('usage: yad gate <open|sync|comments|status|repair|review|walkthrough|trailer|ci|approve|comment|advance> <epic> [artifact]'); break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
       if (!commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`); break; }
       // In verified mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
@@ -569,7 +576,11 @@ async function main() {
       else if (action === 'review') result = await commands.gateReview(o.dir, { epic, artifact });
       else if (action === 'walkthrough') result = await commands.gateWalkthrough(o.dir, { epic, artifact });
       else if (action === 'trailer') result = await commands.gateTrailer(o.dir, { epic, artifact, body: o.body || o.message, number: o.pr });
-      else { refuse(`unknown gate action: ${action} (open|sync|comments|status|repair|review|walkthrough|trailer|ci)`); }
+      // E112 — the gate on a Product with no platform: record an approval, record a comment round, advance.
+      else if (action === 'approve') result = await commands.gateApprove(o.dir, { epic, artifact, by: o.by, engagement: o.engagement ?? null, today });
+      else if (action === 'comment') result = await commands.gateComment(o.dir, { epic, artifact, by: o.by, count: o.count ?? null, newRound: !!o.newRound, today });
+      else if (action === 'advance') result = await commands.gateAdvance(o.dir, { epic, artifact, today });
+      else { refuse(`unknown gate action: ${action} (open|sync|comments|status|repair|review|walkthrough|trailer|ci|approve|comment|advance)`); }
       break;
     }
     case 'review': {

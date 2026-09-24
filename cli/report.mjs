@@ -48,6 +48,8 @@ const SAFE_VERBS = new Set([
   'open', 'sync', 'comments', 'status', 'walkthrough', 'trailer', 'ci', 'context', 'chat', 'cards',
   'nudge', 'list', 'add', 'grant', 'revoke', 'remove', 'build', 'deploy', 'refresh', 'wire',
   'risk-map', 'draft', 'codeowners',
+  // E112: the gate's no-platform verbs (`comments`, the platform fetch, is above; `comment` is not it).
+  'approve', 'advance', 'comment',
 ]);
 
 // Reduce an argv to a safe command line: the leading verb chain (at most `command subcommand`, and

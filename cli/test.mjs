@@ -8116,13 +8116,338 @@ test('readPr (GitLab): approved_at becomes the approval\'s submission time; an i
     [['al', '2026-09-16T10:00:00.000Z', false], ['bo', null, false]], 'no commit key: the MR head is not the approval\'s commit');
 });
 
-test('yad-review-gate, passing a gate by hand on a Product with no platform, writes the closing records advanceState would (E18 review)', async () => {
-  const { CLOSED_VIA } = await import('./epic-state.mjs');
+// ---------------------------------------------------------------------------------------------
+// E112 — `yad gate approve|comment|advance`: the review gate on a Product with no platform
+// ---------------------------------------------------------------------------------------------
+const e112 = await import('./gate-local.mjs');
+// A Product with NO platform, one epic whose epic review is open. `hub` replaces the Product config, so the
+// same fixture gives the platform twins. The count of people is handed in, so no test walks git.
+function localEpic({ hub = { default_branch: 'main' }, owner = 'alice', steps = null } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e112-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+  const ep = path.join(T, 'epics/EP-test');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, 'epic.md'), `---\nid: EP-test\nowner: ${owner}\nrepos: []\n---\n# The epic\n`);
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-test', currentStep: 'epic-review',
+    steps: steps || [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'todo', risk_tags: [] },
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'todo', risk_tags: ['contract'] },
+    ],
+  }));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), '[]\n');
+  fs.writeFileSync(path.join(ep, '.sdlc/comments.json'), '[]\n');
+  const read = (f) => JSON.parse(fs.readFileSync(path.join(ep, '.sdlc', f), 'utf8'));
+  return { T, ep, read, bytes: (f) => fs.readFileSync(path.join(ep, '.sdlc', f), 'utf8') };
+}
+// The E72 shape, defined here: `e72Count` is declared far below, and a test here may run before it is.
+const e112Count = (active) => ({ today: '2026-09-24', unknown: [], capacity: { days: 90, basis: 'the last 20 merged PRs span 90 day(s)', active } });
+const noGit = () => { throw new Error('no git here'); };
+// Run one E112 verb in-process: what it printed (stdout), what it returned, and the exit code it set.
+async function e112Run(fn) {
+  const before = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const { value, out } = await captureConsole(fn);
+    return { value, out, code: process.exitCode ?? 0 };
+  } finally { process.exitCode = before; }
+}
+const approve = (T, o = {}) => e112Run(() => e112.gateApprove(T, { epic: 'EP-test', artifact: 'epic.md', today: '2026-09-24', headCount: e112Count(3), runner: noGit, ...o }));
+const comment = (T, o = {}) => e112Run(() => e112.gateComment(T, { epic: 'EP-test', artifact: 'epic.md', today: '2026-09-24', ...o }));
+const advance = (T, o = {}) => e112Run(() => e112.gateAdvance(T, { epic: 'EP-test', artifact: 'epic.md', today: '2026-09-24', headCount: e112Count(3), ...o }));
+
+test('E112: all three verbs refuse a Product with a platform, name the path that applies, and write nothing', async () => {
+  for (const [hub, hint] of [
+    [{ platform: 'github', default_branch: 'main' }, /yad gate sync EP-test epic\.md/],
+    [{ platform: 'gitlab', default_branch: 'main', ledger: 'verified' }, /CI owns this ledger/],
+  ]) {
+    const { T, bytes } = localEpic({ hub });
+    try {
+      const before = ['approvals.json', 'comments.json', 'state.json'].map(bytes);
+      for (const [verb, run] of [['approve', () => approve(T, { by: 'bob' })], ['comment', () => comment(T, { by: 'bob' })], ['advance', () => advance(T)]]) {
+        const r = await run();
+        assert.equal(r.code, 1, `${verb} on ${hub.platform}`);
+        assert.match(r.out, new RegExp(`yad gate ${verb}\` is for a Product with no platform — this one reviews on ${hub.platform}`));
+        assert.match(r.out, hint, `${verb} names the way that applies on ${hub.platform}`);
+        assert.equal(r.value, undefined);
+      }
+      assert.deepEqual(['approvals.json', 'comments.json', 'state.json'].map(bytes), before, 'nothing written');
+      assert.ok(!fs.existsSync(path.join(T, 'epics/EP-test/reviews')), 'no review record written');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('E112 approve: records one approval bound to the artifact, never advances, and a repeat changes nothing', async () => {
+  const { T, ep, read, bytes } = localEpic();
+  try {
+    const { artifactHash } = await import('./epic-state.mjs');
+    const r = await approve(T, { by: 'bob' });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(read('approvals.json'), [{ artifact: 'epic.md', step: 'epic-review', approver: 'bob', status: 'approved', date: '2026-09-24', artifactHash: artifactHash(ep, 'epic.md'), engagement: 'none' }]);
+    assert.equal(read('state.json').steps[1].status, 'in_review', 'approving never advances');
+    assert.match(r.out, /the gate would pass — advance it with: yad gate advance EP-test epic\.md/);
+    assert.equal(r.value.changed, true);
+    assert.equal(r.value.gate.passed, true);
+    assert.match(fs.readFileSync(path.join(ep, 'reviews/epic--2026-09-24--approved.md'), 'utf8'), /- bob — approved 2026-09-24/);
+    // The same person, the same content, another day: nothing changes, the first date included.
+    const once = bytes('approvals.json');
+    const again = await approve(T, { by: 'bob', today: '2026-09-25' });
+    assert.equal(again.value.changed, false);
+    assert.match(again.out, /bob had already approved this content of epic\.md — nothing changed/);
+    assert.equal(bytes('approvals.json'), once, 'byte-identical');
+    // A second person is a second record; the same person with another engagement replaces their own.
+    await approve(T, { by: 'carol' });
+    await approve(T, { by: 'bob', engagement: 'verified' });
+    assert.deepEqual(read('approvals.json').map((a) => [a.approver, a.engagement]), [['bob', 'verified'], ['carol', 'none']]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 approve: `--by` is required and taken only as it would print; `--engagement` is verified or none', async () => {
+  const { T, bytes } = localEpic();
+  try {
+    for (const by of [undefined, true, '', ' bob', 'bob ', 'bo\nb', 'bob‮', 'b\u0007ob']) {
+      const r = await approve(T, { by });
+      assert.equal(r.code, 1, JSON.stringify(by));
+      assert.match(r.out, by == null || by === true ? /`--by <name>` is required/ : /`--by` must be a name as it would print/);
+    }
+    const r = await approve(T, { by: 'bob', engagement: 'yes' });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /--engagement is verified or none/);
+    assert.equal(bytes('approvals.json'), '[]\n', 'nothing written by a refusal');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 approve: warns, and still records, when the approver is the epic owner or the artifact\'s last git author', async () => {
+  const { T, read } = localEpic({ owner: 'Alice' });
+  try {
+    const owner = await approve(T, { by: 'alice' });
+    assert.equal(owner.code, 0);
+    assert.match(owner.out, /alice is also the epic's owner — an author should not approve their own work/);
+    const author = await approve(T, { by: 'dan', runner: () => 'dan\n' });
+    assert.match(author.out, /dan is also the last author of epic\.md/);
+    const other = await approve(T, { by: 'erin', runner: () => 'dan\n' });
+    assert.ok(!/should not approve/.test(other.out), other.out);
+    assert.deepEqual(read('approvals.json').map((a) => a.approver), ['alice', 'dan', 'erin']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 advance: passes on a recorded approval with the closing records advanceState writes for an approval', async () => {
+  const { T, read } = localEpic();
+  try {
+    const none = await advance(T);
+    assert.equal(none.code, 1);
+    assert.match(none.out, /epic-review does not pass yet — nothing is written/);
+    assert.match(none.out, /still needed: 1 approval\(s\)/);
+    assert.equal(none.value.advanced, false);
+    assert.equal(read('state.json').steps[1].status, 'in_review');
+
+    await approve(T, { by: 'bob' });
+    const r = await advance(T);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /gate PASSED — epic-review → done; next: architecture/);
+    const s = read('state.json');
+    assert.equal(s.currentStep, 'architecture');
+    assert.deepEqual(s.steps.map((x) => x.status), ['done', 'done', 'in_progress', 'todo']);
+    const closed = s.steps[1].closed;
+    assert.deepEqual(Object.keys(closed), ['by', 'date', 'via', 'hash'], 'nothing merged: no pr, no commit');
+    assert.deepEqual([closed.via, closed.date], ['approved', '2026-09-24']);
+    assert.equal(s.steps[0].closed, undefined, 'an author step already done is not closed again');
+    assert.deepEqual([r.value.advanced, r.value.currentStep], [true, 'architecture']);
+
+    const twice = await advance(T);
+    assert.equal(twice.code, 1);
+    assert.match(twice.out, /epic-review already passed — a gate advances once/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 advance: an author step left open behind the gate is closed with it, `via: "review-passed"`', async () => {
+  const steps = [
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'in_progress', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+    { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'todo', risk_tags: [] },
+  ];
+  const { T, read } = localEpic({ steps });
+  try {
+    await approve(T, { by: 'bob' });
+    assert.equal((await advance(T)).code, 0);
+    const s = read('state.json');
+    assert.deepEqual([s.steps[0].status, s.steps[0].closed.via, s.steps[1].closed.via], ['done', 'review-passed', 'approved']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112: an edit after an approval revokes it; approving the new content lets the gate pass', async () => {
+  const { T, ep, read } = localEpic();
+  try {
+    await approve(T, { by: 'bob' });
+    fs.appendFileSync(path.join(ep, 'epic.md'), '\nA new paragraph.\n');
+    const stale = await advance(T);
+    assert.equal(stale.code, 1);
+    assert.match(stale.out, /1 approval\(s\) revoked — artifact changed; re-approve/);
+    const re = await approve(T, { by: 'bob' });
+    assert.equal(re.value.changed, true, 'the new content is a new approval');
+    assert.match(re.out, /bob approved epic\.md \(epic-review\) — their earlier approval is replaced/);
+    assert.equal(read('approvals.json').length, 1, 'still one record per person');
+    assert.equal((await advance(T)).code, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 advance: an older hand-written approval with no fingerprint still counts', async () => {
+  const { T, ep } = localEpic();
+  try {
+    fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([{ artifact: 'epic.md', step: 'epic-review', approver: 'bob', status: 'approved', date: '2026-09-01' }]));
+    fs.appendFileSync(path.join(ep, 'epic.md'), '\nedited\n');
+    assert.equal((await advance(T)).code, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 advance: solo mode passes with no approval and records the waiver', async () => {
+  const { T, read } = localEpic({ hub: { default_branch: 'main', solo: true } });
+  try {
+    const r = await advance(T);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(read('state.json').steps[1].closed.waived, 'solo');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 advance: a contract gate the cap lowered records the cap, as gate sync does on a merge', async () => {
+  const steps = [
+    { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done', risk_tags: [] },
+    { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review', risk_tags: ['contract'] },
+  ];
+  const { T, ep, read } = localEpic({ steps });
+  try {
+    fs.writeFileSync(path.join(ep, 'architecture.md'), '# arch\n');
+    await approve(T, { artifact: 'architecture.md', by: 'bob', headCount: e112Count(2) });
+    const r = await advance(T, { artifact: 'architecture.md', headCount: e112Count(2) });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(read('state.json').steps[1].closed.capped, { needed: 3, to: 1, active: 2 });
+    assert.equal(read('state.json').currentStep, 'ready-for-build', 'no later step: the chain is finished');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112: a review not opened yet is refused by all three verbs, naming `yad gate open`', async () => {
+  const { T, bytes } = localEpic();
+  try {
+    for (const run of [
+      () => approve(T, { artifact: 'architecture.md', by: 'bob' }),
+      () => comment(T, { artifact: 'architecture.md', by: 'bob' }),
+      () => advance(T, { artifact: 'architecture.md' }),
+    ]) {
+      const r = await run();
+      assert.equal(r.code, 1);
+      assert.match(r.out, /architecture-review is todo — its review is not open/);
+      assert.match(r.out, /yad gate open EP-test architecture\.md/);
+    }
+    const r = await approve(T, { artifact: 'nope.md', by: 'bob' });
+    assert.match(r.out, /EP-test has no review step for nope\.md/);
+    const usage = await approve(T, { artifact: undefined, by: 'bob' });
+    assert.match(usage.out, /usage: yad gate approve <epic> <artifact> --by <name>/);
+    assert.equal(bytes('approvals.json'), '[]\n');
+    assert.equal(bytes('comments.json'), '[]\n');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 approve on a step that already passed records the approval and moves nothing', async () => {
+  const { T, read } = localEpic();
+  try {
+    await approve(T, { by: 'bob' });
+    await advance(T);
+    const before = JSON.stringify(read('state.json'));
+    const r = await approve(T, { by: 'carol' });
+    assert.equal(r.code, 0);
+    assert.match(r.out, /epic-review already passed — the approval is recorded against today's content; the chain is not moved/);
+    assert.equal(JSON.stringify(read('state.json')), before);
+    assert.equal(read('approvals.json').length, 2);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 advance: a deferred step is refused and pointed at `yad undefer`', async () => {
+  const steps = [
+    { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'deferred', risk_tags: [] },
+    { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'deferred', risk_tags: [] },
+  ];
+  const { T } = localEpic({ steps });
+  try {
+    const r = await advance(T, { artifact: 'ui-design.md' });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /ui-design-review is deferred — the chain has already moved past it, and its review is still owed/);
+    assert.match(r.out, /yad undefer EP-test ui-design/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 comment: one record per (step, commenter, round); a repeat changes nothing; --new-round starts the next', async () => {
+  const { T, read, bytes } = localEpic();
+  try {
+    const first = await comment(T, { by: 'bob', count: '3' });
+    assert.equal(first.code, 0, first.out);
+    assert.deepEqual(read('comments.json'), [{ artifact: 'epic.md', step: 'epic-review', commenter: 'bob', round: 1, count: 3, date: '2026-09-24' }]);
+    assert.match(first.out, /a comment never holds the gate here/);
+    const once = bytes('comments.json');
+    const same = await comment(T, { by: 'bob', count: '3', today: '2026-09-25' });
+    assert.equal(same.value.changed, false);
+    assert.equal(bytes('comments.json'), once, 'byte-identical');
+    await comment(T, { by: 'bob', count: '4' });
+    await comment(T, { by: 'carol' });
+    assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round, c.count]), [['bob', 1, 4], ['carol', 1, 1]]);
+    const next = await comment(T, { by: 'bob', count: '2', newRound: true });
+    assert.equal(next.value.round, 2);
+    assert.deepEqual(read('comments.json').map((c) => [c.commenter, c.round, c.count]), [['bob', 1, 4], ['carol', 1, 1], ['bob', 2, 2]], 'sorted by round, then name');
+    for (const count of ['0', '-1', '1.5', 'many', true]) {
+      const r = await comment(T, { by: 'bob', count });
+      assert.equal(r.code, 1, String(count));
+      assert.match(r.out, /--count is how many comments this person made this round/);
+    }
+    const noBy = await comment(T, {});
+    assert.match(noBy.out, /who commented\? `--by <name>` is required/);
+    assert.equal(read('state.json').steps[1].status, 'in_review', 'a comment never moves the gate');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 CLI: the three verbs parse their flags, answer --json under their own command name, and `gate` lists them', () => {
+  const { T, read } = localEpic();
+  try {
+    const bad = yadRun(T, 'gate', 'frobnicate', 'EP-test');
+    assert.match(bad.out, /\(open\|sync\|comments\|status\|repair\|review\|walkthrough\|trailer\|ci\|approve\|comment\|advance\)/);
+    const c1 = yadRun(T, 'gate', 'comment', 'EP-test', 'epic.md', '--by', 'bob', '--count', '2', '--new-round');
+    assert.equal(c1.code, 0, c1.out);
+    assert.equal(read('comments.json')[0].count, 2);
+    const a = yadRun(T, 'gate', 'approve', 'EP-test', 'epic.md', '--by=bob', '--engagement', 'verified', '--json');
+    assert.equal(a.code, 0, a.out);
+    const aj = JSON.parse(a.out);
+    assert.deepEqual([aj.command, aj.ok, aj.approver, aj.changed, aj.gate.passed], ['gate approve', true, 'bob', true, true]);
+    assert.equal(read('approvals.json')[0].engagement, 'verified');
+    const adv = yadRun(T, 'gate', 'advance', 'EP-test', 'epic.md', '--json');
+    assert.equal(adv.code, 0, adv.out);
+    const vj = JSON.parse(adv.out);
+    assert.deepEqual([vj.command, vj.advanced, vj.currentStep], ['gate advance', true, 'architecture']);
+    // A refusal exits 1, and `yadRun` then joins stderr after stdout: the answer is the first object.
+    const refused = yadRun(T, 'gate', 'advance', 'EP-test', 'epic.md', '--json').out;
+    const again = JSON.parse(refused.slice(0, refused.indexOf('\n}') + 2));
+    assert.deepEqual([again.ok, again.command], [false, 'gate advance']);
+    assert.match(again.error, /already passed/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E112 report: the new verbs survive `yad report`\'s scrub; their values never do', async () => {
+  const { sanitizeArgv } = await import('./report.mjs');
+  assert.equal(sanitizeArgv(['gate', 'approve', 'EP-secret', 'epic.md', '--by', 'bob']), 'gate approve --by');
+  assert.equal(sanitizeArgv(['gate', 'comment', 'EP-secret', 'epic.md', '--by=bob', '--count', '3', '--new-round']), 'gate comment --by --count --new-round');
+  assert.equal(sanitizeArgv(['gate', 'advance', 'EP-secret', 'epic.md']), 'gate advance');
+});
+
+test('yad-review-gate calls the engine for the no-platform approve, comment and advance — it no longer transcribes advanceState (E112)', () => {
   const skill = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
-  assert.match(skill, /"via": "approved"/);
-  assert.match(skill, /"via": "review-passed"/);
-  assert.match(skill, /Never write a `closed` over one already on a step/);
-  assert.ok(CLOSED_VIA.includes('approved'));
+  for (const cmd of ['yad gate approve <epic> <artifact> --by <name>', 'yad gate comment <epic> <artifact> --by <name>', 'yad gate advance <epic> <artifact>']) {
+    assert.ok(skill.includes(cmd), `the skill names \`${cmd}\``);
+  }
+  assert.match(skill, /never append to `\.sdlc\/approvals\.json` by hand/);
+  assert.match(skill, /never append to `\.sdlc\/comments\.json` by hand/);
+  assert.match(skill, /never edit `state\.json` by hand/);
+  assert.ok(!/These rules are a TRANSCRIPTION of `advanceState`/.test(skill), 'the hand-written copy of the rules is gone');
+  assert.ok(!/until a local approve verb exists/.test(skill));
 });
 
 test('gate open with a platform adds the new PR number to the author step\'s closing record, and to nothing older (E18 review)', async () => {

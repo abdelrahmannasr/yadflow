@@ -348,7 +348,7 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 | `via` | Written by | When |
 |---|---|---|
 | `merge` | `yad gate sync` / `yad gate ci` | A review gate passed on its merge |
-| `approved` | the `yad-review-gate` skill, by hand | A review gate passed on recorded approvals on a Product with no platform: nothing merged, so no `pr` or `commit` |
+| `approved` | `yad gate advance` (E112) — before it, the `yad-review-gate` skill by hand | A review gate passed on recorded approvals on a Product with no platform: nothing merged, so no `pr` or `commit` |
 | `review-passed` | `yad gate sync` / `yad gate ci`, or that skill | Its author step, closed when its gate passed because nothing closed it earlier |
 | `review-opened` | `yad gate open` (local ledger) / `yad gate sync` | An author step, closed when its review opened |
 | `repair` | `yad gate repair` | A stranded author step — an escape hatch, so it says so |
@@ -596,8 +596,9 @@ logins share, or several records that do not prove they are one review (most Git
 
 `source: "bridge"` marks an approval synced from a Product review PR/MR by `yad-review-gate action: sync`
 (via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`, except for the
-login recorded on an older entry (above). A manual approval has no `artifactHash`, so an edit to the
-artifact does not revoke it.
+login recorded on an older entry (above). A manual approval written by `yad gate approve` (E112, a
+Product with no platform) carries `artifactHash`, so an edit to the artifact revokes it as it revokes a
+bridge approval; one written by hand before E112 has none, so an edit does not revoke it.
 
 A **bridge** approval carries more fields, all written by `sync` and all about *what was approved*
 rather than *who approved*:

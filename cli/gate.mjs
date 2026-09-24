@@ -1758,7 +1758,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
 
 // The dated, human-readable approval record beside the ledger. An older approval still carries the
 // role the roster gave it (E62 left those fields on disk), and it is printed as recorded.
-function refreshApprovalRecord(epicDir, targets, approvals, today) {
+export function refreshApprovalRecord(epicDir, targets, approvals, today) {
   for (const pr of targets) {
     const stepApprovals = approvals.filter((a) => a.step === pr.step && a.status === 'approved');
     const file = path.join(epicDir, 'reviews', `${base(pr.artifact)}--${today}--approved.md`);
