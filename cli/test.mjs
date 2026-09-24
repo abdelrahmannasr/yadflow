@@ -22047,7 +22047,7 @@ test('E111 uncommittedIndexInputs: an ignored or untracked change.json keeps the
       '.gitignore': ignore || '# nothing\n',
     });
     try {
-      git(T, 'init', '-q');
+      git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
       git(T, 'add', '-A');
       git(T, 'commit', '-q', '-m', 'seed');
       assert.deepEqual(uncommittedIndexInputs(T), [], `${label}: a clean checkout`);
@@ -22063,7 +22063,7 @@ test('E111 review: the twin adds no file buildIndex does not read — the Founda
   for (const ignore of ['epic.md\nchange.json\n', '# nothing\n']) {
     const T = indexFixture({ 'foundation/.sdlc/state.json': { steps: [] }, '.gitignore': ignore });
     try {
-      git(T, 'init', '-q');
+      git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
       git(T, 'add', '-A');
       git(T, 'commit', '-q', '-m', 'seed');
       fs.writeFileSync(path.join(T, 'foundation', 'epic.md'), '---\ntitle: x\n---\n');
