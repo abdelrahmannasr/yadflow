@@ -1,3 +1,320 @@
+# [4.0.0-next.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.19.0-next.2...v4.0.0-next.1) (2026-09-24)
+
+
+* feat(checks)!: risk-route and hub-route print the approval count, not roles (E62) ([8754585](https://github.com/abdelrahmannasr/yadflow/commit/875458576c6800356980b302dd3366d0b7a5e02a))
+* feat(checks)!: verified-commits checks signatures only; the author allowlist is gone (E62) ([67c0161](https://github.com/abdelrahmannasr/yadflow/commit/67c01612372f74e6c70b5af24636eae034fe34c7))
+* feat(cli)!: every command answers --json in one envelope (E1) ([7862dfb](https://github.com/abdelrahmannasr/yadflow/commit/7862dfb7d496171bc5f8fa20e533ffc688c57f0e))
+* feat(epic)!: shape 5 — the work-item type, and a chore may stand alone ([5eb24fb](https://github.com/abdelrahmannasr/yadflow/commit/5eb24fb04e5d6c686d92b69e4d1b8dd1ea41d46b))
+* feat(gate)!: a team gate needs one approver, and approvals name the platform login (E62) ([3730b9c](https://github.com/abdelrahmannasr/yadflow/commit/3730b9cc4f58acede87f9a020ac1ded0b7cf1fdd))
+* feat(gate)!: review and task PRs request no reviewers (E62) ([d9f3d76](https://github.com/abdelrahmannasr/yadflow/commit/d9f3d765cced1b50868197bf8622e891a2af0f3a))
+* feat(gate)!: shape 9 — an approval's fingerprint leaves out the frontmatter status line ([226f9ec](https://github.com/abdelrahmannasr/yadflow/commit/226f9ec4b9c19bdd055a1f9094b5c95badd69864))
+* feat(migrate)!: shape 8 — `yad migrate` moves the product level into foundation/ (E75) ([88e726f](https://github.com/abdelrahmannasr/yadflow/commit/88e726fe9b24737d02e2b7f32e167a60f09e6961))
+* feat(setup)!: remove yad roster and stop collecting people in setup (E62) ([5eb6914](https://github.com/abdelrahmannasr/yadflow/commit/5eb69147c84aa6b83ddda2c3e394b4f183caca6a))
+* feat(state)!: finish the hub to Product rename ([92a9750](https://github.com/abdelrahmannasr/yadflow/commit/92a9750e708ab130000872e09fd15ff68c4a3c00))
+* feat(state)!: yad undefer re-opens a deferred step behind finished work (E41) ([518b7cc](https://github.com/abdelrahmannasr/yadflow/commit/518b7cc7c339f20cf417712b5e8da0e560312f29))
+* feat(usage)!: yad usage lists people from activity, not from the roster (E62) ([0664996](https://github.com/abdelrahmannasr/yadflow/commit/0664996f4dae2f190fcd304cb259759054251a80))
+* fix(docs)!: a failed docs build exits 1 and says which site failed ([381a000](https://github.com/abdelrahmannasr/yadflow/commit/381a0000754ff4eb9fec4856692d4627369d6420))
+
+
+### Bug Fixes
+
+* **agents:** answer Cursor in the protocol it actually reads ([d6d6175](https://github.com/abdelrahmannasr/yadflow/commit/d6d6175e71447e6ae735979631dd74802d3f0f13))
+* **agents:** close the fifteen defects the deep review found ([cc42177](https://github.com/abdelrahmannasr/yadflow/commit/cc421772bceee0513a3ca30f382cdbb606de39d6))
+* **agents:** close the five defects the E11 review found ([c4ca25f](https://github.com/abdelrahmannasr/yadflow/commit/c4ca25fd66d497157d2ee37707984b02f1c500b0))
+* **agents:** close the four the audit had left open ([0e5dcd8](https://github.com/abdelrahmannasr/yadflow/commit/0e5dcd80a752f263a45865b3188edf57421818eb))
+* **agents:** close the last three, and stop a comment claiming something false ([292a7b1](https://github.com/abdelrahmannasr/yadflow/commit/292a7b1c2b45457f230c39fc19f3db1535beb50d))
+* **agents:** let the doctor see the script Cursor actually invokes ([a070911](https://github.com/abdelrahmannasr/yadflow/commit/a0709113dfca4b94608c0519157f0157060d3999))
+* **artifact-status:** a "$" in a frontmatter value no longer corrupts the status flip ([545123a](https://github.com/abdelrahmannasr/yadflow/commit/545123a5889cf48910507872ba45607592650cd9))
+* **checks:** a claimed Contract-Change with no lock at all now FAILS ([2008eea](https://github.com/abdelrahmannasr/yadflow/commit/2008eea518b4e20052fb277301140d33a9793182))
+* **checks:** hub-route reads whole risk tags; route output stops claiming an author check ([53bda97](https://github.com/abdelrahmannasr/yadflow/commit/53bda9717e75367940abab8ab033f3429c274e22))
+* **checks:** removing a contract slice under a lockless epic is allowed ([9d0b66a](https://github.com/abdelrahmannasr/yadflow/commit/9d0b66a412d19c6b222f9e3a24dbcac1a8bde4ad))
+* **checks:** risk-route reads an older risk-map check as "not counted", never as "nothing is high" ([a486d7b](https://github.com/abdelrahmannasr/yadflow/commit/a486d7b7b46ae95df03f3a372b72f72cc61c0e6a))
+* **checks:** run the risk-map awk in the C locale so every awk reads bytes ([4d0d748](https://github.com/abdelrahmannasr/yadflow/commit/4d0d748e0ce575178cfa2d1a9f42df82a40caf16))
+* **cli:** a JSON refusal keeps what was done; every warning is collected (E1 review 1) ([41fce95](https://github.com/abdelrahmannasr/yadflow/commit/41fce957954e75bb64fb0ab4271270935e7dc2fc))
+* **cli:** a later failure keeps its hint; every commit row has the same keys (E1 review 3) ([188b2de](https://github.com/abdelrahmannasr/yadflow/commit/188b2dec55ce8b25a9fa8fe8e471864141c1def4))
+* **cli:** answer in JSON only when the running command is history (PR review 3) ([cdc8250](https://github.com/abdelrahmannasr/yadflow/commit/cdc8250b340693b5e80d8d49a26044305ec52a4a))
+* **cli:** every line that names a skill asks the project, not the catalogue ([c085218](https://github.com/abdelrahmannasr/yadflow/commit/c08521818e951faddb04c4e26fe5639a70cc0f1b))
+* **cli:** every sweep failure reaches the JSON; a refusal says what was committed (E1 review 2) ([dd7ef3e](https://github.com/abdelrahmannasr/yadflow/commit/dd7ef3e00713bdeba43b0870e70ac90ee4246bf7))
+* **cli:** the history JSON error is exactly the documented refusal shape ([d20c9a3](https://github.com/abdelrahmannasr/yadflow/commit/d20c9a3ab7f83ed73139c62f4eb2622d8a44440d))
+* **cli:** the review round — a write that ate a user's bindings, and five more ([3c63059](https://github.com/abdelrahmannasr/yadflow/commit/3c63059686c467c5a8b29367d1e7712472835b9b))
+* **cli:** two more prototype holes, and yad-run reads the binding without a lane ([3a0a114](https://github.com/abdelrahmannasr/yadflow/commit/3a0a1146e2b50154a294cd8ae0e30dc0e4a2ee58))
+* **codeowners:** a GitLab heading's unreadable default owners are reported (E68 review 3) ([cd9a1f1](https://github.com/abdelrahmannasr/yadflow/commit/cd9a1f1c6628040ccf3c35efad0c49185039e73e))
+* **codeowners:** a path typed in another case is still the top folder; a refusal is JSON under --json (E69 review 5) ([397ccaf](https://github.com/abdelrahmannasr/yadflow/commit/397ccaf9efdf8b6807a04721a2bd726b49398863))
+* **codeowners:** a pattern crosses a folder name holding a line break; no set copy per rule (E69 review 3) ([7341d79](https://github.com/abdelrahmannasr/yadflow/commit/7341d79080cc0d5558929869afbbfb812f84853e))
+* **codeowners:** an exclusion's extra words are not an owner problem; describe the GitLab defaults rule ([4f50303](https://github.com/abdelrahmannasr/yadflow/commit/4f50303ac1fa9d50ad830a1c3ff7813f2a39bfc5))
+* **codeowners:** exact dead-line answer for escaped characters; fast for every common shape; refuse --write= (E69 review 2) ([c52b17d](https://github.com/abdelrahmannasr/yadflow/commit/c52b17db4ba7829bd59497cd60a8e00eb52c839f))
+* **codeowners:** no address in a not-read reason; fast dead-line check; exact file name; top folder only (E69 review 1) ([036f907](https://github.com/abdelrahmannasr/yadflow/commit/036f9078f09f220a45de5f10a44bb9998a3c8a9d))
+* **codeowners:** read the file list only when a CODEOWNERS exists; a list git cannot produce is not known ([a2f0cc8](https://github.com/abdelrahmannasr/yadflow/commit/a2f0cc8a626be7720aaf3b7c99118a93a34ff002))
+* **dial:** close the holes the E34 review found ([2038d19](https://github.com/abdelrahmannasr/yadflow/commit/2038d19bf596ae958e3b51fb2b0bc3b2fbbd4860))
+* **docs:** a new yad release no longer marks every docs site stale ([bdbbff1](https://github.com/abdelrahmannasr/yadflow/commit/bdbbff1eaaf7d89e7582d43dbbc11df52de84bd4))
+* **docs:** only a deploy where every site built ends on a tick (review 2) ([68251be](https://github.com/abdelrahmannasr/yadflow/commit/68251beb3d9208011481e77587ba4ffc46d923cf))
+* **docs:** the review round — right site folder, a real test, no green tick after a failed deploy ([9f868d8](https://github.com/abdelrahmannasr/yadflow/commit/9f868d8332679ab437c49b8e07fc3a5d15534faf))
+* **doctor:** "on every change" also when a scoped rule could not be read (E70 review 6) ([36e52ff](https://github.com/abdelrahmannasr/yadflow/commit/36e52ffd80b74a43404924f1b8aab9a0133ec8b6))
+* **doctor:** a 404 on a list never means "they do not exist" (E70 review 27) ([8bdf98f](https://github.com/abdelrahmannasr/yadflow/commit/8bdf98f64dbb1924768d161d8019813e4aecf7f4))
+* **doctor:** a 404 on the rules is a host without rulesets, not a permission (E70 review 28) ([f80f92d](https://github.com/abdelrahmannasr/yadflow/commit/f80f92d4c468195730ef1a9c28089fb07dfbcf28))
+* **doctor:** a belief from a 404 may remove an offer, never add certainty (E70 review 30) ([a3f653d](https://github.com/abdelrahmannasr/yadflow/commit/a3f653d15514a7842cadefcd16772235df7dfee9)), closes [#7386](https://github.com/abdelrahmannasr/yadflow/issues/7386) [#29576](https://github.com/abdelrahmannasr/yadflow/issues/29576)
+* **doctor:** a branch yad cannot read settles nothing (E70 review 24) ([8d9a46a](https://github.com/abdelrahmannasr/yadflow/commit/8d9a46a1a2826b09634fcfdbce4e820e94882392))
+* **doctor:** a colon, not a second dash, in the GitLab sentence (E70 review 11) ([9d8c835](https://github.com/abdelrahmannasr/yadflow/commit/9d8c83525a69945753250f9acbedbe469dcc609a))
+* **doctor:** a floor counts rules, not labels (E70 review 23) ([3f7d124](https://github.com/abdelrahmannasr/yadflow/commit/3f7d124d6698973d599da54bf64724f4fb8bf23a))
+* **doctor:** a GitLab rule with no name reads as "an approval rule" (E70 review 12) ([5ada04a](https://github.com/abdelrahmannasr/yadflow/commit/5ada04abb6356099a81280a910bc181a09b37dae))
+* **doctor:** a hint hedges wherever its own message does (E70 review 31) ([e256f06](https://github.com/abdelrahmannasr/yadflow/commit/e256f06c50db96cfbab79dda4e91a63fcf91c456))
+* **doctor:** a pointer only where something was unread, and numbers that agree (E70 review 16) ([2ff23f5](https://github.com/abdelrahmannasr/yadflow/commit/2ff23f53b12d0fa3f5d5d00766a90c4333d6dd80))
+* **doctor:** a protection line states only what the platform answered (E70 review 3) ([453f646](https://github.com/abdelrahmannasr/yadflow/commit/453f6463040578c297c46f4cd22ba0521860c27f))
+* **doctor:** a read that answered nothing says so, and one source is named once (E70 review 22) ([25eabe8](https://github.com/abdelrahmannasr/yadflow/commit/25eabe8d02778514bafdbf25b3698caac6a4b2f5))
+* **doctor:** a rule keyed on a wording must say when it stops firing (E70 review 32b) ([6beeb6f](https://github.com/abdelrahmannasr/yadflow/commit/6beeb6f8c3c1f72f30c869559b763f6e3a6097e0))
+* **doctor:** a sentence for a count read beside a protection that was not (E70 review 8) ([8421b00](https://github.com/abdelrahmannasr/yadflow/commit/8421b0060e54308632bbfacaf89149eabb9da98c))
+* **doctor:** an id reads as an id, and no sentence pairs two dashes (E70 review 13) ([8a07f2b](https://github.com/abdelrahmannasr/yadflow/commit/8a07f2bd8b99785ed3bcdf192269113c7ac038c4))
+* **doctor:** apply round 16's fixes to their twins as well (E70 review 17) ([f99db88](https://github.com/abdelrahmannasr/yadflow/commit/f99db8823e34dce8eb84c3bde8f87c04385d0f7f))
+* **doctor:** compare artifacts the way every reader of the field does ([75688d9](https://github.com/abdelrahmannasr/yadflow/commit/75688d9208608c1626cbfdbcb274b0e2f3960979))
+* **doctor:** give the missing-default hint E109's two repository actions, from one string (E110) ([2e751a9](https://github.com/abdelrahmannasr/yadflow/commit/2e751a984e18a1faa007caee0488b11454292c33))
+* **doctor:** name folders under epics/ that are not valid epic ids ([1e0e4ac](https://github.com/abdelrahmannasr/yadflow/commit/1e0e4ac6357f03def0362ef5201e39e352b3a40b))
+* **doctor:** never read a count or "not protected" the platform did not prove (E70 review 1) ([4800bff](https://github.com/abdelrahmannasr/yadflow/commit/4800bffbbeb8bebdf8a20f228992c82d88a98028))
+* **doctor:** never rule a cause out and then offer it again (E70 review 29) ([aeef14b](https://github.com/abdelrahmannasr/yadflow/commit/aeef14b152e6941e7681901ce633e87339b1435a))
+* **doctor:** point the legacy BMAD hints at what still works (E3) ([60df2dc](https://github.com/abdelrahmannasr/yadflow/commit/60df2dc168751f27bd6a892698f211550abd18b6))
+* **doctor:** read the GitLab branch itself; a rule on an unprotected branch is no hold (E70 review 2) ([90d8df9](https://github.com/abdelrahmannasr/yadflow/commit/90d8df9581ba9c7f21b528fc119a4fb00e75a774))
+* **doctor:** restore a guard I wrongly called unreachable (E70 review 18) ([dabd9a1](https://github.com/abdelrahmannasr/yadflow/commit/dabd9a1042da5db52e51c48ba5671e833269ed87))
+* **doctor:** say GitHub's flag the same way everywhere; fill the level table (E70 review 9) ([dca372b](https://github.com/abdelrahmannasr/yadflow/commit/dca372bd289461235cab097b08e87561f5f3c0c6))
+* **doctor:** say only what this read leaves possible (E70 review 15) ([328cf0a](https://github.com/abdelrahmannasr/yadflow/commit/328cf0a6a32de5805b60f6f33ff159ba1c8c5d90))
+* **doctor:** say the GitLab repository could not be read, not that your login cannot (E109) ([3a8ffa5](https://github.com/abdelrahmannasr/yadflow/commit/3a8ffa583d6ac7f15270a9c217c77be5700b585c))
+* **doctor:** see a step that carries ONLY the new dial name ([8ad471f](https://github.com/abdelrahmannasr/yadflow/commit/8ad471f2d90ef4d90df6016b92b4064ce867631b))
+* **doctor:** stop the theme checks reporting correct files ([c6c3a0c](https://github.com/abdelrahmannasr/yadflow/commit/c6c3a0c278ccad2734061e1bd04fbb8b578431f6))
+* **doctor:** tell the two reach gaps apart, and check every partly read line (E70 review 25) ([31dcf1d](https://github.com/abdelrahmannasr/yadflow/commit/31dcf1d5fd0a6e7f55dc4ee249b9c9f277b00500))
+* **doctor:** test the GitLab repository 404 on the shape GitLab really sends (E109) ([81f4001](https://github.com/abdelrahmannasr/yadflow/commit/81f4001f518ea9cd65f31bb93f265176244408a9))
+* **doctor:** the banner needs no rule at all, and lint is green again (E70 review 5) ([7830496](https://github.com/abdelrahmannasr/yadflow/commit/783049648722440999cde7ca079f6d61f0cff536))
+* **doctor:** the clause binds to the rule, not to the branch it names (E70 review 26) ([4ea1403](https://github.com/abdelrahmannasr/yadflow/commit/4ea140368d7d71451204f49304b71fba52c4bbf7))
+* **doctor:** the joined GitLab phrase reads as a sentence (E70 review 10) ([f81a423](https://github.com/abdelrahmannasr/yadflow/commit/f81a423bf0b5a672e0441ebfa04f2ac3e7fd18d3))
+* **doctor:** the last paired dashes, and a limit narrower than the code (E70 review 14) ([d67ae31](https://github.com/abdelrahmannasr/yadflow/commit/d67ae3144e6735db23e73b9a9daa54e29e99a0a4))
+* **doctor:** the review round — a finding whose only remedy always failed ([2783186](https://github.com/abdelrahmannasr/yadflow/commit/27831861756450ed0067271a80f08062e3c35b44))
+* **doctor:** the solo line carries the same facts; hedge what is not read (E70 review 4) ([7019585](https://github.com/abdelrahmannasr/yadflow/commit/7019585ec60deaa28f4217f52a531c8e2943e8fa))
+* **doctor:** the split turns on what the read proved, not where the name came from (E70 review 32) ([3930636](https://github.com/abdelrahmannasr/yadflow/commit/3930636ea87f92275c19fa6751c4a5be1ba074c5))
+* **doctor:** the tier framing belongs to a refusal, and the grid reaches every branch (E70 review 21) ([c2377ef](https://github.com/abdelrahmannasr/yadflow/commit/c2377ef37fd0ae9e11f9b6d7b4454c3db23c8e4c))
+* **doctor:** two answers that disagree are not known; a rule elsewhere is not "no rules" (E70 review 7) ([b002fd8](https://github.com/abdelrahmannasr/yadflow/commit/b002fd89fe9d95b402cb422e7491093b89510b4d))
+* **engine:** drop the profile field nothing read, and fix the test seam ([07af526](https://github.com/abdelrahmannasr/yadflow/commit/07af526629684ee5b5c53438b13e2983ccb82bfc))
+* **epic:** close the holes the E42 review found ([574870f](https://github.com/abdelrahmannasr/yadflow/commit/574870f0d6ebfe1d0c5501daa74a7927662fc13e))
+* **epic:** protect the reserved front-zero id, and stop a false type clash ([871f763](https://github.com/abdelrahmannasr/yadflow/commit/871f763bbf0df4ca92f4991b1456db00bb2aecec))
+* **foundation:** close the holes the roadmap-status review found ([69392d4](https://github.com/abdelrahmannasr/yadflow/commit/69392d441b4212448e0e3092eb74dc313e1f19b2))
+* **foundation:** skills that hand-apply the gate know the Foundation, and the preview lists every moved file ([8e20897](https://github.com/abdelrahmannasr/yadflow/commit/8e20897d56c4c047d207fffdd7a644ebb81ae149))
+* **foundation:** the review round — one product level in the guard, and a move that cannot strand ([5bca4ba](https://github.com/abdelrahmannasr/yadflow/commit/5bca4baded95a108018a780fd0c6ec06f1b3c62b))
+* **gate:** `gate status` counts approvals the way the gate counts them ([eda7429](https://github.com/abdelrahmannasr/yadflow/commit/eda7429d6454f93c3ce034456ab61ab6b5afa3a7))
+* **gate:** `gate status` prints the shortfall, and honours a skip only where the gate does ([95c9c2a](https://github.com/abdelrahmannasr/yadflow/commit/95c9c2a49adfcea6f4e8daf13932d386d4c5a75a))
+* **gate:** a hand-edited cap below 1 is not printed; the inherited test says what it checks (E72) ([49dcef7](https://github.com/abdelrahmannasr/yadflow/commit/49dcef760aa00a46ec157cba2f78b90f9103b77f))
+* **gate:** a malformed record in the merged review's own epic no longer stops the merge ([24eec39](https://github.com/abdelrahmannasr/yadflow/commit/24eec393e6b8ddbdefe71944c0045bbccda2dc16))
+* **gate:** a shared roster name is never matched by name; gate open stamps the old PR (E62) ([a2b15eb](https://github.com/abdelrahmannasr/yadflow/commit/a2b15eb0d4519a05abe77ebb2ff64b6039ce9ea9))
+* **gate:** a short-lane review PR does not ask for a contract re-lock it cannot do ([4855f3a](https://github.com/abdelrahmannasr/yadflow/commit/4855f3afaf90a885d3e1ae1c4d1d133857d6d142))
+* **gate:** an exact submission time beats the roster name table; usage and doctor follow the simulation ([4d2c55c](https://github.com/abdelrahmannasr/yadflow/commit/4d2c55c45c7409942287a1b8834f2c58da756e5d))
+* **gate:** an exact submission time continues only that review's records, never the whole name ([beaa5e3](https://github.com/abdelrahmannasr/yadflow/commit/beaa5e35a3aa77e85207b00d271885bddbd69e39))
+* **gate:** claim and keep older records per review, so a closed step never deletes the other person's history ([1ed2070](https://github.com/abdelrahmannasr/yadflow/commit/1ed2070779055ccf610c0ad0012978183c7b08d0))
+* **gate:** close the gaps the E18 review found ([69aa2cf](https://github.com/abdelrahmannasr/yadflow/commit/69aa2cfcf88db681dfb08cc89a200ef58a23a88a))
+* **gate:** close the holes the E76 review found ([e460fb2](https://github.com/abdelrahmannasr/yadflow/commit/e460fb21f8efd9eb34ef1569361973a8297f3321))
+* **gate:** eighth review round — "after the cap", one dead branch, two comments (E73) ([62e47c3](https://github.com/abdelrahmannasr/yadflow/commit/62e47c3181908e49bc69407775b51ad49951f083))
+* **gate:** fifth review round — an approval anywhere is evidence, and every what-if line is conditional (E73) ([5b78858](https://github.com/abdelrahmannasr/yadflow/commit/5b788587187cdce397d36bb9efdbd772cadaaefc))
+* **gate:** fourth review round — the floor wording on every surface, and a cap only ever lowers (E72) ([81dc0d8](https://github.com/abdelrahmannasr/yadflow/commit/81dc0d866118b167ca18d40531abf3ba53a856e8))
+* **gate:** fourth review round — two kinds of line, each said once, and the GitLab gate bot is not a person (E73) ([622c6d6](https://github.com/abdelrahmannasr/yadflow/commit/622c6d66d35df22fde619e09cd69c0dc6de97e3d))
+* **gate:** keep people under a shared roster name apart; read the PR number from its own segment ([b30ba90](https://github.com/abdelrahmannasr/yadflow/commit/b30ba9051a8a4d291b70bad18f47807ac4fee21b)), closes [#2048](https://github.com/abdelrahmannasr/yadflow/issues/2048)
+* **gate:** old approvals stay with their person in every platform order (E62 review) ([8379656](https://github.com/abdelrahmannasr/yadflow/commit/83796566ca4f35452e717b63b9f08c7caf081d4f))
+* **gate:** recognise old approvals exactly, and never pass one that is stale (E62 review) ([58fe6d2](https://github.com/abdelrahmannasr/yadflow/commit/58fe6d295dbfaa795f771c79e1be1f6f0a052800))
+* **gate:** review round — the names check needs a login, and sees a team of one that reads as two (E73) ([65512d0](https://github.com/abdelrahmannasr/yadflow/commit/65512d0decc079c0a76867b8b05065fe3baef37f))
+* **gate:** round-2 review — singular in open-pr's cap, and doc/test wording that still read as enforced (E72) ([64323b0](https://github.com/abdelrahmannasr/yadflow/commit/64323b0695792c7c9e6dc6ccc97fb56f516ff76a))
+* **gate:** second review round — the silent-path test compares ledgers; doc conditions stated whole (E73) ([5580624](https://github.com/abdelrahmannasr/yadflow/commit/5580624d87dcf685eba6cdb2403ffce112b28974))
+* **gate:** seventh review round — the smallest team is the larger of the logins and the names (E73) ([bcbdb32](https://github.com/abdelrahmannasr/yadflow/commit/bcbdb32d3a1d8646999e183aed3b67a481a3ad7d))
+* **gate:** show the capacity cap and hold on the base alone until E73 (E72) ([3da8498](https://github.com/abdelrahmannasr/yadflow/commit/3da849895011ff19d1368499d825a2b9723a5583))
+* **gate:** sixth review round — "no approval" names the window, and a name is "not matched to a login" (E73) ([d592818](https://github.com/abdelrahmannasr/yadflow/commit/d592818b24d4e78d9bf3563398a45fef87447d92))
+* **gate:** the login stamp merges only proven reviews and never stops a merge ([5c80ce9](https://github.com/abdelrahmannasr/yadflow/commit/5c80ce95a0852fcb2d593c0edf7aac80d54f50fd))
+* **gate:** the product-level move waits for its review, a clean checkout, and the default branch ([91193be](https://github.com/abdelrahmannasr/yadflow/commit/91193be19f652db23f6229026db9d81df0f5db4b))
+* **gate:** the review-PR body is the one surface where the count LASTS, so the line dates itself ([6b378fc](https://github.com/abdelrahmannasr/yadflow/commit/6b378fc28a23543da2b67bc1bf27f07f29bded46))
+* **gate:** third review round — no cap on a shortcut pass, one copy of the cap's words (E72) ([81d86c8](https://github.com/abdelrahmannasr/yadflow/commit/81d86c86cea311a66c6658ac951371cc82b9e405))
+* **gate:** third review round — the silent-path test compares the PR records too; one prefix on every site (E73) ([7b3d874](https://github.com/abdelrahmannasr/yadflow/commit/7b3d874c207f103479dc5df84a398cec1ca9fbf4))
+* **history:** a printed [@word](https://github.com/word) is always a real login; GitLab defaults only for an ownerless entry (E68 review 4) ([cadd82b](https://github.com/abdelrahmannasr/yadflow/commit/cadd82bf43c8adecde2aa5aab1dc156f7b7bf708))
+* **history:** count as the gate counts; keep a thread's root; print every field safely (E20 review 2) ([a539bfc](https://github.com/abdelrahmannasr/yadflow/commit/a539bfc595d22bd5e574e04b02d7f1fbcd2efae6))
+* **history:** follow the real thread, print only safe text, judge approvals as gate status does (E20 review) ([2654480](https://github.com/abdelrahmannasr/yadflow/commit/265448010a526656ef818f710ed2e7e63e7f682c))
+* **history:** name an approver by the gate's test; refuse every flag it does not take (PR review 2) ([406dce6](https://github.com/abdelrahmannasr/yadflow/commit/406dce685068993e7e187dbd76e107c6897f0468))
+* **history:** second-review findings for E68, and E67's address-shaped name ([86e34c0](https://github.com/abdelrahmannasr/yadflow/commit/86e34c025dd37e397f16e22fac35485cf52ccaa6))
+* **history:** the whole-PR review — strict settings, JSON refusals, shape done, exact search (E20) ([e9e13ed](https://github.com/abdelrahmannasr/yadflow/commit/e9e13ed4202c723fe3563be4cd254981ecdeb14c))
+* **history:** waive a step by the gate's own test, not its final state (E20 review 3) ([dd5665e](https://github.com/abdelrahmannasr/yadflow/commit/dd5665ede9f4fec14a2b20425e5a59e12cf78009))
+* **hub-bridge:** the gate-sync fragments ship the major their release publishes ([01ac858](https://github.com/abdelrahmannasr/yadflow/commit/01ac8587d5affc4e0f87c27f935b18f1342683c5))
+* **index:** clean a title before unquoting it; drop bidi controls (E111 review 4) ([5ff9755](https://github.com/abdelrahmannasr/yadflow/commit/5ff97552f2af139c9634e2d398f79089ecc271a0))
+* **index:** commit the index only when git holds exactly what it read (E19 review) ([1b354bc](https://github.com/abdelrahmannasr/yadflow/commit/1b354bcf4a5881aa9c74cdc028dec2562bc8418e))
+* **index:** drop control characters from a title (E111 review 3) ([65ac5f7](https://github.com/abdelrahmannasr/yadflow/commit/65ac5f7c567c041c2cb027676440698ddf9e1078))
+* **index:** read a double-quoted title with JSON's escapes; pin every title rule (E111 review 2) ([0a6b820](https://github.com/abdelrahmannasr/yadflow/commit/0a6b82081d63f26953c54a67af14b31ccf164674))
+* **index:** read a YAML-quoted title as YAML does, keep it one line (E111 review) ([972920f](https://github.com/abdelrahmannasr/yadflow/commit/972920ffa7e462da8d79ec747060fa57d9d82b83))
+* **ledger:** the lock loop could never give up — two `continue`s skipped the cap and the sleep ([e66eab6](https://github.com/abdelrahmannasr/yadflow/commit/e66eab61910eb3b4bd7c3f9ba50f9fa9c39b5fa9))
+* **lifecycle:** place an epic in Build, and keep the discovery epic off the ladder ([1c01e0c](https://github.com/abdelrahmannasr/yadflow/commit/1c01e0c8cf7aa2410b12969e43e5e45b5402edf2))
+* **migrate:** name every file the apply writes, and repair a half-made pair ([a3211e3](https://github.com/abdelrahmannasr/yadflow/commit/a3211e3dfc246bbe89ef3bc322fa6be29bd735bb))
+* **migrate:** the --json preview names the product config's mirror partner ([1eb4738](https://github.com/abdelrahmannasr/yadflow/commit/1eb4738c64899db78fad46036603e2fc7b71f99c))
+* **mode:** close the gaps the E10 review found ([afbeca4](https://github.com/abdelrahmannasr/yadflow/commit/afbeca4599f379e0e815a3bb48e253461f9d931a))
+* **mode:** only a login's approval proves a second person; one wiring for the suggestion (E74) ([0bd132f](https://github.com/abdelrahmannasr/yadflow/commit/0bd132f7664645f56dcb182c29721f7a94713245))
+* **next:** an off-route step is not an unknown one, and a phase is not a passed one ([7f08da2](https://github.com/abdelrahmannasr/yadflow/commit/7f08da218463caa7f630a464ba0423bba145c746))
+* **open-pr:** no address, no cross-platform join, no quiet "nobody" (E68 review) ([0d7814e](https://github.com/abdelrahmannasr/yadflow/commit/0d7814e1021dfc73845e65e7403a6ea66d2f9b6d))
+* **people:** a mistyped future approval is not proof even beside a current commit (E74) ([c1b9d7c](https://github.com/abdelrahmannasr/yadflow/commit/c1b9d7c18963133fca92e2eaaa4fdcd76676986e))
+* **people:** ask git for an absolute date, so the count really does read no clock (E71) ([e065734](https://github.com/abdelrahmannasr/yadflow/commit/e0657347462310ef315068a3e9f3ba52d08b2b0a))
+* **people:** close the identity question — `source: 'bridge'` is the proof, and the keyspace is namespaced ([9e055d7](https://github.com/abdelrahmannasr/yadflow/commit/9e055d711a70c2a6b6798dc5f87ec8a53be45158))
+* **people:** the review round — eleven ways a partial read still became a number ([edf858e](https://github.com/abdelrahmannasr/yadflow/commit/edf858e6d3b2f5bd29877fe04517d8bcd5c4cdc8))
+* **people:** validate the date git hands back — a formatter is not a validator ([dc1249a](https://github.com/abdelrahmannasr/yadflow/commit/dc1249aeae31e107eec359494b95e2230a16a4eb))
+* **release:** refuse to ship a file-shape change as anything but a major ([173dc9a](https://github.com/abdelrahmannasr/yadflow/commit/173dc9a76453b0e5e0ec2341ad05458b71d9a085))
+* **release:** the release checks ask semantic-release what a commit releases ([c5de745](https://github.com/abdelrahmannasr/yadflow/commit/c5de7453ed41bb5a6bac514652a857b6db5d7f8a))
+* **risk-map:** close ten review findings in the map, its check and its command ([aafc578](https://github.com/abdelrahmannasr/yadflow/commit/aafc578c43cc2282e5aa837f3f88768cd7e5e30d))
+* **risk-map:** doctor's section sat under threadChecks' comment; stale comments and help alignment ([5258b54](https://github.com/abdelrahmannasr/yadflow/commit/5258b54f352ba1d0276bec098d766e233beee77a))
+* **risk-map:** every pathspec is :(literal) — a map name describes a directory, it never tells git what to do ([6a4ef28](https://github.com/abdelrahmannasr/yadflow/commit/6a4ef28bb105b3129445cef925d420863b7f271b))
+* **risk-map:** first-review findings — a quoted path, a move out, an older check, and a name's own spacing ([016ad87](https://github.com/abdelrahmannasr/yadflow/commit/016ad87d050b611d69b6fb7d48a850dfac17a2a7))
+* **risk-map:** first-review findings — read the base map from any subfolder, and never exit 1 on a trailing comma ([e6ac49f](https://github.com/abdelrahmannasr/yadflow/commit/e6ac49f32f5944d2beddbe3adc0b1b4ee2ca3ed7))
+* **risk-map:** four second-review findings in the PR check and the file list ([c5eb332](https://github.com/abdelrahmannasr/yadflow/commit/c5eb33293b9dde0bfc0509dbcba45e94116646b0))
+* **risk-map:** second-review findings — a failing git step is "not counted", and the check runs from the repo root ([c51a882](https://github.com/abdelrahmannasr/yadflow/commit/c51a882bcac73561b216e936ff495158d050782a))
+* **risk-map:** second-review findings — a newline in a file name, and a merge that hid a real author ([845a341](https://github.com/abdelrahmannasr/yadflow/commit/845a341e08495cfc81dc24998e7bd80190587a62))
+* **risk-map:** third-review finding — a failing git ls-tree is "not counted", not "no map" ([efeffc0](https://github.com/abdelrahmannasr/yadflow/commit/efeffc0e4bf5edfadbcc2a67fbc6b6397e1a63c5))
+* **risk-map:** third-review findings — bytes for every tool in the check, and only the map itself counts as deleted ([ac4569e](https://github.com/abdelrahmannasr/yadflow/commit/ac4569ec8dba85ea39a7659e8b6038e7a1025d89))
+* **setup:** keep a team's edit to .sdlc/config.yaml through yad update (E3) ([86b2034](https://github.com/abdelrahmannasr/yadflow/commit/86b20348a08bb0a82ce5de03bad0ec5347cbc15e))
+* **skills:** the epic.md templates were unreadable by the gates they feed ([96922de](https://github.com/abdelrahmannasr/yadflow/commit/96922de4ae3e08efe8faee2cbff5abe6c468eabc))
+* **skills:** the review gate must open the gate with the engine, not by hand ([f453509](https://github.com/abdelrahmannasr/yadflow/commit/f453509cbcdd0ec7fa9156af9324eb940846efb4))
+* **skip:** close the holes the E39 review found ([33eb17a](https://github.com/abdelrahmannasr/yadflow/commit/33eb17a85f982456549b225603db04747cd27d94))
+* **skip:** close the holes the verified-skip review found ([311e1ca](https://github.com/abdelrahmannasr/yadflow/commit/311e1cab3f439fc3a4752d997bdb2260ac42bf47))
+* **skip:** refuse a skip on a ledger CI owns on a verified Product ([b9b2d1a](https://github.com/abdelrahmannasr/yadflow/commit/b9b2d1a54f7a31deaf75746581beb3e217611555)), closes [#162](https://github.com/abdelrahmannasr/yadflow/issues/162)
+* **state:** a corrupt ledger gets an error with a hint, not a stack trace ([2cda22d](https://github.com/abdelrahmannasr/yadflow/commit/2cda22d76328e373dfc46b072385b02715529b95))
+* **state:** a gate write moves the recorded shape, not just the fields ([6906c57](https://github.com/abdelrahmannasr/yadflow/commit/6906c577251d96ddf583e5fb83dfb265eb985a86))
+* **state:** a short lane has no optional steps, and that is not a broken chain ([136eec8](https://github.com/abdelrahmannasr/yadflow/commit/136eec83888d5915facdf80c9dd073ff56d95513))
+* **state:** close the holes the E41 review found in re-open and debt ([9b8565e](https://github.com/abdelrahmannasr/yadflow/commit/9b8565e165869f5a6b10f5c46c887bc422ce78d2))
+* **state:** keep the product-level role under BOTH spellings, and report drift ([1b9ac44](https://github.com/abdelrahmannasr/yadflow/commit/1b9ac441a6055f2b17422f11c0aee0a025c7b3ba))
+* **state:** make the two names one file, in both directions ([0a842c7](https://github.com/abdelrahmannasr/yadflow/commit/0a842c74560d96c47064009b3ab4714f0f00ab7f))
+* **state:** one rule for "this epic's route never had that step" ([b687048](https://github.com/abdelrahmannasr/yadflow/commit/b687048e49c7bcfa4f512c7e92de31e6dce8f0d7))
+* **state:** shape 6 stamps against the routes that existed when it landed ([939c862](https://github.com/abdelrahmannasr/yadflow/commit/939c86228b20540ad22c621c19b63e4859899647))
+* **state:** the count reports, it does not hold a gate — yet (E7 review round) ([10bc3ff](https://github.com/abdelrahmannasr/yadflow/commit/10bc3ff06816ff6430bc47b8382363d57c6b9380))
+* **state:** the review round — a live writer of `blocked` this change said did not exist ([7136b93](https://github.com/abdelrahmannasr/yadflow/commit/7136b930b10bba4e8ffe03d217e706409bd5153e))
+* **state:** write the work-item type at the top of state.json, not the bottom ([195c03a](https://github.com/abdelrahmannasr/yadflow/commit/195c03aa96f5c12526b22d54c4db9ad9d4a4ef63))
+* **thread:** an epic never owns an artifact its route has no step for ([6725c5a](https://github.com/abdelrahmannasr/yadflow/commit/6725c5ae9dde8e226f34ae1e1d5888fa86811641))
+
+
+### Features
+
+* **agents:** support agents beyond Claude Code, and guard Cursor too (E11) ([8481398](https://github.com/abdelrahmannasr/yadflow/commit/848139856c5d23cdf52b601d02f7155d5756d9b4))
+* **checks:** guard the Foundation ledger in foundation/ (E75) ([0608e41](https://github.com/abdelrahmannasr/yadflow/commit/0608e41f8a203a633b4ef2e3449711de9201890c)), closes [#162](https://github.com/abdelrahmannasr/yadflow/issues/162)
+* **checks:** guard the Product index as CI-owned on a verified Product (E19) ([5396827](https://github.com/abdelrahmannasr/yadflow/commit/5396827650597341cd98e935c595c73899b4a61f))
+* **checks:** risk-map-check.sh warns on every PR where the risk map went stale ([bc2ada8](https://github.com/abdelrahmannasr/yadflow/commit/bc2ada8707a9499d5ef8afcb1e4259be02980eef))
+* **cli:** add `yad skill` to bind, list and unbind a step's skill ([7b4c9c6](https://github.com/abdelrahmannasr/yadflow/commit/7b4c9c6cdc2e5734a5f670b805003782d877674f))
+* **cli:** the project chooses which skill runs a step (E6) ([a07746e](https://github.com/abdelrahmannasr/yadflow/commit/a07746e327056448f1c3566490cf7d17aa13122d))
+* **cli:** warn before any command reads a project on a newer file shape ([f5695da](https://github.com/abdelrahmannasr/yadflow/commit/f5695da00299169f3bdb34913aa7c90448501510))
+* **cli:** yad epic new — the engine writes an epic's lifecycle (E17) ([92e67d6](https://github.com/abdelrahmannasr/yadflow/commit/92e67d635efddcadbd8f4399dac27b0c56402cbe))
+* **codeowners:** warn when CODEOWNERS is stale (E69) ([6c35d6a](https://github.com/abdelrahmannasr/yadflow/commit/6c35d6a2d854e089561b708c6441616117816cf6))
+* **defer:** yad defer --debt marks a deferral owed back, reminded until paid (E41) ([b20d57d](https://github.com/abdelrahmannasr/yadflow/commit/b20d57dc85abbb8509a6298bb5c98bff66cd827c))
+* **defer:** yad defer and yad undefer set an optional step aside (E37) ([b6f2391](https://github.com/abdelrahmannasr/yadflow/commit/b6f2391df9feb0f9a0b9cf5af74eb928de138767))
+* **dial:** yad dial, yad kill and yad unkill — the advance dial set freely (E34) ([56e8300](https://github.com/abdelrahmannasr/yadflow/commit/56e8300c37839f6a688d821f52ceee9ea682f219))
+* **doctor:** keep the access cause open when GitLab names no default branch (E110) ([ddb8159](https://github.com/abdelrahmannasr/yadflow/commit/ddb8159c792e5bddb42fa135b68e25ab5774a073))
+* **doctor:** name a leftover _bmad/sdlc/ folder (E3) ([5d7b1ab](https://github.com/abdelrahmannasr/yadflow/commit/5d7b1ab4632b5712226057a7d41a796070512bae))
+* **doctor:** name the cause behind a GitLab branch 404 from its body (E109) ([64865d7](https://github.com/abdelrahmannasr/yadflow/commit/64865d71a8449453e05942f0dac69ec413b5e4c0))
+* **doctor:** people:roster-unused says when the roster can go ([eb0c012](https://github.com/abdelrahmannasr/yadflow/commit/eb0c012963af43a15b62dc3c229cd32f7c791a3a))
+* **doctor:** say whether each repo's branch requires an approval (E70) ([e93dd3b](https://github.com/abdelrahmannasr/yadflow/commit/e93dd3b7cbe4ed52fc1d9a9a7b91613c2bfe0cf8))
+* **engine:** lifecycle profiles, with today's chains written down (E5) ([44564d4](https://github.com/abdelrahmannasr/yadflow/commit/44564d44d826265138d6fdc1f5feee5ab5760988))
+* **engine:** the step catalogue, validated in code (E4) ([c3823bf](https://github.com/abdelrahmannasr/yadflow/commit/c3823bf4bed067a91496fe79c8cd490088c9e71c))
+* **epic:** `yad foundation new` — the engine seeds the Product level (E75) ([2cf2241](https://github.com/abdelrahmannasr/yadflow/commit/2cf2241556d8bfef4e6682460c51ab86319024e7))
+* **epic:** the grouping theme tag (E31) ([bf8a31c](https://github.com/abdelrahmannasr/yadflow/commit/bf8a31c880c445dedd1b4abb78f6314971c1cacb))
+* **epic:** yad epic new --parent seeds a threaded change-epic (E42) ([3786ae2](https://github.com/abdelrahmannasr/yadflow/commit/3786ae246ec9b5759de590c72a928e33e2ad7d96))
+* **foundation:** yad foundation status reads roadmap features from the epic ledgers ([e6a4a85](https://github.com/abdelrahmannasr/yadflow/commit/e6a4a853b2f31204ed687b16f0bdba3dd68c245c))
+* **gate:** approvals record the platform's evidence; GitLab's approval time is read ([0e16728](https://github.com/abdelrahmannasr/yadflow/commit/0e167282349f832128757caeda10200617b0a2d7)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+* **gate:** cap the approval count at the active people less one, and record every cap (E72) ([f99e77d](https://github.com/abdelrahmannasr/yadflow/commit/f99e77da98484623d6ed1cb270dcc1dea3a08c1f))
+* **gate:** every surface that reports a gate prints the arithmetic ([0ac5617](https://github.com/abdelrahmannasr/yadflow/commit/0ac56179cd49ab3d66ee2e8642500cd3f420e27c))
+* **gate:** print how many people there are to ask, on every surface a gate reports itself (E71) ([cfabed9](https://github.com/abdelrahmannasr/yadflow/commit/cfabed9521d431b043ab356b46f9f54ec306a005))
+* **gate:** record how a step closed (E18) ([a1c9050](https://github.com/abdelrahmannasr/yadflow/commit/a1c905037061437ecdf6183df26f246cb8cb049b))
+* **gate:** record the platform login on older records while the roster exists ([cc7b02f](https://github.com/abdelrahmannasr/yadflow/commit/cc7b02f36658c5517fcc49b3f464ca1cfeeff048))
+* **gate:** rename the PR ledger too, and guard both names ([c0b8b00](https://github.com/abdelrahmannasr/yadflow/commit/c0b8b00bdf77203346127984f67cce95206ba054))
+* **gate:** say on the closing record when solo mode waived the approvals (E10) ([f733e5e](https://github.com/abdelrahmannasr/yadflow/commit/f733e5e10a9b8ae3c6255e4e724122e9346ac64b))
+* **gate:** say when a gate may not be met — reported, never enforced (E73) ([444b67c](https://github.com/abdelrahmannasr/yadflow/commit/444b67c0e77087d286fab60bd853e1f3272320c0))
+* **gate:** the gate bot converts a verified Product's product level to foundation/ ([ad3bc94](https://github.com/abdelrahmannasr/yadflow/commit/ad3bc94b0a373bd131bb1609afd6cac610aeeef8))
+* **gate:** warn when a Foundation section still holds only its template (E76) ([8a5be38](https://github.com/abdelrahmannasr/yadflow/commit/8a5be38404bcb022cf9e98b10d529815d6bc4ad4))
+* **history:** yad history — list, show, search, all with --json (E20) ([c37c9fe](https://github.com/abdelrahmannasr/yadflow/commit/c37c9fe8c346855c3a04d6921438ccaade336d3f))
+* **index:** `yad index` rebuilds the front door on the default branch (E19) ([5b6dfd6](https://github.com/abdelrahmannasr/yadflow/commit/5b6dfd6f3ae01a5f9409fb63e59f32dad5ab429d))
+* **index:** a title for every work item, carried by the Product index (E111) ([7ab7833](https://github.com/abdelrahmannasr/yadflow/commit/7ab78334eab64153e5d5e7a31939416ff4224f19))
+* **index:** build the Product index from every work item's own files (E19) ([5024d61](https://github.com/abdelrahmannasr/yadflow/commit/5024d61807a4354c6969dedf1d0d87aa01e318c2))
+* **index:** the gate, CI and migrate keep the index; doctor says when it is behind (E19) ([97aba2b](https://github.com/abdelrahmannasr/yadflow/commit/97aba2be1d3c934548c195a5d8b6b1647ba8910b))
+* **lifecycle:** name the six phases, derived from the step ([1b77249](https://github.com/abdelrahmannasr/yadflow/commit/1b77249c197ca70df7f95270004ca94a6b930d6a))
+* **mode:** suggest team mode when the count disagrees with solo (E74) ([4756ef9](https://github.com/abdelrahmannasr/yadflow/commit/4756ef92ecedfe0dda0e5bfa3f2785a10ac6424a))
+* **mode:** yad mode solo|team sets who must approve, and records the change (E10) ([ce4077c](https://github.com/abdelrahmannasr/yadflow/commit/ce4077c5055812f61736924c2f76c903acd6db66))
+* **open-pr:** suggest reviewers from history and CODEOWNERS (E68) ([9214ed9](https://github.com/abdelrahmannasr/yadflow/commit/9214ed90123d55ea1fed59541df9148b0b322ed9))
+* **people:** count active people live, three windows, unknown is never a small number (E71) ([1b186a0](https://github.com/abdelrahmannasr/yadflow/commit/1b186a0125f3b5a1ece5edc85521e0b58596fd59))
+* **platform:** a record names the login gh/glab reports, not the roster's (E62) ([6c2ef4e](https://github.com/abdelrahmannasr/yadflow/commit/6c2ef4ee4df6da9e8f9000055e1aa32359ded0bc))
+* **risk-map:** a directory to risk-level map per code repo, with yad risk-map check|draft and a doctor section ([f3d8115](https://github.com/abdelrahmannasr/yadflow/commit/f3d811547360381409560583cce2e601f1e73cc4))
+* **risk-map:** a high directory asks for an approver who has worked there lately (E67) ([28f4e58](https://github.com/abdelrahmannasr/yadflow/commit/28f4e58903432d4bb1cfa7e45529ad65f840c9b6))
+* **risk-map:** a high directory on the base branch's map adds the high step (E66) ([ad6fcac](https://github.com/abdelrahmannasr/yadflow/commit/ad6fcaca496c7dbc377268a9771bdf18b3737e91))
+* **setup:** install the module config into .sdlc/, not _bmad/sdlc/ (E3) ([da18dac](https://github.com/abdelrahmannasr/yadflow/commit/da18dacc1b02c9dba9f1079aeb26c89286805137))
+* **setup:** let a scripted setup choose its agent directories ([8c13a06](https://github.com/abdelrahmannasr/yadflow/commit/8c13a0672a231b70646501a8b780da85bf503ff6))
+* **skills:** the epic and change templates carry a theme ([8b0c71d](https://github.com/abdelrahmannasr/yadflow/commit/8b0c71ddeaec9ea189e663644f7353a1a3c8246a))
+* **skills:** the skills call the engine instead of writing state.json (E17b) ([f0e0d77](https://github.com/abdelrahmannasr/yadflow/commit/f0e0d77eb97ae20a929f04d5bb4d947546c3d4bc))
+* **skip:** yad skip <epic> <story> --repo skips a whole Build lane (E39) ([261e73e](https://github.com/abdelrahmannasr/yadflow/commit/261e73e360bb31cc35272d7c4f6a06394b713515))
+* **skip:** yad skip and yad unskip name no step (E36) ([abbb4e0](https://github.com/abdelrahmannasr/yadflow/commit/abbb4e080fc2c21c61776f555a5b1c66e2359b53))
+* **state:** a chore lane and a spike lane (E40) ([f521c22](https://github.com/abdelrahmannasr/yadflow/commit/f521c22487e5ad44b029e977ae6716925f4ec731))
+* **state:** a Shape author step is not a gate because it is locked (E34) ([298546e](https://github.com/abdelrahmannasr/yadflow/commit/298546ef6ef67ea1c42cf01178aecc494bd938ef))
+* **state:** a step is optional because the epic's ROUTE says so (E35) ([1641b46](https://github.com/abdelrahmannasr/yadflow/commit/1641b46e6fd3b57526862ce4448c4506ccdce4ec))
+* **state:** a step's gate says how many people it needs (E7) ([314e709](https://github.com/abdelrahmannasr/yadflow/commit/314e70982a0b61927c0a379516d4233c08260b99))
+* **state:** every ledger walker finds the Foundation (E75) ([bf86753](https://github.com/abdelrahmannasr/yadflow/commit/bf867537d17150633faa5a9014df2c4b1e59238c))
+* **state:** give the product settings their new name, keeping the old one beside it ([8d0cf1b](https://github.com/abdelrahmannasr/yadflow/commit/8d0cf1b500a6a15fcbb5e53b7806966bf1457a90))
+* **state:** the Product level — Foundation in the model (E75) ([676bbd1](https://github.com/abdelrahmannasr/yadflow/commit/676bbd1ae4557e0c4eb744f62f75ada74969b36b))
+* **state:** the step-state model, and shape 7 writes it (E38) ([4064067](https://github.com/abdelrahmannasr/yadflow/commit/40640673adae5f2065041d92d431fdda522b6b32))
+* **unblock:** yad unblock clears a recorded blocker (E37) ([5ba73f5](https://github.com/abdelrahmannasr/yadflow/commit/5ba73f560923fcf297ab460a82cca26ee2c1feeb))
+* **update:** name an edited gate-sync fragment left on another major ([b33f9e6](https://github.com/abdelrahmannasr/yadflow/commit/b33f9e61c51101f2e5ebb9756e185ece3ce7de74)), closes [#164](https://github.com/abdelrahmannasr/yadflow/issues/164)
+
+
+### BREAKING CHANGES
+
+* `yad docs build`, `yad docs deploy` and
+`yad docs sync --refresh` now exit 1 when a site's npm install or build
+fails, or when a site named with --epic/--overview was never generated;
+`yad docs build` also exits 1 when npm is not on PATH. Under --json these
+are refusals (`ok: false`) naming the site. A script that ran them and
+ignored build failures will now stop.
+* every `--json` answer is now the E1 envelope. `yad
+history --json` carries `jsonVersion` instead of `schemaVersion`; `yad
+thread --json` and the review bundles gain `ok`; `yad usage --json`
+wraps the model (`--format json` still prints the bare model); a refusal
+always has `error`, `code` and `hint`; `warnings` is always present. The
+full list is in docs/CLI.md, "--json on every command".
+* the ROUTE line of risk-route.sh and hub-route.sh
+changed; anything parsing it must be updated.
+* in a repo whose refreshed gate has landed, a Verified
+commit from an email nobody listed now passes CI.
+* `yad roster` is removed, and `yad setup` no longer
+collects reviewers or repo owners.
+* `yad usage --json` members carry no `role` or `rostered`,
+and the `dormant` and `reviewer-not-reviewing` flags are no longer raised.
+* review and task PRs no longer request reviewers
+automatically.
+* the owner/reviewer/domain-owner rule no longer holds a
+team gate; one approver does. `defaultReviewers` and the roster shape
+check are gone.
+* file shape 10. An older yadflow reading a chain with a
+re-opened step names that step the blocker of the work after it, and
+re-opens that work when its review passes. See docs/migrations/shape-10.md.
+* file shape 9. An older yadflow fingerprints the whole
+file, so it reads every approval this release records on a file with a
+`status:` line as stale. On a local ledger with mixed versions, that
+holds an open gate for the teammate on the older release. Upgrade
+everyone on the project together. A verified project runs
+`yad migrate --apply` and commits the result; CI brings each state.json
+to shape 9 at its next write.
+* file shape 8. A migrated project keeps its product level
+in `foundation/`, which a 3.x yadflow does not read. Upgrade everyone on
+the project together. On a verified Product, run `yad update` so the
+committed checks guard `foundation/`.
+* **state:** shape 7 is the first file shape that changes a value in place
+rather than adding a key beside an old one, so a 3.x CLI cannot read a migrated
+project: it sees `todo` as an unknown status and reads `skipped` / `satisfied` as
+"not done", which makes a UI-less epic or a change-epic look stuck. This release
+reads every pre-shape-7 project correctly; run `yad migrate --preview` first and
+upgrade everyone on the project. See docs/migrations/shape-7.md.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+* file shape 5. Run `yad migrate` to preview, then
+`yad migrate --apply`. See docs/migrations/shape-5.md.
+* project files change shape twice in this release, and both are
+handled by one command. Shape 2 records who writes the ledger as
+`"ledger": "verified" | "local"` in the product settings; shape 3 renames those
+settings from `.sdlc/hub.json` to `.sdlc/product.json`, renames each epic's
+`hub-prs.json` to `product-prs.json`, and gives every reviewer's product-level
+role a second spelling. Nothing is taken away: every old name is still written
+and is still the one read, so a check gate committed in your repository keeps
+working whether or not you have run `yad update`. Run `npx yadflow@<version>
+migrate` to preview — it writes nothing — then `yad migrate --apply`, which backs
+up every file it rewrites. docs/migrations/shape-2.md and shape-3.md explain both.
+
+Shape 2 shipped earlier as 3.19.0-next without declaring a break, which meant the
+"run yad migrate first" banner never fired for it. This footer covers both.
+
 # [3.19.0-next.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.19.0-next.1...v3.19.0-next.2) (2026-09-07)
 
 
