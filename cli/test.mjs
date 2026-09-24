@@ -22666,11 +22666,14 @@ test('E20 review 2: --thread keeps a genesis with no epic.md yet; says when the 
 
 test('E20 review 2: counted follows the gate — nobody named, engagement none, solo, skipped and inherited steps', async () => {
   const T = historyProduct({
+    // `classic` makes `ui-design` optional, and so its review; no other step here is (`isSkippableStep`).
     'epics/EP-odd/.sdlc/state.json': {
-      createdAt: '2026-03-01', steps: [
+      createdAt: '2026-03-01', profile: 'classic', steps: [
         { id: 'r-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review' },
-        { id: 's-review', type: 'review+approve', artifact: 'epic.md', status: 'skipped', record: { by: 'ann', reason: 'n/a' } },
+        { id: 'ui-design-review', type: 'review+approve', artifact: 'epic.md', status: 'skipped', record: { by: 'ann', reason: 'n/a' } },
         { id: 'i-review', type: 'review+approve', artifact: 'epic.md', status: 'satisfied', inheritedFrom: 'EP-old' },
+        { id: 'stories-review', type: 'review+approve', artifact: 'epic.md', status: 'skipped', record: { by: 'ann', reason: 'n/a' } },
+        { id: 'arch-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', inherited: true },
       ],
     },
     'epics/EP-odd/epic.md': '---\nkind: chore\n---\n',
@@ -22680,8 +22683,10 @@ test('E20 review 2: counted follows the gate — nobody named, engagement none, 
       { step: 'r-review', status: 'approved' },
       { step: 'r-review', approver: 'ann', status: 'approved', engagement: 'none' },
       { step: 'r-review', approver: 'bo', status: 'approved', engagement: 'verified' },
-      { step: 's-review', approver: 'cy', status: 'approved', artifactHash: 'sha256:old' },
+      { step: 'ui-design-review', approver: 'cy', status: 'approved', artifactHash: 'sha256:old' },
       { step: 'i-review', approver: 'di', status: 'approved', artifactHash: 'sha256:old' },
+      { step: 'stories-review', approver: 'ed', status: 'approved', artifactHash: 'sha256:old' },
+      { step: 'arch-review', approver: 'fy', status: 'approved', artifactHash: 'sha256:old' },
     ],
   });
   const setHub = (extra) => {
@@ -22692,11 +22697,14 @@ test('E20 review 2: counted follows the gate — nobody named, engagement none, 
   try {
     let steps = await show();
     assert.deepEqual(steps[0].approvals.map((a) => a.counted), [false, false, false, true, true], 'a record that names nobody is not counted');
-    assert.deepEqual(steps[1].approvals.map((a) => [a.stale, a.counted]), [[null, null]], 'a skipped step is never judged');
-    assert.deepEqual(steps[2].approvals.map((a) => [a.stale, a.counted]), [[null, null]], 'nor an inherited one');
+    assert.deepEqual(steps[1].approvals.map((a) => [a.stale, a.counted]), [[null, null]], 'a skip the route allows is never judged');
+    assert.deepEqual(steps[2].approvals.map((a) => [a.stale, a.counted]), [[null, null]], 'nor an inherited step');
+    assert.deepEqual(steps[3].approvals.map((a) => [a.stale, a.counted]), [[true, false]], 'a skip on a step the route requires is not honoured: judged, as the gate judges it');
+    assert.deepEqual(steps[4].approvals.map((a) => [a.stale, a.counted]), [[null, null]], 'an inherited CLAIM waives it, whatever the status says');
     const text = await grab(() => runHistory(T, { action: 'show', args: ['EP-odd'] }));
     assert.match(text, /approved by nobody named — names nobody \(not counted\)/);
-    assert.ok(!text.includes('stale (revoked)'), 'no stale tag where the gate judges nothing');
+    assert.match(text, /approved by ed — stale \(revoked\)/);
+    assert.ok(!/approved by (cy|di|fy) — stale/.test(text), 'no stale tag where the gate judges nothing');
     setHub({ review: { requireEngagement: true } });
     steps = await show();
     assert.deepEqual(steps[0].approvals.slice(3).map((a) => a.counted), [false, true], "'none' is what a bare approve records");
@@ -22704,6 +22712,7 @@ test('E20 review 2: counted follows the gate — nobody named, engagement none, 
     setHub({ solo: true });
     steps = await show();
     assert.deepEqual(steps[0].approvals.map((a) => a.counted), [null, null, null, null, null], 'solo mode waives the count');
+    assert.deepEqual(steps[3].approvals.map((a) => [a.stale, a.counted]), [[true, null]], 'in solo mode stale is still told, as the gate tells it');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -22715,7 +22724,7 @@ test('E20 review 2: a refused filter reads nothing — even when the epics folde
     assert.match(await grab(() => runHistory(E, { type: 'nope' })), /unknown work-item type: nope/);
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
-    assert.match(await grab(() => runHistory(E, { thread: 'EP-x' })), /the epics folder could not be listed \(ENOTDIR\)/, 'no stack trace');
+    assert.match(await grab(() => runHistory(E, { thread: 'EP-x' })), /the thread EP-x could not be walked \(ENOTDIR\)/, 'no stack trace');
     assert.equal(process.exitCode, 1);
   } finally { process.exitCode = exit; fs.rmSync(E, { recursive: true, force: true }); }
 });

@@ -33,6 +33,7 @@ import { buildIndex } from './product-index.mjs';
 import {
   epicRoot, isValidEpicId, FOUNDATION_EPIC, stepStatus, acceptedHashes, isStaleHash,
   WORK_ITEM_TYPES, themeKey, threadEpics, resolveThread, shown,
+  claimsInherited, claimsSkipped, isSkippableStep, optionalStepsFor,
 } from './epic-state.mjs';
 import { closedLine, prNumber, requireEngagement, isSolo } from './gate.mjs';
 
@@ -167,7 +168,7 @@ export function readSteps(root, id) {
   const r = readLedgerFile(path.join(epicRoot(root, id), '.sdlc', 'state.json'));
   if (r.missing) return { why: 'it is missing now' };
   if (r.why) return { why: r.why };
-  return Array.isArray(r.value?.steps) ? { steps: r.value.steps } : { why: 'it has no list of steps' };
+  return Array.isArray(r.value?.steps) ? { steps: r.value.steps, state: r.value } : { why: 'it has no list of steps' };
 }
 
 // The whole story of one item, for `show`. Throws nothing: every part that cannot be read says why.
@@ -180,6 +181,8 @@ export function itemHistory(root, item, { hub = null } = {}) {
   const approvalsWhy = approvals ? null : approvalsRead.why || 'it is not a list';
   const reqEng = requireEngagement(hub);
   const solo = isSolo(hub);
+  // The steps THIS item's route lets be skipped — what `gatePredicate` asks before it honours a skip.
+  const optional = stateRead.state ? optionalStepsFor(stateRead.state) : [];
   const out = [];
   for (const s of stateRead.steps || []) {
     // Every entry in the list is a row, so the count matches the index's: one that is not a step object
@@ -207,11 +210,14 @@ export function itemHistory(root, item, { hub = null } = {}) {
       //
       // `counted` is per RECORD, not a head count: two approvals from one person are both counted, and
       // the gate counts that person once. It is null — no count applies — where the gate counts nothing:
-      // in solo mode (approvals are waived, E10), and on a step passed by being skipped or inherited
-      // (`gatePredicate` returns before it reads any approval). On those two, `stale` is null as well:
-      // the gate never judges them, and an inherited review's content is the parent's, so this item's
-      // own fingerprint would give the wrong answer (the warning in `gatePredicate`).
-      const notJudged = ['skipped', 'satisfied'].includes(row.state);
+      // in solo mode (approvals are waived, E10), and on a step the gate waives before it reads any
+      // approval. That second case is decided by the gate's own test, on what the step CLAIMS — an
+      // inherited claim, or a skip this item's route allows (`isSkippableStep`) — never by its final
+      // state, as `gate status` decides it: a skip on a step the route requires is not honoured, and its
+      // approvals are judged like any other. On a waived step `stale` is null as well — the gate never
+      // judges it, and an inherited review's content is the parent's, so this item's own fingerprint
+      // would give the wrong answer (the warning in `gatePredicate`). In solo mode `stale` is still told.
+      const notJudged = claimsInherited(s) || (claimsSkipped(s) && isSkippableStep(s.id, optional));
       const waived = solo || notJudged;
       let accepted = null;
       let hashWhy = null;
@@ -347,7 +353,8 @@ export async function runHistory(root, { action = 'list', args = [], json = fals
       const walk = resolveThread(root, flags.thread);
       thread = { members: [...new Set([...threadEpics(root, flags.thread), walk.rootId])], broken: walk.broken };
     } catch (e) {
-      fail(`the epics folder could not be listed (${e.code || e.message}), so there is no honest history to show`);
+      // The walk reads each member's epic.md as well as the folder, so the message names the walk.
+      fail(`the thread ${flags.thread} could not be walked (${e.code || e.message}), so there is no honest history to show`);
       process.exitCode = 1;
       return;
     }

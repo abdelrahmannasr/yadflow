@@ -1173,8 +1173,10 @@ be followed. Each approval in `show` carries `"stale"` and `"counted"`, so a scr
 rules. **`counted` is per record, not a count of people:** two approvals from one person are both
 `counted`, and the gate counts that person once. It is `false` for a record that is not an approval, is
 stale, names nobody, or (when engagement is required) has no verified engagement. It is `null` where no
-count applies — in solo mode, and on a step passed by being skipped or inherited, which the gate never
-judges (`stale` is `null` there too) — and when the fingerprint cannot be taken.
+count applies: in solo mode; on a step the gate waives before it reads an approval — one that claims to be
+inherited, or skipped where the item's route lets that step be skipped (a skip on a step the route
+requires is not honoured, and its approvals are judged); and when the fingerprint cannot be taken. On a
+waived step `stale` is `null` too; in solo mode it is still told.
 
 ## File shape: `schemaVersion`
 
