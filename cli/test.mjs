@@ -22728,3 +22728,35 @@ test('E20 review 2: a refused filter reads nothing — even when the epics folde
     assert.equal(process.exitCode, 1);
   } finally { process.exitCode = exit; fs.rmSync(E, { recursive: true, force: true }); }
 });
+
+test('E20 review 3: the route that allows a skip is read as the gate reads it — recorded, inferred, or none', async () => {
+  const CLASSIC = ['epic', 'epic-review', 'architecture', 'architecture-review', 'ui-design', 'ui-design-review', 'stories', 'stories-review', 'test-cases', 'test-cases-review'];
+  const chain = (ids, profile) => ({
+    createdAt: '2026-03-01', ...(profile ? { profile } : {}),
+    steps: ids.map((id) => (id === 'ui-design-review'
+      ? { id, type: 'review+approve', artifact: 'epic.md', status: 'skipped', record: { by: 'ann', reason: 'n/a' } }
+      : { id, ...(id.endsWith('-review') ? { type: 'review+approve', artifact: 'epic.md' } : {}), status: 'todo' })),
+  });
+  const old = [{ step: 'ui-design-review', approver: 'cy', status: 'approved', artifactHash: 'sha256:old' }];
+  const T = historyProduct({
+    // No `profile` key: the route is inferred from a chain that fits `classic`, where ui-design is optional.
+    'epics/EP-inf/.sdlc/state.json': chain(CLASSIC),
+    'epics/EP-inf/epic.md': '---\nkind: feature\n---\n',
+    'epics/EP-inf/.sdlc/approvals.json': old,
+    // No key, and a chain on no route: nothing is optional, so the skip is not honoured.
+    'epics/EP-off/.sdlc/state.json': chain(['epic', 'ui-design-review', 'odd-step']),
+    'epics/EP-off/epic.md': '---\nkind: feature\n---\n',
+    'epics/EP-off/.sdlc/approvals.json': old,
+    // The legacy flag spelling of a skip, on a step the route requires.
+    'epics/EP-leg/.sdlc/state.json': { createdAt: '2026-03-01', profile: 'classic', steps: [{ id: 'stories-review', type: 'review+approve', artifact: 'epic.md', status: 'done', skipped: true }] },
+    'epics/EP-leg/epic.md': '---\nkind: feature\n---\n',
+    'epics/EP-leg/.sdlc/approvals.json': [{ step: 'stories-review', approver: 'ed', status: 'approved', artifactHash: 'sha256:old' }],
+  });
+  const verdict = async (id, stepId) => JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: [id], json: true })))
+    .steps.find((s) => s.id === stepId).approvals.map((a) => [a.stale, a.counted]);
+  try {
+    assert.deepEqual(await verdict('EP-inf', 'ui-design-review'), [[null, null]], 'an inferred route allows the skip');
+    assert.deepEqual(await verdict('EP-off', 'ui-design-review'), [[true, false]], 'no route: nothing is optional, the approvals are judged');
+    assert.deepEqual(await verdict('EP-leg', 'stories-review'), [[true, false]], 'a legacy skip flag on a required step is not honoured');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
