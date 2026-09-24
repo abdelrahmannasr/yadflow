@@ -121,7 +121,8 @@ root. This generalizes the standing rule that feature work hand-updates the repo
 ### Step 6 — Build / deploy (`action`)
 - `action: generate` (default) — generate source + manifest; stop.
 - `action: deploy` — drive **`yad docs deploy --overview`**: npm-build, ensure the Pages CI workflow,
-  report the deploy URL. Degrades to local `dist/` when no platform CLI / `target: "none"`.
+  report the deploy URL. Degrades to local `dist/` when no platform CLI / `target: "none"`. A failed
+  npm install or build exits 1 and names the site — report the failure, not a deploy URL.
 
 ### Step 7 — Stop. Report (no gate, no epic)
 Report: the site path (`docs/sdlc-site/`), the data files produced, that the theme is the yadflow brand

@@ -207,16 +207,36 @@ export function pagesWorkflowPath(platform) {
 }
 
 // ---- build (subprocess) -------------------------------------------------------------------------
-function buildSite(dir) {
-  if (!exists(dir)) { warn(`no generated site at ${path.relative(process.cwd(), dir)} — run the yad-docs skill first`); return { ok: false, missing: true }; }
-  if (!has('npm')) { warn('npm not on PATH — cannot build; the CI workflow will build on push'); return { ok: false, noNpm: true }; }
+// Builds one site and says what happened: `{ site, built, error }`, where `error` is why it was not
+// built (null when it was). Every caller — build, deploy, sync --refresh — reads that one row, so a
+// failure is said the same way on each path. A failure sets exit 1 and is a `fail` with its `hand`
+// right under it: under --json that pair IS the refusal, and a later `hand` (deploy's "no Pages
+// platform") can never become a failed build's hint. The one miss that is only a warning is npm not on
+// PATH for a deploy or a refresh, which the CI workflow builds on push (`npmOptional`).
+function buildSite(root, t, { npmOptional = false } = {}) {
+  const dir = siteDir(root, t);
+  const rel = path.relative(root, dir) || '.';
+  const site = label(t);
+  const failed = (error, next) => {
+    fail(error);
+    hand(next);
+    process.exitCode = 1;
+    return { site, built: false, error };
+  };
+  if (!exists(dir)) return failed(`${site}: no generated site at ${rel}`, `run the ${t.overview ? 'yad-docs-overview' : 'yad-docs'} skill first`);
+  if (!has('npm')) {
+    const error = `${site}: npm not on PATH — cannot build`;
+    if (!npmOptional) return failed(error, 'install npm (or put it on PATH), then run the command again');
+    warn(`${error}; the CI workflow will build on push`);
+    return { site, built: false, error };
+  }
   const install = exists(path.join(dir, 'package-lock.json')) ? ['ci'] : ['install'];
-  log(`  ${c.dim('$')} npm ${install[0]} ${c.dim(`(${path.relative(process.cwd(), dir)})`)}`);
-  const i = run('npm', install, { cwd: dir, stdio: 'inherit' });
-  if (!i.ok) { fail('npm install failed'); return { ok: false }; }
-  const b = run('npm', ['run', 'build'], { cwd: dir, stdio: 'inherit' });
-  if (!b.ok) { fail('npm run build failed'); return { ok: false }; }
-  return { ok: true, dist: path.join(dir, 'dist') };
+  const again = 'fix the error npm printed above, then run the command again';
+  log(`  ${c.dim('$')} npm ${install[0]} ${c.dim(`(${rel})`)}`);
+  if (!run('npm', install, { cwd: dir, stdio: 'inherit' }).ok) return failed(`${site}: npm ${install[0]} failed`, again);
+  if (!run('npm', ['run', 'build'], { cwd: dir, stdio: 'inherit' }).ok) return failed(`${site}: npm run build failed`, again);
+  ok(`built ${site} ${c.dim('→ ' + path.relative(root, path.join(dir, 'dist')))}`);
+  return { site, built: true, error: null };
 }
 
 // ---- orchestration ------------------------------------------------------------------------------
@@ -237,38 +257,46 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
   }
 
   if (action === 'build' || action === 'deploy') {
-    let built = 0;
-    for (const t of targets) {
-      const r = buildSite(siteDir(root, t));
-      if (r.ok) { built++; ok(`built ${label(t)} ${c.dim('→ ' + path.relative(root, r.dist))}`); }
-    }
+    // Every site is tried, even after one fails; the run exits 1 if any did (buildSite sets it).
+    const sites = targets.map((t) => buildSite(root, t, { npmOptional: action === 'deploy' }));
+    const built = sites.filter((s) => s.built).length;
     if (action === 'deploy') {
       const platform = docs ? (docs.target === 'gitlab-pages' ? 'gitlab' : docs.target === 'github-pages' ? 'github' : null) : null;
+      // Both arms say the same thing about what was built here; only a run where every site built ends on ✓.
+      const all = built > 0 && built === sites.length;
+      const here = all ? null : built ? `only ${built} of ${sites.length} sites built here` : 'nothing was built here';
       if (!platform || !platformReady(platform)) {
-        hand('no Pages platform/CLI — built locally only; commit + push so the CI workflow can publish (yad docs sync --wire)');
+        hand(`no Pages platform/CLI — ${here ?? 'built locally only'}; commit + push so the CI workflow can publish (yad docs sync --wire)`);
       } else {
-        ok(`deploy via the ${platform} Pages workflow on push (yad docs sync --wire installs it)`);
+        (all ? ok : info)(`${here ? `${here}; ` : ''}deploy via the ${platform} Pages workflow on push (yad docs sync --wire installs it)`);
         if (docs?.basePath) info(`will publish under ${docs.basePath}`);
       }
     }
-    return { action, built };
+    return { action, built, sites };
   }
 
   if (action === 'sync') {
     if (sync === 'wire') return wirePages(root, docs);
     // check (default) + refresh both compute staleness; refresh additionally rebuilds.
     const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
-    let stale = 0;
+    // One row per site. `built` is null when no build was tried (a check, or a fresh site), so it never
+    // reads as a failed build; a refresh that could not build a stale site exits 1, as a deploy does.
+    const sites = [];
     for (const t of targets) {
       const s = freshness(root, t, registry);
       if (s.stale) {
-        stale++;
         warn(`${label(t)} — ${c.yellow('stale')}: ${s.reasons.join('; ')}`);
-        if (sync === 'refresh') buildSite(siteDir(root, t));
-      } else ok(`${label(t)} ${c.dim('— fresh')}`);
+        const b = sync === 'refresh' ? buildSite(root, t, { npmOptional: true }) : { built: null, error: null };
+        sites.push({ site: label(t), stale: true, built: b.built, error: b.error });
+      } else {
+        ok(`${label(t)} ${c.dim('— fresh')}`);
+        sites.push({ site: label(t), stale: false, built: null, error: null });
+      }
     }
+    const stale = sites.filter((s) => s.stale).length;
+    const built = sites.filter((s) => s.built).length;
     if (stale && sync !== 'refresh') hand('regenerate content with the yad-docs / yad-docs-overview skill (the AI step), then `yad docs deploy`');
-    return { action, sync, stale };
+    return { action, sync, stale, built, sites };
   }
 
   fail(`unknown docs action: ${action} (list | build | deploy | sync)`);

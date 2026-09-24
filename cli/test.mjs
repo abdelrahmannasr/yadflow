@@ -11006,15 +11006,195 @@ test('runDocs: list/sync/wire orchestrate over generated sites and install the P
   assert.equal(wired.wired, '.github/workflows/yad-docs.yml');
   assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-docs.yml')), 'Pages workflow written');
 
-  // build degrades (does not throw) when a targeted site has not been generated yet
+  // a targeted site that has not been generated is a failed build (exit 1), never a throw
+  const before = process.exitCode;
   const builtMissing = await runDocs(T, { action: 'build', epic: 'EP-nope' });
   assert.equal(builtMissing.built, 0, 'build of a non-generated site yields nothing, no throw');
+  assert.deepEqual(builtMissing.sites, [{ site: 'epic EP-nope', built: false, error: 'epic EP-nope: no generated site at epics/EP-nope/docs-site' }]);
+  assert.equal(process.exitCode, 1, 'a named site that does not exist fails the build');
+  process.exitCode = before;
 
-  const before = process.exitCode;
   await runDocs(T, { action: 'bogus' });
   assert.equal(process.exitCode, 1, 'an unknown action sets a failing exit code');
   process.exitCode = before;
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A Product with two generated epic sites and a fake `npm` first on PATH, so no real install runs. The
+// fake logs every call and fails the step named in FAKE_NPM_FAIL (`install` or `build`), only in the
+// site named in FAKE_NPM_FAIL_IN (every site when unset).
+function docsBuildFixture() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-build-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'hub', basePath: '/', source: 'unavailable' }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  for (const id of ['EP-a', 'EP-b']) {
+    const ep = path.join(T, 'epics', id);
+    fs.mkdirSync(path.join(ep, 'docs-site'), { recursive: true });
+    fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(ep, 'epic.md'), '# epic');
+    fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ repos: [] }));
+    fs.writeFileSync(path.join(ep, 'docs-site/package.json'), JSON.stringify({ name: id.toLowerCase(), scripts: { build: 'exit 1' } }));
+  }
+  const bin = path.join(T, 'fakebin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), [
+    '#!/bin/sh',
+    'site=$(basename "$(dirname "$PWD")")',
+    'echo "$site $*" >> "$FAKE_NPM_LOG"',
+    'if [ -n "$FAKE_NPM_FAIL_IN" ] && [ "$FAKE_NPM_FAIL_IN" != "$site" ]; then exit 0; fi',
+    'case "$1" in install|ci) [ "$FAKE_NPM_FAIL" = install ] && exit 1 ;; run) [ "$FAKE_NPM_FAIL" = build ] && exit 1 ;; esac',
+    'exit 0',
+    '',
+  ].join('\n'), { mode: 0o755 });
+  const npmLog = path.join(T, 'npm.log');
+  const yad = (args, env = {}) => {
+    fs.rmSync(npmLog, { force: true });
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], {
+      cwd: os.tmpdir(), encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, FAKE_NPM_LOG: npmLog, NO_COLOR: '1', YAD_NO_REPORT: '1', ...env },
+    });
+    const calls = fs.existsSync(npmLog) ? fs.readFileSync(npmLog, 'utf8').trim().split('\n') : [];
+    return { code: r.status, stdout: r.stdout, stderr: r.stderr, calls };
+  };
+  return { T, yad };
+}
+
+test('docs build/deploy: a failed npm build exits 1, the other sites are still built, --json says which', () => {
+  const { T, yad } = docsBuildFixture();
+  try {
+    // The plain run: exit 1, both sites tried (decision c), the failure named with its site.
+    const plain = yad(['docs', 'build'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-a' });
+    assert.equal(plain.code, 1, 'a failed npm run build fails the command');
+    assert.deepEqual(plain.calls, ['EP-a install', 'EP-a run build', 'EP-b install', 'EP-b run build'], 'EP-b is built after EP-a fails');
+    assert.match(plain.stdout, /✗ epic EP-a: npm run build failed/);
+    assert.match(plain.stdout, /✓ built epic EP-b/);
+
+    // --json: a refusal naming the first failure, and what WAS done — the count and a row per site.
+    for (const action of ['build', 'deploy']) {
+      const j = yad(['docs', action, '--json'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-a' });
+      assert.equal(j.code, 1, `docs ${action} --json exits 1 as the plain run does`);
+      const a = JSON.parse(j.stdout);
+      assert.equal(a.ok, false);
+      assert.equal(a.error, 'epic EP-a: npm run build failed');
+      assert.equal(a.hint, 'fix the error npm printed above, then run the command again', 'the hint is the failure\'s own, never deploy\'s later platform line');
+      assert.equal(a.built, 1);
+      assert.deepEqual(a.sites, [
+        { site: 'epic EP-a', built: false, error: 'epic EP-a: npm run build failed' },
+        { site: 'epic EP-b', built: true, error: null },
+      ]);
+    }
+
+    // The LAST site failing on deploy: the platform line printed after it must not become its hint.
+    const last = JSON.parse(yad(['docs', 'deploy', '--json'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-b' }).stdout);
+    assert.equal(last.error, 'epic EP-b: npm run build failed');
+    assert.equal(last.hint, 'fix the error npm printed above, then run the command again');
+
+    // The no-platform twin says the same about a partial build.
+    const partial = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-a' });
+    assert.match(partial.stdout, /no Pages platform\/CLI — only 1 of 2 sites built here;/);
+
+    // Twin: a failed install is a failure too, and the build step is never run after it.
+    const inst = yad(['docs', 'build', '--json'], { FAKE_NPM_FAIL: 'install' });
+    assert.equal(inst.code, 1);
+    assert.deepEqual(inst.calls, ['EP-a install', 'EP-b install']);
+    const ia = JSON.parse(inst.stdout);
+    assert.equal(ia.error, 'epic EP-a: npm install failed');
+    assert.ok(ia.warnings.includes('epic EP-b: npm install failed — fix the error npm printed above, then run the command again'), 'the second failure is in warnings, with its hint');
+    assert.equal(ia.built, 0);
+
+    // The twin arm: a Pages platform whose CLI is on PATH. With every build failed it must not end on a
+    // green "deploy via" tick; with a build it does.
+    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'github-pages', scope: 'hub', basePath: '/', source: 'gh' }));
+    fs.writeFileSync(path.join(T, 'fakebin/gh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const none = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build' });
+    assert.equal(none.code, 1);
+    assert.match(none.stdout, /• nothing was built here; deploy via the github Pages workflow on push/);
+    assert.doesNotMatch(none.stdout, /✓ deploy via/);
+    const some = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-a' });
+    assert.equal(some.code, 1, 'one site failed, so the deploy fails');
+    assert.match(some.stdout, /• only 1 of 2 sites built here; deploy via the github Pages workflow on push/);
+    assert.doesNotMatch(some.stdout, /✓ deploy via/);
+    const all = yad(['docs', 'deploy']);
+    assert.equal(all.code, 0);
+    assert.match(all.stdout, /✓ deploy via the github Pages workflow on push/, 'only a run where every site built ends on a tick');
+    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'hub', basePath: '/', source: 'unavailable' }));
+
+    // Every build passing: exit 0, ok true, the same keys.
+    const good = yad(['docs', 'build', '--json']);
+    assert.equal(good.code, 0);
+    const ga = JSON.parse(good.stdout);
+    assert.equal(ga.ok, true);
+    assert.equal(ga.built, 2);
+    assert.deepEqual(ga.sites.map((s) => [s.site, s.built, s.error]), [['epic EP-a', true, null], ['epic EP-b', true, null]]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('docs build/deploy: a missing site fails every action; npm missing fails build but only warns on deploy', () => {
+  const { T, yad } = docsBuildFixture();
+  try {
+    for (const action of ['build', 'deploy']) {
+      const j = yad(['docs', action, '--epic', 'EP-nope', '--json']);
+      assert.equal(j.code, 1, `docs ${action} of a site never generated exits 1`);
+      const a = JSON.parse(j.stdout);
+      assert.equal(a.error, 'epic EP-nope: no generated site at epics/EP-nope/docs-site', 'the path is the project\'s, wherever the command runs');
+      assert.equal(a.hint, 'run the yad-docs skill first');
+      assert.deepEqual(a.sites.map((s) => s.built), [false]);
+    }
+    const ov = JSON.parse(yad(['docs', 'build', '--overview', '--json']).stdout);
+    assert.equal(ov.hint, 'run the yad-docs-overview skill first', 'the overview names its own skill');
+
+    // No npm on PATH: `which` cannot find it (PATH holds only an empty folder; node is run by full path).
+    const empty = path.join(T, 'nobin');
+    fs.mkdirSync(empty);
+    const build = yad(['docs', 'build', '--epic', 'EP-a', '--json'], { PATH: empty });
+    assert.equal(build.code, 1, 'build was asked for a build, so no npm fails it');
+    assert.equal(JSON.parse(build.stdout).error, 'epic EP-a: npm not on PATH — cannot build');
+    const deploy = yad(['docs', 'deploy', '--epic', 'EP-a', '--json'], { PATH: empty });
+    assert.equal(deploy.code, 0, 'deploy leaves the build to CI when npm is missing');
+    const d = JSON.parse(deploy.stdout);
+    assert.equal(d.ok, true);
+    assert.deepEqual(d.sites, [{ site: 'epic EP-a', built: false, error: 'epic EP-a: npm not on PATH — cannot build' }]);
+    assert.ok(d.warnings.some((w) => /npm not on PATH — cannot build; the CI workflow will build on push/.test(w)));
+    assert.match(deploy.stderr, /no Pages platform\/CLI — nothing was built here;/, 'nothing was built, so deploy does not say it was');
+    assert.doesNotMatch(deploy.stderr, /built locally only/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('docs sync --refresh: a stale site whose rebuild fails exits 1 and says so; a check builds nothing', () => {
+  const { T, yad } = docsBuildFixture();
+  try {
+    // No manifest yet, so both sites read stale.
+    const check = yad(['docs', 'sync', '--json']);
+    assert.equal(check.code, 0);
+    assert.deepEqual(check.calls, [], 'a check never runs npm');
+    const ca = JSON.parse(check.stdout);
+    assert.equal(ca.stale, 2);
+    assert.equal(ca.built, 0);
+    assert.deepEqual(ca.sites.map((s) => [s.site, s.stale, s.built, s.error]), [['epic EP-a', true, null, null], ['epic EP-b', true, null, null]], 'null: no build was tried');
+
+    const plain = yad(['docs', 'sync', '--refresh'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-b' });
+    assert.equal(plain.code, 1, 'a refresh whose rebuild fails fails the command');
+    const refresh = yad(['docs', 'sync', '--refresh', '--json'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-b' });
+    assert.equal(refresh.code, 1);
+    assert.deepEqual(refresh.calls, ['EP-a install', 'EP-a run build', 'EP-b install', 'EP-b run build']);
+    const r = JSON.parse(refresh.stdout);
+    assert.equal(r.ok, false);
+    assert.equal(r.error, 'epic EP-b: npm run build failed');
+    assert.equal(r.stale, 2);
+    assert.equal(r.built, 1);
+    assert.deepEqual(r.sites, [
+      { site: 'epic EP-a', stale: true, built: true, error: null },
+      { site: 'epic EP-b', stale: true, built: false, error: 'epic EP-b: npm run build failed' },
+    ]);
+
+    // npm missing on a refresh is a warning, as on deploy: CI builds on push.
+    const empty = path.join(T, 'nobin');
+    fs.mkdirSync(empty);
+    const noNpm = yad(['docs', 'sync', '--refresh', '--json'], { PATH: empty });
+    assert.equal(noNpm.code, 0);
+    assert.deepEqual(JSON.parse(noNpm.stdout).sites.map((s) => s.built), [false, false]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 // ---- artifact-status: derive frontmatter status from state.json + sweep ----------------------
