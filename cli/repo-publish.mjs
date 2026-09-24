@@ -204,8 +204,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
     const ahead = rev.ok ? (Number(rev.stdout) || 0) : 1; // no upstream ref yet -> attempt the push
     if (!ahead) { info('code-context unchanged and already published — nothing to do'); return; }
     info(`code-context unchanged — pushing ${ahead} already-committed change(s) not yet on origin/${branch}`);
-    pushHead();
-    return;
+    return { message: null, committed: false, pushed: pushHead() };
   }
 
   // Only relevant when we are about to push a commit straight to the default branch: warn (never block)
@@ -232,14 +231,13 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
       git('reset', '-q', '--', ...pathspecs, ...ignoreSpec); // unstage only OUR allowlist for a clean retry
       fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
       process.exitCode = 1;
-      return { message };
+      return { message, committed: false, pushed: false };
     }
   } finally {
     for (const h of held) if (!fs.existsSync(h.abs)) fs.writeFileSync(h.abs, h.buf);
   }
   ok(`published ${fileset.length} file(s): ${c.dim(label)}`);
 
-  if (!push) return { message };
-  pushHead();
-  return { message };
+  if (!push) return { message, committed: true, pushed: false };
+  return { message, committed: true, pushed: pushHead() };
 }

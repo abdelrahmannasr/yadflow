@@ -25,7 +25,7 @@ export const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // make the whole output unparseable. Each `warn` is also collected into `warnings`, as plain text.
 // A command never calls JSON.stringify toward stdout itself; a test greps for it.
 export const JSON_VERSION = 1;
-const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
+export const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
 let jsonRun = null;
 export function beginJSON(command) { jsonRun = { command, emitted: false, warnings: [], failures: [] }; }
 export const inJSON = () => jsonRun !== null;
@@ -36,9 +36,12 @@ export const jsonEmitted = () => jsonRun?.emitted === true;
 // The refusal a command SAID in prose (`fail`, then the `hand` under it), for the run that ends with a
 // non-zero exit and no answer: most refusals are written that way, and turning each by hand into a
 // JSON one is how one arm gets fixed and its twin missed. `bin/yad.mjs` answers with the first.
+// Every failure after the first goes into `warnings`, so a sweep that skipped several epics says all of
+// them (E1 review 2) — `error` holds one line, and none is lost.
 export const jsonFailure = () => {
-  const f = jsonRun?.failures[0];
+  const [f, ...more] = jsonRun?.failures ?? [];
   if (!f) return null;
+  for (const m of more) jsonRun.warnings.push(m.error);
   const code = /\b(YAD-[A-Z]+-\d{3})\b/.exec(f.error)?.[1] ?? null;
   return { error: f.error, hint: f.hint, code };
 };

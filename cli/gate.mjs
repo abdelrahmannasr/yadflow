@@ -5,8 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject,
-  writeMirrored, emitJSON, refuse,
+  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject, writeMirrored, emitJSON, refuse, collectWarning,
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
@@ -959,7 +958,7 @@ export function convertProductLevel(root, hub, { git = (...a) => run('git', a, {
 
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
+  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = hub.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
@@ -980,7 +979,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const jobs = [];
   if (branch) {
     const parsed = parseReviewBranch(branch);
-    if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0 }; }
+    if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
     // A review branch named for the OLD spelling whose ledger has already moved (shape 8) is the
     // Foundation's review: its steps keep `artifact: "discovery/"`, so the job resolves to them there.
     // Without this, that merge finds no ledger at `epics/EP-discovery/` and is dropped.
@@ -1144,7 +1143,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const moved = (merged || !branch)
     ? convertProductLevel(root, hub, { git, defaultBranch, dirty: legacyDirtyBefore })
     : null;
-  if (!touched.size && !moved) return { synced };
+  if (!touched.size && !moved) return { synced, committed: false, pushed: false };
 
   // Path B: CI never writes the ledger to the review branch. A held step that did not advance is
   // read-only here — during review the platform PR/MR is the source of truth (native approvals/
@@ -1179,7 +1178,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       }
     }
     info('pre-merge: gate evaluated; the ledger reconciles on the default branch at merge — nothing pushed');
-    return { synced };
+    return { synced, committed: false, pushed: false };
   }
   const target = defaultBranch; // CI only ever commits the ledger to the default branch
 
@@ -1216,7 +1215,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   })();
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
-  if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
+  if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced, committed: false, pushed: false }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard
   // sibling workflows. CI never pushes the review branch (Path B), so there is no synchronize loop.
   // Only the index staged (the ledger this run wrote was already committed): say that, not an advance.
@@ -1233,14 +1232,14 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     : `chore(gate): ${sync} [skip ci]`;
   const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
     ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : []));
-  if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
+  if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
   ok(`committed gate update: ${c.dim(subject)}`);
-  if (!push) return { synced };
+  if (!push) return { synced, committed: true, pushed: false };
 
-  if (pushWithRebase(root, target).ok) { ok(`pushed to origin/${target}`); return { synced }; }
+  if (pushWithRebase(root, target).ok) { ok(`pushed to origin/${target}`); return { synced, committed: true, pushed: true }; }
   fail(`could not push to origin/${target}${merged ? ' — protected default branch? allow the gate bot to push the merge advance (see yad-hub-bridge references/bridge.md)' : ''} — or run \`yad gate sync\` locally`);
   process.exitCode = 1;
-  return { synced };
+  return { synced, committed: true, pushed: false };
 }
 
 export async function gateComments(root, { epic, artifact, today, reader = readPr } = {}) {
@@ -1666,7 +1665,7 @@ export async function gateWalkthrough(root, { epic, artifact, runner = run } = {
     if (diff.ok && diff.stdout.trim()) {
       stops = sequenceDiff(diff.stdout, { contractPath: bundle.contractPath });
     } else if (!diff.ok) {
-      note(`could not read the artifact diff (${defaultBranch}...HEAD) in ${root} — is the review branch checked out and the base correct?`);
+      { const w = `could not read the artifact diff (${defaultBranch}...HEAD) in ${root} — is the review branch checked out and the base correct?`; collectWarning(w); note(w); }
     }
   }
   const out = { ...bundle, stops };

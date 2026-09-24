@@ -170,7 +170,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (!fix) {
     if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
-    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length };
+    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [] };
   }
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
@@ -210,6 +210,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (gaps.length) hand('one-time setup still missing — run `yad setup`.');
 
   // --- publish: commit each repo's applied changes and push directly to its default branch ---
+  // Each repo's `{ label, committed, pushed }`, for the --json answer (E1): a push that failed after a
+  // commit landed is said per repo.
+  let commits = [];
   if (push) {
     preflightGuardReadiness(root);
     const hub = readJSON(productConfigPath(root), {});
@@ -220,7 +223,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       defByRoot.set(repoRoot, repo.default_branch);
       platformByRoot.set(repoRoot, repo.platform);
     }
-    commitUpdates(root, groupByRoot(appliedActions), {
+    commits = commitUpdates(root, groupByRoot(appliedActions), {
       push: true, allowBranch,
       defaultBranchFor: (r) => defByRoot.get(r),
       // GitLab's yad-update-guard is an includable fragment: unlike a GitHub workflow it does nothing
@@ -234,5 +237,5 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       },
     });
   }
-  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length };
+  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits };
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
 import { VERSION } from '../cli/manifest.mjs';
-import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject } from '../cli/lib.mjs';
+import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
 import { runLedgerGuardHook } from '../cli/hook.mjs';
 
 const helpText = (profiles) => `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
@@ -709,7 +709,10 @@ main()
     // "nothing happened" (E1 review) — `ship` answers `committed: true` beside the refusal.
     const said = process.exitCode ? jsonFailure() : null;
     if (said) {
-      const did = Object.fromEntries(Object.entries(isPlainObject(result) ? result : {}).filter(([k]) => !['ok', 'error', 'code', 'hint'].includes(k)));
+      // Never a key the envelope or the refusal owns: a clash would throw inside the answer and lose the
+      // real refusal, and a `json` key is an option of `refuse`, not data.
+      const owned = new Set([...ENVELOPE_KEYS, 'ok', 'error', 'code', 'hint', 'warnings', 'json']);
+      const did = Object.fromEntries(Object.entries(isPlainObject(result) ? result : {}).filter(([k]) => !owned.has(k)));
       return refuse(said.error, said.hint, { code: said.code, ...did });
     }
     // Otherwise the command's result object IS the answer — `ok` follows the exit code, as everywhere.

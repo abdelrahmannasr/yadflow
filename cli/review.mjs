@@ -6,7 +6,7 @@
 // The CLI never calls an LLM: the skill (yad-review-companion / yad-engineer-review) generates the
 // trailer/cards/chat text and posts it via these primitives, all to the PLATFORM (never a ledger file).
 import path from 'node:path';
-import { log, ok, info, warn, fail, note, run, readJSON, emitJSON, refuse, inJSON } from './lib.mjs';
+import { log, ok, info, warn, fail, note, run, readJSON, emitJSON, refuse, inJSON, collectWarning } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
@@ -89,7 +89,7 @@ export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = 
   const diff = runner('git', ['-C', repoRoot, 'diff', `${base}...HEAD`]);
   // Diagnostics go to STDERR so STDOUT stays pure JSON (the skill / e2e parse it). The empty `stops: []`
   // in the bundle already signals "nothing to walk".
-  if (!diff.ok) note(`could not read the diff (${base}...HEAD) in ${repoRoot} — is the branch pushed and the base correct?`);
+  if (!diff.ok) { const w = `could not read the diff (${base}...HEAD) in ${repoRoot} — is the branch pushed and the base correct?`; collectWarning(w); note(w); }
   const stops = sequenceDiff(diff.ok ? diff.stdout : '', { contractPath: bundle.contract });
   const out = { ...bundle, stops };
   emitJSON(out);

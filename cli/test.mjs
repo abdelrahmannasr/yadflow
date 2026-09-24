@@ -4794,6 +4794,7 @@ test('gate repair: closes the stranded author step, is idempotent, and writes no
   const { T, statePath } = hubWithStrandedEpic();
   const r = await gateRepair(T, { epic: 'EP-x' });
   assert.deepEqual(r.closed, ['stories']);
+  assert.deepEqual([r.dryRun, r.written, r.committed, r.pushed], [false, true, false, false], 'the --json answer says what the run did (E1)');
   const state = JSON.parse(fs.readFileSync(statePath));
   assert.equal(state.steps[0].status, 'done');
   assert.equal(state.steps[2].status, 'in_progress', 'the parallel test-cases track is left alone');
@@ -4809,6 +4810,7 @@ test('gate repair --dry-run reports the violation but writes nothing', async () 
   const before = fs.readFileSync(statePath, 'utf8');
   const r = await gateRepair(T, { epic: 'EP-x', dryRun: true });
   assert.deepEqual(r.closed, ['stories']);
+  assert.deepEqual([r.dryRun, r.written], [true, false], 'a dry run never reads like a real one (E1 review)');
   assert.equal(fs.readFileSync(statePath, 'utf8'), before, 'a dry run leaves state.json byte-identical');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -23211,4 +23213,26 @@ test('E1 review: a refusal keeps what was done, every warning is collected, a pa
     assert.equal(yad(R, 'history', 'show', '--type').j.command, 'history show');
     assert.equal(yad(R, 'gate', 'status', '--pr').j.command, 'gate status');
   } finally { fs.rmSync(R, { recursive: true, force: true }); }
+});
+
+// E1 review 2: a sweep that skips several epics says every one — the first as `error`, the rest in
+// `warnings` — and still answers what it did (`synced`, `committed`, `pushed`).
+test('E1 review: gate ci --json names every epic it skipped', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-ci-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', git_url: 'https://github.com/a/b' }));
+    for (const e of ['EP-alpha', 'EP-beta']) {
+      fs.mkdirSync(path.join(T, 'epics', e, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'epics', e, '.sdlc/state.json'), '{');
+    }
+    git(T, 'init', '-q', '-b', 'main');
+    const r = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'gate', 'ci', '--json', '--dir', T], {
+      encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1', YAD_NO_REPORT: '1' },
+    });
+    const j = JSON.parse(r.stdout);
+    assert.deepEqual([r.status, j.ok, j.synced, j.committed, j.pushed], [1, false, 0, false, false]);
+    assert.match(j.error, /^EP-alpha: .* skipping this epic$/);
+    assert.equal(j.warnings.filter((w) => /^EP-beta: .* skipping this epic$/.test(w)).length, 1, 'the second skip is not lost');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
