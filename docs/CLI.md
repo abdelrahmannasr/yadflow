@@ -46,7 +46,7 @@ no clone needed.
 | `yad checkpoint --retro-ship <epic>/<story> --repo <r>` | Reconcile a **pre-tracking** story — merged and shipped **before** the Build ledger existed, so it has no `build-log` ship and plain `checkpoint` can't carry its `status: shipped` flip (#142). Records **one** retroactive ship shard marked `retroactive: true` (`--task <t>` overrides the default `retro` sentinel; `--merge-commit <sha>` records the SHA — never invented; `shippedAt` is the backfill date), then runs the normal checkpoint so the story's already-made flip rides the **same** `chore(hub)` commit. **One repo per run:** a story that shipped in several repos is recorded by re-running once per `--repo` (the flip rides the first commit; each later run lands only its own shard) — the guard is per **(story, repo)**, so recording one repo never locks out the rest (#166), and after each run it names the story's declared repos that still have no evidence. Because a ship is permanent audit evidence, `--repo` must be one the story's `repos:` frontmatter declares (or, when it declares none, one the Product's `.sdlc/repos.json` connects) — a typo'd or invented repo is **refused**, not recorded — and a name that would share a build-log **shard filename** with an already-recorded repo (`api.v2` vs `api_v2`, both sanitized to `api_v2`) is refused too, so a retro ship can never overwrite another repo's record. **Refuses** when the story already has a ship **in that repo** (then it isn't pre-tracking there — use the normal flow); does **not** author the story frontmatter and **refuses unless you have already set a Build `status:`** — `in-build` or `shipped` — (so a ship is never committed while the artifact still says `approved` — evidence and flip stay atomic); `--push`/`--allow-branch`/`--dry-run` behave as for `checkpoint`. **Where the record lands:** like every ship, it is written as a **shard** under `.sdlc/build-log/` — the folded `.sdlc/build-log.json` is *not* appended to (that is what would make concurrent shippers conflict). Readers **union** the folded file with every shard, so the ship is fully visible immediately; `yad tidy up` folds it into `build-log.json` once the story is `shipped` (a backfill against an `in-build` story stays a loose shard until then). An empty `build-log.json` right after a backfill is the design, not a lost write (#167). This is the supported alternative to a raw `git push origin main` for a legacy shipped story. |
 | `yad tidy up [<epic>] [--push]` | Fold a **shipped story's** finished `trust-log`/`build-log` **shards** back into the single folded ledger file, as one `chore(hub)` commit — the manual "pack it up" companion to the shard-then-fold storage (like `git gc` for its loose objects). Concurrent Build writers each write their own shard file (so parallel stories of one epic never conflict), and readers union the folded file + loose shards; `tidy up` is the on-demand compaction. A fold reads shards, merges them, then deletes them, so it holds the ledger's exclusive lock for that whole span — a ship written or stamped mid-fold can never be folded away without its change, or deleted without being folded (`YAD-STATE-006` if another writer holds it). Default branch only; `--push` lands it on `origin/<default>`; a **no-op** when nothing is foldable. |
 | `yad index [--json]` | **Rebuild the Product index, `.sdlc/index.json` (E19)** — one summary per work item, so a reader opens one file instead of walking `epics/*`. The index is **derived**: it is rebuilt from each item's own `.sdlc/state.json`, `epic.md` and `.sdlc/change.json`, and never edited by hand. It is written **on the default branch only**, with no override, and the command never commits it: commit it with the change it describes. On a **verified** Product it writes nothing, because CI rebuilds the index in the commit that records a merge. `--json` prints the index built live from the files, on any branch, and writes nothing. See [the Product index](#the-product-index-sdlcindexjson). |
-| `yad history [list\|show\|search]` | **What the Product has done (E20)**, read live from each work item's own files, on any branch, writing nothing. `list` shows every work item, open and finished, newest first, with `--type`, `--theme`, `--thread`, `--open` or `--done` to narrow it. `show <id>` prints one item's steps with their closing records and the approvals recorded for each review step. `search <text>` finds text in ids, titles, themes, types and repos, and in who closed or merged a step, its PR and its commit. `--json` on all three. See [Work-item history](#work-item-history-yad-history). |
+| `yad history [list\|show\|search]` | **What the Product has done (E20)**, read live from each work item's own files, on any branch, writing nothing. `list` shows every work item, open and shape-done (its Shape steps closed; Build is not counted), newest first, with `--type`, `--theme`, `--thread`, `--open` or `--done` to narrow it. `show <id>` prints one item's steps with their closing records and the approvals recorded for each review step. `search <text>` finds text in ids, titles, themes, types and repos, and in who closed or merged a step, its PR and its commit. `--json` on all three. See [Work-item history](#work-item-history-yad-history). |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo refresh [name] --push` | After the re-pack (and the AI regenerating the code-map), commit the tracked code-maps + `.sdlc/repos.json` as an audit-trail `chore(hub): sync code-context … [skip ci]` commit and push it straight to the Product's **default branch** (`--allow-branch` to override). The code-context analogue of `yad checkpoint`. |
 | `yad risk-map check [repo] [--json]` | Check a code repo's **risk map** (`.sdlc/risk-map`: a risk level per directory, no names — see [The risk map](#the-risk-map-a-level-per-directory)). Warns about a directory no line covers, a line whose directory is gone, a line still `unset` or `guessed`, and a line it cannot read. `repo` is a name from `.sdlc/repos.json` or a path; with none, every connected repo — or the current directory, but only when there is no `repos.json` at all (an empty or unreadable registry is refused, so a map is never written into the Product). **Advisory:** it never sets a failing exit code for a warning. The PR check `checks/risk-map-check.sh` says the same about one change. |
@@ -1130,55 +1130,94 @@ saved index is behind. It never writes a file.
 
 | Command | What it prints |
 |---|---|
-| `yad history` or `yad history list` | Every work item, open and finished, **newest first** by its created date. A value that is not a real calendar date (such as `someday` or `2026-02-31`) sorts last; items with the same date sort by id. Each row shows the title (or the id, when the item has no title), the type, the theme, the current step, and the date of the last closed step |
-| `yad history show <id>` | One work item: its type, theme, thread, parent, profile, created date, current step and repos, then **every step in chain order** with its state and its closing record (who closed it, when, how, and the PR or commit). Under each review step, the **approvals** recorded for it, judged by the same rules as `yad gate status`: an approval whose fingerprint is not one the current content gives is marked `stale (revoked)`, and, when the Product requires engagement, one with no verified engagement is marked `not engagement-verified (not counted)`. A deferred step owed as debt, and a step inherited from another epic, say so |
-| `yad history search <text>` | The work items where the text appears, ignoring upper and lower case, in the id, title, theme, type or repos, or in a step's closing record: who closed it, who merged it, its PR number or its commit (a short commit finds the full one). Approvals are not searched. Each match names the field and the step. Case is folded simply: an accent typed as one character or two matches either way, but `ß` does not match `SS` |
+| `yad history` or `yad history list` | Every work item, open and shape-done, **newest first** by its created date. A value that is not a real calendar date (such as `someday` or `2026-02-31`) sorts last; items with the same date sort by id. Each row shows the title (or the id, when the item has no title), the type, the theme, the current step, `shape done` when it is, and the date of the last closed step. The header counts the items it could not read too |
+| `yad history show <id>` | One work item: its type, theme, thread, parent, profile, created date, current step and repos, then **every step in chain order** with its state and its closing record (who closed it, when, how, and the PR or commit). Under each review step, the **approvals** recorded for it, judged by the same rules as the gate (see *Reading an approval* below). A deferred step owed as debt, and a step inherited from another epic, say so. The thread is the one `yad thread` finds by walking `parent:` links, with a note when that disagrees with the `thread:` line in `epic.md` |
+| `yad history search <text>` | The work items where the text appears, ignoring upper and lower case, in the id, title, theme, type or repos, or in a step's closing record: who closed it or merged it (anywhere in the name), its **PR as a whole number** (`12`, `#12` and `PR #12` all find PR 12, never PR 112), or its **commit from the start** (at least 4 characters, so `abc1` finds `abc12345…`). Approvals are not searched. Each match names the field and the step. Case is folded simply: an accent typed as one character or two matches either way, but `ß` does not match `SS` |
+
+**Shape done, not finished.** An item's `state.json` holds its **Shape** steps only — the epic,
+architecture, UI design, stories and test cases, and their reviews. **Build** (the code, the checks and
+the code review) is tracked in other files. So `yad history` says **shape done** when every Shape step is
+closed for good (`done`, `skipped` or `satisfied`); an item marked shape done may have shipped nothing
+yet. `yad next <id>` shows where its Build stands.
 
 **Filters** for `list` and `search`:
 
 | Flag | Keeps |
 |---|---|
-| `--type <t>` | items of that work-item type: `feature`, `change`, `defect`, `hotfix` or `chore` |
+| `--type <t>` | items of that work-item type: `feature`, `change`, `defect`, `hotfix` or `chore`, in any case (`Chore` is `chore`) |
 | `--theme <x>` | items with that theme, compared the way `yad doctor` groups themes — `Checkout Revamp` and `checkout-revamp` are one theme |
 | `--thread <EP-…>` | items in that feature thread |
-| `--open` | items with at least one step not closed for good, or with no steps yet. A **deferred** step is still owed, so it keeps an item open |
-| `--done` | items whose every step is `done`, `skipped` or `satisfied` |
+| `--open` | items whose Shape is not done: at least one Shape step not closed for good, or no steps yet. A **deferred** step is still owed, so it keeps an item open |
+| `--done` | items whose Shape is done |
 
 `--thread` finds the thread's members by their `parent:` links, as `yad thread` does — not by the
-`thread:` key, which is only a cache — and keeps the thread's first epic even before its `epic.md` is
-written. When the walk cannot be followed (the named epic has no folder, a parent is missing, a cycle),
-it says so instead of showing an empty thread. `EP-foundation` is in no thread and is refused. A value that can match nothing — an unknown type, a thread id that
-is not an id, `--open` with `--done` — is refused before anything is read. The filters do not apply to
-`show`, which refuses them; `list` refuses extra words (use `search`).
+`thread:` line in `epic.md`, which is only a cache — and keeps the thread's first epic even before its
+`epic.md` is written. A thread whose named epic has no folder is refused. When the walk breaks further
+up (a missing parent, a cycle), it lists what it found and says where the walk stopped. `EP-foundation`
+is in no thread and is refused.
+
+**What is refused.** Anything that cannot give an honest answer is refused before a file is read, with
+exit code 1: an unknown type, a thread id that is not an id, `--open` with `--done`, a flag `yad history`
+does not take (such as `--since` or `--repo` — a flag quietly ignored would look like a filter that was
+applied), filters given to `show`, and extra words after `list` (use `search`). A search text that is the
+same as a flag (`--open`) cannot be searched, and `--` is not read as "end of flags"; this is how every
+`yad` command reads its arguments.
 
 **An item that cannot be read is never hidden.** `list` and `search` name it under every answer, whatever
 the filters, with the reason, because a filter cannot know what an unreadable item holds; `show` of it
 says why and fails. A folder under `epics/` that holds a `.sdlc/` but is not read as a work item is named
-too. In `show`, an `approvals.json` that cannot be read is said, and no approvals are shown for it — never
-an empty list standing in for a file that was not read. An entry in the steps list that is not a step is
-shown as one row, `(not a step object)`, so the count matches the index. If a `state.json` changes
-between reading the summary and reading its steps, `show` says the steps could not be read and fails,
-and `search` says which items it searched by their summary only.
+too. Each of these ends with what to do: fix or restore the files, and `yad doctor` checks them. In
+`show`:
 
-**What is printed is made safe.** Every value read from a file — a theme, a reason, an approver's name, a
-step id — is printed on one line with control characters and bidi controls removed, as a title is
-(E111), because it reaches other people's terminals. A closing record's fields are printed only when
-they are text, and a PR only when it is a whole number. `--json` prints the data as it was read.
+- an `approvals.json` that cannot be read is said, and no approvals are shown for it — never an empty list
+  standing in for a file that was not read. The command still exits 0, because the steps were shown;
+- steps that cannot be read (a `state.json` that changed between the summary and the steps) are said, and
+  the command exits 1;
+- Product settings (`hub.json`) that cannot be read are said, and no approval is judged as counted or not,
+  because solo mode and the engagement rule are unknown;
+- an entry in the steps list that is not a step is shown as one row, `(not a step object)`, so the count
+  matches the index.
 
-**`--json`** prints `{ "schemaVersion", "items", "unreadable", "unlisted"? }` for `list`; the same plus
-`"query"`, `"summaryOnly"`? and a `"matches"` list on each item, for `search`; and `{ "schemaVersion",
-"item", "steps", "stepsWhy"?, "approvalsWhy"? }` for `show`. Each item has the shape of an item in
-`.sdlc/index.json`, plus `"finished"`; `list` and `search` add `"threadBroken"` when `--thread` could not
-be followed. Each approval in `show` carries `"stale"` and `"counted"`, so a script need not re-derive the
-rules. **`counted` is per record, not a count of people:** two approvals from one person are both
-`counted`, and the gate counts that person once. It is `false` for a record that is not an approval, is
-stale, names nobody, or (when engagement is required) has no verified engagement. It is `null` where no
-count applies: in solo mode; on a step `gatePredicate` (the check that passes or holds a gate) waives
-before it reads an approval — one that claims to be inherited, or skipped where the item's route lets that
-step be skipped (a skip on a step the route requires is not honoured, and its approvals are judged); and
-when the fingerprint cannot be taken. On a waived step `stale` is `null` too, because that check never
-judges it — although `yad gate status` still prints a stale count there. In solo mode `stale` is still
-told.
+**Reading an approval** in `show`:
+
+| Words | What they mean |
+|---|---|
+| `stale (revoked)` | The approval's fingerprint — a hash of the content it approved — is not one the current content gives. The gate does not count it. |
+| `names nobody (not counted)` | The record has no approver name. The gate counts people, so it does not count this. |
+| `not engagement-verified (not counted)` | The Product requires a verified engagement signal on each approval (`review.requireEngagement`), and this one has none. |
+| `inherited from EP-…` | Not an approval by a person: the item took over that epic's approved review (E42). |
+
+A closing record's `via` word says how the step was closed — `merge`, `review-opened`, `repair` and the
+rest; see *Closing records* above for each one.
+
+**What is printed is made safe.** Every value read from a file — a title, a theme, a reason, an approver's
+name, a step id — is printed on one line with control characters and bidi controls (characters that
+reverse how text is shown) removed, because it reaches other people's terminals. Ordinary spaces are
+kept, so a theme spelled with two spaces still looks different. A closing record's fields are printed only
+when they are text, and a PR only when it is a whole number.
+
+**`--json`.** Every answer has `"schemaVersion"` (the file shape, as in `yad index --json`) and
+`"ok": true`; **every other key is always present**, as `null`, `false` or `[]` when there is nothing, so
+a script never has to ask whether a key exists. A refusal is `{ "schemaVersion", "ok": false, "error",
+"hint" }` with exit code 1 — the shape `yad next --json` uses.
+
+| Command | Keys |
+|---|---|
+| `list` | `items`, `unreadable`, `unlisted`, `threadBroken` |
+| `search` | the same, plus `query`, `summaryOnly` (items whose steps could not be read, so only their summary was searched), and on each item `matches: [{ field, value, step }]` |
+| `show` | `item`, `thread: { root, broken }`, `steps`, `stepsWhy`, `approvalsWhy`, `hubWhy`; with `"ok": false` and an `error` when the steps cannot be read |
+
+Each item has the shape of an item in `.sdlc/index.json`, plus `"shapeDone"`. In `show`, each approval
+carries `"stale"`, `"counted"` and `"notCounted"` — the reason it does not count: `"not-an-approval"`,
+`"stale"`, `"unnamed"` or `"unengaged"` — so a script need not re-derive the rules. **`counted` is per
+record, not a count of people:** two approvals from one person are both `counted`, and the gate counts
+that person once. It is `null` where no count applies: in solo mode; when the Product settings cannot be
+read; when the fingerprint cannot be taken; and on a step `gatePredicate` (the check that passes or holds
+a gate) waives before it reads an approval — one that claims to be inherited, or skipped where the item's
+route lets that step be skipped. A skip on a step the route requires is not honoured, and its approvals are
+judged. On a waived step `stale` is `null` too, because that check never judges it — although
+`yad gate status` still prints a stale count there. In solo mode `stale` is still told. A version number
+for this output, apart from `schemaVersion`, is left to E1.
 
 ## File shape: `schemaVersion`
 
