@@ -265,6 +265,7 @@ const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
+  try {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--fix') o.fix = true;
@@ -320,8 +321,16 @@ function parseArgs(argv) {
       o[a.slice(2, eq)] = value;
     } else o._.push(a);
   }
+  } catch (e) {
+    // The command read so far, so the error handler knows WHICH command failed — the parse did not finish.
+    e.parsedCmd = o._[0] ?? null;
+    throw e;
+  }
   return o;
 }
+
+// The command `main` is running, for the error handler (set once the arguments are read).
+let runningCmd = null;
 
 // A value flag must be followed by a token; erroring beats silently passing `undefined` downstream.
 function takeValue(argv, i, flag) {
@@ -333,6 +342,7 @@ function takeValue(argv, i, flag) {
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   const cmd = o._[0];
+  runningCmd = cmd ?? null;
   if (o.version) return log(VERSION);
 
   // THE HOT PATH, handled before anything heavy is loaded. `yad hook ledger-guard` runs inside the
@@ -578,7 +588,7 @@ async function main() {
       // does not know (`--limit`, a typo) into a plain word, which `search` would take as text, and it
       // stores `--preview` under another name. A word that starts with `--`, or a one-letter flag such
       // as `-m`, is a flag; a value (`--type chore`) never starts with `-`, because `parseArgs` refuses it.
-      const HISTORY_OWN = new Set(['--dir', '--json', '--type', '--theme', '--thread', '--open', '--done']);
+      const HISTORY_OWN = new Set(commands.HISTORY_FLAGS);
       const unknownFlags = [...new Set(process.argv.slice(2)
         .filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t))
         .map((t) => t.split('=')[0])
@@ -650,9 +660,11 @@ main()
     // `yad history --json` promises JSON for every refusal (E20), and a flag given with no value is
     // refused here, by the parser, before the command runs. Other commands keep their text until E1
     // settles one format for all of them.
-    const argv = process.argv.slice(2);
-    if (argv.includes('history') && argv.includes('--json')) {
-      process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ok: false, error: String(err?.message || err), hint: err?.hint || '`yad --help` lists the flags of each command' }, null, 2)}\n`);
+    // Only when the command IS history — never because the word `history` is some flag's value.
+    if ((err?.parsedCmd ?? runningCmd) === 'history' && process.argv.slice(2).includes('--json')) {
+      const hint = err?.hint || (/expects a value$/.test(String(err?.message)) ? '`yad --help` lists the flags of each command' : null);
+      const yadCode = err?.code && /^YAD-/.test(err.code) ? { code: err.code } : {};
+      process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ok: false, error: String(err?.message || err), hint, ...yadCode }, null, 2)}\n`);
       process.exitCode = 1;
       return;
     }

@@ -1220,7 +1220,7 @@ characters"). For an **approved** record, `counted` is `null` where no count app
 read; when the fingerprint cannot be taken; and on a step `gatePredicate` (the check that passes or holds
 a gate) waives before it reads an approval — one that claims to be inherited, or skipped where the item's
 route lets that step be skipped. A skip on a step the route requires is not honoured, and its approvals are
-judged. A record that is not an approval is `counted: false` in every case. On a waived step `stale` is `null` too, because that check never judges it — although
+judged. A record that is not an approval is `counted: false`, except on a waived step, where every record is `null`. On a waived step `stale` is `null` too, because that check never judges it — although
 `yad gate status` still prints a stale count there. In solo mode `stale` is still told. A version number
 for this output, apart from `schemaVersion`, is left to E1.
 

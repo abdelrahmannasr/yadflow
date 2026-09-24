@@ -22950,6 +22950,10 @@ test('PR270 fix: any flag history does not take is refused — even one the pars
     }
     const noValue = run('--type', '--json');
     assert.deepEqual([noValue.status, JSON.parse(noValue.stdout).ok, JSON.parse(noValue.stdout).error], [1, false, '--type expects a value']);
+    // Only history answers in JSON: another command whose arguments hold the WORD history keeps its text.
+    const other = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'kill', '--reason', 'history', '--json', '--title', '--dir', T], { encoding: 'utf8' });
+    assert.match(other.stdout, /yad failed: --title expects a value/);
+    assert.throws(() => JSON.parse(other.stdout));
     assert.equal(JSON.parse(run('search', '-dash', '--json').stdout).query, '-dash', 'a single-dash word is text, not a flag');
     assert.equal(JSON.parse(run('--json', '--dir', T).stdout).ok, true, '--dir is its own');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }

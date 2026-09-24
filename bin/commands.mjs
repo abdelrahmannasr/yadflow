@@ -23,7 +23,7 @@ export { runShip } from '../cli/ship.mjs';
 export { runCheckpoint } from '../cli/checkpoint.mjs';
 export { runTidy } from '../cli/tidy.mjs';
 export { runIndex } from '../cli/index-command.mjs';
-export { runHistory } from '../cli/history.mjs';
+export { runHistory, HISTORY_FLAGS } from '../cli/history.mjs';
 export { runRepo } from '../cli/repo.mjs';
 export { runRiskMap } from '../cli/riskmap-command.mjs';
 export { runCodeowners } from '../cli/codeowners-command.mjs';
