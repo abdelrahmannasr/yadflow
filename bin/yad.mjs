@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
-import { VERSION } from '../cli/manifest.mjs';
+import { VERSION, SCHEMA_VERSION } from '../cli/manifest.mjs';
 import { c, log, closePrompts, askYesNo } from '../cli/lib.mjs';
 import { runLedgerGuardHook } from '../cli/hook.mjs';
 
@@ -573,13 +573,16 @@ async function main() {
       break;
     case 'history': {
       const [, action, ...args] = o._;
-      // Every flag `parseArgs` recognised that is not history's own is refused, not ignored: an ignored
-      // `--since` would read as a filter that was applied. `dir` and the parser's defaults are not flags
-      // anyone passed unless they differ from the default.
-      const own = new Set(['_', 'dir', 'json', 'type', 'theme', 'thread', 'open', 'done', 'fix', 'force', 'scope']);
-      const unknownFlags = Object.keys(o).filter((k) => !own.has(k))
-        .concat(o.fix ? ['fix'] : [], o.force ? ['force'] : [], o.scope !== 'all' ? ['scope'] : [])
-        .map((k) => `--${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`);
+      // Every flag that is not history's own is refused, not ignored: an ignored `--since` would read as
+      // a filter that was applied. Read from the RAW arguments, as typed — `parseArgs` turns a flag it
+      // does not know (`--limit`, a typo) into a plain word, which `search` would take as text, and it
+      // stores `--preview` under another name. A word that starts with `--`, or a one-letter flag such
+      // as `-m`, is a flag; a value (`--type chore`) never starts with `-`, because `parseArgs` refuses it.
+      const HISTORY_OWN = new Set(['--dir', '--json', '--type', '--theme', '--thread', '--open', '--done']);
+      const unknownFlags = [...new Set(process.argv.slice(2)
+        .filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t))
+        .map((t) => t.split('=')[0])
+        .filter((f) => !HISTORY_OWN.has(f)))];
       await commands.runHistory(o.dir, {
         action: action || 'list', args, json: !!o.json, unknownFlags,
         type: o.type ?? null, theme: o.theme ?? null, thread: o.thread ?? null, open: !!o.open, done: !!o.done,
@@ -644,6 +647,15 @@ async function main() {
 
 main()
   .catch(async (err) => {
+    // `yad history --json` promises JSON for every refusal (E20), and a flag given with no value is
+    // refused here, by the parser, before the command runs. Other commands keep their text until E1
+    // settles one format for all of them.
+    const argv = process.argv.slice(2);
+    if (argv.includes('history') && argv.includes('--json')) {
+      process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ok: false, error: String(err?.message || err), hint: err?.hint || '`yad --help` lists the flags of each command' }, null, 2)}\n`);
+      process.exitCode = 1;
+      return;
+    }
     const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';
     log(c.red(`\nyad failed${code}: ${err?.message || err}`));
     if (err?.hint) log(c.yellow(`  → ${err.hint}`));

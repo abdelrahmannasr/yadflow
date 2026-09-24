@@ -128,15 +128,16 @@ const fold = (s) => s.normalize('NFKC').toLowerCase();
 // What `search` matches in one item: [{ field, value, step }], empty when nothing does. `steps` is the
 // item's `state.json` steps, or null when they could not be read (then only the summary is searched).
 //   - words (id, title, theme, type, repos, who closed, who merged) match anywhere in the value;
-//   - a PR matches as the WHOLE number — `12`, `#12` or `PR #12` finds PR 12, never 112 — since a part
-//     of a number is not a PR anyone means;
+//   - a PR matches as the WHOLE number — `12`, `#12`, `PR 12` or `PR #12` finds PR 12, never 112 —
+//     since a part of a number is not a PR anyone means;
 //   - a commit matches from its START, and only from 4 characters on: a short commit finds the full one,
 //     and a digit or two does not match half the hashes in the Product.
 // Only text is matched, and a PR only as a whole number: `String()` of any other value would match text
 // that is not in the file (`[object Object]`).
 export function searchMatches(item, steps, text) {
   const needle = fold(String(text).trim());
-  const prWanted = needle.replace(/^(pr\s*)?#\s*/, '');
+  // `12`, `#12`, `PR 12`, `pr12` and `PR #12` all name PR 12.
+  const prWanted = needle.replace(/^(pr\s*#?|#)\s*/, '');
   const prQuery = /^\d+$/.test(prWanted) ? Number(prWanted) : null;
   const hits = [];
   const hit = (field, value, step) => hits.push({ field, value, step: step ?? null });
@@ -303,7 +304,10 @@ export function itemHistory(root, item, { hub = null, hubWhy = null } = {}) {
         if (notJudged) return { ...fields, ...NOT_JUDGED };
         const stale = !approved ? null : accepted === null ? null : isStaleHash(a.artifactHash, accepted);
         if (approved && (stale === null || solo || hubWhy)) return { ...fields, stale, counted: null, notCounted: null };
-        const notCounted = notCountedReason(a, { approved, stale, named: printable(a.approver) !== null, reqEng });
+        // Named by the gate's own test (`gatePredicate`): any text that is not blank, even text with
+        // nothing printable in it — the gate counts that record, so this must too.
+        const named = typeof a.approver === 'string' && a.approver.trim() !== '';
+        const notCounted = notCountedReason(a, { approved, stale, named, reqEng });
         return { ...fields, stale, counted: notCounted === null, notCounted };
       });
     }
@@ -398,7 +402,8 @@ const NOT_COUNTED_WORDS = {
 function approvalLine(a) {
   // The reason is carried on the record (`notCounted`), so the words can never disagree with the count.
   const tag = NOT_COUNTED_WORDS[a.notCounted] || (a.stale === true ? NOT_COUNTED_WORDS.stale : null);
-  const who = a.status === 'inherited' ? ` from ${printable(a.from) ?? 'the parent epic'}` : ` by ${printable(a.approver) ?? 'nobody named'}`;
+  const nameless = typeof a.approver === 'string' && a.approver.trim() !== '' ? 'a name with no visible characters' : 'nobody named';
+  const who = a.status === 'inherited' ? ` from ${printable(a.from) ?? 'the parent epic'}` : ` by ${printable(a.approver) ?? nameless}`;
   return `${printable(a.status) ?? 'recorded'}${who}${a.date ? ` on ${printable(a.date)}` : ''}${a.pr !== null ? ` (PR #${a.pr})` : ''}${tag ? ` — ${tag}` : ''}`;
 }
 
@@ -496,14 +501,15 @@ function showCmd(root, read, id, { json }) {
 
 // The flags `yad history` takes. `unknownFlags`: any other flag the dispatcher saw, which is refused —
 // a flag quietly ignored reads as a filter that was applied (`--since` would print everything).
-export const HISTORY_FLAGS = ['--type', '--theme', '--thread', '--open', '--done', '--json'];
+export const HISTORY_FLAGS = ['--type', '--theme', '--thread', '--open', '--done', '--json', '--dir'];
 
 export async function runHistory(root, { action = 'list', args = [], json = false, unknownFlags = [], ...flags } = {}) {
-  if (!['list', 'show', 'search'].includes(action)) {
-    return refuse(json, `unknown history command: ${printable(action)}`, 'use `yad history list`, `yad history show <id>` or `yad history search <text>`');
-  }
+  // A flag first: `yad history --opne` is a mistyped flag, not a subcommand named `--opne`.
   if (unknownFlags.length) {
     return refuse(json, `yad history does not take ${unknownFlags.join(', ')}`, `its flags are ${HISTORY_FLAGS.join(', ')}`);
+  }
+  if (!['list', 'show', 'search'].includes(action)) {
+    return refuse(json, `unknown history command: ${printable(action)}`, 'use `yad history list`, `yad history show <id>` or `yad history search <text>`');
   }
   if (action === 'list' && args.length) {
     return refuse(json, `list takes no words (${args.map((a) => JSON.stringify(printable(a) ?? '')).join(' ')})`, 'to find text, use `yad history search <text>`');

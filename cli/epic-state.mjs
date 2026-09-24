@@ -3605,8 +3605,8 @@ export const FOUNDATION_TITLE = 'Foundation';
 const CONTROLS = /[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 // Any value read from a committed file and PRINTED on a terminal, made safe the way a title is (E20
 // review — a theme, a reason, an approver name or a step id reaches other people's screens as much as a
-// title does): control and bidi characters dropped, each run of line breaks or tabs made one space, the
-// ends trimmed. Ordinary spaces inside are KEPT, so two spellings `yad doctor` tells apart (a theme with
+// title does): control and bidi characters dropped, each run of line breaks or tabs made one space (a
+// space beside it is kept), the ends trimmed. Ordinary spaces inside are KEPT, so two spellings `yad doctor` tells apart (a theme with
 // two spaces) still look different. Text only: anything else, or text with nothing left, is null — so a
 // caller prints a value only when it is words (`printable(v) ?? '(none)'`). `--json` never passes
 // through this.

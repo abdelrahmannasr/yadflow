@@ -1132,7 +1132,7 @@ saved index is behind. It never writes a file.
 |---|---|
 | `yad history` or `yad history list` | Every work item, open and shape-done, **newest first** by its created date. A value that is not a real calendar date (such as `someday` or `2026-02-31`) sorts last; items with the same date sort by id. Each row shows the title (or the id, when the item has no title), the type, the theme, the current step, `shape done` when it is, and the date of the last closed step. The header counts the items it could not read too |
 | `yad history show <id>` | One work item: its type, theme, thread, parent, profile, created date, current step and repos, then **every step in chain order** with its state and its closing record (who closed it, when, how, and the PR or commit). Under each review step, the **approvals** recorded for it, judged by the same rules as the gate (see *Reading an approval* below). A deferred step owed as debt, and a step inherited from another epic, say so. The thread is the one `yad thread` finds by walking `parent:` links, with a note when that disagrees with the `thread:` line in `epic.md` |
-| `yad history search <text>` | The work items where the text appears, ignoring upper and lower case, in the id, title, theme, type or repos, or in a step's closing record: who closed it or merged it (anywhere in the name), its **PR as a whole number** (`12`, `#12` and `PR #12` all find PR 12, never PR 112), or its **commit from the start** (at least 4 characters, so `abc1` finds `abc12345…`). Approvals are not searched. Each match names the field and the step. Case is folded simply: an accent typed as one character or two matches either way, but `ß` does not match `SS` |
+| `yad history search <text>` | The work items where the text appears, ignoring upper and lower case, in the id, title, theme, type or repos, or in a step's closing record: who closed it or merged it (anywhere in the name), its **PR as a whole number** (`12`, `#12`, `PR 12` and `PR #12` all find PR 12, never PR 112), or its **commit from the start** (at least 4 characters, so `abc1` finds `abc12345…`). Approvals are not searched. Each match names the field and the step. Case is folded simply: an accent typed as one character or two matches either way, but `ß` does not match `SS` |
 
 **Shape done, not finished.** An item's `state.json` holds its **Shape** steps only — the epic,
 architecture, UI design, stories and test cases, and their reviews. **Build** (the code, the checks and
@@ -1158,10 +1158,11 @@ is in no thread and is refused.
 
 **What is refused.** Anything that cannot give an honest answer is refused before a file is read, with
 exit code 1: an unknown type, a thread id that is not an id, `--open` with `--done`, a flag `yad history`
-does not take (such as `--since` or `--repo` — a flag quietly ignored would look like a filter that was
-applied), filters given to `show`, and extra words after `list` (use `search`). A search text that is the
-same as a flag (`--open`) cannot be searched, and `--` is not read as "end of flags"; this is how every
-`yad` command reads its arguments.
+does not take, filters given to `show`, and extra words after `list` (use `search`). A flag is any word
+that starts with `--`, or a one-letter flag such as `-m`, whether or not `yad` knows it — `--since`,
+`--repo` and a mistyped `--opne` are all refused, because a flag quietly ignored would look like a filter
+that was applied, and under `search` it would silently become part of the text. So a search text cannot
+start with `--`; one that starts with a single `-` (such as `-dash`) is text.
 
 **An item that cannot be read is never hidden.** `list` and `search` name it under every answer, whatever
 the filters, with the reason, because a filter cannot know what an unreadable item holds; `show` of it
@@ -1173,8 +1174,8 @@ too. Each of these ends with what to do: fix or restore the files, and `yad doct
   standing in for a file that was not read. The command still exits 0, because the steps were shown;
 - steps that cannot be read (a `state.json` that changed between the summary and the steps) are said, and
   the command exits 1;
-- Product settings (`hub.json`) that cannot be read are said, and no approval is judged as counted or not,
-  because solo mode and the engagement rule are unknown;
+- Product settings (`.sdlc/product.json`, or the older `hub.json`) that cannot be read are said, and no
+  approval is judged as counted or not, because solo mode and the engagement rule are unknown;
 - an entry in the steps list that is not a step is shown as one row, `(not a step object)`, so the count
   matches the index.
 
@@ -1199,7 +1200,9 @@ when they are text, and a PR only when it is a whole number.
 **`--json`.** Every answer has `"schemaVersion"` (the file shape, as in `yad index --json`) and
 `"ok": true`; **every other key is always present**, as `null`, `false` or `[]` when there is nothing, so
 a script never has to ask whether a key exists. A refusal is `{ "schemaVersion", "ok": false, "error",
-"hint" }` with exit code 1 — the shape `yad next --json` uses.
+"hint" }` with exit code 1 — the shape `yad next --json` uses. This holds for a flag given with no value
+(`--type` alone), which the argument reader refuses before the command runs. `error` and `hint` appear only
+when `ok` is `false`.
 
 | Command | Keys |
 |---|---|
@@ -1211,11 +1214,13 @@ Each item has the shape of an item in `.sdlc/index.json`, plus `"shapeDone"`. In
 carries `"stale"`, `"counted"` and `"notCounted"` — the reason it does not count: `"not-an-approval"`,
 `"stale"`, `"unnamed"` or `"unengaged"` — so a script need not re-derive the rules. **`counted` is per
 record, not a count of people:** two approvals from one person are both `counted`, and the gate counts
-that person once. It is `null` where no count applies: in solo mode; when the Product settings cannot be
+that person once. A record counts as naming someone when its approver is any text that is not blank —
+the gate's own test — even text with no visible characters (it is printed as "a name with no visible
+characters"). For an **approved** record, `counted` is `null` where no count applies: in solo mode; when the Product settings cannot be
 read; when the fingerprint cannot be taken; and on a step `gatePredicate` (the check that passes or holds
 a gate) waives before it reads an approval — one that claims to be inherited, or skipped where the item's
 route lets that step be skipped. A skip on a step the route requires is not honoured, and its approvals are
-judged. On a waived step `stale` is `null` too, because that check never judges it — although
+judged. A record that is not an approval is `counted: false` in every case. On a waived step `stale` is `null` too, because that check never judges it — although
 `yad gate status` still prints a stale count there. In solo mode `stale` is still told. A version number
 for this output, apart from `schemaVersion`, is left to E1.
 

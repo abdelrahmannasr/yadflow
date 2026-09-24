@@ -22637,7 +22637,7 @@ test('E20 review 2: gate status prints its header and step lines safely too — 
 test('E20 review 2: closedLine — one line, a whole-number PR, via compared after it is cleaned', () => {
   assert.equal(_e20ClosedLine({ via: 'repair', by: ' ann\n    ✓ fake — done ' }), 'closed — via repair; recorded by ann     ✓ fake — done', 'the line break is a space: no line of its own');
   assert.equal(_e20ClosedLine({ via: 'repair', pr: 1.5 }), 'closed — via repair');
-  assert.equal(_e20ClosedLine({ via: 'merge‎', pr: 3 }), 'closed — merged (PR #3)');
+  assert.equal(_e20ClosedLine({ via: 'merge\u200e', pr: 3 }), 'closed — merged (PR #3)');
 });
 
 test('E20 review 2: --thread keeps a genesis with no epic.md yet; says when the thread cannot be followed; refuses the Foundation', async () => {
@@ -22915,4 +22915,91 @@ test('PR270 bin/yad.mjs: a flag history does not take is refused, never quietly 
     assert.equal(JSON.parse(run('--type', 'Chore', '--json').stdout).items[0].id, 'EP-nodate', 'a type in another case');
     assert.equal(JSON.parse(run('--since', 'x', '--json').stdout).ok, false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- PR #270 review, fix round -----------------------------------------------------------------------------
+
+test('PR270 fix: an approver is named by the gate\'s own test — history and gatePredicate count the same records', async () => {
+  const T = historyProduct();
+  try {
+    const dir = path.join(T, 'epics/EP-old');
+    const current = _e20Hash(dir, 'epic.md');
+    const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review' };
+    for (const approver of ['alice', 'LRM', 'NEL', 'BEL', 'RLO', '', '   ']) {
+      const name = { LRM: '\u200e', NEL: '\u0085', BEL: '\x07', RLO: '\u202e' }[approver] ?? approver;
+      const record = { step: 'epic-review', approver: name, status: 'approved', artifactHash: current };
+      fs.writeFileSync(path.join(dir, '.sdlc/approvals.json'), JSON.stringify([record]));
+      const got = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
+      const gate = _gatePred({ step, approvals: [record], acceptedHashes: _e20Accepted(dir, 'epic.md') });
+      assert.equal(got.steps[1].approvals[0].counted, gate.approvalsSatisfied, `approver ${JSON.stringify(approver)}`);
+    }
+    fs.writeFileSync(path.join(dir, '.sdlc/approvals.json'), JSON.stringify([{ step: 'epic-review', approver: '\u200e', status: 'approved', artifactHash: current }]));
+    assert.match(await grab(() => runHistory(T, { action: 'show', args: ['EP-old'] })), /approved by a name with no visible characters\n/, 'counted, and said to have no visible name');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270 fix: any flag history does not take is refused — even one the parser does not know — and a missing value is JSON too', () => {
+  const T = historyProduct();
+  const run = (...a) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'history', ...a, '--dir', T], { encoding: 'utf8' });
+  try {
+    for (const [args, flag] of [[['search', 'foo', '--limit', '5'], '--limit'], [['--opne'], '--opne'], [['show', 'EP-old', '--verbose'], '--verbose'],
+      [['--preview'], '--preview'], [['--scope=all'], '--scope'], [['-m', 'x'], '-m']]) {
+      const r = run(...args, '--json');
+      assert.equal(r.status, 1, args.join(' '));
+      assert.deepEqual([JSON.parse(r.stdout).ok, JSON.parse(r.stdout).error], [false, `yad history does not take ${flag}`], args.join(' '));
+    }
+    const noValue = run('--type', '--json');
+    assert.deepEqual([noValue.status, JSON.parse(noValue.stdout).ok, JSON.parse(noValue.stdout).error], [1, false, '--type expects a value']);
+    assert.equal(JSON.parse(run('search', '-dash', '--json').stdout).query, '-dash', 'a single-dash word is text, not a flag');
+    assert.equal(JSON.parse(run('--json', '--dir', T).stdout).ok, true, '--dir is its own');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270 fix: search edges — PR 12 without #, a number is not a PR, a PR written as text, a commit in capitals, a step id that is not text', () => {
+  const item = { id: 'EP-a', title: null, theme: null, type: 'feature', repos: [] };
+  const f = (steps, t) => searchMatches(item, steps, t).map((m) => `${m.step}:${m.field}=${m.value}`);
+  const s = [{ id: 'a', closed: { pr: 12, commit: 'ABC1234def' } }];
+  for (const q of ['PR 12', 'pr12', '# 12', '00012']) assert.deepEqual(f(s, q), ['a:closed.pr=12'], q);
+  for (const q of ['12.0', '1e1', '+12', '-12']) assert.deepEqual(f(s, q), [], q);
+  assert.deepEqual(f([{ id: 'a', closed: { pr: '007' } }], '7'), ['a:closed.pr=007'], 'a PR written as text is still a number');
+  assert.deepEqual(f([{ id: 'a', closed: { pr: [12] } }, { id: 'b', closed: { pr: '12 ' } }], '12'), [], 'a PR that is not a whole number is not one');
+  assert.deepEqual(f(s, 'abc1'), ['a:closed.commit=ABC1234def'], 'a commit in capitals');
+  assert.deepEqual(searchMatches(item, [{ id: 5, closed: { by: 'ann' } }], 'ann'), [{ field: 'closed.by', value: 'ann', step: null }]);
+});
+
+test('PR270 fix: the settings file must be an object; a stale record that names nobody is stale first', async () => {
+  const T = historyProduct();
+  try {
+    const dir = path.join(T, 'epics/EP-old');
+    fs.writeFileSync(path.join(dir, '.sdlc/approvals.json'), JSON.stringify([{ step: 'epic-review', status: 'approved', artifactHash: 'sha256:old' }]));
+    let json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
+    assert.equal(json.steps[1].approvals[0].notCounted, 'stale', 'the order the gate asks in: stale before nobody named');
+    for (const body of ['[]', 'null', '"x"']) {
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), body);
+      json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
+      assert.deepEqual([json.hubWhy, json.steps[1].approvals[0].counted], ['it is not an object', null], body);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270 fix: a waived step takes no fingerprint; a thread walk that fails is refused; closedLine prints safely', async () => {
+  const T = historyProduct({
+    'epics/EP-w/.sdlc/state.json': { createdAt: '2026-03-01', steps: [{ id: 'x-review', type: 'review+approve', artifact: '.sdlc', status: 'satisfied', inheritedFrom: 'EP-old' }] },
+    'epics/EP-w/epic.md': '---\nkind: chore\n---\n',
+    'epics/EP-w/.sdlc/approvals.json': [{ step: 'x-review', approver: 'a', status: 'approved' }],
+    'epics/EP-g/.sdlc/state.json': { steps: [] },
+    'epics/EP-g/epic.md': '---\nkind: feature\ntheme: a\u0085b\n---\n',
+  });
+  const exit = process.exitCode;
+  try {
+    const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-w'], json: true })));
+    assert.equal(json.steps[0].staleUnknown, null, 'a waived step is never fingerprinted, so nothing can fail');
+    fs.rmSync(path.join(T, 'epics/EP-new/epic.md'));
+    fs.mkdirSync(path.join(T, 'epics/EP-new/epic.md'));
+    process.exitCode = 0;
+    const walked = JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-new' })));
+    assert.deepEqual([walked.ok, walked.error, process.exitCode], [false, 'the thread EP-new could not be walked (EISDIR)', 1]);
+    assert.equal(_e20ClosedLine({ via: 'repair', waived: 'x\x1b[2Jy' }), 'closed — via repair; approvals waived (x[2Jy)');
+    assert.match(await grab(() => runHistory(T, { thread: null, theme: 'ab' })), /#a b/, 'a NEL in a theme prints as a space');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
 });
