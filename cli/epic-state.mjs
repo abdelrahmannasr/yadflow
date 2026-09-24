@@ -3603,7 +3603,19 @@ export const FOUNDATION_TITLE = 'Foundation';
 
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROLS = /[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
-const oneLine = (t) => t.replace(CONTROLS, '').replace(/[\s\u0085]+/gu, ' ').trim() || null;
+// Any value read from a committed file and PRINTED on a terminal, made safe the way a title is (E20
+// review — a theme, a reason, an approver name or a step id reaches other people's screens as much as a
+// title does): control and bidi characters dropped, each run of line breaks or tabs made one space
+// (a space beside it is kept), the ends trimmed. Ordinary spaces inside are KEPT, so two spellings `yad doctor` tells apart (a theme with
+// two spaces) still look different. Text only: anything else, or text with nothing left, is null — so a
+// caller prints a value only when it is words (`printable(v) ?? '(none)'`). `--json` never passes
+// through this.
+export const printable = (v) => {
+  if (typeof v !== 'string') return null;
+  return v.replace(CONTROLS, '').replace(/[\t\n\v\f\r\u0085\u2028\u2029]+/gu, ' ').trim() || null;
+};
+// A title is stricter: every run of whitespace, a no-break space included, becomes one space.
+const oneLine = (t) => (printable(t) ?? '').replace(/\s+/gu, ' ').trim() || null;
 
 // One quoted string, unquoted — or the value unchanged when it is not exactly one. It is given a value
 // `oneLine` has already cleaned, so no raw control character (which JSON refuses) is left to stop it.

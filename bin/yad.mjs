@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
-import { VERSION } from '../cli/manifest.mjs';
+import { VERSION, SCHEMA_VERSION } from '../cli/manifest.mjs';
 import { c, log, closePrompts, askYesNo } from '../cli/lib.mjs';
 import { runLedgerGuardHook } from '../cli/hook.mjs';
 
@@ -186,6 +186,14 @@ ${c.bold('Build helpers')}
                                        derived from their own files; the default branch only, with no
                                        override; on a verified Product CI writes it.
                                        --json prints it, built live, and writes nothing
+  yad history [list] [--type t] [--theme x] [--thread EP-…] [--open|--done] [--json]
+                                       Every work item, open and shape-done (Build is not counted),
+                                       newest first — built live from their own files; writes nothing
+  yad history show <id> [--json]       One work item: every step with its state and closing record,
+                                       and the approvals recorded for each review step
+  yad history search <text> [filters] [--json]
+                                       Match text in ids, titles, themes, types, repos, and in who
+                                       closed or merged a step, its PR and its commit
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
   yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
@@ -253,10 +261,11 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
+  try {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--fix') o.fix = true;
@@ -274,6 +283,8 @@ function parseArgs(argv) {
     // positional. `o._[0]` is the command, already pushed by the time `--check` is seen in normal use.
     else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
+    else if (a === '--open') o.open = true;
+    else if (a === '--done') o.done = true;
     else if (a === '--undo') o.undo = true;
     else if (a === '--debt') o.debt = true;
     else if (a === '--stub') o.stub = true;
@@ -310,8 +321,16 @@ function parseArgs(argv) {
       o[a.slice(2, eq)] = value;
     } else o._.push(a);
   }
+  } catch (e) {
+    // The command read so far, so the error handler knows WHICH command failed — the parse did not finish.
+    e.parsedCmd = o._[0] ?? null;
+    throw e;
+  }
   return o;
 }
+
+// The command `main` is running, for the error handler (set once the arguments are read).
+let runningCmd = null;
 
 // A value flag must be followed by a token; erroring beats silently passing `undefined` downstream.
 function takeValue(argv, i, flag) {
@@ -323,6 +342,7 @@ function takeValue(argv, i, flag) {
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   const cmd = o._[0];
+  runningCmd = cmd ?? null;
   if (o.version) return log(VERSION);
 
   // THE HOT PATH, handled before anything heavy is loaded. `yad hook ledger-guard` runs inside the
@@ -561,6 +581,24 @@ async function main() {
     case 'index':
       await commands.runIndex(o.dir, { json: o.json });
       break;
+    case 'history': {
+      const [, action, ...args] = o._;
+      // Every flag that is not history's own is refused, not ignored: an ignored `--since` would read as
+      // a filter that was applied. Read from the RAW arguments, as typed — `parseArgs` turns a flag it
+      // does not know (`--limit`, a typo) into a plain word, which `search` would take as text, and it
+      // stores `--preview` under another name. A word that starts with `--`, or a one-letter flag such
+      // as `-m`, is a flag; a value (`--type chore`) never starts with `-`, because `parseArgs` refuses it.
+      const HISTORY_OWN = new Set(commands.HISTORY_FLAGS);
+      const unknownFlags = [...new Set(process.argv.slice(2)
+        .filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t))
+        .map((t) => t.split('=')[0])
+        .filter((f) => !HISTORY_OWN.has(f)))];
+      await commands.runHistory(o.dir, {
+        action: action || 'list', args, json: !!o.json, unknownFlags,
+        type: o.type ?? null, theme: o.theme ?? null, thread: o.thread ?? null, open: !!o.open, done: !!o.done,
+      });
+      break;
+    }
     case 'repo': {
       const [, action, name] = o._;
       await commands.runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });
@@ -619,6 +657,17 @@ async function main() {
 
 main()
   .catch(async (err) => {
+    // `yad history --json` promises JSON for every refusal (E20), and a flag given with no value is
+    // refused here, by the parser, before the command runs. Other commands keep their text until E1
+    // settles one format for all of them.
+    // Only when the command IS history — never because the word `history` is some flag's value.
+    if ((err?.parsedCmd ?? runningCmd) === 'history' && process.argv.slice(2).includes('--json')) {
+      const hint = err?.hint || (/expects a value$/.test(String(err?.message)) ? '`yad --help` lists the flags of each command' : null);
+      // Exactly the documented refusal shape — { schemaVersion, ok, error, hint } — and nothing else.
+      process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ok: false, error: String(err?.message || err), hint }, null, 2)}\n`);
+      process.exitCode = 1;
+      return;
+    }
     const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';
     log(c.red(`\nyad failed${code}: ${err?.message || err}`));
     if (err?.hint) log(c.yellow(`  → ${err.hint}`));

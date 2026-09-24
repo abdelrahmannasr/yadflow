@@ -10,7 +10,7 @@ import {
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
-  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
+  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate, printable,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
@@ -37,12 +37,22 @@ function closingActor(root, hub) {
   return actorName(root, hub?.platform);
 }
 
-// One line for a review step's closing record in `yad gate status` (E18).
-function closedLine(closed) {
-  const how = closed.via === 'merge'
-    ? `merged${closed.mergedBy ? ` by ${closed.mergedBy}` : ''}${closed.pr != null ? ` (PR #${closed.pr})` : ''}${closed.commit ? ` at ${String(closed.commit).slice(0, 7)}` : ''}`
-    : `via ${closed.via || 'an unknown path'}${closed.pr != null ? ` (PR #${closed.pr})` : ''}`;
-  const waived = closed.waived === 'solo' ? '; approvals waived (solo mode)' : closed.waived ? `; approvals waived (${closed.waived})` : '';
+// One line for a step's closing record — `yad gate status` prints it under a review step (E18), and
+// `yad history show` under every step (E20), so the two views say it in the same words.
+//
+// The record is a file a person can edit, and it is printed on other people's terminals: a value is used
+// only when it is text (made safe by `printable`), and a PR only when it is a whole number (E20 review —
+// an object printed as `[object Object]`, and `pr: "9; rm"` as `PR #9; rm`).
+// `prText`: a PR number as the text to print, or null. Text, not a number — a number written `"007"`
+// prints as written. (Not `prNumber`: two functions below take a parameter of that name.)
+export const prText = (v) => (Number.isInteger(v) && v >= 0 ? String(v) : typeof v === 'string' && /^\d+$/.test(v) ? v : null);
+export function closedLine(closed) {
+  const [via, mergedBy, commit, date, by, pr] = [closed.via, closed.mergedBy, closed.commit, closed.date, closed.by].map(printable).concat(prText(closed.pr));
+  const how = via === 'merge'
+    ? `merged${mergedBy ? ` by ${mergedBy}` : ''}${pr !== null ? ` (PR #${pr})` : ''}${commit ? ` at ${commit.slice(0, 7)}` : ''}`
+    : `via ${via || 'an unknown path'}${pr !== null ? ` (PR #${pr})` : ''}`;
+  const waivedText = printable(closed.waived);
+  const waived = waivedText === 'solo' ? '; approvals waived (solo mode)' : waivedText ? `; approvals waived (${waivedText})` : '';
   // E72 — a count the capacity cap lowered. Read strictly: the record is a file a person can edit, and
   // a line built from half a record would state a cap nobody applied. All three numbers, and a `to`
   // of at least 1 (the base) and below `needed` (a cap only ever lowers), or nothing.
@@ -50,7 +60,7 @@ function closedLine(closed) {
   const whole = (n) => Number.isInteger(n) && n >= 0;
   const capped = k && typeof k === 'object' && !Array.isArray(k) && whole(k.needed) && whole(k.to) && whole(k.active) && k.to >= 1 && k.to < k.needed
     ? `; count capped from ${k.needed} to ${k.to} (${k.active} active ${peopleWord(k.active)})` : '';
-  return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${waived}${capped}${closed.by ? `; recorded by ${closed.by}` : ''}`;
+  return `closed${date ? ` on ${date}` : ''} — ${how}${waived}${capped}${by ? `; recorded by ${by}` : ''}`;
 }
 
 // ---- tiny frontmatter reader (key: value, and `repos: [a, b]`) ----------------------------------
@@ -1266,7 +1276,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // `given` is a count the caller already read, as `gateSync` takes one — the CLI passes none; a test
   // passes one so the cap (E72) can be seen on a fixture that has no git history of its own.
   const headCount = given || activePeople(root, { aliases: legacyLogins(hub) });
-  log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
+  log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${printable(ledger.state.currentStep) ?? '(none)'}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   // Printed in solo mode too, exactly as the per-step count is: someone who later switches to team mode
   // can see the number their gates will be capped against (E72), before it holds anything for them.
   log(`  ${c.dim(activeSum(headCount))}`);
@@ -1309,7 +1319,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     // read-only views of one ledger, and a human checks this one first.
     const state = stepStatus(s);
     const waived = claimsInherited(s)
-      ? `; inherited from ${s.inheritedFrom || 'the parent epic'}`
+      ? `; inherited from ${printable(s.inheritedFrom) ?? 'the parent epic'}`
       : (claimsSkipped(s) && isSkippableStep(s.id, optional)) ? '; skipped (N/A)'
         : (state === 'deferred' && isSkippableStep(s.id, optional)) ? `; deferred (still owed${s.debt === true ? ', as debt' : ''})` : '';
     // The shortfall, the same number `gatePredicate` returns as `short`: against the capped count when
@@ -1330,7 +1340,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     // A debt being paid back (E41) is no longer `deferred`, so the tag above does not show; say it here,
     // until the review passes and clears the flag.
     const paying = s.debt === true && state !== 'deferred' ? '; owed as debt — being paid back' : '';
-    log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
+    log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${printable(s.id) ?? '(no id)'} ${c.dim(`— ${state || `${printable(s.status) ?? 'no state'} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
     if (s.closed && typeof s.closed === 'object' && !Array.isArray(s.closed)) log(`      ${c.dim(closedLine(s.closed))}`);
     // E73: why this gate may not pass — reported only, never enforced. Not in solo mode, not on a waived
     // (inherited, skipped, deferred) step, and not on one that passed. Every other review step counts,
