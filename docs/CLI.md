@@ -46,6 +46,7 @@ no clone needed.
 | `yad checkpoint --retro-ship <epic>/<story> --repo <r>` | Reconcile a **pre-tracking** story — merged and shipped **before** the Build ledger existed, so it has no `build-log` ship and plain `checkpoint` can't carry its `status: shipped` flip (#142). Records **one** retroactive ship shard marked `retroactive: true` (`--task <t>` overrides the default `retro` sentinel; `--merge-commit <sha>` records the SHA — never invented; `shippedAt` is the backfill date), then runs the normal checkpoint so the story's already-made flip rides the **same** `chore(hub)` commit. **One repo per run:** a story that shipped in several repos is recorded by re-running once per `--repo` (the flip rides the first commit; each later run lands only its own shard) — the guard is per **(story, repo)**, so recording one repo never locks out the rest (#166), and after each run it names the story's declared repos that still have no evidence. Because a ship is permanent audit evidence, `--repo` must be one the story's `repos:` frontmatter declares (or, when it declares none, one the Product's `.sdlc/repos.json` connects) — a typo'd or invented repo is **refused**, not recorded — and a name that would share a build-log **shard filename** with an already-recorded repo (`api.v2` vs `api_v2`, both sanitized to `api_v2`) is refused too, so a retro ship can never overwrite another repo's record. **Refuses** when the story already has a ship **in that repo** (then it isn't pre-tracking there — use the normal flow); does **not** author the story frontmatter and **refuses unless you have already set a Build `status:`** — `in-build` or `shipped` — (so a ship is never committed while the artifact still says `approved` — evidence and flip stay atomic); `--push`/`--allow-branch`/`--dry-run` behave as for `checkpoint`. **Where the record lands:** like every ship, it is written as a **shard** under `.sdlc/build-log/` — the folded `.sdlc/build-log.json` is *not* appended to (that is what would make concurrent shippers conflict). Readers **union** the folded file with every shard, so the ship is fully visible immediately; `yad tidy up` folds it into `build-log.json` once the story is `shipped` (a backfill against an `in-build` story stays a loose shard until then). An empty `build-log.json` right after a backfill is the design, not a lost write (#167). This is the supported alternative to a raw `git push origin main` for a legacy shipped story. |
 | `yad tidy up [<epic>] [--push]` | Fold a **shipped story's** finished `trust-log`/`build-log` **shards** back into the single folded ledger file, as one `chore(hub)` commit — the manual "pack it up" companion to the shard-then-fold storage (like `git gc` for its loose objects). Concurrent Build writers each write their own shard file (so parallel stories of one epic never conflict), and readers union the folded file + loose shards; `tidy up` is the on-demand compaction. A fold reads shards, merges them, then deletes them, so it holds the ledger's exclusive lock for that whole span — a ship written or stamped mid-fold can never be folded away without its change, or deleted without being folded (`YAD-STATE-006` if another writer holds it). Default branch only; `--push` lands it on `origin/<default>`; a **no-op** when nothing is foldable. |
 | `yad index [--json]` | **Rebuild the Product index, `.sdlc/index.json` (E19)** — one summary per work item, so a reader opens one file instead of walking `epics/*`. The index is **derived**: it is rebuilt from each item's own `.sdlc/state.json`, `epic.md` and `.sdlc/change.json`, and never edited by hand. It is written **on the default branch only**, with no override, and the command never commits it: commit it with the change it describes. On a **verified** Product it writes nothing, because CI rebuilds the index in the commit that records a merge. `--json` prints the index built live from the files, on any branch, and writes nothing. See [the Product index](#the-product-index-sdlcindexjson). |
+| `yad history [list\|show\|search]` | **What the Product has done (E20)**, read live from each work item's own files, on any branch, writing nothing. `list` shows every work item, open and finished, newest first, with `--type`, `--theme`, `--thread`, `--open` or `--done` to narrow it. `show <id>` prints one item's steps with their closing records and the approvals recorded for each review step. `search <text>` finds text in ids, titles, themes, types and repos, and in who closed or merged a step, its PR and its commit. `--json` on all three. See [Work-item history](#work-item-history-yad-history). |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo refresh [name] --push` | After the re-pack (and the AI regenerating the code-map), commit the tracked code-maps + `.sdlc/repos.json` as an audit-trail `chore(hub): sync code-context … [skip ci]` commit and push it straight to the Product's **default branch** (`--allow-branch` to override). The code-context analogue of `yad checkpoint`. |
 | `yad risk-map check [repo] [--json]` | Check a code repo's **risk map** (`.sdlc/risk-map`: a risk level per directory, no names — see [The risk map](#the-risk-map-a-level-per-directory)). Warns about a directory no line covers, a line whose directory is gone, a line still `unset` or `guessed`, and a line it cannot read. `repo` is a name from `.sdlc/repos.json` or a path; with none, every connected repo — or the current directory, but only when there is no `repos.json` at all (an empty or unreadable registry is refused, so a map is never written into the Product). **Advisory:** it never sets a failing exit code for a warning. The PR check `checks/risk-map-check.sh` says the same about one change. |
@@ -854,8 +855,8 @@ nothing recorded on it.
 | `repair` | `yad gate repair` closed a stranded author step. |
 | `auto` / `human` | The `yad-run` skill moved a Build lane past a step, on its own or for a person. |
 
-`yad gate status` prints it under each review step; an author step's record has no reader yet (`yad
-history`, E20, will read both). A step closed before this release has none, and nothing warns about that. See the state schema's "Closing records" for every field.
+`yad gate status` prints it under each review step, and `yad history show` (E20) under every step,
+author steps included, in the same words. A step closed before this release has none, and nothing warns about that. See the state schema's "Closing records" for every field.
 
 A `deferred` step can also carry `"debt": true`, a flag beside the state rather than a ninth state: it
 marks the deferral as owed back, and changes nothing about whether the chain continues. See `yad defer
@@ -1119,6 +1120,40 @@ Upgrading yadflow can do it too: when a release changes what the index holds (E1
 index built by the older release reads as behind. Run `yad index` on the default branch. On a verified
 Product only CI writes the index, so it — and a new work item merged by PR — waits for the next merged
 review.
+
+## Work-item history: `yad history`
+
+`yad history` (E20) answers "what has this Product done?" It reads each work item's own files every time
+it runs — with the same builder as `.sdlc/index.json` — so it is correct on any branch, even when the
+saved index is behind. It never writes a file.
+
+| Command | What it prints |
+|---|---|
+| `yad history` or `yad history list` | Every work item, open and finished, **newest first** by its created date. A date that is not a calendar date (such as `someday`) sorts last; items with the same date sort by id. Each row shows the title (or the id, when the item has no title), the type, the theme, the current step, and the date of the last closed step |
+| `yad history show <id>` | One work item: its type, theme, thread, parent, profile, created date, current step and repos, then **every step in chain order** with its state and its closing record (who closed it, when, how, and the PR or commit). Under each review step, the **approvals** recorded for it; an approval whose fingerprint is outside the accepted ones is marked stale, by the same rule as `yad gate status` |
+| `yad history search <text>` | The work items where the text appears, ignoring upper and lower case, in the id, title, theme, type or repos, or in a step's closing record: who closed it, who merged it, its PR number or its commit (a short commit finds the full one). Approvals are not searched. Each match names the field and the step |
+
+**Filters** for `list` and `search`:
+
+| Flag | Keeps |
+|---|---|
+| `--type <t>` | items of that work-item type: `feature`, `change`, `defect`, `hotfix` or `chore` |
+| `--theme <x>` | items with that theme, compared the way `yad doctor` groups themes — `Checkout Revamp` and `checkout-revamp` are one theme |
+| `--thread <EP-…>` | items in that feature thread |
+| `--open` | items with at least one step not closed for good. A **deferred** step is still owed, so it keeps an item open |
+| `--done` | items whose every step is `done`, `skipped` or `satisfied` |
+
+A value that can match nothing — an unknown type, a thread id that is not an id, `--open` with `--done` —
+is refused before anything is read.
+
+**An item that cannot be read is never hidden.** It is named under every answer, whatever the filters,
+with the reason, because a filter cannot know what an unreadable item holds. A folder under `epics/` whose
+name is not a work-item id is named too. In `show`, an `approvals.json` that cannot be read is said, and
+no approvals are shown for it — never an empty list standing in for a file that was not read.
+
+**`--json`** prints `{ "schemaVersion", "items", "unreadable", "unlisted"? }` for `list`; the same plus
+`"query"`, and a `"matches"` list on each item, for `search`; and `{ "schemaVersion", "item", "steps",
+"stepsWhy"?, "approvalsWhy"? }` for `show`. Each item has the shape of an item in `.sdlc/index.json`.
 
 ## File shape: `schemaVersion`
 

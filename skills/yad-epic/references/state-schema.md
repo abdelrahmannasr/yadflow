@@ -360,8 +360,8 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 - **Steps closed before this release carry none**, and nothing asks for one: `yad doctor` does not warn.
 - **No shape change.** An older release ignores the key, and nothing reads `done` differently because it
   is there.
-- `yad gate status` prints it under each review step. An author step's record has no reader yet;
-  `yad history` (E20) is the command that will read both.
+- `yad gate status` prints it under each review step; `yad history show` (E20) prints it under every
+  step, author steps included, and `yad history search` finds text in it.
 
 **`blocked` changed meaning in shape 7.** Before it, every writer used `blocked` for "waiting on an
 earlier step" — what is now `todo`. The two are told apart by the record, not by the shape number:
