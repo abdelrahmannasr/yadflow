@@ -37,8 +37,9 @@ function closingActor(root, hub) {
   return actorName(root, hub?.platform);
 }
 
-// One line for a review step's closing record in `yad gate status` (E18).
-function closedLine(closed) {
+// One line for a step's closing record — `yad gate status` prints it under a review step (E18), and
+// `yad history show` under every step (E20), so the two views say it in the same words.
+export function closedLine(closed) {
   const how = closed.via === 'merge'
     ? `merged${closed.mergedBy ? ` by ${closed.mergedBy}` : ''}${closed.pr != null ? ` (PR #${closed.pr})` : ''}${closed.commit ? ` at ${String(closed.commit).slice(0, 7)}` : ''}`
     : `via ${closed.via || 'an unknown path'}${closed.pr != null ? ` (PR #${closed.pr})` : ''}`;

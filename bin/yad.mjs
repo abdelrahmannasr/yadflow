@@ -186,6 +186,14 @@ ${c.bold('Build helpers')}
                                        derived from their own files; the default branch only, with no
                                        override; on a verified Product CI writes it.
                                        --json prints it, built live, and writes nothing
+  yad history [list] [--type t] [--theme x] [--thread EP-…] [--open|--done] [--json]
+                                       Every work item, open and finished, newest first — built live
+                                       from their own files, on any branch; writes nothing
+  yad history show <id> [--json]       One work item: every step with its state and closing record,
+                                       and the approvals recorded for each review step
+  yad history search <text> [filters] [--json]
+                                       Match text in ids, titles, themes, types, repos, and in who
+                                       closed or merged a step, its PR and its commit
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
   yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
@@ -253,7 +261,7 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -274,6 +282,8 @@ function parseArgs(argv) {
     // positional. `o._[0]` is the command, already pushed by the time `--check` is seen in normal use.
     else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
+    else if (a === '--open') o.open = true;
+    else if (a === '--done') o.done = true;
     else if (a === '--undo') o.undo = true;
     else if (a === '--debt') o.debt = true;
     else if (a === '--stub') o.stub = true;
@@ -561,6 +571,14 @@ async function main() {
     case 'index':
       await commands.runIndex(o.dir, { json: o.json });
       break;
+    case 'history': {
+      const [, action, ...args] = o._;
+      await commands.runHistory(o.dir, {
+        action: action || 'list', args, json: o.json,
+        type: o.type ?? null, theme: o.theme ?? null, thread: o.thread ?? null, open: !!o.open, done: !!o.done,
+      });
+      break;
+    }
     case 'repo': {
       const [, action, name] = o._;
       await commands.runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });

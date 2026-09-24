@@ -22092,3 +22092,263 @@ test('E111 review: an index built by the E19 format reads behind over unchanged 
     assert.deepEqual(indexFreshness(T), { state: 'current' }, 'a rebuild heals it');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- E20: `yad history` — list, show, search ---------------------------------------------------------
+// Built live by the index's own builder; every item, newest first; show = steps + closing records +
+// approvals; search = the summary and the closing records. The user's decisions (2026-09-24).
+const { runHistory, createdKey, newestFirst, isFinished, historyFilter, searchMatches } = await import('./history.mjs');
+const { artifactHash: _e20Hash } = await import('./epic-state.mjs');
+
+async function grabStdout(fn) {
+  const orig = process.stdout.write;
+  let printed = '';
+  process.stdout.write = (s) => { printed += s; return true; };
+  try { await fn(); } finally { process.stdout.write = orig; }
+  return printed;
+}
+
+function historyProduct(extra = {}) {
+  return indexFixture({
+    '.sdlc/hub.json': { platform: 'github', default_branch: 'main' },
+    'epics/EP-old/.sdlc/state.json': {
+      createdAt: '2026-1-5', currentStep: 'done', steps: [
+        { id: 'epic', status: 'done', closed: { by: 'ada', date: '2026-01-06', via: 'review-opened', pr: 7 } },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', closed: { via: 'merge', pr: 8, commit: 'abc1234def', mergedBy: 'bo-gh', date: '2026-01-07' } },
+      ],
+    },
+    'epics/EP-old/epic.md': '---\ntitle: Old checkout\nkind: feature\nthread: EP-old\ntheme: Checkout Revamp\n---\n',
+    'epics/EP-new/.sdlc/state.json': {
+      createdAt: '2026-09-20', currentStep: 'architecture', steps: [
+        { id: 'epic', status: 'done' },
+        { id: 'architecture', status: 'deferred', record: { by: 'ada', date: '2026-09-21', reason: 'later' } },
+      ],
+    },
+    'epics/EP-new/epic.md': '---\nkind: change\nparent: EP-old\nthread: EP-old\ntheme: checkout-revamp\n---\n',
+    'epics/EP-new/.sdlc/change.json': { title: 'Fix the queue' },
+    'epics/EP-nodate/.sdlc/state.json': { createdAt: 'someday', steps: [] },
+    'epics/EP-nodate/epic.md': '---\nkind: chore\n---\n',
+    'epics/EP-bad/.sdlc/state.json': '{ broken',
+    'epics/Bad_Name/.sdlc/state.json': { steps: [] },
+    ...extra,
+  });
+}
+
+test('E20 createdKey / newestFirst: calendar dates only, never guessed; no date last; ties by id', () => {
+  assert.equal(createdKey('2026-9-4'), 20260904, 'E71 met one-digit months and days');
+  assert.equal(createdKey('2026-09-04T10:00:00Z'), 20260904, 'a time after the date is ignored');
+  for (const bad of ['2026-13-01', '2026-00-10', '2026-01-32', '2026-09-045', '2026-9-4abc', 'someday', '04/09/2026', '2026-09', '', null, 20260904]) {
+    assert.equal(createdKey(bad), null, `not a date: ${JSON.stringify(bad)}`);
+  }
+  const order = newestFirst([
+    { id: 'EP-b', createdAt: '2026-01-01' }, { id: 'EP-x', createdAt: 'later' }, { id: 'EP-c', createdAt: '2026-9-4' },
+    { id: 'EP-a', createdAt: '2026-01-01' }, { id: 'EP-w', createdAt: null },
+  ]).map((i) => i.id);
+  assert.deepEqual(order, ['EP-c', 'EP-a', 'EP-b', 'EP-w', 'EP-x']);
+});
+
+test('E20 isFinished: every step done, skipped or satisfied — a deferred step is still owed', () => {
+  const s = (o) => ({ steps: { todo: 0, in_progress: 0, in_review: 0, done: 0, skipped: 0, deferred: 0, satisfied: 0, blocked: 0, ...o } });
+  assert.equal(isFinished(s({ done: 3, skipped: 1, satisfied: 2 })), true);
+  for (const open of [{ done: 2, deferred: 1 }, { done: 2, todo: 1 }, { done: 2, blocked: 1 }, { done: 2, in_review: 1 }, { done: 2, unknown: 1 }, {}]) {
+    assert.equal(isFinished(s(open)), false, JSON.stringify(open));
+  }
+});
+
+test('E20 historyFilter: bad values are refused before anything is read; the theme folds like doctor\'s', () => {
+  assert.match(historyFilter({ open: true, done: true }).error, /cannot be used together/);
+  assert.match(historyFilter({ type: 'epic' }).error, /unknown work-item type: epic — one of feature · change · defect · hotfix · chore/);
+  assert.match(historyFilter({ thread: 'nope' }).error, /invalid thread id/);
+  assert.match(historyFilter({ theme: '##' }).error, /no letters or digits/);
+  const item = { type: 'change', theme: 'Checkout Revamp', thread: 'EP-old', steps: { done: 1 } };
+  assert.equal(historyFilter({ theme: 'checkout-revamp' }).keep(item), true, 'one theme typed two ways');
+  assert.equal(historyFilter({ theme: 'checkout' }).keep(item), false, 'a whole theme, not a part of one');
+  assert.equal(historyFilter({ theme: 'x' }).keep({ ...item, theme: null }), false);
+  assert.equal(historyFilter({ type: 'change', thread: 'EP-old', done: true }).keep(item), true);
+  assert.equal(historyFilter({ type: 'feature' }).keep(item), false);
+  assert.equal(historyFilter({ thread: 'EP-other' }).keep(item), false);
+  assert.equal(historyFilter({ open: true }).keep(item), false);
+  assert.equal(historyFilter({}).keep(item), true);
+});
+
+test('E20 searchMatches: the summary and the closing records, ignoring case — never the approvals', () => {
+  const item = { id: 'EP-old', title: 'Old Checkout', theme: 'Revamp', type: 'feature', repos: ['api', 'web'] };
+  const steps = [
+    { id: 'epic', closed: { by: 'Ada', pr: 7 } },
+    { id: 'epic-review', closed: { mergedBy: 'bo-gh', pr: 8, commit: 'abc1234def' } },
+    { id: 'odd', closed: 'not an object' },
+    'not a step',
+  ];
+  const f = (t) => searchMatches(item, steps, t).map((m) => `${m.step || ''}:${m.field}=${m.value}`);
+  assert.deepEqual(f('checkout'), [':title=Old Checkout']);
+  assert.deepEqual(f('ADA'), ['epic:closed.by=Ada']);
+  assert.deepEqual(f('bo-gh'), ['epic-review:closed.mergedBy=bo-gh']);
+  assert.deepEqual(f('8'), ['epic-review:closed.pr=8'], 'a PR number is matched as text');
+  assert.deepEqual(f('abc1234'), ['epic-review:closed.commit=abc1234def'], 'a short commit finds the full one');
+  assert.deepEqual(f('WEB'), [':repo=web']);
+  assert.deepEqual(f('revamp'), [':theme=Revamp']);
+  assert.deepEqual(f('ep-old'), [':id=EP-old']);
+  assert.deepEqual(f('alice'), [], 'an approver is not a closing record');
+  assert.deepEqual(searchMatches(item, null, 'ada'), [], 'steps that cannot be read: the summary only');
+  assert.deepEqual(searchMatches({ ...item, title: null, theme: null, type: null }, [], 'null'), [], 'a missing value never matches its own spelling');
+});
+
+test('E20 yad history list: every item newest first, titles or ids, unreadable items named under any filter', async () => {
+  const T = historyProduct();
+  const exit = process.exitCode;
+  try {
+    let out = await grab(() => runHistory(T, {}));
+    assert.match(out, /yad history — 3 work items, newest first/);
+    const rows = out.split('\n').filter((l) => /^ {2}[✓•] /.test(l));
+    assert.deepEqual(rows.map((l) => l.split('  ')[1].slice(2)), ['Fix the queue', 'Old checkout', 'EP-nodate'], 'newest first, a bad date last, the id where there is no title');
+    assert.match(out, /EP-bad could not be read — \.sdlc\/state\.json does not parse/);
+    assert.match(out, /epics\/Bad_Name holds a \.sdlc\/ but is not a work-item id/);
+    out = await grab(() => runHistory(T, { type: 'chore' }));
+    assert.match(out, /1 work item of 3/);
+    assert.match(out, /EP-bad could not be read/, 'a filter cannot know what an unreadable item holds, so it is still named');
+    const json = JSON.parse(await grabStdout(() => runHistory(T, { json: true, theme: 'CHECKOUT revamp' })));
+    assert.deepEqual(json.items.map((i) => [i.id, i.title]), [['EP-new', 'Fix the queue'], ['EP-old', 'Old checkout']]);
+    assert.deepEqual(json.unreadable, [{ id: 'EP-bad', dir: 'epics/EP-bad', why: '.sdlc/state.json does not parse' }]);
+    assert.deepEqual(json.unlisted, ['epics/Bad_Name']);
+    assert.equal(json.schemaVersion, 10);
+    assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, done: true }))).items.map((i) => i.id), ['EP-old']);
+    assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, open: true }))).items.map((i) => i.id), ['EP-new', 'EP-nodate']);
+    assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-old' }))).items.map((i) => i.id), ['EP-new', 'EP-old']);
+    process.exitCode = 0;
+    out = await grab(() => runHistory(T, { type: 'nope' }));
+    assert.match(out, /unknown work-item type: nope/);
+    assert.equal(process.exitCode, 1);
+    assert.ok(!fs.existsSync(indexPath(T)), 'read-only: the saved index is neither read nor written');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 yad history: refuses outside a Product, an unknown subcommand, and search with no text', async () => {
+  const T = historyProduct();
+  const N = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e20-none-'));
+  const exit = process.exitCode;
+  try {
+    for (const [root, opts, re] of [
+      [N, {}, /no Product here/],
+      [T, { action: 'blame' }, /unknown history command: blame/],
+      [T, { action: 'search', args: [] }, /search needs some text/],
+      [T, { action: 'search', args: ['  '] }, /search needs some text/],
+      [T, { action: 'show', args: [] }, /show needs a work-item id/],
+      [T, { action: 'show', args: ['nope'] }, /invalid work-item id: nope/],
+      [T, { action: 'show', args: ['EP-missing'] }, /no work item EP-missing in this Product/],
+      [T, { action: 'show', args: ['EP-bad'] }, /EP-bad could not be read — \.sdlc\/state\.json does not parse/],
+      [T, { open: true, done: true }, /--open and --done cannot be used together/],
+    ]) {
+      process.exitCode = 0;
+      const out = await grab(() => runHistory(root, opts));
+      assert.match(out, re, JSON.stringify(opts));
+      assert.equal(process.exitCode, 1, JSON.stringify(opts));
+    }
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(N, { recursive: true, force: true }); }
+});
+
+test('E20 yad history search: summary and closing records, with the filters, newest first', async () => {
+  const T = historyProduct();
+  try {
+    let json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'search', args: ['bo-GH'], json: true })));
+    assert.equal(json.query, 'bo-GH');
+    assert.deepEqual(json.items.map((i) => [i.id, i.matches]), [['EP-old', [{ field: 'closed.mergedBy', value: 'bo-gh', step: 'epic-review' }]]]);
+    json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'search', args: ['ep'], json: true })));
+    assert.deepEqual(json.items.map((i) => i.id), ['EP-new', 'EP-old', 'EP-nodate'], 'newest first');
+    json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'search', args: ['ep'], json: true, type: 'feature' })));
+    assert.deepEqual(json.items.map((i) => i.id), ['EP-old'], 'the filters apply');
+    const out = await grab(() => runHistory(T, { action: 'search', args: ['fix', 'the'] }));
+    assert.match(out, /yad history search "fix the" — 1 work item/, 'the words are joined into one text');
+    assert.match(out, /title = Fix the queue/);
+    assert.match(out, /EP-bad could not be read/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 yad history show: every step with its record, approvals marked stale by gate status\'s rule', async () => {
+  const T = historyProduct();
+  const exit = process.exitCode;
+  try {
+    const current = _e20Hash(path.join(T, 'epics/EP-old'), 'epic.md');
+    fs.writeFileSync(path.join(T, 'epics/EP-old/.sdlc/approvals.json'), JSON.stringify([
+      { step: 'epic-review', approver: 'alice', status: 'approved', date: '2026-01-07', artifactHash: current, source: 'bridge', pr: 8 },
+      { step: 'epic-review', approver: 'bob', status: 'approved', date: '2026-01-02', artifactHash: 'sha256:old' },
+      { step: 'epic-review', approver: 'carol', status: 'approved', date: '2026-01-03' },
+      { step: 'epic-review', status: 'inherited', from: 'EP-root', date: '2026-01-01' },
+      { step: 'other-review', approver: 'dan', status: 'approved' },
+      'not an approval', null,
+    ]));
+    const out = await grab(() => runHistory(T, { action: 'show', args: ['EP-old'] }));
+    const plain = out;
+    assert.match(plain, /Old checkout {2}EP-old/);
+    assert.match(plain, /theme: Checkout Revamp/);
+    assert.match(plain, /✓ epic — done\n {6}closed on 2026-01-06 — via review-opened \(PR #7\); recorded by ada/, 'an author step\'s record, which nothing printed before');
+    assert.match(plain, /✓ epic-review — done, review\n {6}closed on 2026-01-07 — merged by bo-gh \(PR #8\) at abc1234/);
+    assert.match(plain, /approved by alice on 2026-01-07 \(PR #8\)\n/);
+    assert.match(plain, /approved by bob on 2026-01-02 \(stale — the content changed after it\)/);
+    assert.match(plain, /approved by carol on 2026-01-03\n/, 'no fingerprint recorded: no claim, never stale');
+    assert.match(plain, /inherited from EP-root on 2026-01-01/);
+    assert.ok(!plain.includes('dan'), 'only this step\'s approvals');
+    assert.match(plain, /2 steps of 2 have a closing record/);
+    const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
+    assert.equal(json.item.title, 'Old checkout');
+    assert.deepEqual(json.steps.map((s) => [s.id, s.state, !!s.closed]), [['epic', 'done', true], ['epic-review', 'done', true]]);
+    assert.deepEqual(json.steps[1].approvals.map((a) => [a.approver, a.stale]), [['alice', false], ['bob', true], ['carol', false], [null, false]]);
+    assert.deepEqual(json.steps[1].approvals[0], { approver: 'alice', status: 'approved', date: '2026-01-07', source: 'bridge', pr: 8, stale: false });
+    assert.equal(json.steps[1].approvals[3].from, 'EP-root');
+    assert.ok(!('approvals' in json.steps[0]), 'an author step has no approvals');
+    // A deferred step: its record, and the open mark (still owed).
+    const nw = (await grab(() => runHistory(T, { action: 'show', args: ['EP-new'] })));
+    assert.match(nw, /• architecture — deferred\n {6}deferred by ada on 2026-09-21 — later/);
+    assert.match(nw, /Fix the queue {2}EP-new/, 'the change.json title (E111)');
+    assert.ok(!nw.includes('approvals.json'), 'a missing approvals.json is no approvals, not a file that could not be read');
+    assert.ok(!('approvalsWhy' in JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-new'], json: true })))));
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 yad history show: an approvals file that cannot be read is said, never shown as no approvals', async () => {
+  const T = historyProduct({ 'epics/EP-old/.sdlc/approvals.json': '{ broken' });
+  try {
+    const out = await grab(() => runHistory(T, { action: 'show', args: ['EP-old'] }));
+    assert.match(out, /\.sdlc\/approvals\.json could not be read — it does not parse; no approvals are shown/);
+    assert.match(out, /closed on 2026-01-07/, 'the steps are still shown');
+    const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
+    assert.equal(json.approvalsWhy, 'it does not parse');
+    assert.ok(!('approvals' in json.steps[1]), 'no empty list standing in for an unread file');
+    fs.writeFileSync(path.join(T, 'epics/EP-old/.sdlc/approvals.json'), '{"not":"a list"}');
+    assert.equal(JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true }))).approvalsWhy, 'it is not a list');
+    fs.rmSync(path.join(T, 'epics/EP-old/.sdlc/approvals.json'));
+    fs.mkdirSync(path.join(T, 'epics/EP-old/.sdlc/approvals.json'));
+    assert.equal(JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true }))).approvalsWhy, 'it is a folder');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 yad history show: a CRLF epic.md keeps its title, as in the index (E111 note)', async () => {
+  const T = historyProduct({ 'epics/EP-nodate/epic.md': '---\r\ntitle: Windows item\r\nkind: chore\r\n---\r\n' });
+  try {
+    const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-nodate'], json: true })));
+    assert.equal(json.item.title, 'Windows item');
+    assert.deepEqual(json.steps, []);
+    assert.equal(json.item.title, buildIndex(T).index.items.find((i) => i.id === 'EP-nodate').title, 'the same builder, the same answer');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 bin/yad.mjs: history is wired, and --theme/--thread take values, --open/--done are flags', () => {
+  const T = historyProduct();
+  const yad = (...a) => execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...a, '--dir', T], { encoding: 'utf8', stdio: 'pipe' });
+  try {
+    assert.deepEqual(JSON.parse(yad('history', '--json', '--theme', 'checkout-revamp', '--open')).items.map((i) => i.id), ['EP-new']);
+    assert.deepEqual(JSON.parse(yad('history', 'list', '--json', '--thread=EP-old', '--done')).items.map((i) => i.id), ['EP-old']);
+    assert.deepEqual(JSON.parse(yad('history', 'search', 'queue', '--json')).items.map((i) => i.id), ['EP-new']);
+    assert.equal(JSON.parse(yad('history', 'show', 'EP-old', '--json')).item.id, 'EP-old');
+    assert.match(yad('--help'), /yad history show <id> \[--json\]/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 twin: `yad reconcile check --thread` is honoured now that --thread takes a value', () => {
+  // The yad-reconcile skill documents `--thread EP-<genesis>`, and the dispatcher read `o.thread`, but the
+  // flag was never registered: it fell through to the positionals and every thread was checked instead.
+  const T = historyProduct();
+  try {
+    const out = execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'reconcile', 'check', '--thread', 'EP-nothing', '--dir', T], { encoding: 'utf8', stdio: 'pipe' });
+    assert.match(out, /broken lineage: missing epic EP-nothing/, 'the one thread asked for');
+    assert.ok(!out.includes('EP-old'), 'and not every thread');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
