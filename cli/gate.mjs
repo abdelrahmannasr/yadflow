@@ -10,7 +10,7 @@ import {
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
-  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
+  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate, shown,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
@@ -39,11 +39,19 @@ function closingActor(root, hub) {
 
 // One line for a step's closing record — `yad gate status` prints it under a review step (E18), and
 // `yad history show` under every step (E20), so the two views say it in the same words.
+//
+// The record is a file a person can edit, and it is printed on other people's terminals: a value is used
+// only when it is text (made safe by `shown`), and a PR only when it is a whole number (E20 review — an
+// object printed as `[object Object]`, and `pr: "9; rm"` as `PR #9; rm`).
+const recordText = (v) => (typeof v === 'string' && shown(v) ? shown(v) : null);
+export const prNumber = (v) => (Number.isInteger(v) && v >= 0 ? String(v) : typeof v === 'string' && /^\d+$/.test(v) ? v : null);
 export function closedLine(closed) {
-  const how = closed.via === 'merge'
-    ? `merged${closed.mergedBy ? ` by ${closed.mergedBy}` : ''}${closed.pr != null ? ` (PR #${closed.pr})` : ''}${closed.commit ? ` at ${String(closed.commit).slice(0, 7)}` : ''}`
-    : `via ${closed.via || 'an unknown path'}${closed.pr != null ? ` (PR #${closed.pr})` : ''}`;
-  const waived = closed.waived === 'solo' ? '; approvals waived (solo mode)' : closed.waived ? `; approvals waived (${closed.waived})` : '';
+  const [via, mergedBy, commit, date, by, pr] = [closed.via, closed.mergedBy, closed.commit, closed.date, closed.by].map(recordText).concat(prNumber(closed.pr));
+  const how = via === 'merge'
+    ? `merged${mergedBy ? ` by ${mergedBy}` : ''}${pr !== null ? ` (PR #${pr})` : ''}${commit ? ` at ${commit.slice(0, 7)}` : ''}`
+    : `via ${via || 'an unknown path'}${pr !== null ? ` (PR #${pr})` : ''}`;
+  const waivedText = recordText(closed.waived);
+  const waived = waivedText === 'solo' ? '; approvals waived (solo mode)' : waivedText ? `; approvals waived (${waivedText})` : '';
   // E72 — a count the capacity cap lowered. Read strictly: the record is a file a person can edit, and
   // a line built from half a record would state a cap nobody applied. All three numbers, and a `to`
   // of at least 1 (the base) and below `needed` (a cap only ever lowers), or nothing.
@@ -51,7 +59,7 @@ export function closedLine(closed) {
   const whole = (n) => Number.isInteger(n) && n >= 0;
   const capped = k && typeof k === 'object' && !Array.isArray(k) && whole(k.needed) && whole(k.to) && whole(k.active) && k.to >= 1 && k.to < k.needed
     ? `; count capped from ${k.needed} to ${k.to} (${k.active} active ${peopleWord(k.active)})` : '';
-  return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${waived}${capped}${closed.by ? `; recorded by ${closed.by}` : ''}`;
+  return `closed${date ? ` on ${date}` : ''} — ${how}${waived}${capped}${by ? `; recorded by ${by}` : ''}`;
 }
 
 // ---- tiny frontmatter reader (key: value, and `repos: [a, b]`) ----------------------------------

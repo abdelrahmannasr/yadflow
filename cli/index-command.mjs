@@ -83,6 +83,6 @@ export async function runIndex(root, { json = false } = {}) {
 // Every item the index could not read is said, with the reason: it is in the file, and it is on screen.
 function reportUnreadable(index) {
   for (const i of index.items.filter((x) => x.unreadable)) warn(`${i.dir}: listed as unreadable — ${i.why}`);
-  for (const d of index.unlisted || []) warn(`${d} holds a ledger, but its name is not a work-item id — listed as unlisted`);
+  for (const d of index.unlisted || []) warn(`${d} holds a ledger that is not read as a work item — listed as unlisted`);
   if (index.items.some((x) => x.unreadable) || index.unlisted) hand('fix or restore the files named above, then run `yad index` again');
 }

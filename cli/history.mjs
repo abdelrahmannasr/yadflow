@@ -9,40 +9,45 @@
 //      two can never describe an item differently. The saved file is not read: it is behind on every
 //      branch and after a skill hand-writes `state.json` (E17b), and `yad doctor` already says so. The
 //      saved file stays the front door for apps and CI.
-//   2. `list` shows EVERY work item, open and finished, NEWEST FIRST by its created date. A date that
-//      does not read as a calendar date sorts last — never guessed — and ties sort by id.
+//   2. `list` shows EVERY work item, open and finished, NEWEST FIRST by its created date. A value that is
+//      not a real calendar date sorts last — never guessed — and ties sort by id.
 //   3. `show` prints the item's summary and lineage, then every step in chain order with its state and
 //      its closing record (E18) — the author steps too, which nothing printed before — and, under each
-//      review step, the approvals recorded for it (E64), marked stale by the same rule `gate status` uses.
+//      review step, the approvals recorded for it (E64), judged by the same rules `gate status` uses.
 //   4. `search` matches text, ignoring case, in each item's id, title, theme, type and repos, and in its
 //      steps' closing records (who closed, who merged, the PR, the commit). It opens nothing outside the
 //      item's own ledger files.
 //
-// A work item whose files cannot be read is never dropped (E19): it is named under every answer,
-// whatever the filters, because a filter cannot know what an unreadable item holds.
+// A work item whose files cannot be read is never dropped (E19): `list` and `search` name it under every
+// answer, whatever the filters, because a filter cannot know what an unreadable item holds.
+//
+// Everything printed from a file goes through `shown` (control and bidi characters dropped, one line):
+// these values reach other people's terminals, as titles do (E111). `--json` is data and is left as read.
 //
 // Read-only: nothing here writes a file.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, info, warn, fail, exists, isPlainObject } from './lib.mjs';
+import { c, log, info, warn, fail, exists, isPlainObject, readJSON } from './lib.mjs';
 import { productConfigPath, SCHEMA_VERSION } from './manifest.mjs';
 import { buildIndex } from './product-index.mjs';
 import {
-  epicRoot, isValidEpicId, FOUNDATION_EPIC, stepStatus, stepStateDef, acceptedHashes, isStaleHash,
-  WORK_ITEM_TYPES, themeKey,
+  epicRoot, isValidEpicId, FOUNDATION_EPIC, stepStatus, acceptedHashes, isStaleHash,
+  WORK_ITEM_TYPES, themeKey, threadEpics, shown,
 } from './epic-state.mjs';
-import { closedLine } from './gate.mjs';
+import { closedLine, prNumber, requireEngagement } from './gate.mjs';
 
 // ---- the pure parts ---------------------------------------------------------------------------------
 
-// A created date as a sortable number, or null when it is not a calendar date. `createdAt` is copied as
-// written (E19 never parses it), and E71 met `2026-9-4`, so one-digit months and days are read; a time
-// after the date is ignored. Anything else — a word, `2026-13-40` — is null and sorts last.
+// A created date as a sortable number, or null when it is not a real calendar date. `createdAt` is
+// copied as written (E19 never parses it), and E71 met `2026-9-4`, so one-digit months and days are
+// read; a time after the date is ignored. Anything else — a word, `2026-13-40`, `2026-02-31` — is null
+// and sorts last.
 export function createdKey(v) {
   const m = typeof v === 'string' ? v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|[T ])/) : null;
   if (!m) return null;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return null;
   return y * 10000 + mo * 100 + d;
 }
 
@@ -67,8 +72,10 @@ export function isFinished(item) {
 }
 
 // The filters, checked before anything is read: a value that can match nothing is a typo, not an answer.
-// Returns { error } or { keep(item) }.
-export function historyFilter({ type = null, theme = null, thread = null, open = false, done = false } = {}) {
+// `threadMembers`: the ids in the thread `--thread` names, as `yad thread` finds them — by walking
+// `parent:`, never by the `thread:` key, which is only a cache (E20 review: a genesis epic written before
+// the key existed never matched its own thread). Returns { error } or { keep(item) }.
+export function historyFilter({ type = null, theme = null, thread = null, open = false, done = false } = {}, { threadMembers = null } = {}) {
   if (open && done) return { error: '--open and --done cannot be used together' };
   if (type !== null && !WORK_ITEM_TYPES.includes(type)) return { error: `unknown work-item type: ${type} — one of ${WORK_ITEM_TYPES.join(' · ')}` };
   if (thread !== null && !isValidEpicId(thread)) return { error: `invalid thread id: ${thread} (expected EP-<slug>)` };
@@ -76,24 +83,30 @@ export function historyFilter({ type = null, theme = null, thread = null, open =
   // `checkout-revamp` are one theme typed twice.
   const want = theme === null ? null : themeKey(theme);
   if (want === '') return { error: `--theme ${JSON.stringify(theme)} has no letters or digits to match` };
+  const members = thread === null ? null : new Set(threadMembers || []);
   return {
     keep: (item) => (type === null || item.type === type)
       && (want === null || themeKey(item.theme) === want)
-      && (thread === null || item.thread === thread)
+      && (members === null || members.has(item.id))
       && (!open || !isFinished(item))
       && (!done || isFinished(item)),
   };
 }
 
+// Text compared without case. `NFKC` first, so an accent typed as one character or as two matches
+// either way. Not every language's case rules are followed: `ß` does not match `SS`.
+const fold = (s) => s.normalize('NFKC').toLowerCase();
+
 // What `search` matches in one item: [{ field, value, step? }], empty when nothing does. `steps` is the
 // item's `state.json` steps, or null when they could not be read (then only the summary is searched).
+// Only text is matched, and a PR only as a whole number: a value of any other type is not what the file
+// says in words, and `String()` of it would match text that is not there (`[object Object]`).
 export function searchMatches(item, steps, text) {
-  const needle = String(text).toLowerCase();
+  const needle = fold(String(text));
   const hits = [];
   const test = (field, value, step) => {
-    if (value === null || value === undefined) return;
-    const s = String(value);
-    if (s.toLowerCase().includes(needle)) hits.push({ field, value: s, ...(step ? { step } : {}) });
+    if (typeof value !== 'string' || !fold(value).includes(needle)) return;
+    hits.push({ field, value, ...(step ? { step } : {}) });
   };
   test('id', item.id);
   test('title', item.title);
@@ -106,7 +119,7 @@ export function searchMatches(item, steps, text) {
     const id = typeof s.id === 'string' ? s.id : null;
     test('closed.by', k.by, id);
     test('closed.mergedBy', k.mergedBy, id);
-    test('closed.pr', k.pr, id);
+    test('closed.pr', prNumber(k.pr), id);
     test('closed.commit', k.commit, id);
   }
   return hits;
@@ -128,16 +141,16 @@ function readItems(root) {
   }
 }
 
-// One ledger file: { value } or { why }. A file that is missing gives `def`. Read here rather than through
+// One ledger file: { value }, { missing: true } or { why }. Read here rather than through
 // `readJSONStrict`, which names every failure `YAD-STATE-001`: a view that says why a file could not be
 // read must tell "does not parse" from "is a folder" or "permission denied". Nothing is written, so no
 // shape stamp is needed.
-function readLedgerFile(file, def) {
+function readLedgerFile(file) {
   let text;
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT') return { value: def };
+    if (e.code === 'ENOENT') return { missing: true };
     return { why: e.code === 'EISDIR' ? 'it is a folder' : (e.code || e.message) };
   }
   try {
@@ -147,24 +160,29 @@ function readLedgerFile(file, def) {
   }
 }
 
-// The steps of one item's `state.json`, or null when they cannot be read now (the file changed since the
-// summary was built, or holds no list).
-function readSteps(root, id) {
-  const r = readLedgerFile(path.join(epicRoot(root, id), '.sdlc', 'state.json'), null);
-  return r.value && Array.isArray(r.value.steps) ? r.value.steps : null;
+// The steps of one item's `state.json`: { steps } or { why }. The summary was built a moment earlier
+// from the same file; if it changed in between (a checkout, a pull), this says so rather than guessing.
+export function readSteps(root, id) {
+  const r = readLedgerFile(path.join(epicRoot(root, id), '.sdlc', 'state.json'));
+  if (r.missing) return { why: 'it is missing now' };
+  if (r.why) return { why: r.why };
+  return Array.isArray(r.value?.steps) ? { steps: r.value.steps } : { why: 'it has no list of steps' };
 }
 
 // The whole story of one item, for `show`. Throws nothing: every part that cannot be read says why.
-export function itemHistory(root, item) {
+// `hub`: the Product config, for the engagement rule `gate status` applies.
+export function itemHistory(root, item, { hub = null } = {}) {
   const epicDir = epicRoot(root, item.id);
-  const stateRead = readLedgerFile(path.join(epicDir, '.sdlc', 'state.json'), null);
-  const steps = stateRead.value && Array.isArray(stateRead.value.steps) ? stateRead.value.steps : null;
-  const approvalsRead = readLedgerFile(path.join(epicDir, '.sdlc', 'approvals.json'), []);
-  const approvals = Array.isArray(approvalsRead.value) ? approvalsRead.value : null;
+  const stateRead = readSteps(root, item.id);
+  const approvalsRead = readLedgerFile(path.join(epicDir, '.sdlc', 'approvals.json'));
+  const approvals = approvalsRead.missing ? [] : Array.isArray(approvalsRead.value) ? approvalsRead.value : null;
   const approvalsWhy = approvals ? null : approvalsRead.why || 'it is not a list';
+  const reqEng = requireEngagement(hub);
   const out = [];
-  for (const s of steps || []) {
-    if (!isPlainObject(s)) continue;
+  for (const s of stateRead.steps || []) {
+    // Every entry in the list is a row, so the count matches the index's: one that is not a step object
+    // is said to be one, never skipped.
+    if (!isPlainObject(s)) { out.push({ id: null, type: null, state: null, known: false, notAStep: true }); continue; }
     const review = s.type === 'review+approve';
     const row = {
       id: typeof s.id === 'string' ? s.id : null,
@@ -175,10 +193,14 @@ export function itemHistory(root, item) {
       known: stepStatus(s) !== null,
       closed: isPlainObject(s.closed) ? s.closed : null,
       record: isPlainObject(s.record) ? s.record : null,
+      ...(typeof s.inheritedFrom === 'string' ? { inheritedFrom: s.inheritedFrom } : {}),
+      ...(s.debt === true ? { debt: true } : {}),
     };
     if (review && approvals) {
-      // The same rule as `gate status`: stale only when the recorded fingerprint is outside the
-      // accepted ones (never "not today's exact hash"). A fingerprint that cannot be taken is said.
+      // The rules `gate status` counts by (cli/gate.mjs gateStatus): an APPROVED record whose fingerprint
+      // is outside the accepted ones is stale (never "not today's exact hash"); with `requireEngagement`
+      // on, one with no verified engagement is not counted. A record of another status is shown, and
+      // neither rule applies to it. A fingerprint that cannot be taken is said.
       let accepted = null;
       let hashWhy = null;
       try {
@@ -186,53 +208,92 @@ export function itemHistory(root, item) {
       } catch (e) {
         hashWhy = e.code || e.message;
       }
-      row.approvals = approvals.filter((a) => isPlainObject(a) && a.step === s.id).map((a) => ({
-        approver: typeof a.approver === 'string' ? a.approver : null,
-        status: typeof a.status === 'string' ? a.status : null,
-        date: typeof a.date === 'string' ? a.date : null,
-        // An inherited record names the epic whose review it took over, not a person (E42).
-        ...(typeof a.from === 'string' ? { from: a.from } : {}),
-        ...(a.source ? { source: String(a.source) } : {}),
-        ...(a.pr != null ? { pr: a.pr } : {}),
-        ...(a.engagement ? { engagement: String(a.engagement) } : {}),
-        stale: accepted === null ? null : isStaleHash(a.artifactHash, accepted),
-      }));
+      row.approvals = approvals.filter((a) => isPlainObject(a) && a.step === s.id).map((a) => {
+        const approved = a.status === 'approved';
+        const stale = !approved ? null : accepted === null ? null : isStaleHash(a.artifactHash, accepted);
+        const engaged = a.engagement === 'verified';
+        return {
+          approver: typeof a.approver === 'string' ? a.approver : null,
+          status: typeof a.status === 'string' ? a.status : null,
+          date: typeof a.date === 'string' ? a.date : null,
+          // An inherited record names the epic whose review it took over, not a person (E42).
+          ...(typeof a.from === 'string' ? { from: a.from } : {}),
+          ...(typeof a.source === 'string' ? { source: a.source } : {}),
+          ...(prNumber(a.pr) !== null ? { pr: Number(prNumber(a.pr)) } : {}),
+          ...(typeof a.engagement === 'string' ? { engagement: a.engagement } : {}),
+          stale,
+          counted: !approved ? false : stale === null ? null : !stale && (!reqEng || engaged),
+        };
+      });
       if (hashWhy) row.staleUnknown = hashWhy;
     }
     out.push(row);
   }
   return {
-    steps: steps ? out : null,
-    ...(steps ? {} : { stepsWhy: stateRead.why || '.sdlc/state.json has no list of steps' }),
+    steps: stateRead.steps ? out : null,
+    ...(stateRead.steps ? {} : { stepsWhy: stateRead.why }),
     ...(approvalsWhy ? { approvalsWhy } : {}),
   };
 }
 
 // ---- printing ---------------------------------------------------------------------------------------
 
-const nameOf = (item) => item.title || item.id;
+const nameOf = (item) => shown(item.title) || item.id;
+const withFinished = (item) => ({ ...item, finished: isFinished(item) });
 
-function itemLine(item, extra = '') {
+function itemLine(item) {
   const meta = [
     ...(item.title ? [item.id] : []),
     item.type || (item.id === FOUNDATION_EPIC ? 'product level' : null),
-    item.theme ? `#${item.theme}` : null,
-    item.currentStep ? `at ${item.currentStep}` : null,
+    item.theme ? `#${shown(item.theme)}` : null,
+    item.currentStep ? `at ${shown(item.currentStep)}` : null,
     isFinished(item) ? 'finished' : null,
-    item.lastClosed?.date ? `last closed ${item.lastClosed.date}` : null,
+    item.lastClosed?.date ? `last closed ${shown(item.lastClosed.date)}` : null,
   ].filter(Boolean).join(' · ');
-  log(`  ${isFinished(item) ? c.green('✓') : c.yellow('•')} ${c.bold(nameOf(item))}  ${c.dim(meta)}${extra}`);
+  log(`  ${isFinished(item) ? c.green('✓') : c.yellow('•')} ${c.bold(nameOf(item))}  ${c.dim(meta)}`);
 }
 
 function printUnreadable({ unreadable, unlisted }) {
-  for (const u of unreadable) warn(`${u.id} could not be read — ${u.why} (not filtered: its type, theme and steps are unknown)`);
-  for (const d of unlisted) warn(`${d} holds a .sdlc/ but is not a work-item id, so it is not listed`);
+  for (const u of unreadable) warn(`${u.id} could not be read — ${shown(u.why)} (not filtered: its type, theme and steps are unknown)`);
+  // What `unlistedLedgerDirs` returns is more than one kind of folder (a name that is not an id, a
+  // symlink, an `epics/EP-foundation` beside `foundation/`), so the line says only what is known.
+  for (const d of unlisted) warn(`${shown(d)} holds a .sdlc/ that is not read as a work item, so it is not listed`);
 }
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function printJson(obj) {
   process.stdout.write(`${JSON.stringify({ schemaVersion: SCHEMA_VERSION, ...obj }, null, 2)}\n`);
+}
+
+function stepLine(s) {
+  if (s.notAStep) return `    ${c.yellow('•')} ${c.dim('(not a step object)')}`;
+  // A tick for a step closed for good; a deferred one is still owed, so it keeps the open mark (E37).
+  const tick = FINISHED.includes(s.state) ? c.green('✓') : c.yellow('•');
+  const state = s.known ? s.state : `${shown(s.state) ?? 'no state'} (unknown)`;
+  // The same words `gate status` uses for an inherited step and for debt (E41).
+  const notes = [
+    s.type === 'review+approve' ? 'review' : null,
+    s.inheritedFrom ? `inherited from ${shown(s.inheritedFrom)}` : null,
+    s.debt && s.state === 'deferred' ? 'still owed, as debt' : s.debt ? 'owed as debt — being paid back' : null,
+  ].filter(Boolean);
+  return `    ${tick} ${s.id !== null ? shown(s.id) : '(no id)'} ${c.dim(`— ${state}${notes.length ? `, ${notes.join(', ')}` : ''}`)}`;
+}
+
+function recordLine(s) {
+  const r = s.record;
+  const t = (v) => (typeof v === 'string' && shown(v) ? shown(v) : null);
+  const [by, date, reason, link] = [r.by, r.date, r.reason, r.link].map(t);
+  return `${t(s.state) || 'recorded'}${by ? ` by ${by}` : ''}${date ? ` on ${date}` : ''}${reason ? ` — ${reason}` : ''}${link ? ` (${link})` : ''}`;
+}
+
+function approvalLine(a) {
+  const tags = [
+    a.stale === true ? 'stale (revoked)' : null,
+    a.stale === false && a.counted === false ? 'not engagement-verified (not counted)' : null,
+  ].filter(Boolean);
+  const who = a.status === 'inherited' ? ` from ${shown(a.from) || 'the parent epic'}` : ` by ${shown(a.approver) || 'someone unnamed'}`;
+  return `${shown(a.status) || 'recorded'}${who}${a.date ? ` on ${shown(a.date)}` : ''}${a.pr != null ? ` (PR #${a.pr})` : ''}${tags.length ? ` — ${tags.join(', ')}` : ''}`;
 }
 
 // ---- the command --------------------------------------------------------------------------------------
@@ -243,12 +304,25 @@ export async function runHistory(root, { action = 'list', args = [], json = fals
     process.exitCode = 1;
     return;
   }
+  if (action === 'list' && args.length) {
+    fail(`list takes no words (${args.map((a) => JSON.stringify(a)).join(' ')}) — to find text, use \`yad history search <text>\``);
+    process.exitCode = 1;
+    return;
+  }
+  const filterSet = ['type', 'theme', 'thread'].filter((k) => flags[k] != null).map((k) => `--${k}`)
+    .concat(['open', 'done'].filter((k) => flags[k]).map((k) => `--${k}`));
+  if (action === 'show' && filterSet.length) {
+    fail(`show prints one work item, so ${filterSet.join(' and ')} cannot apply — the filters are for list and search`);
+    process.exitCode = 1;
+    return;
+  }
   if (!exists(productConfigPath(root))) {
     fail('no Product here (.sdlc/product.json) — run `yad history` from the Product');
     process.exitCode = 1;
     return;
   }
-  const filter = action === 'show' ? { keep: () => true } : historyFilter(flags);
+  const threadMembers = action !== 'show' && flags.thread && isValidEpicId(flags.thread) ? threadEpics(root, flags.thread) : null;
+  const filter = action === 'show' ? { keep: () => true } : historyFilter(flags, { threadMembers });
   if (filter.error) { fail(filter.error); process.exitCode = 1; return; }
   const read = readItems(root);
   if (read.error) { fail(`${read.error}, so there is no honest history to show`); process.exitCode = 1; return; }
@@ -257,7 +331,7 @@ export async function runHistory(root, { action = 'list', args = [], json = fals
 
   if (action === 'list') {
     const items = newestFirst(read.items.filter(filter.keep));
-    if (json) return printJson({ items, ...tail });
+    if (json) return printJson({ items: items.map(withFinished), ...tail });
     log(c.bold(`\nyad history — ${plural(items.length, 'work item')}${items.length === read.items.length ? '' : ` of ${read.items.length}`}, newest first`));
     for (const item of items) itemLine(item);
     if (!items.length) info(read.items.length ? 'no work item matches these filters' : 'no work items yet');
@@ -269,34 +343,41 @@ export async function runHistory(root, { action = 'list', args = [], json = fals
     const text = args.join(' ').trim();
     if (!text) { fail('search needs some text — `yad history search <text>`'); process.exitCode = 1; return; }
     const found = [];
+    const summaryOnly = [];
     for (const item of newestFirst(read.items.filter(filter.keep))) {
-      const matches = searchMatches(item, readSteps(root, item.id), text);
-      if (matches.length) found.push({ ...item, matches });
+      const r = readSteps(root, item.id);
+      if (!r.steps) summaryOnly.push({ id: item.id, why: r.why });
+      const matches = searchMatches(item, r.steps || null, text);
+      if (matches.length) found.push({ ...withFinished(item), matches });
     }
-    if (json) return printJson({ query: text, items: found, ...tail });
-    log(c.bold(`\nyad history search ${JSON.stringify(text)} — ${plural(found.length, 'work item')}`));
+    if (json) return printJson({ query: text, items: found, ...(summaryOnly.length ? { summaryOnly } : {}), ...tail });
+    log(c.bold(`\nyad history search ${JSON.stringify(shown(text))} — ${plural(found.length, 'work item')}`));
     for (const item of found) {
       itemLine(item);
-      for (const m of item.matches) log(`      ${c.dim(`${m.step ? `${m.step}: ` : ''}${m.field} = ${m.value}`)}`);
+      for (const m of item.matches) log(`      ${c.dim(`${m.step ? `${shown(m.step)}: ` : ''}${m.field} = ${shown(m.value)}`)}`);
     }
     if (!found.length) info('nothing matches');
+    for (const s of summaryOnly) warn(`${s.id}: its steps could not be read (${s.why}), so only its summary was searched`);
     printUnreadable(read);
     return;
   }
 
   // show
   const id = args[0];
-  if (!id || !isValidEpicId(id)) {
-    fail(id ? `invalid work-item id: ${id} (expected EP-<slug>)` : 'show needs a work-item id — `yad history show <id>`');
+  if (!id || !isValidEpicId(id) || args.length > 1) {
+    fail(!id ? 'show needs a work-item id — `yad history show <id>`'
+      : args.length > 1 ? 'show takes one work-item id' : `invalid work-item id: ${shown(id)} (expected EP-<slug>)`);
     process.exitCode = 1;
     return;
   }
   const bad = unreadable.find((u) => u.id === id);
-  if (bad) { fail(`${id} could not be read — ${bad.why}`); process.exitCode = 1; return; }
+  if (bad) { fail(`${id} could not be read — ${shown(bad.why)}`); process.exitCode = 1; return; }
   const item = read.items.find((i) => i.id === id);
   if (!item) { fail(`no work item ${id} in this Product`); process.exitCode = 1; return; }
-  const story = itemHistory(root, item);
-  if (json) return printJson({ item, ...story });
+  const story = itemHistory(root, item, { hub: readJSON(productConfigPath(root), null) });
+  // Steps that cannot be read are a failure in both forms: a script reading `--json` must see it too.
+  if (!story.steps) process.exitCode = 1;
+  if (json) return printJson({ item: withFinished(item), ...story });
 
   log(`\n  ${c.bold(nameOf(item))}${item.title ? `  ${c.dim(item.id)}` : ''}`);
   const facts = [
@@ -309,26 +390,17 @@ export async function runHistory(root, { action = 'list', args = [], json = fals
     ['current step', item.currentStep],
     ['repos', item.repos.length ? item.repos.join(', ') : null],
   ].filter(([, v]) => v);
-  for (const [k, v] of facts) log(`    ${c.dim(`${k}:`)} ${v}`);
-  if (!story.steps) { warn(`the steps could not be read — ${story.stepsWhy}`); process.exitCode = 1; return; }
+  for (const [k, v] of facts) log(`    ${c.dim(`${k}:`)} ${shown(v)}`);
+  if (story.approvalsWhy) warn(`.sdlc/approvals.json could not be read — ${story.approvalsWhy}; no approvals are shown`);
+  if (!story.steps) { warn(`the steps could not be read — .sdlc/state.json: ${story.stepsWhy}`); return; }
   log('');
   for (const s of story.steps) {
-    // A tick for a step closed for good; a deferred one is still owed, so it keeps the open mark (E37).
-    const done = FINISHED.includes(s.state) && stepStateDef(s.state) !== null;
-    log(`    ${done ? c.green('✓') : c.yellow('•')} ${s.id ?? '(no id)'} ${c.dim(`— ${s.known ? s.state : `${s.state} (unknown)`}${s.type === 'review+approve' ? ', review' : ''}`)}`);
+    log(stepLine(s));
     if (s.closed) log(`      ${c.dim(closedLine(s.closed))}`);
-    if (s.record && !s.closed) {
-      const r = s.record;
-      log(`      ${c.dim(`${s.state}${r.by ? ` by ${r.by}` : ''}${r.date ? ` on ${r.date}` : ''}${r.reason ? ` — ${r.reason}` : ''}`)}`);
-    }
-    for (const a of s.approvals || []) {
-      const tag = a.stale === true ? ' (stale — the content changed after it)' : '';
-      const who = a.status === 'inherited' ? ` from ${a.from || 'the parent epic'}` : ` by ${a.approver || 'someone unnamed'}`;
-      log(`      ${c.dim(`${a.status || 'recorded'}${who}${a.date ? ` on ${a.date}` : ''}${a.pr != null ? ` (PR #${a.pr})` : ''}${tag}`)}`);
-    }
-    if (s.staleUnknown) log(`      ${c.dim(`whether these approvals are stale cannot be told — ${s.staleUnknown}`)}`);
+    if (s.record && !s.closed) log(`      ${c.dim(recordLine(s))}`);
+    for (const a of s.approvals || []) log(`      ${c.dim(approvalLine(a))}`);
+    if (s.staleUnknown) log(`      ${c.dim(`whether these approvals are stale cannot be told — ${shown(s.staleUnknown)}`)}`);
   }
-  if (story.approvalsWhy) warn(`.sdlc/approvals.json could not be read — ${story.approvalsWhy}; no approvals are shown`);
   if (!story.steps.length) info('no steps yet');
   const closedCount = story.steps.filter((s) => s.closed).length;
   info(`${plural(closedCount, 'step')} of ${story.steps.length} ${closedCount === 1 ? 'has' : 'have'} a closing record`);

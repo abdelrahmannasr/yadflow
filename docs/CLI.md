@@ -1090,7 +1090,8 @@ an app, a CI job, an agent or a person can read one file instead of opening ever
 
 A work item whose files cannot be read is **still listed**, as `{ "id", "dir", "unreadable": true, "why" }`.
 It is never dropped, and it never stops the rest of the file. A folder under `epics/` that holds a `.sdlc/`
-but whose name is not a work-item id is listed under `unlisted`.
+but is not read as a work item is listed under `unlisted`: a name that is not a work-item id, a symlink,
+or an `epics/EP-foundation` beside the real `foundation/`.
 
 **Who writes it — the default branch only.** A file that every branch rewrote would conflict at every
 merge, the same problem the Build ledgers were sharded to avoid. So:
@@ -1129,9 +1130,9 @@ saved index is behind. It never writes a file.
 
 | Command | What it prints |
 |---|---|
-| `yad history` or `yad history list` | Every work item, open and finished, **newest first** by its created date. A date that is not a calendar date (such as `someday`) sorts last; items with the same date sort by id. Each row shows the title (or the id, when the item has no title), the type, the theme, the current step, and the date of the last closed step |
-| `yad history show <id>` | One work item: its type, theme, thread, parent, profile, created date, current step and repos, then **every step in chain order** with its state and its closing record (who closed it, when, how, and the PR or commit). Under each review step, the **approvals** recorded for it; an approval whose fingerprint is outside the accepted ones is marked stale, by the same rule as `yad gate status` |
-| `yad history search <text>` | The work items where the text appears, ignoring upper and lower case, in the id, title, theme, type or repos, or in a step's closing record: who closed it, who merged it, its PR number or its commit (a short commit finds the full one). Approvals are not searched. Each match names the field and the step |
+| `yad history` or `yad history list` | Every work item, open and finished, **newest first** by its created date. A value that is not a real calendar date (such as `someday` or `2026-02-31`) sorts last; items with the same date sort by id. Each row shows the title (or the id, when the item has no title), the type, the theme, the current step, and the date of the last closed step |
+| `yad history show <id>` | One work item: its type, theme, thread, parent, profile, created date, current step and repos, then **every step in chain order** with its state and its closing record (who closed it, when, how, and the PR or commit). Under each review step, the **approvals** recorded for it, judged by the same rules as `yad gate status`: an approval whose fingerprint is not one the current content gives is marked `stale (revoked)`, and, when the Product requires engagement, one with no verified engagement is marked `not engagement-verified (not counted)`. A deferred step owed as debt, and a step inherited from another epic, say so |
+| `yad history search <text>` | The work items where the text appears, ignoring upper and lower case, in the id, title, theme, type or repos, or in a step's closing record: who closed it, who merged it, its PR number or its commit (a short commit finds the full one). Approvals are not searched. Each match names the field and the step. Case is folded simply: an accent typed as one character or two matches either way, but `ß` does not match `SS` |
 
 **Filters** for `list` and `search`:
 
@@ -1140,20 +1141,33 @@ saved index is behind. It never writes a file.
 | `--type <t>` | items of that work-item type: `feature`, `change`, `defect`, `hotfix` or `chore` |
 | `--theme <x>` | items with that theme, compared the way `yad doctor` groups themes — `Checkout Revamp` and `checkout-revamp` are one theme |
 | `--thread <EP-…>` | items in that feature thread |
-| `--open` | items with at least one step not closed for good. A **deferred** step is still owed, so it keeps an item open |
+| `--open` | items with at least one step not closed for good, or with no steps yet. A **deferred** step is still owed, so it keeps an item open |
 | `--done` | items whose every step is `done`, `skipped` or `satisfied` |
 
-A value that can match nothing — an unknown type, a thread id that is not an id, `--open` with `--done` —
-is refused before anything is read.
+`--thread` finds the thread's members by their `parent:` links, as `yad thread` does — not by the
+`thread:` key, which is only a cache. A value that can match nothing — an unknown type, a thread id that
+is not an id, `--open` with `--done` — is refused before anything is read. The filters do not apply to
+`show`, which refuses them; `list` refuses extra words (use `search`).
 
-**An item that cannot be read is never hidden.** It is named under every answer, whatever the filters,
-with the reason, because a filter cannot know what an unreadable item holds. A folder under `epics/` whose
-name is not a work-item id is named too. In `show`, an `approvals.json` that cannot be read is said, and
-no approvals are shown for it — never an empty list standing in for a file that was not read.
+**An item that cannot be read is never hidden.** `list` and `search` name it under every answer, whatever
+the filters, with the reason, because a filter cannot know what an unreadable item holds; `show` of it
+says why and fails. A folder under `epics/` that holds a `.sdlc/` but is not read as a work item is named
+too. In `show`, an `approvals.json` that cannot be read is said, and no approvals are shown for it — never
+an empty list standing in for a file that was not read. An entry in the steps list that is not a step is
+shown as one row, `(not a step object)`, so the count matches the index. If a `state.json` changes
+between reading the summary and reading its steps, `show` says the steps could not be read and fails,
+and `search` says which items it searched by their summary only.
+
+**What is printed is made safe.** Every value read from a file — a theme, a reason, an approver's name, a
+step id — is printed on one line with control characters and bidi controls removed, as a title is
+(E111), because it reaches other people's terminals. A closing record's fields are printed only when
+they are text, and a PR only when it is a whole number. `--json` prints the data as it was read.
 
 **`--json`** prints `{ "schemaVersion", "items", "unreadable", "unlisted"? }` for `list`; the same plus
-`"query"`, and a `"matches"` list on each item, for `search`; and `{ "schemaVersion", "item", "steps",
-"stepsWhy"?, "approvalsWhy"? }` for `show`. Each item has the shape of an item in `.sdlc/index.json`.
+`"query"`, `"summaryOnly"`? and a `"matches"` list on each item, for `search`; and `{ "schemaVersion",
+"item", "steps", "stepsWhy"?, "approvalsWhy"? }` for `show`. Each item has the shape of an item in
+`.sdlc/index.json`, plus `"finished"`. Each approval in `show` carries `"stale"` and `"counted"` (`null`
+when they cannot be told), so a script need not re-derive the rules.
 
 ## File shape: `schemaVersion`
 

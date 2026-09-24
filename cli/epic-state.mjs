@@ -3605,6 +3605,12 @@ export const FOUNDATION_TITLE = 'Foundation';
 const CONTROLS = /[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 const oneLine = (t) => t.replace(CONTROLS, '').replace(/[\s\u0085]+/gu, ' ').trim() || null;
 
+// Any value read from a committed file and PRINTED on a terminal, made safe the way a title is: one line,
+// no control or bidi characters (E20 review — a theme, a reason, an approver name or a step id reaches
+// other people's screens as much as a title does). Only strings are cleaned; `--json` output is data and
+// is never passed through this.
+export const shown = (v) => (typeof v === 'string' ? v.replace(CONTROLS, '').replace(/[\s\u0085]+/gu, ' ').trim() : v);
+
 // One quoted string, unquoted — or the value unchanged when it is not exactly one. It is given a value
 // `oneLine` has already cleaned, so no raw control character (which JSON refuses) is left to stop it.
 function unquoteYaml(t) {
