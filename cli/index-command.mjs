@@ -17,7 +17,7 @@ import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.
 import { loadProduct } from './gate.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 import { buildIndex, writeIndex, indexFreshness, INDEX_FILE } from './product-index.mjs';
-import { shown } from './epic-state.mjs';
+import { printable } from './epic-state.mjs';
 
 export async function runIndex(root, { json = false } = {}) {
   if (!exists(productConfigPath(root))) {
@@ -83,7 +83,7 @@ export async function runIndex(root, { json = false } = {}) {
 
 // Every item the index could not read is said, with the reason: it is in the file, and it is on screen.
 function reportUnreadable(index) {
-  for (const i of index.items.filter((x) => x.unreadable)) warn(`${i.dir}: listed as unreadable — ${i.why}`);
-  for (const d of index.unlisted || []) warn(`${shown(d)} holds a ledger that is not read as a work item — listed as unlisted`);
+  for (const i of index.items.filter((x) => x.unreadable)) warn(`${printable(i.dir)}: listed as unreadable — ${printable(i.why)}`);
+  for (const d of index.unlisted || []) warn(`${printable(d)} holds a ledger that is not read as a work item — listed as unlisted`);
   if (index.items.some((x) => x.unreadable) || index.unlisted) hand('fix or restore the files named above, then run `yad index` again');
 }

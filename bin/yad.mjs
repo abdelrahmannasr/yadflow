@@ -187,8 +187,8 @@ ${c.bold('Build helpers')}
                                        override; on a verified Product CI writes it.
                                        --json prints it, built live, and writes nothing
   yad history [list] [--type t] [--theme x] [--thread EP-…] [--open|--done] [--json]
-                                       Every work item, open and finished, newest first — built live
-                                       from their own files, on any branch; writes nothing
+                                       Every work item, open and shape-done (Build is not counted),
+                                       newest first — built live from their own files; writes nothing
   yad history show <id> [--json]       One work item: every step with its state and closing record,
                                        and the approvals recorded for each review step
   yad history search <text> [filters] [--json]
@@ -573,8 +573,15 @@ async function main() {
       break;
     case 'history': {
       const [, action, ...args] = o._;
+      // Every flag `parseArgs` recognised that is not history's own is refused, not ignored: an ignored
+      // `--since` would read as a filter that was applied. `dir` and the parser's defaults are not flags
+      // anyone passed unless they differ from the default.
+      const own = new Set(['_', 'dir', 'json', 'type', 'theme', 'thread', 'open', 'done', 'fix', 'force', 'scope']);
+      const unknownFlags = Object.keys(o).filter((k) => !own.has(k))
+        .concat(o.fix ? ['fix'] : [], o.force ? ['force'] : [], o.scope !== 'all' ? ['scope'] : [])
+        .map((k) => `--${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`);
       await commands.runHistory(o.dir, {
-        action: action || 'list', args, json: o.json,
+        action: action || 'list', args, json: !!o.json, unknownFlags,
         type: o.type ?? null, theme: o.theme ?? null, thread: o.thread ?? null, open: !!o.open, done: !!o.done,
       });
       break;

@@ -21518,13 +21518,9 @@ test('E19 yad index: on a verified Product it writes nothing and says CI rebuild
 
 test('E19 yad index --json: a read on any branch, the file\'s shape, nothing written', async () => {
   const T = indexProduct({ ledger: 'verified' });
-  const orig = process.stdout.write.bind(process.stdout);
-  let printed = '';
   try {
     git(T, 'checkout', '-q', '-b', 'feat/y');
-    process.stdout.write = (s) => { printed += s; return true; };
-    try { await runIndex(T, { json: true }); } finally { process.stdout.write = orig; }
-    const j = JSON.parse(printed);
+    const j = JSON.parse(await grabStdout(() => runIndex(T, { json: true })));
     assert.deepEqual(Object.keys(j), ['schemaVersion', 'inputs', 'items']);
     assert.deepEqual(j.items.map((i) => [i.id, !!i.unreadable]), [['EP-a', false], ['EP-bad', true]]);
     assert.equal(j.inputs, buildIndex(T).inputs);
@@ -22096,7 +22092,7 @@ test('E111 review: an index built by the E19 format reads behind over unchanged 
 // ---- E20: `yad history` — list, show, search ---------------------------------------------------------
 // Built live by the index's own builder; every item, newest first; show = steps + closing records +
 // approvals; search = the summary and the closing records. The user's decisions (2026-09-24).
-const { runHistory, createdKey, newestFirst, isFinished, historyFilter, searchMatches } = await import('./history.mjs');
+const { runHistory, createdKey, newestFirst, isShapeDone, historyFilter, searchMatches } = await import('./history.mjs');
 const { artifactHash: _e20Hash } = await import('./epic-state.mjs');
 
 // eslint-disable-next-line no-control-regex -- a control or bidi character on the screen
@@ -22149,17 +22145,18 @@ test('E20 createdKey / newestFirst: calendar dates only, never guessed; no date 
   assert.deepEqual(order, ['EP-c', 'EP-a', 'EP-b', 'EP-w', 'EP-x']);
 });
 
-test('E20 isFinished: every step done, skipped or satisfied — a deferred step is still owed', () => {
+test('E20 isShapeDone: every Shape step done, skipped or satisfied — a deferred step is still owed', () => {
   const s = (o) => ({ steps: { todo: 0, in_progress: 0, in_review: 0, done: 0, skipped: 0, deferred: 0, satisfied: 0, blocked: 0, ...o } });
-  assert.equal(isFinished(s({ done: 3, skipped: 1, satisfied: 2 })), true);
+  assert.equal(isShapeDone(s({ done: 3, skipped: 1, satisfied: 2 })), true);
   for (const open of [{ done: 2, deferred: 1 }, { done: 2, todo: 1 }, { done: 2, blocked: 1 }, { done: 2, in_review: 1 }, { done: 2, unknown: 1 }, {}]) {
-    assert.equal(isFinished(s(open)), false, JSON.stringify(open));
+    assert.equal(isShapeDone(s(open)), false, JSON.stringify(open));
   }
 });
 
 test('E20 historyFilter: bad values are refused before anything is read; the theme folds like doctor\'s', () => {
   assert.match(historyFilter({ open: true, done: true }).error, /cannot be used together/);
-  assert.match(historyFilter({ type: 'epic' }).error, /unknown work-item type: epic — one of feature · change · defect · hotfix · chore/);
+  assert.deepEqual(historyFilter({ type: 'epic' }), { error: 'unknown work-item type: epic', hint: 'a work-item type is one of feature · change · defect · hotfix · chore' });
+  assert.equal(historyFilter({ type: 'Chore' }).keep({ type: 'chore', steps: {} }), true, 'a type is compared without case');
   assert.match(historyFilter({ thread: 'nope' }).error, /invalid thread id/);
   assert.match(historyFilter({ theme: '##' }).error, /no letters or digits/);
   const item = { type: 'change', theme: 'Checkout Revamp', thread: 'EP-old', steps: { done: 1 } };
@@ -22202,7 +22199,7 @@ test('E20 yad history list: every item newest first, titles or ids, unreadable i
   const exit = process.exitCode;
   try {
     let out = await grab(() => runHistory(T, {}));
-    assert.match(out, /yad history — 3 work items, newest first/);
+    assert.match(out, /yad history — 3 work items \(1 more could not be read\), newest first/, 'the header counts the unreadable item too');
     const rows = out.split('\n').filter((l) => /^ {2}[✓•] /.test(l));
     assert.deepEqual(rows.map((l) => l.split('  ')[1].slice(2)), ['Fix the queue', 'Old checkout', 'EP-nodate'], 'newest first, a bad date last, the id where there is no title');
     assert.match(out, /EP-bad could not be read — \.sdlc\/state\.json does not parse/);
@@ -22214,7 +22211,7 @@ test('E20 yad history list: every item newest first, titles or ids, unreadable i
     assert.deepEqual(json.items.map((i) => [i.id, i.title]), [['EP-new', 'Fix the queue'], ['EP-old', 'Old checkout']]);
     assert.deepEqual(json.unreadable, [{ id: 'EP-bad', dir: 'epics/EP-bad', why: '.sdlc/state.json does not parse' }]);
     assert.deepEqual(json.unlisted, ['epics/Bad_Name']);
-    assert.equal(json.schemaVersion, 10);
+    assert.deepEqual([json.schemaVersion, json.ok, json.threadBroken], [ENGINE_SHAPE, true, null]);
     assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, done: true }))).items.map((i) => i.id), ['EP-old']);
     assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, open: true }))).items.map((i) => i.id), ['EP-new', 'EP-nodate']);
     assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-old' }))).items.map((i) => i.id), ['EP-new', 'EP-old']);
@@ -22281,30 +22278,30 @@ test('E20 yad history show: every step with its record, approvals marked stale b
       'not an approval', null,
     ]));
     const out = await grab(() => runHistory(T, { action: 'show', args: ['EP-old'] }));
-    const plain = out;
-    assert.match(plain, /Old checkout {2}EP-old/);
-    assert.match(plain, /theme: Checkout Revamp/);
-    assert.match(plain, /✓ epic — done\n {6}closed on 2026-01-06 — via review-opened \(PR #7\); recorded by ada/, 'an author step\'s record, which nothing printed before');
-    assert.match(plain, /✓ epic-review — done, review\n {6}closed on 2026-01-07 — merged by bo-gh \(PR #8\) at abc1234/);
-    assert.match(plain, /approved by alice on 2026-01-07 \(PR #8\)\n/);
-    assert.match(plain, /approved by bob on 2026-01-02 — stale \(revoked\)/, 'gate status\'s words, and no guessed cause');
-    assert.match(plain, /approved by carol on 2026-01-03\n/, 'no fingerprint recorded: no claim, never stale');
-    assert.match(plain, /inherited from EP-root on 2026-01-01/);
-    assert.ok(!plain.includes('dan'), 'only this step\'s approvals');
-    assert.match(plain, /2 steps of 2 have a closing record/);
+    assert.match(out, /Old checkout {2}EP-old/);
+    assert.match(out, /theme: Checkout Revamp/);
+    assert.match(out, /✓ epic — done\n {6}closed on 2026-01-06 — via review-opened \(PR #7\); recorded by ada/, 'an author step\'s record, which nothing printed before');
+    assert.match(out, /✓ epic-review — done, review\n {6}closed on 2026-01-07 — merged by bo-gh \(PR #8\) at abc1234/);
+    assert.match(out, /approved by alice on 2026-01-07 \(PR #8\)\n/);
+    assert.match(out, /approved by bob on 2026-01-02 — stale \(revoked\)/, 'gate status\'s words, and no guessed cause');
+    assert.match(out, /approved by carol on 2026-01-03\n/, 'no fingerprint recorded: no claim, never stale');
+    assert.match(out, /inherited from EP-root on 2026-01-01/);
+    assert.ok(!out.includes('dan'), 'only this step\'s approvals');
+    assert.match(out, /2 steps of 2 have a closing record/);
     const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
     assert.equal(json.item.title, 'Old checkout');
     assert.deepEqual(json.steps.map((s) => [s.id, s.state, !!s.closed]), [['epic', 'done', true], ['epic-review', 'done', true]]);
     assert.deepEqual(json.steps[1].approvals.map((a) => [a.approver, a.stale, a.counted]), [['alice', false, true], ['bob', true, false], ['carol', false, true], [null, null, false]], 'an inherited record is not an approval: neither rule applies');
-    assert.deepEqual(json.steps[1].approvals[0], { approver: 'alice', status: 'approved', date: '2026-01-07', source: 'bridge', pr: 8, stale: false, counted: true });
+    assert.deepEqual(json.steps[1].approvals[0], { approver: 'alice', status: 'approved', date: '2026-01-07', from: null, source: 'bridge', pr: 8, engagement: null, stale: false, counted: true, notCounted: null });
+    assert.deepEqual(json.steps[1].approvals.map((a) => a.notCounted), [null, 'stale', null, 'not-an-approval'], 'the reason is carried, so text and count cannot disagree');
     assert.equal(json.steps[1].approvals[3].from, 'EP-root');
-    assert.ok(!('approvals' in json.steps[0]), 'an author step has no approvals');
+    assert.equal(json.steps[0].approvals, null, 'an author step has no approvals list');
     // A deferred step: its record, and the open mark (still owed).
     const nw = (await grab(() => runHistory(T, { action: 'show', args: ['EP-new'] })));
     assert.match(nw, /• architecture — deferred\n {6}deferred by ada on 2026-09-21 — later/);
     assert.match(nw, /Fix the queue {2}EP-new/, 'the change.json title (E111)');
     assert.ok(!nw.includes('approvals.json'), 'a missing approvals.json is no approvals, not a file that could not be read');
-    assert.ok(!('approvalsWhy' in JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-new'], json: true })))));
+    assert.equal(JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-new'], json: true }))).approvalsWhy, null);
   } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -22316,7 +22313,7 @@ test('E20 yad history show: an approvals file that cannot be read is said, never
     assert.match(out, /closed on 2026-01-07/, 'the steps are still shown');
     const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
     assert.equal(json.approvalsWhy, 'it does not parse');
-    assert.ok(!('approvals' in json.steps[1]), 'no empty list standing in for an unread file');
+    assert.equal(json.steps[1].approvals, null, 'no empty list standing in for an unread file');
     fs.writeFileSync(path.join(T, 'epics/EP-old/.sdlc/approvals.json'), '{"not":"a list"}');
     assert.equal(JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true }))).approvalsWhy, 'it is not a list');
     fs.rmSync(path.join(T, 'epics/EP-old/.sdlc/approvals.json'));
@@ -22362,7 +22359,7 @@ test('E20 twin: `yad reconcile check --thread` is honoured now that --thread tak
 });
 
 // ---- E20 review: the findings of the first round, each pinned ------------------------------------------
-const { itemHistory, readSteps } = await import('./history.mjs');
+const { itemHistory, readState } = await import('./history.mjs');
 const { closedLine: _e20ClosedLine } = await import('./gate.mjs');
 const { acceptedHashes: _e20Accepted } = await import('./epic-state.mjs');
 
@@ -22373,12 +22370,14 @@ test('E20 review: --thread follows parent: links like `yad thread`, not the thre
     'epics/EP-c/.sdlc/state.json': { createdAt: '2026-02-02', steps: [{ id: 'epic', status: 'todo' }] },
     'epics/EP-c/epic.md': '---\nkind: change\nparent: EP-g\n---\n', // no cache either
   });
+  const exit = process.exitCode;
   try {
     const ids = async (thread) => JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread }))).items.map((i) => i.id);
     assert.deepEqual(await ids('EP-g'), ['EP-c', 'EP-g'], 'the genesis and its child');
     assert.deepEqual(await ids('EP-c'), ['EP-c', 'EP-g'], 'a child id names its whole thread');
-    assert.deepEqual(await ids('EP-nothing'), [], 'a thread that does not exist has no members');
-  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+    const refused = JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-nothing' })));
+    assert.deepEqual([refused.ok, refused.error, process.exitCode], [false, 'no work item EP-nothing to start a thread from', 1], 'a thread whose named epic has no folder is refused, never read as empty');
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('E20 review: nothing printed carries a control or bidi character — list, show, search, closedLine', async () => {
@@ -22428,8 +22427,8 @@ test('E20 review: a record field that is not text never prints or matches — cl
   assert.deepEqual(searchMatches(item, steps, ','), []);
   assert.deepEqual(searchMatches(item, steps, 'object'), []);
   assert.deepEqual(searchMatches(item, [{ id: 'a', closed: { pr: '12' } }], '12'), [{ field: 'closed.pr', value: '12', step: 'a' }]);
-  assert.deepEqual(searchMatches(item, null, 'feature'), [{ field: 'type', value: 'feature' }]);
-  assert.deepEqual(searchMatches({ ...item, title: 'Café menu' }, null, 'café'), [{ field: 'title', value: 'Café menu' }], 'an accent typed two ways');
+  assert.deepEqual(searchMatches(item, null, 'feature'), [{ field: 'type', value: 'feature', step: null }]);
+  assert.deepEqual(searchMatches({ ...item, title: 'Café menu' }, null, 'café'), [{ field: 'title', value: 'Café menu', step: null }], 'an accent typed two ways');
 });
 
 test('E20 review: createdKey accepts only real calendar dates', () => {
@@ -22464,10 +22463,10 @@ test('E20 review: show — steps that are not objects, unknown states, records, 
     assert.match(out, /1 step of 8 has a closing record/);
     const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-odd'], json: true })));
     assert.equal(json.steps.length, 8);
-    assert.deepEqual(json.steps[0], { id: null, type: null, state: null, known: false, notAStep: true });
+    assert.deepEqual(json.steps[0], { id: null, type: null, state: null, known: false, notAStep: true, closed: null, record: null, inheritedFrom: null, debt: false, approvals: null, staleUnknown: null });
     assert.deepEqual([json.steps[3].closed, json.steps[3].record], [null, null]);
     assert.deepEqual([json.steps[6].debt, json.steps[5].inheritedFrom], [true, 'EP-root']);
-    assert.equal(json.item.finished, false);
+    assert.equal(json.item.shapeDone, false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -22497,9 +22496,9 @@ test('E20 review: show — approvals: odd fields, an untakeable fingerprint, a l
     let json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-odd'], json: true })));
     assert.equal(json.steps[0].staleUnknown, 'EISDIR');
     assert.deepEqual([json.steps[0].approvals[0].stale, json.steps[0].approvals[0].counted], [null, null], 'cannot be told, so not guessed');
-    assert.deepEqual([json.steps[1].approvals[0].stale, 'staleUnknown' in json.steps[1]], [false, false], 'nothing to fingerprint: no claim');
+    assert.deepEqual([json.steps[1].approvals[0].stale, json.steps[1].staleUnknown], [false, null], 'nothing to fingerprint: no claim');
     const [odd, leg, plain, nope] = json.steps[2].approvals;
-    assert.deepEqual(odd, { approver: null, status: null, date: null, engagement: 'verified', stale: null, counted: false });
+    assert.deepEqual(odd, { approver: null, status: null, date: null, from: null, source: null, pr: null, engagement: 'verified', stale: null, counted: false, notCounted: 'not-an-approval' });
     assert.deepEqual([leg.stale, leg.counted], [false, true], 'a legacy fingerprint still counts, as in gate status');
     assert.deepEqual([plain.stale, plain.counted], [false, true]);
     assert.deepEqual([nope.stale, nope.counted], [null, false], 'the stale rule is for approvals only');
@@ -22524,12 +22523,12 @@ test('E20 review: readSteps and itemHistory say why the steps cannot be read', (
   try {
     for (const [body, why] of [['{ broken', 'it does not parse'], ['{"steps":{}}', 'it has no list of steps'], [null, 'it is missing now']]) {
       if (body === null) fs.rmSync(file); else fs.writeFileSync(file, body);
-      assert.deepEqual(readSteps(T, 'EP-old'), { why });
+      assert.deepEqual(readState(T, 'EP-old'), { why });
       const h = itemHistory(T, item);
       assert.deepEqual([h.steps, h.stepsWhy], [null, why]);
     }
     fs.mkdirSync(file);
-    assert.deepEqual(readSteps(T, 'EP-old'), { why: 'it is a folder' });
+    assert.deepEqual(readState(T, 'EP-old'), { why: 'it is a folder' });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -22544,10 +22543,10 @@ test('E20 review: the Foundation, a clean Product, and an epics folder that cann
   try {
     const list = JSON.parse(await grabStdout(() => runHistory(C, { json: true })));
     assert.deepEqual(list.unreadable, []);
-    assert.ok(!('unlisted' in list), 'no unlisted key when there is none');
-    assert.deepEqual(list.items.map((i) => [i.id, i.title, i.finished]), [['EP-foundation', 'Foundation', true]]);
+    assert.deepEqual(list.unlisted, [], 'an empty list, never a missing key');
+    assert.deepEqual(list.items.map((i) => [i.id, i.title, i.shapeDone]), [['EP-foundation', 'Foundation', true]]);
     const text = await grab(() => runHistory(C, {}));
-    assert.ok(!text.includes('!'), 'nothing to warn about');
+    assert.ok(!/^\s+! /m.test(text), 'nothing to warn about');
     const show = await grab(() => runHistory(C, { action: 'show', args: ['EP-foundation'] }));
     assert.match(show, /Foundation {2}EP-foundation\n {4}type: product level/);
     assert.match(show, /✓ purpose — done\n {6}closed — via repair; recorded by ann/);
@@ -22566,7 +22565,7 @@ test('E20 review: show refuses filters and extra words; list refuses words', asy
       [{ action: 'show', args: ['EP-old'], type: 'nope' }, /show prints one work item, so --type cannot apply/],
       [{ action: 'show', args: ['EP-old'], thread: 'EP-old', done: true }, /so --thread and --done cannot apply/],
       [{ action: 'show', args: ['EP-old', 'EP-new'] }, /show takes one work-item id/],
-      [{ action: 'list', args: ['foo'] }, /list takes no words \("foo"\) — to find text, use `yad history search <text>`/],
+      [{ action: 'list', args: ['foo'] }, /list takes no words \("foo"\)\n.*to find text, use `yad history search <text>`/],
     ]) {
       process.exitCode = 0;
       assert.match(await grab(() => runHistory(T, opts)), re);
@@ -22576,7 +22575,6 @@ test('E20 review: show refuses filters and extra words; list refuses words', asy
 });
 
 // ---- E20 review, round 2 --------------------------------------------------------------------------------
-const E20_UNSAFE = E20_UNSAFE_EARLY;
 
 test('E20 review 2: every field printed by list, search and show is made safe — type, dates, from, status', async () => {
   const E = '\x1b[31m';
@@ -22602,7 +22600,7 @@ test('E20 review 2: every field printed by list, search and show is made safe �
       await grab(() => runHistory(T, { action: 'search', args: ['odd'] })),
       await grab(() => runHistory(T, { action: 'show', args: ['EP-odd'] })),
     ];
-    for (const out of outs) assert.ok(!E20_UNSAFE.test(out), JSON.stringify(out));
+    for (const out of outs) assert.ok(!E20_UNSAFE_EARLY.test(out), JSON.stringify(out));
     assert.ok(outs[0].includes('fea[31mture'), 'the type, made safe, in a list row');
     const show = outs[2];
     assert.ok(show.includes('closed on 2026-03-02[31m — via repair'), 'lastClosed-style dates too');
@@ -22628,16 +22626,16 @@ test('E20 review 2: gate status prints its header and step lines safely too — 
   });
   try {
     const out = await grab(() => gateStatus(T, { epic: 'EP-g', headCount: e72Count(2) }));
-    assert.ok(!E20_UNSAFE.test(out), JSON.stringify(out));
+    assert.ok(!E20_UNSAFE_EARLY.test(out), JSON.stringify(out));
     assert.ok(!/\n {4}✓ security-review/.test(out), 'a newline in a step id cannot start a line of its own');
     assert.match(out, /currentStep: x\[2Jy/);
     assert.match(out, /inherited from EP-p\]8;;http:\/\/evil/);
-    assert.match(out, /wob\[?bly \(unknown\)/);
+    assert.match(out, /wobbly \(unknown\)/, 'the lone ESC is gone');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('E20 review 2: closedLine — one line, a whole-number PR, via compared after it is cleaned', () => {
-  assert.equal(_e20ClosedLine({ via: 'repair', by: ' ann\n    ✓ fake — done ' }), 'closed — via repair; recorded by ann ✓ fake — done');
+  assert.equal(_e20ClosedLine({ via: 'repair', by: ' ann\n    ✓ fake — done ' }), 'closed — via repair; recorded by ann     ✓ fake — done', 'the line break is a space: no line of its own');
   assert.equal(_e20ClosedLine({ via: 'repair', pr: 1.5 }), 'closed — via repair');
   assert.equal(_e20ClosedLine({ via: 'merge‎', pr: 3 }), 'closed — merged (PR #3)');
 });
@@ -22648,16 +22646,23 @@ test('E20 review 2: --thread keeps a genesis with no epic.md yet; says when the 
     'epics/EP-g/analysis.md': '---\nid: EP-g\n---\n', // seeded by yad-analysis; no epic.md yet
     'epics/EP-c/.sdlc/state.json': { createdAt: '2026-02-02', steps: [] },
     'epics/EP-c/epic.md': '---\nkind: change\nparent: EP-g\nthread: EP-g\n---\n',
+    'epics/EP-orph/.sdlc/state.json': { createdAt: '2026-02-03', steps: [] },
+    'epics/EP-orph/epic.md': '---\nkind: change\nparent: EP-lost\nthread: EP-lost\n---\n',
   });
   const exit = process.exitCode;
   try {
     let json = JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-g' })));
     assert.deepEqual(json.items.map((i) => i.id), ['EP-c', 'EP-g']);
-    assert.ok(!('threadBroken' in json));
+    assert.equal(json.threadBroken, null);
+    // A named epic with no folder is refused; a break further up is reported with what could be found.
+    process.exitCode = 0;
     json = JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-gone' })));
-    assert.deepEqual([json.items, json.threadBroken], [[], 'missing epic EP-gone']);
-    const out = await grab(() => runHistory(T, { thread: 'EP-gone' }));
-    assert.match(out, /thread EP-gone: missing epic EP-gone/, 'never left to read as an empty thread');
+    assert.deepEqual([json.ok, json.error, process.exitCode], [false, 'no work item EP-gone to start a thread from', 1]);
+    process.exitCode = 0;
+    json = JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-orph' })));
+    assert.deepEqual([json.items.map((i) => i.id), json.threadBroken, process.exitCode], [['EP-orph'], 'missing parent epic EP-lost', 0]);
+    const out = await grab(() => runHistory(T, { thread: 'EP-orph' }));
+    assert.match(out, /thread EP-orph: missing parent epic EP-lost/, 'never left to read as a whole thread');
     process.exitCode = 0;
     assert.match(await grab(() => runHistory(T, { thread: 'EP-foundation' })), /EP-foundation is the product level and is in no feature thread/);
     assert.equal(process.exitCode, 1);
@@ -22724,7 +22729,7 @@ test('E20 review 2: a refused filter reads nothing — even when the epics folde
     assert.match(await grab(() => runHistory(E, { type: 'nope' })), /unknown work-item type: nope/);
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
-    assert.match(await grab(() => runHistory(E, { thread: 'EP-x' })), /the thread EP-x could not be walked \(ENOTDIR\)/, 'no stack trace');
+    assert.match(await grab(() => runHistory(E, { thread: 'EP-x' })), /no work item EP-x to start a thread from/, 'no stack trace');
     assert.equal(process.exitCode, 1);
   } finally { process.exitCode = exit; fs.rmSync(E, { recursive: true, force: true }); }
 });
@@ -22758,5 +22763,156 @@ test('E20 review 3: the route that allows a skip is read as the gate reads it �
     assert.deepEqual(await verdict('EP-inf', 'ui-design-review'), [[null, null]], 'an inferred route allows the skip');
     assert.deepEqual(await verdict('EP-off', 'ui-design-review'), [[true, false]], 'no route: nothing is optional, the approvals are judged');
     assert.deepEqual(await verdict('EP-leg', 'stories-review'), [[true, false]], 'a legacy skip flag on a required step is not honoured');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- PR #270 review: the whole-PR findings ----------------------------------------------------------------
+const { printable: _e20Printable } = await import('./epic-state.mjs');
+
+test('PR270 printable: text only, one line, control characters gone, ordinary spaces kept', () => {
+  assert.equal(_e20Printable('Checkout  Revamp'), 'Checkout  Revamp', 'two spellings doctor tells apart stay apart');
+  assert.equal(_e20Printable(' a\n\tb \u2028c '), 'a b  c', 'a line break or tab run is one space; the space beside it is kept');
+  assert.equal(_e20Printable('x\x1b[2Jy'), 'x[2Jy');
+  for (const none of [null, undefined, 7, {}, ['a'], '', '   ', '\x1b\x07']) assert.equal(_e20Printable(none), null, JSON.stringify(none));
+});
+
+test('PR270: a Product settings file that does not parse is said, and no approval is counted from a guess', async () => {
+  const T = historyProduct();
+  const exit = process.exitCode;
+  try {
+    const current = _e20Hash(path.join(T, 'epics/EP-old'), 'epic.md');
+    fs.writeFileSync(path.join(T, 'epics/EP-old/.sdlc/approvals.json'), JSON.stringify([
+      { step: 'epic-review', approver: 'alice', status: 'approved', artifactHash: current },
+      { step: 'epic-review', approver: 'bob', status: 'approved', artifactHash: 'sha256:old' },
+    ]));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","solo":true,}');
+    const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-old'], json: true })));
+    assert.equal(json.hubWhy, 'it does not parse');
+    assert.deepEqual(json.steps[1].approvals.map((a) => [a.stale, a.counted]), [[false, null], [true, null]], 'stale is still told; whether it counts is not');
+    const out = await grab(() => runHistory(T, { action: 'show', args: ['EP-old'] }));
+    assert.match(out, /the Product's settings could not be read — it does not parse; whether an approval counts is not told/);
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270: show prints the thread yad thread walks, not the thread: cache', async () => {
+  const T = historyProduct({ 'epics/EP-new/epic.md': '---\nkind: change\nparent: EP-old\nthread: EP-zzz\n---\n' });
+  try {
+    const out = await grab(() => runHistory(T, { action: 'show', args: ['EP-new'] }));
+    assert.match(out, /thread: EP-old \(thread cache 'EP-zzz' != computed root 'EP-old'\)/);
+    const json = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-new'], json: true })));
+    assert.deepEqual(json.thread, { root: 'EP-old', broken: "thread cache 'EP-zzz' != computed root 'EP-old'" });
+    assert.equal(json.item.thread, 'EP-zzz', 'the summary keeps what the file says, as the index does');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270: under --json every refusal is JSON — { ok: false, error, hint } — and exits 1', async () => {
+  const T = historyProduct();
+  const N = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e20-none-'));
+  const exit = process.exitCode;
+  try {
+    for (const [root, opts, error] of [
+      [N, {}, 'no Product here (.sdlc/product.json)'],
+      [T, { action: 'blame' }, 'unknown history command: blame'],
+      [T, { unknownFlags: ['--since'] }, 'yad history does not take --since'],
+      [T, { type: 'bogus' }, 'unknown work-item type: bogus'],
+      [T, { action: 'search', args: [] }, 'search needs some text'],
+      [T, { action: 'list', args: ['extra'] }, 'list takes no words ("extra")'],
+      [T, { action: 'show', args: ['EP-nope'] }, 'no work item EP-nope in this Product'],
+      [T, { action: 'show', args: ['EP-bad'] }, 'EP-bad could not be read — .sdlc/state.json does not parse'],
+      [T, { action: 'show', args: [] }, 'show needs a work-item id'],
+    ]) {
+      process.exitCode = 0;
+      const printed = await grabStdout(() => runHistory(root, { ...opts, json: true }));
+      const got = JSON.parse(printed);
+      assert.deepEqual([got.ok, got.error, typeof got.hint, process.exitCode], [false, error, 'string', 1], JSON.stringify(opts));
+    }
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(N, { recursive: true, force: true }); }
+});
+
+test('PR270: every key of an answer is always present', async () => {
+  const T = historyProduct();
+  try {
+    const keys = (o) => Object.keys(o).sort();
+    const list = JSON.parse(await grabStdout(() => runHistory(T, { json: true })));
+    assert.deepEqual(keys(list), ['items', 'ok', 'schemaVersion', 'threadBroken', 'unlisted', 'unreadable']);
+    const search = JSON.parse(await grabStdout(() => runHistory(T, { action: 'search', args: ['ep'], json: true })));
+    assert.deepEqual(keys(search), ['items', 'ok', 'query', 'schemaVersion', 'summaryOnly', 'threadBroken', 'unlisted', 'unreadable']);
+    assert.deepEqual(keys(search.items[0].matches[0]), ['field', 'step', 'value']);
+    const show = JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-new'], json: true })));
+    assert.deepEqual(keys(show), ['approvalsWhy', 'hubWhy', 'item', 'ok', 'schemaVersion', 'steps', 'stepsWhy', 'thread']);
+    assert.deepEqual(keys(show.steps[0]), ['approvals', 'closed', 'debt', 'id', 'inheritedFrom', 'known', 'notAStep', 'record', 'staleUnknown', 'state', 'type']);
+    assert.equal(show.item.shapeDone, false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270: "shape done", never "finished" — an item ready for Build is not shown as shipped', async () => {
+  const T = historyProduct({ 'epics/EP-old/.sdlc/state.json': { createdAt: '2026-1-5', currentStep: 'ready-for-build', steps: [{ id: 'epic', status: 'done' }] } });
+  try {
+    const list = await grab(() => runHistory(T, {}));
+    assert.match(list, /✓ Old checkout {2}EP-old · feature · #Checkout Revamp · at ready-for-build · shape done/);
+    assert.ok(!/finished/.test(list));
+    assert.match(await grab(() => runHistory(T, { action: 'show', args: ['EP-old'] })), /shape: done \(Build is not shown here\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270: search finds a PR as a whole number, with or without #, and a commit from its start', async () => {
+  const item = { id: 'EP-a', title: 'Issue 12 cleanup', theme: null, type: 'feature', repos: [] };
+  const steps = [
+    { id: 'a', closed: { pr: 12, commit: 'abc12345def' } },
+    { id: 'b', closed: { pr: 112, commit: '9912abcd' } },
+  ];
+  const f = (t) => searchMatches(item, steps, t).map((m) => `${m.step || ''}:${m.field}=${m.value}`);
+  assert.deepEqual(f('12'), [':title=Issue 12 cleanup', 'a:closed.pr=12'], 'never PR 112, and a commit only from its start');
+  assert.deepEqual(f('#12'), ['a:closed.pr=12']);
+  assert.deepEqual(f('PR #112'), ['b:closed.pr=112']);
+  assert.deepEqual(f('pr#12'), ['a:closed.pr=12']);
+  assert.deepEqual(f('abc1'), ['a:closed.commit=abc12345def']);
+  assert.deepEqual(f('abc'), [], 'fewer than 4 characters never match a commit');
+  assert.deepEqual(f('12ab'), [], 'the middle of a commit is not its start');
+});
+
+test('PR270: every dead end names a next step', async () => {
+  const T = historyProduct({ 'epics/EP-old/.sdlc/approvals.json': '{ broken' });
+  const exit = process.exitCode;
+  try {
+    const nothing = await grab(() => runHistory(T, { action: 'search', args: ['zzzz'] }));
+    assert.match(nothing, /nothing matches\n {2}→ search covers .*not approvals; `yad history show <id>` lists an item's approvals/, 'a next step, marked as one');
+    assert.match(await grab(() => runHistory(T, {})), /fix or restore the files named above — `yad doctor` checks them/);
+    assert.match(await grab(() => runHistory(T, { action: 'show', args: ['EP-old'] })), /no approvals are shown\n.*restore it from git — `yad doctor` checks it/);
+    assert.match(await grab(() => runHistory(T, { thread: 'EP-foundation' })), /`yad history show EP-foundation` shows it/);
+    assert.match(await grab(() => runHistory(T, { action: 'show', args: ['EP-bad'] })), /fix or restore its files — `yad doctor` checks them/);
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270: small output points — no steps, the Foundation named, a link not said twice, a theme spelled as written', async () => {
+  const T = historyProduct({
+    'foundation/.sdlc/state.json': { createdAt: '2026-01-01', steps: [] },
+    'epics/EP-sat/.sdlc/state.json': { createdAt: '2026-03-01', steps: [{ id: 'epic', status: 'satisfied', inheritedFrom: 'EP-p', record: { by: 'ann', reason: 'carried by reference from EP-p', link: 'EP-p' } }] },
+    'epics/EP-sat/epic.md': '---\nkind: change\ntheme: Checkout  Revamp\n---\n',
+  });
+  try {
+    const f = await grab(() => runHistory(T, { action: 'show', args: ['EP-foundation'] }));
+    assert.deepEqual(JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-foundation'], json: true }))).thread, { root: null, broken: null }, 'the Foundation is in no thread');
+    assert.match(f, /type: product level \(the Foundation\)/);
+    assert.match(f, /no steps yet/);
+    assert.ok(!/0 steps of 0/.test(f), 'one line for an item with no steps');
+    const sat = await grab(() => runHistory(T, { action: 'show', args: ['EP-sat'] }));
+    assert.match(sat, /satisfied by ann — carried by reference from EP-p\n/, 'the link the reason names is not repeated');
+    assert.match(await grab(() => runHistory(T, {})), /#Checkout {2}Revamp/, 'the two-space theme doctor warns about is visible');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('PR270 bin/yad.mjs: a flag history does not take is refused, never quietly ignored', () => {
+  const T = historyProduct();
+  const run = (...a) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'history', ...a, '--dir', T], { encoding: 'utf8' });
+  try {
+    for (const [args, flag] of [[['--since', '2026-09-25'], '--since'], [['--repo', 'web'], '--repo'], [['--all'], '--all'], [['show', 'EP-old', '--repo', 'api'], '--repo'], [['--no-push'], '--no-push'],
+      [['--fix'], '--fix'], [['--force'], '--force'], [['--scope=x'], '--scope']]) {
+      const r = run(...args);
+      assert.equal(r.status, 1, args.join(' '));
+      assert.match(r.stdout, new RegExp(`yad history does not take ${flag}`), args.join(' '));
+    }
+    assert.equal(JSON.parse(run('--type', 'Chore', '--json').stdout).items[0].id, 'EP-nodate', 'a type in another case');
+    assert.equal(JSON.parse(run('--since', 'x', '--json').stdout).ok, false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
