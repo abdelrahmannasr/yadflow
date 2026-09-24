@@ -23189,6 +23189,9 @@ test('E1 review: a refusal keeps what was done, every warning is collected, a pa
   try {
     // 1. `ship` whose push fails AFTER the commit landed: the refusal says so, it is not "nothing happened".
     git(R, 'init', '-q', '-b', 'main');
+    // The repo's own identity: `git()` strips the GIT_AUTHOR/COMMITTER variables, and CI's Linux runner
+    // cannot guess a name the way a Mac can.
+    git(R, 'config', 'user.email', 't@example.com'); git(R, 'config', 'user.name', 't');
     fs.writeFileSync(path.join(R, 'a'), 'a'); git(R, 'add', 'a'); git(R, 'commit', '-qm', 'init');
     git(R, 'remote', 'add', 'origin', path.join(R, 'no-such-remote.git'));
     git(R, 'switch', '-qc', 'feat/x');
