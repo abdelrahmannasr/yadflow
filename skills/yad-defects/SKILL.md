@@ -15,7 +15,7 @@ risk), not just the symptom. It is an **output enrichment**, exactly like `yad-d
 
 - `{project-root}` resolves from the Product.
 - Reuses the **`yad-docs` shell** verbatim (`../yad-docs/templates/app/`) — generated `src/data/*.ts`,
-  themed, deployed via `yad docs deploy`; build-only / markdown-only when no docs target.
+  themed; build-only / markdown-only (`yad docs deploy` does not build `defects-site/` yet).
 - Per **epic** (one epic's defects) and per **thread** (the whole feature; the thread report lives under
   the genesis epic, since `thread == genesis id`). The thread is derived from `parent:` frontmatter.
 - Deterministic generation, like `yad-docs` (stable sort, fixed key order, no timestamps in data).
@@ -66,8 +66,8 @@ Generate the site into `epics/<scope>/defects-site/` with sections:
 5. **Severity & age.**
 6. **Recommendations** — which originating stage to harden, derived from the top escape-stages.
 
-Also write a plain `epics/<scope>/DEFECTS.md` mirror. On `action: deploy`, `yad docs deploy` the site
-(build-only when no target); if it exits 1 the site did not build — report that, not a deploy.
+Also write a plain `epics/<scope>/DEFECTS.md` mirror. On `action: deploy`, note that
+`yad docs deploy` does not build this folder yet (it builds only the epic `docs-site/` and the overview) — build it with `npm install && npm run build` inside the folder, and report it as build-only; a failed npm build is reported as a failure, never as a deploy.
 
 ## Hard rules
 

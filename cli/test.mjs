@@ -11010,7 +11010,7 @@ test('runDocs: list/sync/wire orchestrate over generated sites and install the P
   const before = process.exitCode;
   const builtMissing = await runDocs(T, { action: 'build', epic: 'EP-nope' });
   assert.equal(builtMissing.built, 0, 'build of a non-generated site yields nothing, no throw');
-  assert.deepEqual(builtMissing.sites, [{ site: 'epic EP-nope', built: false, error: 'epic EP-nope: no generated site at ' + path.relative(process.cwd(), path.join(T, 'epics/EP-nope/docs-site')) }]);
+  assert.deepEqual(builtMissing.sites, [{ site: 'epic EP-nope', built: false, error: 'epic EP-nope: no generated site at epics/EP-nope/docs-site' }]);
   assert.equal(process.exitCode, 1, 'a named site that does not exist fails the build');
   process.exitCode = before;
 
@@ -11051,7 +11051,7 @@ function docsBuildFixture() {
   const yad = (args, env = {}) => {
     fs.rmSync(npmLog, { force: true });
     const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], {
-      cwd: T, encoding: 'utf8',
+      cwd: os.tmpdir(), encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, FAKE_NPM_LOG: npmLog, NO_COLOR: '1', YAD_NO_REPORT: '1', ...env },
     });
     const calls = fs.existsSync(npmLog) ? fs.readFileSync(npmLog, 'utf8').trim().split('\n') : [];
@@ -11099,6 +11099,18 @@ test('docs build/deploy: a failed npm build exits 1, the other sites are still b
     assert.ok(ia.warnings.includes('epic EP-b: npm install failed — fix the error npm printed above, then run the command again'), 'the second failure is in warnings, with its hint');
     assert.equal(ia.built, 0);
 
+    // The twin arm: a Pages platform whose CLI is on PATH. With every build failed it must not end on a
+    // green "deploy via" tick; with a build it does.
+    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'github-pages', scope: 'hub', basePath: '/', source: 'gh' }));
+    fs.writeFileSync(path.join(T, 'fakebin/gh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const none = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build' });
+    assert.equal(none.code, 1);
+    assert.match(none.stdout, /• nothing was built here; deploy via the github Pages workflow on push/);
+    assert.doesNotMatch(none.stdout, /✓ deploy via/);
+    const some = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build', FAKE_NPM_FAIL_IN: 'EP-a' });
+    assert.match(some.stdout, /✓ deploy via the github Pages workflow on push/);
+    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'hub', basePath: '/', source: 'unavailable' }));
+
     // Every build passing: exit 0, ok true, the same keys.
     const good = yad(['docs', 'build', '--json']);
     assert.equal(good.code, 0);
@@ -11116,7 +11128,7 @@ test('docs build/deploy: a missing site fails every action; npm missing fails bu
       const j = yad(['docs', action, '--epic', 'EP-nope', '--json']);
       assert.equal(j.code, 1, `docs ${action} of a site never generated exits 1`);
       const a = JSON.parse(j.stdout);
-      assert.match(a.error, /^epic EP-nope: no generated site at /);
+      assert.equal(a.error, 'epic EP-nope: no generated site at epics/EP-nope/docs-site', 'the path is the project\'s, wherever the command runs');
       assert.equal(a.hint, 'run the yad-docs skill first');
       assert.deepEqual(a.sites.map((s) => s.built), [false]);
     }
@@ -11135,7 +11147,8 @@ test('docs build/deploy: a missing site fails every action; npm missing fails bu
     assert.equal(d.ok, true);
     assert.deepEqual(d.sites, [{ site: 'epic EP-a', built: false, error: 'epic EP-a: npm not on PATH — cannot build' }]);
     assert.ok(d.warnings.some((w) => /npm not on PATH — cannot build; the CI workflow will build on push/.test(w)));
-    assert.ok(d.warnings.every((w) => !/built locally only/.test(w)), 'nothing was built, so deploy does not say it was');
+    assert.match(deploy.stderr, /no Pages platform\/CLI — nothing was built here;/, 'nothing was built, so deploy does not say it was');
+    assert.doesNotMatch(deploy.stderr, /built locally only/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

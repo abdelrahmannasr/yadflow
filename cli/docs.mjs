@@ -215,7 +215,7 @@ export function pagesWorkflowPath(platform) {
 // PATH for a deploy or a refresh, which the CI workflow builds on push (`npmOptional`).
 function buildSite(root, t, { npmOptional = false } = {}) {
   const dir = siteDir(root, t);
-  const rel = path.relative(process.cwd(), dir) || '.';
+  const rel = path.relative(root, dir) || '.';
   const site = label(t);
   const failed = (error, next) => {
     fail(error);
@@ -226,7 +226,7 @@ function buildSite(root, t, { npmOptional = false } = {}) {
   if (!exists(dir)) return failed(`${site}: no generated site at ${rel}`, `run the ${t.overview ? 'yad-docs-overview' : 'yad-docs'} skill first`);
   if (!has('npm')) {
     const error = `${site}: npm not on PATH — cannot build`;
-    if (!npmOptional) return failed(error, 'install Node.js (it brings npm), then run the command again');
+    if (!npmOptional) return failed(error, 'install npm (or put it on PATH), then run the command again');
     warn(`${error}; the CI workflow will build on push`);
     return { site, built: false, error };
   }
@@ -265,7 +265,8 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
       if (!platform || !platformReady(platform)) {
         hand(`no Pages platform/CLI — ${built ? 'built locally only' : 'nothing was built here'}; commit + push so the CI workflow can publish (yad docs sync --wire)`);
       } else {
-        ok(`deploy via the ${platform} Pages workflow on push (yad docs sync --wire installs it)`);
+        const say = built ? ok : info;
+        say(`${built ? '' : 'nothing was built here; '}deploy via the ${platform} Pages workflow on push (yad docs sync --wire installs it)`);
         if (docs?.basePath) info(`will publish under ${docs.basePath}`);
       }
     }

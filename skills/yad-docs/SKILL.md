@@ -122,8 +122,8 @@ Optionally record a `docs:` line in a `DOCS.md` index under the epic.
 - `action: deploy` — drive **`yad docs deploy --epic <id>`**: it npm-builds the site (`npm ci && npm run
   build` as a subprocess, like `yad-spec` shelling `npx repomix`), ensures the Pages CI workflow is
   present, and reports the deploy URL (publish happens via CI). **Degrades** to the local `dist/` path
-  when no platform CLI / `target: "none"` (build-only). **A failed build exits 1**: if `npm ci` or
-  `npm run build` fails, or the site was never generated, the command names the site and exits 1 —
+  when no platform CLI / `target: "none"` (build-only). **A failed build exits 1**: if `npm ci` (or
+  `npm install`, when the site has no lockfile) or `npm run build` fails, or the site was never generated, the command names the site and exits 1 —
   report that failure and give no deploy URL. npm missing from PATH is only a warning here (CI builds on
   push). `--json` has `built` (a count) and `sites: [{ site, built, error }]`.
 
