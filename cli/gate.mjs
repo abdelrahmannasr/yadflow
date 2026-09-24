@@ -1275,7 +1275,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // `given` is a count the caller already read, as `gateSync` takes one — the CLI passes none; a test
   // passes one so the cap (E72) can be seen on a fixture that has no git history of its own.
   const headCount = given || activePeople(root, { aliases: legacyLogins(hub) });
-  log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
+  log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${shown(ledger.state.currentStep)}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   // Printed in solo mode too, exactly as the per-step count is: someone who later switches to team mode
   // can see the number their gates will be capped against (E72), before it holds anything for them.
   log(`  ${c.dim(activeSum(headCount))}`);
@@ -1318,7 +1318,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     // read-only views of one ledger, and a human checks this one first.
     const state = stepStatus(s);
     const waived = claimsInherited(s)
-      ? `; inherited from ${s.inheritedFrom || 'the parent epic'}`
+      ? `; inherited from ${shown(s.inheritedFrom) || 'the parent epic'}`
       : (claimsSkipped(s) && isSkippableStep(s.id, optional)) ? '; skipped (N/A)'
         : (state === 'deferred' && isSkippableStep(s.id, optional)) ? `; deferred (still owed${s.debt === true ? ', as debt' : ''})` : '';
     // The shortfall, the same number `gatePredicate` returns as `short`: against the capped count when
@@ -1339,7 +1339,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
     // A debt being paid back (E41) is no longer `deferred`, so the tag above does not show; say it here,
     // until the review passes and clears the flag.
     const paying = s.debt === true && state !== 'deferred' ? '; owed as debt — being paid back' : '';
-    log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
+    log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${shown(s.id)} ${c.dim(`— ${state || `${shown(s.status)} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
     if (s.closed && typeof s.closed === 'object' && !Array.isArray(s.closed)) log(`      ${c.dim(closedLine(s.closed))}`);
     // E73: why this gate may not pass — reported only, never enforced. Not in solo mode, not on a waived
     // (inherited, skipped, deferred) step, and not on one that passed. Every other review step counts,

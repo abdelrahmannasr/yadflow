@@ -22099,6 +22099,9 @@ test('E111 review: an index built by the E19 format reads behind over unchanged 
 const { runHistory, createdKey, newestFirst, isFinished, historyFilter, searchMatches } = await import('./history.mjs');
 const { artifactHash: _e20Hash } = await import('./epic-state.mjs');
 
+// eslint-disable-next-line no-control-regex -- a control or bidi character on the screen
+const E20_UNSAFE_EARLY = /[\x00-\x09\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+
 async function grabStdout(fn) {
   const orig = process.stdout.write;
   let printed = '';
@@ -22380,7 +22383,7 @@ test('E20 review: --thread follows parent: links like `yad thread`, not the thre
 
 test('E20 review: nothing printed carries a control or bidi character — list, show, search, closedLine', async () => {
   const ESC = '\x1b[2J';
-  const RLO = '‮';
+  const RLO = '\u202e';
   const T = historyProduct({
     'epics/EP-odd/.sdlc/state.json': {
       createdAt: `2026-03-01${ESC}`, currentStep: `x${RLO}y`, steps: [
@@ -22401,8 +22404,7 @@ test('E20 review: nothing printed carries a control or bidi character — list, 
       await grab(() => runHistory(T, { action: 'search', args: ['evil'] })),
     ];
     for (const out of outs) {
-      // eslint-disable-next-line no-control-regex -- the point of the test
-      assert.ok(!/[\x00-\x08\x0e-\x1f\x7f‮]/u.test(out), `a control character reached the screen:\n${JSON.stringify(out)}`);
+      assert.ok(!E20_UNSAFE_EARLY.test(out), `a control character reached the screen:\n${JSON.stringify(out)}`);
     }
     // The control character goes; the harmless text after it stays, so nothing is hidden.
     assert.ok(outs[1].includes('closed on 2026-03-02 — via re[2Jpair; recorded by mallory'));
@@ -22571,4 +22573,149 @@ test('E20 review: show refuses filters and extra words; list refuses words', asy
       assert.equal(process.exitCode, 1, JSON.stringify(opts));
     }
   } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E20 review, round 2 --------------------------------------------------------------------------------
+const E20_UNSAFE = E20_UNSAFE_EARLY;
+
+test('E20 review 2: every field printed by list, search and show is made safe — type, dates, from, status', async () => {
+  const E = '\x1b[31m';
+  const T = historyProduct({
+    'epics/EP-odd/.sdlc/state.json': {
+      createdAt: '2026-03-01', steps: [
+        { id: 'a', status: 'done', closed: { via: 'repair', date: `2026-03-02${E}` } },
+        { id: 'b', status: `wob${E}bly`, record: { by: { x: 1 }, reason: ['r'], date: 5 } },
+        { id: 'c' },
+        { id: 'd', status: 'done', inheritedFrom: {}, debt: 'yes' },
+        { id: 'r-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review' },
+      ],
+    },
+    'epics/EP-odd/epic.md': `---\nkind: fea${E}ture\nparent: [x, y]\n---\n`,
+    'epics/EP-odd/.sdlc/approvals.json': [
+      { step: 'r-review', status: `inher${E}ited`, from: `EP-p${E}`, date: `d${E}` },
+      { step: 'r-review', status: 'inherited', from: `EP-p\x1b]8;;http://evil\x07`, date: '2026-03-03' },
+    ],
+  });
+  try {
+    const outs = [
+      await grab(() => runHistory(T, {})),
+      await grab(() => runHistory(T, { action: 'search', args: ['odd'] })),
+      await grab(() => runHistory(T, { action: 'show', args: ['EP-odd'] })),
+    ];
+    for (const out of outs) assert.ok(!E20_UNSAFE.test(out), JSON.stringify(out));
+    assert.ok(outs[0].includes('fea[31mture'), 'the type, made safe, in a list row');
+    const show = outs[2];
+    assert.ok(show.includes('closed on 2026-03-02[31m — via repair'), 'lastClosed-style dates too');
+    assert.match(show, /• b — wob\[31mbly \(unknown\)\n {6}wob\[31mbly\n/, 'a record field that is not text prints nothing');
+    assert.match(show, /• c — no state \(unknown\)/);
+    assert.match(show, /✓ d — done\n/, 'an inheritedFrom that is not text, and a debt that is not `true`, say nothing');
+    assert.ok(!/parent:/.test(show), 'a lineage value that is not text is not printed');
+    assert.ok(show.includes('inher[31mited by nobody named on d[31m'), 'a status that is not `inherited` names no epic');
+    assert.ok(show.includes('inherited from EP-p]8;;http://evil on 2026-03-03'), 'the link escape is gone');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 review 2: gate status prints its header and step lines safely too — no forged line', async () => {
+  const T = historyProduct({
+    'epics/EP-g/.sdlc/state.json': {
+      epicId: 'EP-g', currentStep: 'x\x1b[2Jy', steps: [
+        { id: 'epic-review\n    ✓ security-review — done, 3 approval(s) from 3 people', type: 'review+approve', artifact: 'epic.md', status: 'in_review' },
+        { id: 'arch-review', type: 'review+approve', artifact: 'epic.md', status: 'satisfied', inheritedFrom: 'EP-p\x1b]8;;http://evil\x07' },
+        { id: 'odd-review', type: 'review+approve', artifact: 'epic.md', status: 'wob\x1bbly' },
+      ],
+    },
+    'epics/EP-g/epic.md': '---\nkind: feature\n---\n',
+  });
+  try {
+    const out = await grab(() => gateStatus(T, { epic: 'EP-g', headCount: e72Count(2) }));
+    assert.ok(!E20_UNSAFE.test(out), JSON.stringify(out));
+    assert.ok(!/\n {4}✓ security-review/.test(out), 'a newline in a step id cannot start a line of its own');
+    assert.match(out, /currentStep: x\[2Jy/);
+    assert.match(out, /inherited from EP-p\]8;;http:\/\/evil/);
+    assert.match(out, /wob\[?bly \(unknown\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 review 2: closedLine — one line, a whole-number PR, via compared after it is cleaned', () => {
+  assert.equal(_e20ClosedLine({ via: 'repair', by: ' ann\n    ✓ fake — done ' }), 'closed — via repair; recorded by ann ✓ fake — done');
+  assert.equal(_e20ClosedLine({ via: 'repair', pr: 1.5 }), 'closed — via repair');
+  assert.equal(_e20ClosedLine({ via: 'merge‎', pr: 3 }), 'closed — merged (PR #3)');
+});
+
+test('E20 review 2: --thread keeps a genesis with no epic.md yet; says when the thread cannot be followed; refuses the Foundation', async () => {
+  const T = historyProduct({
+    'epics/EP-g/.sdlc/state.json': { createdAt: '2026-02-01', steps: [{ id: 'analysis', status: 'done' }] },
+    'epics/EP-g/analysis.md': '---\nid: EP-g\n---\n', // seeded by yad-analysis; no epic.md yet
+    'epics/EP-c/.sdlc/state.json': { createdAt: '2026-02-02', steps: [] },
+    'epics/EP-c/epic.md': '---\nkind: change\nparent: EP-g\nthread: EP-g\n---\n',
+  });
+  const exit = process.exitCode;
+  try {
+    let json = JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-g' })));
+    assert.deepEqual(json.items.map((i) => i.id), ['EP-c', 'EP-g']);
+    assert.ok(!('threadBroken' in json));
+    json = JSON.parse(await grabStdout(() => runHistory(T, { json: true, thread: 'EP-gone' })));
+    assert.deepEqual([json.items, json.threadBroken], [[], 'missing epic EP-gone']);
+    const out = await grab(() => runHistory(T, { thread: 'EP-gone' }));
+    assert.match(out, /thread EP-gone: missing epic EP-gone/, 'never left to read as an empty thread');
+    process.exitCode = 0;
+    assert.match(await grab(() => runHistory(T, { thread: 'EP-foundation' })), /EP-foundation is the product level and is in no feature thread/);
+    assert.equal(process.exitCode, 1);
+  } finally { process.exitCode = exit; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 review 2: counted follows the gate — nobody named, engagement none, solo, skipped and inherited steps', async () => {
+  const T = historyProduct({
+    'epics/EP-odd/.sdlc/state.json': {
+      createdAt: '2026-03-01', steps: [
+        { id: 'r-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review' },
+        { id: 's-review', type: 'review+approve', artifact: 'epic.md', status: 'skipped', record: { by: 'ann', reason: 'n/a' } },
+        { id: 'i-review', type: 'review+approve', artifact: 'epic.md', status: 'satisfied', inheritedFrom: 'EP-old' },
+      ],
+    },
+    'epics/EP-odd/epic.md': '---\nkind: chore\n---\n',
+    'epics/EP-odd/.sdlc/approvals.json': [
+      { step: 'r-review', approver: '', status: 'approved' },
+      { step: 'r-review', approver: '   ', status: 'approved' },
+      { step: 'r-review', status: 'approved' },
+      { step: 'r-review', approver: 'ann', status: 'approved', engagement: 'none' },
+      { step: 'r-review', approver: 'bo', status: 'approved', engagement: 'verified' },
+      { step: 's-review', approver: 'cy', status: 'approved', artifactHash: 'sha256:old' },
+      { step: 'i-review', approver: 'di', status: 'approved', artifactHash: 'sha256:old' },
+    ],
+  });
+  const setHub = (extra) => {
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, ...extra }));
+  };
+  const show = async () => JSON.parse(await grabStdout(() => runHistory(T, { action: 'show', args: ['EP-odd'], json: true }))).steps;
+  try {
+    let steps = await show();
+    assert.deepEqual(steps[0].approvals.map((a) => a.counted), [false, false, false, true, true], 'a record that names nobody is not counted');
+    assert.deepEqual(steps[1].approvals.map((a) => [a.stale, a.counted]), [[null, null]], 'a skipped step is never judged');
+    assert.deepEqual(steps[2].approvals.map((a) => [a.stale, a.counted]), [[null, null]], 'nor an inherited one');
+    const text = await grab(() => runHistory(T, { action: 'show', args: ['EP-odd'] }));
+    assert.match(text, /approved by nobody named — names nobody \(not counted\)/);
+    assert.ok(!text.includes('stale (revoked)'), 'no stale tag where the gate judges nothing');
+    setHub({ review: { requireEngagement: true } });
+    steps = await show();
+    assert.deepEqual(steps[0].approvals.slice(3).map((a) => a.counted), [false, true], "'none' is what a bare approve records");
+    assert.match(await grab(() => runHistory(T, { action: 'show', args: ['EP-odd'] })), /approved by ann — not engagement-verified \(not counted\)/);
+    setHub({ solo: true });
+    steps = await show();
+    assert.deepEqual(steps[0].approvals.map((a) => a.counted), [null, null, null, null, null], 'solo mode waives the count');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E20 review 2: a refused filter reads nothing — even when the epics folder cannot be listed', async () => {
+  const E = indexFixture({ '.sdlc/hub.json': { platform: 'github', default_branch: 'main' }, epics: 'not a folder' });
+  const exit = process.exitCode;
+  try {
+    process.exitCode = 0;
+    assert.match(await grab(() => runHistory(E, { type: 'nope' })), /unknown work-item type: nope/);
+    assert.equal(process.exitCode, 1);
+    process.exitCode = 0;
+    assert.match(await grab(() => runHistory(E, { thread: 'EP-x' })), /the epics folder could not be listed \(ENOTDIR\)/, 'no stack trace');
+    assert.equal(process.exitCode, 1);
+  } finally { process.exitCode = exit; fs.rmSync(E, { recursive: true, force: true }); }
 });

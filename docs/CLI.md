@@ -1145,7 +1145,9 @@ saved index is behind. It never writes a file.
 | `--done` | items whose every step is `done`, `skipped` or `satisfied` |
 
 `--thread` finds the thread's members by their `parent:` links, as `yad thread` does — not by the
-`thread:` key, which is only a cache. A value that can match nothing — an unknown type, a thread id that
+`thread:` key, which is only a cache — and keeps the thread's first epic even before its `epic.md` is
+written. When the walk cannot be followed (the named epic has no folder, a parent is missing, a cycle),
+it says so instead of showing an empty thread. `EP-foundation` is in no thread and is refused. A value that can match nothing — an unknown type, a thread id that
 is not an id, `--open` with `--done` — is refused before anything is read. The filters do not apply to
 `show`, which refuses them; `list` refuses extra words (use `search`).
 
@@ -1166,8 +1168,13 @@ they are text, and a PR only when it is a whole number. `--json` prints the data
 **`--json`** prints `{ "schemaVersion", "items", "unreadable", "unlisted"? }` for `list`; the same plus
 `"query"`, `"summaryOnly"`? and a `"matches"` list on each item, for `search`; and `{ "schemaVersion",
 "item", "steps", "stepsWhy"?, "approvalsWhy"? }` for `show`. Each item has the shape of an item in
-`.sdlc/index.json`, plus `"finished"`. Each approval in `show` carries `"stale"` and `"counted"` (`null`
-when they cannot be told), so a script need not re-derive the rules.
+`.sdlc/index.json`, plus `"finished"`; `list` and `search` add `"threadBroken"` when `--thread` could not
+be followed. Each approval in `show` carries `"stale"` and `"counted"`, so a script need not re-derive the
+rules. **`counted` is per record, not a count of people:** two approvals from one person are both
+`counted`, and the gate counts that person once. It is `false` for a record that is not an approval, is
+stale, names nobody, or (when engagement is required) has no verified engagement. It is `null` where no
+count applies — in solo mode, and on a step passed by being skipped or inherited, which the gate never
+judges (`stale` is `null` there too) — and when the fingerprint cannot be taken.
 
 ## File shape: `schemaVersion`
 
