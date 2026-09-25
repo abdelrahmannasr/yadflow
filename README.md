@@ -146,7 +146,7 @@ git hook runs.
 | What | How |
 | --- | --- |
 | When | After every agent edit, by a hook yad wires in both ledger modes: Claude Code `PostToolUse` in `.claude/settings.json`, Cursor `afterFileEdit` in `.cursor/hooks.json`. Any other agent or editor: run `yad capture` yourself. Each capture takes every changed artifact, so your own editor's edits ride along |
-| Push | A capture commits at once, locally. The hook pushes your capture branches in the background at most once every 5 minutes, with no password prompt and a short timeout, so an edit never waits on the network. `yad capture` by hand pushes straight away. With no remote, or offline, the captures stay local and nothing fails |
+| Push | A capture commits at once, locally. The hook pushes your capture branches (and fetches everyone else's, for claims) in the background at most once every 5 minutes, with no password prompt and a short timeout, so an edit never waits on the network. `yad capture` by hand pushes straight away. With no remote, or offline, the captures stay local and nothing fails |
 | CI | yadflow's own push workflow skips `yad/wip/**`. `yad doctor` names any of **your** workflows a push to `yad/wip/*` would start (no branch filter, `branches: ["**"]`, or a `branches-ignore` that does not name it), so you can add `branches-ignore: ["yad/wip/**"]` |
 | Off | `"capture": false` in the Product config (`yad check --fix` then removes the hook), or `YAD_CAPTURE=0` for one shell |
 
@@ -154,6 +154,25 @@ The capture commits are unsigned on purpose — a signing prompt inside a hook w
 each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines. They are drafts: the commit your history
 keeps is the fold, below. The push is never forced: if you capture the same epic on two machines, the second push is refused rather than overwriting the first, and a `yad capture` you run by hand says so and names the branch (delete one copy with `git branch -D` to continue the other) — the hook's background push cannot report it. **To remove a capture branch for good** — say a secret was captured — delete it on origin first, then on every machine that has it run `git branch -D yad/wip/<you>/<epic>` **and** `git branch -dr origin/yad/wip/<you>/<epic>` (the second deletes that machine's saved copy of origin's branch; it says so if there is none): a machine that still holds either one rebuilds the branch and pushes it back. On a fresh clone, a capture continues the branch already on origin. Two people with the same git name share branches. The people count that caps review gates
 (E71) does not count capture commits.
+
+### Who else is editing a file (claims)
+
+`yad claims` lists who else is editing which artifact right now (E46). It is **advice, not a lock**:
+nothing stops anyone, because with no server a real lock is impossible. There is nothing to record by
+hand — a claim is read from the capture branches: someone's `yad/wip/<name>/<epic>` branch holds a
+saved change to that file that is not on the default branch yet.
+
+| What | How |
+| --- | --- |
+| A claim | A file of the epic that differs between the capture branch's last save and the commit that save was built on — the person's own edits, never what a pull brought in |
+| Ends | 4 hours after that branch's last save, or at once when the file on the default branch matches the saved one (the work was merged) |
+| `yad claims [<epic>]` | Fetches everyone's capture branches first (short timeout, no prompts), then lists each claim: file, person, last save. `--no-fetch` reads what is already here; `--json` too |
+| At edit time | When an edit changes a file someone else has a claim on, the capture hook says so. Under Claude Code the agent reads it (and you see it); under Cursor it is a line on stderr. It never blocks, never waits on the network, and names the same person and file at most once an hour |
+| Fresh enough | The hook's background push (at most every 5 minutes) also fetches everyone's capture branches in the background |
+
+**Limits.** Someone with capture off, or offline, is invisible. A claim can be up to about 5 minutes
+late. Two people with the same git name share capture branches, so they never see each other. Times
+are the saver's own clock, shown in UTC.
 
 ### Folding a step into one commit
 

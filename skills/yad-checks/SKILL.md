@@ -99,7 +99,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     harness hook that runs `yad capture --hook`, which snapshots every changed Shape artifact onto the
     person's private `yad/wip/<name>/<epic>` branches without touching the checkout. Wired as a
     `PostToolUse` entry in `.claude/settings.json` and an `afterFileEdit` entry in `.cursor/hooks.json`;
-    always exits 0 and prints nothing. `"capture": false` in the Product config unwires it.
+    always exits 0. It prints nothing, except under Claude Code when a file the edit changed is also
+    being edited by someone else (E46 claims): then one PostToolUse JSON note the agent reads.
+    `"capture": false` in the Product config unwires it.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
     → the standalone Product-side verified-commits CI (installed by `yad check --fix` with the Product wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);

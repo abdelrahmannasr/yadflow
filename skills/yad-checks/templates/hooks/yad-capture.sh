@@ -11,9 +11,10 @@
 #   Cursor       an `afterFileEdit` hook in `.cursor/hooks.json`
 # Any other harness: run this script (or `yad capture --hook`) after a file write.
 #
-# The contract: it ALWAYS exits 0 and prints NOTHING to stdout — a capture must never block, slow or
-# confuse an agent. A problem is one line on stderr. `YAD_CAPTURE=0`, or `"capture": false` in the
-# Product config, turns it off.
+# The contract: it ALWAYS exits 0 — a capture must never block or slow an agent. A problem is one line on
+# stderr. Stdout carries ONE thing, and only under Claude Code: when a file this edit changed is also being
+# edited by someone else (E46 claims), a PostToolUse JSON note the agent reads. Otherwise it prints nothing.
+# `YAD_CAPTURE=0`, or `"capture": false` in the Product config, turns it off.
 set -uo pipefail
 # Drain the payload the harness sends on stdin, so it never sees a broken pipe — but never wait on it: not
 # at all from a terminal (someone ran this by hand), and at most a second on a pipe that never closes.
@@ -44,5 +45,9 @@ else
   exit 0
 fi
 [ "${#CMD[@]}" -eq 0 ] && exit 0
-"${CMD[@]}" capture --hook --dir "$HUB_ROOT" </dev/null >/dev/null
+# Claude Code sets CLAUDE_PROJECT_DIR for its hooks; it reads JSON back. Cursor reads nothing back.
+FORMAT=()
+[ -n "${CLAUDE_PROJECT_DIR:-}" ] && FORMAT=(--format claude)
+# `${FORMAT[@]+…}`: bash 3.2 (macOS) calls an empty array unbound under `set -u`.
+"${CMD[@]}" capture --hook ${FORMAT[@]+"${FORMAT[@]}"} --dir "$HUB_ROOT" </dev/null
 exit 0
