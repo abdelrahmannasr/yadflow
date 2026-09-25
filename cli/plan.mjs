@@ -299,8 +299,10 @@ const hasInstallContainer = (root, ide) => !!lstatIfPresent(path.join(root, inst
 // then wrote the loss into the stamp. The live entry would still fire on every edit while nothing
 // updated it, normalised its legacy spelling, or reported it. Reading the FILE, not just its
 // existence, is what keeps this from re-admitting a `.claude/` that only ever held permissions.
-const hasOurHookEntry = (root, ide) => {
-  const adapter = HOOK_ADAPTERS[ide];
+// Either of our hooks counts: the guard's, or — on a local-ledger Product, where it is the only one — the
+// capture entry (E43). Missing the capture entry here would drop `.claude` from detection and let the next
+// `--fix` unwire it as a removed target, the regression described above.
+const hasOurHookEntry = (root, ide) => [HOOK_ADAPTERS[ide], CAPTURE_ADAPTERS[ide]].some((adapter) => {
   if (!adapter) return false;
   const full = path.join(root, adapter.settings);
   if (!lstatIfPresent(full)) return false;
@@ -310,7 +312,7 @@ const hasOurHookEntry = (root, ide) => {
     if (!Array.isArray(entries)) return false;
     return entries.some((entry) => entryIsOurs(adapter, entry));
   } catch { return false; }
-};
+});
 
 export function detectedIdeTargetStateFor(root) {
   assertRootIsDirectory(root);

@@ -2092,8 +2092,9 @@ export function captureChecks(root, checks, cfg) {
     check(checks, 'capture', 'project', 'warn', `wip capture not wired: ${unwired.join(', ')}${byHand}`,
       'run `yad check --fix` — until then an agent\'s edits are saved only when someone commits them');
   } else if (noProtocol.length === targets.length) {
-    check(checks, 'capture', 'project', 'warn', `wip capture installed but attached to nothing${byHand}`,
-      'add `.claude` or `.cursor` to the IDE targets, or run `yad capture` after editing');
+    // A real and reasonable setup, not a fault: no target has a post-edit hook yad wires. A warning here
+    // could never be cleared by doing what it asks, so it is said as a fact.
+    check(checks, 'capture', 'project', 'ok', `wip capture is by hand here — no IDE target (${noProtocol.join(', ')}) has a post-edit hook yad wires; run \`yad capture\` after editing`);
   } else {
     check(checks, 'capture', 'project', 'ok', `wip capture wired (hooks/yad-capture.sh)${byHand}`);
   }
@@ -2104,11 +2105,36 @@ export function captureChecks(root, checks, cfg) {
   }
 }
 
-// The team's own GitHub workflow files whose `push` trigger names no branch filter — so a push to any
-// branch runs them. A line reader, not a YAML parser: it catches the three usual spellings (`on: push`,
-// `on: [push, …]`, and a `push:` key with no `branches`/`branches-ignore`/`tags` under it) and stays
-// silent on anything it cannot read, since a false warning here costs a team a needless edit. yadflow's
-// own files (`# yad-managed`) are skipped: their filters are ours to keep.
+// The team's own GitHub workflow files that a push to a `yad/wip/*` branch would start. A line reader, not
+// a YAML parser, confined to the TOP-LEVEL `on:` block (a job named `push` is not a trigger). It reads the
+// usual spellings — `on: push`, `on: [push, …]`, and a `push:` key under `on:` — and decides the way
+// GitHub does: no `branches`/`branches-ignore` (and no `tags`) runs on every branch; a `branches` pattern
+// that matches a capture branch runs on it (`**` does); a `branches-ignore` that does not name one runs on
+// it. A pattern it cannot judge (a `!` negation) counts as filtered, since a false warning costs a team a
+// needless edit. yadflow's own files (`# yad-managed`) are skipped: their filters are ours to keep.
+const SAMPLE_WIP_BRANCH = 'yad/wip/someone/EP-x';
+const globMatches = (glob, ref) => new RegExp(`^${glob.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '.*')}$`).test(ref);
+const yamlList = (inline, childLines) => {
+  const v = (inline || '').trim();
+  const items = v.startsWith('[') ? v.replace(/^\[|\].*$/g, '').split(',') : v && !v.startsWith('#') ? [v] : childLines.map((l) => l.replace(/^\s*-\s*/, ''));
+  return items.map((x) => x.replace(/\s+#.*$/, '').trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+};
+function pushRunsOnWip(block) {
+  // `block` is the lines of the `push:` value, deeper than the `push:` key.
+  const keys = {};
+  for (let i = 0; i < block.length; i++) {
+    const m = block[i].match(/^(\s+)(branches|branches-ignore|tags|tags-ignore):\s*(.*)$/);
+    if (!m) continue;
+    const children = [];
+    for (let j = i + 1; j < block.length && (block[j].match(/^(\s*)/)[1].length > m[1].length || /^\s*-/.test(block[j])); j++) {
+      if (/^\s*-/.test(block[j])) children.push(block[j]);
+    }
+    keys[m[2]] = yamlList(m[3], children);
+  }
+  if (keys.branches) return !keys.branches.some((b) => b.startsWith('!')) && keys.branches.some((b) => globMatches(b, SAMPLE_WIP_BRANCH));
+  if (keys['branches-ignore']) return !keys['branches-ignore'].some((b) => globMatches(b, SAMPLE_WIP_BRANCH));
+  return !(keys.tags || keys['tags-ignore']);
+}
 export function pushOnEveryBranch(root) {
   const dir = path.join(root, '.github', 'workflows');
   let names = [];
@@ -2119,24 +2145,35 @@ export function pushOnEveryBranch(root) {
     try { text = fs.readFileSync(path.join(dir, n), 'utf8'); } catch { continue; }
     if (/^#\s*yad-managed/m.test(text)) continue;
     const lines = text.split(/\r?\n/);
+    const onAt = lines.findIndex((l) => /^(on|"on"|'on'):/.test(l));
+    if (onAt < 0) continue;
+    const inline = lines[onAt].replace(/^(on|"on"|'on'):\s*/, '').replace(/\s+#.*$/, '').trim();
     let hit = false;
-    for (let i = 0; i < lines.length && !hit; i++) {
-      const l = lines[i];
-      if (/^(on|"on"|'on'):\s*(push|\[[^\]]*\bpush\b[^\]]*\])\s*(#.*)?$/.test(l)) { hit = true; break; }
-      const m = l.match(/^(\s+)push:\s*(#.*)?$/);
-      if (!m) continue;
-      const indent = m[1].length;
-      let filtered = false;
-      for (let j = i + 1; j < lines.length; j++) {
-        const t = lines[j];
-        if (!t.trim() || /^\s*#/.test(t)) continue;
-        if ((t.match(/^(\s*)/)[1].length) <= indent) break;
-        if (/^\s+(branches|branches-ignore|tags|tags-ignore):/.test(t)) { filtered = true; break; }
+    if (inline) {
+      hit = /^push$/.test(inline) || /^\[[^\]]*\bpush\b[^\]]*\]$/.test(inline) || /^\{.*\bpush\s*:\s*(\{\s*\}|null|~)?\s*[,}]/.test(inline);
+    } else {
+      // The `on:` block: every line below it until the next top-level key.
+      const block = [];
+      for (let j = onAt + 1; j < lines.length; j++) {
+        if (lines[j].trim() && !/^\s/.test(lines[j]) && !/^#/.test(lines[j])) break;
+        block.push(lines[j]);
       }
-      if (!filtered) hit = true;
+      const childIndent = Math.min(...block.filter((l) => l.trim() && !/^\s*#/.test(l)).map((l) => l.match(/^(\s*)/)[1].length));
+      for (let k = 0; k < block.length; k++) {
+        const m = block[k].match(/^(\s+)push:\s*(.*)$/);
+        if (!m || m[1].length !== childIndent) continue;
+        const value = m[2].replace(/\s+#.*$/, '').trim();
+        if (value && value !== '{}' && value !== 'null' && value !== '~') break;
+        const inner = [];
+        for (let j = k + 1; j < block.length; j++) {
+          if (block[j].trim() && !/^\s*#/.test(block[j]) && block[j].match(/^(\s*)/)[1].length <= childIndent) break;
+          inner.push(block[j]);
+        }
+        hit = pushRunsOnWip(inner);
+        break;
+      }
     }
     if (hit) out.push(`.github/workflows/${n}`);
   }
   return out;
 }
-

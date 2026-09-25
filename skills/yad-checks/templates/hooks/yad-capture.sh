@@ -15,8 +15,11 @@
 # confuse an agent. A problem is one line on stderr. `YAD_CAPTURE=0`, or `"capture": false` in the
 # Product config, turns it off.
 set -uo pipefail
-# Drain the payload the harness sends on stdin, so it never sees a broken pipe.
-cat >/dev/null 2>&1 || true
+# Drain the payload the harness sends on stdin, so it never sees a broken pipe — but never wait on it: not
+# at all from a terminal (someone ran this by hand), and at most a second on a pipe that never closes.
+if [ ! -t 0 ]; then
+  while IFS= read -r -t 1 _ 2>/dev/null; do :; done
+fi
 _src="${BASH_SOURCE[0]}"
 while [ -L "$_src" ]; do
   _dir="$(CDPATH= cd -P -- "$(dirname -- "$_src")" && pwd)"

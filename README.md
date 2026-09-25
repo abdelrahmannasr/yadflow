@@ -146,12 +146,12 @@ git hook runs.
 | --- | --- |
 | When | After every agent edit, by a hook yad wires in both ledger modes: Claude Code `PostToolUse` in `.claude/settings.json`, Cursor `afterFileEdit` in `.cursor/hooks.json`. Any other agent or editor: run `yad capture` yourself. Each capture takes every changed artifact, so your own editor's edits ride along |
 | Push | A capture commits at once, locally. The hook pushes your capture branches in the background at most once every 5 minutes, with no password prompt and a short timeout, so an edit never waits on the network. `yad capture` by hand pushes straight away. With no remote, or offline, the captures stay local and nothing fails |
-| CI | yadflow's own push workflow skips `yad/wip/**`. `yad doctor` names any of **your** workflows that run on a push to every branch, so you can add `branches-ignore: ["yad/wip/**"]` |
+| CI | yadflow's own push workflow skips `yad/wip/**`. `yad doctor` names any of **your** workflows a push to `yad/wip/*` would start (no branch filter, `branches: ["**"]`, or a `branches-ignore` that does not name it), so you can add `branches-ignore: ["yad/wip/**"]` |
 | Off | `"capture": false` in the Product config (`yad check --fix` then removes the hook), or `YAD_CAPTURE=0` for one shell |
 
 The capture commits are unsigned on purpose — a signing prompt inside a hook would hang the agent — and
 each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines, which the later fold into one clean commit
-(E44) reads. Two people with the same git name share branches. The people count that caps review gates
+(E44) reads. The push is never forced: if you push the same epic from two machines, the second is refused rather than overwriting the first. Two people with the same git name share branches. The people count that caps review gates
 (E71) does not count capture commits.
 
 ### The local ledger guard, per agent

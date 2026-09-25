@@ -29,6 +29,7 @@
 // on purpose (`--no-gpg-sign`): a signing prompt inside a hook would hang the agent, and E44's fold is the
 // commit that gets signed.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,14 +65,19 @@ export function capturedEpic(rel) {
   return epic;
 }
 
-// The git user.name as one branch-name segment, or null when there is none to use. Lower case, because refs
-// are files and a case-insensitive disk (macOS, Windows) would make `Ann` and `ann` one file.
-export function wipName(gitName) {
-  if (typeof gitName !== 'string') return null;
-  const s = gitName.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-').replace(/\.{2,}/g, '.').replace(/-{2,}/g, '-')
-    .replace(/^[-.]+|[-.]+$/g, '').replace(/\.lock$/, '');
-  return s || null;
+// The git user.name as one branch-name segment. Lower case, because refs are files and a case-insensitive
+// disk (macOS, Windows) would make `Ann` and `ann` one file. A name written in a script with no Latin
+// letters (Arabic, Chinese…) leaves nothing after the cleaning, so it falls back to the local part of the
+// git email, and then to a short fingerprint of the name itself — the same name always gives the same
+// branch. Null only when git has no name at all.
+const safeSegment = (v) => (typeof v === 'string' ? v : '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/[^a-z0-9._-]+/g, '-').replace(/\.{2,}/g, '.').replace(/-{2,}/g, '-')
+  .replace(/^[-.]+|[-.]+$/g, '').replace(/\.lock$/, '');
+export function wipName(gitName, email = null) {
+  if (typeof gitName !== 'string' || !gitName.trim()) return null;
+  return safeSegment(gitName)
+    || safeSegment(typeof email === 'string' ? email.split('@')[0] : '')
+    || `u-${createHash('sha256').update(gitName.trim()).digest('hex').slice(0, 8)}`;
 }
 
 export const wipBranch = (name, epic) => `${WIP_PREFIX}/${name}/${epic}`;
@@ -96,16 +102,26 @@ function gitIn(root, env = null) {
 }
 
 // Every changed path under epics/ and foundation/ — tracked changes, deletions and new files — from
-// `git status -z`. A rename yields both paths, so the old one is captured as deleted.
-function changedPaths(git) {
-  const r = git(['status', '-z', '--porcelain=v1', '--untracked-files=all', '--no-renames', '--', 'epics', FOUNDATION_DIR]);
+// `git status -z`. A rename yields both paths, so the old one is captured as deleted. git prints paths from
+// the TOP of the repository, and a Product may live in a subfolder of it (a monorepo), so `prefix` — the
+// Product's place in the repo — is cut off, and every path below is relative to the Product root.
+// `GIT_OPTIONAL_LOCKS=0`: a plain `git status` refreshes and rewrites the person's real index, taking
+// `index.lock` for a moment, and a `git commit` of theirs at that instant would fail. This must not.
+function changedPaths(root, prefix) {
+  const r = gitIn(root, { GIT_OPTIONAL_LOCKS: '0' })(['status', '-z', '--porcelain=v1', '--untracked-files=all', '--no-renames', '--', 'epics', FOUNDATION_DIR]);
   if (!r.ok) return null;
   const out = [];
   for (const entry of r.out.split('\0')) {
-    if (entry.length > 3) out.push(entry.slice(3));
+    if (entry.length <= 3) continue;
+    const p = entry.slice(3);
+    if (p.startsWith(prefix)) out.push(p.slice(prefix.length));
   }
   return out;
 }
+// A tree path from the top of the repo, as a Product-relative one — or null outside the Product.
+const underPrefix = (p, prefix) => (p.startsWith(prefix) ? p.slice(prefix.length) : null);
+
+const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
 
 const trailers = ({ epic, base, branch }) => `Yad-Epic: ${epic}\nYad-Base: ${base || 'none'}\nYad-Branch: ${branch || '(detached)'}`;
 export const captureMessage = (meta) => `wip(${meta.epic}): capture\n\n${trailers(meta)}\n`;
@@ -113,7 +129,7 @@ export const captureMessage = (meta) => `wip(${meta.epic}): capture\n\n${trailer
 // One epic's capture: build the tree, and commit it on the epic's branch when its artifacts differ from the
 // branch tip. Returns { epic, branch, commit, files } for a commit, { epic, branch, unchanged: true } when
 // there was nothing new, or { epic, branch, error } on a failure (reported, never thrown).
-function captureEpic(root, git, { name, epic, paths, head, headTree, current }) {
+function captureEpic(root, git, { name, epic, paths, head, headTree, current, prefix }) {
   const branch = wipBranch(name, epic);
   const ref = `refs/heads/${branch}`;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-capture-'));
@@ -123,6 +139,11 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current }) 
     if (!seeded.ok) return { epic, branch, error: `could not read HEAD's tree: ${seeded.err}` };
     // The paths come on stdin, NUL-separated, so a name holding a space, a quote or a newline is read as
     // written and no command line grows past the system's limit. `-A` adds, updates AND removes.
+    // A path that is neither on disk nor in HEAD's tree cannot be added — a file staged and then deleted
+    // (`AD`), or deleted on both sides of a merge (`DD`) — and one such path would make `git add` refuse
+    // the whole epic, on every capture, until someone fixed the index. It has nothing to capture: drop it.
+    const known = new Set(idx(['ls-files', '-z', '--', 'epics', FOUNDATION_DIR]).out.split('\0').filter(Boolean));
+    paths = paths.filter((p) => known.has(p) || fs.existsSync(path.join(root, p)) || isLink(path.join(root, p)));
     if (paths.length) {
       const added = idx(['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], paths.join('\0'));
       if (!added.ok) return { epic, branch, error: `could not stage the artifacts: ${added.err}` };
@@ -140,7 +161,7 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current }) 
       if (against) {
         const diff = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', against, treeSha]);
         if (!diff.ok) return { epic, branch, error: `could not compare with ${tip ? branch : 'HEAD'}: ${diff.err}` };
-        const moved = diff.out.split('\0').filter((p) => p && capturedEpic(p) === epic);
+        const moved = diff.out.split('\0').filter((p) => p && capturedEpic(underPrefix(p, prefix)) === epic);
         if (!moved.length) return { epic, branch, unchanged: true };
       }
       const parent = tip || head;
@@ -160,13 +181,16 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current }) 
   }
 }
 
-// The push, as git arguments: every capture branch of this person in one go. `--force-with-lease` because a
-// capture branch is one person's, but a second machine of theirs may have pushed it too — the lease
-// refuses to overwrite that instead of losing it. `--no-verify`: a team's pre-push hook (tests, linters)
-// has no business running on a draft snapshot, and could not run unattended anyway.
+// The push, as git arguments: every capture branch of this person in one go. A PLAIN push, never a forced
+// one: each capture is built on the last, so the remote branch is always an older capture of ours and the
+// push is a fast-forward. When it is not — the same person pushed from a second machine — git refuses that
+// one branch and nothing is overwritten (E43 review: a lease read remote-tracking refs, which a
+// single-branch clone never has, so it refused every push after the first; and which an IDE's background
+// fetch updates, so it would have let the push overwrite the other machine). `--no-verify`: a team's
+// pre-push hook (tests, linters) has no business running on a draft snapshot, and could not run unattended.
 export const pushArgs = (name) => [
   '-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20',
-  'push', '--no-verify', '--force-with-lease', '--quiet', 'origin',
+  'push', '--no-verify', '--quiet', 'origin',
   `refs/heads/${WIP_PREFIX}/${name}/*:refs/heads/${WIP_PREFIX}/${name}/*`,
 ];
 // No prompt may ever appear: a hook has no terminal, and a prompt nobody sees hangs the push for ever.
@@ -175,11 +199,11 @@ export const pushEnv = (env = process.env) => ({
   ...(env.GIT_SSH_COMMAND ? {} : { GIT_SSH_COMMAND: 'ssh -oBatchMode=yes -oConnectTimeout=10' }),
 });
 
-// When the last push started, per clone — kept in git's own folder, so it is never committed and each
-// worktree of one clone shares it.
+// When the last push started, per clone — kept in git's own COMMON folder (`--git-common-dir`), so it is
+// never committed and every worktree of one clone shares it: they push the same branches.
 function pushStatePath(git) {
-  const r = git(['rev-parse', '--git-path', 'yad-capture.json']);
-  return r.ok ? r.out.trim() : null;
+  const r = git(['rev-parse', '--git-common-dir']);
+  return r.ok && r.out.trim() ? path.join(r.out.trim(), 'yad-capture.json') : null;
 }
 
 // Push now (a person ran `yad capture`), or start one in the background when due (the hook).
@@ -225,7 +249,8 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
     say(info, `capture is off — ${off}`);
     return { captured: [], unchanged: [], errors: [], pushed: null, off };
   }
-  const name = wipName(git(['config', 'user.name']).out.trim());
+  const name = wipName(git(['config', 'user.name']).out.trim(), git(['config', 'user.email']).out.trim());
+  const prefix = git(['rev-parse', '--show-prefix']).out.trim();
   if (!name) return bail('git has no user.name to name the capture branch after', { hint: 'git config user.name "<your name>"', loud: true });
 
   const headR = git(['rev-parse', '--verify', '-q', 'HEAD^{commit}']);
@@ -235,7 +260,7 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   const branchR = git(['symbolic-ref', '--short', '-q', 'HEAD']);
   const current = branchR.ok ? branchR.out.trim() : null;
 
-  const changed = changedPaths(git);
+  const changed = changedPaths(root, prefix);
   if (changed === null) return bail('git could not list the changed files', { loud: true });
   const byEpic = new Map();
   for (const p of changed) {
@@ -260,7 +285,7 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   const unchanged = [];
   const errors = [];
   for (const [epic, paths] of [...byEpic].sort(([a], [b]) => a.localeCompare(b))) {
-    const res = captureEpic(root, git, { name, epic, paths, head, headTree, current });
+    const res = captureEpic(root, git, { name, epic, paths, head, headTree, current, prefix });
     if (res.error) errors.push(res);
     else if (res.unchanged) unchanged.push(res);
     else captured.push(res);
