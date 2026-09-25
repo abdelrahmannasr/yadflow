@@ -14,7 +14,7 @@ import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists, emitJSON } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { printTeamHint, soloTeamHint } from './people.mjs';
-import { OWNER_STEPS, liveOwner } from './owners.mjs';
+import { OWNER_STEPS, liveOwner, readState as loadLedgerState } from './owners.mjs';
 import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
@@ -75,7 +75,10 @@ const rowFor = (root, id, bindings = loadSkillBindings(root)) => {
 
 // The live step owners of one epic (E47), by step. Beside the action, never in it: `yad next --json`'s
 // action keys are frozen by the golden test, and `yad owners --json` is where a script reads them.
-const liveOwners = (root, id) => Object.fromEntries(OWNER_STEPS.map((s) => [s, liveOwner(root, id, s)]).filter(([, r]) => r));
+const liveOwners = (root, id) => {
+  const state = loadLedgerState(root, id);
+  return Object.fromEntries(OWNER_STEPS.map((s) => [s, liveOwner(root, id, s, state)]).filter(([, r]) => r));
+};
 
 // "owner: Ann Lee" under a line whose step — or whose review's author step — someone owns. Advice only.
 const reviewedBy = new Map(STEPS.filter((s) => s.kind === 'review' && s.reviews).map((s) => [s.id, s.reviews]));

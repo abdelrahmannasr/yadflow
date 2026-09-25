@@ -7,8 +7,9 @@
 //   1. STORAGE: one small file per step, `<epic>/.sdlc/owners/<step>.json`. Not a ledger file name, so
 //      `ledger-guard` never guards it and it is writable in both ledger modes; not a key in `state.json`, which
 //      a verified Product lets only CI write, and which many skills rewrite by hand. Two assignments made at
-//      once on two branches touch two files. Capture takes these files like any person-written `.sdlc/` file,
-//      and the fold of a step takes that step's own file.
+//      once on two branches touch two files. Capture takes these files like any person-written `.sdlc/` file;
+//      `yad fold` never does (an assignment is not authoring, and a fold of it alone would be a
+//      "docs: author <step>" commit with nothing authored).
 //   2. EFFECT: `yad next` prints a live owner beside the step, `yad owners` lists them, and the capture hook
 //      warns when someone who is not the owner edits the step's files — to the agent under Claude Code, on
 //      stderr elsewhere, at most once an hour per step.
@@ -23,10 +24,12 @@
 //      not passed yet (rework during a review is still the owner's). After that the file stays as a record,
 //      and re-opening the step makes it live again. No time limit.
 //   7. `yad assign` writes the file and commits nothing: it reaches the team when it is committed and pulled.
+// The hook's throttle lives in the per-clone capture state file, read and written in turn by the push, claims
+// and this; two hooks at the same instant can lose an entry — one extra warning, never a broken file.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ok, info, warn, fail, hand, writeJSON } from './lib.mjs';
-import { epicFiles, productConfigPath } from './manifest.mjs';
+import { ok, info, warn, fail, hand, readJSON, writeJSON } from './lib.mjs';
+import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { STEPS, epicIds, epicRel, epicRoot, isPassed, isValidEpicId, stepStatus } from './epic-state.mjs';
 import { capturedEpic, gitIn, wipName, WIP_PREFIX } from './capture.mjs';
 import { FOLD_STEPS, stepPaths } from './fold.mjs';
@@ -56,7 +59,7 @@ export function readOwnerFile(file, step) {
 }
 
 // The epic's `state.json`, read leniently: null when it is missing or broken.
-function readState(root, epic) {
+export function readState(root, epic) {
   try {
     const s = JSON.parse(fs.readFileSync(epicFiles(epicRoot(root, epic)).state, 'utf8'));
     return s && Array.isArray(s.steps) ? s : null;
@@ -180,7 +183,7 @@ export async function runAssign(root, { epic, step, to = null, force = false, en
     warn(`no capture branch here is named ${owner} yet — check it is ${name}'s git user.name exactly, or the edit-time warning will never match them`);
   }
   info('advice, not a lock: the capture hook warns anyone else who edits this step\'s files; nothing is blocked');
-  hand(`it reaches the team once it is committed and pulled — commit ${rel}; \`yad fold ${epic} ${step}\` also takes it`);
+  hand(`it reaches the team once it is committed and pulled — commit ${rel} on its own (\`yad fold\` never takes it)${isVerifiedLedger(readJSON(productConfigPath(root), null)) ? ', through a small PR on this verified Product' : ''}`);
   return { epic, step, owner, name, changed: true, replaced, path: rel };
 }
 
@@ -212,6 +215,7 @@ export async function runOwners(root, { epic = null, env = process.env } = {}) {
   const refuse = (msg, hint) => { fail(msg); if (hint) hand(hint); process.exitCode = 1; };
   if (!fs.existsSync(productConfigPath(root))) return refuse('not a Product (no .sdlc/hub.json or product.json here)', 'run it from the Product root, or pass --dir');
   if (epic && !isValidEpicId(epic)) return refuse(`not an epic id: ${epic}`);
+  if (epic && !fs.existsSync(path.join(root, epicRel(epic)))) return refuse(`no epic ${epic} here (${epicRel(epic)}/ does not exist)`, '`yad next` lists the epics');
   const ids = epic ? [epic] : epicIds(root);   // the Foundation included
   const { me } = whoAmI(root, env);
   const owners = ids.flatMap((id) => readOwners(root, id)).map((o) => (o.error ? o : { ...o, mine: o.owner === me }));

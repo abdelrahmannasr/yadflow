@@ -1601,9 +1601,12 @@ export function stepStateChecks(checks, root) {
 
 // `owners:unreadable` (E47). A step owner file that cannot be read is skipped in silence everywhere else —
 // `yad next` prints no owner and the capture hook warns nobody — so the assignment the team thinks it made
-// does nothing. Say so here. A file for a step that cannot be assigned is the same kind of dead line.
+// does nothing. Say so here. A file for a step that cannot be assigned, or that is not on the epic's chain,
+// is the same kind of dead line.
 export function ownerChecks(checks, root) {
-  const bad = epicIds(root).flatMap((e) => readOwners(root, e)).filter((o) => o.error);
+  const bad = epicIds(root).flatMap((e) => readOwners(root, e))
+    .filter((o) => o.error || o.onChain === false)
+    .map((o) => (o.error ? o : { ...o, error: `${o.path}: ${o.step} is not on ${o.epic}'s chain` }));
   if (!bad.length) return;
   const shown = bad.slice(0, 3).map((o) => o.error).join('; ');
   check(checks, 'owners:unreadable', 'project', 'warn',

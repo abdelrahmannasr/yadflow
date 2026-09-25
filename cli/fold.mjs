@@ -51,8 +51,7 @@ const STEP_EXTRAS = {
 export function stepPaths(epic, stepId) {
   const step = STEPS.find((s) => s.id === stepId && s.kind === 'author' && s.artifact);
   if (!step) return null;
-  // The step's owner file (E47) rides its fold: it is about this step and nothing else.
-  return [...artifactPaths(artifactBase(step.artifact)), ...(STEP_EXTRAS[stepId] || []), `.sdlc/owners/${stepId}.json`].map((p) => `${epicRel(epic)}/${p}`);
+  return [...artifactPaths(artifactBase(step.artifact)), ...(STEP_EXTRAS[stepId] || [])].map((p) => `${epicRel(epic)}/${p}`);
 }
 const covers = (paths, p) => paths.some((s) => p === s || p.startsWith(`${s}/`));
 
@@ -82,6 +81,9 @@ export function sortChanges(entries, { epic, step, verified, seeding = false }) 
     // ` A` is a file marked with `git add -N` (intent to add): new too.
     const creating = xy === '??' || xy[0] === 'A' || xy === ' A';
     if (covers(own, p)) out.step.push(p);
+    // A step owner file (E47) is never folded: an assignment is not authoring, and a fold that carried one
+    // alone would be a "docs: author <step>" commit with nothing authored. It is committed on its own.
+    else if (/\/\.sdlc\/owners\/[^/]+\.json$/.test(p)) out.other.push(p);
     else if (artifactOf === epic) (seeding && creating && p.startsWith(`${dir}.sdlc/`) ? out.seed : out.other).push(p);
     else if (artifactOf === null) (!verified || (seeding && creating) ? out.ledger : out.ci).push(p);
   }

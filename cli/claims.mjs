@@ -88,7 +88,8 @@ export function readClaims(root, { env = process.env, now = Date.now(), epics = 
     const diff = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', against, tip]);
     if (!diff.ok) continue;
     let files = diff.out.split('\0').filter((p) => p && p.startsWith(prefix)).map((p) => p.slice(prefix.length))
-      .filter((p) => capturedEpic(p) === epic);
+      // A step owner file (E47) rides the assigner's capture, but assigning is not editing an artifact.
+      .filter((p) => capturedEpic(p) === epic && !/\/\.sdlc\/owners\/[^/]+\.json$/.test(p));
     // Landed: the file's content on the default branch is the capture's — the work is merged, the claim ends.
     if (files.length && def.ref) {
       const differs = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', def.ref, tip]);
