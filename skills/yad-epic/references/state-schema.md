@@ -567,7 +567,8 @@ The shared procedure (run once the `EP-<slug>` is known):
 3. Author the step's artifact(s) on that branch, and end the step with `yad fold EP-<slug> <step>` (E44): one
    commit, `docs(EP-<slug>): author <step>`, of that step's files only. The drafts stay on the private
    `yad/wip/…` capture branch. With `ledger: local` the epic's ledger changes ride in the same commit;
-   with `ledger: verified` only a ledger file being created (the seed) does. The verified ledger's `review/…` branch is created
+   with `ledger: verified` only a brand-new epic's seed does (its ledger is not in HEAD yet), together with
+   its new person-written `.sdlc/` files such as a change-epic's `change.json`. The verified ledger's `review/…` branch is created
    separately at review time and is untouched by this step.
 
 **How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once — by `yad epic new`

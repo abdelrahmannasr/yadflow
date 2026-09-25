@@ -24283,10 +24283,20 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   assert.deepEqual(local, {
     step: ['epics/EP-x/architecture.md', 'epics/EP-x/contract.md', 'epics/EP-x/.sdlc/contract-lock.json'],
     ledger: ['epics/EP-x/.sdlc/state.json', 'epics/EP-x/.sdlc/approvals.json', 'epics/EP-x/reviews/r.md'],
-    ci: [], other: ['epics/EP-x/epic.md', 'epics/EP-x/architecture.md.bak'],
+    seed: [], ci: [], other: ['epics/EP-x/epic.md', 'epics/EP-x/architecture.md.bak'],
   });
+  // Verified: an epic already seeded leaves EVERY ledger change to CI — a new reviews/*.md too, which
+  // ledger-guard would reject (it exempts an epic's ledger only while its state.json is off the base).
   const verified = fold.sortChanges(entries, { epic: 'EP-x', step: 'architecture', verified: true });
-  assert.deepEqual([verified.ledger, verified.ci], [['epics/EP-x/.sdlc/approvals.json', 'epics/EP-x/reviews/r.md'], ['epics/EP-x/.sdlc/state.json']]);
+  assert.deepEqual([verified.ledger, verified.ci], [[], ['epics/EP-x/.sdlc/state.json', 'epics/EP-x/.sdlc/approvals.json', 'epics/EP-x/reviews/r.md']]);
+  const seeding = fold.sortChanges(entries, { epic: 'EP-x', step: 'architecture', verified: true, seeding: true });
+  assert.deepEqual([seeding.ledger, seeding.ci], [['epics/EP-x/.sdlc/approvals.json', 'epics/EP-x/reviews/r.md'], ['epics/EP-x/.sdlc/state.json']]);
+  // A change-epic's seed: its new change.json rides the first fold; once seeded, an edit to it is left on disk.
+  const change = [{ xy: '??', path: 'epics/EP-c/.sdlc/change.json' }, { xy: '??', path: 'epics/EP-c/.sdlc/contract-lock.json' }, { xy: '??', path: 'epics/EP-c/notes.md' }];
+  const first = fold.sortChanges(change, { epic: 'EP-c', step: 'epic', verified: true, seeding: true });
+  assert.deepEqual([first.seed, first.other], [['epics/EP-c/.sdlc/change.json', 'epics/EP-c/.sdlc/contract-lock.json'], ['epics/EP-c/notes.md']]);
+  const later = fold.sortChanges([{ xy: ' M', path: 'epics/EP-c/.sdlc/change.json' }], { epic: 'EP-c', step: 'epic', verified: false, seeding: false });
+  assert.deepEqual([later.seed, later.other], [[], ['epics/EP-c/.sdlc/change.json']]);
   const stories = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/stories/EP-x-S01.md' }, { xy: ' M', path: 'epics/EP-x/stories-old.md' }], { epic: 'EP-x', step: 'stories', verified: false });
   assert.deepEqual([stories.step, stories.other], [['epics/EP-x/stories/EP-x-S01.md'], ['epics/EP-x/stories-old.md']]);
   const ui = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/.sdlc/design-links.json' }, { xy: '??', path: 'epics/EP-x/DESIGN.md' }, { xy: ' M', path: 'epics/EP-x/.sdlc/test-links.json' }], { epic: 'EP-x', step: 'ui-design', verified: true });
@@ -24360,13 +24370,16 @@ test('E44 fold (ledger: verified): refused on the default branch; elsewhere a le
     g('switch', '-q', '-c', 'epic/EP-x');
     w('epics/EP-x/.sdlc/state.json', '{"moved":true}\n');
     w('epics/EP-y/epic.md', '# y\n'); w('epics/EP-y/.sdlc/state.json', '{}\n');
+    w('epics/EP-x/reviews/epic--by-hand.md', 'a review written by hand\n');
+    w('epics/EP-y/.sdlc/change.json', '{}\n');
     const r = await foldRun(T, { epic: 'EP-x', step: 'epic' });
     assert.equal(r.code, 0, r.out);
     assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n'), ['epics/EP-x/epic.md']);
-    assert.deepEqual(r.value.leftForCi, ['epics/EP-x/.sdlc/state.json']);
+    assert.deepEqual(r.value.leftForCi, ['epics/EP-x/.sdlc/state.json', 'epics/EP-x/reviews/epic--by-hand.md'], 'a new file in a seeded epic is still CI\'s');
+    assert.match(r.out, /commit signing is not enabled/, 'an unsigned fold is warned about, never blocked');
     const seed = await foldRun(T, { epic: 'EP-y', step: 'epic' });
     assert.equal(seed.code, 0, seed.out);
-    assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n').sort(), ['epics/EP-y/.sdlc/state.json', 'epics/EP-y/epic.md'], 'creation, not mutation (#162)');
+    assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n').sort(), ['epics/EP-y/.sdlc/change.json', 'epics/EP-y/.sdlc/state.json', 'epics/EP-y/epic.md'], 'creation, not mutation (#162); the seed is one thing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

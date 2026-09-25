@@ -32,7 +32,7 @@ import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
 import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, artifactBase, artifactPaths, epicRoot } from './epic-state.mjs';
 import { capturedEpic, gitIn, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
-import { resolveDefaultBranch } from './hubcommit.mjs';
+import { resolveDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 
 // The authoring steps a fold can close: every catalogue step of kind `author` that writes a Shape artifact.
 // The Build steps (spec, tasks, implement, checks) write code in another repo and have no artifact here.
@@ -59,26 +59,29 @@ export const foldMessage = ({ epic, step, folded }) =>
   `docs(${epic}): author ${step}\n\nYad-Epic: ${epic}\nYad-Step: ${step}\nYad-Folded: ${folded || 'none'}\n`;
 
 // Sort one epic's changed files into what the fold takes and what it leaves. `entries` are
-// `statusEntries` rows; `verified` is the ledger mode. Pure, so every rule is testable without git.
+// `statusEntries` rows; `verified` is the ledger mode; `seeding` is true while the epic has no
+// `.sdlc/state.json` in HEAD — a brand-new epic whose seed has never been committed. Pure, so every rule is
+// testable without git.
 //   step    — the step's own artifacts (always taken)
-//   ledger  — the epic's ledger files taken (local mode: every change; verified: only files being created)
-//   ci      — ledger changes left for CI (verified mode, a file that already exists)
+//   seed    — while seeding, the person-written `.sdlc/` files being created beside the ledger
+//             (a change-epic's `change.json`, its pointer `contract-lock.json`): the seed is one thing
+//   ledger  — the epic's ledger files taken (local mode: every change; verified: only while seeding, and
+//             only files being created — exactly `ledger-guard`'s carve-out, which exempts an epic's ledger
+//             only while its state.json is off the base ref (#162))
+//   ci      — ledger changes left for CI (verified mode, every other case)
 //   other   — the epic's other changed artifacts, left on disk
-export function sortChanges(entries, { epic, step, verified }) {
+export function sortChanges(entries, { epic, step, verified, seeding = false }) {
   const own = stepPaths(epic, step) || [];
   const dir = `${epicRel(epic)}/`;
-  const out = { step: [], ledger: [], ci: [], other: [] };
+  const out = { step: [], seed: [], ledger: [], ci: [], other: [] };
   for (const { xy, path: p } of entries) {
     if (!p.startsWith(dir)) continue;
     const artifactOf = capturedEpic(p);
+    // `??` is untracked, `A` in the first column is added to the index: both are a file being created.
+    const creating = xy === '??' || xy[0] === 'A';
     if (covers(own, p)) out.step.push(p);
-    else if (artifactOf === epic) out.other.push(p);
-    else if (artifactOf === null) {
-      // A ledger file. `??` is untracked, `A` in the first column is added to the index: both are a file
-      // being created. Anything else already exists in HEAD.
-      const creating = xy === '??' || xy[0] === 'A';
-      (!verified || creating ? out.ledger : out.ci).push(p);
-    }
+    else if (artifactOf === epic) (seeding && creating && p.startsWith(`${dir}.sdlc/`) ? out.seed : out.other).push(p);
+    else if (artifactOf === null) (!verified || (seeding && creating) ? out.ledger : out.ci).push(p);
   }
   return out;
 }
@@ -150,7 +153,10 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const prefix = git(['rev-parse', '--show-prefix']).out.trim();
   const entries = statusEntries(root, prefix, env);
   if (entries === null) return refuse('git could not list the changed files');
-  const sorted = sortChanges(entries, { epic, step, verified });
+  // Is the epic's seed still uncommitted? The same question `ledger-guard` asks of the base ref, asked of HEAD:
+  // the authoring branch is cut from the default branch, and once a fold commits the seed, it is no longer new.
+  const seeding = !git(['cat-file', '-e', `HEAD:./${epicRel(epic)}/.sdlc/state.json`]).ok;
+  const sorted = sortChanges(entries, { epic, step, verified, seeding });
   // What `git add` can take: a path on disk or in the index. A deletion already staged (`D `, from `git rm`
   // or the old half of a `git mv`) is in neither, and `git add` would refuse it — but it is in HEAD, so
   // `commit --only` commits the deletion. A path added and then deleted (`AD`) is in none of the three and
@@ -161,7 +167,7 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const addable = (p) => known.has(p) || onDisk(p);
   const foldable = (p) => addable(p) || stagedDeletion.has(p);
   // A path can be listed twice: `git rm --cached` shows it as a staged deletion (`D `) AND untracked (`??`).
-  const files = [...new Set([...sorted.step, ...sorted.ledger])].filter(foldable);
+  const files = [...new Set([...sorted.step, ...sorted.seed, ...sorted.ledger])].filter(foldable);
   // That case cannot be folded: the fold commits files as they are on disk, and `commit --only` cannot
   // record the deletion of a file that is still there. `git add` would quietly undo the person's choice.
   // It is told apart by git's own untracked listing, never by the disk alone: on a case-blind disk (macOS,
@@ -192,6 +198,9 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
       sorted.other.length ? `changed, but not ${step}'s: ${sorted.other.join(', ')}` : null);
   }
 
+  // With a verified ledger the fold rides a review PR that `verified-commits` checks: an unsigned fold fails
+  // there, twenty minutes later. Warn now, never block — the same warning the direct-push commands give.
+  if (verified) preflightGuardReadiness(root);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-fold-'));
   try {
     const spec = path.join(tmp, 'paths');
@@ -219,9 +228,10 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const sha = git(['rev-parse', 'HEAD']).out.trim();
   const subject = `docs(${epic}): author ${step}`;
   ok(`${subject} → ${sha.slice(0, 7)} (${files.length} file(s))`);
+  if (sorted.seed.length) info(`with the new epic's seed: ${sorted.seed.join(', ')}`);
   if (sorted.ledger.length) info(`with the ledger (${verified ? 'a new epic\'s seed' : 'ledger: local'}): ${sorted.ledger.length} file(s)`);
   if (sorted.ci.length) info(`ledger changes left for CI (ledger: verified): ${sorted.ci.join(', ')}`);
   if (sorted.other.length) warn(`changed but not ${step}'s, left on disk: ${sorted.other.join(', ')}`);
   if (!folded) info('no draft branch to point at — capture is off or never ran (Yad-Folded: none)');
-  return { epic, step, commit: sha, subject, branch, folded, files, ledger: sorted.ledger, leftForCi: sorted.ci, leftOnDisk: sorted.other };
+  return { epic, step, commit: sha, subject, branch, folded, files, seed: sorted.seed, ledger: sorted.ledger, leftForCi: sorted.ci, leftOnDisk: sorted.other };
 }

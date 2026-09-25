@@ -193,7 +193,9 @@ The engine writes everything this step used to spell out by hand (E42):
 | `epic.md says …, --parent says …` · `--inherits says …` · `thread: …` · `has no parent:` / `has no thread:` · `write it as inherits: [a, b]` | the header is what `yad thread` reads, so it must say the same as the flags — in brackets for a list | fix `epic.md` (Step 4), or drop the flag |
 | `already has a contract-lock.json` · `already has an approvals.json with records in it` | a file already there is somebody's record | remove it only if it is left over from a mistake |
 
-Commit the seed on the `change/EP-<slug>` branch. It reaches the Product's default branch through this
+Commit the seed on the `change/EP-<slug>` branch: the first `yad fold EP-<slug> <step>` there takes it
+whole — the new ledger files and the new `change.json` / pointer `contract-lock.json` — beside that step's
+artifact, while the epic has no `state.json` in HEAD (E44). It reaches the Product's default branch through this
 change-epic's **first** review PR/MR — cut the `review/EP-<slug>/<artifact>` branch from `change/…` so
 it carries the seed. In verified mode `ledger-guard` exempts a new epic's ledger (creation, not mutation,
 #162), so no direct push to a protected default branch is needed; every later change to that ledger is
