@@ -273,7 +273,10 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   // copy — a fresh clone, a deleted branch — is continued rather than restarted from HEAD. Not from the hook:
   // an edit must never wait on the network. Offline, it is skipped in silence.
   if (!hook && !noPush && git(['remote', 'get-url', 'origin']).ok) {
-    spawnSync('git', ['fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${WIP_PREFIX}/${name}/*:refs/remotes/origin/${WIP_PREFIX}/${name}/*`],
+    // `--prune`, confined by the refspec to this person's capture copies: a branch deleted on origin (a
+    // secret captured by mistake, say) must not be continued and pushed back (E43 review 3). The same
+    // low-speed limit as the push, so a stalled HTTPS connection gives up instead of holding the capture.
+    spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--prune', '--no-tags', 'origin', `+refs/heads/${WIP_PREFIX}/${name}/*:refs/remotes/origin/${WIP_PREFIX}/${name}/*`],
       { cwd: root, stdio: 'ignore', timeout: 30_000, env: { ...env, ...pushEnv(env) } });
   }
   const changed = changedPaths(root, prefix);
@@ -328,7 +331,7 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
         if (quiet) process.stderr.write(`  • yad capture: push refused — ${pushed.why}\n`);
         else {
           warn(`push refused — ${pushed.why}; it stays refused while both machines keep their own copy`);
-          hand(`keep origin's: \`git branch -D <branch>\` here, then \`yad capture\` continues it (this machine's un-pushed captures of that epic are dropped)`);
+          hand(`keep origin's: \`git branch -D ${pushed.branches.join(' ')}\` here, then \`yad capture\` continues it (this machine's un-pushed captures of that epic are dropped)`);
         }
       }
     }

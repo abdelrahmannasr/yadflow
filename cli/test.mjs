@@ -24215,8 +24215,15 @@ test('E43 push: with no local branch a capture continues origin\'s; two machines
     // A capture by hand fetched first, but a local copy exists, so it is kept: the two have diverged.
     assert.equal(refused.value.pushed.pushed, 'refused', refused.out);
     assert.match(refused.out, /push refused — origin already has .*yad\/wip\/ann-lee\/EP-x.* nothing was overwritten; it stays refused while both machines keep their own copy/);
-    assert.match(refused.out, /git branch -D <branch>/);
+    assert.match(refused.out, /git branch -D yad\/wip\/ann-lee\/EP-x/, 'the hint names the branch');
     assert.equal(execFileSync('git', ['rev-parse', 'yad/wip/ann-lee/EP-x'], { cwd: remote, encoding: 'utf8' }).trim(), onOrigin);
+    // Deleted on origin: a capture by hand prunes the stale copy, so the old history is not pushed back.
+    execFileSync('git', ['update-ref', '-d', 'refs/heads/yad/wip/ann-lee/EP-x'], { cwd: remote });
+    b.g('branch', '-D', 'yad/wip/ann-lee/EP-x');
+    fs.writeFileSync(path.join(b.T, 'epics/EP-x/epic.md'), 'after the delete\n');
+    assert.equal((await captureRun(b.T, { noPush: false })).value.pushed.pushed, 'done');
+    assert.equal(execFileSync('git', ['rev-list', '--count', 'yad/wip/ann-lee/EP-x'], { cwd: remote, encoding: 'utf8' }).trim(),
+      String(Number(execFileSync('git', ['rev-list', '--count', 'main'], { cwd: remote, encoding: 'utf8' }).trim()) + 1), 'restarted on HEAD: the deleted captures are gone');
   } finally {
     for (const d of [remote, a.T, b?.T].filter(Boolean)) fs.rmSync(d, { recursive: true, force: true });
   }
@@ -24231,6 +24238,8 @@ test('E43 doctor: a blank line inside a branches list does not hide it; a patter
     wf('b.yml', 'on:\n  push:\n    branches: ["yad/**"]\n');
     wf('c.yml', 'on:\n  push:\n    branches: ["yad/wip/*"]\n');
     wf('d.yml', 'on:\n  push:\n    branches-ignore: ["yad/**", "[bad"]\n');
-    assert.deepEqual(pushOnEveryBranch(T), ['.github/workflows/a.yml', '.github/workflows/b.yml'], '`*` does not cross a `/`, so c misses yad/wip/<name>/<epic>');
+    wf('e.yml', 'on:\n  push:\n    branches: ["[a-z]*/**"]\n');        // a set, as GitHub reads it (review 3)
+    wf('f.yml', 'on:\n  push:\n    branches-ignore: ["[y]ad/**"]\n');
+    assert.deepEqual(pushOnEveryBranch(T), ['.github/workflows/a.yml', '.github/workflows/b.yml', '.github/workflows/e.yml'], '`*` does not cross a `/`, so c misses yad/wip/<name>/<epic>');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

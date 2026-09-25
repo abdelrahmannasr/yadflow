@@ -2115,14 +2115,16 @@ export function captureChecks(root, checks, cfg) {
 // whose filter is a one-line map (`push: { branches: ["**"] }`). yadflow's own files (`# yad-managed`) are
 // skipped: their filters are ours to keep.
 const SAMPLE_WIP_BRANCH = 'yad/wip/someone/EP-x';
-// GitHub's filter patterns: `**` any run of characters, `*` any run without `/`, and `?` and `+` apply to the
-// character before them, as in a regular expression (zero-or-one, one-or-more). Everything else is literal.
+// GitHub's filter patterns: `**` any run of characters, `*` any run without `/`, `?` and `+` apply to the
+// character before them (zero-or-one, one-or-more) and `[a-z]` is one character from a set — all as in a
+// regular expression, so those are left as they are. Everything else is literal. A pattern that is not a
+// valid expression is judged not to match.
 const globMatches = (glob, ref) => {
-  try { return new RegExp(`^${glob.replace(/[.^${}()|\\[\]]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`).test(ref); } catch { return false; }
+  try { return new RegExp(`^${glob.replace(/[.^${}()|\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`).test(ref); } catch { return false; }
 };
 const yamlList = (inline, childLines) => {
   const v = (inline || '').trim();
-  const items = v.startsWith('[') ? v.replace(/^\[|\].*$/g, '').split(',') : v && !v.startsWith('#') ? [v] : childLines.map((l) => l.replace(/^\s*-\s*/, ''));
+  const items = v.startsWith('[') ? v.replace(/^\[/, '').replace(/\]\s*(#.*)?$/, '').split(',') : v && !v.startsWith('#') ? [v] : childLines.map((l) => l.replace(/^\s*-\s*/, ''));
   return items.map((x) => x.replace(/\s+#.*$/, '').trim().replace(/^["']|["']$/g, '')).filter(Boolean);
 };
 function pushRunsOnWip(block) {
