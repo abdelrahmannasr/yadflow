@@ -593,6 +593,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | Check | What it means | What to do |
 |---|---|---|
 | `automation` | `.sdlc/automation.json` does not parse or has the wrong shape (**fail**). Every step is held at `advance: human` until it is fixed, and neither `yad dial` nor `yad kill` writes over it. | Fix the JSON, or delete the file to go back to the defaults (kill switch off, every Shape step human). |
+| `owners:unreadable` | A step owner file (`.sdlc/owners/<step>.json`, E47) cannot be read, or is named for a step that cannot be assigned (**warn**). It is ignored everywhere else: no owner is shown and the edit-time warning is off. | `yad assign <epic> <step> --force` replaces it; `yad unassign <epic> <step> --force` removes it. `yad owners` lists them. |
 | `automation:kill` | The kill switch is on (**warn**), with who, when and why. Every step is held at `advance: human`. | `yad unkill` once the reason is gone. |
 | `automation:gate` | `.sdlc/automation.json` sets a review gate to `auto` (**fail**). Nothing honours it — a gate is never automatic. | Remove the line. |
 | `automation:build-step` / `automation:unknown` | A Build step listed in `automation.json`, where nothing reads it (a lane's dial is in `build-state`), or an id or value this release does not know (**warn**). | `yad dial <epic> <story> --repo <name> <step>` for a Build step; remove the rest. |

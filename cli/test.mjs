@@ -24964,3 +24964,18 @@ test('E47 CLI: the three verbs parse their words, and yad owners --json answers 
     assert.equal(yadRun(T, 'unassign', 'EP-x', 'architecture', '--force').code, 0);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E47 doctor: an owner file that does nothing is named as owners:unreadable; a good one says nothing', async () => {
+  const { T, w } = ownersFixture();
+  try {
+    const { collectDoctor } = await import('./doctor.mjs');
+    await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal(collectDoctor(T).checks.some((x) => x.id === 'owners:unreadable'), false);
+    w('epics/EP-x/.sdlc/owners/epic.json', '{');
+    w('epics/EP-x/.sdlc/owners/epic-review.json', '{}');
+    const hit = collectDoctor(T).checks.filter((x) => x.id === 'owners:unreadable');
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /2 step owner file\(s\) do nothing: .*epic-review is not an authoring step.*epic\.json is not valid JSON/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

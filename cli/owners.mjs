@@ -91,7 +91,7 @@ export function readOwners(root, epic) {
   return names.map((n) => {
     const step = n.slice(0, -'.json'.length);
     const base = { epic, step, path: ownerRel(epic, step) };
-    if (!OWNER_STEPS.includes(step)) return { ...base, error: `${step} is not an authoring step, so nothing reads this file` };
+    if (!OWNER_STEPS.includes(step)) return { ...base, error: `${base.path}: ${step} is not an authoring step, so nothing reads this file` };
     const { record, error } = readOwnerFile(path.join(dir, n), step);
     if (error) return { ...base, error: `${base.path} ${error}` };
     const open = stepOpen(state, step);

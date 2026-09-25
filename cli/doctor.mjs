@@ -22,6 +22,7 @@ import { readProtection, protectionLine, protectionJSON, hideAddresses } from '.
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { readOwners } from './owners.mjs';
 
 const MIN_NODE = 18;
 
@@ -1598,6 +1599,18 @@ export function stepStateChecks(checks, root) {
   }
 }
 
+// `owners:unreadable` (E47). A step owner file that cannot be read is skipped in silence everywhere else —
+// `yad next` prints no owner and the capture hook warns nobody — so the assignment the team thinks it made
+// does nothing. Say so here. A file for a step that cannot be assigned is the same kind of dead line.
+export function ownerChecks(checks, root) {
+  const bad = epicIds(root).flatMap((e) => readOwners(root, e)).filter((o) => o.error);
+  if (!bad.length) return;
+  const shown = bad.slice(0, 3).map((o) => o.error).join('; ');
+  check(checks, 'owners:unreadable', 'project', 'warn',
+    `${bad.length} step owner file(s) do nothing: ${shown}${bad.length > 3 ? ` (+${bad.length - 3} more)` : ''}`,
+    'an owner file that cannot be read is ignored — no owner is shown and the edit-time warning is off. Assign the step again (`yad assign <epic> <step> --force` replaces the file), or remove it (`yad unassign <epic> <step> --force`); `yad owners` lists them all');
+}
+
 // `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
 // default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
 //
@@ -2026,6 +2039,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   profileChecks(checks, root);
   skipChecks(checks, root);
   stepStateChecks(checks, root);
+  ownerChecks(checks, root);
   phaseChecks(checks, root);
   laneChecks(checks, root);
   epicChecks(checks, root);
