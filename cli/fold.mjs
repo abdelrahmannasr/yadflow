@@ -160,7 +160,15 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const stagedDeletion = new Set(entries.filter((e) => e.xy[0] === 'D').map((e) => e.path));
   const addable = (p) => known.has(p) || onDisk(p);
   const foldable = (p) => addable(p) || stagedDeletion.has(p);
-  const files = [...sorted.step, ...sorted.ledger].filter(foldable);
+  // A path can be listed twice: `git rm --cached` shows it as a staged deletion (`D `) AND untracked (`??`).
+  const files = [...new Set([...sorted.step, ...sorted.ledger])].filter(foldable);
+  // That case cannot be folded: the fold commits files as they are on disk, and `commit --only` cannot
+  // record the deletion of a file that is still there. `git add` would quietly undo the person's choice.
+  const untracked = files.filter((p) => stagedDeletion.has(p) && onDisk(p));
+  if (untracked.length) {
+    return refuse(`staged as deleted but still on disk (git rm --cached): ${untracked.join(', ')}`,
+      'yad fold commits files as they are on disk — delete the file to fold its deletion, or `git add` it back to keep it');
+  }
   if (!sorted.step.filter(foldable).length) {
     return refuse(`nothing to fold — ${step}'s files have no changes since the last commit`,
       sorted.other.length ? `changed, but not ${step}'s: ${sorted.other.join(', ')}` : null);
@@ -172,11 +180,13 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
     const addSpec = path.join(tmp, 'add');
     const msg = path.join(tmp, 'message');
     fs.writeFileSync(spec, files.join('\0'));
-    fs.writeFileSync(addSpec, files.filter(addable).join('\0'));
+    const toAdd = files.filter(addable);
+    fs.writeFileSync(addSpec, toAdd.join('\0'));
     fs.writeFileSync(msg, foldMessage({ epic, step, folded }));
     const lit = { ...env, GIT_LITERAL_PATHSPECS: '1' };
     // New files must be known to git before `commit --only` can take them; the step's own paths only.
-    const added = spawnSync('git', ['add', '-A', `--pathspec-from-file=${addSpec}`, '--pathspec-file-nul'], { cwd: root, encoding: 'utf8', env: lit });
+    // Never with an empty list: `git add -A` given no pathspec stages EVERY change in the repository.
+    const added = toAdd.length ? spawnSync('git', ['add', '-A', `--pathspec-from-file=${addSpec}`, '--pathspec-file-nul'], { cwd: root, encoding: 'utf8', env: lit }) : { status: 0 };
     if (added.status !== 0) return refuse(`could not stage ${step}'s files: ${(added.stderr || '').trim()}`);
     // stdin stays the terminal's: a signing key may ask for its passphrase.
     const commit = spawnSync('git', ['commit', '--only', '--quiet', '-F', msg, `--pathspec-from-file=${spec}`, '--pathspec-file-nul'],

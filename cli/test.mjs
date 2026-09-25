@@ -24403,9 +24403,20 @@ test('E44 fold (review 1): a staged deletion and a git mv are folded whole; a me
     assert.deepEqual(g('show', '--name-status', '--no-renames', '--format=', 'HEAD').split('\n').sort(), ['A\tepics/EP-x/stories/EP-x-S01.md', 'D\tepics/EP-x/stories/EP-x-S01-old.md']);
     assert.equal(g('status', '--porcelain'), '', 'nothing of the rename is left behind in the index');
     g('rm', '-q', 'epics/EP-x/stories/EP-x-S02.md');
+    w('notes.txt', 'mine\n');   // a fold with nothing to `git add` must not stage the rest of the repo
     const rm = await foldRun(T, { epic: 'EP-x', step: 'stories' });
     assert.equal(rm.code, 0, rm.out);
     assert.deepEqual(g('show', '--name-status', '--format=', 'HEAD').split('\n'), ['D\tepics/EP-x/stories/EP-x-S02.md']);
+    assert.equal(g('diff', '--cached', '--name-only'), '', 'nothing else was staged');
+    fs.rmSync(path.join(T, 'notes.txt'));
+    // `git rm --cached`: a staged deletion of a file still on disk is refused, not quietly added back.
+    w('epics/EP-x/stories/EP-x-S04.md', 'four\n'); g('add', '-A'); g('commit', '-q', '-m', 's4');
+    g('rm', '-q', '--cached', 'epics/EP-x/stories/EP-x-S04.md');
+    const cached = await foldRun(T, { epic: 'EP-x', step: 'stories' });
+    assert.equal(cached.code, 1);
+    assert.match(cached.out, /staged as deleted but still on disk \(git rm --cached\): epics\/EP-x\/stories\/EP-x-S04\.md/);
+    assert.match(g('diff', '--cached', '--name-status'), /^D\s+epics\/EP-x\/stories\/EP-x-S04\.md$/, 'the person\'s choice is left as it was');
+    g('reset', '-q', '--', 'epics/EP-x/stories/EP-x-S04.md');
     // A merge in progress: refused, and nothing staged.
     fs.writeFileSync(path.join(T, '.git/MERGE_HEAD'), `${g('rev-parse', 'HEAD')}\n`);
     w('epics/EP-x/stories/EP-x-S03.md', 'three\n');
