@@ -90,11 +90,13 @@ export function captureOff(root, env = process.env) {
 }
 
 // git, spawned directly: `run()` trims its output, and a NUL-separated list must reach the parser whole.
-function gitIn(root, env = null) {
+// `env` is the whole environment the command was given (`runCapture`'s, so a caller's settings reach every git
+// call); `extra` adds this call's own keys on top.
+function gitIn(root, env = process.env, extra = null) {
   return (args, input = null) => {
     const r = spawnSync('git', args, {
       cwd: root, encoding: 'utf8', maxBuffer: 1 << 30,
-      env: env ? { ...process.env, ...env } : process.env,
+      env: extra ? { ...env, ...extra } : env,
       ...(input !== null ? { input } : {}),
     });
     return { ok: r.status === 0, out: r.stdout || '', err: (r.stderr || '').trim() };
@@ -107,8 +109,8 @@ function gitIn(root, env = null) {
 // Product's place in the repo — is cut off, and every path below is relative to the Product root.
 // `GIT_OPTIONAL_LOCKS=0`: a plain `git status` refreshes and rewrites the person's real index, taking
 // `index.lock` for a moment, and a `git commit` of theirs at that instant would fail. This must not.
-function changedPaths(root, prefix) {
-  const r = gitIn(root, { GIT_OPTIONAL_LOCKS: '0' })(['status', '-z', '--porcelain=v1', '--untracked-files=all', '--no-renames', '--', 'epics', FOUNDATION_DIR]);
+function changedPaths(root, prefix, env) {
+  const r = gitIn(root, env, { GIT_OPTIONAL_LOCKS: '0' })(['status', '-z', '--porcelain=v1', '--untracked-files=all', '--no-renames', '--', 'epics', FOUNDATION_DIR]);
   if (!r.ok) return null;
   const out = [];
   for (const entry of r.out.split('\0')) {
@@ -129,11 +131,11 @@ export const captureMessage = (meta) => `wip(${meta.epic}): capture\n\n${trailer
 // One epic's capture: build the tree, and commit it on the epic's branch when its artifacts differ from the
 // branch tip. Returns { epic, branch, commit, files } for a commit, { epic, branch, unchanged: true } when
 // there was nothing new, or { epic, branch, error } on a failure (reported, never thrown).
-function captureEpic(root, git, { name, epic, paths, head, headTree, current, prefix }) {
+function captureEpic(root, git, { name, epic, paths, head, headTree, current, prefix, env }) {
   const branch = wipBranch(name, epic);
   const ref = `refs/heads/${branch}`;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-capture-'));
-  const idx = gitIn(root, { GIT_INDEX_FILE: path.join(tmp, 'index'), GIT_LITERAL_PATHSPECS: '1' });
+  const idx = gitIn(root, env, { GIT_INDEX_FILE: path.join(tmp, 'index'), GIT_LITERAL_PATHSPECS: '1' });
   try {
     const seeded = head ? idx(['read-tree', head]) : idx(['read-tree', '--empty']);
     if (!seeded.ok) return { epic, branch, error: `could not read HEAD's tree: ${seeded.err}` };
@@ -249,7 +251,7 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
     else { fail(msg); if (extra.hint) hand(extra.hint); process.exitCode = 1; }
     return { captured: [], unchanged: [], errors: [], pushed: null, off: extra.off ?? null };
   };
-  const git = gitIn(root);
+  const git = gitIn(root, env);
   const top = git(['rev-parse', '--show-toplevel']);
   if (!top.ok) return bail('not a git repository — nothing to capture');
   if (!fs.existsSync(productConfigPath(root))) return bail('not a Product (no .sdlc/hub.json or product.json here) — nothing to capture', { hint: 'run it from the Product root, or pass --dir' });
@@ -282,7 +284,7 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
     spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--prune', '--no-tags', 'origin', `+refs/heads/${WIP_PREFIX}/${name}/*:refs/remotes/origin/${WIP_PREFIX}/${name}/*`],
       { cwd: root, stdio: 'ignore', timeout: 30_000, env: { ...env, ...pushEnv(env) } });
   }
-  const changed = changedPaths(root, prefix);
+  const changed = changedPaths(root, prefix, env);
   if (changed === null) return bail('git could not list the changed files', { loud: true });
   const byEpic = new Map();
   for (const p of changed) {
@@ -307,7 +309,7 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   const unchanged = [];
   const errors = [];
   for (const [epic, paths] of [...byEpic].sort(([a], [b]) => a.localeCompare(b))) {
-    const res = captureEpic(root, git, { name, epic, paths, head, headTree, current, prefix });
+    const res = captureEpic(root, git, { name, epic, paths, head, headTree, current, prefix, env });
     if (res.error) errors.push(res);
     else if (res.unchanged) unchanged.push(res);
     else captured.push(res);

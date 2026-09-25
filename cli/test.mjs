@@ -24002,8 +24002,10 @@ test('E43 capture: off by config or YAD_CAPTURE=0; no git name, no Product and n
   try {
     anon.w('epics/EP-x/epic.md', 'changed\n');
     const manual = await captureRun(anon.T, { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
-    // The global config may hold a name on this machine, so only assert when git truly has none.
-    if (manual.value.captured.length === 0) assert.match(manual.out, /git has no user.name/);
+    // With no global or system config, git truly has no name — on every machine, the Mac included.
+    assert.equal(manual.code, 1);
+    assert.match(manual.out, /git has no user.name to name the capture branch after/);
+    assert.equal(anon.g('branch', '--list', 'yad/wip/*'), '', 'nothing captured without a name');
   } finally { fs.rmSync(anon.T, { recursive: true, force: true }); }
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-none-'));
   try {
