@@ -274,8 +274,9 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   // an edit must never wait on the network. Offline, it is skipped in silence.
   if (!hook && !noPush && git(['remote', 'get-url', 'origin']).ok) {
     // `--prune`, confined by the refspec to this person's capture copies: a branch deleted on origin (a
-    // secret captured by mistake, say) is not continued from a stale copy (E43 review 3). A LOCAL branch is
-    // still pushed back — removing one for good means deleting it on every machine too (README). The same
+    // secret captured by mistake, say) is not continued from a stale copy (E43 review 3). A LOCAL branch, or
+    // a copy another fetch left, is still pushed back — removing one for good means `git branch -D` and
+    // `git fetch --prune origin` on every machine too (README). The same
     // low-speed limit as the push, so a stalled HTTPS connection gives up instead of holding the capture.
     spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--prune', '--no-tags', 'origin', `+refs/heads/${WIP_PREFIX}/${name}/*:refs/remotes/origin/${WIP_PREFIX}/${name}/*`],
       { cwd: root, stdio: 'ignore', timeout: 30_000, env: { ...env, ...pushEnv(env) } });
