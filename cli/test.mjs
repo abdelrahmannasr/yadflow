@@ -24183,3 +24183,54 @@ test('E43 doctor: a Product whose targets have no post-edit hook is told to capt
     assert.match(c.message, /wip capture is by hand here — no IDE target \(\.agents\) has a post-edit hook yad wires/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E43 push: with no local branch a capture continues origin\'s; two machines each with their own copy are refused, named, never overwritten (review 2)', async () => {
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-origin-'));
+  const a = captureFixture();
+  let b = null;
+  try {
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    a.g('remote', 'add', 'origin', remote);
+    a.g('push', '-q', 'origin', 'main');
+    a.w('epics/EP-x/epic.md', 'first\n');
+    assert.equal((await captureRun(a.T, { noPush: false })).value.pushed.pushed, 'done');
+    const first = a.g('rev-parse', 'yad/wip/ann-lee/EP-x');
+    // The local branch is deleted after the push (or this is a fresh clone): the next capture continues origin's.
+    a.g('branch', '-D', 'yad/wip/ann-lee/EP-x');
+    a.w('epics/EP-x/epic.md', 'second\n');
+    const again = await captureRun(a.T, { noPush: false });
+    assert.equal(again.value.pushed.pushed, 'done', again.out);
+    assert.equal(a.g('rev-parse', 'yad/wip/ann-lee/EP-x^'), first, 'continued, not restarted from HEAD');
+    // A second machine, a fresh clone, with a capture of its own: it continues origin's, so its push lands.
+    b = { T: fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-clone-')) };
+    execFileSync('git', ['clone', '-q', remote, b.T], { stdio: 'pipe' });
+    b.g = (...x) => execFileSync('git', x, { cwd: b.T, encoding: 'utf8', stdio: 'pipe' }).trim();
+    b.g('config', 'user.email', 'ann@corp.io'); b.g('config', 'user.name', 'Ann Lee');
+    fs.writeFileSync(path.join(b.T, 'epics/EP-x/epic.md'), 'from b\n');
+    assert.equal((await captureRun(b.T, { noPush: false })).value.pushed.pushed, 'done');
+    // Machine A captures again on its OWN copy, which B has moved past: refused, named, nothing overwritten.
+    const onOrigin = execFileSync('git', ['rev-parse', 'yad/wip/ann-lee/EP-x'], { cwd: remote, encoding: 'utf8' }).trim();
+    a.w('epics/EP-x/epic.md', 'third from a\n');
+    const refused = await captureRun(a.T, { noPush: false });
+    // A capture by hand fetched first, but a local copy exists, so it is kept: the two have diverged.
+    assert.equal(refused.value.pushed.pushed, 'refused', refused.out);
+    assert.match(refused.out, /push refused — origin already has .*yad\/wip\/ann-lee\/EP-x.* nothing was overwritten; it stays refused while both machines keep their own copy/);
+    assert.match(refused.out, /git branch -D <branch>/);
+    assert.equal(execFileSync('git', ['rev-parse', 'yad/wip/ann-lee/EP-x'], { cwd: remote, encoding: 'utf8' }).trim(), onOrigin);
+  } finally {
+    for (const d of [remote, a.T, b?.T].filter(Boolean)) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('E43 doctor: a blank line inside a branches list does not hide it; a pattern is read the way GitHub reads it (review 2)', async () => {
+  const { pushOnEveryBranch } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-wf2-'));
+  try {
+    const wf = (n, text) => { fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true }); fs.writeFileSync(path.join(T, '.github/workflows', n), text); };
+    wf('a.yml', 'on:\n  push:\n    branches:\n\n      # every branch\n      - "**"\n');
+    wf('b.yml', 'on:\n  push:\n    branches: ["yad/**"]\n');
+    wf('c.yml', 'on:\n  push:\n    branches: ["yad/wip/*"]\n');
+    wf('d.yml', 'on:\n  push:\n    branches-ignore: ["yad/**", "[bad"]\n');
+    assert.deepEqual(pushOnEveryBranch(T), ['.github/workflows/a.yml', '.github/workflows/b.yml'], '`*` does not cross a `/`, so c misses yad/wip/<name>/<epic>');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

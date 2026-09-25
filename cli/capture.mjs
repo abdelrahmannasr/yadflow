@@ -153,7 +153,12 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current, pr
     const treeSha = tree.out.trim();
     for (let attempt = 0; attempt < 2; attempt++) {
       const tipR = git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]);
-      const tip = tipR.ok ? tipR.out.trim() : null;
+      const local = tipR.ok ? tipR.out.trim() : null;
+      // No local branch, but origin has one (a fresh clone, or the local branch deleted after a push): the
+      // capture CONTINUES origin's, or the plain push below could never fast-forward it and the epic's
+      // captures would never leave this machine (E43 review 2). A capture by hand fetches these first.
+      const remoteR = local ? null : git(['rev-parse', '--verify', '-q', `refs/remotes/origin/${branch}^{commit}`]);
+      const tip = local || (remoteR?.ok ? remoteR.out.trim() : null);
       // Nothing new when this epic's artifacts are the same as on the branch tip (or, for a first capture,
       // as in HEAD). Compared on the artifacts only: HEAD moving under the branch changes the ledger and
       // the rest of the tree, and that alone is not a capture.
@@ -171,7 +176,7 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current, pr
       const sha = commit.out.trim();
       // Compare-and-swap: move the ref only if it is still where it was read. An all-zero old value means
       // "must not exist yet". A lost race re-reads the tip and commits on top of it, once.
-      const moved = git(['update-ref', '-m', `yad capture ${epic}`, ref, sha, tip || '0'.repeat(sha.length)]);
+      const moved = git(['update-ref', '-m', `yad capture ${epic}`, ref, sha, local || '0'.repeat(sha.length)]);
       if (moved.ok) return { epic, branch, commit: sha, files: paths.filter((p) => capturedEpic(p) === epic).length };
       if (attempt === 1) return { epic, branch, error: `${branch} moved while it was being written — run \`yad capture\` again` };
     }
@@ -182,9 +187,9 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current, pr
 }
 
 // The push, as git arguments: every capture branch of this person in one go. A PLAIN push, never a forced
-// one: each capture is built on the last, so the remote branch is always an older capture of ours and the
-// push is a fast-forward. When it is not — the same person pushed from a second machine — git refuses that
-// one branch and nothing is overwritten (E43 review: a lease read remote-tracking refs, which a
+// one: each capture is built on the last — or, with no local branch, on origin's (see `captureEpic`) — so
+// the push is a fast-forward. When it is not — the same person captured the same epic on two machines —
+// git refuses that one branch and nothing is overwritten (E43 review: a lease read remote-tracking refs, which a
 // single-branch clone never has, so it refused every push after the first; and which an IDE's background
 // fetch updates, so it would have let the push overwrite the other machine). `--no-verify`: a team's
 // pre-push hook (tests, linters) has no business running on a draft snapshot, and could not run unattended.
@@ -226,6 +231,10 @@ function push(root, git, name, { hook, now, spawner, env }) {
   const r = spawnSync('git', pushArgs(name), { cwd: root, encoding: 'utf8', timeout: 60_000, env: { ...env, ...pushEnv(env) } });
   if (stateFile) writeJSON(stateFile, { lastPushAt: now });
   if (r.status === 0) return { pushed: 'done' };
+  // Refused, not failed: origin has a capture branch this one does not continue. The next push is refused
+  // the same way, so it is named as stuck — never "rides the next push".
+  const refused = [...(r.stderr || '').matchAll(/\[rejected\]\s+(\S+)/g)].map((m) => m[1]);
+  if (refused.length) return { pushed: 'refused', branches: refused, why: `origin already has ${refused.join(', ')} with captures this machine does not have (pushed from another machine) — nothing was overwritten` };
   const why = r.error?.code === 'ETIMEDOUT' ? 'the push took over a minute' : ((r.stderr || '').trim().split('\n').pop() || `git exited ${r.status}`);
   return { pushed: 'failed', why };
 }
@@ -260,6 +269,13 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   const branchR = git(['symbolic-ref', '--short', '-q', 'HEAD']);
   const current = branchR.ok ? branchR.out.trim() : null;
 
+  // A capture by hand first fetches this person's capture branches (no prompts, short), so one with no local
+  // copy — a fresh clone, a deleted branch — is continued rather than restarted from HEAD. Not from the hook:
+  // an edit must never wait on the network. Offline, it is skipped in silence.
+  if (!hook && !noPush && git(['remote', 'get-url', 'origin']).ok) {
+    spawnSync('git', ['fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${WIP_PREFIX}/${name}/*:refs/remotes/origin/${WIP_PREFIX}/${name}/*`],
+      { cwd: root, stdio: 'ignore', timeout: 30_000, env: { ...env, ...pushEnv(env) } });
+  }
   const changed = changedPaths(root, prefix);
   if (changed === null) return bail('git could not list the changed files', { loud: true });
   const byEpic = new Map();
@@ -308,6 +324,12 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
       else if (pushed.pushed === 'failed') {
         if (quiet) process.stderr.write(`  • yad capture: push failed — ${pushed.why}\n`);
         else { warn(`push failed — ${pushed.why}; the captures are safe on this machine and ride the next push`); }
+      } else if (pushed.pushed === 'refused') {
+        if (quiet) process.stderr.write(`  • yad capture: push refused — ${pushed.why}\n`);
+        else {
+          warn(`push refused — ${pushed.why}; it stays refused while both machines keep their own copy`);
+          hand(`keep origin's: \`git branch -D <branch>\` here, then \`yad capture\` continues it (this machine's un-pushed captures of that epic are dropped)`);
+        }
       }
     }
   }

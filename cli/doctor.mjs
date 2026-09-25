@@ -2111,9 +2111,15 @@ export function captureChecks(root, checks, cfg) {
 // GitHub does: no `branches`/`branches-ignore` (and no `tags`) runs on every branch; a `branches` pattern
 // that matches a capture branch runs on it (`**` does); a `branches-ignore` that does not name one runs on
 // it. A pattern it cannot judge (a `!` negation) counts as filtered, since a false warning costs a team a
-// needless edit. yadflow's own files (`# yad-managed`) are skipped: their filters are ours to keep.
+// needless edit — and so do two spellings it does not read: `on:` as a YAML list (`- push`), and a `push:`
+// whose filter is a one-line map (`push: { branches: ["**"] }`). yadflow's own files (`# yad-managed`) are
+// skipped: their filters are ours to keep.
 const SAMPLE_WIP_BRANCH = 'yad/wip/someone/EP-x';
-const globMatches = (glob, ref) => new RegExp(`^${glob.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '.*')}$`).test(ref);
+// GitHub's filter patterns: `**` any run of characters, `*` any run without `/`, and `?` and `+` apply to the
+// character before them, as in a regular expression (zero-or-one, one-or-more). Everything else is literal.
+const globMatches = (glob, ref) => {
+  try { return new RegExp(`^${glob.replace(/[.^${}()|\\[\]]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`).test(ref); } catch { return false; }
+};
 const yamlList = (inline, childLines) => {
   const v = (inline || '').trim();
   const items = v.startsWith('[') ? v.replace(/^\[|\].*$/g, '').split(',') : v && !v.startsWith('#') ? [v] : childLines.map((l) => l.replace(/^\s*-\s*/, ''));
@@ -2126,7 +2132,10 @@ function pushRunsOnWip(block) {
     const m = block[i].match(/^(\s+)(branches|branches-ignore|tags|tags-ignore):\s*(.*)$/);
     if (!m) continue;
     const children = [];
-    for (let j = i + 1; j < block.length && (block[j].match(/^(\s*)/)[1].length > m[1].length || /^\s*-/.test(block[j])); j++) {
+    for (let j = i + 1; j < block.length; j++) {
+      // A blank or comment line inside the list does not end it (E43 review 2).
+      if (!block[j].trim() || /^\s*#/.test(block[j])) continue;
+      if (!(block[j].match(/^(\s*)/)[1].length > m[1].length || /^\s*-/.test(block[j]))) break;
       if (/^\s*-/.test(block[j])) children.push(block[j]);
     }
     keys[m[2]] = yamlList(m[3], children);
