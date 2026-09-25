@@ -31,7 +31,7 @@ import path from 'node:path';
 import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
 import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot } from './epic-state.mjs';
-import { capturedEpic, gitIn, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
+import { capturedEpic, gitIn, isOwnerPath, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
 import { resolveDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 
 // The authoring steps a fold can close: every catalogue step of kind `author` that writes a Shape artifact.
@@ -83,7 +83,7 @@ export function sortChanges(entries, { epic, step, verified, seeding = false }) 
     if (covers(own, p)) out.step.push(p);
     // A step owner file (E47) is never folded: an assignment is not authoring, and a fold that carried one
     // alone would be a "docs: author <step>" commit with nothing authored. It is committed on its own.
-    else if (/\/\.sdlc\/owners\/[^/]+\.json$/.test(p)) out.other.push(p);
+    else if (isOwnerPath(p)) out.other.push(p);
     else if (artifactOf === epic) (seeding && creating && p.startsWith(`${dir}.sdlc/`) ? out.seed : out.other).push(p);
     else if (artifactOf === null) (!verified || (seeding && creating) ? out.ledger : out.ci).push(p);
   }

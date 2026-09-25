@@ -50,7 +50,10 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --prof
 
 # True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
-artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -qE '^(epics|foundation)/' "$CHANGED"; }
+# A step owner file (`yad assign`, E47) is not an artifact: an assignment is advice, reviewed by nobody, and
+# a review/EP-* PR would advance the step on merge. So a PR of owner files alone is not an artifact change.
+# No `-q` on the second grep: under pipefail an early exit would SIGPIPE the first and read as "no artifact".
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -E '^(epics|foundation)/' "$CHANGED" | grep -vE '^(epics/[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
 
 TITLE="${ARGS[0]:-}"
 if [ -z "$TITLE" ]; then

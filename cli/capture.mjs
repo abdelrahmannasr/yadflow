@@ -47,6 +47,11 @@ export const PUSH_EVERY_MS = 5 * 60 * 1000;
 // Everything else in a `.sdlc/` folder is the ledger, or a Build log only the engine writes.
 const PERSON_WRITTEN_SDLC = new Set(['.sdlc/contract-lock.json', '.sdlc/change.json', '.sdlc/design-links.json', '.sdlc/test-links.json']);
 
+// A step owner file (E47): `<epic>/.sdlc/owners/<step>.json`, directly in that folder. The one rule capture,
+// fold, claims and the owners module all use, so the four can never disagree.
+export const isOwnerPath = (rel) => typeof rel === 'string'
+  && /^(epics\/EP-[^/]+|foundation)\/\.sdlc\/owners\/[^/]+\.json$/.test(rel.split(path.sep).join('/'));
+
 // Which epic a Product-relative path belongs to, if capture takes it — else null. The complement of the
 // ledger, not a list of artifacts (decision 4).
 export function capturedEpic(rel) {
@@ -62,7 +67,7 @@ export function capturedEpic(rel) {
   }
   if (!rest || PERSON_WRITTEN_SDLC.has(rest)) return rest ? epic : null;
   // A step's owner file (E47), written by `yad assign` — never the ledger.
-  if (/^\.sdlc\/owners\/[^/]+\.json$/.test(rest)) return epic;
+  if (isOwnerPath(p)) return epic;
   const parts = rest.split('/');
   // The ledger at any depth: a `.sdlc/` folder (state, approvals, Build logs, shards) or `reviews/`.
   if (parts.slice(0, -1).some((d) => d === '.sdlc' || d === 'reviews')) return null;

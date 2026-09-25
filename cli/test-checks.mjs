@@ -1572,6 +1572,17 @@ test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review h
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the Product gates']).code, 0);
   // the legitimate path: a review/EP-* head carries the artifact change and wants the review title
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, 'review: epic.md (EP-demo)']).code, 0);
+  // E47: step owner files alone are not an artifact change; beside a real artifact they change nothing.
+  const owners = path.join(T, 'changed-owners.txt');
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nfoundation/.sdlc/owners/foundation.json\n');
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 0);
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nepics/EP-demo/epic.md\n');
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/sub/x.json\n');
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1, 'only a file directly in owners/');
+  // A long list: the guard must read all of it (pipefail), and still fail.
+  fs.writeFileSync(owners, `${Array.from({ length: 20000 }, (_, i) => `epics/EP-demo/notes/${i}.md`).join('\n')}\n`);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1638,6 +1649,12 @@ test('pr-template gate: hub rejects an artifact change (epics/**) on a non-revie
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, CODE_TPL]).code, 0);
   // the legitimate path: a review/EP-* head still requires the artifact-review template
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, HUB_TPL]).code, 0);
+  // E47: step owner files alone are not an artifact change; beside a real artifact they change nothing.
+  const owners = path.join(T, 'changed-owners.txt');
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nfoundation/.sdlc/owners/foundation.json\n');
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 0);
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nepics/EP-demo/architecture.md\n');
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

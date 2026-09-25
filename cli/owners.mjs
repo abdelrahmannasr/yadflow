@@ -31,7 +31,7 @@ import path from 'node:path';
 import { ok, info, warn, fail, hand, readJSON, writeJSON } from './lib.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { STEPS, epicIds, epicRel, epicRoot, isPassed, isValidEpicId, stepStatus } from './epic-state.mjs';
-import { capturedEpic, gitIn, wipName, WIP_PREFIX } from './capture.mjs';
+import { capturedEpic, gitIn, isOwnerPath, wipName, WIP_PREFIX } from './capture.mjs';
 import { FOLD_STEPS, stepPaths } from './fold.mjs';
 
 export const OWNER_STEPS = FOLD_STEPS;
@@ -40,7 +40,7 @@ export const OWNERS_DIR = '.sdlc/owners';
 export const OWNER_WARN_AGAIN_MS = 60 * 60 * 1000;
 
 export const ownerRel = (epic, step) => `${epicRel(epic)}/${OWNERS_DIR}/${step}.json`;
-export const isOwnerPath = (rel) => /(^|\/)\.sdlc\/owners\/[^/]+\.json$/.test(String(rel || '').split(path.sep).join('/'));
+export { isOwnerPath };
 const reviewOf = (step) => STEPS.find((s) => s.kind === 'review' && s.reviews === step)?.id || null;
 
 // One owner file, read. `{ record }` when it is a valid assignment, `{ error }` when it is there and is not,
@@ -183,7 +183,7 @@ export async function runAssign(root, { epic, step, to = null, force = false, en
     warn(`no capture branch here is named ${owner} yet — check it is ${name}'s git user.name exactly, or the edit-time warning will never match them`);
   }
   info('advice, not a lock: the capture hook warns anyone else who edits this step\'s files; nothing is blocked');
-  hand(`it reaches the team once it is committed and pulled — commit ${rel} on its own (\`yad fold\` never takes it)${isVerifiedLedger(readJSON(productConfigPath(root), null)) ? ', through a small PR on this verified Product' : ''}`);
+  hand(`it reaches the team once it is committed and pulled — commit ${rel} on its own (\`yad fold\` never takes it)${isVerifiedLedger(readJSON(productConfigPath(root), null)) ? ', in a PR of its own on this verified Product: the Product checks let a PR of owner files alone through, and a review/EP-* branch is not for it' : ''}`);
   return { epic, step, owner, name, changed: true, replaced, path: rel };
 }
 

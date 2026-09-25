@@ -1599,7 +1599,7 @@ export function stepStateChecks(checks, root) {
   }
 }
 
-// `owners:unreadable` (E47). A step owner file that cannot be read is skipped in silence everywhere else —
+// `owners:ignored` (E47). A step owner file that cannot be read is skipped in silence everywhere else —
 // `yad next` prints no owner and the capture hook warns nobody — so the assignment the team thinks it made
 // does nothing. Say so here. A file for a step that cannot be assigned, or that is not on the epic's chain,
 // is the same kind of dead line.
@@ -1609,9 +1609,9 @@ export function ownerChecks(checks, root) {
     .map((o) => (o.error ? o : { ...o, error: `${o.path}: ${o.step} is not on ${o.epic}'s chain` }));
   if (!bad.length) return;
   const shown = bad.slice(0, 3).map((o) => o.error).join('; ');
-  check(checks, 'owners:unreadable', 'project', 'warn',
+  check(checks, 'owners:ignored', 'project', 'warn',
     `${bad.length} step owner file(s) do nothing: ${shown}${bad.length > 3 ? ` (+${bad.length - 3} more)` : ''}`,
-    'an owner file that cannot be read is ignored — no owner is shown and the edit-time warning is off. Assign the step again (`yad assign <epic> <step> --force` replaces the file), or remove it (`yad unassign <epic> <step> --force`); `yad owners` lists them all');
+    'such a file is ignored — no owner is shown and the edit-time warning is off. For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them all');
 }
 
 // `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's

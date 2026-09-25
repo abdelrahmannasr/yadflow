@@ -24761,7 +24761,7 @@ test('E47 assign: to me by default, to someone by --to; the same owner is a no-o
     assert.match(me.out, /assigned to Ann Lee/);
     assert.doesNotMatch(me.out, /no capture branch/, 'yourself is never an unknown name');
     assert.match(me.out, /commit epics\/EP-x\/\.sdlc\/owners\/architecture\.json on its own \(`yad fold` never takes it\)/);
-    assert.doesNotMatch(me.out, /small PR/, 'a local ledger: no PR needed');
+    assert.doesNotMatch(me.out, /PR of its own/, 'a local ledger: no PR needed');
     const again = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'ann lee' });
     assert.equal(again.value.changed, false, 'the same person, spelled another way');
     const bob = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Bob Chen' });
@@ -24782,12 +24782,12 @@ test('E47 assign: to me by default, to someone by --to; the same owner is a no-o
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E47 assign: on a verified Product the hint says the file goes through a small PR', async () => {
+test('E47 assign: on a verified Product the hint says the file goes in a PR of its own', async () => {
   const { T } = ownersFixture({ hub: { default_branch: 'main', ledger: 'verified', platform: 'github' } });
   try {
     const r = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /through a small PR on this verified Product/);
+    assert.match(r.out, /in a PR of its own on this verified Product: the Product checks let a PR of owner files alone through/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -24981,16 +24981,16 @@ test('E47 CLI: the three verbs parse their words, and yad owners --json answers 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E47 doctor: an owner file that does nothing is named as owners:unreadable; a good one says nothing', async () => {
+test('E47 doctor: an owner file that does nothing is named as owners:ignored; a good one says nothing', async () => {
   const { T, w } = ownersFixture();
   try {
     const { collectDoctor } = await import('./doctor.mjs');
     await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
-    assert.equal(collectDoctor(T).checks.some((x) => x.id === 'owners:unreadable'), false);
+    assert.equal(collectDoctor(T).checks.some((x) => x.id === 'owners:ignored'), false);
     w('epics/EP-x/.sdlc/owners/epic.json', '{');
     w('epics/EP-x/.sdlc/owners/epic-review.json', '{}');
     w('epics/EP-x/.sdlc/owners/stories.json', JSON.stringify({ step: 'stories', owner: 'bob' }));
-    const hit = collectDoctor(T).checks.filter((x) => x.id === 'owners:unreadable');
+    const hit = collectDoctor(T).checks.filter((x) => x.id === 'owners:ignored');
     assert.equal(hit.length, 1);
     assert.equal(hit[0].status, 'warn');
     assert.match(hit[0].message, /3 step owner file\(s\) do nothing: .*epic-review is not an authoring step.*epic\.json is not valid JSON.*stories\.json: stories is not on EP-x's chain/);
