@@ -23,6 +23,7 @@ export { reviewTrailer, reviewContext, reviewNudge, reviewReconcile, reviewWalkt
 export { runShip } from '../cli/ship.mjs';
 export { runCheckpoint } from '../cli/checkpoint.mjs';
 export { runTidy } from '../cli/tidy.mjs';
+export { runCapture } from '../cli/capture.mjs';
 export { runIndex } from '../cli/index-command.mjs';
 export { runHistory, HISTORY_FLAGS } from '../cli/history.mjs';
 export { runRepo } from '../cli/repo.mjs';

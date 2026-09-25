@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -332,6 +332,10 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (${[...new Set(wiredScripts)].join(', ')})${alsoUnguarded}`);
     }
   }
+
+  // Background capture (E43), on any Product in either ledger mode: is the post-edit hook wired, and will
+  // a push to the `yad/wip/*` branches start the team's own CI?
+  if (exists(productPath)) captureChecks(root, checks, readJSON(productPath, null));
 
   // design.json: parse + shape + tool + MCP confirmation (absent is the normal markdown-only default —
   // pre-feature projects have none, so silence rather than warn when the file does not exist).
@@ -2056,4 +2060,133 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
   }
   if (failed.length) process.exitCode = 1;
   return { ok: failed.length === 0, failed: failed.length, warned: warned.length, checks };
+}
+
+// The capture half of `yad doctor` (E43). Three facts: whether capture is on, whether every IDE target with
+// a post-edit protocol runs it, and which of the team's OWN GitHub workflows start on a push to any branch —
+// those run on every `yad/wip/*` push. yadflow's own templates exclude the branches; a team's file is theirs,
+// so it is named, never edited.
+export function captureChecks(root, checks, cfg) {
+  if (cfg && cfg.capture === false) {
+    check(checks, 'capture', 'project', 'ok', 'wip capture is off (`"capture": false` in the Product config)');
+    return;
+  }
+  const unwired = [];
+  if (!hookScriptReady(root, 'hooks/yad-capture.sh')) unwired.push('hooks/yad-capture.sh');
+  const targets = ideTargetsFor(root);
+  const safe = new Set(safeIdeTargetStateFor(root, targets).targets);
+  const noProtocol = [];
+  for (const ide of targets) {
+    if (!safe.has(ide)) continue;
+    const adapter = CAPTURE_ADAPTERS[ide];
+    if (!adapter) { noProtocol.push(ide); continue; }
+    const settingsPath = path.join(root, adapter.settings);
+    let settings = null;
+    if (exists(settingsPath)) {
+      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { settings = null; }
+    }
+    if (!isPlainObject(settings) || mergeHookSettings(settings, adapter).changed || !hookMatcherFires(settings, adapter)) unwired.push(adapter.settings);
+  }
+  const byHand = noProtocol.length ? ` — ${noProtocol.join(', ')} has no post-edit hook yad wires; run \`yad capture\` there by hand` : '';
+  if (unwired.length) {
+    check(checks, 'capture', 'project', 'warn', `wip capture not wired: ${unwired.join(', ')}${byHand}`,
+      'run `yad check --fix` — until then an agent\'s edits are saved only when someone commits them');
+  } else if (noProtocol.length === targets.length) {
+    // A real and reasonable setup, not a fault: no target has a post-edit hook yad wires. A warning here
+    // could never be cleared by doing what it asks, so it is said as a fact.
+    check(checks, 'capture', 'project', 'ok', `wip capture is by hand here — no IDE target (${noProtocol.join(', ')}) has a post-edit hook yad wires; run \`yad capture\` after editing`);
+  } else {
+    check(checks, 'capture', 'project', 'ok', `wip capture wired (hooks/yad-capture.sh)${byHand}`);
+  }
+  const noisy = pushOnEveryBranch(root);
+  if (noisy.length) {
+    check(checks, 'capture', 'project', 'warn', `${noisy.join(', ')} ${noisy.length > 1 ? 'run' : 'runs'} on a push to ANY branch, so every \`yad capture\` push to yad/wip/* starts ${noisy.length > 1 ? 'them' : 'it'}`,
+      'add `branches-ignore: ["yad/wip/**"]` under its `push:` trigger (yadflow\'s own workflows already do)');
+  }
+}
+
+// The team's own GitHub workflow files that a push to a `yad/wip/*` branch would start. A line reader, not
+// a YAML parser, confined to the TOP-LEVEL `on:` block (a job named `push` is not a trigger). It reads the
+// usual spellings — `on: push`, `on: [push, …]`, and a `push:` key under `on:` — and decides the way
+// GitHub does: no `branches`/`branches-ignore` (and no `tags`) runs on every branch; a `branches` pattern
+// that matches a capture branch runs on it (`**` does); a `branches-ignore` that does not name one runs on
+// it. A pattern it cannot judge (a `!` negation) counts as filtered, since a false warning costs a team a
+// needless edit — and so do two spellings it does not read: `on:` as a YAML list (`- push`), and a `push:`
+// whose filter is a one-line map (`push: { branches: ["**"] }`). yadflow's own files (`# yad-managed`) are
+// skipped: their filters are ours to keep.
+const SAMPLE_WIP_BRANCH = 'yad/wip/someone/EP-x';
+// GitHub's filter patterns: `**` any run of characters, `*` any run without `/`, `?` and `+` apply to the
+// character before them (zero-or-one, one-or-more) and `[a-z]` is one character from a set — all as in a
+// regular expression, so those are left as they are. Everything else is literal. A pattern that is not a
+// valid expression is judged not to match.
+const globMatches = (glob, ref) => {
+  // Split on `**` first, so the single `*` rule never reaches it.
+  const body = glob.split('**').map((part) => part.replace(/[.^${}()|\\]/g, '\\$&').replace(/\*/g, '[^/]*')).join('.*');
+  try { return new RegExp(`^${body}$`).test(ref); } catch { return false; }
+};
+const yamlList = (inline, childLines) => {
+  const v = (inline || '').trim();
+  const items = v.startsWith('[') ? v.replace(/^\[/, '').replace(/\]\s*(#.*)?$/, '').split(',') : v && !v.startsWith('#') ? [v] : childLines.map((l) => l.replace(/^\s*-\s*/, ''));
+  return items.map((x) => x.replace(/\s+#.*$/, '').trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+};
+function pushRunsOnWip(block) {
+  // `block` is the lines of the `push:` value, deeper than the `push:` key.
+  const keys = {};
+  for (let i = 0; i < block.length; i++) {
+    const m = block[i].match(/^(\s+)(branches|branches-ignore|tags|tags-ignore):\s*(.*)$/);
+    if (!m) continue;
+    const children = [];
+    for (let j = i + 1; j < block.length; j++) {
+      // A blank or comment line inside the list does not end it (E43 review 2).
+      if (!block[j].trim() || /^\s*#/.test(block[j])) continue;
+      if (!(block[j].match(/^(\s*)/)[1].length > m[1].length || /^\s*-/.test(block[j]))) break;
+      if (/^\s*-/.test(block[j])) children.push(block[j]);
+    }
+    keys[m[2]] = yamlList(m[3], children);
+  }
+  if (keys.branches) return !keys.branches.some((b) => b.startsWith('!')) && keys.branches.some((b) => globMatches(b, SAMPLE_WIP_BRANCH));
+  if (keys['branches-ignore']) return !keys['branches-ignore'].some((b) => globMatches(b, SAMPLE_WIP_BRANCH));
+  return !(keys.tags || keys['tags-ignore']);
+}
+export function pushOnEveryBranch(root) {
+  const dir = path.join(root, '.github', 'workflows');
+  let names;
+  try { names = fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n)).sort(); } catch { return []; }
+  const out = [];
+  for (const n of names) {
+    let text;
+    try { text = fs.readFileSync(path.join(dir, n), 'utf8'); } catch { continue; }
+    if (/^#\s*yad-managed/m.test(text)) continue;
+    const lines = text.split(/\r?\n/);
+    const onAt = lines.findIndex((l) => /^(on|"on"|'on'):/.test(l));
+    if (onAt < 0) continue;
+    const inline = lines[onAt].replace(/^(on|"on"|'on'):\s*/, '').replace(/\s+#.*$/, '').trim();
+    let hit = false;
+    if (inline) {
+      hit = /^push$/.test(inline) || /^\[[^\]]*\bpush\b[^\]]*\]$/.test(inline) || /^\{.*\bpush\s*:\s*(\{\s*\}|null|~)?\s*[,}]/.test(inline);
+    } else {
+      // The `on:` block: every line below it until the next top-level key.
+      const block = [];
+      for (let j = onAt + 1; j < lines.length; j++) {
+        if (lines[j].trim() && !/^\s/.test(lines[j]) && !/^#/.test(lines[j])) break;
+        block.push(lines[j]);
+      }
+      const childIndent = Math.min(...block.filter((l) => l.trim() && !/^\s*#/.test(l)).map((l) => l.match(/^(\s*)/)[1].length));
+      for (let k = 0; k < block.length; k++) {
+        const m = block[k].match(/^(\s+)push:\s*(.*)$/);
+        if (!m || m[1].length !== childIndent) continue;
+        const value = m[2].replace(/\s+#.*$/, '').trim();
+        if (value && value !== '{}' && value !== 'null' && value !== '~') break;
+        const inner = [];
+        for (let j = k + 1; j < block.length; j++) {
+          if (block[j].trim() && !/^\s*#/.test(block[j]) && block[j].match(/^(\s*)/)[1].length <= childIndent) break;
+          inner.push(block[j]);
+        }
+        hit = pushRunsOnWip(inner);
+        break;
+      }
+    }
+    if (hit) out.push(`.github/workflows/${n}`);
+  }
+  return out;
 }

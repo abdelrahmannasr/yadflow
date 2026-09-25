@@ -13,7 +13,7 @@ import { preflightGuardReadiness } from './hubcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions,
-  legacyModuleActions, removedModuleActions, orphanHookActions, legacyRepoActions, legacyHubActions,
+  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyRepoActions, legacyHubActions,
   ideTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
@@ -53,6 +53,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     ...productActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
     ...orphanHookActions(root, ideTargets),
+    // E43: the post-edit capture hook, in both ledger modes.
+    ...captureHookActions(root, ideTargets), ...orphanCaptureHookActions(root, ideTargets),
   ];
   if (ideState.needsRepair) {
     actions.push({
