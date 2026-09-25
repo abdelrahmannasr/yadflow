@@ -23844,7 +23844,9 @@ function captureFixture({ hub = { default_branch: 'main' }, commit = true, name 
   fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '# x\n');
   fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{}\n');
-  if (commit) { g('add', '-A'); g('commit', '-q', '-m', 'init'); }
+  // The first commit names its author explicitly: a fixture with no user.name (the "no git name" case) must
+  // still commit, and CI's Linux has no global identity to fall back on (the Mac does).
+  if (commit) { g('add', '-A'); g('-c', 'user.name=Fixture', 'commit', '-q', '-m', 'init'); }
   const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
   return { T, g, w };
 }
@@ -24203,7 +24205,8 @@ test('E43 push: with no local branch a capture continues origin\'s; two machines
     assert.equal(a.g('rev-parse', 'yad/wip/ann-lee/EP-x^'), first, 'continued, not restarted from HEAD');
     // A second machine, a fresh clone, with a capture of its own: it continues origin's, so its push lands.
     b = { T: fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-clone-')) };
-    execFileSync('git', ['clone', '-q', remote, b.T], { stdio: 'pipe' });
+    // `-b main`: a bare repo's HEAD names the machine's default branch, which is `master` on CI's Linux.
+    execFileSync('git', ['clone', '-q', '-b', 'main', remote, b.T], { stdio: 'pipe' });
     b.g = (...x) => execFileSync('git', x, { cwd: b.T, encoding: 'utf8', stdio: 'pipe' }).trim();
     b.g('config', 'user.email', 'ann@corp.io'); b.g('config', 'user.name', 'Ann Lee');
     fs.writeFileSync(path.join(b.T, 'epics/EP-x/epic.md'), 'from b\n');
