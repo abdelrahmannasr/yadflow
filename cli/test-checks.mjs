@@ -3690,3 +3690,45 @@ test('proven history: a directory whose name starts with `:` is a directory, nev
   assert.deepEqual(js.authors.map((a) => a.name), ['Colonist'], 'the JS twin agrees');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// E47 review 3: the owner-file exemption made a RENAME the bypass. Plain `git diff --name-only` reports a
+// rename by its new path only, so `git mv epic.md .sdlc/owners/epic.json` listed nothing but an owner file.
+// This runs each hub-checks workflow's OWN diff command against a real repo, then the gates on its answer.
+test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifact change; so is a non-ASCII epic', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e47-mv-'));
+  try {
+    const g = (...a) => git(T, ...a);
+    g('init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(T, 'epics/EP-x'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), `${'# the reviewed epic\n'.repeat(20)}`);
+    g('add', '-A'); g('commit', '-q', '-m', 'init');
+    g('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    g('checkout', '-q', '-b', 'chore/sneak');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc/owners'), { recursive: true });
+    g('mv', 'epics/EP-x/epic.md', 'epics/EP-x/.sdlc/owners/epic.json');
+    fs.mkdirSync(path.join(T, 'epics/EP-café'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-café/epic.md'), '# new\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'sneak');
+    const changed = path.join(T, 'changed.txt');
+    const templates = {
+      'skills/yad-checks/templates/github/yad-hub-checks.yml': /git (.*?diff .*?--name-only) "origin\/\$\{BASE_REF\}\.\.\.HEAD"/g,
+      'skills/yad-checks/templates/gitlab/yad-hub-checks.gitlab-ci.yml': /git (.*?diff .*?--name-only) "origin\/\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME\.\.\.HEAD"/g,
+    };
+    for (const [rel, re] of Object.entries(templates)) {
+      const cmds = [...fs.readFileSync(path.join(ROOT, rel), 'utf8').matchAll(re)].map((m) => m[1]);
+      assert.equal(cmds.length, 2, `${rel}: both jobs build the changed list`);
+      for (const cmd of cmds) {
+        fs.writeFileSync(changed, execFileSync('git', [...cmd.split(/\s+/), 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
+        const list = fs.readFileSync(changed, 'utf8');
+        assert.match(list, /^epics\/EP-x\/epic\.md$/m, `${rel}: the rename's old path is listed`);
+        assert.match(list, /^epics\/EP-café\/epic\.md$/m, `${rel}: a non-ASCII path is not quoted`);
+        const t = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, 'chore: tidy']);
+        assert.equal(t.code, 1, t.out);
+        assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, CODE_TPL]).code, 1);
+      }
+    }
+    // What the old command saw: only the owner file (and a quoted path) — the gates would have passed.
+    fs.writeFileSync(changed, execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
+    assert.doesNotMatch(fs.readFileSync(changed, 'utf8'), /^epics\/EP-x\/epic\.md$/m, 'the test would catch the old command');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

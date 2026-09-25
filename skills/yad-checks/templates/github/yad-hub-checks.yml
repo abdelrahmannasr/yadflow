@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - run: |
-          changed="$(mktemp)"; git diff --name-only "origin/${BASE_REF}...HEAD" > "$changed"
+          changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
           bash checks/pr-title.sh --profile hub --head "$PR_HEAD" --changed "$changed" "$PR_TITLE"
 
   pr-template:
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - run: |
-          changed="$(mktemp)"; git diff --name-only "origin/${BASE_REF}...HEAD" > "$changed"
+          changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
           body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
           bash checks/pr-template.sh --profile hub --head "$PR_HEAD" --changed "$changed" "$body"
 

@@ -227,7 +227,9 @@ from the event payload):
     `--changed <file>` (computed from the diff against the base ref); without that list (a direct
     by-hand caller) the guard is inert and the branch split alone applies. A step owner file
     (`epics/<epic>/.sdlc/owners/<step>.json`, `foundation/.sdlc/owners/…`, written by `yad assign`,
-    E47) is not a Shape artifact: a PR that changes only owner files passes on any branch.
+    E47) is not a Shape artifact: a PR that changes only owner files passes on any branch. The
+    workflow builds the list with `--no-renames` (and `core.quotePath=false`), so a rename INTO
+    `owners/` still lists the artifact it removed.
 
 ## 7. pr-template (`templates/checks/pr-template.sh`)
 
