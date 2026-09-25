@@ -53,7 +53,8 @@ export function readClaims(root, { env = process.env, now = Date.now(), epics = 
   const fmt = '%(refname)%00%(objectname)%00%(committerdate:unix)%00%(authorname)%00%(trailers:key=Yad-Base,valueonly)';
   // Others' branches from the remote-tracking copies; my own from the local branches, which are the freshest.
   const roots = [`refs/remotes/origin/${WIP_PREFIX}/`, ...(me ? [`refs/heads/${WIP_PREFIX}/${me}/`] : [])];
-  const listed = git(['for-each-ref', `--format=${fmt}`, ...roots]);
+  // `trailer.separators=:` — capture writes `Yad-Base: <sha>`; a person's own separators setting would hide it.
+  const listed = git(['-c', 'trailer.separators=:', 'for-each-ref', `--format=${fmt}`, ...roots]);
   const claims = [];
   for (const line of listed.ok ? listed.out.split('\n').filter(Boolean) : []) {
     const [ref, tip, date, person, baseRaw = ''] = line.split('\0');

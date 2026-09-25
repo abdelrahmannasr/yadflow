@@ -328,7 +328,8 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   // on the HEAD that branch was last captured from (`Yad-Base`): once HEAD moves (a pull, a merge, a
   // switch), a difference is other work arriving, not an edit undone, and recording it would add a commit
   // to every old capture branch on every pull.
-  const branches = git(['for-each-ref', '--format=%(refname)%00%(trailers:key=Yad-Base,valueonly)', `refs/heads/${WIP_PREFIX}/${name}/`]);
+  // `trailer.separators=:` pins how the `Yad-Base: <sha>` line is read against a person's own git config.
+  const branches = git(['-c', 'trailer.separators=:', 'for-each-ref', '--format=%(refname)%00%(trailers:key=Yad-Base,valueonly)', `refs/heads/${WIP_PREFIX}/${name}/`]);
   for (const line of branches.ok ? branches.out.split('\n').filter(Boolean) : []) {
     const [r, base = ''] = line.split('\0');
     const epic = r.slice(`refs/heads/${WIP_PREFIX}/${name}/`.length);

@@ -24551,6 +24551,7 @@ test('E46 claims: another person\'s unmerged capture is a claim; the list is fet
   try {
     alice.w('epics/EP-x/architecture.md', '# arch\nalice was here\n');
     assert.equal((await captureRun(alice.dir, { noPush: false })).value.pushed.pushed, 'done');
+    bob.g('config', 'trailer.separators', '#');   // would hide `Yad-Base:` unless the read pins it (review 4)
     const r = await claimsRun(bob.dir);
     assert.equal(r.code, 0, r.out);
     assert.equal(r.value.fetched, 'done');
