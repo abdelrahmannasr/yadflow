@@ -24427,6 +24427,15 @@ test('E44 fold (review 1): a staged deletion and a git mv are folded whole; a me
       assert.doesNotMatch(renamed.out, /git rm --cached/);
       g('commit', '-q', '-m', 'case rename');
     }
+    // Ignored after `git rm --cached`: no `??` line, and not a rename — a neutral refusal, on any disk (review 4).
+    g('rm', '-q', '--cached', 'epics/EP-x/stories/EP-x-S01.md');
+    fs.appendFileSync(path.join(T, '.git/info/exclude'), 'epics/EP-x/stories/EP-x-S01.md\n');
+    const ignored = await foldRun(T, { epic: 'EP-x', step: 'stories' });
+    assert.equal(ignored.code, 1);
+    assert.match(ignored.out, /staged as deleted, but something is still at that path on disk: epics\/EP-x\/stories\/EP-x-S01\.md/);
+    assert.doesNotMatch(ignored.out, /letter case/);
+    fs.writeFileSync(path.join(T, '.git/info/exclude'), '');
+    g('reset', '-q', '--', 'epics/EP-x/stories/EP-x-S01.md');
     // A merge in progress: refused, and nothing staged.
     fs.writeFileSync(path.join(T, '.git/MERGE_HEAD'), `${g('rev-parse', 'HEAD')}\n`);
     w('epics/EP-x/stories/EP-x-S03.md', 'three\n');

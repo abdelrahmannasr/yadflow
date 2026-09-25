@@ -173,11 +173,19 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
     return refuse(`staged as deleted but still on disk (git rm --cached): ${rmCached.join(', ')}`,
       'yad fold commits files as they are on disk — delete the file to fold its deletion, or `git add` it back to keep it');
   }
-  // A case-only rename: `commit --only` refuses it ("will not add file alias"). Say so before staging anything.
-  const caseOnly = files.filter((p) => stagedDeletion.has(p) && !untrackedNow.has(p) && onDisk(p));
-  if (caseOnly.length) {
-    return refuse(`a rename that changes only letter case cannot be folded: ${caseOnly.join(', ')}`,
-      'commit that rename with a plain `git commit` first, then run yad fold again');
+  // Any other staged deletion still on disk is refused too, before staging: `commit --only` cannot take it.
+  // A case-only rename (`commit --only`: "will not add file alias") is named only when git shows the new
+  // spelling staged; anything else — a file ignored after `git rm --cached`, a folder at the old path — gets
+  // a neutral message, since "delete the file" could be wrong for it.
+  const stillThere = files.filter((p) => stagedDeletion.has(p) && !untrackedNow.has(p) && onDisk(p));
+  if (stillThere.length) {
+    const added = entries.filter((e) => e.xy[0] === 'A').map((e) => e.path);
+    const recased = (p) => added.some((a) => a !== p && a.toLowerCase() === p.toLowerCase());
+    const caseOnly = stillThere.every(recased);
+    return refuse(caseOnly
+      ? `a rename that changes only letter case cannot be folded: ${stillThere.join(', ')}`
+      : `staged as deleted, but something is still at that path on disk: ${stillThere.join(', ')}`,
+    `commit ${caseOnly ? 'that rename' : 'the deletion'} with a plain \`git commit\` first, then run yad fold again`);
   }
   if (!sorted.step.filter(foldable).length) {
     return refuse(`nothing to fold — ${step}'s files have no changes since the last commit`,
