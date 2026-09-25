@@ -16,14 +16,17 @@
 // — the HEAD that capture was built on. That is exactly the person's own in-progress edits. It is NOT the
 // diff against the previous capture: after a pull, a capture's tree is the NEW HEAD plus the edits, and the
 // pull's changes would read as that person's work. When `Yad-Base` is not in this clone (a later HEAD is not
-// an ancestor of the branch, so it was never pushed with it), the parent capture is the fallback and the
-// claim is marked `basis: 'parent'` — over-reporting is the safe direction for advice.
+// an ancestor of the branch, so it was never pushed with it), the commit the branch's FIRST capture was built
+// on is the fallback, marked `basis: 'first-capture'` — over-reporting is the safe direction for advice.
+// The hook's background fetch and push can both move this person's own remote-tracking copies at once; one
+// may lose the race in silence. Nothing reads those copies while the local branch exists, and a capture by
+// hand fetches (with prune) before it relies on them.
 //
 // LIMITS, said in the README: capture off, or offline, is invisible; the push runs at most every 5 minutes;
 // two people with one git name share branches, so they never see each other; clocks are the committer's.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
+import { ok, info, warn, fail, hand, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { capturedEpic, gitIn, pushEnv, wipName, WIP_PREFIX, fetchAllArgs } from './capture.mjs';
 import { resolveDefaultBranch } from './hubcommit.mjs';
@@ -70,9 +73,13 @@ export function readClaims(root, { env = process.env, now = Date.now(), epics = 
     if (base === 'none') against = empty;
     else if (base && git(['cat-file', '-e', `${base}^{tree}`]).ok) against = base;
     else {
-      basis = 'parent';
-      const parent = git(['rev-parse', '--verify', '-q', `${tip}^`]);
-      against = parent.ok ? parent.out.trim() : empty;
+      // Not in this clone. The commit the branch's FIRST capture was built on always is (it is an ancestor, so
+      // it was pushed with the branch): diffing against it takes in every capture since, and maybe a pull's
+      // files too — over-reporting, the safe side for advice, where the previous capture would drop earlier edits.
+      basis = 'first-capture';
+      const walk = git(['log', '--first-parent', '-n', '1000', '--format=%H%x00%s', tip]);
+      const first = (walk.ok ? walk.out.split('\n') : []).map((l) => l.split('\0')).find(([, s]) => s !== undefined && !/^wip\(EP-[^)]+\): capture$/.test(s));
+      against = first ? first[0] : empty;
     }
     const diff = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', against, tip]);
     if (!diff.ok) continue;
@@ -82,7 +89,7 @@ export function readClaims(root, { env = process.env, now = Date.now(), epics = 
     if (files.length && def.ref) {
       const differs = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', def.ref, tip]);
       if (differs.ok) {
-        const set = new Set(differs.out.split('\0').filter(Boolean).map((p) => p.slice(prefix.length)));
+        const set = new Set(differs.out.split('\0').filter((p) => p && p.startsWith(prefix)).map((p) => p.slice(prefix.length)));
         files = files.filter((p) => set.has(p));
       }
     }
@@ -118,7 +125,7 @@ export function claimWarnings(root, changed, { env = process.env, now = Date.now
   const fresh = hits.filter((c) => !(now - (Number(warned[`${c.name}\0${c.path}`]) || 0) < WARN_AGAIN_MS));
   const kept = Object.fromEntries(Object.entries(warned).filter(([, t]) => now - Number(t) < CLAIM_MS));
   for (const c of fresh) kept[`${c.name}\0${c.path}`] = now;
-  try { fs.writeFileSync(statePath, `${JSON.stringify({ ...state, claimsWarned: kept }, null, 2)}\n`); } catch { /* a cache */ }
+  try { writeJSON(statePath, { ...state, claimsWarned: kept }); } catch { /* a cache */ }
   return fresh;
 }
 export const warningText = (hits, now) => `yad claims: ${hits.length === 1 ? 'this file is' : 'these files are'} also being edited by someone else — advice, not a lock; talk to them before you go further:\n${hits.map((c) => `  • ${claimLine(c, now)}`).join('\n')}`;
@@ -134,10 +141,13 @@ export async function runClaims(root, { epic = null, noFetch = false, env = proc
   if (!noFetch) {
     if (!git(['remote', 'get-url', 'origin']).ok) fetched = 'local';
     else {
-      const def = defaultRef(root, git).name;
-      const r = spawnSync('git', fetchAllArgs({ prune: true, extra: [`+refs/heads/${def}:refs/remotes/origin/${def}`] }),
-        { cwd: root, encoding: 'utf8', timeout: 30_000, env: { ...env, ...pushEnv(env) } });
+      const opts = { cwd: root, encoding: 'utf8', timeout: 30_000, env: { ...env, ...pushEnv(env) } };
+      const r = spawnSync('git', fetchAllArgs({ prune: true }), opts);
       fetched = r.status === 0 ? 'done' : 'failed';
+      // The default branch, for the "landed" rule — on its own: a name guessed wrong (no hub default, no
+      // origin/HEAD) must not stop the capture branches from arriving. Its failure changes nothing.
+      const def = defaultRef(root, git).name;
+      if (fetched === 'done') spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${def}:refs/remotes/origin/${def}`], opts);
     }
   }
   if (fetched === 'local') info('no remote named origin — only your own captures can be read here');

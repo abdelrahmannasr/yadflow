@@ -24645,3 +24645,38 @@ test('E46 claims: no remote reads only your own; not a repo or not a Product is 
     assert.match((await claimsRun(bare)).out, /not a Product/);
   } finally { fs.rmSync(bare, { recursive: true, force: true }); }
 });
+
+test('E46 (review 1): a push keeps the once-an-hour memory; a file HEAD moved is not "your edit"; a missing Yad-Base over-reports; a wrong default name still fetches', async () => {
+  const { base, alice, bob } = claimsFixture();
+  try {
+    alice.w('epics/EP-x/architecture.md', '# arch, alice\n');
+    await captureRun(alice.dir, { noPush: false });
+    bob.g('fetch', '-q', 'origin');
+    // (1) A push in between does not wipe what was already said.
+    const spawner = () => ({ unref() {} });
+    const now = Date.now();
+    bob.w('epics/EP-x/architecture.md', '# arch, bob\n');
+    assert.match((await hookRun(bob.dir, { format: 'claude', now, noPush: false, spawner })).stdout, /Alice Ng/);
+    bob.w('epics/EP-x/architecture.md', '# arch, bob, 2\n');
+    const pushed = await hookRun(bob.dir, { format: 'claude', now: now + 6 * 60_000, noPush: false, spawner });
+    assert.equal(pushed.stdout, '', 'the push 6 minutes later kept claimsWarned');
+    // (2) Bob commits architecture.md, then edits epic.md: this capture's own edit is epic.md alone, although
+    // architecture.md moved since his last capture (HEAD moved under it).
+    bob.w('epics/EP-x/architecture.md', '# arch, bob, committed\n');   // HEAD moves to content the last capture never saw
+    bob.g('commit', '-q', '-m', 'bob arch', '--', 'epics/EP-x/architecture.md');
+    bob.w('epics/EP-x/epic.md', '# x, bob\n');
+    const moved = await hookRun(bob.dir, { format: 'claude', now: now + 3 * 3600_000 });
+    assert.equal(moved.stdout, '', 'no warning about a file this edit did not touch');
+    // (3) Alice commits locally (never pushed), then edits and captures: her tip's Yad-Base is not in Bob's clone.
+    alice.g('commit', '-q', '-am', 'alice local fold');
+    alice.w('epics/EP-x/epic.md', '# x, alice\n');
+    await captureRun(alice.dir, { noPush: false });
+    const r = await claimsRun(bob.dir);
+    const hers = r.value.claims.filter((c) => c.name === 'alice-ng');
+    assert.deepEqual(hers.map((c) => [c.path, c.basis]), [['epics/EP-x/architecture.md', 'first-capture'], ['epics/EP-x/epic.md', 'first-capture']],
+      'the earlier edit (architecture.md) is kept, not dropped');
+    // (4) A default branch name origin does not have does not stop the capture branches from arriving.
+    bob.w('.sdlc/hub.json', JSON.stringify({ default_branch: 'trunk' }));
+    assert.equal((await claimsRun(bob.dir)).value.fetched, 'done');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});

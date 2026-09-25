@@ -178,8 +178,11 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current, pr
         if (!diff.ok) return { epic, branch, error: `could not compare with ${tip ? branch : 'HEAD'}: ${diff.err}` };
         const moved = diff.out.split('\0').filter((p) => p && capturedEpic(underPrefix(p, prefix)) === epic);
         if (!moved.length) return { epic, branch, unchanged: true };
-        // What THIS capture changed — the files E46's claim check asks about.
-        changed = moved.map((p) => underPrefix(p, prefix));
+        // What THIS capture changed that is the person's OWN edit — the files E46's claim check asks about. A
+        // file a pull brought in also moved since the last capture, but it equals HEAD's: not theirs.
+        const own = headTree && tip ? git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', headTree, treeSha]) : null;
+        const ownSet = own?.ok ? new Set(own.out.split('\0').filter(Boolean)) : null;
+        changed = moved.filter((p) => !ownSet || ownSet.has(p)).map((p) => underPrefix(p, prefix));
       }
       const parent = tip || head;
       const commit = git(['commit-tree', '--no-gpg-sign', treeSha, ...(parent ? ['-p', parent] : []), '-F', '-'],
@@ -230,6 +233,9 @@ function pushStatePath(git) {
   return r.ok && r.out.trim() ? path.join(r.out.trim(), 'yad-capture.json') : null;
 }
 
+// The state file's other keys (E46's `claimsWarned`) survive a push's write. A cache: unreadable reads as empty.
+const stateOf = (file) => { const s = readJSON(file, {}); return s && typeof s === 'object' && !Array.isArray(s) ? s : {}; };
+
 // Push now (a person ran `yad capture`), or start one in the background when due (the hook).
 function push(root, git, name, { hook, now, spawner, env }) {
   if (!git(['remote', 'get-url', 'origin']).ok) return { pushed: 'local', why: 'no remote named origin' };
@@ -239,7 +245,7 @@ function push(root, git, name, { hook, now, spawner, env }) {
     const last = stateFile ? Number(readJSON(stateFile, {})?.lastPushAt) || 0 : 0;
     if (now - last < PUSH_EVERY_MS) return { pushed: 'later', why: `the last push started under ${PUSH_EVERY_MS / 60000} minutes ago` };
     // Recorded BEFORE the push starts, so two hooks a moment apart cannot both start one.
-    if (stateFile) writeJSON(stateFile, { lastPushAt: now });
+    if (stateFile) writeJSON(stateFile, { ...stateOf(stateFile), lastPushAt: now });
     try {
       spawner('git', pushArgs(name), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore' }).unref();
       // E46: fetch everyone's capture branches in the same window, so the claim check at the next edit reads
@@ -251,7 +257,7 @@ function push(root, git, name, { hook, now, spawner, env }) {
     }
   }
   const r = spawnSync('git', pushArgs(name), { cwd: root, encoding: 'utf8', timeout: 60_000, env: { ...env, ...pushEnv(env) } });
-  if (stateFile) writeJSON(stateFile, { lastPushAt: now });
+  if (stateFile) writeJSON(stateFile, { ...stateOf(stateFile), lastPushAt: now });
   if (r.status === 0) return { pushed: 'done' };
   // Refused, not failed: origin has a capture branch this one does not continue. The next push is refused
   // the same way, so it is named as stuck — never "rides the next push".
