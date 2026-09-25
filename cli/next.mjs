@@ -14,7 +14,8 @@ import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists, emitJSON } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { printTeamHint, soloTeamHint } from './people.mjs';
-import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
+import { OWNER_STEPS, liveOwner } from './owners.mjs';
+import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -69,8 +70,19 @@ const actionFor = (root, id, lin = epicLineage(root, id), bindings = loadSkillBi
 // beside it. Every printed path in this file goes through here.
 const rowFor = (root, id, bindings = loadSkillBindings(root)) => {
   const lin = epicLineage(root, id);
-  return { action: actionFor(root, id, lin, bindings), theme: lin.theme };
+  return { action: actionFor(root, id, lin, bindings), theme: lin.theme, owners: liveOwners(root, id) };
 };
+
+// The live step owners of one epic (E47), by step. Beside the action, never in it: `yad next --json`'s
+// action keys are frozen by the golden test, and `yad owners --json` is where a script reads them.
+const liveOwners = (root, id) => Object.fromEntries(OWNER_STEPS.map((s) => [s, liveOwner(root, id, s)]).filter(([, r]) => r));
+
+// "owner: Ann Lee" under a line whose step — or whose review's author step — someone owns. Advice only.
+const reviewedBy = new Map(STEPS.filter((s) => s.kind === 'review' && s.reviews).map((s) => [s.id, s.reviews]));
+function printOwner(owners, step) {
+  const r = owners?.[OWNER_STEPS.includes(step) ? step : reviewedBy.get(step)];
+  if (r) info(c.dim(`owner: ${r.name}${r.date ? ` (assigned ${r.date})` : ''} — advice, not a lock; see \`yad owners\``));
+}
 
 // EP-checkout-S03 → S03 (the compact lane label for the roll-up). Falls back to the full id.
 const shortStory = (s) => (s && s.match(/S\d+$/i)?.[0]) || s || '(story)';
@@ -217,7 +229,7 @@ function actionLine(a, { solo, bindings = null, verified = false } = {}) {
 // `printAction` renders `a` and `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled
 // by the golden test, which an added key breaks (see actionFor). It comes from `rowFor`, off the same
 // `epic.md` read the action's own `lineageKind` came from.
-function printAction(a, { solo, theme: tag = null, bindings = null, automation = null, verified = false } = {}) {
+function printAction(a, { solo, theme: tag = null, bindings = null, automation = null, verified = false, owners = null } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The product level is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && !PRODUCT_EPICS.includes(a.epicId) ? `${typeNoun(a.lineageKind)} ` : '';
@@ -235,6 +247,7 @@ function printAction(a, { solo, theme: tag = null, bindings = null, automation =
     if (lanes.length && lanes.every((r) => r.status === 'skipped')) hand(actionLine(a, { solo, bindings, verified }));
   } else {
     hand(actionLine(a, { solo, bindings, verified }));
+    printOwner(owners, a.step);
     const note = costNote(a);
     if (note) info(c.dim(note));
     // A Shape author step the team set to `auto` (E34). Recorded, not acted on: say so, or the line reads
@@ -250,12 +263,16 @@ function printAction(a, { solo, theme: tag = null, bindings = null, automation =
   if (a.kind === 'review-sync') info(`${c.dim('unresolved comments?')} ${c.bold(`yad gate comments ${a.epicId} ${a.artifact}`)}`);
   if (a.parallel) {
     hand(`parallel track: invoke ${skillPhrase(a.parallel)} ${c.dim(`(author ${a.parallel.artifact})`)}`);
+    printOwner(owners, a.parallel.step);
     const note = costNote(a.parallel);
     if (note) info(c.dim(note));
   }
   // A step re-opened behind finished work (E41) is a lane of its own beside the chain, like the
   // test-cases track above: it gets its own line, with the same words a chain step would get.
-  for (const lane of a.reopened || []) hand(`re-opened lane: ${actionLine({ ...lane, epicId: a.epicId }, { solo, bindings, verified })}`);
+  for (const lane of a.reopened || []) {
+    hand(`re-opened lane: ${actionLine({ ...lane, epicId: a.epicId }, { solo, bindings, verified })}`);
+    printOwner(owners, lane.step);
+  }
   // DEBT is reminded on every run until it is paid (E41). The line says what is owed and the one command
   // that starts paying it — or, once that has started, what finishes it.
   for (const d of a.debt || []) warn(debtLine(a.epicId, d, verified));

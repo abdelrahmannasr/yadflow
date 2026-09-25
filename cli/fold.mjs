@@ -51,7 +51,8 @@ const STEP_EXTRAS = {
 export function stepPaths(epic, stepId) {
   const step = STEPS.find((s) => s.id === stepId && s.kind === 'author' && s.artifact);
   if (!step) return null;
-  return [...artifactPaths(artifactBase(step.artifact)), ...(STEP_EXTRAS[stepId] || [])].map((p) => `${epicRel(epic)}/${p}`);
+  // The step's owner file (E47) rides its fold: it is about this step and nothing else.
+  return [...artifactPaths(artifactBase(step.artifact)), ...(STEP_EXTRAS[stepId] || []), `.sdlc/owners/${stepId}.json`].map((p) => `${epicRel(epic)}/${p}`);
 }
 const covers = (paths, p) => paths.some((s) => p === s || p.startsWith(`${s}/`));
 

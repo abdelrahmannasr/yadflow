@@ -14,7 +14,8 @@
 //      splits across two branches when the network drops. Two people with one git name share branches.
 //   4. FILES: everything under `epics/<epic>/` and `foundation/` EXCEPT the ledger — any `.sdlc/` folder
 //      and `reviews/`. `contract-lock.json` and `change.json` are the two `.sdlc/` files a person writes,
-//      so they are captured. A new kind of artifact is captured with no list to update.
+//      so they are captured, and so is a step's owner file (`.sdlc/owners/<step>.json`, E47). A new kind of
+//      artifact is captured with no list to update.
 //
 // THE MECHANISM NEVER TOUCHES THE CHECKOUT. It builds each commit with git plumbing in a throwaway index
 // (`GIT_INDEX_FILE`): the tree is HEAD's, with this epic's changed artifacts as they are on disk. So the
@@ -60,6 +61,8 @@ export function capturedEpic(rel) {
     [, epic, rest] = m;
   }
   if (!rest || PERSON_WRITTEN_SDLC.has(rest)) return rest ? epic : null;
+  // A step's owner file (E47), written by `yad assign` — never the ledger.
+  if (/^\.sdlc\/owners\/[^/]+\.json$/.test(rest)) return epic;
   const parts = rest.split('/');
   // The ledger at any depth: a `.sdlc/` folder (state, approvals, Build logs, shards) or `reviews/`.
   if (parts.slice(0, -1).some((d) => d === '.sdlc' || d === 'reviews')) return null;
@@ -384,13 +387,26 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
     const statePath = pushStatePath(git);
     if (mod) claims = mod.claimWarnings(root, captured.flatMap((c) => c.changed || []), { env, now, statePath: statePath && path.resolve(root, statePath) });
   } catch { claims = []; }
-  if (claims.length && warningText) {
-    const text = warningText(claims, now);
+  // E47: of the files this capture changed, which belong to a step someone else owns? The same advice-only
+  // rule. One note carries both warnings: a harness reads one PostToolUse JSON object.
+  let owners = [];
+  let ownersText = null;
+  try {
+    const mod = captured.length ? await import('./owners.mjs') : null;
+    const statePath = pushStatePath(git);
+    if (mod) {
+      owners = mod.ownerWarnings(root, captured.flatMap((c) => c.changed || []), { me: name, now, statePath: statePath && path.resolve(root, statePath) });
+      if (owners.length) ownersText = mod.ownerWarningText(owners);
+    }
+  } catch { owners = []; }
+  const texts = [claims.length && warningText ? warningText(claims, now) : null, ownersText].filter(Boolean);
+  if (texts.length) {
+    const text = texts.join('\n');
     if (hook && format === 'claude') {
       process.stdout.write(`${JSON.stringify({ systemMessage: text, hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } })}\n`);
     } else if (quiet) process.stderr.write(`  • ${text.replace(/\n/g, '\n  ')}\n`);
     else warn(text);
   }
   if (!quiet && errors.length) process.exitCode = 1;
-  return { name, captured, unchanged: unchanged.map((u) => u.epic), errors, pushed, off: null, claims };
+  return { name, captured, unchanged: unchanged.map((u) => u.epic), errors, pushed, off: null, claims, owners };
 }

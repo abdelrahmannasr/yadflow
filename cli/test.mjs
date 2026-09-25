@@ -24683,3 +24683,284 @@ test('E46 (review 1): a push keeps the once-an-hour memory; a file HEAD moved is
     assert.equal((await claimsRun(bob.dir)).value.fetched, 'done');
   } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
+
+// ---- E47 — step ownership: yad assign / unassign / owners ----
+const ownersMod = await import('./owners.mjs');
+// One Product, one epic: epic passed, architecture open, its review not started.
+const e47Steps = (arch = 'in_progress', review = 'todo') => [
+  { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+  { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done' },
+  { id: 'architecture', type: 'author', artifact: 'architecture.md', status: arch },
+  { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: review },
+];
+function ownersFixture(o = {}) {
+  const f = foldFixture(o);
+  f.w('epics/EP-x/.sdlc/state.json', `${JSON.stringify({ epicId: 'EP-x', currentStep: 'architecture', steps: e47Steps() })}\n`);
+  f.g('add', '-A'); f.g('commit', '-q', '-m', 'state');
+  const setState = (arch, review) => f.w('epics/EP-x/.sdlc/state.json', `${JSON.stringify({ epicId: 'EP-x', currentStep: 'architecture', steps: e47Steps(arch, review) })}\n`);
+  return { ...f, setState };
+}
+const ownersRun = async (fn, T, o = {}) => {
+  const before = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const { value, out } = await captureConsole(() => ownersMod[fn](T, { today: '2026-09-25', ...o }));
+    return { value, out, code: process.exitCode ?? 0 };
+  } finally { process.exitCode = before; }
+};
+const ownerJSON = (T, step = 'architecture') => JSON.parse(fs.readFileSync(path.join(T, `epics/EP-x/.sdlc/owners/${step}.json`), 'utf8'));
+
+test('E47 capturedEpic and fold: an owner file is person-written, and rides its own step\'s fold only', () => {
+  assert.equal(cap.capturedEpic('epics/EP-x/.sdlc/owners/architecture.json'), 'EP-x');
+  assert.equal(cap.capturedEpic('foundation/.sdlc/owners/foundation.json'), 'EP-foundation');
+  assert.equal(cap.capturedEpic('epics/EP-x/.sdlc/owners/nested/a.json'), null, 'only a file directly in owners/');
+  assert.equal(cap.capturedEpic('epics/EP-x/.sdlc/owners/a.txt'), null);
+  assert.ok(fold.stepPaths('EP-x', 'architecture').includes('epics/EP-x/.sdlc/owners/architecture.json'));
+  const entries = [{ xy: ' M', path: 'epics/EP-x/.sdlc/owners/architecture.json' }, { xy: '??', path: 'epics/EP-x/.sdlc/owners/stories.json' }];
+  // Verified: never the "left for CI" bucket — CI never writes an owner file.
+  for (const verified of [true, false]) {
+    const out = fold.sortChanges(entries, { epic: 'EP-x', step: 'architecture', verified });
+    assert.deepEqual(out.step, ['epics/EP-x/.sdlc/owners/architecture.json']);
+    assert.deepEqual(out.other, ['epics/EP-x/.sdlc/owners/stories.json']);
+    assert.deepEqual([...out.ci, ...out.ledger], []);
+  }
+  assert.equal(ownersMod.isOwnerPath('epics/EP-x/.sdlc/owners/epic.json'), true);
+  assert.equal(ownersMod.isOwnerPath('epics/EP-x/epic.md'), false);
+});
+
+test('E47 readOwnerFile: a broken file says why; the step must be the file\'s own; the owner must be branch-safe', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-owners-'));
+  try {
+    const f = path.join(T, 'architecture.json');
+    assert.deepEqual(ownersMod.readOwnerFile(f, 'architecture'), {});
+    const cases = [['{', /not valid JSON/], ['[]', /not a JSON object/], ['{"step":"epic","owner":"ann"}', /names the step "epic"/],
+      ['{"step":"architecture"}', /no usable "owner"/], ['{"step":"architecture","owner":"Ann Lee"}', /no usable "owner"/]];
+    for (const [text, want] of cases) { fs.writeFileSync(f, text); assert.match(ownersMod.readOwnerFile(f, 'architecture').error, want, text); }
+    fs.writeFileSync(f, '{"step":"architecture","owner":"ann-lee"}');
+    assert.deepEqual(ownersMod.readOwnerFile(f, 'architecture').record, { step: 'architecture', owner: 'ann-lee', name: 'ann-lee', assignedBy: null, date: null });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 stepOpen: live while the step or its review is open; a passed pair, or a step off the chain, is not', () => {
+  const st = (a, r) => ({ steps: e47Steps(a, r) });
+  assert.equal(ownersMod.stepOpen(st('in_progress', 'todo'), 'architecture').live, true);
+  assert.equal(ownersMod.stepOpen(st('done', 'in_review'), 'architecture').live, true, 'rework during review is still the owner\'s');
+  assert.equal(ownersMod.stepOpen(st('done', 'done'), 'architecture').live, false);
+  assert.equal(ownersMod.stepOpen(st('skipped', 'skipped'), 'architecture').live, false);
+  assert.equal(ownersMod.stepOpen(st('in_progress', 'done'), 'architecture').live, true, 're-opened: live again');
+  assert.deepEqual(ownersMod.stepOpen(st('done', 'done'), 'stories'), { live: false, known: true, state: null, onChain: false });
+  assert.deepEqual(ownersMod.stepOpen(null, 'architecture'), { live: true, known: false, state: null }, 'unknown: the safe side for advice');
+});
+
+test('E47 assign: to me by default, to someone by --to; the same owner is a no-op; another owner needs --force', async () => {
+  const { T, g } = ownersFixture();
+  try {
+    const me = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal(me.code, 0, me.out);
+    assert.deepEqual(ownerJSON(T), { schemaVersion: ownerJSON(T).schemaVersion, step: 'architecture', owner: 'ann-lee', name: 'Ann Lee', assignedBy: 'Ann Lee', date: '2026-09-25' });
+    assert.match(me.out, /assigned to Ann Lee/);
+    assert.doesNotMatch(me.out, /no capture branch/, 'yourself is never an unknown name');
+    assert.match(me.out, /commit epics\/EP-x\/\.sdlc\/owners\/architecture\.json/);
+    const again = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'ann lee' });
+    assert.equal(again.value.changed, false, 'the same person, spelled another way');
+    const bob = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Bob Chen' });
+    assert.equal(bob.code, 1);
+    assert.match(bob.out, /is assigned to Ann Lee, since 2026-09-25/);
+    assert.match(bob.out, /--to "Bob Chen" --force/);
+    assert.equal(ownerJSON(T).owner, 'ann-lee', 'nothing written');
+    const forced = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Bob Chen', force: true });
+    assert.equal(forced.code, 0, forced.out);
+    assert.match(forced.out, /assigned to Bob Chen — replacing Ann Lee/);
+    assert.match(forced.out, /no capture branch here is named bob-chen yet/);
+    assert.deepEqual(ownerJSON(T).replaced, { owner: 'ann-lee', name: 'Ann Lee' });
+    assert.deepEqual(forced.value, { epic: 'EP-x', step: 'architecture', owner: 'bob-chen', name: 'Bob Chen', changed: true, replaced: { owner: 'ann-lee', name: 'Ann Lee' }, path: 'epics/EP-x/.sdlc/owners/architecture.json' });
+    // A name a capture branch carries is known: no warning.
+    g('branch', 'yad/wip/cy/EP-x');
+    const cy = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Cy', force: true });
+    assert.doesNotMatch(cy.out, /no capture branch/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 assign: a git name with no Latin letters owns under the name its capture branches carry', async () => {
+  const { T, g, w } = ownersFixture({ name: '李雷' });
+  try {
+    g('config', 'user.email', 'lei@corp.io');
+    const r = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal(r.code, 0, r.out);
+    assert.equal(ownerJSON(T).owner, cap.wipName('李雷', 'lei@corp.io'));
+    assert.equal(ownerJSON(T).owner, 'lei');
+    // Someone else naming them: `wipName('李雷')` alone cannot know the email, but their capture branch can.
+    w('epics/EP-x/architecture.md', '# arch\n');
+    await captureRun(T);
+    g('config', 'user.name', 'Ann Lee');
+    await ownersRun('runUnassign', T, { epic: 'EP-x', step: 'architecture', force: true });
+    const other = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: '李雷' });
+    assert.equal(other.code, 0, other.out);
+    assert.equal(ownerJSON(T).owner, 'lei', 'found through the capture branch saved under that git name');
+    assert.doesNotMatch(other.out, /no capture branch/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 assign: refused for a review step, a step off the chain, a passed step, a broken file, a bad id, and outside a Product', async () => {
+  const { T, w, setState } = ownersFixture();
+  try {
+    const review = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture-review' });
+    assert.equal(review.code, 1);
+    assert.match(review.out, /architecture-review is a review step, and review steps are not assigned/);
+    assert.match(review.out, /yad assign EP-x architecture/);
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-x', step: 'implement' })).out, /not an authoring step with an artifact/);
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-x', step: 'stories' })).out, /stories is not on EP-x's chain/);
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-x', step: 'epic' })).out, /epic of EP-x is done and its review is done — there is no open work left to own/);
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-X', step: 'epic' })).out, /not an epic id: EP-X/);
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-y', step: 'epic' })).out, /epics\/EP-y\/\.sdlc\/state\.json is missing or cannot be read/);
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-x' })).out, /yad assign needs an epic and a step/);
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: '  ' })).out, /--to needs a name/);
+    w('epics/EP-x/.sdlc/owners/architecture.json', '{ broken');
+    const broken = await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal(broken.code, 1);
+    assert.match(broken.out, /architecture\.json is not valid JSON/);
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/owners/architecture.json'), 'utf8'), '{ broken', 'read strictly: never rewritten');
+    assert.equal((await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', force: true })).code, 0);
+    assert.equal(ownerJSON(T).owner, 'ann-lee');
+    // The review passed: the step's work is closed, so a new assignment is refused.
+    setState('done', 'done');
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Bob', force: true })).out, /no open work left to own/);
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    assert.match((await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' })).out, /not a Product/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 unassign: your own freely, someone else\'s with --force; nothing assigned is a no-op; a broken file needs --force', async () => {
+  const { T, w } = ownersFixture();
+  try {
+    const none = await ownersRun('runUnassign', T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal(none.code, 0);
+    assert.equal(none.value.changed, false);
+    await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Bob Chen' });
+    const theirs = await ownersRun('runUnassign', T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal(theirs.code, 1);
+    assert.match(theirs.out, /assigned to Bob Chen, not you/);
+    const forced = await ownersRun('runUnassign', T, { epic: 'EP-x', step: 'architecture', force: true });
+    assert.equal(forced.code, 0, forced.out);
+    assert.deepEqual(forced.value.removed, { owner: 'bob-chen', name: 'Bob Chen' });
+    assert.equal(fs.existsSync(path.join(T, 'epics/EP-x/.sdlc/owners')), false, 'the empty folder goes too');
+    await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal((await ownersRun('runUnassign', T, { epic: 'EP-x', step: 'architecture' })).code, 0);
+    w('epics/EP-x/.sdlc/owners/architecture.json', '[]');
+    assert.match((await ownersRun('runUnassign', T, { epic: 'EP-x', step: 'architecture' })).out, /is not a JSON object/);
+    assert.equal((await ownersRun('runUnassign', T, { epic: 'EP-x', step: 'architecture', force: true })).code, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 owners: every assignment, live or not, and every file that cannot be read — listed, never dropped', async () => {
+  const { T, w, setState } = ownersFixture();
+  try {
+    assert.match((await ownersRun('runOwners', T)).out, /no step is assigned/);
+    await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture' });
+    w('epics/EP-x/.sdlc/owners/stories.json', JSON.stringify({ step: 'stories', owner: 'bob', name: 'Bob' }));
+    w('epics/EP-x/.sdlc/owners/epic-review.json', '{}');
+    w('epics/EP-x/.sdlc/owners/epic.json', '{');
+    w('foundation/.sdlc/state.json', JSON.stringify({ steps: [{ id: 'foundation', type: 'author', status: 'in_progress' }] }));
+    w('foundation/.sdlc/owners/foundation.json', JSON.stringify({ step: 'foundation', owner: 'cy', name: 'Cy' }));
+    const r = await ownersRun('runOwners', T);
+    assert.equal(r.code, 0, r.out);
+    const good = r.value.owners.filter((o) => !o.error).map((o) => [o.epic, o.step, o.owner, o.live, o.mine]);
+    assert.deepEqual(good, [['EP-foundation', 'foundation', 'cy', true, false], ['EP-x', 'architecture', 'ann-lee', true, true], ['EP-x', 'stories', 'bob', false, false]]);
+    assert.deepEqual(r.value.owners.filter((o) => o.error).map((o) => o.step), ['epic-review', 'epic']);
+    assert.match(r.out, /EP-x architecture — Ann Lee \(you\), since 2026-09-25, assigned by Ann Lee/);
+    assert.match(r.out, /EP-x stories — Bob — not live: the step is not on the chain/);
+    assert.match(r.out, /epic-review is not an authoring step, so nothing reads this file/);
+    assert.match(r.out, /owners\/epic\.json is not valid JSON/);
+    setState('done', 'done');
+    const one = await ownersRun('runOwners', T, { epic: 'EP-x' });
+    assert.match(one.out, /EP-x architecture — Ann Lee \(you\).* — not live: the step is done/);
+    assert.equal(one.value.owners.some((o) => o.epic === 'EP-foundation'), false);
+    assert.match((await ownersRun('runOwners', T, { epic: 'nope' })).out, /not an epic id/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 hook: an edit to a step someone else owns is named to the agent once an hour; the owner, a passed step and the owner file say nothing', async () => {
+  const { T, g, w, setState } = ownersFixture();
+  try {
+    await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Bob Chen' });
+    g('add', '-A'); g('commit', '-q', '-m', 'assign');
+    w('epics/EP-x/architecture.md', '# arch, ann\n');
+    const now = Date.now();
+    const first = await hookRun(T, { format: 'claude', now });
+    const note = JSON.parse(first.stdout);
+    assert.equal(note.hookSpecificOutput.hookEventName, 'PostToolUse');
+    assert.match(note.hookSpecificOutput.additionalContext, /yad owners: this step is assigned to someone else — advice, not a lock/);
+    assert.match(note.systemMessage, /EP-x architecture — Bob Chen, since 2026-09-25: epics\/EP-x\/architecture\.md/);
+    w('epics/EP-x/architecture.md', '# arch, ann, 2\n');
+    assert.equal((await hookRun(T, { format: 'claude', now: now + 60_000 })).stdout, '', 'held back within the hour');
+    w('epics/EP-x/architecture.md', '# arch, ann, 3\n');
+    const later = await hookRun(T, { now: now + 61 * 60_000 });
+    assert.equal(later.stdout, '');
+    assert.match(later.stderr, /assigned to someone else/);
+    // Another step's file, and the owner file itself, say nothing.
+    w('epics/EP-x/epic.md', '# x, ann\n');
+    w('epics/EP-x/.sdlc/owners/architecture.json', JSON.stringify({ step: 'architecture', owner: 'bob-chen', name: 'Bob C.' }));
+    const quiet = await hookRun(T, { format: 'claude', now: now + 3 * 3600_000 });
+    assert.equal(quiet.stdout + quiet.stderr, '');
+    // Once the step's review passes, the assignment is not live.
+    setState('done', 'done');
+    w('epics/EP-x/architecture.md', '# arch, ann, 4\n');
+    assert.equal((await hookRun(T, { format: 'claude', now: now + 5 * 3600_000 })).stdout, '');
+    // The owner editing their own step hears nothing.
+    setState('in_progress', 'todo');
+    g('config', 'user.name', 'Bob Chen');
+    w('epics/EP-x/architecture.md', '# arch, bob\n');
+    const own = await hookRun(T, { format: 'claude', now: now + 7 * 3600_000 });
+    assert.equal(own.stdout + own.stderr, '');
+    assert.deepEqual((await captureRun(T)).value.owners, []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 hook: a claim and an owner on one edit are ONE PostToolUse note', async () => {
+  const { base, alice, bob } = claimsFixture();
+  try {
+    alice.w('epics/EP-x/.sdlc/state.json', JSON.stringify({ steps: e47Steps() }));
+    alice.g('config', 'commit.gpgsign', 'false');
+    await ownersRun('runAssign', alice.dir, { epic: 'EP-x', step: 'architecture' });
+    alice.g('add', '-A'); alice.g('commit', '-q', '-m', 'assign'); alice.g('push', '-q', 'origin', 'main');
+    alice.w('epics/EP-x/architecture.md', '# arch, alice\n');
+    await captureRun(alice.dir, { noPush: false });
+    bob.g('pull', '-q', 'origin', 'main'); bob.g('fetch', '-q', 'origin');
+    bob.w('epics/EP-x/architecture.md', '# arch, bob\n');
+    const r = await hookRun(bob.dir, { format: 'claude' });
+    assert.equal(r.stdout.trim().split('\n').length, 1, 'one JSON line');
+    const text = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+    assert.match(text, /also being edited by someone else/);
+    assert.match(text, /EP-x architecture — Alice Ng, since \d{4}-\d\d-\d\d: epics\/EP-x\/architecture\.md/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('E47 next: the owner is printed under the step, and under its review, while it is live', async () => {
+  const { T, setState } = ownersFixture();
+  try {
+    await ownersRun('runAssign', T, { epic: 'EP-x', step: 'architecture', to: 'Bob Chen' });
+    const author = await captureConsole(() => runNext(T, { epic: 'EP-x' }));
+    assert.match(author.out, /owner: Bob Chen \(assigned 2026-09-25\) — advice, not a lock/);
+    setState('done', 'in_review');
+    const st = JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({ ...st, currentStep: 'architecture-review' }));
+    assert.match((await captureConsole(() => runNext(T, { epic: 'EP-x' }))).out, /owner: Bob Chen/);
+    setState('done', 'done');
+    assert.doesNotMatch((await captureConsole(() => runNext(T, { epic: 'EP-x' }))).out, /owner:/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E47 CLI: the three verbs parse their words, and yad owners --json answers in the envelope', () => {
+  const { T } = ownersFixture();
+  try {
+    assert.match(yadRun(T, 'unassign', 'EP-x', 'architecture', '--to', 'x').out, /yad unassign takes no --to/);
+    assert.match(yadRun(T, 'assign', 'EP-x', 'architecture', 'extra').out, /takes an epic and a step \(got an extra word: extra\)/);
+    assert.match(yadRun(T, 'owners', 'EP-x', 'extra').out, /takes at most an epic/);
+    assert.equal(yadRun(T, 'assign', 'EP-x', 'architecture', '--to', 'Bob Chen').code, 0);
+    const j = JSON.parse(yadRun(T, 'owners', '--json').out);
+    assert.equal(j.command, 'owners');
+    assert.equal(j.ok, true);
+    assert.deepEqual(j.owners.map((o) => [o.step, o.owner, o.live]), [['architecture', 'bob-chen', true]]);
+    assert.equal(yadRun(T, 'unassign', 'EP-x', 'architecture', '--force').code, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

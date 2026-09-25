@@ -174,6 +174,28 @@ saved change to that file that is not on the default branch yet.
 late. Two people with the same git name share capture branches, so they never see each other. Times
 are the saver's own clock, shown in UTC.
 
+### Who owns a step (assign)
+
+`yad assign` gives one authoring step to one person (E47) — for example "Bob writes the
+architecture". It is stronger advice than a claim, because it is decided in advance, but it is still
+**advice, not a lock**: it never blocks an edit, never holds a review gate and never stops a fold.
+
+| What | How |
+| --- | --- |
+| `yad assign <epic> <step> [--to <name>]` | Assigns the step to you, or to the person whose **git name** you give (the name they commit with). Only authoring steps that write an artifact (`epic`, `architecture`, `stories`, …); review steps are not assigned, because the platform and the gate count decide who approves. If someone else already owns the step it is refused and names them; `--force` replaces them |
+| `yad unassign <epic> <step>` | Removes the assignment. Your own freely; someone else's needs `--force` |
+| `yad owners [<epic>]` | Lists every assignment, whether it is live, and any owner file that cannot be read. `--json` too |
+| Where it is kept | One small file per step: `epics/<epic>/.sdlc/owners/<step>.json` (`foundation/.sdlc/owners/` for the Foundation). It is not a ledger file, so you can write it in both ledger modes. `yad assign` does not commit it: commit it (or let `yad fold <epic> <step>` take it) so the team sees it when they pull |
+| Live | While the step's work is open: the step is not finished, or its review has not passed yet. After that the file stays as a record; re-opening the step makes it live again. There is no time limit |
+| Shown | `yad next` prints `owner: <name>` under the step (and under its review) while it is live |
+| At edit time | When your edit changes a file of a step someone else owns, the capture hook says so — to the agent under Claude Code, on stderr under Cursor — at most once an hour per step. One note carries both this and any claim warning |
+
+**Limits.** The name is the git name, made branch-safe the way capture branch names are — so it matches
+the capture hook without asking GitHub or GitLab. Two people with the same git name look like one owner.
+A git name with no Latin letters is branch-safe only through the person's email, so someone else can
+assign it only once that person has a capture branch here (`--to` finds it by the git name the branch was
+saved under). With capture off, there is no edit-time warning.
+
 ### Folding a step into one commit
 
 `yad fold <epic> <step>` ends an authoring step (E44). It makes the one commit the record keeps,

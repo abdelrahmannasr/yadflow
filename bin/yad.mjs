@@ -193,6 +193,12 @@ ${c.bold('Build helpers')}
   yad claims [<epic>] [--no-fetch]     Who else is editing which artifact: read from everyone's
                                        capture branches (fetched first) — advice, not a lock; a claim
                                        ends 4 hours after the last save, or once the file is merged
+  yad assign <epic> <step> [--to <name>] [--force]
+                                       Assign an authoring step to one person (you, or their git
+                                       name) — advice, not a lock: the capture hook warns anyone
+                                       else who edits its files; --force replaces another owner
+  yad unassign <epic> <step> [--force] Remove an assignment (someone else's needs --force)
+  yad owners [<epic>]                  List every step assignment, and whether it is live
   yad fold <epic> <step>               End an authoring step: commit ITS artifacts as one commit,
                                        docs(<epic>): author <step> (signed if git signs) — the drafts
                                        stay on yad/wip/…; with ledger: local the epic's ledger rides along
@@ -652,6 +658,24 @@ async function main() {
       const [, epic, extra] = o._;
       if (extra) { refuse(`yad claims takes at most an epic (got an extra word: ${extra})`, 'usage: yad claims [<epic>] [--no-fetch]'); break; }
       result = await commands.runClaims(o.dir, { epic, noFetch: !!o.noFetch });
+      break;
+    }
+    case 'assign':
+    case 'unassign': {
+      // E47. A file per step; nothing is committed and nothing is blocked.
+      const [verb, epic, step, extra] = o._;
+      const usage = verb === 'assign' ? 'usage: yad assign <epic> <step> [--to <git name>] [--force]' : 'usage: yad unassign <epic> <step> [--force]';
+      if (extra) { refuse(`yad ${verb} takes an epic and a step (got an extra word: ${extra})`, usage); break; }
+      if (verb === 'unassign' && o.to != null) { refuse('yad unassign takes no --to: it removes whoever is assigned', usage); break; }
+      result = verb === 'assign'
+        ? await commands.runAssign(o.dir, { epic, step, to: o.to ?? null, force: !!o.force, today })
+        : await commands.runUnassign(o.dir, { epic, step, force: !!o.force });
+      break;
+    }
+    case 'owners': {
+      const [, epic, extra] = o._;
+      if (extra) { refuse(`yad owners takes at most an epic (got an extra word: ${extra})`, 'usage: yad owners [<epic>]'); break; }
+      result = await commands.runOwners(o.dir, { epic });
       break;
     }
     case 'fold': {

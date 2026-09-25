@@ -88,6 +88,13 @@ Print, in this order:
      cleared with `yad unblock <epic> <id>` once the wait is over — on a verified Product that verb refuses
      once the ledger is on the default branch, so say so. A `blocked` with no record is the older
      word for `todo`: render it as not started.
+   - **Owned steps:** `yad assign` (E47) gives an authoring step to one person, in
+     `<epic>/.sdlc/owners/<step>.json` (`{ step, owner, name, assignedBy, date }`). Add `· owner: <name>`
+     to the author step's line **and** its `-review` line while it is live — the author step, or its
+     review, not yet passed (`done`, `skipped`, `deferred`, `satisfied`). A passed step's file is a record:
+     say nothing. It is advice, not a lock, and never changes what the gate needs. A file that is not valid
+     JSON, or whose `step` is not its own file name, is not an owner: name it and point to `yad owners`.
+     `yad owners [<epic>] --json` gives the same list ready-made.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the count in force — **distinct approvers** recorded, against the **base** (1, enforced) and the
      **full count** from the step's risk tags (advisory),
