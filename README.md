@@ -151,7 +151,7 @@ git hook runs.
 
 The capture commits are unsigned on purpose — a signing prompt inside a hook would hang the agent — and
 each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines, which the later fold into one clean commit
-(E44) reads. The push is never forced: if you capture the same epic on two machines, the second push is refused rather than overwriting the first, and a `yad capture` you run by hand says so and names the branch (delete one copy with `git branch -D` to continue the other) — the hook's background push cannot report it. A capture by hand also fetches your capture branches first, pruning any deleted on origin, so a deleted branch is never pushed back. On a fresh clone, a capture continues the branch already on origin. Two people with the same git name share branches. The people count that caps review gates
+(E44) reads. The push is never forced: if you capture the same epic on two machines, the second push is refused rather than overwriting the first, and a `yad capture` you run by hand says so and names the branch (delete one copy with `git branch -D` to continue the other) — the hook's background push cannot report it. A capture by hand also fetches your capture branches first, so a fresh clone continues them. **To remove a capture branch for good** — say a secret was captured — delete it on origin **and** on every machine that captured it (`git branch -D yad/wip/<you>/<epic>`): a machine that still has its local copy pushes it back. On a fresh clone, a capture continues the branch already on origin. Two people with the same git name share branches. The people count that caps review gates
 (E71) does not count capture commits.
 
 ### The local ledger guard, per agent
