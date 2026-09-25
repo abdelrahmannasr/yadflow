@@ -78,7 +78,10 @@ export function readClaims(root, { env = process.env, now = Date.now(), epics = 
       // files too — over-reporting, the safe side for advice, where the previous capture would drop earlier edits.
       basis = 'first-capture';
       // One git call, however long the branch: the newest first-parent ancestor that is not a capture.
-      const first = git(['log', '--first-parent', '--invert-grep', '--grep=^wip(EP-[^)]*): capture$', '-n', '1', '--format=%H', tip]);
+      // `--basic-regexp` and `--no-show-signature` pin it against a person's own git config: another
+      // `grep.patternType` matches nothing (the tip comes back, and the claims vanish), and
+      // `log.showSignature` prints a signature check before the hash.
+      const first = git(['log', '--no-show-signature', '--basic-regexp', '--first-parent', '--invert-grep', '--grep=^wip(EP-[^)]*): capture$', '-n', '1', '--format=%H', tip]);
       against = first.ok && first.out.trim() ? first.out.trim() : empty;
     }
     const diff = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', against, tip]);

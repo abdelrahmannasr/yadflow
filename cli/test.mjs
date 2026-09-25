@@ -24671,6 +24671,8 @@ test('E46 (review 1): a push keeps the once-an-hour memory; a file HEAD moved is
     alice.g('commit', '-q', '-am', 'alice local fold');
     alice.w('epics/EP-x/epic.md', '# x, alice\n');
     await captureRun(alice.dir, { noPush: false });
+    // A person's own git config must not change the answer (review 3).
+    bob.g('config', 'grep.patternType', 'perl'); bob.g('config', 'log.showSignature', 'true');
     const r = await claimsRun(bob.dir);
     const hers = r.value.claims.filter((c) => c.name === 'alice-ng');
     assert.deepEqual(hers.map((c) => [c.path, c.basis]), [['epics/EP-x/architecture.md', 'first-capture'], ['epics/EP-x/epic.md', 'first-capture']],
