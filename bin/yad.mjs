@@ -190,6 +190,9 @@ ${c.bold('Build helpers')}
   yad capture [--no-push]              Snapshot every changed Shape artifact onto your private
                                        yad/wip/<you>/<epic> branches — never your checkout; pushes them
                                        (a harness hook runs it after each agent edit, with --hook)
+  yad claims [<epic>] [--no-fetch]     Who else is editing which artifact: read from everyone's
+                                       capture branches (fetched first) — advice, not a lock; a claim
+                                       ends 4 hours after the last save, or once the file is merged
   yad fold <epic> <step>               End an authoring step: commit ITS artifacts as one commit,
                                        docs(<epic>): author <step> (signed if git signs) — the drafts
                                        stay on yad/wip/…; with ledger: local the epic's ledger rides along
@@ -287,6 +290,7 @@ function parseArgs(argv) {
     else if (a === '--force') o.force = true;
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--no-push') o.noPush = true;
+    else if (a === '--no-fetch') o.noFetch = true;
     else if (a === '--push') o.push = true;
     else if (a === '--allow-branch') o.allowBranch = true;
     else if (a === '--overwrite-local') o.overwriteLocal = true;
@@ -421,7 +425,7 @@ async function main() {
   // and needs `cli/capture.mjs` alone.
   if (cmd === 'capture' && o.hook) {
     const { runCapture } = await import('../cli/capture.mjs');
-    try { await runCapture(o.dir, { hook: true, noPush: !!o.noPush }); } catch (e) { process.stderr.write(`  • yad capture: ${e.message}\n`); }
+    try { await runCapture(o.dir, { hook: true, noPush: !!o.noPush, format: o.format || null }); } catch (e) { process.stderr.write(`  • yad capture: ${e.message}\n`); }
     process.exitCode = 0;
     return;
   }
@@ -641,6 +645,13 @@ async function main() {
       if (o._[1]) { refuse(`yad capture takes no word (got ${o._[1]})`, 'usage: yad capture [--no-push]'); break; }
       result = await commands.runCapture(o.dir, { hook: !!o.hook, noPush: !!o.noPush });
       if (o.hook) process.exitCode = 0;
+      break;
+    }
+    case 'claims': {
+      // E46. Read from the capture branches; nothing is recorded here.
+      const [, epic, extra] = o._;
+      if (extra) { refuse(`yad claims takes at most an epic (got an extra word: ${extra})`, 'usage: yad claims [<epic>] [--no-fetch]'); break; }
+      result = await commands.runClaims(o.dir, { epic, noFetch: !!o.noFetch });
       break;
     }
     case 'fold': {

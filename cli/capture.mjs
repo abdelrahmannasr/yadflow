@@ -172,11 +172,17 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current, pr
       // as in HEAD). Compared on the artifacts only: HEAD moving under the branch changes the ledger and
       // the rest of the tree, and that alone is not a capture.
       const against = tip ? `${tip}^{tree}` : headTree;
+      let changed = paths.filter((p) => capturedEpic(p) === epic);
       if (against) {
         const diff = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', against, treeSha]);
         if (!diff.ok) return { epic, branch, error: `could not compare with ${tip ? branch : 'HEAD'}: ${diff.err}` };
         const moved = diff.out.split('\0').filter((p) => p && capturedEpic(underPrefix(p, prefix)) === epic);
         if (!moved.length) return { epic, branch, unchanged: true };
+        // What THIS capture changed that is the person's OWN edit — the files E46's claim check asks about. A
+        // file a pull brought in also moved since the last capture, but it equals HEAD's: not theirs.
+        const own = headTree && tip ? git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', headTree, treeSha]) : null;
+        const ownSet = own?.ok ? new Set(own.out.split('\0').filter(Boolean)) : null;
+        changed = moved.filter((p) => !ownSet || ownSet.has(p)).map((p) => underPrefix(p, prefix));
       }
       const parent = tip || head;
       const commit = git(['commit-tree', '--no-gpg-sign', treeSha, ...(parent ? ['-p', parent] : []), '-F', '-'],
@@ -186,7 +192,7 @@ function captureEpic(root, git, { name, epic, paths, head, headTree, current, pr
       // Compare-and-swap: move the ref only if it is still where it was read. An all-zero old value means
       // "must not exist yet". A lost race re-reads the tip and commits on top of it, once.
       const moved = git(['update-ref', '-m', `yad capture ${epic}`, ref, sha, local || '0'.repeat(sha.length)]);
-      if (moved.ok) return { epic, branch, commit: sha, files: paths.filter((p) => capturedEpic(p) === epic).length };
+      if (moved.ok) return { epic, branch, commit: sha, files: paths.filter((p) => capturedEpic(p) === epic).length, changed };
       if (attempt === 1) return { epic, branch, error: `${branch} moved while it was being written — run \`yad capture\` again` };
     }
     return { epic, branch, error: 'unreachable' };
@@ -207,6 +213,13 @@ export const pushArgs = (name) => [
   'push', '--no-verify', '--quiet', 'origin',
   `refs/heads/${WIP_PREFIX}/${name}/*:refs/heads/${WIP_PREFIX}/${name}/*`,
 ];
+// E46: everyone's capture branches, as remote-tracking refs — what `yad claims` reads. No `--prune` from the
+// hook: a deleted branch lingers until the next `yad claims`, and the 4-hour claim expiry bounds what it says.
+export const FETCH_ALL_REFSPEC = `+refs/heads/${WIP_PREFIX}/*:refs/remotes/origin/${WIP_PREFIX}/*`;
+export const fetchAllArgs = ({ prune = false, extra = [] } = {}) => [
+  '-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20',
+  'fetch', '--quiet', '--no-tags', ...(prune ? ['--prune'] : []), 'origin', FETCH_ALL_REFSPEC, ...extra,
+];
 // No prompt may ever appear: a hook has no terminal, and a prompt nobody sees hangs the push for ever.
 export const pushEnv = (env = process.env) => ({
   GIT_TERMINAL_PROMPT: '0',
@@ -220,25 +233,33 @@ function pushStatePath(git) {
   return r.ok && r.out.trim() ? path.join(r.out.trim(), 'yad-capture.json') : null;
 }
 
+// The state file's other keys (E46's `claimsWarned`) survive a push's write. A cache, so read leniently: an
+// unreadable file reads as empty and is replaced (claimWarnings, which only adds to it, refuses to overwrite one).
+const stateOf = (file) => { const s = readJSON(file, {}); return s && typeof s === 'object' && !Array.isArray(s) ? s : {}; };
+
 // Push now (a person ran `yad capture`), or start one in the background when due (the hook).
 function push(root, git, name, { hook, now, spawner, env }) {
   if (!git(['remote', 'get-url', 'origin']).ok) return { pushed: 'local', why: 'no remote named origin' };
   const statePath = pushStatePath(git);
   const stateFile = statePath && path.resolve(root, statePath);
   if (hook) {
-    const last = stateFile ? Number(readJSON(stateFile, {})?.lastPushAt) || 0 : 0;
+    const state = stateFile ? stateOf(stateFile) : {};
+    const last = Number(state.lastPushAt) || 0;
     if (now - last < PUSH_EVERY_MS) return { pushed: 'later', why: `the last push started under ${PUSH_EVERY_MS / 60000} minutes ago` };
     // Recorded BEFORE the push starts, so two hooks a moment apart cannot both start one.
-    if (stateFile) writeJSON(stateFile, { lastPushAt: now });
+    if (stateFile) writeJSON(stateFile, { ...state, lastPushAt: now });
     try {
       spawner('git', pushArgs(name), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore' }).unref();
+      // E46: fetch everyone's capture branches in the same window, so the claim check at the next edit reads
+      // minutes-old claims, not hours-old ones. Detached too: an edit never waits on it, and a failure is silent.
+      try { spawner('git', fetchAllArgs(), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore' }).unref(); } catch { /* claims read what was last fetched */ }
       return { pushed: 'started' };
     } catch (e) {
       return { pushed: 'failed', why: e.message };
     }
   }
   const r = spawnSync('git', pushArgs(name), { cwd: root, encoding: 'utf8', timeout: 60_000, env: { ...env, ...pushEnv(env) } });
-  if (stateFile) writeJSON(stateFile, { lastPushAt: now });
+  if (stateFile) writeJSON(stateFile, { ...stateOf(stateFile), lastPushAt: now });
   if (r.status === 0) return { pushed: 'done' };
   // Refused, not failed: origin has a capture branch this one does not continue. The next push is refused
   // the same way, so it is named as stuck — never "rides the next push".
@@ -250,7 +271,9 @@ function push(root, git, name, { hook, now, spawner, env }) {
 
 // `yad capture [--no-push] [--hook]`. With `--hook` it is the harness's post-edit command: it never fails,
 // never prints to stdout (a harness may read it), and says nothing unless something went wrong.
-export async function runCapture(root, { hook = false, noPush = false, now = Date.now(), spawner = spawn, env = process.env } = {}) {
+// `format: 'claude'` (from `--format claude`, which the hook script passes under Claude Code) makes a claim
+// warning the one thing the hook prints on stdout: PostToolUse JSON the agent reads (E46).
+export async function runCapture(root, { hook = false, noPush = false, now = Date.now(), spawner = spawn, env = process.env, format = null } = {}) {
   const quiet = hook;
   const say = (fn, msg) => { if (!quiet) fn(msg); };
   const bail = (msg, extra = {}) => {
@@ -305,7 +328,8 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
   // on the HEAD that branch was last captured from (`Yad-Base`): once HEAD moves (a pull, a merge, a
   // switch), a difference is other work arriving, not an edit undone, and recording it would add a commit
   // to every old capture branch on every pull.
-  const branches = git(['for-each-ref', '--format=%(refname)%00%(trailers:key=Yad-Base,valueonly)', `refs/heads/${WIP_PREFIX}/${name}/`]);
+  // `trailer.separators=:` pins how the `Yad-Base: <sha>` line is read against a person's own git config.
+  const branches = git(['-c', 'trailer.separators=:', 'for-each-ref', '--format=%(refname)%00%(trailers:key=Yad-Base,valueonly)', `refs/heads/${WIP_PREFIX}/${name}/`]);
   for (const line of branches.ok ? branches.out.split('\n').filter(Boolean) : []) {
     const [r, base = ''] = line.split('\0');
     const epic = r.slice(`refs/heads/${WIP_PREFIX}/${name}/`.length);
@@ -348,6 +372,25 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
       }
     }
   }
+  // E46: of the files this capture changed, does someone else have them open? Advice only, and never a
+  // reason for the capture to fail.
+  let claims = [];
+  let warningText = null;
+  try {
+    // Loaded here, not at the top: claims.mjs reads this module's exports, and the hook's fast path should
+    // not pay for it on an edit that captured nothing.
+    const mod = captured.length ? await import('./claims.mjs') : null;
+    warningText = mod?.warningText;
+    const statePath = pushStatePath(git);
+    if (mod) claims = mod.claimWarnings(root, captured.flatMap((c) => c.changed || []), { env, now, statePath: statePath && path.resolve(root, statePath) });
+  } catch { claims = []; }
+  if (claims.length && warningText) {
+    const text = warningText(claims, now);
+    if (hook && format === 'claude') {
+      process.stdout.write(`${JSON.stringify({ systemMessage: text, hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } })}\n`);
+    } else if (quiet) process.stderr.write(`  • ${text.replace(/\n/g, '\n  ')}\n`);
+    else warn(text);
+  }
   if (!quiet && errors.length) process.exitCode = 1;
-  return { name, captured, unchanged: unchanged.map((u) => u.epic), errors, pushed, off: null };
+  return { name, captured, unchanged: unchanged.map((u) => u.epic), errors, pushed, off: null, claims };
 }

@@ -25,6 +25,7 @@ export { runCheckpoint } from '../cli/checkpoint.mjs';
 export { runTidy } from '../cli/tidy.mjs';
 export { runCapture } from '../cli/capture.mjs';
 export { runFold } from '../cli/fold.mjs';
+export { runClaims } from '../cli/claims.mjs';
 export { runIndex } from '../cli/index-command.mjs';
 export { runHistory, HISTORY_FLAGS } from '../cli/history.mjs';
 export { runRepo } from '../cli/repo.mjs';

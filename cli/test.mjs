@@ -23627,8 +23627,9 @@ test('E1 only cli/lib.mjs writes a JSON answer to stdout', () => {
         // cli/lib.mjs holds the emitter itself, and `log`.
         const hit = (/log\(JSON\.stringify\(/.test(line) && rel !== 'cli/lib.mjs')
           || (/console\.log\(/.test(line) && rel !== 'cli/lib.mjs')
-          // yad hook's stdout is Cursor's permission protocol, not a --json answer (E1 decision 4).
-          || (/process\.stdout\.write\(/.test(line) && rel !== 'cli/hook.mjs');
+          // yad hook's stdout is Cursor's permission protocol, not a --json answer (E1 decision 4); the capture
+          // hook's is Claude Code's PostToolUse note, printed only under --hook --format claude (E46).
+          || (/process\.stdout\.write\(/.test(line) && rel !== 'cli/hook.mjs' && rel !== 'cli/capture.mjs');
         if (hit) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
       });
     }
@@ -24035,6 +24036,9 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     w('epics/EP-x/epic.md', 'two\n');
     const h1 = await captureRun(T, { hook: true, noPush: false, spawner, now: 1_000_000 });
     assert.deepEqual(h1.value.pushed, { pushed: 'started' });
+    // E46: the same window starts a detached fetch of everyone's capture branches, for the claim check.
+    assert.deepEqual(spawned[1].args.slice(-2), ['origin', '+refs/heads/yad/wip/*:refs/remotes/origin/yad/wip/*']);
+    assert.ok(spawned[1].opts.detached && !spawned[1].args.includes('--prune'), 'detached, and no prune from the hook');
     assert.deepEqual(spawned[0].args.slice(-2), ['origin', 'refs/heads/yad/wip/ann-lee/*:refs/heads/yad/wip/ann-lee/*']);
     assert.ok(spawned[0].args.includes('--no-verify'));
     assert.ok(!spawned[0].args.some((a) => /force/.test(a)), 'never a forced push: a second machine\'s capture is refused, not overwritten');
@@ -24043,7 +24047,7 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     w('epics/EP-x/epic.md', 'three\n');
     const h2 = await captureRun(T, { hook: true, noPush: false, spawner, now: 1_000_000 + 60_000 });
     assert.equal(h2.value.pushed.pushed, 'later', 'within the window the capture is local only');
-    assert.equal(spawned.length, 1);
+    assert.equal(spawned.length, 2, 'one push and one fetch per window');
     // The hook pushes only after a capture that committed something: an edit that changed nothing sends nothing.
     assert.equal((await captureRun(T, { hook: true, noPush: false, spawner, now: 1_000_000 + cap.PUSH_EVERY_MS })).value.pushed, null);
     w('epics/EP-x/epic.md', 'four\n');
@@ -24496,4 +24500,186 @@ test('E44 fold (review 6): the Product level is seeded under either spelling —
     assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n'), ['foundation/purpose.md']);
     assert.deepEqual(r.value.leftForCi, ['foundation/.sdlc/state.json'], 'ledger-guard would reject it as a second product level');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------------------------------------
+// E46 — `yad claims`: who else is editing which artifact, read from the capture branches
+// ---------------------------------------------------------------------------------------------
+const claimsMod = await import('./claims.mjs');
+// A bare origin and two clones, Alice and Bob, each with their own git identity; one epic on main.
+function claimsFixture() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-claims-'));
+  const origin = path.join(base, 'origin.git');
+  const run = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
+  fs.mkdirSync(origin); run(origin, 'init', '-q', '--bare', '-b', 'main');
+  const clone = (who, email) => {
+    const dir = path.join(base, who);
+    run(base, 'clone', '-q', origin, dir);
+    run(dir, 'config', 'user.name', who); run(dir, 'config', 'user.email', email); run(dir, 'config', 'commit.gpgsign', 'false');
+    const g = (...a) => run(dir, ...a);
+    const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    return { dir, g, w };
+  };
+  const alice = clone('Alice Ng', 'alice@corp.io');
+  alice.g('checkout', '-q', '-b', 'main');
+  alice.w('.sdlc/hub.json', JSON.stringify({ default_branch: 'main' }));
+  alice.w('epics/EP-x/epic.md', '# x\n'); alice.w('epics/EP-x/architecture.md', '# arch\n');
+  alice.g('add', '-A'); alice.g('commit', '-q', '-m', 'init'); alice.g('push', '-q', '-u', 'origin', 'main');
+  const bob = clone('Bob Chen', 'bob@corp.io');
+  return { base, alice, bob };
+}
+const claimsRun = async (T, o = {}) => {
+  const before = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const { value, out } = await captureConsole(() => claimsMod.runClaims(T, o));
+    return { value, out, code: process.exitCode ?? 0 };
+  } finally { process.exitCode = before; }
+};
+// The hook's stdout and stderr, as a harness would read them.
+async function hookRun(T, o = {}) {
+  const out = []; const err = [];
+  const ow = process.stdout.write; const ew = process.stderr.write;
+  process.stdout.write = (c) => { out.push(String(c)); return true; };
+  process.stderr.write = (c) => { err.push(String(c)); return true; };
+  try { await cap.runCapture(T, { hook: true, noPush: true, ...o }); } finally { process.stdout.write = ow; process.stderr.write = ew; }
+  return { stdout: out.join(''), stderr: err.join('') };
+}
+
+test('E46 claims: another person\'s unmerged capture is a claim; the list is fetched first; your own is marked', async () => {
+  const { base, alice, bob } = claimsFixture();
+  try {
+    alice.w('epics/EP-x/architecture.md', '# arch\nalice was here\n');
+    assert.equal((await captureRun(alice.dir, { noPush: false })).value.pushed.pushed, 'done');
+    bob.g('config', 'trailer.separators', '#');   // would hide `Yad-Base:` unless the read pins it (review 4)
+    const r = await claimsRun(bob.dir);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.value.fetched, 'done');
+    assert.deepEqual(r.value.claims.map((c) => [c.path, c.name, c.person, c.mine, c.basis]), [['epics/EP-x/architecture.md', 'alice-ng', 'Alice Ng', false, 'yad-base']]);
+    assert.match(r.out, /epics\/EP-x\/architecture\.md — Alice Ng, last saved \d\d:\d\d UTC/);
+    assert.match(r.out, /advice, not a lock/);
+    // Alice sees her own, marked; an epic filter narrows; --no-fetch reads what is there.
+    const own = await claimsRun(alice.dir, { noFetch: true });
+    assert.deepEqual(own.value.claims.map((c) => [c.path, c.mine]), [['epics/EP-x/architecture.md', true]]);
+    assert.match(own.out, /Alice Ng \(you\)/);
+    assert.deepEqual((await claimsRun(bob.dir, { epic: 'EP-y', noFetch: true })).value.claims, []);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('E46 claims: one ends 4 hours after the last save, and at once when the file on main matches it', async () => {
+  const { base, alice, bob } = claimsFixture();
+  try {
+    alice.w('epics/EP-x/architecture.md', '# arch v2\n');
+    await captureRun(alice.dir, { noPush: false });
+    const at = Date.now();
+    assert.equal((await claimsRun(bob.dir, { now: at + 3 * 3600_000 })).value.claims.length, 1);
+    const late = await claimsRun(bob.dir, { now: at + 4 * 3600_000 + 60_000, noFetch: true });
+    assert.deepEqual(late.value.claims, []);
+    assert.match(late.out, /no open claims/);
+    // Alice's change lands on main: the claim ends although her capture branch still has it.
+    alice.g('add', '-A'); alice.g('commit', '-q', '-m', 'docs(EP-x): author architecture'); alice.g('push', '-q', 'origin', 'main');
+    assert.deepEqual((await claimsRun(bob.dir)).value.claims, []);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('E46 claims: a claim is the person\'s own edits (Yad-Base), never what a pull brought in', async () => {
+  const { base, alice, bob } = claimsFixture();
+  try {
+    alice.w('epics/EP-x/architecture.md', '# arch, alice\n');
+    await captureRun(alice.dir, { noPush: true });
+    // Bob's epic.md reaches main; Alice pulls it, and her next capture is built on the new HEAD.
+    bob.w('epics/EP-x/epic.md', '# x, bob\n'); bob.g('commit', '-q', '-am', 'bob'); bob.g('push', '-q', 'origin', 'main');
+    alice.g('pull', '-q', '--no-rebase', 'origin', 'main');
+    alice.w('epics/EP-x/architecture.md', '# arch, alice, again\n');
+    await captureRun(alice.dir, { noPush: false });
+    // No default branch to compare with (a name this clone does not hold), so only the Yad-Base rule stands
+    // between epic.md and a false claim.
+    alice.w('.sdlc/hub.json', JSON.stringify({ default_branch: 'trunk' }));
+    const { claims } = claimsMod.readClaims(alice.dir, { epics: new Set(['EP-x']) });
+    assert.deepEqual(claims.map((c) => c.path), ['epics/EP-x/architecture.md']);
+    const tip = alice.g('rev-parse', 'yad/wip/alice-ng/EP-x');
+    assert.match(alice.g('diff', '--name-only', `${tip}^`, tip), /epic\.md/, 'the parent diff WOULD have named epic.md');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('E46 hook: a file someone else has open is named to the agent (Claude Code JSON) once an hour; elsewhere on stderr', async () => {
+  const { base, alice, bob } = claimsFixture();
+  try {
+    alice.w('epics/EP-x/architecture.md', '# arch, alice\n');
+    await captureRun(alice.dir, { noPush: false });
+    bob.g('fetch', '-q', 'origin');   // what the hook's background fetch does
+    bob.w('epics/EP-x/architecture.md', '# arch, bob\n');
+    const now = Date.now();
+    const first = await hookRun(bob.dir, { format: 'claude', now });
+    const note = JSON.parse(first.stdout);
+    assert.equal(note.hookSpecificOutput.hookEventName, 'PostToolUse');
+    assert.match(note.hookSpecificOutput.additionalContext, /epics\/EP-x\/architecture\.md — Alice Ng, last saved/);
+    assert.match(note.systemMessage, /advice, not a lock/);
+    bob.w('epics/EP-x/architecture.md', '# arch, bob, 2\n');
+    assert.equal((await hookRun(bob.dir, { format: 'claude', now: now + 60_000 })).stdout, '', 'held back within the hour');
+    bob.w('epics/EP-x/architecture.md', '# arch, bob, 3\n');
+    const later = await hookRun(bob.dir, { now: now + 61 * 60_000 });
+    assert.equal(later.stdout, '', 'no --format claude: nothing on stdout');
+    assert.match(later.stderr, /also being edited by someone else/);
+    // A file nobody else has open says nothing.
+    bob.w('epics/EP-x/epic.md', '# x, bob\n');
+    const quiet = await hookRun(bob.dir, { format: 'claude', now: now + 3 * 3600_000 });
+    assert.equal(quiet.stdout + quiet.stderr, '');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('E46 claims: no remote reads only your own; not a repo or not a Product is refused', async () => {
+  const { T, w } = captureFixture();
+  try {
+    w('epics/EP-x/epic.md', '# x\nmine\n');
+    await captureRun(T);
+    const r = await claimsRun(T);
+    assert.equal(r.value.fetched, 'local');
+    assert.match(r.out, /no remote named origin/);
+    assert.deepEqual(r.value.claims.map((c) => [c.path, c.mine]), [['epics/EP-x/epic.md', true]]);
+    assert.equal((await claimsRun(T, { epic: 'nope' })).code, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-claims-none-'));
+  try {
+    assert.match((await claimsRun(bare)).out, /not a git repository/);
+    execFileSync('git', ['init', '-q'], { cwd: bare });
+    assert.match((await claimsRun(bare)).out, /not a Product/);
+  } finally { fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
+test('E46 (review 1): a push keeps the once-an-hour memory; a file HEAD moved is not "your edit"; a missing Yad-Base over-reports; a wrong default name still fetches', async () => {
+  const { base, alice, bob } = claimsFixture();
+  try {
+    alice.w('epics/EP-x/architecture.md', '# arch, alice\n');
+    await captureRun(alice.dir, { noPush: false });
+    bob.g('fetch', '-q', 'origin');
+    // (1) A push in between does not wipe what was already said.
+    const spawner = () => ({ unref() {} });
+    const now = Date.now();
+    bob.w('epics/EP-x/architecture.md', '# arch, bob\n');
+    assert.match((await hookRun(bob.dir, { format: 'claude', now, noPush: false, spawner })).stdout, /Alice Ng/);
+    bob.w('epics/EP-x/architecture.md', '# arch, bob, 2\n');
+    const pushed = await hookRun(bob.dir, { format: 'claude', now: now + 6 * 60_000, noPush: false, spawner });
+    assert.equal(pushed.stdout, '', 'the push 6 minutes later kept claimsWarned');
+    // (2) Bob commits architecture.md, then edits epic.md: this capture's own edit is epic.md alone, although
+    // architecture.md moved since his last capture (HEAD moved under it).
+    bob.w('epics/EP-x/architecture.md', '# arch, bob, committed\n');   // HEAD moves to content the last capture never saw
+    bob.g('commit', '-q', '-m', 'bob arch', '--', 'epics/EP-x/architecture.md');
+    bob.w('epics/EP-x/epic.md', '# x, bob\n');
+    const moved = await hookRun(bob.dir, { format: 'claude', now: now + 3 * 3600_000 });
+    assert.equal(moved.stdout, '', 'no warning about a file this edit did not touch');
+    // (3) Alice commits locally (never pushed), then edits and captures: her tip's Yad-Base is not in Bob's clone.
+    alice.g('commit', '-q', '-am', 'alice local fold');
+    alice.w('epics/EP-x/epic.md', '# x, alice\n');
+    await captureRun(alice.dir, { noPush: false });
+    // A person's own git config must not change the answer (review 3).
+    bob.g('config', 'grep.patternType', 'perl'); bob.g('config', 'log.showSignature', 'true');
+    const r = await claimsRun(bob.dir);
+    const hers = r.value.claims.filter((c) => c.name === 'alice-ng');
+    assert.deepEqual(hers.map((c) => [c.path, c.basis]), [['epics/EP-x/architecture.md', 'first-capture'], ['epics/EP-x/epic.md', 'first-capture']],
+      'the earlier edit (architecture.md) is kept, not dropped');
+    // (4) A default branch name origin does not have does not stop the capture branches from arriving.
+    bob.w('.sdlc/hub.json', JSON.stringify({ default_branch: 'trunk' }));
+    assert.equal((await claimsRun(bob.dir)).value.fetched, 'done');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
