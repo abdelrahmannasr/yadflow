@@ -24417,6 +24417,16 @@ test('E44 fold (review 1): a staged deletion and a git mv are folded whole; a me
     assert.match(cached.out, /staged as deleted but still on disk \(git rm --cached\): epics\/EP-x\/stories\/EP-x-S04\.md/);
     assert.match(g('diff', '--cached', '--name-status'), /^D\s+epics\/EP-x\/stories\/EP-x-S04\.md$/, 'the person\'s choice is left as it was');
     g('reset', '-q', '--', 'epics/EP-x/stories/EP-x-S04.md');
+    // A case-only rename, where the disk ignores case (macOS, Windows): refused as what it is, never with the
+    // `git rm --cached` hint, whose "delete the file" would delete the renamed one. Linux disks see case: skipped.
+    if (fs.existsSync(path.join(T, 'epics/EP-x/STORIES/EP-x-S04.md'))) {
+      g('mv', 'epics/EP-x/stories/EP-x-S04.md', 'epics/EP-x/stories/ep-x-s04.md');
+      const renamed = await foldRun(T, { epic: 'EP-x', step: 'stories' });
+      assert.equal(renamed.code, 1);
+      assert.match(renamed.out, /changes only letter case cannot be folded: epics\/EP-x\/stories\/EP-x-S04\.md/);
+      assert.doesNotMatch(renamed.out, /git rm --cached/);
+      g('commit', '-q', '-m', 'case rename');
+    }
     // A merge in progress: refused, and nothing staged.
     fs.writeFileSync(path.join(T, '.git/MERGE_HEAD'), `${g('rev-parse', 'HEAD')}\n`);
     w('epics/EP-x/stories/EP-x-S03.md', 'three\n');

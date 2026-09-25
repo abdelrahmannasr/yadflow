@@ -164,10 +164,20 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const files = [...new Set([...sorted.step, ...sorted.ledger])].filter(foldable);
   // That case cannot be folded: the fold commits files as they are on disk, and `commit --only` cannot
   // record the deletion of a file that is still there. `git add` would quietly undo the person's choice.
-  const untracked = files.filter((p) => stagedDeletion.has(p) && onDisk(p));
-  if (untracked.length) {
-    return refuse(`staged as deleted but still on disk (git rm --cached): ${untracked.join(', ')}`,
+  // It is told apart by git's own untracked listing, never by the disk alone: on a case-blind disk (macOS,
+  // Windows) the OLD name of a case-only `git mv Story.md story.md` also "exists" — and deleting it, as the
+  // `git rm --cached` hint says, would delete the renamed file.
+  const untrackedNow = new Set(entries.filter((e) => e.xy === '??').map((e) => e.path));
+  const rmCached = files.filter((p) => stagedDeletion.has(p) && untrackedNow.has(p));
+  if (rmCached.length) {
+    return refuse(`staged as deleted but still on disk (git rm --cached): ${rmCached.join(', ')}`,
       'yad fold commits files as they are on disk — delete the file to fold its deletion, or `git add` it back to keep it');
+  }
+  // A case-only rename: `commit --only` refuses it ("will not add file alias"). Say so before staging anything.
+  const caseOnly = files.filter((p) => stagedDeletion.has(p) && !untrackedNow.has(p) && onDisk(p));
+  if (caseOnly.length) {
+    return refuse(`a rename that changes only letter case cannot be folded: ${caseOnly.join(', ')}`,
+      'commit that rename with a plain `git commit` first, then run yad fold again');
   }
   if (!sorted.step.filter(foldable).length) {
     return refuse(`nothing to fold — ${step}'s files have no changes since the last commit`,
