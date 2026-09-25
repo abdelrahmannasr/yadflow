@@ -24295,6 +24295,8 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   const change = [{ xy: '??', path: 'epics/EP-c/.sdlc/change.json' }, { xy: '??', path: 'epics/EP-c/.sdlc/contract-lock.json' }, { xy: '??', path: 'epics/EP-c/notes.md' }];
   const first = fold.sortChanges(change, { epic: 'EP-c', step: 'epic', verified: true, seeding: true });
   assert.deepEqual([first.seed, first.other], [['epics/EP-c/.sdlc/change.json', 'epics/EP-c/.sdlc/contract-lock.json'], ['epics/EP-c/notes.md']]);
+  assert.deepEqual(fold.sortChanges([{ xy: ' A', path: 'epics/EP-c/.sdlc/state.json' }], { epic: 'EP-c', step: 'epic', verified: true, seeding: true }).ledger,
+    ['epics/EP-c/.sdlc/state.json'], 'a file marked with git add -N is being created');
   const later = fold.sortChanges([{ xy: ' M', path: 'epics/EP-c/.sdlc/change.json' }], { epic: 'EP-c', step: 'epic', verified: false, seeding: false });
   assert.deepEqual([later.seed, later.other], [[], ['epics/EP-c/.sdlc/change.json']]);
   const stories = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/stories/EP-x-S01.md' }, { xy: ' M', path: 'epics/EP-x/stories-old.md' }], { epic: 'EP-x', step: 'stories', verified: false });
@@ -24479,5 +24481,19 @@ test('E44 unfoldedPaths (review 1): a per-story review branch names only its own
     assert.deepEqual(fold.unfoldedPaths(T, 'EP-x', 'stories-S01'), []);
     assert.deepEqual(fold.unfoldedPaths(T, 'EP-x', 'stories-S02'), ['epics/EP-x/stories/EP-x-S02.md']);
     assert.deepEqual(fold.unfoldedPaths(T, 'EP-x', 'stories'), ['epics/EP-x/stories/EP-x-S02.md']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E44 fold (review 6): the Product level is seeded under either spelling — a Foundation beside an EP-discovery ledger is not a new one', async () => {
+  const { T, g, w } = foldFixture({ hub: VERIFIED });
+  try {
+    w('epics/EP-discovery/.sdlc/state.json', '{}\n'); w('epics/EP-discovery/requirements.md', 'r\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'old product level');
+    g('switch', '-q', '-c', 'foundation/EP-foundation');
+    w('foundation/purpose.md', 'why\n'); w('foundation/.sdlc/state.json', '{}\n');
+    const r = await foldRun(T, { epic: 'EP-foundation', step: 'foundation' });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n'), ['foundation/purpose.md']);
+    assert.deepEqual(r.value.leftForCi, ['foundation/.sdlc/state.json'], 'ledger-guard would reject it as a second product level');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

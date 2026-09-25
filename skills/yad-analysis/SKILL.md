@@ -186,7 +186,8 @@ mutation: `ledger-guard` rejects any non-bot commit that changes one, and `yad g
 performs the whole transition when the review PR merges.
 
 **Do not EDIT the ledger — but do COMMIT it when it is untracked.** `yad fold EP-<slug> analysis` does exactly
-this: it takes the artifact and any ledger file being created, and leaves a tracked one to CI. Those are two different acts.
+this while the epic is new (no `state.json` in HEAD): it takes the artifact, the new ledger files and any
+new person-written `.sdlc/` file of the seed, and leaves every other ledger change to CI. Those are two different acts.
 Commit `analysis.md`, and also `.sdlc/state.json`, `.sdlc/approvals.json` and `.sdlc/comments.json`
 when `git status` shows them **untracked** — an engine-seeded ledger has never been reviewed, so it is
 still off the base ref and `ledger-guard` exempts it (creation, not mutation, #162). It rides this

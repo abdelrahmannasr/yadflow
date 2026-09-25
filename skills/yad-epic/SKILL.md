@@ -247,7 +247,9 @@ fails the gate if it rides the review PR, and desynchronises the ledger CI is ab
 is pushed around the gate.
 
 **Do not EDIT the ledger — but do COMMIT it when it is untracked.** `yad fold EP-<slug> epic` does exactly
-this: it takes the artifact and any ledger file being created, and leaves a tracked one to CI. Those are two different acts and
+this while the epic is new (no `state.json` in HEAD): it takes the artifact, the new ledger files and any
+new person-written `.sdlc/` file of the seed, and leaves every other ledger change to CI — once an analysis
+PR has merged the seed, it takes `epic.md` alone. Those are two different acts and
 the guard treats them differently. Commit `epic.md`, and also `.sdlc/state.json`, `.sdlc/approvals.json`
 and `.sdlc/comments.json` when `git status` shows them **untracked** — that is the case after
 `yad epic new`, whose seed has never been reviewed and so rides this epic's first review PR exactly as

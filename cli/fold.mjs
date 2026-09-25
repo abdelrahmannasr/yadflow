@@ -15,9 +15,9 @@
 //      `yad open-pr` on a review branch only WARNS about step files that were never folded.
 //   4. THE LEDGER FOLLOWS `ledger` MODE. `local`: this machine writes the epic's ledger, so its changes go
 //      in the same commit — one step boundary, one commit. `verified`: CI writes the ledger at merge, so the
-//      fold leaves it out — except files being CREATED (the seed of a new epic), which is exactly the case
-//      `ledger-guard` exempts ("creation, not mutation", #162) and the only way the seed reaches the
-//      default branch.
+//      fold leaves it out — except the new ledger files of an epic that is not seeded yet (no state.json
+//      in HEAD): its seed, which `ledger-guard` exempts ("creation, not mutation", #162) and the only way
+//      a seed reaches the default branch. The seed's new person-written `.sdlc/` files ride with it.
 //
 // THE FOLD IS A REAL `git commit`, not capture's plumbing: it is the commit that gets signed, so it honours
 // `commit.gpgsign` and the person's own commit hooks. `--only` with the step's paths commits exactly those
@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
-import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, artifactBase, artifactPaths, epicRoot } from './epic-state.mjs';
+import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot } from './epic-state.mjs';
 import { capturedEpic, gitIn, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
 import { resolveDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 
@@ -78,7 +78,8 @@ export function sortChanges(entries, { epic, step, verified, seeding = false }) 
     if (!p.startsWith(dir)) continue;
     const artifactOf = capturedEpic(p);
     // `??` is untracked, `A` in the first column is added to the index: both are a file being created.
-    const creating = xy === '??' || xy[0] === 'A';
+    // ` A` is a file marked with `git add -N` (intent to add): new too.
+    const creating = xy === '??' || xy[0] === 'A' || xy === ' A';
     if (covers(own, p)) out.step.push(p);
     else if (artifactOf === epic) (seeding && creating && p.startsWith(`${dir}.sdlc/`) ? out.seed : out.other).push(p);
     else if (artifactOf === null) (!verified || (seeding && creating) ? out.ledger : out.ci).push(p);
@@ -153,9 +154,15 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const prefix = git(['rev-parse', '--show-prefix']).out.trim();
   const entries = statusEntries(root, prefix, env);
   if (entries === null) return refuse('git could not list the changed files');
-  // Is the epic's seed still uncommitted? The same question `ledger-guard` asks of the base ref, asked of HEAD:
-  // the authoring branch is cut from the default branch, and once a fold commits the seed, it is no longer new.
-  const seeding = !git(['cat-file', '-e', `HEAD:./${epicRel(epic)}/.sdlc/state.json`]).ok;
+  // Is the epic's seed still uncommitted? `ledger-guard` asks this of the BASE ref; the fold asks it of HEAD,
+  // because the authoring branch is cut from the default branch and, once a fold commits the seed, it is no
+  // longer new. The two differ only on a branch whose seed is committed but not yet merged (the fold then
+  // leaves a later new ledger file on disk — stricter, never rejected), or one cut before the seed merged
+  // (the guard's own hint says rebase). The Product level counts as seeded under either spelling, as the
+  // guard reads it: a Foundation beside an old EP-discovery ledger is a second product level, not a new one.
+  const seededAt = (e) => git(['cat-file', '-e', `HEAD:./${epicRel(e)}/.sdlc/state.json`]).ok;
+  const productLevel = epic === FOUNDATION_EPIC || epic === DISCOVERY_EPIC;
+  const seeding = productLevel ? !seededAt(FOUNDATION_EPIC) && !seededAt(DISCOVERY_EPIC) : !seededAt(epic);
   const sorted = sortChanges(entries, { epic, step, verified, seeding });
   // What `git add` can take: a path on disk or in the index. A deletion already staged (`D `, from `git rm`
   // or the old half of a `git mv`) is in neither, and `git add` would refuse it — but it is in HEAD, so
@@ -200,7 +207,7 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
 
   // With a verified ledger the fold rides a review PR that `verified-commits` checks: an unsigned fold fails
   // there, twenty minutes later. Warn now, never block — the same warning the direct-push commands give.
-  if (verified) preflightGuardReadiness(root);
+  if (verified) preflightGuardReadiness(root, 'verified-commits requires a platform-Verified signature on the review PR, and an unsigned fold will fail it');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-fold-'));
   try {
     const spec = path.join(tmp, 'paths');
