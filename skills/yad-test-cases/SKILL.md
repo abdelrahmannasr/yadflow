@@ -50,7 +50,8 @@ step has opened to `in_progress`) and `test-cases` is not already `done`. While 
 Open the test-cases authoring branch `test-cases/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if
 `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-Product's default branch. Author and commit `test-cases.md` on it. This is **distinct** from the verified ledger's
+Product's default branch. Author `test-cases.md` on it, and end the step with `yad fold EP-<slug> test-cases` — the one commit the
+step keeps (E44). This is **distinct** from the verified ledger's
 `review/…` branch.
 
 ### Step 2 — Read inputs
@@ -172,7 +173,7 @@ any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
 is pushed around the gate. Commit the artifact set — **`test-cases.md` and, when a testing
-tool was used, `.sdlc/test-links.json`** (artifact-side, not ledger; generated tests live in their
+tool was used, `.sdlc/test-links.json`** (artifact-side, not ledger; `yad fold EP-<slug> test-cases` takes exactly these; generated tests live in their
 own code repo, not here) — then hand off to `yad-review-gate`.
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**

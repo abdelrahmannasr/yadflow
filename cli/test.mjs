@@ -24249,3 +24249,145 @@ test('E43 doctor: a blank line inside a branches list does not hide it; a patter
     assert.deepEqual(pushOnEveryBranch(T), ['.github/workflows/a.yml', '.github/workflows/b.yml', '.github/workflows/e.yml'], '`*` does not cross a `/`, so c misses yad/wip/<name>/<epic>');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------------------------
+// E44 — `yad fold <epic> <step>`: the step-boundary commit, one clean commit of one step's artifacts
+// ---------------------------------------------------------------------------------------------
+const fold = await import('./fold.mjs');
+// The capture fixture, plus `commit.gpgsign false` in the repo: a signing prompt would hang the test.
+function foldFixture(o = {}) {
+  const f = captureFixture(o);
+  f.g('config', 'commit.gpgsign', 'false');
+  return f;
+}
+const foldRun = async (T, o = {}) => {
+  const before = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const capture = (root, co) => cap.runCapture(root, { ...co, noPush: true });
+    const { value, out } = await captureConsole(() => fold.runFold(T, { capture, ...o }));
+    return { value, out, code: process.exitCode ?? 0 };
+  } finally { process.exitCode = before; }
+};
+const VERIFIED = { default_branch: 'main', platform: 'github', ledger: 'verified' };
+
+test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes only a file being created), the rest left', () => {
+  const entries = [
+    { xy: ' M', path: 'epics/EP-x/architecture.md' }, { xy: '??', path: 'epics/EP-x/contract.md' },
+    { xy: ' M', path: 'epics/EP-x/.sdlc/contract-lock.json' }, { xy: ' M', path: 'epics/EP-x/epic.md' },
+    { xy: ' M', path: 'epics/EP-x/.sdlc/state.json' }, { xy: '??', path: 'epics/EP-x/.sdlc/approvals.json' },
+    { xy: 'A ', path: 'epics/EP-x/reviews/r.md' }, { xy: ' M', path: 'epics/EP-y/architecture.md' },
+    { xy: ' M', path: 'epics/EP-x/architecture.md.bak' },
+  ];
+  const local = fold.sortChanges(entries, { epic: 'EP-x', step: 'architecture', verified: false });
+  assert.deepEqual(local, {
+    step: ['epics/EP-x/architecture.md', 'epics/EP-x/contract.md', 'epics/EP-x/.sdlc/contract-lock.json'],
+    ledger: ['epics/EP-x/.sdlc/state.json', 'epics/EP-x/.sdlc/approvals.json', 'epics/EP-x/reviews/r.md'],
+    ci: [], other: ['epics/EP-x/epic.md', 'epics/EP-x/architecture.md.bak'],
+  });
+  const verified = fold.sortChanges(entries, { epic: 'EP-x', step: 'architecture', verified: true });
+  assert.deepEqual([verified.ledger, verified.ci], [['epics/EP-x/.sdlc/approvals.json', 'epics/EP-x/reviews/r.md'], ['epics/EP-x/.sdlc/state.json']]);
+  const stories = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/stories/EP-x-S01.md' }, { xy: ' M', path: 'epics/EP-x/stories-old.md' }], { epic: 'EP-x', step: 'stories', verified: false });
+  assert.deepEqual([stories.step, stories.other], [['epics/EP-x/stories/EP-x-S01.md'], ['epics/EP-x/stories-old.md']]);
+  const ui = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/.sdlc/design-links.json' }, { xy: '??', path: 'epics/EP-x/DESIGN.md' }, { xy: ' M', path: 'epics/EP-x/.sdlc/test-links.json' }], { epic: 'EP-x', step: 'ui-design', verified: true });
+  assert.deepEqual([ui.step, ui.ci, ui.other], [['epics/EP-x/.sdlc/design-links.json', 'epics/EP-x/DESIGN.md'], [], ['epics/EP-x/.sdlc/test-links.json']], 'the skill\'s artifact set, never left for CI');
+  const found = fold.sortChanges([{ xy: '??', path: 'foundation/purpose.md' }], { epic: 'EP-foundation', step: 'foundation', verified: false });
+  assert.deepEqual(found.step, ['foundation/purpose.md']);
+  assert.equal(fold.authorStepOf('stories-S02'), 'stories');
+  assert.equal(fold.authorStepOf('ui-design'), 'ui-design');
+  assert.ok(!fold.FOLD_STEPS.includes('implement') && fold.FOLD_STEPS.includes('test-cases'));
+});
+
+test('E44 fold (ledger: local): one commit of the step\'s files and the ledger; the rest stays; the draft branch is left; the next capture is a no-op', async () => {
+  const { T, g, w } = foldFixture();
+  try {
+    w('README.md', 'x\n'); g('add', 'README.md');   // the person's own staged change: stays staged, uncommitted
+    w('epics/EP-x/architecture.md', '# arch\n');
+    w('epics/EP-x/contract.md', '# contract\n');
+    w('epics/EP-x/epic.md', '# x\nhalf-written\n');
+    w('epics/EP-x/.sdlc/state.json', '{"moved":true}\n');
+    await captureRun(T);
+    const tip = g('rev-parse', 'yad/wip/ann-lee/EP-x');
+    const head0 = g('rev-parse', 'HEAD');
+    const r = await foldRun(T, { epic: 'EP-x', step: 'architecture' });
+    assert.equal(r.code, 0, r.out);
+    assert.equal(g('rev-parse', 'HEAD^'), head0);
+    assert.equal(g('log', '-1', '--format=%B'), `docs(EP-x): author architecture\n\nYad-Epic: EP-x\nYad-Step: architecture\nYad-Folded: ${tip}`);
+    assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n').sort(),
+      ['epics/EP-x/.sdlc/state.json', 'epics/EP-x/architecture.md', 'epics/EP-x/contract.md']);
+    assert.deepEqual(r.value.leftOnDisk, ['epics/EP-x/epic.md']);
+    assert.match(r.out, /left on disk: epics\/EP-x\/epic\.md/);
+    assert.equal(g('diff', '--cached', '--name-only'), 'README.md', 'the person\'s staged file is still staged');
+    assert.match(g('diff', '--name-only'), /epics\/EP-x\/epic\.md/, 'the half-written epic.md is still changed, unstaged');
+    assert.equal(g('rev-parse', 'yad/wip/ann-lee/EP-x'), tip, 'the draft branch is left alone (decision 1)');
+    const after = await captureRun(T);
+    assert.deepEqual(after.value.captured, [], 'the folded files equal the branch tip: nothing to capture');
+    assert.equal(g('rev-parse', 'yad/wip/ann-lee/EP-x'), tip);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E44 fold: a fold with capture off, a deleted artifact, a new story; nothing to fold and bad words are refused', async () => {
+  const { T, g, w } = foldFixture();
+  try {
+    w('epics/EP-x/stories/EP-x-S01.md', 'one\n'); g('add', '-A'); g('commit', '-q', '-m', 'seed stories');
+    fs.rmSync(path.join(T, 'epics/EP-x/stories/EP-x-S01.md'));
+    w('epics/EP-x/stories/EP-x-S02 two.md', 'two\n');
+    const r = await foldRun(T, { epic: 'EP-x', step: 'stories', env: { ...process.env, YAD_CAPTURE: '0' } });
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.value.folded, null);
+    assert.match(g('log', '-1', '--format=%B'), /Yad-Folded: none/);
+    assert.deepEqual(g('show', '--name-status', '--format=', 'HEAD').split('\n').sort(), ['A\tepics/EP-x/stories/EP-x-S02 two.md', 'D\tepics/EP-x/stories/EP-x-S01.md']);
+    const none = await foldRun(T, { epic: 'EP-x', step: 'stories' });
+    assert.equal(none.code, 1);
+    assert.match(none.out, /nothing to fold/);
+    for (const [o, re] of [[{ epic: 'EP-x' }, /needs an epic and a step/], [{ epic: 'x', step: 'epic' }, /not an epic id/],
+      [{ epic: 'EP-x', step: 'implement' }, /not an authoring step/], [{ epic: 'EP-x', step: 'foundation' }, /not a step of EP-x/],
+      [{ epic: 'EP-foundation', step: 'epic' }, /not a step of EP-foundation/], [{ epic: 'EP-nope', step: 'epic' }, /no epics\/EP-nope\//]]) {
+      const bad = await foldRun(T, o);
+      assert.equal(bad.code, 1, JSON.stringify(o));
+      assert.match(bad.out, re);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E44 fold (ledger: verified): refused on the default branch; elsewhere a ledger change is left for CI, a new epic\'s seed rides along', async () => {
+  const { T, g, w } = foldFixture({ hub: VERIFIED });
+  try {
+    w('epics/EP-x/epic.md', '# x\nv2\n');
+    const onMain = await foldRun(T, { epic: 'EP-x', step: 'epic' });
+    assert.equal(onMain.code, 1);
+    assert.match(onMain.out, /on the default branch 'main'.*review PR/);
+    g('switch', '-q', '-c', 'epic/EP-x');
+    w('epics/EP-x/.sdlc/state.json', '{"moved":true}\n');
+    w('epics/EP-y/epic.md', '# y\n'); w('epics/EP-y/.sdlc/state.json', '{}\n');
+    const r = await foldRun(T, { epic: 'EP-x', step: 'epic' });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n'), ['epics/EP-x/epic.md']);
+    assert.deepEqual(r.value.leftForCi, ['epics/EP-x/.sdlc/state.json']);
+    const seed = await foldRun(T, { epic: 'EP-y', step: 'epic' });
+    assert.equal(seed.code, 0, seed.out);
+    assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n').sort(), ['epics/EP-y/.sdlc/state.json', 'epics/EP-y/epic.md'], 'creation, not mutation (#162)');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E44 fold: a Product in a subfolder of its repository folds the same; unfoldedPaths names what a review would miss', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fold-mono-'));
+  const g = (...a) => execFileSync('git', a, { cwd: T, encoding: 'utf8', stdio: 'pipe' }).trim();
+  try {
+    g('init', '-q'); g('checkout', '-q', '-b', 'main');
+    g('config', 'user.email', 'ann@corp.io'); g('config', 'user.name', 'Ann Lee'); g('config', 'commit.gpgsign', 'false');
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(P, '.sdlc/hub.json'), '{}');
+    fs.mkdirSync(path.join(P, 'epics/EP-x'), { recursive: true });
+    fs.writeFileSync(path.join(P, 'epics/EP-x/epic.md'), '# x\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'init');
+    fs.writeFileSync(path.join(P, 'epics/EP-x/ui-design.md'), '# ui\n');
+    assert.deepEqual(fold.unfoldedPaths(P, 'EP-x', 'ui-design'), ['epics/EP-x/ui-design.md']);
+    assert.deepEqual(fold.unfoldedPaths(P, 'EP-x', 'epic'), []);
+    const r = await foldRun(P, { epic: 'EP-x', step: 'ui-design' });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n'), ['product/epics/EP-x/ui-design.md']);
+    assert.deepEqual(fold.unfoldedPaths(P, 'EP-x', 'ui-design'), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

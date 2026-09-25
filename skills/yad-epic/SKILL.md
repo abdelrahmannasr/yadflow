@@ -107,7 +107,7 @@ Check `{project-root}/epics/` for collisions; if the slug exists, append a disti
 Open the epic authoring branch `epic/EP-<slug>` per the shared procedure
 (`references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
 is not a git work tree), check out the branch if it exists, else create it from the Product's default
-branch. Author and commit `epic.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
+branch. Author `epic.md` on it, and end the step with `yad fold EP-<slug> epic` — the one commit the step keeps (E44). This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 4 — Write the epic (assist: pm)
 Adopt the **pm** lens and write `{project-root}/epics/EP-<slug>/epic.md`
@@ -246,7 +246,8 @@ any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
 is pushed around the gate.
 
-**Do not EDIT the ledger — but do COMMIT it when it is untracked.** Those are two different acts and
+**Do not EDIT the ledger — but do COMMIT it when it is untracked.** `yad fold EP-<slug> epic` does exactly
+this: it takes the artifact and any ledger file being created, and leaves a tracked one to CI. Those are two different acts and
 the guard treats them differently. Commit `epic.md`, and also `.sdlc/state.json`, `.sdlc/approvals.json`
 and `.sdlc/comments.json` when `git status` shows them **untracked** — that is the case after
 `yad epic new`, whose seed has never been reviewed and so rides this epic's first review PR exactly as

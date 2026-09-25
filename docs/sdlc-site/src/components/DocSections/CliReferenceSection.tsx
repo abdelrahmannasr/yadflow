@@ -30,6 +30,7 @@ const GROUPS = [
       'yad gate advance <epic> <artifact> — no platform only: pass the gate when its approvals hold',
       'yad gate repair <epic> — close an author step stranded behind a passed gate (YAD-STATE-005)',
       'yad capture [--no-push] — snapshot every changed artifact onto your private yad/wip/<you>/<epic> branches (a hook runs it after each agent edit)',
+      'yad fold <epic> <step> — end an authoring step with ONE commit of its files, docs(<epic>): author <step>; with ledger: local the epic\'s ledger rides along; the drafts stay on yad/wip (E44)',
     ],
   },
   {

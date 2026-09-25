@@ -93,7 +93,7 @@ export function captureOff(root, env = process.env) {
 // git, spawned directly: `run()` trims its output, and a NUL-separated list must reach the parser whole.
 // `env` is the whole environment the command was given (`runCapture`'s, so a caller's settings reach every git
 // call); `extra` adds this call's own keys on top.
-function gitIn(root, env = process.env, extra = null) {
+export function gitIn(root, env = process.env, extra = null) {
   return (args, input = null) => {
     const r = spawnSync('git', args, {
       cwd: root, encoding: 'utf8', maxBuffer: 1 << 30,
@@ -110,16 +110,22 @@ function gitIn(root, env = process.env, extra = null) {
 // Product's place in the repo — is cut off, and every path below is relative to the Product root.
 // `GIT_OPTIONAL_LOCKS=0`: a plain `git status` refreshes and rewrites the person's real index, taking
 // `index.lock` for a moment, and a `git commit` of theirs at that instant would fail. This must not.
-function changedPaths(root, prefix, env) {
+// `statusEntries` keeps git's two-letter status (`??` new, `A ` added, ` M` changed…) beside each path;
+// the fold (E44) reads it to tell a file being CREATED from one being changed.
+export function statusEntries(root, prefix, env = process.env) {
   const r = gitIn(root, env, { GIT_OPTIONAL_LOCKS: '0' })(['status', '-z', '--porcelain=v1', '--untracked-files=all', '--no-renames', '--', 'epics', FOUNDATION_DIR]);
   if (!r.ok) return null;
   const out = [];
   for (const entry of r.out.split('\0')) {
     if (entry.length <= 3) continue;
     const p = entry.slice(3);
-    if (p.startsWith(prefix)) out.push(p.slice(prefix.length));
+    if (p.startsWith(prefix)) out.push({ xy: entry.slice(0, 2), path: p.slice(prefix.length) });
   }
   return out;
+}
+function changedPaths(root, prefix, env) {
+  const entries = statusEntries(root, prefix, env);
+  return entries && entries.map((e) => e.path);
 }
 // A tree path from the top of the repo, as a Product-relative one — or null outside the Product.
 const underPrefix = (p, prefix) => (p.startsWith(prefix) ? p.slice(prefix.length) : null);

@@ -190,6 +190,9 @@ ${c.bold('Build helpers')}
   yad capture [--no-push]              Snapshot every changed Shape artifact onto your private
                                        yad/wip/<you>/<epic> branches — never your checkout; pushes them
                                        (a harness hook runs it after each agent edit, with --hook)
+  yad fold <epic> <step>               End an authoring step: commit ITS artifacts as one commit,
+                                       docs(<epic>): author <step> (signed if git signs) — the drafts
+                                       stay on yad/wip/…; with ledger: local the epic's ledger rides along
   yad tidy up [<epic>] [--push]        Fold FINISHED Build shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
                                        ledger, as one chore(hub) commit — the manual "pack it up"
@@ -638,6 +641,13 @@ async function main() {
       if (o._[1]) { refuse(`yad capture takes no word (got ${o._[1]})`, 'usage: yad capture [--no-push]'); break; }
       result = await commands.runCapture(o.dir, { hook: !!o.hook, noPush: !!o.noPush });
       if (o.hook) process.exitCode = 0;
+      break;
+    }
+    case 'fold': {
+      // E44. The step-boundary commit; the authoring skills run it where they used to say "commit".
+      const [, epic, step, extra] = o._;
+      if (extra) { refuse(`yad fold takes an epic and a step (got an extra word: ${extra})`, 'usage: yad fold <epic> <step>'); break; }
+      result = await commands.runFold(o.dir, { epic, step });
       break;
     }
     case 'tidy': {

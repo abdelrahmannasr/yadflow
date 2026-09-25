@@ -103,7 +103,8 @@ endpoints, data — so the Foundation describes the real system rather than re-p
 Open the Foundation authoring branch `foundation/EP-foundation` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if
 `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-Product's default branch. Author and commit the Foundation on it. Distinct from the verified ledger's
+Product's default branch. Author the Foundation on it, and end the step with `yad fold EP-foundation foundation` — the one commit the
+step keeps (E44). Distinct from the verified ledger's
 `review/EP-foundation/foundation` branch.
 
 ### Step 4 — Seed the ledger with the engine
