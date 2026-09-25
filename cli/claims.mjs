@@ -77,9 +77,9 @@ export function readClaims(root, { env = process.env, now = Date.now(), epics = 
       // it was pushed with the branch): diffing against it takes in every capture since, and maybe a pull's
       // files too — over-reporting, the safe side for advice, where the previous capture would drop earlier edits.
       basis = 'first-capture';
-      const walk = git(['log', '--first-parent', '-n', '1000', '--format=%H%x00%s', tip]);
-      const first = (walk.ok ? walk.out.split('\n') : []).map((l) => l.split('\0')).find(([, s]) => s !== undefined && !/^wip\(EP-[^)]+\): capture$/.test(s));
-      against = first ? first[0] : empty;
+      // One git call, however long the branch: the newest first-parent ancestor that is not a capture.
+      const first = git(['log', '--first-parent', '--invert-grep', '--grep=^wip(EP-[^)]*): capture$', '-n', '1', '--format=%H', tip]);
+      against = first.ok && first.out.trim() ? first.out.trim() : empty;
     }
     const diff = git(['diff-tree', '-r', '-z', '--name-only', '--no-renames', against, tip]);
     if (!diff.ok) continue;

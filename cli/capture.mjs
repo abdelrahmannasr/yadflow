@@ -233,7 +233,8 @@ function pushStatePath(git) {
   return r.ok && r.out.trim() ? path.join(r.out.trim(), 'yad-capture.json') : null;
 }
 
-// The state file's other keys (E46's `claimsWarned`) survive a push's write. A cache: unreadable reads as empty.
+// The state file's other keys (E46's `claimsWarned`) survive a push's write. A cache, so read leniently: an
+// unreadable file reads as empty and is replaced (claimWarnings, which only adds to it, refuses to overwrite one).
 const stateOf = (file) => { const s = readJSON(file, {}); return s && typeof s === 'object' && !Array.isArray(s) ? s : {}; };
 
 // Push now (a person ran `yad capture`), or start one in the background when due (the hook).
@@ -242,10 +243,11 @@ function push(root, git, name, { hook, now, spawner, env }) {
   const statePath = pushStatePath(git);
   const stateFile = statePath && path.resolve(root, statePath);
   if (hook) {
-    const last = stateFile ? Number(readJSON(stateFile, {})?.lastPushAt) || 0 : 0;
+    const state = stateFile ? stateOf(stateFile) : {};
+    const last = Number(state.lastPushAt) || 0;
     if (now - last < PUSH_EVERY_MS) return { pushed: 'later', why: `the last push started under ${PUSH_EVERY_MS / 60000} minutes ago` };
     // Recorded BEFORE the push starts, so two hooks a moment apart cannot both start one.
-    if (stateFile) writeJSON(stateFile, { ...stateOf(stateFile), lastPushAt: now });
+    if (stateFile) writeJSON(stateFile, { ...state, lastPushAt: now });
     try {
       spawner('git', pushArgs(name), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore' }).unref();
       // E46: fetch everyone's capture branches in the same window, so the claim check at the next edit reads
