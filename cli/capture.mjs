@@ -41,9 +41,10 @@ export const WIP_PREFIX = 'yad/wip';
 // How often the background push may run. A capture between two pushes is committed locally and rides the
 // next one — the push sends every capture branch of this person at once.
 export const PUSH_EVERY_MS = 5 * 60 * 1000;
-// The two `.sdlc/` files a person writes (hook.mjs calls them artifact-side). Everything else in a `.sdlc/`
-// folder is the ledger, or a Build log only the engine writes.
-const PERSON_WRITTEN_SDLC = new Set(['.sdlc/contract-lock.json', '.sdlc/change.json']);
+// The `.sdlc/` files a person, or their skill, writes. hook.mjs calls the first two artifact-side; the yad-ui
+// and yad-test-cases skills commit the two links files with their artifacts, "artifact-side, not ledger".
+// Everything else in a `.sdlc/` folder is the ledger, or a Build log only the engine writes.
+const PERSON_WRITTEN_SDLC = new Set(['.sdlc/contract-lock.json', '.sdlc/change.json', '.sdlc/design-links.json', '.sdlc/test-links.json']);
 
 // Which epic a Product-relative path belongs to, if capture takes it — else null. The complement of the
 // ledger, not a list of artifacts (decision 4).

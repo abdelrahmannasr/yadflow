@@ -136,8 +136,9 @@ own documentation on 2026-09-16; `yad doctor` prints the same table's verdict fo
 ### Background capture
 
 `yad capture` saves your work in progress without touching your checkout (E43). It takes every changed
-file under `epics/` and `foundation/` — except the ledger (any `.sdlc/` folder and `reviews/`; the two
-files a person writes there, `contract-lock.json` and `change.json`, are included) — and commits it onto
+file under `epics/` and `foundation/` — except the ledger (any `.sdlc/` folder and `reviews/`; the four
+files a person or a skill writes there, `contract-lock.json`, `change.json`, `design-links.json` and
+`test-links.json`, are included) — and commits it onto
 a private branch per epic, `yad/wip/<your git name>/<epic>`. It uses git's low-level commands in a
 throwaway index, so your branch, your staged changes and your files stay exactly as they were, and no
 git hook runs.

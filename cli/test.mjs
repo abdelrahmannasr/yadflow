@@ -23863,6 +23863,7 @@ test('E43 capturedEpic: everything under an epic or the Foundation but the ledge
   const cases = [
     ['epics/EP-x/epic.md', 'EP-x'], ['epics/EP-x/stories/EP-x-S01.md', 'EP-x'], ['epics/EP-x/notes/a b.md', 'EP-x'],
     ['epics/EP-x/.sdlc/contract-lock.json', 'EP-x'], ['epics/EP-x/.sdlc/change.json', 'EP-x'],
+    ['epics/EP-x/.sdlc/design-links.json', 'EP-x'], ['epics/EP-x/.sdlc/test-links.json', 'EP-x'],
     ['foundation/purpose.md', 'EP-foundation'],
     ['epics/EP-x/.sdlc/state.json', null], ['epics/EP-x/.sdlc/approvals.json', null], ['epics/EP-x/.sdlc/build-log/a.json', null],
     ['epics/EP-x/reviews/epic--2026-09-25--approved.md', null], ['foundation/.sdlc/state.json', null], ['foundation/reviews/x.md', null],
