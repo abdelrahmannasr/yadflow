@@ -2120,7 +2120,9 @@ const SAMPLE_WIP_BRANCH = 'yad/wip/someone/EP-x';
 // regular expression, so those are left as they are. Everything else is literal. A pattern that is not a
 // valid expression is judged not to match.
 const globMatches = (glob, ref) => {
-  try { return new RegExp(`^${glob.replace(/[.^${}()|\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`).test(ref); } catch { return false; }
+  // Split on `**` first, so the single `*` rule never reaches it.
+  const body = glob.split('**').map((part) => part.replace(/[.^${}()|\\]/g, '\\$&').replace(/\*/g, '[^/]*')).join('.*');
+  try { return new RegExp(`^${body}$`).test(ref); } catch { return false; }
 };
 const yamlList = (inline, childLines) => {
   const v = (inline || '').trim();
@@ -2148,7 +2150,7 @@ function pushRunsOnWip(block) {
 }
 export function pushOnEveryBranch(root) {
   const dir = path.join(root, '.github', 'workflows');
-  let names = [];
+  let names;
   try { names = fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n)).sort(); } catch { return []; }
   const out = [];
   for (const n of names) {

@@ -24132,7 +24132,7 @@ test('E43 doctor: names a team workflow that runs on a push to any branch, and s
 
 test('E43: yadflow\'s update-guard workflow ignores the capture branches; the CLI runs capture and its hook path', () => {
   const guard = fs.readFileSync(new URL('../skills/yad-checks/templates/github/yad-update-guard.yml', import.meta.url), 'utf8');
-  assert.match(guard, /on:\n  push:\n(?:\s*#.*\n)*\s+branches-ignore: \["yad\/wip\/\*\*"\]/);
+  assert.match(guard, /on:\n {2}push:\n(?:\s*#.*\n)*\s+branches-ignore: \["yad\/wip\/\*\*"\]/);
   assert.ok(!/branches: \["\*\*"\]/.test(guard));
   const { T, g, w } = captureFixture();
   try {
