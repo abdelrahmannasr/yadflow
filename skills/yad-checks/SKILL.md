@@ -95,6 +95,11 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     `PreToolUse` entry in `.claude/settings.json`; a `.cursor` project also gets
     `templates/hooks/ledger-guard-cursor.sh` and a `preToolUse` entry in `.cursor/hooks.json`.
     Fails OPEN; see "Step 2b" below.
+  - `templates/hooks/yad-capture.sh` → **Product-only**, in **both** ledger modes (E43): the post-edit
+    harness hook that runs `yad capture --hook`, which snapshots every changed Shape artifact onto the
+    person's private `yad/wip/<name>/<epic>` branches without touching the checkout. Wired as a
+    `PostToolUse` entry in `.claude/settings.json` and an `afterFileEdit` entry in `.cursor/hooks.json`;
+    always exits 0 and prints nothing. `"capture": false` in the Product config unwires it.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
     → the standalone Product-side verified-commits CI (installed by `yad check --fix` with the Product wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);

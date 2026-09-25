@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions,
+  moduleActions, repoActions, productActions, hookActions, captureHookActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -586,6 +586,14 @@ export async function runSetup(root, opts = {}) {
     log(`  ${c.bold('hub')} ${c.dim('(agent ledger guard)')}`);
     applyActions(hookWiring, { force: true });
     wired.push(...hookWiring);
+  }
+  // The post-edit capture hook (E43): every change to an artifact is snapshotted onto the person's private
+  // `yad/wip/<name>/<epic>` branches. Both ledger modes; `"capture": false` in the Product config turns it off.
+  const captureWiring = captureHookActions(root, ideTargets);
+  if (captureWiring.length) {
+    log(`  ${c.bold('hub')} ${c.dim('(wip capture)')}`);
+    applyActions(captureWiring, { force: true });
+    wired.push(...captureWiring);
   }
   // After every write to a managed path has landed (including the legacy renames), so the recorded
   // sha is the file's final state.

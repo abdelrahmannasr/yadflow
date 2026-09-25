@@ -331,7 +331,10 @@ function gitAuthors(repoRoot, since) {
   // the two clocks disagreed by up to a day. A commit made at 08:00 in Tokyo is 23:00 the previous day
   // in UTC: git printed tomorrow's date, the range below dropped it, and a real person vanished —
   // `active: 0` with an empty `unknown`, the exact outcome this file exists to prevent.
-  const r = git(['log', '--all', '--no-merges', `--since=${since}`, '--format=%ct%x1f%an%x1f%ae']);
+  // Not the `yad/wip/*` capture branches (E43): they are one person's unfinished drafts, snapshotted by the
+  // engine, not work anyone committed. `--exclude` must come BEFORE `--all`, which it qualifies; the
+  // remote-tracking copies are excluded too, since a fetch brings everyone's.
+  const r = git(['log', '--exclude=refs/heads/yad/wip/*', '--exclude=refs/remotes/*/yad/wip/*', '--all', '--no-merges', `--since=${since}`, '--format=%ct%x1f%an%x1f%ae']);
   if (r.status !== 0) return { unknown: `git could not read the history of ${repoRoot}` };
   const out = [];
   for (const line of (r.stdout || '').split('\n')) {

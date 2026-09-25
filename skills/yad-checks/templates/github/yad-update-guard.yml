@@ -14,7 +14,10 @@
 name: yad-update-guard
 on:
   push:
-    branches: ["**"]
+    # Every branch but the private `yad/wip/*` capture branches (E43): `yad capture` pushes one person's
+    # draft snapshots there every few minutes, and a run per push — even one whose job is skipped below —
+    # is noise in the Actions list. (`branches-ignore` means "all others"; GitHub allows only one of the two.)
+    branches-ignore: ["yad/wip/**"]
 
 permissions:
   contents: read

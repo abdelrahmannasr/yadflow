@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
-  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER,
+  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath,
 } from './manifest.mjs';
@@ -615,9 +615,11 @@ export function productActions(root) {
 // one matcher entry carries a list of commands; `false` is Cursor's flat entry. `failClosed: false`
 // is written once, on a new entry, to state the stance the script already takes — only an explicit
 // deny blocks. It is never enforced afterwards: a team that turns it on has made a choice.
+// An `observe` hook (E43's capture) only watches, so it states no `failClosed`; a null matcher is an
+// event that takes none.
 export const hookEntry = (adapter = CLAUDE_HOOK_ADAPTER) => (adapter.nested
-  ? { matcher: adapter.matcher, hooks: [{ type: 'command', command: adapter.command }] }
-  : { matcher: adapter.matcher, command: adapter.command, failClosed: false });
+  ? { ...(adapter.matcher ? { matcher: adapter.matcher } : {}), hooks: [{ type: 'command', command: adapter.command }] }
+  : { ...(adapter.matcher ? { matcher: adapter.matcher } : {}), command: adapter.command, ...(adapter.observe ? {} : { failClosed: false }) });
 
 // Ours is a hook command EXACTLY equal to one we have written — the current spelling or a
 // documented past one, FOR THIS HARNESS. Never "the entry at index N", never "the entry with our
@@ -759,6 +761,8 @@ export function miswiredGuardCommand(entry, adapter) {
 export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
   const entries = settings?.hooks?.[adapter.event];
   if (!Array.isArray(entries)) return false;
+  // An event that takes no matcher (Cursor's `afterFileEdit`) fires whenever our entry is there.
+  if (!adapter.matcher) return entries.some((e) => entryIsOurs(adapter, e));
   const tools = adapter.matcher.split('|');
   for (const entry of entries) {
     if (!entryIsOurs(adapter, entry)) continue;
@@ -810,14 +814,14 @@ function hookSettingsAction(root, adapter) {
   // hand — "replace them with `yad update --overwrite-local`" — advice that can never clear this,
   // since this action deliberately writes nothing. The specific reason has to surface either way.
   if (unreadable) {
-    warn(`${relDest} does not parse — the ledger guard cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
+    warn(`${relDest} does not parse — the ${adapter.label || 'ledger guard'} cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
     return { ...base, status: 'modified', apply: () => {} };
   }
   const { changed, unreadable: unmergeable } = mergeHookSettings(parsed, adapter);
   // Same treatment as a file that does not parse, and for the same reason: everything in it is the
   // team's, there is no shipped template to restore, and `--overwrite-local` must not invent one.
   if (unmergeable) {
-    warn(`${relDest}: ${unmergeable} — the ledger guard cannot be wired without discarding what is there; fix it by hand, then re-run \`yad check --fix\``);
+    warn(`${relDest}: ${unmergeable} — the ${adapter.label || 'ledger guard'} cannot be wired without discarding what is there; fix it by hand, then re-run \`yad check --fix\``);
     return { ...base, status: 'modified', apply: () => {} };
   }
   return {
@@ -948,6 +952,75 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
         paths: [w.dest],
         apply: () => fs.rmSync(dest, { force: true }),
       });
+    }
+  }
+  return actions;
+}
+
+// ---- background capture wiring (E43) -----------------------------------------------------------
+//
+// The post-edit capture hook: `hooks/yad-capture.sh`, plus one entry per IDE target that has a post-edit
+// protocol. Unlike `hookActions` it is wired in BOTH ledger modes — never losing a draft matters whoever
+// owns the ledger — on any Product (a `.sdlc/hub.json` or `product.json`) whose config does not say
+// `"capture": false`. Only the CONFIG turns the wiring off: `YAD_CAPTURE=0` is one shell's choice, and
+// letting it unwire a committed file would make `yad check` flip-flop between two people's shells.
+function captureWanted(root) {
+  const cfgPath = productConfigPath(root);
+  if (!exists(cfgPath)) return false;
+  const cfg = readJSON(cfgPath, null);
+  return !(cfg && cfg.capture === false);
+}
+
+export function captureHookActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!captureWanted(root)) return [];
+  const ledger = readManagedLedger(root);
+  const actions = CAPTURE_WIRING.map((w) =>
+    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+  );
+  for (const ide of safeIdeTargetsFor(root, ideTargets)) {
+    const adapter = CAPTURE_ADAPTERS[ide];
+    if (!adapter) continue;
+    actions.push(hookSettingsAction(root, adapter));
+  }
+  // The script and its entries land together, for the reason `hookActions` gives.
+  return actions.map(asNew);
+}
+
+// Capture wiring that should no longer run: an entry for a target that left `ideTargets`, or every entry
+// and the script once the config says `"capture": false`. Only OUR entry comes out, as `orphanHookActions`
+// does it; the script goes only when capture is off (a remaining target still invokes it otherwise).
+export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const on = captureWanted(root);
+  const kept = on ? new Set(safeIdeTargetsFor(root, ideTargets)) : new Set();
+  const actions = [];
+  for (const adapter of Object.values(CAPTURE_ADAPTERS)) {
+    if (kept.has(adapter.target)) continue;
+    const settingsPath = path.join(root, adapter.settings);
+    if (!exists(settingsPath)) continue;
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
+    if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
+    actions.push({
+      scope: adapter.target,
+      item: `${path.basename(adapter.settings)} (capture entry removed)`,
+      status: 'removed',
+      root,
+      paths: [],
+      apply: () => {
+        let current;
+        try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+        if (!isPlainObject(current)) return;
+        const { settings, changed } = unmergeHookSettings(current, adapter);
+        if (changed) writeJSON(settingsPath, settings);
+      },
+    });
+  }
+  if (!on) {
+    for (const w of CAPTURE_WIRING) {
+      const dest = path.join(root, w.dest);
+      if (!exists(dest)) continue;
+      actions.push({ scope: 'hub', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
     }
   }
   return actions;

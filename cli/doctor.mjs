@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -332,6 +332,10 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (${[...new Set(wiredScripts)].join(', ')})${alsoUnguarded}`);
     }
   }
+
+  // Background capture (E43), on any Product in either ledger mode: is the post-edit hook wired, and will
+  // a push to the `yad/wip/*` branches start the team's own CI?
+  if (exists(productPath)) captureChecks(root, checks, readJSON(productPath, null));
 
   // design.json: parse + shape + tool + MCP confirmation (absent is the normal markdown-only default —
   // pre-feature projects have none, so silence rather than warn when the file does not exist).
@@ -2057,3 +2061,82 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
   if (failed.length) process.exitCode = 1;
   return { ok: failed.length === 0, failed: failed.length, warned: warned.length, checks };
 }
+
+// The capture half of `yad doctor` (E43). Three facts: whether capture is on, whether every IDE target with
+// a post-edit protocol runs it, and which of the team's OWN GitHub workflows start on a push to any branch —
+// those run on every `yad/wip/*` push. yadflow's own templates exclude the branches; a team's file is theirs,
+// so it is named, never edited.
+export function captureChecks(root, checks, cfg) {
+  if (cfg && cfg.capture === false) {
+    check(checks, 'capture', 'project', 'ok', 'wip capture is off (`"capture": false` in the Product config)');
+    return;
+  }
+  const unwired = [];
+  if (!hookScriptReady(root, 'hooks/yad-capture.sh')) unwired.push('hooks/yad-capture.sh');
+  const targets = ideTargetsFor(root);
+  const safe = new Set(safeIdeTargetStateFor(root, targets).targets);
+  const noProtocol = [];
+  for (const ide of targets) {
+    if (!safe.has(ide)) continue;
+    const adapter = CAPTURE_ADAPTERS[ide];
+    if (!adapter) { noProtocol.push(ide); continue; }
+    const settingsPath = path.join(root, adapter.settings);
+    let settings = null;
+    if (exists(settingsPath)) {
+      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { settings = null; }
+    }
+    if (!isPlainObject(settings) || mergeHookSettings(settings, adapter).changed || !hookMatcherFires(settings, adapter)) unwired.push(adapter.settings);
+  }
+  const byHand = noProtocol.length ? ` — ${noProtocol.join(', ')} has no post-edit hook yad wires; run \`yad capture\` there by hand` : '';
+  if (unwired.length) {
+    check(checks, 'capture', 'project', 'warn', `wip capture not wired: ${unwired.join(', ')}${byHand}`,
+      'run `yad check --fix` — until then an agent\'s edits are saved only when someone commits them');
+  } else if (noProtocol.length === targets.length) {
+    check(checks, 'capture', 'project', 'warn', `wip capture installed but attached to nothing${byHand}`,
+      'add `.claude` or `.cursor` to the IDE targets, or run `yad capture` after editing');
+  } else {
+    check(checks, 'capture', 'project', 'ok', `wip capture wired (hooks/yad-capture.sh)${byHand}`);
+  }
+  const noisy = pushOnEveryBranch(root);
+  if (noisy.length) {
+    check(checks, 'capture', 'project', 'warn', `${noisy.join(', ')} ${noisy.length > 1 ? 'run' : 'runs'} on a push to ANY branch, so every \`yad capture\` push to yad/wip/* starts ${noisy.length > 1 ? 'them' : 'it'}`,
+      'add `branches-ignore: ["yad/wip/**"]` under its `push:` trigger (yadflow\'s own workflows already do)');
+  }
+}
+
+// The team's own GitHub workflow files whose `push` trigger names no branch filter — so a push to any
+// branch runs them. A line reader, not a YAML parser: it catches the three usual spellings (`on: push`,
+// `on: [push, …]`, and a `push:` key with no `branches`/`branches-ignore`/`tags` under it) and stays
+// silent on anything it cannot read, since a false warning here costs a team a needless edit. yadflow's
+// own files (`# yad-managed`) are skipped: their filters are ours to keep.
+export function pushOnEveryBranch(root) {
+  const dir = path.join(root, '.github', 'workflows');
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n)).sort(); } catch { return []; }
+  const out = [];
+  for (const n of names) {
+    let text;
+    try { text = fs.readFileSync(path.join(dir, n), 'utf8'); } catch { continue; }
+    if (/^#\s*yad-managed/m.test(text)) continue;
+    const lines = text.split(/\r?\n/);
+    let hit = false;
+    for (let i = 0; i < lines.length && !hit; i++) {
+      const l = lines[i];
+      if (/^(on|"on"|'on'):\s*(push|\[[^\]]*\bpush\b[^\]]*\])\s*(#.*)?$/.test(l)) { hit = true; break; }
+      const m = l.match(/^(\s+)push:\s*(#.*)?$/);
+      if (!m) continue;
+      const indent = m[1].length;
+      let filtered = false;
+      for (let j = i + 1; j < lines.length; j++) {
+        const t = lines[j];
+        if (!t.trim() || /^\s*#/.test(t)) continue;
+        if ((t.match(/^(\s*)/)[1].length) <= indent) break;
+        if (/^\s+(branches|branches-ignore|tags|tags-ignore):/.test(t)) { filtered = true; break; }
+      }
+      if (!filtered) hit = true;
+    }
+    if (hit) out.push(`.github/workflows/${n}`);
+  }
+  return out;
+}
+

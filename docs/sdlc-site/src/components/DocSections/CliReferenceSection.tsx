@@ -29,6 +29,7 @@ const GROUPS = [
       'yad gate comment <epic> <artifact> --by <name> [--count <n>] [--new-round] — no platform only: record who commented this round',
       'yad gate advance <epic> <artifact> — no platform only: pass the gate when its approvals hold',
       'yad gate repair <epic> — close an author step stranded behind a passed gate (YAD-STATE-005)',
+      'yad capture [--no-push] — snapshot every changed artifact onto your private yad/wip/<you>/<epic> branches (a hook runs it after each agent edit)',
     ],
   },
   {

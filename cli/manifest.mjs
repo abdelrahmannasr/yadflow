@@ -559,6 +559,7 @@ const guardCommand = (envVar) => `"$${envVar}/hooks/ledger-guard.sh"`;
 export const HOOK_ADAPTERS = Object.freeze({
   '.claude': Object.freeze({
     target: '.claude',
+    label: 'ledger guard',
     settings: '.claude/settings.json',
     event: 'PreToolUse',
     nested: true,
@@ -584,6 +585,7 @@ export const HOOK_ADAPTERS = Object.freeze({
   }),
   '.cursor': Object.freeze({
     target: '.cursor',
+    label: 'ledger guard',
     settings: '.cursor/hooks.json',
     event: 'preToolUse',
     nested: false,
@@ -623,6 +625,52 @@ export const HOOK_ADAPTERS = Object.freeze({
     // simply a guard that never fires.
     requiresJsonVerdict: true,
     // Nothing shipped before this release, so there is no past spelling of ours to normalise.
+    legacyCommands: Object.freeze([]),
+  }),
+});
+
+// Background capture (E43): the POST-edit half. After an agent writes a file, `hooks/yad-capture.sh` runs
+// `yad capture --hook`, which snapshots every changed artifact onto the person's private
+// `yad/wip/<name>/<epic>` branches. Unlike the guard it is wired in BOTH ledger modes — capture is about
+// never losing a draft, which matters whoever owns the ledger — and on any Product whose config does not
+// say `"capture": false`. The same adapter shape as the guard, so one merge, one unmerge and one doctor
+// check serve both; `observe: true` marks a hook that only watches (it cannot refuse), so its entry carries
+// no `failClosed`, and a null `matcher` is an event that takes none (Cursor's `afterFileEdit`).
+export const CAPTURE_WIRING = [
+  { src: 'skills/yad-checks/templates/hooks/yad-capture.sh', dest: 'hooks/yad-capture.sh', exec: true },
+];
+export const CAPTURE_ADAPTERS = Object.freeze({
+  '.claude': Object.freeze({
+    target: '.claude',
+    label: 'wip capture',
+    settings: '.claude/settings.json',
+    event: 'PostToolUse',
+    nested: true,
+    preamble: null,
+    // The same file-writing tools the guard matches: a capture after anything else would find nothing new.
+    matcher: 'Edit|Write|MultiEdit|NotebookEdit',
+    projectDirEnv: CLAUDE_PROJECT_DIR_ENV,
+    // Quoted and anchored on the project root, for the reason the guard's entry is (see above).
+    command: `"$${CLAUDE_PROJECT_DIR_ENV}/hooks/yad-capture.sh"`,
+    observe: true,
+    wiring: Object.freeze([]),
+    legacyCommands: Object.freeze([]),
+  }),
+  '.cursor': Object.freeze({
+    target: '.cursor',
+    label: 'wip capture',
+    settings: '.cursor/hooks.json',
+    // Fires once an edit is on disk — the one moment a capture wants, and the reason the guard does
+    // not use it. It takes no matcher, and reads nothing back from the command.
+    event: 'afterFileEdit',
+    nested: false,
+    preamble: Object.freeze({ version: 1 }),
+    matcher: null,
+    projectDirEnv: CURSOR_PROJECT_DIR_ENV,
+    // Relative and unquoted, for the reason the guard's Cursor entry is (see above).
+    command: 'hooks/yad-capture.sh',
+    observe: true,
+    wiring: Object.freeze([]),
     legacyCommands: Object.freeze([]),
   }),
 });

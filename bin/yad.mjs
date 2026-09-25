@@ -187,6 +187,9 @@ ${c.bold('Build helpers')}
                                        (merged before ledger tracking), then carry its status: shipped
                                        flip in the same commit (--merge-commit <sha>, --task <t> opt.);
                                        one repo per run — re-run per --repo for a multi-repo story
+  yad capture [--no-push]              Snapshot every changed Shape artifact onto your private
+                                       yad/wip/<you>/<epic> branches — never your checkout; pushes them
+                                       (a harness hook runs it after each agent edit, with --hook)
   yad tidy up [<epic>] [--push]        Fold FINISHED Build shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
                                        ledger, as one chore(hub) commit — the manual "pack it up"
@@ -297,6 +300,7 @@ function parseArgs(argv) {
     else if (a === '--undo') o.undo = true;
     else if (a === '--debt') o.debt = true;
     else if (a === '--new-round') o.newRound = true;
+    else if (a === '--hook') o.hook = true;
     else if (a === '--stub') o.stub = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
@@ -407,6 +411,15 @@ async function main() {
     if (inJSON()) return refuse('yad hook takes no --json — its output is the protocol the agent reads', 'run it without --json');
     if (action !== 'ledger-guard') return refuse(`unknown hook: ${action ?? '(none)'} (ledger-guard)`);
     runLedgerGuardHook({ paths: o.path ? [o.path] : [], format: o.format });
+    return;
+  }
+
+  // The same hot path for the post-edit capture hook (E43): it runs after every agent edit, never fails,
+  // and needs `cli/capture.mjs` alone.
+  if (cmd === 'capture' && o.hook) {
+    const { runCapture } = await import('../cli/capture.mjs');
+    try { await runCapture(o.dir, { hook: true, noPush: !!o.noPush }); } catch (e) { process.stderr.write(`  • yad capture: ${e.message}\n`); }
+    process.exitCode = 0;
     return;
   }
 
@@ -618,6 +631,13 @@ async function main() {
         retroShip = { epic, story, repo: o.repo, task: o.task, mergeCommit: o['merge-commit'], today };
       }
       result = await commands.runCheckpoint(o.dir, { push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun, retroShip });
+      break;
+    }
+    case 'capture': {
+      // E43. `--hook` is the harness's post-edit command: it never fails and never prints to stdout.
+      if (o._[1]) { refuse(`yad capture takes no word (got ${o._[1]})`, 'usage: yad capture [--no-push]'); break; }
+      result = await commands.runCapture(o.dir, { hook: !!o.hook, noPush: !!o.noPush });
+      if (o.hook) process.exitCode = 0;
       break;
     }
     case 'tidy': {

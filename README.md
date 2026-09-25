@@ -96,6 +96,10 @@ In one pass it produces:
   agent the CI-owned gate-ledger write at the moment it tries it and names the command that owns the
   transition, instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic
   (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority.
+- **Background capture** on every Product, in both ledger modes (E43) — `hooks/yad-capture.sh`, a
+  harness hook that runs `yad capture` after each agent edit. It snapshots every changed Shape artifact
+  onto your private `yad/wip/<you>/<epic>` branches, so a draft is never lost and nobody types a git
+  command. See [Background capture](#background-capture) below.
 - **PR/MR templates** and an opt-in CodeRabbit config.
 
 Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — state, approvals, and the contract lock —
@@ -128,6 +132,27 @@ A fresh setup offers **`.claude,.agents`**, which together cover every agent in 
 has an INSTALL in one of them — a `skills/` folder, or an armed hook entry — is offered that one
 instead; a `.cursor/` holding only Cursor rules is not an install, and is offered the default. Checked against each agent's
 own documentation on 2026-09-16; `yad doctor` prints the same table's verdict for your project.
+
+### Background capture
+
+`yad capture` saves your work in progress without touching your checkout (E43). It takes every changed
+file under `epics/` and `foundation/` — except the ledger (any `.sdlc/` folder and `reviews/`; the two
+files a person writes there, `contract-lock.json` and `change.json`, are included) — and commits it onto
+a private branch per epic, `yad/wip/<your git name>/<epic>`. It uses git's low-level commands in a
+throwaway index, so your branch, your staged changes and your files stay exactly as they were, and no
+git hook runs.
+
+| What | How |
+| --- | --- |
+| When | After every agent edit, by a hook yad wires in both ledger modes: Claude Code `PostToolUse` in `.claude/settings.json`, Cursor `afterFileEdit` in `.cursor/hooks.json`. Any other agent or editor: run `yad capture` yourself. Each capture takes every changed artifact, so your own editor's edits ride along |
+| Push | A capture commits at once, locally. The hook pushes your capture branches in the background at most once every 5 minutes, with no password prompt and a short timeout, so an edit never waits on the network. `yad capture` by hand pushes straight away. With no remote, or offline, the captures stay local and nothing fails |
+| CI | yadflow's own push workflow skips `yad/wip/**`. `yad doctor` names any of **your** workflows that run on a push to every branch, so you can add `branches-ignore: ["yad/wip/**"]` |
+| Off | `"capture": false` in the Product config (`yad check --fix` then removes the hook), or `YAD_CAPTURE=0` for one shell |
+
+The capture commits are unsigned on purpose — a signing prompt inside a hook would hang the agent — and
+each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines, which the later fold into one clean commit
+(E44) reads. Two people with the same git name share branches. The people count that caps review gates
+(E71) does not count capture commits.
 
 ### The local ledger guard, per agent
 

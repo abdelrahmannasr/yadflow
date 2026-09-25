@@ -23826,3 +23826,282 @@ test('E1 review: gate ci --json names every epic it skipped', () => {
     assert.equal(j.warnings.filter((w) => /^EP-beta: .* skipping this epic$/.test(w)).length, 1, 'the second skip is not lost');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------------------------
+// E43 — `yad capture`: background capture of Shape artifacts to private yad/wip/<name>/<epic> branches
+// ---------------------------------------------------------------------------------------------
+const cap = await import('./capture.mjs');
+// A Product in a git repo with a git identity (a test that commits must set one — CI Linux cannot guess),
+// one epic committed. `hub` is the Product config.
+function captureFixture({ hub = { default_branch: 'main' }, commit = true, name = 'Ann Lee' } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-'));
+  const g = (...a) => execFileSync('git', a, { cwd: T, encoding: 'utf8', stdio: 'pipe' }).trim();
+  g('init', '-q'); g('checkout', '-q', '-b', 'main');
+  g('config', 'user.email', 'ann@corp.io');
+  if (name) g('config', 'user.name', name);
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '# x\n');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{}\n');
+  if (commit) { g('add', '-A'); g('commit', '-q', '-m', 'init'); }
+  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
+  return { T, g, w };
+}
+const captureRun = async (T, o = {}) => {
+  const before = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const { value, out } = await captureConsole(() => cap.runCapture(T, { noPush: true, ...o }));
+    return { value, out, code: process.exitCode ?? 0 };
+  } finally { process.exitCode = before; }
+};
+
+test('E43 capturedEpic: everything under an epic or the Foundation but the ledger; the two person-written .sdlc files count', () => {
+  const cases = [
+    ['epics/EP-x/epic.md', 'EP-x'], ['epics/EP-x/stories/EP-x-S01.md', 'EP-x'], ['epics/EP-x/notes/a b.md', 'EP-x'],
+    ['epics/EP-x/.sdlc/contract-lock.json', 'EP-x'], ['epics/EP-x/.sdlc/change.json', 'EP-x'],
+    ['foundation/purpose.md', 'EP-foundation'],
+    ['epics/EP-x/.sdlc/state.json', null], ['epics/EP-x/.sdlc/approvals.json', null], ['epics/EP-x/.sdlc/build-log/a.json', null],
+    ['epics/EP-x/reviews/epic--2026-09-25--approved.md', null], ['foundation/.sdlc/state.json', null], ['foundation/reviews/x.md', null],
+    ['epics/EP-x/stories/.sdlc/x.json', null], ['.sdlc/index.json', null], ['README.md', null], ['epics/notanepic/x.md', null], ['epics/EP-x', null],
+  ];
+  for (const [p, want] of cases) assert.equal(cap.capturedEpic(p), want, p);
+});
+
+test('E43 wipName: the git name as one safe, lower-case branch segment, or null', () => {
+  for (const [given, want] of [['Ann Lee', 'ann-lee'], ['José Núñez', 'jose-nunez'], ['a..b', 'a.b'], ['--x--', 'x'], ['x.lock', 'x'],
+    ['ann/lee', 'ann-lee'], ['  ', null], ['', null], [null, null], ['日本', null]]) {
+    assert.equal(cap.wipName(given), want, JSON.stringify(given));
+  }
+});
+
+test('E43 capture: commits every changed artifact per epic, leaves the ledger out, and never touches the checkout', async () => {
+  const { T, g, w } = captureFixture();
+  try {
+    w('epics/EP-x/epic.md', '# x\nmore\n');
+    w('epics/EP-x/my notes.md', 'new\n');
+    w('epics/EP-x/.sdlc/contract-lock.json', '{}\n');
+    w('epics/EP-x/.sdlc/state.json', '{"changed":true}\n');
+    w('epics/EP-x/reviews/r.md', 'review\n');
+    w('foundation/purpose.md', 'why\n');
+    g('add', 'epics/EP-x/epic.md');   // a staged change must stay staged, exactly as it was
+    const before = [g('status', '--porcelain'), g('rev-parse', 'HEAD'), g('symbolic-ref', 'HEAD'), g('diff', '--cached')];
+    const r = await captureRun(T);
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(r.value.captured.map((c) => [c.epic, c.branch, c.files]), [['EP-foundation', 'yad/wip/ann-lee/EP-foundation', 1], ['EP-x', 'yad/wip/ann-lee/EP-x', 3]]);
+    assert.deepEqual([g('status', '--porcelain'), g('rev-parse', 'HEAD'), g('symbolic-ref', 'HEAD'), g('diff', '--cached')], before, 'checkout, HEAD, branch and index untouched');
+    const files = g('show', '--name-only', '--format=', 'yad/wip/ann-lee/EP-x').split('\n').sort();
+    assert.deepEqual(files, ['epics/EP-x/.sdlc/contract-lock.json', 'epics/EP-x/epic.md', 'epics/EP-x/my notes.md']);
+    assert.equal(g('show', 'yad/wip/ann-lee/EP-x:epics/EP-x/.sdlc/state.json'), '{}', 'the ledger is HEAD\'s, never the working copy');
+    const msg = g('log', '-1', '--format=%B', 'yad/wip/ann-lee/EP-x');
+    assert.equal(msg, `wip(EP-x): capture\n\nYad-Epic: EP-x\nYad-Base: ${before[1]}\nYad-Branch: main`);
+    assert.equal(g('rev-parse', 'yad/wip/ann-lee/EP-x^'), before[1], 'the first capture sits on HEAD');
+    const again = await captureRun(T);
+    assert.deepEqual([again.value.captured, again.value.unchanged], [[], ['EP-foundation', 'EP-x']]);
+    assert.match(again.out, /nothing new since the last capture/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E43 capture: a later capture stacks on the branch; an edit undone is captured; once HEAD moves, an old branch is left alone', async () => {
+  const { T, g, w } = captureFixture();
+  try {
+    w('epics/EP-x/epic.md', '# x\none\n');
+    await captureRun(T);
+    const first = g('rev-parse', 'yad/wip/ann-lee/EP-x');
+    w('epics/EP-x/epic.md', '# x\ntwo\n');
+    await captureRun(T);
+    assert.equal(g('rev-parse', 'yad/wip/ann-lee/EP-x^'), first, 'stacked on the last capture');
+    w('epics/EP-x/epic.md', '# x\n');                       // the edit undone
+    const undone = await captureRun(T);
+    assert.deepEqual(undone.value.captured.map((c) => c.epic), ['EP-x'], 'the branch ends on what is really there');
+    assert.equal(g('show', 'yad/wip/ann-lee/EP-x:epics/EP-x/epic.md'), '# x');
+    // HEAD moves (someone's work lands) and changes the epic: that is not an edit of ours to record.
+    w('epics/EP-x/epic.md', '# x\nlanded\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'landed');
+    const tip = g('rev-parse', 'yad/wip/ann-lee/EP-x');
+    const after = await captureRun(T);
+    assert.deepEqual(after.value.captured, []);
+    assert.equal(g('rev-parse', 'yad/wip/ann-lee/EP-x'), tip, 'no commit added to a branch whose base is behind');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E43 capture: a deleted artifact is captured as deleted; a repo with no commit yet captures with no parent', async () => {
+  const del = captureFixture();
+  try {
+    fs.rmSync(path.join(del.T, 'epics/EP-x/epic.md'));
+    await captureRun(del.T);
+    assert.throws(() => del.g('show', 'yad/wip/ann-lee/EP-x:epics/EP-x/epic.md'), 'gone from the capture');
+  } finally { fs.rmSync(del.T, { recursive: true, force: true }); }
+  const fresh = captureFixture({ commit: false });
+  try {
+    const r = await captureRun(fresh.T);
+    assert.deepEqual(r.value.captured.map((c) => c.epic), ['EP-x']);
+    assert.match(fresh.g('log', '-1', '--format=%B', 'yad/wip/ann-lee/EP-x'), /Yad-Base: none\nYad-Branch: main/);
+    assert.equal(fresh.g('rev-list', '--count', 'yad/wip/ann-lee/EP-x'), '1', 'a root commit');
+    assert.deepEqual(fresh.g('ls-tree', '-r', '--name-only', 'yad/wip/ann-lee/EP-x').split('\n'), ['epics/EP-x/epic.md'], 'the ledger is not captured even with no HEAD to take it from');
+  } finally { fs.rmSync(fresh.T, { recursive: true, force: true }); }
+});
+
+test('E43 capture: off by config or YAD_CAPTURE=0; no git name, no Product and no repo are said, and --hook never fails or prints', async () => {
+  const off = captureFixture({ hub: { default_branch: 'main', capture: false } });
+  try {
+    off.w('epics/EP-x/epic.md', 'changed\n');
+    const r = await captureRun(off.T);
+    assert.equal(r.value.off, 'capture is off in the Product config (`"capture": false`)');
+    assert.equal(off.g('branch', '--list', 'yad/wip/*'), '');
+  } finally { fs.rmSync(off.T, { recursive: true, force: true }); }
+  const env = captureFixture();
+  try {
+    env.w('epics/EP-x/epic.md', 'changed\n');
+    const r = await captureRun(env.T, { env: { ...process.env, YAD_CAPTURE: '0' } });
+    assert.equal(r.value.off, 'YAD_CAPTURE=0 is set');
+  } finally { fs.rmSync(env.T, { recursive: true, force: true }); }
+  const anon = captureFixture({ name: null });
+  try {
+    anon.w('epics/EP-x/epic.md', 'changed\n');
+    const manual = await captureRun(anon.T, { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    // The global config may hold a name on this machine, so only assert when git truly has none.
+    if (manual.value.captured.length === 0) assert.match(manual.out, /git has no user.name/);
+  } finally { fs.rmSync(anon.T, { recursive: true, force: true }); }
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-none-'));
+  try {
+    const hook = await captureRun(bare, { hook: true });
+    assert.deepEqual([hook.code, hook.out], [0, ''], 'the hook is silent and exits 0 outside a repo');
+    const manual = await captureRun(bare);
+    assert.equal(manual.code, 1);
+    assert.match(manual.out, /not a git repository/);
+    execFileSync('git', ['init', '-q'], { cwd: bare });
+    assert.match((await captureRun(bare)).out, /not a Product/);
+  } finally { fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
+test('E43 push: none with no remote; the hook starts ONE detached push per window; a manual capture pushes every branch of this person', async () => {
+  const { T, g, w } = captureFixture();
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-remote-'));
+  try {
+    w('epics/EP-x/epic.md', 'one\n');
+    const local = await captureRun(T, { noPush: false });
+    assert.deepEqual(local.value.pushed, { pushed: 'local', why: 'no remote named origin' });
+    assert.match(local.out, /local only — no remote named origin/);
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    g('remote', 'add', 'origin', remote);
+    const spawned = [];
+    const spawner = (cmd, args, opts) => { spawned.push({ cmd, args, opts }); return { unref() {} }; };
+    w('epics/EP-x/epic.md', 'two\n');
+    const h1 = await captureRun(T, { hook: true, noPush: false, spawner, now: 1_000_000 });
+    assert.deepEqual(h1.value.pushed, { pushed: 'started' });
+    assert.deepEqual(spawned[0].args.slice(-2), ['origin', 'refs/heads/yad/wip/ann-lee/*:refs/heads/yad/wip/ann-lee/*']);
+    assert.ok(spawned[0].args.includes('--force-with-lease') && spawned[0].args.includes('--no-verify'));
+    assert.equal(spawned[0].opts.detached, true);
+    assert.equal(spawned[0].opts.env.GIT_TERMINAL_PROMPT, '0', 'no prompt can ever appear');
+    w('epics/EP-x/epic.md', 'three\n');
+    const h2 = await captureRun(T, { hook: true, noPush: false, spawner, now: 1_000_000 + 60_000 });
+    assert.equal(h2.value.pushed.pushed, 'later', 'within the window the capture is local only');
+    assert.equal(spawned.length, 1);
+    // The hook pushes only after a capture that committed something: an edit that changed nothing sends nothing.
+    assert.equal((await captureRun(T, { hook: true, noPush: false, spawner, now: 1_000_000 + cap.PUSH_EVERY_MS })).value.pushed, null);
+    w('epics/EP-x/epic.md', 'four\n');
+    const h3 = await captureRun(T, { hook: true, noPush: false, spawner, now: 1_000_000 + cap.PUSH_EVERY_MS });
+    assert.equal(h3.value.pushed.pushed, 'started');
+    const manual = await captureRun(T, { noPush: false });
+    assert.equal(manual.value.pushed.pushed, 'done', manual.out);
+    assert.equal(execFileSync('git', ['rev-parse', 'yad/wip/ann-lee/EP-x'], { cwd: remote, encoding: 'utf8' }).trim(), g('rev-parse', 'yad/wip/ann-lee/EP-x'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(remote, { recursive: true, force: true }); }
+});
+
+test('E43 people: capture branches, local and remote-tracking, are not counted as anyone committing', () => {
+  const fx = peopleFixture({ withRepo: false });
+  try {
+    const g = (...a) => execFileSync('git', a, { cwd: fx.T, encoding: 'utf8', stdio: 'pipe', env: GIT_ENV });
+    const at = `${daysBefore(P_TODAY, 1)}T12:00:00Z`;
+    const wipCommit = (ref) => {
+      const tree = g('rev-parse', 'HEAD^{tree}').trim();
+      const sha = execFileSync('git', ['-c', 'user.name=Draft Only', '-c', 'user.email=draft@corp.io', 'commit-tree', tree, '-p', 'HEAD', '-m', 'wip(EP-x): capture'],
+        { cwd: fx.T, encoding: 'utf8', env: { ...GIT_ENV, GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } }).trim();
+      g('update-ref', ref, sha);
+    };
+    wipCommit('refs/heads/yad/wip/draft-only/EP-x');
+    wipCommit('refs/remotes/origin/yad/wip/draft-only/EP-x');
+    const r = activePeople(fx.T, { today: P_TODAY });
+    assert.ok(!r.expertise.people.some((p) => /draft/.test(p.key)), `a capture is nobody committing: ${JSON.stringify(r.expertise.people.map((p) => p.key))}`);
+    // The same commit on an ordinary branch still counts: the exclusion is the capture branches only.
+    wipCommit('refs/heads/feature/x');
+    assert.ok(activePeople(fx.T, { today: P_TODAY }).expertise.people.some((p) => /draft/.test(p.key)));
+  } finally { fs.rmSync(fx.T, { recursive: true, force: true }); }
+});
+
+test('E43 wiring: the capture hook is wired in both ledger modes, in each harness\'s shape, and unwired when the config turns it off', async () => {
+  const { captureHookActions, orphanCaptureHookActions, hookEntry } = await import('./plan.mjs');
+  const { CAPTURE_ADAPTERS, HOOK_ADAPTERS } = await import('./manifest.mjs');
+  assert.deepEqual(hookEntry(CAPTURE_ADAPTERS['.claude']), { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: '"$CLAUDE_PROJECT_DIR/hooks/yad-capture.sh"' }] });
+  assert.deepEqual(hookEntry(CAPTURE_ADAPTERS['.cursor']), { command: 'hooks/yad-capture.sh' }, 'afterFileEdit takes no matcher, and a watcher states no failClosed');
+  assert.deepEqual(hookEntry(HOOK_ADAPTERS['.cursor']), { matcher: 'Write|Edit|Delete', command: 'hooks/ledger-guard-cursor.sh', failClosed: false }, 'the guard\'s entry is unchanged');
+  for (const hub of [{ default_branch: 'main' }, { platform: 'github', ledger: 'verified', default_branch: 'main' }]) {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-wire-'));
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+      const acts = captureHookActions(T, ['.claude', '.cursor', '.agents']);
+      assert.deepEqual(acts.map((a) => [a.scope, a.item, a.status]), [['hub', 'hooks/yad-capture.sh', 'new'], ['.claude', 'settings.json', 'new'], ['.cursor', 'hooks.json', 'new']], JSON.stringify(hub));
+      for (const a of acts) a.apply();
+      assert.ok(fs.statSync(path.join(T, 'hooks/yad-capture.sh')).mode & 0o100, 'executable');
+      const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
+      assert.deepEqual(cursor, { version: 1, hooks: { afterFileEdit: [{ command: 'hooks/yad-capture.sh' }] } });
+      assert.deepEqual(orphanCaptureHookActions(T, ['.claude', '.cursor']), [], 'nothing orphaned while wanted');
+      assert.deepEqual(orphanCaptureHookActions(T, ['.claude']).map((a) => a.item), ['hooks.json (capture entry removed)'], 'a dropped target loses its entry');
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, capture: false }));
+      assert.deepEqual(captureHookActions(T, ['.claude']), []);
+      const gone = orphanCaptureHookActions(T, ['.claude', '.cursor']);
+      assert.deepEqual(gone.map((a) => a.item).sort(), ['hooks.json (capture entry removed)', 'hooks/yad-capture.sh (removed)', 'settings.json (capture entry removed)']);
+      for (const a of gone) a.apply();
+      assert.ok(!fs.existsSync(path.join(T, 'hooks/yad-capture.sh')));
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8')), { version: 1 });
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  const none = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-noproduct-'));
+  try { assert.deepEqual(captureHookActions(none, ['.claude']), [], 'no Product, nothing wired'); }
+  finally { fs.rmSync(none, { recursive: true, force: true }); }
+});
+
+test('E43 doctor: names a team workflow that runs on a push to any branch, and skips yadflow\'s own', async () => {
+  const { pushOnEveryBranch } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-wf-'));
+  try {
+    const wf = (n, text) => { fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true }); fs.writeFileSync(path.join(T, '.github/workflows', n), text); };
+    wf('a.yml', 'on: push\n');
+    wf('b.yml', 'on: [push, pull_request]\n');
+    wf('c.yml', 'on:\n  push:\n  pull_request:\n');
+    wf('d.yml', 'on:\n  push:\n    branches: [main]\n');
+    wf('e.yaml', 'on:\n  push:\n    # a comment\n    branches-ignore: ["yad/wip/**"]\n');
+    wf('f.yml', 'on:\n  pull_request:\n');
+    wf('g.yml', '# yad-managed: yad-checks\non: push\n');
+    wf('h.yml', 'on:\n  push:\n    tags: ["v*"]\n');
+    assert.deepEqual(pushOnEveryBranch(T), ['.github/workflows/a.yml', '.github/workflows/b.yml', '.github/workflows/c.yml']);
+    assert.deepEqual(pushOnEveryBranch(path.join(T, 'nowhere')), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E43: yadflow\'s update-guard workflow ignores the capture branches; the CLI runs capture and its hook path', () => {
+  const guard = fs.readFileSync(new URL('../skills/yad-checks/templates/github/yad-update-guard.yml', import.meta.url), 'utf8');
+  assert.match(guard, /on:\n  push:\n(?:\s*#.*\n)*\s+branches-ignore: \["yad\/wip\/\*\*"\]/);
+  assert.ok(!/branches: \["\*\*"\]/.test(guard));
+  const { T, g, w } = captureFixture();
+  try {
+    w('epics/EP-x/epic.md', 'cli\n');
+    const hook = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'capture', '--hook', '--no-push'], { cwd: T, encoding: 'utf8', env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+    assert.deepEqual([hook.status, hook.stdout], [0, ''], hook.stderr);
+    assert.equal(g('show', 'yad/wip/ann-lee/EP-x:epics/EP-x/epic.md'), 'cli');
+    const word = yadRun(T, 'capture', 'extra');
+    assert.equal(word.code, 1);
+    assert.match(word.out, /yad capture takes no word/);
+    w('epics/EP-x/epic.md', 'json\n');
+    const j = JSON.parse(yadRun(T, 'capture', '--no-push', '--json').out);
+    assert.deepEqual([j.command, j.ok, j.name, j.captured.map((c) => c.epic)], ['capture', true, 'ann-lee', ['EP-x']]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E43 report: the capture verb survives the scrub', async () => {
+  const { sanitizeArgv } = await import('./report.mjs');
+  assert.equal(sanitizeArgv(['capture', '--hook', '--no-push']), 'capture --hook --no-push');
+});
