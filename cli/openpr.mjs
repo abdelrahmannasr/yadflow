@@ -16,6 +16,7 @@ import { baseCodeowners, ownersFor, parseCodeowners } from './codeowners.mjs';
 import { baseChangeLevel, changedSince, recentAuthorsFor, suggestedAuthorsFor } from './riskmap-command.mjs';
 import { personLabel } from './riskmap.mjs';
 import { gateOpen } from './gate.mjs';
+import { unfoldedPaths, authorStepOf } from './fold.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
 function resolveRepo(root, { repo, dir }) {
@@ -247,6 +248,12 @@ export async function runOpenPr(root, opts = {}) {
   if (stage === 'hub-shape') {
     const parsed = parseReviewBranch(branch);
     if (!parsed) { fail(`could not parse review branch '${branch}' (expected review/EP-<slug>/<artifact>)`); process.exitCode = 1; return; }
+    // E44: the review carries what was FOLDED. A step file changed since then is not on this branch.
+    const unfolded = unfoldedPaths(repoRoot, parsed.epic, parsed.base);
+    if (unfolded.length) {
+      warn(`not folded, so not in this review: ${unfolded.join(', ')}`);
+      hand(`fold them first: yad fold ${parsed.epic} ${authorStepOf(parsed.base)}${/^stories-S\d+$/i.test(parsed.base) ? ' (it folds every changed story)' : ''}`);
+    }
     info(`pushing ${branch} …`);
     const fpush = run('git', ['push', '-u', 'origin', branch], { cwd: repoRoot });
     if (!fpush.ok) { fail(`git push failed — ${fpush.stderr.split('\n')[0] || 'unknown'}`); process.exitCode = 1; return; }

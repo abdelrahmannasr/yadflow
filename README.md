@@ -136,8 +136,9 @@ own documentation on 2026-09-16; `yad doctor` prints the same table's verdict fo
 ### Background capture
 
 `yad capture` saves your work in progress without touching your checkout (E43). It takes every changed
-file under `epics/` and `foundation/` — except the ledger (any `.sdlc/` folder and `reviews/`; the two
-files a person writes there, `contract-lock.json` and `change.json`, are included) — and commits it onto
+file under `epics/` and `foundation/` — except the ledger (any `.sdlc/` folder and `reviews/`; the four
+files a person or a skill writes there, `contract-lock.json`, `change.json`, `design-links.json` and
+`test-links.json`, are included) — and commits it onto
 a private branch per epic, `yad/wip/<your git name>/<epic>`. It uses git's low-level commands in a
 throwaway index, so your branch, your staged changes and your files stay exactly as they were, and no
 git hook runs.
@@ -150,9 +151,27 @@ git hook runs.
 | Off | `"capture": false` in the Product config (`yad check --fix` then removes the hook), or `YAD_CAPTURE=0` for one shell |
 
 The capture commits are unsigned on purpose — a signing prompt inside a hook would hang the agent — and
-each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines, which the later fold into one clean commit
-(E44) reads. The push is never forced: if you capture the same epic on two machines, the second push is refused rather than overwriting the first, and a `yad capture` you run by hand says so and names the branch (delete one copy with `git branch -D` to continue the other) — the hook's background push cannot report it. **To remove a capture branch for good** — say a secret was captured — delete it on origin first, then on every machine that has it run `git branch -D yad/wip/<you>/<epic>` **and** `git branch -dr origin/yad/wip/<you>/<epic>` (the second deletes that machine's saved copy of origin's branch; it says so if there is none): a machine that still holds either one rebuilds the branch and pushes it back. On a fresh clone, a capture continues the branch already on origin. Two people with the same git name share branches. The people count that caps review gates
+each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines. They are drafts: the commit your history
+keeps is the fold, below. The push is never forced: if you capture the same epic on two machines, the second push is refused rather than overwriting the first, and a `yad capture` you run by hand says so and names the branch (delete one copy with `git branch -D` to continue the other) — the hook's background push cannot report it. **To remove a capture branch for good** — say a secret was captured — delete it on origin first, then on every machine that has it run `git branch -D yad/wip/<you>/<epic>` **and** `git branch -dr origin/yad/wip/<you>/<epic>` (the second deletes that machine's saved copy of origin's branch; it says so if there is none): a machine that still holds either one rebuilds the branch and pushes it back. On a fresh clone, a capture continues the branch already on origin. Two people with the same git name share branches. The people count that caps review gates
 (E71) does not count capture commits.
+
+### Folding a step into one commit
+
+`yad fold <epic> <step>` ends an authoring step (E44). It makes the one commit the record keeps,
+`docs(<epic>): author <step>` — for example `docs(EP-checkout): author architecture`. The authoring
+skills run it at the end of their step; you can run it yourself too.
+
+| What | How |
+| --- | --- |
+| Files | Only that step's files: the ones its review covers (architecture is `architecture.md`, `contract.md` and `.sdlc/contract-lock.json`; stories is everything under `stories/`), plus what the step's skill writes beside them (`DESIGN.md` and `.sdlc/design-links.json` for the UI step, `.sdlc/test-links.json` for test cases). Other changed files of the epic are named and left on disk, so a half-written draft of another step never lands in this commit |
+| The ledger | Follows `ledger` mode. `local`: the epic's changed ledger files go in the same commit — one step, one commit. `verified`: CI writes the ledger at merge, so the fold leaves those files for CI — except while the epic is brand new (no `.sdlc/state.json` in HEAD yet): then its new ledger files are its seed, which is the case `ledger-guard` allows and the only way a seed reaches the default branch. Once the epic is seeded, even a NEW ledger file (a `reviews/*.md` written by hand) is left for CI, because the guard would reject it |
+| The seed | While the epic is brand new, the first fold also takes the new person-written `.sdlc/` files beside the ledger — a change-epic's `change.json` and its pointer `contract-lock.json` — in both modes |
+| The commit | A normal `git commit`, so it is signed if your git signs (with `ledger: verified` it warns when signing is off: the review PR's signature check would fail), and your commit hooks run. Only the step's files are committed; anything else you staged stays staged. It ends with `Yad-Epic`, `Yad-Step` and `Yad-Folded` lines — the last is the tip of your capture branch, the drafts this commit folds (`none` with capture off) |
+| Where | With `ledger: verified`, never on the default branch — artifacts reach it only through the review PR. With `ledger: local`, anywhere |
+| The drafts | Your `yad/wip/<you>/<epic>` branch is left as it is: the draft history stays for the later rework measurement (E95), and nothing has to be deleted on other machines. The next capture has nothing new to save |
+
+A step with no changed files has nothing to fold, and says so. `yad open-pr` on a review branch warns
+when that step's files have changes no fold has committed — they are not in the review.
 
 ### The local ledger guard, per agent
 

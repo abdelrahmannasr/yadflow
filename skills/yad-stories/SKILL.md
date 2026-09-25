@@ -37,7 +37,8 @@ This passes when `stories` is the next runnable step per the state sequence — 
 Open the stories authoring branch `stories/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-Product's default branch. Author and commit the story files under `stories/` on it. This is **distinct**
+Product's default branch. Author the story files under `stories/` on it, and end the step with `yad fold EP-<slug> stories` — the
+one commit the step keeps (E44). This is **distinct**
 from the verified ledger's `review/…` branch.
 
 ### Step 2 — Read inputs
@@ -121,7 +122,7 @@ any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
 is pushed around the gate. Commit **the story files under `stories/` only** — nothing else
-under `.sdlc/` — then hand off to `yad-review-gate`.
+under `.sdlc/` (`yad fold EP-<slug> stories` takes exactly these) — then hand off to `yad-review-gate`.
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
 `yad gate open <epic> stories/` marks `stories-review` `in_review`, closes `stories` as `done`, and moves `currentStep` to the gate

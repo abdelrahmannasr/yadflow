@@ -57,7 +57,8 @@ are a hint for whom to ask. There is no roster to turn them into people.
 
 ### Step 2 — `open` (create the review PR/MR)
 1. From the Product default branch, create `review/EP-<slug>/<artifact-base>` and ensure the artifact file
-   (and, for architecture, `contract.md` + `.sdlc/contract-lock.json`) is committed on it. Push as the
+   (and, for architecture, `contract.md` + `.sdlc/contract-lock.json`) is committed on it — by the step's
+   `yad fold` commit (E44); `yad open-pr` warns when the step's files have changes no fold has committed. Push as the
    local user. **First gate of a new epic:** cut the review branch from the **authoring** branch
    (`epic/…`, `change/…`, `analysis/…`, `discovery/…`) instead, so it carries the `.sdlc/` **seed** —
    that PR/MR is the only way a new epic's ledger reaches the default branch, and `ledger-guard`

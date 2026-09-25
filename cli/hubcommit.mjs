@@ -10,11 +10,12 @@ export const productGit = (root) => (...args) => run('git', args, { cwd: root })
 // yad-update-guard unless the commits are signed. Warn up front (never block) so the operator isn't
 // surprised by a reddened default branch. There is no author allowlist to check since E62: write access
 // decides who can author.
-export function preflightGuardReadiness(root) {
+// `why` names the check an unsigned commit fails; the default is the direct-push commands' guard.
+export function preflightGuardReadiness(root, why = 'the yad-update-guard requires a platform-Verified signature; unsigned pushes will fail the gate') {
   // Only commit.gpgsign actually enables signing — user.signingkey merely picks WHICH key once
   // signing is on, so it must not count (it would hide the warning while commits stay unsigned).
   const signing = run('git', ['config', '--bool', '--get', 'commit.gpgsign'], { cwd: root }).stdout === 'true';
-  if (!signing) warn('commit signing is not enabled (git config commit.gpgsign true) — the yad-update-guard requires a platform-Verified signature; unsigned pushes will fail the gate.');
+  if (!signing) warn(`commit signing is not enabled (git config commit.gpgsign true) — ${why}.`);
 }
 
 // The default branch: Product config, else the remote's published default (origin/HEAD), else 'main'.

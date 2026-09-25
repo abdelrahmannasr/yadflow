@@ -36,7 +36,8 @@ This passes when `architecture` is the next runnable step per the state sequence
 Open the architecture authoring branch `architecture/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-Product's default branch. Author and commit `architecture.md` / `contract.md` / `contract-lock.json` on it.
+Product's default branch. Author `architecture.md` / `contract.md` / `contract-lock.json` on it, and end the step with
+`yad fold EP-<slug> architecture` — the one commit the step keeps (E44).
 This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 2 — Read the epic as input context
@@ -187,7 +188,7 @@ any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
 is pushed around the gate. Commit the artifact set — **`architecture.md`, `contract.md`, and
-`.sdlc/contract-lock.json`** (artifact-side, not ledger) — then hand off to `yad-review-gate`.
+`.sdlc/contract-lock.json`** (artifact-side, not ledger) — with `yad fold EP-<slug> architecture`, which takes exactly these and leaves the ledger to CI — then hand off to `yad-review-gate`.
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
 `yad gate open <epic> architecture.md` marks `architecture-review` `in_review`, closes `architecture` as `done`, and moves `currentStep` to the gate

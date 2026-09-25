@@ -87,7 +87,7 @@ Foundation's `roadmap.md` has a row for this feature, prefer that row's **propos
 Open the analysis authoring branch `analysis/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
 is not a git work tree), check out the branch if it exists, else create it from the Product's default
-branch. Author and commit `analysis.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
+branch. Author `analysis.md` on it, and end the step with `yad fold EP-<slug> analysis` — the one commit the step keeps (E44). This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 5 — Write the analysis (assist: analyst)
 Write `{project-root}/epics/EP-<slug>/analysis.md` using EXACTLY this template:
@@ -185,7 +185,9 @@ the step that closes the authoring step and opens its gate.)*
 mutation: `ledger-guard` rejects any non-bot commit that changes one, and `yad gate ci --merged`
 performs the whole transition when the review PR merges.
 
-**Do not EDIT the ledger — but do COMMIT it when it is untracked.** Those are two different acts.
+**Do not EDIT the ledger — but do COMMIT it when it is untracked.** `yad fold EP-<slug> analysis` does exactly
+this while the epic is new (no `state.json` in HEAD): it takes the artifact, the new ledger files and any
+new person-written `.sdlc/` file of the seed, and leaves every other ledger change to CI. Those are two different acts.
 Commit `analysis.md`, and also `.sdlc/state.json`, `.sdlc/approvals.json` and `.sdlc/comments.json`
 when `git status` shows them **untracked** — an engine-seeded ledger has never been reviewed, so it is
 still off the base ref and `ledger-guard` exempts it (creation, not mutation, #162). It rides this

@@ -71,7 +71,8 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-Product's default branch. Author and commit `ui-design.md` / `DESIGN.md` on it. This is **distinct** from
+Product's default branch. Author `ui-design.md` / `DESIGN.md` on it, and end the step with `yad fold EP-<slug> ui-design` — the one
+commit the step keeps (E44). This is **distinct** from
 the verified ledger's `review/…` branch.
 
 ### Step 2 — Read inputs
@@ -192,7 +193,8 @@ any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
 is pushed around the gate. Commit the artifact set — **`ui-design.md`, `DESIGN.md`, and, when a
-design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) — then hand off to
+design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) — with `yad fold EP-<slug> ui-design`,
+which takes exactly these and leaves the ledger to CI — then hand off to
 `yad-review-gate`.
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
