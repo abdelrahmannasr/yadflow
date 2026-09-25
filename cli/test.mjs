@@ -24996,3 +24996,25 @@ test('E47 doctor: an owner file that does nothing is named as owners:ignored; a 
     assert.match(hit[0].message, /3 step owner file\(s\) do nothing: .*epic-review is not an authoring step.*epic\.json is not valid JSON.*stories\.json: stories is not on EP-x's chain/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E47 doctor: new owner-exempting checks beside a hub workflow that lists renames by one path is owners:rename-blind', async () => {
+  const { T, w } = ownersFixture();
+  try {
+    const { collectDoctor } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'owners:rename-blind');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    w('.github/workflows/yad-hub-checks.yml', shipped('skills/yad-checks/templates/github/yad-hub-checks.yml').replace(/ --no-renames/g, '').replace(/-c core\.quotePath=false /g, ''));
+    assert.deepEqual(blind(), [], 'old checks: the exemption is not there, so nothing is open');
+    w('checks/pr-title.sh', shipped('skills/yad-pr-template/templates/checks/pr-title.sh'));
+    const hit = blind();
+    assert.equal(hit.length, 1);
+    assert.match(hit[0].message, /\.github\/workflows\/yad-hub-checks\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
+    w('.github/workflows/yad-hub-checks.yml', shipped('skills/yad-checks/templates/github/yad-hub-checks.yml'));
+    assert.deepEqual(blind(), [], 'the shipped workflow is fine');
+    w('.gitlab/ci/yad-hub-checks.yml', 'x: git diff --name-only "origin/main...HEAD"\n');
+    assert.match(blind()[0].message, /^\.gitlab\/ci\/yad-hub-checks\.yml/);
+    // The Foundation-guard reader still knows both releases of the checks.
+    const { staleFoundationGuards } = await import('./epic-state.mjs');
+    assert.deepEqual(staleFoundationGuards(T), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

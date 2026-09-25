@@ -3709,6 +3709,19 @@ test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifac
     fs.mkdirSync(path.join(T, 'epics/EP-café'), { recursive: true });
     fs.writeFileSync(path.join(T, 'epics/EP-café/epic.md'), '# new\n');
     g('add', '-A'); g('commit', '-q', '-m', 'sneak');
+    // A second branch: a story whose name git C-quotes even with quotePath off (`"`), alone.
+    g('checkout', '-q', '-b', 'chore/quoted', 'main');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/stories'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/stories/EP-x-S09"q.md'), '# smuggled\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'quoted');
+    const quoted = path.join(T, 'quoted.txt');
+    fs.writeFileSync(quoted, execFileSync('git', ['-c', 'core.quotePath=false', 'diff', '--no-renames', '--name-only', 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
+    assert.match(fs.readFileSync(quoted, 'utf8'), /^"epics\/EP-x\/stories\/EP-x-S09\\"q\.md"$/m, 'git still quotes it');
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1);
+    assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, CODE_TPL]).code, 1);
+    fs.writeFileSync(quoted, '"epics/EP-x/.sdlc/owners/a\\"b.json"\n');
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1, 'a quoted owner-shaped line fails closed');
+    g('checkout', '-q', 'chore/sneak');
     const changed = path.join(T, 'changed.txt');
     const templates = {
       'skills/yad-checks/templates/github/yad-hub-checks.yml': /git (.*?diff .*?--name-only) "origin\/\$\{BASE_REF\}\.\.\.HEAD"/g,
@@ -3730,5 +3743,6 @@ test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifac
     // What the old command saw: only the owner file (and a quoted path) — the gates would have passed.
     fs.writeFileSync(changed, execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
     assert.doesNotMatch(fs.readFileSync(changed, 'utf8'), /^epics\/EP-x\/epic\.md$/m, 'the test would catch the old command');
+    assert.match(fs.readFileSync(changed, 'utf8'), /^"epics\/EP-caf/m, 'and the old command quoted the non-ASCII path');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

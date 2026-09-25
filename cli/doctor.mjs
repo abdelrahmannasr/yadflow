@@ -1614,6 +1614,22 @@ export function ownerChecks(checks, root) {
     'such a file is ignored — no owner is shown and the edit-time warning is off. For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them all');
 }
 
+// `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
+// through; that is safe only while the hub-checks workflow lists renames by BOTH paths (`--no-renames`).
+// `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
+// workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
+export const HUB_CHECK_WORKFLOWS = ['.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml'];
+export function ownerGuardChecks(checks, root) {
+  const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
+  const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('.sdlc/owners/'));
+  if (!exempting.length) return;
+  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => { const t = read(rel); return t != null && /--name-only/.test(t) && !/--no-renames/.test(t); });
+  if (!blind.length) return;
+  check(checks, 'owners:rename-blind', 'project', 'warn',
+    `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,
+    'add `--no-renames` (and `-c core.quotePath=false`) to that workflow\'s `git diff --name-only` lines, as the shipped one has — `yad update` did not replace it because it was changed by hand');
+}
+
 // `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
 // default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
 //
@@ -2043,6 +2059,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   skipChecks(checks, root);
   stepStateChecks(checks, root);
   ownerChecks(checks, root);
+  ownerGuardChecks(checks, root);
   phaseChecks(checks, root);
   laneChecks(checks, root);
   epicChecks(checks, root);

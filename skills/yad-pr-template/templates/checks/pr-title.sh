@@ -13,6 +13,8 @@
 #     artifacts (epics/**) would otherwise slip past the review workflow with a plain code title.
 #     Pass the PR's changed paths via --changed <file> (one path per line); when they touch epics/**
 #     on a non-review head the gate FAILS — artifact changes must go through a review/EP-* PR.
+#     Build the list with `git -c core.quotePath=false diff --no-renames --name-only`: without
+#     --no-renames a rename lists only its new path, and the removed artifact is never seen.
 # The title is passed as the (single) positional arg; CI injects it from the event payload
 # (GitHub: github.event.pull_request.title; GitLab: $CI_MERGE_REQUEST_TITLE).
 set -euo pipefail
@@ -53,7 +55,9 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --prof
 # A step owner file (`yad assign`, E47) is not an artifact: an assignment is advice, reviewed by nobody, and
 # a review/EP-* PR would advance the step on merge. So a PR of owner files alone is not an artifact change.
 # No `-q` on the second grep: under pipefail an early exit would SIGPIPE the first and read as "no artifact".
-artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -E '^(epics|foundation)/' "$CHANGED" | grep -vE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
+# `"?`: git still C-quotes a path holding `"`, `\`, a tab or a newline, even with core.quotePath=false. Such a
+# line counts as an artifact, and the owner exemption never matches it — so it fails closed.
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -E '^"?(epics|foundation)/' "$CHANGED" | grep -vE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
 
 TITLE="${ARGS[0]:-}"
 if [ -z "$TITLE" ]; then

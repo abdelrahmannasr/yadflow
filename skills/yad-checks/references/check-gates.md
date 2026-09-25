@@ -229,7 +229,8 @@ from the event payload):
     (`epics/<epic>/.sdlc/owners/<step>.json`, `foundation/.sdlc/owners/…`, written by `yad assign`,
     E47) is not a Shape artifact: a PR that changes only owner files passes on any branch. The
     workflow builds the list with `--no-renames` (and `core.quotePath=false`), so a rename INTO
-    `owners/` still lists the artifact it removed.
+    `owners/` still lists the artifact it removed. A path git still C-quotes (a `"`, `\`, tab or
+    newline in its name) counts as an artifact change and never as an owner file.
 
 ## 7. pr-template (`templates/checks/pr-template.sh`)
 
