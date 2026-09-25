@@ -249,10 +249,10 @@ export async function runOpenPr(root, opts = {}) {
     const parsed = parseReviewBranch(branch);
     if (!parsed) { fail(`could not parse review branch '${branch}' (expected review/EP-<slug>/<artifact>)`); process.exitCode = 1; return; }
     // E44: the review carries what was FOLDED. A step file changed since then is not on this branch.
-    const unfolded = unfoldedPaths(repoRoot, parsed.epic, parsed.base.replace(/^stories-S\d+$/i, 'stories'));
+    const unfolded = unfoldedPaths(repoRoot, parsed.epic, parsed.base);
     if (unfolded.length) {
       warn(`not folded, so not in this review: ${unfolded.join(', ')}`);
-      hand(`fold them first: yad fold ${parsed.epic} ${authorStepOf(parsed.base)}`);
+      hand(`fold them first: yad fold ${parsed.epic} ${authorStepOf(parsed.base)}${/^stories-S\d+$/i.test(parsed.base) ? ' (it folds every changed story)' : ''}`);
     }
     info(`pushing ${branch} …`);
     const fpush = run('git', ['push', '-u', 'origin', branch], { cwd: repoRoot });

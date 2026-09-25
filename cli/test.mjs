@@ -24391,3 +24391,48 @@ test('E44 fold: a Product in a subfolder of its repository folds the same; unfol
     assert.deepEqual(fold.unfoldedPaths(P, 'EP-x', 'ui-design'), []);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E44 fold (review 1): a staged deletion and a git mv are folded whole; a merge in progress and a detached HEAD are refused before staging', async () => {
+  const { T, g, w } = foldFixture();
+  try {
+    w('epics/EP-x/stories/EP-x-S01-old.md', 'one\n'); w('epics/EP-x/stories/EP-x-S02.md', 'two\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'seed stories');
+    g('mv', 'epics/EP-x/stories/EP-x-S01-old.md', 'epics/EP-x/stories/EP-x-S01.md');
+    const r = await foldRun(T, { epic: 'EP-x', step: 'stories' });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(g('show', '--name-status', '--no-renames', '--format=', 'HEAD').split('\n').sort(), ['A\tepics/EP-x/stories/EP-x-S01.md', 'D\tepics/EP-x/stories/EP-x-S01-old.md']);
+    assert.equal(g('status', '--porcelain'), '', 'nothing of the rename is left behind in the index');
+    g('rm', '-q', 'epics/EP-x/stories/EP-x-S02.md');
+    const rm = await foldRun(T, { epic: 'EP-x', step: 'stories' });
+    assert.equal(rm.code, 0, rm.out);
+    assert.deepEqual(g('show', '--name-status', '--format=', 'HEAD').split('\n'), ['D\tepics/EP-x/stories/EP-x-S02.md']);
+    // A merge in progress: refused, and nothing staged.
+    fs.writeFileSync(path.join(T, '.git/MERGE_HEAD'), `${g('rev-parse', 'HEAD')}\n`);
+    w('epics/EP-x/stories/EP-x-S03.md', 'three\n');
+    const merging = await foldRun(T, { epic: 'EP-x', step: 'stories' });
+    assert.equal(merging.code, 1);
+    assert.match(merging.out, /a merge is in progress/);
+    assert.equal(g('diff', '--cached', '--name-only'), '', 'nothing was staged');
+    fs.rmSync(path.join(T, '.git/MERGE_HEAD'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  const v = foldFixture({ hub: VERIFIED });
+  try {
+    v.g('checkout', '-q', '--detach');
+    v.w('epics/EP-x/epic.md', '# x\nv2\n');
+    const detached = await foldRun(v.T, { epic: 'EP-x', step: 'epic' });
+    assert.equal(detached.code, 1);
+    assert.match(detached.out, /not on a branch/);
+  } finally { fs.rmSync(v.T, { recursive: true, force: true }); }
+});
+
+test('E44 unfoldedPaths (review 1): a per-story review branch names only its own story', () => {
+  const { T, w, g } = foldFixture();
+  try {
+    w('epics/EP-x/stories/EP-x-S01.md', 'one\n'); w('epics/EP-x/stories/EP-x-S02.md', 'two\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'stories');
+    w('epics/EP-x/stories/EP-x-S02.md', 'two, edited\n');
+    assert.deepEqual(fold.unfoldedPaths(T, 'EP-x', 'stories-S01'), []);
+    assert.deepEqual(fold.unfoldedPaths(T, 'EP-x', 'stories-S02'), ['epics/EP-x/stories/EP-x-S02.md']);
+    assert.deepEqual(fold.unfoldedPaths(T, 'EP-x', 'stories'), ['epics/EP-x/stories/EP-x-S02.md']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

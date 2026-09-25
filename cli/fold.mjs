@@ -96,7 +96,9 @@ export function unfoldedPaths(root, epic, base, env = process.env) {
   if (!prefix.ok) return [];
   const entries = statusEntries(root, prefix.out.trim(), env) || [];
   const own = stepPaths(epic, authorStepOf(base)) || [];
-  return entries.map((e) => e.path).filter((p) => covers(own, p));
+  // A per-story branch (`stories-S01`) reviews that one story: another story's edit is not its business.
+  const story = /^stories-S\d+$/i.test(base) ? base.toLowerCase() : null;
+  return entries.map((e) => e.path).filter((p) => covers(own, p) && (!story || artifactBase(p).toLowerCase() === story));
 }
 
 // `yad fold <epic> <step>`. Returns a plain object (E1 turns it into the `--json` answer); a refusal
@@ -120,6 +122,16 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const verified = isVerifiedLedger(hub);
   const branchR = git(['symbolic-ref', '--short', '-q', 'HEAD']);
   const branch = branchR.ok ? branchR.out.trim() : null;
+  if (verified && !branch) {
+    return refuse('not on a branch (a detached HEAD) — with a verified ledger, a fold belongs on the step\'s authoring branch',
+      `switch to it first (git switch -c ${step}/${epic}), then run yad fold again`);
+  }
+  // `git commit --only` cannot make a partial commit in the middle of a merge, and staging the step's files
+  // first would leave them staged for a commit that never comes. Refuse before touching anything.
+  const IN_PROGRESS = { MERGE_HEAD: 'merge', CHERRY_PICK_HEAD: 'cherry-pick', REVERT_HEAD: 'revert', 'rebase-merge': 'rebase', 'rebase-apply': 'rebase' };
+  const busy = Object.keys(IN_PROGRESS)
+    .find((f) => { const r = git(['rev-parse', '--git-path', f]); return r.ok && fs.existsSync(path.resolve(root, r.out.trim())); });
+  if (busy) return refuse(`a ${IN_PROGRESS[busy]} is in progress — finish or abort it first, then run yad fold again`);
   if (verified) {
     const def = resolveDefaultBranch((...a) => { const r = git(a); return { ok: r.ok, stdout: r.out.trim() }; }, hub);
     if (branch === def) {
@@ -139,11 +151,17 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const entries = statusEntries(root, prefix, env);
   if (entries === null) return refuse('git could not list the changed files');
   const sorted = sortChanges(entries, { epic, step, verified });
-  // A path neither on disk nor in the index (staged, then deleted) cannot be committed; it has nothing to fold.
+  // What `git add` can take: a path on disk or in the index. A deletion already staged (`D `, from `git rm`
+  // or the old half of a `git mv`) is in neither, and `git add` would refuse it — but it is in HEAD, so
+  // `commit --only` commits the deletion. A path added and then deleted (`AD`) is in none of the three and
+  // has nothing to fold.
   const known = new Set(git(['ls-files', '-z', '--', epicRel(epic)]).out.split('\0').filter(Boolean)); // relative to the Product, as `git ls-files` prints from its cwd
-  const exists = (p) => known.has(p) || fs.existsSync(path.join(root, p)) || (() => { try { return fs.lstatSync(path.join(root, p)).isSymbolicLink(); } catch { return false; } })();
-  const files = [...sorted.step, ...sorted.ledger].filter(exists);
-  if (!sorted.step.filter(exists).length) {
+  const onDisk = (p) => fs.existsSync(path.join(root, p)) || (() => { try { return fs.lstatSync(path.join(root, p)).isSymbolicLink(); } catch { return false; } })();
+  const stagedDeletion = new Set(entries.filter((e) => e.xy[0] === 'D').map((e) => e.path));
+  const addable = (p) => known.has(p) || onDisk(p);
+  const foldable = (p) => addable(p) || stagedDeletion.has(p);
+  const files = [...sorted.step, ...sorted.ledger].filter(foldable);
+  if (!sorted.step.filter(foldable).length) {
     return refuse(`nothing to fold — ${step}'s files have no changes since the last commit`,
       sorted.other.length ? `changed, but not ${step}'s: ${sorted.other.join(', ')}` : null);
   }
@@ -151,12 +169,14 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-fold-'));
   try {
     const spec = path.join(tmp, 'paths');
+    const addSpec = path.join(tmp, 'add');
     const msg = path.join(tmp, 'message');
     fs.writeFileSync(spec, files.join('\0'));
+    fs.writeFileSync(addSpec, files.filter(addable).join('\0'));
     fs.writeFileSync(msg, foldMessage({ epic, step, folded }));
     const lit = { ...env, GIT_LITERAL_PATHSPECS: '1' };
     // New files must be known to git before `commit --only` can take them; the step's own paths only.
-    const added = spawnSync('git', ['add', '-A', `--pathspec-from-file=${spec}`, '--pathspec-file-nul'], { cwd: root, encoding: 'utf8', env: lit });
+    const added = spawnSync('git', ['add', '-A', `--pathspec-from-file=${addSpec}`, '--pathspec-file-nul'], { cwd: root, encoding: 'utf8', env: lit });
     if (added.status !== 0) return refuse(`could not stage ${step}'s files: ${(added.stderr || '').trim()}`);
     // stdin stays the terminal's: a signing key may ask for its passphrase.
     const commit = spawnSync('git', ['commit', '--only', '--quiet', '-F', msg, `--pathspec-from-file=${spec}`, '--pathspec-file-nul'],
