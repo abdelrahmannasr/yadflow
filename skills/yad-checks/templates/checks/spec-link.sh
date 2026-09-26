@@ -44,6 +44,8 @@ RANGE="${BASE}..HEAD"
 
 # Conventional-Commits types exempt from the spec-link requirement (optional (scope) and breaking !).
 EXEMPT='ci|chore|build|test'
+# The letters are spelled out so no locale widens them; matched whole with bash `=~`.
+STORY_RE='^EP-[abcdefghijklmnopqrstuvwxyz0123456789-]+-S[0123456789]+$'
 
 # Portable across bash 3.2 (macOS) and 4+ — no mapfile; feed the loop via heredoc (not a pipe) so
 # the failure count survives the loop body.
@@ -86,6 +88,13 @@ while IFS= read -r sha; do
     continue
   fi
   story="$(printf '%s' "$task" | sed -E 's/-T[0-9]+$//')"
+  # One story ID shape, the same as the Product-reading gates (E117 review 1): EP-<slug>-S<n>. A trailer
+  # of `EP-x-S01/.-T1` names `specs/EP-x-S01/./link.md`, which exists, and walked past the others.
+  if ! [[ $story =~ $STORY_RE ]]; then
+    echo "FAIL [spec-link]: ${short} ${task} — '${story}' is not a story ID (expected EP-<slug>-S<n>, the slug in lowercase letters, digits and dashes)."
+    rc=1
+    continue
+  fi
   if [ -f "specs/${story}/link.md" ]; then
     echo "PASS [spec-link]: ${short} ${task} -> specs/${story}/link.md${note}"
   else

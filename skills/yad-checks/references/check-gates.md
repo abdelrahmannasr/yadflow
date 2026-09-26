@@ -11,9 +11,9 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | spec-link | the `Task: <story>-<task>` commit trailer; `specs/<story>/link.md` | `yad-implement` (trailer), `yad-spec` (link.md) |
 | contract-check | changed files under `specs/<story>/contracts/`; the `Contract-Change: yes` trailer; `link.md`'s pinned `contract-lock`; the product repo's `contract-lock.json` | `yad-architecture` (lock), `yad-spec` (slice + link), `yad-implement` (trailer) |
 | build/test/lint | the repo's configured package manager running `lint` / `build` / `test` | the repo |
-| lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's work-item type (`kind:`, then `type:`) and `parent` frontmatter in the Product | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
-| epic-open | the `Task:` trailer → `link.md` → the Product epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
-| reconcile-debt | the `Task:` trailer → `link.md` → the Product epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
+| lineage-check | the `Task:` trailer → `link.md` (`epic`, which must be the story ID's prefix, + `product-repo`, read from the base — §8); the owning epic's work-item type (`kind:`, then `type:`) and `parent` frontmatter in the Product | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
+| epic-open | the `Task:` trailer → `link.md` (`epic`, the story ID's prefix; `product-repo`, from the base — §8) → the Product epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
+| reconcile-debt | the `Task:` trailer → `link.md` (`epic`, the story ID's prefix; `product-repo`, from the base — §8) → the Product epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
 | verified-commits | each commit's platform signature-verification status | the platform (GitHub/GitLab "Verified"); no author allowlist since E62 |
 | commit-message | each non-merge commit's subject + trailer block | `yad-commit` / `CONTRIBUTING.md` (`config.yaml build.commit_subject_style`) |
 | pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
@@ -54,8 +54,12 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 - For every other commit, requires a `Task: <story>-<task>` trailer. **FAIL** if absent.
 - The trailer must be a well-formed `<story>-T<NN>` id. **FAIL** on a malformed trailer (e.g.
   `EP-demo-S01` with no `-T<NN>`) rather than letting it slip through the suffix-strip.
-- Strips the `-T<NN>` suffix from the task to get `<story>` and requires `specs/<story>/link.md` to
-  exist. **FAIL** if missing.
+- Strips the `-T<NN>` suffix from the task to get `<story>`, which must be a story ID —
+  `EP-<slug>-S<n>`, the slug in lowercase letters, digits and dashes (what `yad-stories` writes).
+  **FAIL** by name otherwise (E117 review 1): a trailer of `EP-x-S01/.-T1` named
+  `specs/EP-x-S01/./link.md`, which exists, and walked past the Product-reading gates. The four
+  Product-reading gates apply the same pattern.
+- Requires `specs/<story>/link.md` to exist. **FAIL** if missing.
 - An empty range (no non-merge commits) **PASSes**.
 - Portable across bash 3.2 (macOS) and 4+ (no `mapfile`).
 - **Fails closed** when `<base>` can't be resolved (so a shallow clone / wrong base never PASSes blind).
@@ -332,18 +336,20 @@ hand-made `contract-lock.json` with the hash it pins. Two rules close both:
 
 | Rule | What the gate does | Why |
 | --- | --- | --- |
-| `product-repo` comes from the **base** | When `link.md` on the base branch has a `product-repo`, that value is used. A PR that changes it gets a note (`… changes product-repo from 'X' to 'Y' — the Product is read from the base value; the new one counts once this merges`). A `link.md` new in this PR, or a base one with no value, uses the PR's value. | Only `product-repo` is read from the base. `contract-lock` and `epic` are read as the PR leaves them — a re-spec PR must update the pin. |
-| A **tracked** Product is read from the **base commit** | If the path is a folder this repo tracks (a monorepo: the Product and the code in one git repo), its `epics/` is copied out of the base commit with `git archive` and read from there. If the base has no `epics/` there, the folder is files this PR adds: **FAIL** by name. A path that runs through a tracked symlink, submodule or file: **FAIL** by name. | "Inside the code repo" is not the test. CI can only check a second repo out inside the workspace (`actions/checkout` `path:`), and an untracked checkout there is not the PR's. |
+| `product-repo` comes from the **base** | Where the Product lives is a fact about the whole repo, so the value is, in order: `link.md` as it stands on the base; else the first `specs/*/link.md` on the base that has one (a story new in this PR, or a `link.md` that never had a value); else — the repo's first spec — the PR's value. A PR whose value differs gets a note (`… names product-repo 'Y', but specs/<other>/link.md on main says 'X' — the Product is read from the base value; a new one counts once it merges`). | Only `product-repo` is read from the base. `contract-lock` is read as the PR leaves it — a re-spec PR must update the pin. |
+| A **tracked** Product is read from the **base commit** | A folder this repo tracks counts as a Product (a monorepo: the Product and the code in one git repo) only when the base tracks its `.sdlc/hub.json`, which every Product commits. Then its `epics/` is written out from the base commit through a throwaway index (`git read-tree` + `git checkout-index`) and read from there — not `git archive`, which drops whatever `.gitattributes` marks `export-ignore`. Any other tracked file under a Product path — a planted folder, or one file force-added under an ignored checkout — **FAILs** by name, with the fix (`git rm -r --cached`). A path that runs through a tracked symlink, submodule or file: **FAIL** by name. | "Inside the code repo" is not the test. CI can only check a second repo out inside the workspace (`actions/checkout` `path:`), and an untracked checkout there is not the PR's. |
+| One story ID shape | A story must be `EP-<slug>-S<n>` (lowercase slug), in all four gates and spec-link. **FAIL** by name otherwise. | A story written as a path (`EP-x-S01/.`) named a `link.md` the base read never found. |
 
 The cost, stated: in a monorepo, a PR that re-locks the contract **and** changes the slice fails the pin
 check, because the lock is read from the base. Merge the re-lock first — the rule the gate already
 states ("re-locked upstream first"). The case of a path is folded only where git folds it
-(`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a
-note, as before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
+(`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a note, as
+before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
 
 **The PR does not choose the epic either (E118).** lineage-check, epic-open and reconcile-debt-check
 read `epic:` from `link.md`. It must equal the story ID's prefix — story `EP-checkout-S01` belongs to
-epic `EP-checkout`, which is what `yad-spec` writes. Any other value **FAILs** by name. Before E118 a
+epic `EP-checkout`, which is what `yad-spec` writes. Any other value — an empty or missing one
+included — **FAILs** by name. Before E118 a
 story of a sealed epic could name an open one and pass epic-open. contract-check has always worked the
 epic out from the story ID.
 

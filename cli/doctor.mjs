@@ -1664,21 +1664,23 @@ export function renameBlindGate(file) {
   return renameBlindText(src);
 }
 // E115: a contract-check that never reads the tree for links under specs/. Read like the one above — a
-// `#` line is prose, a line ending in `\` goes on — and it is enough that ONE command runs `git ls-tree`:
-// no older copy ever did, and the current one reads the whole tree (the name `specs` is in its awk).
+// `#` line is prose, a line ending in `\` goes on — and it is enough that ONE command runs `git ls-tree`
+// on HEAD: no older copy ever did, and the current one reads the whole tree (the name `specs` is in its
+// awk). HEAD, because E117 added a second `git ls-tree`, of the BASE, that finds sibling link.md files.
 export const symlinkBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
-  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b/.test(l));
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b.*\bHEAD\b/.test(l));
 export function symlinkBlindGate(file) {
   let src;
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return symlinkBlindText(src);
 }
 // E117: a Product-reading gate that does not read link.md from the base (`git show`) or a tracked Product
-// from the base commit (`git archive`). Read like the two above; no older copy ran either command.
+// from the base commit (`git checkout-index`, from a throwaway index). Read like the two above; no older
+// copy ran either command.
 export const PRODUCT_PATH_GATES = ['checks/contract-check.sh', 'checks/lineage-check.sh', 'checks/epic-open.sh', 'checks/reconcile-debt-check.sh'];
 export const productPathBlindText = (src) => {
   const lines = src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n').replace(/\\\r?\n/g, ' ').split('\n');
-  return !lines.some((l) => /\bgit\s+show\s/.test(l)) || !lines.some((l) => /\bgit\s+archive\s/.test(l));
+  return !lines.some((l) => /\bgit\s+show\s/.test(l)) || !lines.some((l) => /\bgit\s+checkout-index\s/.test(l));
 };
 export function productPathBlindGate(file) {
   let src;

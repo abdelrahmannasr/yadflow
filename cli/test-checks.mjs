@@ -1078,9 +1078,14 @@ function onBase(T, files) {
   git(T, 'checkout', '-q', '-B', 'feature');
 }
 
-// Write a Product as files under <T>/<dir> (to be committed, unlike <T>/product).
-function productFiles(T, dir, seed) {
+// Write a Product as files under <T>/<dir> (to be committed, unlike <T>/product). `hub` adds the
+// `.sdlc/hub.json` every Product commits — what makes a tracked folder a monorepo's Product.
+function productFiles(T, dir, seed, { hub = false } = {}) {
   seed(path.join(T, dir));
+  if (hub) {
+    fs.mkdirSync(path.join(T, dir, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, dir, '.sdlc/hub.json'), '{}\n');
+  }
   return dir;
 }
 
@@ -1090,17 +1095,59 @@ for (const g of GATES) {
   const clean = CLEAN[g.name];
 
   test(`${g.name} gate: a Product this PR commits is refused, never read (E117)`, () => {
+    // `-p` too (review 1): `cd -P -p` read the name as an option, and the walk took the folder as untracked.
+    for (const dir of ['fake', '-p']) {
+      const T = scaffoldRepo();
+      productFiles(T, dir, clean);
+      commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+        'src/thing.js': 'x',
+        ...(g.files || {}),
+        'specs/EP-demo-S01/link.md': linkFor(g, `../../${dir}`),
+      });
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, `${dir}: a planted Product must not be read:\n${r.out}`);
+      assert.ok(r.out.includes(`product-repo resolves to '${dir}', which holds files this repo tracks, but main does not track '${dir}/.sdlc/hub.json' there, so it is not a Product kept in this repo`), r.out);
+      assert.doesNotMatch(r.out, /hash matches|not reachable/);
+      fs.rmSync(T, { recursive: true, force: true });
+    }
+  });
+
+  test(`${g.name} gate: a story new in this PR reads product-repo from a sibling link.md on the base (E117 review 1)`, () => {
+    // Where the Product lives is a fact about the repo. A made-up story ID pointing at nothing deferred.
     const T = scaffoldRepo();
-    productFiles(T, 'fake', clean);
+    g.seed(path.join(T, 'product'));
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../product') });
+    const files = Object.fromEntries(Object.entries(g.files || {}).map(([k, v]) => [k.replace('EP-demo-S01', 'EP-demo-S02'), v]));
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S02-T01', {
+      'src/thing.js': 'x',
+      ...files,
+      'specs/EP-demo-S02/link.md': linkFor(g, '../../nowhere'),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, `the sibling's value must be read:\n${r.out}`);
+    assert.match(r.out, g.expect);
+    assert.ok(r.out.includes("specs/EP-demo-S02/link.md names product-repo '../../nowhere', but specs/EP-demo-S01/link.md on main says '../../product'"), r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: one force-added file under an ignored Product is refused, not read as a monorepo (E117 review 1)`, () => {
+    const T = scaffoldRepo();
+    g.seed(path.join(T, 'product')); // the real one, ignored through .git/info/exclude
+    git(T, 'checkout', '-q', 'main');
+    fs.mkdirSync(path.join(T, 'product/epics/EP-demo/stories'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'product/epics/EP-demo/stories/EP-demo-S09.md'), linkMd({ story: 'EP-demo-S09', status: 'draft' }));
+    git(T, 'add', '-f', 'product/epics/EP-demo/stories/EP-demo-S09.md');
+    git(T, 'commit', '-q', '-m', 'chore: sneak one file in');
+    git(T, 'checkout', '-q', '-B', 'feature');
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
       'src/thing.js': 'x',
       ...(g.files || {}),
-      'specs/EP-demo-S01/link.md': linkFor(g, '../../fake'),
+      'specs/EP-demo-S01/link.md': linkFor(g, '../../product'),
     });
     const r = runGate(g.script, T);
-    assert.equal(r.code, 1, `a planted Product must not be read:\n${r.out}`);
-    assert.match(r.out, /product-repo resolves to 'fake', a folder this repo tracks, and main has no 'fake\/epics' — the Product there would be files this PR adds/);
-    assert.doesNotMatch(r.out, /hash matches|not reachable/);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes("product-repo resolves to 'product', which holds files this repo tracks, but main does not track 'product/.sdlc/hub.json' there"), r.out);
+    assert.match(r.out, /git rm -r --cached 'product'/);
     fs.rmSync(T, { recursive: true, force: true });
   });
 
@@ -1121,7 +1168,7 @@ for (const g of GATES) {
       const r = runGate(g.script, T);
       assert.equal(r.code, 1, `${target}: the base value must still be read:\n${r.out}`);
       assert.match(r.out, g.expect);
-      assert.ok(r.out.includes(`specs/EP-demo-S01/link.md changes product-repo from '../../product' to '${target}' — the Product is read from the base value; the new one counts once this merges.`), r.out);
+      assert.ok(r.out.includes(`specs/EP-demo-S01/link.md names product-repo '${target}', but specs/EP-demo-S01/link.md on main says '../../product' — the Product is read from the base value; a new one counts once it merges.`), r.out);
     }
     fs.rmSync(T, { recursive: true, force: true });
   });
@@ -1129,7 +1176,7 @@ for (const g of GATES) {
   test(`${g.name} gate: a monorepo Product is read as it stands on the base, not as the PR leaves it (E117)`, () => {
     // The Product and the code in ONE git repo: the Product folder is tracked, so the PR could edit it.
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed);
+    productFiles(T, 'hub', g.seed, { hub: true });
     onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
     fs.rmSync(path.join(T, 'hub'), { recursive: true, force: true });
     productFiles(T, 'hub', clean);
@@ -1141,9 +1188,22 @@ for (const g of GATES) {
     fs.rmSync(T, { recursive: true, force: true });
   });
 
+  test(`${g.name} gate: a monorepo Product marked export-ignore is still read from the base (E117 review 1)`, () => {
+    // `git archive` drops what .gitattributes marks export-ignore; the Product came out empty.
+    const T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed, { hub: true });
+    fs.writeFileSync(path.join(T, '.gitattributes'), 'hub export-ignore\n');
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, g.expect);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
   test(`${g.name} gate: a monorepo Product at the repo root is read from the base too (E117)`, () => {
     const T = scaffoldRepo();
-    g.seed(T);
+    productFiles(T, '.', g.seed, { hub: true });
     onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../..') });
     fs.rmSync(path.join(T, 'epics'), { recursive: true, force: true });
     clean(T);
@@ -1183,6 +1243,50 @@ for (const g of GATES) {
     }
   });
 }
+
+// Review 1: an empty or missing `epic:` is not the story's epic either — reconcile-debt passed a frozen
+// thread on it, reading the thread as "". And a story ID written as a path (`EP-demo-S01/.`) read a
+// link.md the base read never found, with an `epic:` that agreed with itself. Both FAIL in every gate.
+for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
+  test(`${g.name} gate: an empty or missing epic: is refused (E118 review 1)`, () => {
+    for (const fields of [{ epic: '' }, {}]) {
+      const T = scaffoldRepo();
+      g.seed(path.join(T, 'product'));
+      commit(T, 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+        'src/thing.js': 'x',
+        'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', ...fields, 'product-repo': '../../product' }),
+      });
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, `${JSON.stringify(fields)}:\n${r.out}`);
+      assert.doesNotMatch(r.out, /^PASS /m);
+      fs.rmSync(T, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [name, script, tag] of [['spec-link', SPEC_LINK, 'spec-link'], ['lineage-check', LINEAGE, 'lineage-check'], ['epic-open', EPIC_OPEN, 'epic-open'], ['reconcile-debt', DEBT, 'reconcile-debt']]) {
+  test(`${name} gate: a story ID written as a path is refused by name (E117 review 1)`, () => {
+    const T = scaffoldRepo();
+    seedHubEpic(path.join(T, 'product'), 'EP-demo');
+    commit(T, 'feat: add thing\n\nTask: EP-demo-S01/.-T1', {
+      'src/thing.js': 'x',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo-S01/.', 'product-repo': '../../nowhere' }),
+    });
+    const r = runGate(script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes(`FAIL [${tag}]: `) && r.out.includes("— 'EP-demo-S01/.' is not a story ID (expected EP-<slug>-S<n>"), r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('contract-check gate: a slice under a folder that is not a story ID is refused by name (E117 review 1)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', { 'specs/EP-demo-S1x/contracts/api.md': 'new endpoint\n' });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[contract-check\]: specs\/EP-demo-S1x\/contracts is not under a story ID/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
 
 // E118. link.md's `epic:` is the PR's to write. A story of the epic each gate FAILs on names another,
 // clean, epic instead; the gate must refuse the mismatch, not gate the epic the PR named.

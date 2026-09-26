@@ -25064,11 +25064,11 @@ test('E117 doctor: an older Product-reading gate that takes product-repo as the 
     assert.equal(hit[0].status, 'warn');
     assert.match(hit[0].message, /^checks\/epic-open\.sh in backend is an older copy that reads the Product from wherever the PR's link\.md points/);
     // One without the base-commit read of a tracked Product is blind too.
-    put(T, 'checks/lineage-check.sh', shipped('checks/lineage-check.sh').replace(/git archive/g, 'true'));
+    put(T, 'checks/lineage-check.sh', shipped('checks/lineage-check.sh').replace(/git checkout-index/g, 'true'));
     assert.match(blind()[0].message, /^checks\/lineage-check\.sh in the Product, checks\/epic-open\.sh in backend are older copies/);
     // A comment naming the command is not the command; a split command is one command.
-    assert.equal(productPathBlindText('# git show x\n# git archive y\n'), true);
-    assert.equal(productPathBlindText('git \\\n  show x\ngit archive y\n'), false);
+    assert.equal(productPathBlindText('# git show x\n# git checkout-index -a\n'), true);
+    assert.equal(productPathBlindText('git \\\n  show x\ngit checkout-index -a\n'), false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
