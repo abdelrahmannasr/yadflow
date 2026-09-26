@@ -1,3 +1,10 @@
+# [4.0.0-next.3](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.0-next.2...v4.0.0-next.3) (2026-09-26)
+
+
+### Bug Fixes
+
+* **test:** strip the publisher's git identity from the whole test process ([8660f56](https://github.com/abdelrahmannasr/yadflow/commit/8660f5611f1c9f24a67eeead4302c4acca260ba3))
+
 # [4.0.0-next.2](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.0-next.1...v4.0.0-next.2) (2026-09-26)
 
 
