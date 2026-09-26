@@ -1627,22 +1627,25 @@ export function ownerChecks(checks, root) {
     'such a file is ignored — no owner is shown and the edit-time warning is off. For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them all');
 }
 
-// `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
-// through; that is safe only while the hub-checks workflow lists renames by BOTH paths (`--no-renames`).
-// `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
-// workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
 // The installed gates whose changed list must name a rename by both paths (E114), and the test for one
-// that does not. Line by line, and a `#` line is prose: one fixed line must not hide its blind twin. A line
-// ending in `\` goes on, as it does for bash: a hand-edited copy may split `git … \ diff --name-only`.
+// that does not. Read as bash reads it, one command at a time, so one fixed command never hides its blind
+// twin: a `#` line is prose and is dropped FIRST (a `\` at its end does not go on); then a line ending in
+// `\` goes on to the next, as a hand-edited copy may split `git … \ diff --name-only`; then each line is
+// cut at `&&`, `||`, `;` and `|`, so `fixed && \ blind` is two commands, not one.
 export const RENAME_BLIND_GATES = ['checks/contract-check.sh', 'checks/backfill-check.sh'];
-const renameBlindLine = (l) => !/^\s*#/.test(l) && /\bgit\b.*\bdiff\b.*--name-only/.test(l) && !/--no-renames/.test(l);
-const renameBlindText = (src) => src.replace(/\\\r?\n/g, ' ').split('\n').some(renameBlindLine);
+const renameBlindCommand = (c) => /\bgit\b.*\bdiff\b.*--name-only/.test(c) && !/--no-renames/.test(c);
+export const renameBlindText = (src) => src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => l.split(/&&|\|\||;|\|/).some(renameBlindCommand));
 export function renameBlindGate(file) {
   let src;
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return renameBlindText(src);
 }
 
+// `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
+// through; that is safe only while the hub-checks workflow lists renames by BOTH paths (`--no-renames`).
+// `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
+// workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
 export const HUB_CHECK_WORKFLOWS = ['.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml'];
 export function ownerGuardChecks(checks, root) {
   const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
