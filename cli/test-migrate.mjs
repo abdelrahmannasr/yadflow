@@ -13,6 +13,15 @@ import path from 'node:path';
 import { isEpicStatePath, MIGRATIONS, planMigration, projectJsonFiles, runMigrate } from './migrate.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 
+// Keep printed lines off the runner's message stream — see the same guard at the top of cli/test.mjs.
+if (process.env.NODE_TEST_CONTEXT) {
+  const write = process.stdout.write;
+  for (const k of ['log', 'info']) {
+    const orig = console[k];
+    console[k] = (...a) => (process.stdout.write === write ? console.error(...a) : orig(...a));
+  }
+}
+
 // E62: a record's `by` asks `gh`/`glab` who is logged in. The suite must never ask the developer's real
 // account — the answer would differ per machine — so the lookup is off for every test in this file and
 // every CLI it spawns. The lookup's own tests pass `env` explicitly.
