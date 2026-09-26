@@ -630,6 +630,7 @@ test('contract-check gate: a second spelling of contracts/ or of a story folder 
     [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/Ep-Demo-S01/x.md'], '  specs/EP-demo-S01/ and specs/Ep-Demo-S01/ (one folder'],
     [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/Ep-Demo-S01/x.md'], '  specs/EP-demo-S01/ and specs/ep-demo-s01/ (one folder'],
     [['specs'], '  specs (a file, where the specs/ folder goes)'],
+    [['specs/README.md', 'specs/readme.md'], '  specs/README.md and specs/readme.md (one file on macOS and Windows)'],
   ]) {
     const T = scaffoldRepo();
     commitIndexOnly(T, 'feat: add', names);

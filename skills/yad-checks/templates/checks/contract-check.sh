@@ -69,7 +69,10 @@ RANGE="${BASE}..HEAD"
 # The same holds one and two folders down (review 3): `specs/<story>/Contracts/` IS `contracts/` on a
 # Mac, and `specs/EP-x-S01/` and `specs/ep-x-s01/` are one folder there, while every rule below reads
 # exact bytes. So a `contracts` spelled any other way is refused, and so is a second spelling of a
-# story folder — each once, by name. So is a FILE named `specs`, where the folder has to go.
+# story folder — each once, by name. So is a FILE named `specs`, where the folder has to go. `fold`
+# knows ASCII case and the long s only: `EP-démo` beside `EP-DÉMO` (or an NFC/NFD twin) is not caught.
+# That costs a skipped lock check at most — the surface grep takes any story spelling — and refusing
+# every non-ASCII story name would refuse real repos.
 links="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n' | awk '
   function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); return x }
   function once(k, msg) { if (!(k in said)) { said[k] = 1; print "  " msg } }
@@ -80,7 +83,7 @@ links="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n' | awk '
   p !~ /^specs(\/|$)/ { top = p; sub(/\/.*/, "", top); once(top, (top == p ? top " (a file" : top "/ (a folder") " spelled other than specs — the same name on macOS and Windows)"); next }
   p == "specs" { print "  specs (a file, where the specs/ folder goes)"; next }
   { n = split(p, c, "/"); fs = fold(c[2]) }
-  (fs in story) && story[fs] != c[2] { once("s/" c[2], "specs/" story[fs] "/ and specs/" c[2] "/ (one folder on macOS and Windows)") }
+  (fs in story) && story[fs] != c[2] { once("s/" c[2], "specs/" story[fs] (n == 2 ? " and specs/" c[2] " (one file" : "/ and specs/" c[2] "/ (one folder") " on macOS and Windows)") }
   !(fs in story) { story[fs] = c[2] }
   n >= 3 && c[3] != "contracts" && fold(c[3]) == "contracts" { once("c/" c[2] "/" c[3], "specs/" c[2] "/" c[3] (n == 3 ? " (a file" : "/ (a folder") " spelled other than contracts — the same name on macOS and Windows)") }
 ')" || { echo "FAIL [contract-check]: could not read the tree at HEAD — the links under specs/ cannot be checked."; exit 1; }
