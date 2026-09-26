@@ -550,31 +550,59 @@ for (const [rel, target] of [
   ['specs/EP-demo-S01/contracts', '../../docs'],
   ['specs/EP-demo-S01/contracts/api.md', '../../../docs/api.md'],
   ['specs/EP-demo-S01/link.md', '../../docs/api.md'],
+  // On macOS and Windows `Specs/` IS `specs/`, and git's path filter matches exact bytes only.
+  ['Specs/EP-demo-S01/contracts', '../../docs'],
 ]) {
   test(`contract-check gate: a symlink at ${rel} fails, and so does every later PR (E115)`, () => {
     const { T, base } = linkRepo(rel, target);
     const r = runGate(CONTRACT, T, [base]);
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /specs\/ holds a symlink or a submodule/);
+    assert.match(r.out, /specs\/ holds a symlink, a submodule or a second spelling/);
     assert.ok(r.out.includes(`  ${rel} (symlink)`), r.out);
     // The link is on the base now; a later PR only edits its target — no path under specs/ in the diff.
     const later = git(T, 'rev-parse', 'HEAD').toString().trim();
     commit(T, 'docs: edit the notes', { 'docs/api.md': 'v2\n' });
     const again = runGate(CONTRACT, T, [later]);
     assert.equal(again.code, 1, `a link merged earlier must not let an edit to its target through:\n${again.out}`);
+    assert.match(again.out, /specs\/ holds a symlink/);
     fs.rmSync(T, { recursive: true, force: true });
   });
 }
 
-test('contract-check gate: a submodule under specs/ fails (E115)', () => {
+test('contract-check gate: a submodule under specs/, or AS specs, fails (E115)', () => {
+  for (const rel of ['specs/EP-demo-S01/contracts', 'specs']) {
+    const T = scaffoldRepo();
+    const sha = git(T, 'rev-parse', 'HEAD').toString().trim();
+    git(T, 'update-index', '--add', '--cacheinfo', `160000,${sha},${rel}`);
+    git(T, 'commit', '-q', '-m', 'chore: a submodule');
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes(`  ${rel} (submodule)`), r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('contract-check gate: a second spelling of specs/ fails, even holding plain files (E115)', () => {
+  // A plain file at Specs/<story>/contracts/ is the slice on macOS and Windows, but the surface pattern
+  // is lowercase. The folder is refused once, by its own name — not once per file.
   const T = scaffoldRepo();
-  const sha = git(T, 'rev-parse', 'HEAD').toString().trim();
-  git(T, 'update-index', '--add', '--cacheinfo', `160000,${sha},specs/EP-demo-S01/contracts`);
-  git(T, 'commit', '-q', '-m', 'chore: a submodule as the slice');
+  commit(T, 'feat: widen the API quietly', { 'Specs/EP-demo-S01/contracts/api.md': 'new\n', 'Specs/EP-demo-S01/link.md': 'x\n' });
   const r = runGate(CONTRACT, T);
   assert.equal(r.code, 1, r.out);
-  assert.ok(r.out.includes('  specs/EP-demo-S01/contracts (submodule)'), r.out);
+  assert.equal(r.out.split('\n').filter((l) => l.includes('Specs/ (spelled other than specs/')).length, 1, r.out);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a git that cannot read the tree fails with a line that says so (E115)', () => {
+  const T = scaffoldRepo();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fakegit-'));
+  const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ncase " $* " in *" ls-tree "*) echo "fatal: broken" >&2; exit 128 ;; esac\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  const r = runGate(CONTRACT, T, ['main'], { PATH: `${bin}:${process.env.PATH}` });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[contract-check\]: could not read the tree at HEAD/);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(bin, { recursive: true, force: true });
 });
 
 test('contract-check gate: a symlink outside specs/ is not this gate\'s concern (E115)', () => {
@@ -610,7 +638,8 @@ test('contract-check reads the surface as contracts(/|$) in every place, and the
   assert.deepEqual(code.filter((l) => /contracts\/['"]|contracts\/\.\*/.test(l)), [], 'no old surface pattern left');
   assert.equal(code.filter((l) => l.includes('contracts(/|$)')).length, 4);
   assert.equal(code.filter((l) => l.includes('contracts(/.*)?$')).length, 1);
-  assert.ok(src.indexOf('git ls-tree -r -z HEAD -- specs') < src.indexOf('PASS [contract-check]'), 'the tree is read before the first PASS');
+  const read = src.indexOf('git ls-tree -r -z --full-tree HEAD');
+  assert.ok(read >= 0 && read < src.indexOf('PASS [contract-check]'), 'the tree is read before the first PASS');
 });
 
 // ---------- backfill-check.sh ----------

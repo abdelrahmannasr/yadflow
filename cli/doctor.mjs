@@ -1651,10 +1651,11 @@ export function renameBlindGate(file) {
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return renameBlindText(src);
 }
-// E115: a contract-check that never reads the tree under specs/ for links. Read like the one above — a
-// `#` line is prose, a line ending in `\` goes on — and it is enough that ONE command lists `specs`.
+// E115: a contract-check that never reads the tree for links under specs/. Read like the one above — a
+// `#` line is prose, a line ending in `\` goes on — and it is enough that ONE command runs `git ls-tree`:
+// no older copy ever did, and the current one reads the whole tree (the name `specs` is in its awk).
 export const symlinkBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
-  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b.*\bspecs\b/.test(l));
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b/.test(l));
 export function symlinkBlindGate(file) {
   let src;
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }

@@ -55,15 +55,27 @@ RANGE="${BASE}..HEAD"
 #
 # Read from the TREE at HEAD, not from the diff, and before the "no surface" PASS below: a link merged
 # before this check existed fails every PR until one PR removes it — no diff would ever show it again.
-# 120000 is a symlink, 160000 a submodule; `-r` lists `specs` itself when `specs` is the link. No
-# `|| true`: a git that fails here must fail the gate.
-links="$(git ls-tree -r -z HEAD -- specs | tr '\0' '\n' | awk -F'\t' '$1 ~ /^120000 / {print "  " $2 " (symlink)"} $1 ~ /^160000 / {print "  " $2 " (submodule)"}')"
+# 120000 is a symlink, 160000 a submodule; `-r` lists `specs` itself when `specs` is the link.
+#
+# The WHOLE tree, from the repo root (--full-tree), matched without case: on macOS and Windows `Specs/`
+# IS `specs/`, and git's path filter matches exact bytes only (`:(icase)` is refused by ls-tree). So a
+# link under `Specs/` got past a `-- specs` read, and a plain file at `Specs/<story>/contracts/…` was
+# never on the surface below, which is spelled in lowercase. A top folder spelled any other way than
+# `specs` is refused too, once, by its own name. The name printed is everything after the first tab.
+links="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n' | awk '
+  { t = index($0, "\t"); p = (t ? substr($0, t + 1) : $0); m = (t ? substr($0, 1, t - 1) : ""); lp = tolower(p) }
+  lp !~ /^specs(\/|$)/ { next }
+  m ~ /^120000 / { print "  " p " (symlink)"; next }
+  m ~ /^160000 / { print "  " p " (submodule)"; next }
+  p !~ /^specs(\/|$)/ { top = p; sub(/\/.*/, "", top); if (!(top in seen)) { seen[top] = 1; print "  " top "/ (spelled other than specs/ — the same folder on macOS and Windows)" } }
+')" || { echo "FAIL [contract-check]: could not read the tree at HEAD — the links under specs/ cannot be checked."; exit 1; }
 if [ -n "$links" ]; then
-  echo "FAIL [contract-check]: specs/ holds a symlink or a submodule — this gate cannot see what it points at:"
+  echo "FAIL [contract-check]: specs/ holds a symlink, a submodule or a second spelling — this gate cannot see what it points at:"
   printf '%s\n' "$links"
-  echo "  -> replace each one with the real files (yad-spec writes real files). Until then every PR in"
-  echo "     this repo fails here, because the contract surface cannot be checked."
-  echo "     Removing a link is itself a change to specs/: under contracts/ it needs 'Contract-Change: yes'."
+  echo "  -> replace each link with the real files (yad-spec writes real files), and keep one folder,"
+  echo "     spelled specs/. Until then every PR in this repo fails here, because the contract surface"
+  echo "     cannot be checked. Removing a link is itself a change to specs/: under contracts/ it needs"
+  echo "     'Contract-Change: yes'."
   exit 1
 fi
 
@@ -98,7 +110,7 @@ surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts(/|$)' || t
 deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\0' '\n' | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
 
 if [ -z "$surface" ]; then
-  echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts/**)."
+  echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts and everything under it)."
   exit 0
 fi
 

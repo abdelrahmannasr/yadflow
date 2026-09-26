@@ -25010,7 +25010,7 @@ test('E115 doctor: an older contract-check that never reads specs/ for links is 
     put(T, shipped);
     assert.deepEqual(blind(), [], 'the shipped gate is fine');
     // An older gate: no tree read at all. (Built from the shipped one, not from history — CI may clone shallow.)
-    const old = shipped.replace(/^links=.*$/m, 'links=""');
+    const old = shipped.replace('git ls-tree -r -z --full-tree HEAD', 'true');
     assert.notEqual(old, shipped);
     put(backend, old);
     const hit = blind();
@@ -25021,7 +25021,7 @@ test('E115 doctor: an older contract-check that never reads specs/ for links is 
     assert.match(blind()[0].message, /^checks\/contract-check\.sh in the Product, backend are older copies/);
     // A comment naming the command is not the command; a split command is one command.
     assert.equal(symlinkBlindText('# git ls-tree -r -z HEAD -- specs\n'), true);
-    assert.equal(symlinkBlindText('links="$(git ls-tree -r -z HEAD \\\n  -- specs | tr x y)"\n'), false);
+    assert.equal(symlinkBlindText('links="$(git ls-tree -r -z \\\n  --full-tree HEAD | tr x y)"\n'), false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

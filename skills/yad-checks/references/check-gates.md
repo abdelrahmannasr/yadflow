@@ -66,12 +66,17 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 - **Fails closed** if `<base>` can't be resolved — an undiffable range must never report "no surface
   change" and silently green-light a bypass. `<base>` is optional — see
   [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
-- **Refuses any symlink or submodule under `specs/`** (E115), before any other rule. The gate reads
+- **Refuses any symlink or submodule under `specs/`** (E115), right after the base check and before
+  any surface rule. The gate reads
   paths, and a link lets the content live where no path under `specs/` names it: a symlink at
   `specs`, `specs/<story>` or `specs/<story>/contracts` hid the slice from every rule, and so did every
   later edit to the link's target. A symlinked `link.md` redirects the lock pin the fidelity check
-  reads. The check reads the **tree at HEAD** (`git ls-tree -r -z HEAD -- specs`), not the diff, so a
-  link merged before this check existed fails **every PR** in the repo until one PR removes it.
+  reads. The check reads the **tree at HEAD** (`git ls-tree -r -z --full-tree HEAD`), not the diff, so
+  a link merged before this check existed fails **every PR** in the repo until one PR removes it. It
+  matches `specs` **without case**: on macOS and Windows `Specs/` is the same folder, and git's path
+  filter matches exact bytes only. A top folder spelled any other way than `specs` (`Specs/`, `SPECS/`)
+  is refused too, even when it holds plain files — the surface rules below are spelled in lowercase and
+  would never see them. A git that cannot read the tree fails the gate with a line that says so.
   `yad-spec` writes real files, so nothing legitimate lives there as a link. Removing a link under
   `contracts/` is a change to the surface and needs `Contract-Change: yes`; on a lockless epic it takes
   the removal hatch below. `yad doctor` warns `checks:symlink-blind` for an older copy without this check.
