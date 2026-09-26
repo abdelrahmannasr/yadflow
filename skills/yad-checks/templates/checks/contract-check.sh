@@ -245,6 +245,13 @@ product_tracked() (
   exit 0
 )
 
+# E118. A story's epic is its ID's prefix (EP-<slug>-S0N -> EP-<slug>): yad-spec always writes link.md's
+# `epic:` so, and contract-check never read the field. The field is the PR's to write, so a gate that took
+# it as it stands gated whichever epic the PR named — a story of a SEALED epic could name an open one and
+# pass epic-open, or step off a thread frozen for hotfix debt. The gates that read `epic:` require it to
+# agree with the story ID.
+story_epic() { printf '%s' "$1" | sed -E 's/-S[0-9]+$//'; }
+
 # Resolve link.md's `product-repo` to a path in THIS checkout. An ABSOLUTE value is used as-is. A
 # RELATIVE value is written relative to the link.md's own directory (specs/<story>/) — the canonical
 # form — but contract-check historically read it from the repo root, so a link.md authored against that
@@ -279,7 +286,7 @@ while IFS= read -r story; do
     continue
   fi
   pinned="$(printf '%s' "$(link_val contract-lock "$link")" | sed -E 's/^sha256:([0-9a-f]+).*$/\1/')"
-  epic="$(printf '%s' "$story" | sed -E 's/-S[0-9]+$//')"   # story EP-<slug>-S0N -> epic EP-<slug>
+  epic="$(story_epic "$story")"   # story EP-<slug>-S0N -> epic EP-<slug>
   product_for "$story"
   if [ -n "$prod_note" ]; then printf '%s\n' "$prod_note" | sed 's/^/note [contract-check]: /'; fi
   if [ -n "$prod_fail" ]; then

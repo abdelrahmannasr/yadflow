@@ -341,6 +341,12 @@ states ("re-locked upstream first"). The case of a path is folded only where git
 (`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a
 note, as before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
 
+**The PR does not choose the epic either (E118).** lineage-check, epic-open and reconcile-debt-check
+read `epic:` from `link.md`. It must equal the story ID's prefix — story `EP-checkout-S01` belongs to
+epic `EP-checkout`, which is what `yad-spec` writes. Any other value **FAILs** by name. Before E118 a
+story of a sealed epic could name an open one and pass epic-open. contract-check has always worked the
+epic out from the story ID.
+
 - **lineage-check** — reads the Product epic's work-item type and `parent` frontmatter. The type has
   two names and the gate reads `kind:` first, then `type:` — the same order the CLI uses, asserted by a
   table test in `cli/test-checks.mjs`. A `feature` or `chore` (genesis) epic

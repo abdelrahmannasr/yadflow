@@ -94,6 +94,9 @@ The contract surface above is **referenced, not re-defined**. Any change to the 
 back to the architecture gate in the product repo — it is never widened from this code repo.
 ```
 
+`epic` must be the story ID's prefix (`EP-<slug>-S0N` → `EP-<slug>`); lineage-check, epic-open and
+reconcile-debt-check FAIL on any other value (E118).
+
 `product-repo` is the one field CI resolves on disk (contract-check, lineage-check, epic-open,
 reconcile-debt all read it). Every gate resolves it the SAME way: an **absolute** path is used as-is; a
 **relative** path is joined to this `link.md`'s own directory, `specs/<story>/` — `../../` climbs out of

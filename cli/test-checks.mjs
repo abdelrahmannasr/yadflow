@@ -1184,6 +1184,26 @@ for (const g of GATES) {
   });
 }
 
+// E118. link.md's `epic:` is the PR's to write. A story of the epic each gate FAILs on names another,
+// clean, epic instead; the gate must refuse the mismatch, not gate the epic the PR named.
+for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
+  test(`${g.name} gate: a link.md whose epic: is not the story's own is refused (E118)`, () => {
+    const T = scaffoldRepo();
+    const hub = path.join(T, 'product');
+    g.seed(hub);
+    seedHubEpic(hub, 'EP-other', { stories: { 'EP-other-S01': 'in-progress' } }); // open, genesis, no debt
+    commit(T, 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-other', 'product-repo': '../../product' }),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, `the PR must not choose the epic that is gated:\n${r.out}`);
+    assert.match(r.out, /specs\/EP-demo-S01\/link\.md says epic: EP-other, but EP-demo-S01 is a story of EP-demo\./);
+    assert.match(r.out, /A story's epic is the prefix of its ID/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 test('epic-open gate: a base link.md with no product-repo takes the one this PR adds (E117)', () => {
   // The base value wins only when there is one. Otherwise a link.md that never had a product-repo — which
   // epic-open FAILs as malformed — could never be fixed: the fixing PR would be read by the broken value.

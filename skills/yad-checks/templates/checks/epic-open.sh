@@ -142,6 +142,13 @@ product_tracked() (
   exit 0
 )
 
+# E118. A story's epic is its ID's prefix (EP-<slug>-S0N -> EP-<slug>): yad-spec always writes link.md's
+# `epic:` so, and contract-check never read the field. The field is the PR's to write, so a gate that took
+# it as it stands gated whichever epic the PR named — a story of a SEALED epic could name an open one and
+# pass epic-open, or step off a thread frozen for hotfix debt. The gates that read `epic:` require it to
+# agree with the story ID.
+story_epic() { printf '%s' "$1" | sed -E 's/-S[0-9]+$//'; }
+
 # Resolve link.md's `product-repo` to a path in THIS checkout. An ABSOLUTE value is used as-is. A
 # RELATIVE value is written relative to the link.md's own directory (specs/<story>/) — the canonical
 # form — but contract-check historically read it from the repo root, so a link.md authored against that
@@ -208,6 +215,12 @@ while IFS= read -r sha; do
   # dir) and pass the seal check as if the epic were open.
   if [ -z "$product_rel" ] || ! printf '%s' "$epic" | grep -qE '^EP-[a-z0-9-]+$'; then
     echo "FAIL [epic-open]: ${short} ${task} — link.md has no valid product-repo/epic metadata."
+    rc=1
+    continue
+  fi
+  if [ -n "$epic" ] && [ "$epic" != "$(story_epic "$story")" ]; then
+    echo "FAIL [epic-open]: ${short} ${task} — ${link} says epic: ${epic}, but ${story} is a story of $(story_epic "$story")."
+    echo "  A story's epic is the prefix of its ID; the gate will not read another. Fix epic: in ${link}."
     rc=1
     continue
   fi
