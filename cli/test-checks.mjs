@@ -1450,7 +1450,23 @@ for (const g of GATES) {
     });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /inside this repo's own git folder .* not a Product/);
+    assert.match(r.out, /inside this repo's own git folder — what is there is git's, shaped by branch names, not a Product/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: .GIT is the git folder too on a disk that ignores case (E117 review 8)`, () => {
+    // The refusal compared spellings; `pwd -P` keeps the case typed, so `.GIT/refs` passed as untracked.
+    const T = scaffoldRepo();
+    if (!fs.existsSync(path.join(T, '.GIT'))) { fs.rmSync(T, { recursive: true, force: true }); return; } // case-sensitive disk
+    productFiles(T, 'hub', g.seed, { hub: true });
+    onBase(T, {});
+    git(T, 'branch', 'epics/EP-demo/x');
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '../../.GIT/refs/heads'),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /inside this repo's own git folder/);
     fs.rmSync(T, { recursive: true, force: true });
   });
 

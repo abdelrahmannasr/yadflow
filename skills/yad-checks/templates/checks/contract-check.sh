@@ -182,7 +182,8 @@ link_val() {
 #    it is the PR's to choose), and so is a tracked folder that is not a kept Product, so one force-added
 #    file cannot switch the gates to a partial Product; the walk is repeated from where the path really
 #    lands (an alias like /proc/self/cwd means another folder to each process); an untracked folder
-#    that is there is CI's checkout, and is read; (3) only when the path reaches NOTHING, a Product the base keeps that holds
+#    that is there is CI's checkout, and is read — unless it is inside the repo's own git folder,
+#    which branch names shape (review 7); (3) only when the path reaches NOTHING, a Product the base keeps that holds
 #    this story's epic is the one meant. "Inside the code repo" is NOT the test: CI can only check a
 #    second repo out INSIDE the workspace, and an untracked checkout there is not the PR's.
 # Sets product_rel, prod (the folder to read), prod_note and prod_fail (text; the caller prints them).
@@ -263,14 +264,19 @@ CANDS
       # Not inside this repo's own git folder (review 7). git never lists `.git/` as tracked, yet a PR
       # shapes it: a branch named `epics/EP-x/y` makes the folders `.git/refs/…/epics/EP-x/` when CI
       # fetches, and that read as an untracked checkout holding an open epic with no lock.
+      # Compared as FOLDERS (`-ef`: the same one on disk), not as spellings: on a disk that ignores case
+      # (macOS, Windows) `.GIT/refs` is `.git/refs`, and `pwd -P` keeps the case it was typed in (review 8).
       for _gd in "$(git rev-parse --absolute-git-dir 2>/dev/null)" "$(git rev-parse --git-common-dir 2>/dev/null)"; do
-        [ -n "$_gd" ] || continue
-        _gd="$(cd -P "$_gd" 2>/dev/null && pwd -P)" || continue
-        case "$_phys/" in
-          "$_gd"/*)
-            prod_fail="product-repo resolves to '${prod}', inside this repo's own git folder (${_gd}) — what is there is git's, shaped by branch names, not a Product."
-            return 0 ;;
-        esac
+        [ -n "$_gd" ] && [ -d "$_gd" ] || continue
+        _p="$_phys"
+        while :; do
+          if [ "$_p" -ef "$_gd" ]; then
+            prod_fail="product-repo resolves to '${prod}', inside this repo's own git folder — what is there is git's, shaped by branch names, not a Product."
+            return 0
+          fi
+          case "$_p" in /|'') break ;; esac
+          _p="${_p%/*}"; [ -n "$_p" ] || _p=/
+        done
       done
       ! tracked_verdict "$(product_tracked "$_phys")" || return 0
       # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it.
