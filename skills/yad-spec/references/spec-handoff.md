@@ -96,17 +96,20 @@ back to the architecture gate in the product repo — it is never widened from t
 
 `product-repo` is the one field CI resolves on disk (contract-check, lineage-check, epic-open,
 reconcile-debt all read it). Every gate resolves it the SAME way: an **absolute** path is used as-is; a
-**relative** path is joined to this `link.md`'s own directory, `specs/<story>/` — `../../` climbs out
-of the story dir and out of `specs/` to the code-repo root, so a Product checked out beside the code repo
+**relative** path is joined to this `link.md`'s own directory, `specs/<story>/` — `../../` climbs out of
+the story dir and out of `specs/` to the code-repo root, so a Product checked out beside the code repo
 is `../../../<product-dir>`. A relative value that only resolves from the **repo root** still works too
-(what contract-check historically did), so older `link.md` files keep gating. Write it as an
-**unquoted scalar** — `"..."` or `'...'` is taken literally, and a leading `~`/`$VAR` is never
-expanded. An unreachable path degrades the Product-reading gates to a PASS-with-note rather than failing
-them, and each one now says so in its output. **Reachable-but-lockless is a different case and does
-NOT degrade:** when the Product resolves and `epics/<epic>/.sdlc/` is there with no
-`contract-lock.json` in it, a claimed `Contract-Change: yes` FAILS, because nothing exists for the
-claim to be true of. That is the ordinary state of a short-lane epic, of a stub, and of a classic epic
-that has not reached its architecture gate yet.
+(what contract-check historically did), so older `link.md` files keep gating. Write it as an **unquoted
+scalar** — `"..."` or `'...'` is taken literally, and a leading `~`/`$VAR` is never expanded. An
+unreachable path degrades the Product-reading gates to a PASS-with-note rather than failing them, and
+each one now says so in its output. **CI reads `product-repo` from `link.md` as it stands on the base
+branch** once one is merged (E117): a PR that changes it is read by the old value, and the new one
+counts after the merge. A Product folder that the code repo itself tracks (a monorepo) is read as it
+stands on the base commit, so a re-lock must merge before the slice change that pins it.
+**Reachable-but-lockless is a different case and does NOT degrade:** when the Product resolves and
+`epics/<epic>/.sdlc/` is there with no `contract-lock.json` in it, a claimed `Contract-Change: yes`
+FAILS, because nothing exists for the claim to be true of. That is the ordinary state of a short-lane
+epic, of a stub, and of a classic epic that has not reached its architecture gate yet.
 
 ## Do not re-invent the contract
 

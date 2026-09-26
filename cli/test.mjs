@@ -25045,6 +25045,33 @@ test('E115 doctor: an older contract-check that never reads specs/ for links is 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E117 doctor: an older Product-reading gate that takes product-repo as the PR leaves it is checks:product-path-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, productPathBlindText, PRODUCT_PATH_GATES } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:product-path-blind');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates', rel), 'utf8');
+    const put = (dir, rel, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    for (const rel of PRODUCT_PATH_GATES) { put(backend, rel, shipped(rel)); put(T, rel, shipped(rel)); }
+    assert.deepEqual(blind(), [], 'the shipped gates are fine');
+    // An older gate: no base read of link.md. (Built from the shipped one, not from history — CI may clone shallow.)
+    const old = shipped('checks/epic-open.sh').replace(/git show/g, 'true');
+    assert.notEqual(old, shipped('checks/epic-open.sh'));
+    put(backend, 'checks/epic-open.sh', old);
+    const hit = blind();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/epic-open\.sh in backend is an older copy that reads the Product from wherever the PR's link\.md points/);
+    // One without the base-commit read of a tracked Product is blind too.
+    put(T, 'checks/lineage-check.sh', shipped('checks/lineage-check.sh').replace(/git archive/g, 'true'));
+    assert.match(blind()[0].message, /^checks\/lineage-check\.sh in the Product, checks\/epic-open\.sh in backend are older copies/);
+    // A comment naming the command is not the command; a split command is one command.
+    assert.equal(productPathBlindText('# git show x\n# git archive y\n'), true);
+    assert.equal(productPathBlindText('git \\\n  show x\ngit archive y\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E114 doctor: an older contract-check or backfill-check that lists a rename by one path is checks:rename-blind', async () => {
   const { T, backend } = scaffold();
   try {

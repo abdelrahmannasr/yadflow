@@ -40,6 +40,10 @@ function scaffoldRepo() {
   git(T, 'init', '-q');
   git(T, 'config', 'user.name', 'alice');
   git(T, 'config', 'user.email', 'alice@corp.io');
+  // A Product seeded at <repo>/product stands for one CI checked out into the workspace: a second repo,
+  // never part of this one's commits. `commit` below stages everything, so keep it out — a Product the
+  // PR commits is a different case, and the gates refuse it (E117).
+  fs.appendFileSync(path.join(T, '.git/info/exclude'), '/product/\n');
   fs.writeFileSync(path.join(T, 'a.txt'), '1');
   git(T, 'add', '-A');
   git(T, 'commit', '-q', '-m', 'seed');
@@ -1054,6 +1058,161 @@ for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
     fs.rmSync(T, { recursive: true, force: true });
   });
 }
+
+// ---------- E117: the PR does not choose where the Product is read from ----------
+// link.md is a file the PR's own author writes. Before E117 a PR could point `product-repo` at nothing
+// (a deferral, so a PASS) or at a folder it committed itself (a hand-made lock, "hash matches"). Each gate
+// gets two Products: `seed` is the real one, rigged so the gate FAILs iff it read it; `clean` is what an
+// author would plant, which would PASS. A FAIL with `seed`'s message proves the real one was read.
+const CLEAN = {
+  'lineage-check': (hub) => seedHubEpic(hub, 'EP-demo'), // a genesis feature epic
+  'epic-open': (hub) => seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } }),
+  'reconcile-debt': (hub) => seedHubEpic(hub, 'EP-demo'),
+  'contract-check': (hub) => seedProductLock(hub, 'EP-demo', 'a'.repeat(64), '.'), // matches the pin
+};
+
+// Commit on the base branch, then start `feature` again from it.
+function onBase(T, files) {
+  git(T, 'checkout', '-q', 'main');
+  commit(T, 'chore: seed the base', files);
+  git(T, 'checkout', '-q', '-B', 'feature');
+}
+
+// Write a Product as files under <T>/<dir> (to be committed, unlike <T>/product).
+function productFiles(T, dir, seed) {
+  seed(path.join(T, dir));
+  return dir;
+}
+
+const linkFor = (g, productRepo) => linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': productRepo, ...(g.extraLink || {}) });
+
+for (const g of GATES) {
+  const clean = CLEAN[g.name];
+
+  test(`${g.name} gate: a Product this PR commits is refused, never read (E117)`, () => {
+    const T = scaffoldRepo();
+    productFiles(T, 'fake', clean);
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x',
+      ...(g.files || {}),
+      'specs/EP-demo-S01/link.md': linkFor(g, '../../fake'),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, `a planted Product must not be read:\n${r.out}`);
+    assert.match(r.out, /product-repo resolves to 'fake', a folder this repo tracks, and main has no 'fake\/epics' — the Product there would be files this PR adds/);
+    assert.doesNotMatch(r.out, /hash matches|not reachable/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a PR that re-points product-repo is read from the base value (E117)`, () => {
+    const T = scaffoldRepo();
+    g.seed(path.join(T, 'product'));
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../product') });
+    // Somewhere that is not there (a deferral, a PASS), and an untracked Product that would pass.
+    for (const target of ['../../nowhere', '../../other']) {
+      git(T, 'checkout', '-q', '-B', 'feature', 'main');
+      clean(path.join(T, 'other'));
+      fs.appendFileSync(path.join(T, '.git/info/exclude'), '/other/\n');
+      commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+        'src/thing.js': `x${target}`,
+        ...(g.files || {}),
+        'specs/EP-demo-S01/link.md': linkFor(g, target),
+      });
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, `${target}: the base value must still be read:\n${r.out}`);
+      assert.match(r.out, g.expect);
+      assert.ok(r.out.includes(`specs/EP-demo-S01/link.md changes product-repo from '../../product' to '${target}' — the Product is read from the base value; the new one counts once this merges.`), r.out);
+    }
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a monorepo Product is read as it stands on the base, not as the PR leaves it (E117)`, () => {
+    // The Product and the code in ONE git repo: the Product folder is tracked, so the PR could edit it.
+    const T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed);
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
+    fs.rmSync(path.join(T, 'hub'), { recursive: true, force: true });
+    productFiles(T, 'hub', clean);
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, `the base's Product must be read, not the PR's edit of it:\n${r.out}`);
+    assert.match(r.out, g.expect);
+    assert.match(r.out, /the Product at 'hub' is tracked by this repo, so it is read as it stands on main, not as this PR leaves it/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a monorepo Product at the repo root is read from the base too (E117)`, () => {
+    const T = scaffoldRepo();
+    g.seed(T);
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../..') });
+    fs.rmSync(path.join(T, 'epics'), { recursive: true, force: true });
+    clean(T);
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, g.expect);
+    assert.match(r.out, /the Product at '\.' is tracked by this repo/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a tracked symlink or submodule on the way to the Product is refused (E117)`, () => {
+    for (const kind of ['symlink', 'dangling symlink', 'submodule']) {
+      const T = scaffoldRepo();
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+      clean(outside);
+      if (kind === 'submodule') {
+        // An empty folder is how git leaves a submodule nobody initialised; filled in after the commit.
+        fs.mkdirSync(path.join(T, 'sub'));
+        const head = git(T, 'rev-parse', 'HEAD').toString().trim();
+        git(T, 'update-index', '--add', '--cacheinfo', `160000,${head},sub`);
+        git(T, 'commit', '-q', '-m', 'chore: add sub');
+      } else {
+        fs.symlinkSync(kind === 'symlink' ? outside : path.join(outside, 'gone'), path.join(T, 'sub'));
+      }
+      commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+        'src/thing.js': 'x',
+        ...(g.files || {}),
+        'specs/EP-demo-S01/link.md': linkFor(g, '../../sub'),
+      });
+      if (kind === 'submodule') clean(path.join(T, 'sub'));
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, `${kind}:\n${r.out}`);
+      assert.match(r.out, /product-repo reaches the Product through 'sub', a symlink, submodule or file this repo tracks/, `${kind}:\n${r.out}`);
+      fs.rmSync(outside, { recursive: true, force: true });
+      fs.rmSync(T, { recursive: true, force: true });
+    }
+  });
+}
+
+test('epic-open gate: a base link.md with no product-repo takes the one this PR adds (E117)', () => {
+  // The base value wins only when there is one. Otherwise a link.md that never had a product-repo — which
+  // epic-open FAILs as malformed — could never be fixed: the fixing PR would be read by the broken value.
+  const T = scaffoldRepo();
+  seedHubEpic(path.join(T, 'product'), 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } });
+  onBase(T, { 'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo' }) });
+  linkedCommit(T, '../../product');
+  const r = runGate(EPIC_OPEN, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /epic is open/);
+  assert.doesNotMatch(r.out, /changes product-repo/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: an untracked Product checked out inside the repo is read as it is (E117)', () => {
+  // The CI layout: actions/checkout can only place a second repo inside the workspace. Not the PR's.
+  const T = scaffoldRepo();
+  const hash = 'c'.repeat(64);
+  seedProductLock(T, 'EP-demo', hash);
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': `sha256:${hash}` }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /hash matches the product lock/);
+  assert.doesNotMatch(r.out, /tracked by this repo|changes product-repo/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
 
 test('all four hub-reading gates carry the SAME resolution block, byte for byte', () => {
   // The gates are standalone by design, so the block is duplicated rather than sourced — and issue

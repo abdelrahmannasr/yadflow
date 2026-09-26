@@ -103,7 +103,8 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   - Best-effort fidelity: when the product repo is reachable (via `link.md`'s `product-repo` path),
     require `link.md`'s pinned `contract-lock` hash to match the product repo's current
     `contract-lock.json`. A claimed change that still pins the **old** lock **FAILS** — re-run
-    `yad-spec` so the slice matches the re-locked contract.
+    `yad-spec` so the slice matches the re-locked contract. **Where** the lock is read from is not the
+    PR's to choose (E117) — see "Resolving `product-repo`" in §8.
   - The fidelity check runs for **every story whose slice the diff touches**, and **aggregates**: each
     story reports (matched / stale / deferred), and any stale pin fails the gate. `git diff
     --name-only` is path-sorted, so reading one story off the first changed path validated whichever
@@ -323,6 +324,22 @@ another, and "unreachable" is a PASS-with-note, so the gate silently stops gatin
 gate now **prints that note**, so a deferred check is never mistaken for a passed one. The block is
 duplicated verbatim across the four scripts (they are standalone by design) and a test asserts the
 four copies stay byte-identical.
+
+**The PR under check does not choose where the Product is read from (E117).** `link.md` is a file the
+PR's own author writes. Before E117 a PR could point `product-repo` at a path that does not exist — the
+gate called the Product "not reachable" and passed — or at a folder it committed itself, holding a
+hand-made `contract-lock.json` with the hash it pins. Two rules close both:
+
+| Rule | What the gate does | Why |
+| --- | --- | --- |
+| `product-repo` comes from the **base** | When `link.md` on the base branch has a `product-repo`, that value is used. A PR that changes it gets a note (`… changes product-repo from 'X' to 'Y' — the Product is read from the base value; the new one counts once this merges`). A `link.md` new in this PR, or a base one with no value, uses the PR's value. | Only `product-repo` is read from the base. `contract-lock` and `epic` are read as the PR leaves them — a re-spec PR must update the pin. |
+| A **tracked** Product is read from the **base commit** | If the path is a folder this repo tracks (a monorepo: the Product and the code in one git repo), its `epics/` is copied out of the base commit with `git archive` and read from there. If the base has no `epics/` there, the folder is files this PR adds: **FAIL** by name. A path that runs through a tracked symlink, submodule or file: **FAIL** by name. | "Inside the code repo" is not the test. CI can only check a second repo out inside the workspace (`actions/checkout` `path:`), and an untracked checkout there is not the PR's. |
+
+The cost, stated: in a monorepo, a PR that re-locks the contract **and** changes the slice fails the pin
+check, because the lock is read from the base. Merge the re-lock first — the rule the gate already
+states ("re-locked upstream first"). The case of a path is folded only where git folds it
+(`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a
+note, as before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
 
 - **lineage-check** — reads the Product epic's work-item type and `parent` frontmatter. The type has
   two names and the gate reads `kind:` first, then `type:` — the same order the CLI uses, asserted by a
