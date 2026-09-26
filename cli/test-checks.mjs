@@ -1454,10 +1454,14 @@ for (const g of GATES) {
     fs.rmSync(T, { recursive: true, force: true });
   });
 
-  test(`${g.name} gate: .GIT is the git folder too on a disk that ignores case (E117 review 8)`, () => {
+  test(`${g.name} gate: .GIT is the git folder too on a disk that ignores case (E117 review 8)`, (t) => {
     // The refusal compared spellings; `pwd -P` keeps the case typed, so `.GIT/refs` passed as untracked.
     const T = scaffoldRepo();
-    if (!fs.existsSync(path.join(T, '.GIT'))) { fs.rmSync(T, { recursive: true, force: true }); return; } // case-sensitive disk
+    if (!fs.existsSync(path.join(T, '.GIT'))) { // a case-sensitive disk: `.GIT` is simply another name
+      fs.rmSync(T, { recursive: true, force: true });
+      t.skip('needs a disk that ignores case');
+      return;
+    }
     productFiles(T, 'hub', g.seed, { hub: true });
     onBase(T, {});
     git(T, 'branch', 'epics/EP-demo/x');
