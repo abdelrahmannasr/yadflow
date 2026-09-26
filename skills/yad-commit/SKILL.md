@@ -20,8 +20,9 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
 - **Subject** — `<type>: <lowercase imperative description, no trailing period>`; types are
   `feat|fix|docs|refactor|test|perf|build|ci|chore|revert`; proper nouns/acronyms keep their case.
 - **Task trailer** — required on a code repo (anchors the `spec-link` + `commit-message` gates). Given
-  with `--task` (a `<story>-T<NN>` id — an explicit value is validated against the `spec-link`
-  contract, so a malformed id like a bare `EP-x-S01` fails locally instead of after a push), else
+  with `--task` (a `<story>-T<NN>` id, the story an `EP-<slug>-S<n>` with a lowercase slug — an explicit
+  value is validated against the `spec-link` contract, so a malformed id like a bare `EP-x-S01` or an
+  `EP-Demo-S01-T01` fails locally instead of after a push), else
   derived from the branch (`feat/<story>-<task>-…`). Product commits are not
   task-scoped, so the trailer is optional there — a missing-Task warning is informational on the Product
   (`spec-link` is a code-repo gate) and only flags a real gate failure in a code repo.

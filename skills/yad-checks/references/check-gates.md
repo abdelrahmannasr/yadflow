@@ -109,13 +109,21 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
     `contract-lock.json`. A claimed change that still pins the **old** lock **FAILS** — re-run
     `yad-spec` so the slice matches the re-locked contract. **Where** the lock is read from is not the
     PR's to choose (E117) — see "Resolving `product-repo`" in §8.
+  - Each story's slice must sit under a story ID (`specs/EP-<slug>-S<n>/contracts/`) and come with its
+    `specs/<story>/link.md` — `yad-spec` writes the two together. A slice that is **added or changed**
+    without them **FAILS** by name (E117 review 2): deleting `link.md` used to drop a stale pin, and a
+    Spec Kit folder such as `specs/001-name/contracts/` can be tied to no lock. A story whose slice is
+    only **removed** — every changed file under it deleted — needs neither, so a folder can always be
+    cleaned up. This closes the deferral E115 stated as a cost.
+  - When the Product **was reached** and has no `epics/<epic>/`, the slice is an **orphan** and
+    **FAILS** — it used to say "not reachable" and defer.
   - The fidelity check runs for **every story whose slice the diff touches**, and **aggregates**: each
     story reports (matched / stale / deferred), and any stale pin fails the gate. `git diff
     --name-only` is path-sorted, so reading one story off the first changed path validated whichever
     story sorted first and left the rest unpinned — a later story pinning a stale hash passed, and a
     first story with no `link.md` deferred the whole check before the stale one was ever read
     (issue #161). One clean-or-deferred story never masks another's stale pin, the same rule spec-link
-    applies per commit.
+    applies per commit. (A story with no `link.md` now FAILs rather than defers — see above.)
   - A lock the gate can **read but not parse** (truncated, half-written, or a changed schema — no
     `"hash": "sha256:…"`) **FAILS**. It used to short-circuit the comparison into the "hash matches"
     note, i.e. the gate affirmatively reported a match it never made.
@@ -336,13 +344,15 @@ hand-made `contract-lock.json` with the hash it pins. Two rules close both:
 
 | Rule | What the gate does | Why |
 | --- | --- | --- |
-| `product-repo` comes from the **base** | Where the Product lives is a fact about the whole repo, so the value is, in order: `link.md` as it stands on the base; else the first `specs/*/link.md` on the base that has one (a story new in this PR, or a `link.md` that never had a value); else — the repo's first spec — the PR's value. A PR whose value differs gets a note (`… names product-repo 'Y', but specs/<other>/link.md on main says 'X' — the Product is read from the base value; a new one counts once it merges`). | Only `product-repo` is read from the base. `contract-lock` is read as the PR leaves it — a re-spec PR must update the pin. |
-| A **tracked** Product is read from the **base commit** | A folder this repo tracks counts as a Product (a monorepo: the Product and the code in one git repo) only when the base tracks its `.sdlc/hub.json`, which every Product commits. Then its `epics/` is written out from the base commit through a throwaway index (`git read-tree` + `git checkout-index`) and read from there — not `git archive`, which drops whatever `.gitattributes` marks `export-ignore`. Any other tracked file under a Product path — a planted folder, or one file force-added under an ignored checkout — **FAILs** by name, with the fix (`git rm -r --cached`). A path that runs through a tracked symlink, submodule or file: **FAIL** by name. | "Inside the code repo" is not the test. CI can only check a second repo out inside the workspace (`actions/checkout` `path:`), and an untracked checkout there is not the PR's. |
+| `product-repo` comes from the **base** | Where the Product lives is a fact about the whole repo, so the value is, in order: `link.md` as it stands on the base; else a sibling `specs/<story>/link.md` on the base (a story new in this PR, or a `link.md` that never had a value) — one of the same epic first, and the first whose value reaches a folder here, so one stale `link.md` cannot hand every new story a deferral; else — the repo's first spec — the PR's value. A PR whose value differs gets a note (`… names product-repo 'Y', but specs/<other>/link.md on main says 'X' — the Product is read from the base value; a new one counts once it merges`). | Only `product-repo` is read from the base. `contract-lock` is read as the PR leaves it — a re-spec PR must update the pin. |
+| A **kept** Product is read from the **base commit** | Whether the Product is kept in this repo (a monorepo: the Product and the code in one git repo) is asked of the **base**, from the path's text alone, before anything on disk: the base tracks `<path>/.sdlc/hub.json`, which every Product commits. The disk is the PR's — a PR that deleted or moved the folder read as untracked, and deferred. Its `epics/` is then written out from the base commit through a throwaway index (`git read-tree` + `git checkout-index`), with the work tree pointed at an empty temp folder, and read from there. Not `git archive`, which drops whatever `.gitattributes` marks `export-ignore`; and not with the real work tree, whose `.gitattributes` is the PR's — `*.md text eol=crlf` or `working-tree-encoding=UTF-16` there wrote the base's files unreadable. A symlink or submodule inside the base's `epics/` is **FAIL** by name: a link written out still points where it pointed (an absolute one into the PR's working tree), and a submodule comes out as an empty folder. Any other tracked file under a Product path — a planted folder, or one file force-added under an ignored checkout — **FAILs** by name, with the fix (`git rm -r --cached`). A path that runs through a tracked symlink, submodule or file: **FAIL** by name. | "Inside the code repo" is not the test. CI can only check a second repo out inside the workspace (`actions/checkout` `path:`), and an untracked checkout there is not the PR's. |
 | One story ID shape | A story must be `EP-<slug>-S<n>` (lowercase slug), in all four gates and spec-link. **FAIL** by name otherwise. | A story written as a path (`EP-x-S01/.`) named a `link.md` the base read never found. |
 
-The cost, stated: in a monorepo, a PR that re-locks the contract **and** changes the slice fails the pin
-check, because the lock is read from the base. Merge the re-lock first — the rule the gate already
-states ("re-locked upstream first"). The case of a path is folded only where git folds it
+The costs, stated: in a monorepo the Product is read from the base, so a PR that re-locks the contract
+**and** changes the slice fails the pin check — merge the re-lock first, the rule the gate already states
+("re-locked upstream first"); and a PR that adds a new epic or story **and** its code fails lineage-check,
+epic-open and reconcile-debt as an orphan — merge the Product change first. Frontmatter is read with CR
+stripped before the `---` fences are matched, so a CRLF Product reads the same as an LF one. The case of a path is folded only where git folds it
 (`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a note, as
 before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
 
@@ -363,7 +373,8 @@ epic out from the story ID.
   `shipped`. A commit whose owning epic is sealed **FAILS**: new behaviour cannot mutate a shipped epic;
   it must land in a new threaded change-epic. This is what stops the Shape artifacts from going stale.
 - **reconcile-debt** — resolves the epic's `thread` (its `thread:` frontmatter, else the epic id) and
-  scans every thread epic's `reconcile-debt.json`. An **open** entry the current epic does not own
+  scans every thread epic's `reconcile-debt.json`. A Product that was reached with no such epic **FAILs** as an orphan story
+  link, as lineage-check and epic-open do (E117 review 2). An **open** entry the current epic does not own
   **FAILS** the change (the thread is frozen until the hotfix debt is paid: artifacts updated + a
   regression test added, then `status: paid`). Thread-scoped — only the affected thread freezes.
 

@@ -24,7 +24,7 @@ export function buildCommitMessage({ type, subject, task, contractChange = false
   // it never enters a trailer. Well-formed branch-derived ids (taskFromBranch) are stricter and pass;
   // a lowercase-suffix branch is caught here, matching the case-sensitive spec-link grep.
   if (task && !TASK_ID_RE.test(task)) {
-    throw new Error(`invalid --task "${task}" (expected <story>-T<NN>, e.g. EP-x-S01-T02) — the spec-link CI gate would reject it`);
+    throw new Error(`invalid --task "${task}" (expected EP-<slug>-S<n>-T<NN> with a lowercase slug, e.g. EP-x-S01-T02) — the spec-link CI gate would reject it`);
   }
 
   const trailers = [];
