@@ -149,8 +149,15 @@ CANDS
       # The walk above goes one part at a time in a subshell, and a Linux magic link such as
       # /proc/self/cwd means a different folder to each process: there it pointed at the walk's own
       # subshell and found nothing, while this shell read the PR's own copy of a kept Product through it.
-      _phys="$(cd -P "$prod" 2>/dev/null && pwd -P)" || _phys=""
-      if [ -n "$_phys" ]; then ! tracked_verdict "$(product_tracked "$_phys")" || return 0; fi
+      # `./` before a relative path, so a value starting with `-` is not read by `cd` as an option
+      # (review 6); and a folder that is there but cannot be entered is refused, not read unchecked.
+      case "$prod" in /*) _pc="$prod" ;; *) _pc="./$prod" ;; esac
+      _phys="$(cd -P "$_pc" 2>/dev/null && pwd -P)" || _phys=""
+      if [ -z "$_phys" ]; then
+        prod_fail="product-repo resolves to '${prod}', a folder the gate cannot enter to check where it really is — so it is not read."
+        return 0
+      fi
+      ! tracked_verdict "$(product_tracked "$_phys")" || return 0
       # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it.
       return 0
     fi
@@ -231,10 +238,12 @@ base_product() {
     prod_fail="product-repo resolves to '${_r:-.}', a Product this repo keeps, and ${BASE} has no '${_e}' folder — there is nothing on the base to read."
     return 0
   fi
+  # (awk reads to the end rather than stopping at the first hit: stopping left `tr` writing into a
+  # closed pipe on a large epics/, and under pipefail the gate died with no message — review 6.)
   # A symlink or submodule inside it is refused by name, as under specs/ (E115): a link written out
   # still points where it pointed — an absolute one into this PR's working tree — and a submodule comes
   # out as an empty folder, which reads as an epic with no stories.
-  _bad="$(git ls-tree -r -z "${BASE}:${_e}" 2>/dev/null | tr '\0' '\n' | awk '$1 == "120000" || $1 == "160000" { sub(/^[^\t]*\t/, ""); print; exit }')"
+  _bad="$(git ls-tree -r -z "${BASE}:${_e}" 2>/dev/null | tr '\0' '\n' | awk '!f && ($1 == "120000" || $1 == "160000") { sub(/^[^\t]*\t/, ""); print; f = 1 }')"
   if [ -n "$_bad" ]; then
     prod_fail="'${_e}/${_bad}' on ${BASE} is a symlink or a submodule, so the Product this repo keeps cannot be read from the base. Replace it with the files themselves."
     return 0

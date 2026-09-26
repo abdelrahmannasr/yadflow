@@ -1390,6 +1390,54 @@ for (const g of GATES) {
     fs.rmSync(T, { recursive: true, force: true });
   });
 
+  test(`${g.name} gate: a product-repo starting with - still gets the second walk (E117 review 6)`, { skip: process.platform !== 'linux' && 'needs /proc (Linux)' }, () => {
+    // `cd -P -x/…` read the value as an option and failed, and the second walk was skipped.
+    const T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed, { hub: true });
+    onBase(T, {});
+    fs.rmSync(path.join(T, 'hub/epics'), { recursive: true, force: true });
+    clean(path.join(T, 'hub'));
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x', '-x/keep': 'x\n', ...(g.files || {}),
+      'specs/EP-demo-S01/link.md': linkFor(g, '-x/../../../../../../../../../proc/self/cwd/hub'),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, g.expect);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a folder the gate cannot enter is refused, not read unchecked (E117 review 6)`, { skip: (process.getuid && process.getuid() === 0) && 'root enters any folder' }, () => {
+    const T = scaffoldRepo();
+    clean(path.join(T, 'product'));
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '../../product') });
+    fs.chmodSync(path.join(T, 'product'), 0o600); // there (-d), but no way in
+    try {
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /a folder the gate cannot enter to check where it really is — so it is not read/);
+    } finally {
+      fs.chmodSync(path.join(T, 'product'), 0o755);
+      fs.rmSync(T, { recursive: true, force: true });
+    }
+  });
+
+  test(`${g.name} gate: a symlink early in a large base Product is still named, not a silent exit (E117 review 6)`, () => {
+    // awk stopped at the first hit; `tr` then wrote into a closed pipe and pipefail killed the gate (141).
+    const T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed, { hub: true });
+    fs.symlinkSync('EP-demo', path.join(T, 'hub/epics/AAA-link'));
+    const bulk = path.join(T, 'hub/epics/zzz-bulk');
+    fs.mkdirSync(bulk, { recursive: true });
+    for (let i = 0; i < 2000; i++) fs.writeFileSync(path.join(bulk, `file-with-a-long-enough-name-${i}.md`), 'x\n');
+    onBase(T, {});
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes("'hub/epics/AAA-link' on main is a symlink or a submodule"), `exit ${r.code}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
   test(`${g.name} gate: a .gitattributes merged into the base Product cannot re-encode it (E117 review 3)`, () => {
     const T = scaffoldRepo();
     productFiles(T, 'hub', g.seed, { hub: true });
