@@ -4,6 +4,11 @@
 # the whole repo: touching feature A is never blocked by an unverified feature B. Features that are
 # forward-spec'd (their own specs/<story>/) or not yet being backfilled are not this gate's concern.
 set -euo pipefail
+# Bytes, not characters (E114). The changed list below carries raw path bytes, and a path that is not
+# valid UTF-8 read under a UTF-8 locale is one GNU grep and sed may skip or leave unmatched — one such
+# file in a diff would hide every other path from the patterns (Linux CI). On macOS, `tr` and `sed` stop
+# on it with "Illegal byte sequence" instead, so the gate fails with a message that names nothing.
+export LC_ALL=C
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---
@@ -34,8 +39,11 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
   exit 1
 fi
 
-# quotePath off so a non-ASCII feature directory still matches src/<feature>/ below.
-changed="$(git -c core.quotePath=false diff --name-only "${BASE}..HEAD")"
+# --no-renames (E114): a rename is listed by BOTH paths. Without it git names a rename by its NEW path
+# only, so `git mv src/<feature>/x.js lib/x.js` took the file out of a feature being backfilled and the
+# gate never saw the feature. -z | tr: NUL-separated, so git never quotes a path — a quoted one (any
+# non-ASCII byte by default; a `"` or a tab always) never matched src/<feature>/ below.
+changed="$(git diff --no-renames --name-only -z "${BASE}..HEAD" | tr '\0' '\n')"
 # Feature = a directory under src/ (src/<feature>/...). Top-level src/*.js files are deliberately NOT
 # gated here (they belong to no single feature); only src/<feature>/ changes are checked.
 feats="$(printf '%s\n' "$changed" | sed -nE 's#^src/([^/]+)/.*#\1#p' | sort -u)"

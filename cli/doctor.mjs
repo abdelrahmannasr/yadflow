@@ -473,6 +473,19 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         `checks/verified-commits.sh in ${oldGates.join(', ')} is an older copy that still enforces the author list`,
         'run `yad check --fix` (it refreshes the gate on a verified ledger and on code repos); on a local-ledger Product, copy skills/yad-checks/templates/checks/verified-commits.sh over it');
     }
+    // E114. An older contract-check / backfill-check names a rename by its new path only, so moving a
+    // slice out of specs/<story>/contracts/ (or a file out of src/<feature>/) passes the gate. `yad check
+    // --fix` refreshes a wired contract-check nobody changed; one changed by hand is kept, and
+    // backfill-check is never wired at all — every copy is placed by hand. Named, not fixed.
+    const renameBlind = [{ where: 'the Product', root }, ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))]
+      .flatMap((x) => RENAME_BLIND_GATES.map((rel) => ({ ...x, rel })))
+      .filter((x) => renameBlindGate(path.join(x.root, x.rel)))
+      .map((x) => `${x.rel} in ${x.where}`);
+    if (renameBlind.length) {
+      check(checks, 'checks:rename-blind', 'project', 'warn',
+        `${renameBlind.join(', ')} ${renameBlind.length > 1 ? 'are older copies that list' : 'is an older copy that lists'} a renamed file by its new path only — moving a file out of what the gate guards passes it`,
+        'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise copy the shipped template over it (skills/yad-checks/templates/checks/contract-check.sh, skills/yad-backfill/templates/checks/backfill-check.sh) — or build each list as the template does: `git diff --no-renames --name-only -z … | tr \'\\0\' \'\\n\'`, with `export LC_ALL=C` at the top, because `--no-renames` alone still lets git quote an odd path past the gate');
+    }
   }
 
   ciTagsChecks(checks, root, hub, registry);
@@ -1614,6 +1627,21 @@ export function ownerChecks(checks, root) {
     'such a file is ignored — no owner is shown and the edit-time warning is off. For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them all');
 }
 
+// The installed gates whose changed list must name a rename by both paths (E114), and the test for one
+// that does not. Read as bash reads it, one command at a time, so one fixed command never hides its blind
+// twin: a `#` line is prose and is dropped FIRST (a `\` at its end does not go on); then a line ending in
+// `\` goes on to the next, as a hand-edited copy may split `git … \ diff --name-only`; then each line is
+// cut at `&&`, `||`, `;` and `|`, so `fixed && \ blind` is two commands, not one.
+export const RENAME_BLIND_GATES = ['checks/contract-check.sh', 'checks/backfill-check.sh'];
+const renameBlindCommand = (c) => /\bgit\b.*\bdiff\b.*--name-only/.test(c) && !/--no-renames/.test(c);
+export const renameBlindText = (src) => src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => l.split(/&&|\|\||;|\|/).some(renameBlindCommand));
+export function renameBlindGate(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return renameBlindText(src);
+}
+
 // `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
 // through; that is safe only while the hub-checks workflow lists renames by BOTH paths (`--no-renames`).
 // `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
@@ -1625,8 +1653,7 @@ export function ownerGuardChecks(checks, root) {
   const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('\\.sdlc/owners/[^/]+\\.json$'));
   if (!exempting.length) return;
   // Line by line: one fixed diff line must not hide its blind twin in the other job.
-  const blindLine = (l) => !/^\s*#/.test(l) && /\bgit\b.*\bdiff\b.*--name-only/.test(l) && !/--no-renames/.test(l);
-  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => (read(rel) || '').split('\n').some(blindLine));
+  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => renameBlindText(read(rel) || ''));
   if (!blind.length) return;
   check(checks, 'owners:rename-blind', 'project', 'warn',
     `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,

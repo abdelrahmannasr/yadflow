@@ -449,6 +449,149 @@ test('contract-check gate: a non-ASCII slice path still counts as the contract s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------- a rename is two paths (E114) ----------
+// Both gates build their changed list with `git diff --name-only`, which by default names a rename by its
+// NEW path only. So a file moved OUT of what the gate guards vanished from the list: the move was never
+// seen. These run each gate's own command on a real repo, with a real `git mv`.
+
+// The repo as it stands on `main`, then the commit sha the branch starts from.
+function renameRepo(files) {
+  const T = scaffoldRepo();
+  commit(T, 'chore: what the base branch already holds', files);
+  return { T, base: git(T, 'rev-parse', 'HEAD').toString().trim() };
+}
+
+test('contract-check gate: MOVING a slice out of contracts/ is a surface change (E114)', () => {
+  const { T, base } = renameRepo({ 'specs/EP-demo-S01/contracts/api.md': 'the agreed endpoint\n' });
+  fs.mkdirSync(path.join(T, 'docs'));
+  git(T, 'mv', 'specs/EP-demo-S01/contracts/api.md', 'docs/api.md');
+  git(T, 'commit', '-q', '-m', 'docs: move the api notes');
+  assert.match(git(T, 'diff', '--name-status', `${base}..HEAD`).toString(), /^R100/m, 'git itself sees a rename');
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 1, `a git mv must not take the slice off the surface unseen:\n${r.out}`);
+  assert.match(r.out, /^ {2}specs\/EP-demo-S01\/contracts\/api\.md$/m, 'the OLD path is the one on the surface');
+  assert.match(r.out, /without a 'Contract-Change: yes' trailer/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: moving a slice out under a lockless epic still takes the REMOVE hatch (E114)', () => {
+  // The twin of the test above. `deleted` must be built like `changed`: with rename detection on, the
+  // move is an `R`, --diff-filter=D misses it, and the hatch refuses the one fix a short lane has.
+  const { T, base } = renameRepo({
+    'specs/EP-demo-S01/contracts/api.md': 'oops\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': 'none' }),
+    'product/epics/EP-demo/.sdlc/state.json': '{}\n',
+  });
+  fs.mkdirSync(path.join(T, 'docs'));
+  git(T, 'mv', 'specs/EP-demo-S01/contracts/api.md', 'docs/api.md');
+  git(T, 'commit', '-q', '-m', 'chore: drop the slice a short lane must not carry\n\nContract-Change: yes');
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /only REMOVES contract slice files/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a slice path git quotes even with quotePath off still counts (E114)', () => {
+  // A `"` in a name is C-quoted whatever core.quotePath says; the quoted line starts with `"`, not specs/.
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen the API quietly', { 'specs/EP-demo-S01/contracts/a"b.md': 'new endpoint\n' });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /without a 'Contract-Change: yes' trailer/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A commit that also adds a file whose name is not valid UTF-8. The name goes in through the index, as raw
+// bytes — a file system may refuse to hold it, and git does not care.
+function commitWithRawName(T, msg, files, rawName) {
+  for (const [rel, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+    fs.writeFileSync(path.join(T, rel), content);
+  }
+  git(T, 'add', '-A');
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'x\n', env: GIT_ENV }).toString().trim();
+  execFileSync('git', ['update-index', '--index-info'], { cwd: T, env: GIT_ENV, input: Buffer.concat([Buffer.from(`100644 ${blob}\t`), rawName, Buffer.from('\n')]) });
+  git(T, 'commit', '-q', '-m', msg);
+}
+
+test('contract-check gate: one non-UTF-8 file name does not hide the slice under a UTF-8 locale (E114)', () => {
+  // GNU grep, reading raw bytes under a UTF-8 locale, may treat the list as binary and print no line —
+  // then the surface is empty and the gate PASSes (Linux CI). On macOS `tr` stops on the byte instead
+  // ("Illegal byte sequence"), so the gate fails with no surface message — caught here either way.
+  const T = scaffoldRepo();
+  commitWithRawName(T, 'feat: widen the API quietly', { 'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n' },
+    Buffer.concat([Buffer.from('junk'), Buffer.from([0xff]), Buffer.from('.txt')]));
+  const r = runGate(CONTRACT, T, ['main'], { LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /without a 'Contract-Change: yes' trailer/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------- backfill-check.sh ----------
+const BACKFILL = path.join(ROOT, 'skills/yad-backfill/templates/checks/backfill-check.sh');
+const backfillSpec = (verified) => `---\nfeature: billing\nverified: ${verified}\n---\n# billing\n`;
+
+test('backfill gate: a change in a feature whose spec is not approved fails; an approved one passes', () => {
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[backfill\]: billing is being backfilled/);
+  commit(T, 'docs: approve the billing spec', { 'specs/backfill/billing/spec.md': backfillSpec(true) });
+  assert.equal(runGate(BACKFILL, T, [base]).code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: MOVING a file out of a feature being backfilled touches that feature (E114)', () => {
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  fs.mkdirSync(path.join(T, 'lib'));
+  git(T, 'mv', 'src/billing/pay.js', 'lib/pay.js');
+  git(T, 'commit', '-q', '-m', 'refactor: move pay');
+  assert.match(git(T, 'diff', '--name-status', `${base}..HEAD`).toString(), /^R100/m, 'git itself sees a rename');
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 1, `a git mv must not take the file out of the feature unseen:\n${r.out}`);
+  assert.match(r.out, /FAIL \[backfill\]: billing is being backfilled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: a name git quotes even with quotePath off does not hide a feature (E114)', () => {
+  // One odd file alone, so this fails if `-z` goes: `"src/billing/a\"b.js"` never matches src/<feature>/.
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  commit(T, 'feat: touch billing', { 'src/billing/a"b.js': 'x\n' });
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[backfill\]: billing is being backfilled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: a non-UTF-8 name under a UTF-8 locale does not hide a feature (E114)', () => {
+  // One odd file alone, so this fails if `export LC_ALL=C` goes: GNU sed skips the line on Linux, and
+  // macOS `tr` stops on it ("Illegal byte sequence") — either way the billing FAIL is never printed.
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  commitWithRawName(T, 'feat: touch billing', {},
+    Buffer.concat([Buffer.from('src/billing/junk'), Buffer.from([0xff]), Buffer.from('.js')]));
+  const r = runGate(BACKFILL, T, [base], { LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[backfill\]: billing is being backfilled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check and backfill-check list every change by both paths, byte-wise (E114)', () => {
+  // A mechanical pin, line by line: a later tidy that drops the flag from ONE of contract-check's two
+  // lists breaks the hatch or the gate, and only this test names which. doctor's `checks:rename-blind`
+  // uses the same reading of a line.
+  for (const rel of ['skills/yad-checks/templates/checks/contract-check.sh', 'skills/yad-backfill/templates/checks/backfill-check.sh']) {
+    const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const lists = src.split('\n').filter((l) => !/^\s*#/.test(l) && /\bgit\b.*\bdiff\b.*--name-only/.test(l));
+    assert.ok(lists.length >= 1, `${rel}: no changed list found`);
+    for (const l of lists) {
+      assert.match(l, /--no-renames/, `${rel}: ${l.trim()}`);
+      assert.match(l, / -z .*\| tr '\\0' '\\n'/, `${rel}: ${l.trim()}`);
+    }
+    assert.ok(src.indexOf('export LC_ALL=C') >= 0 && src.indexOf('export LC_ALL=C') < src.indexOf(lists[0]), `${rel}: bytes before the list`);
+  }
+});
+
 // ---------- base resolution with no explicit base (issue #161) ----------
 // CI always passes the base; a local run does not. Defaulting to a hardcoded `origin/main` diffs the
 // wrong range (or nothing at all) on a repo whose trunk is `develop`/`master`.
