@@ -1369,6 +1369,24 @@ for (const g of GATES) {
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, g.expect);
+    assert.ok(r.out.includes("link.md names no product-repo here; the Product this repo keeps at 'hub' on main holds EP-demo"), r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a Linux magic link to the repo cannot hand the gate the PR's copy of a kept Product (E117 review 5)`, { skip: process.platform !== 'linux' && 'needs /proc (Linux)' }, () => {
+    // /proc/self/cwd means a different folder to each process: the part-by-part walk (a subshell) saw
+    // its own folder and nothing tracked, while the gate's shell read the PR's edited `hub/` through it.
+    const T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed, { hub: true });
+    onBase(T, {}); // a first spec: the PR's own product-repo is the one used
+    fs.rmSync(path.join(T, 'hub/epics'), { recursive: true, force: true });
+    clean(path.join(T, 'hub'));
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '/proc/self/cwd/hub'),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, g.expect);
     fs.rmSync(T, { recursive: true, force: true });
   });
 

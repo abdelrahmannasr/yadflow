@@ -180,8 +180,9 @@ link_val() {
 #    which is the PR's: a PR that deleted or moved that folder read as untracked, and deferred; (2) the
 #    path is walked on disk: a tracked symlink, submodule or file on the way is refused (what is behind
 #    it is the PR's to choose), and so is a tracked folder that is not a kept Product, so one force-added
-#    file cannot switch the gates to a partial Product; an untracked folder that is there is CI's
-#    checkout, and is read; (3) only when the path reaches NOTHING, a Product the base keeps that holds
+#    file cannot switch the gates to a partial Product; the walk is repeated from where the path really
+#    lands (an alias like /proc/self/cwd means another folder to each process); an untracked folder
+#    that is there is CI's checkout, and is read; (3) only when the path reaches NOTHING, a Product the base keeps that holds
 #    this story's epic is the one meant. "Inside the code repo" is NOT the test: CI can only check a
 #    second repo out INSIDE the workspace, and an untracked checkout there is not the PR's.
 # Sets product_rel, prod (the folder to read), prod_note and prod_fail (text; the caller prints them).
@@ -245,19 +246,17 @@ $_cands
 CANDS
   if [ -n "$product_rel" ]; then
     prod="$(resolve_product "$product_rel" "$1")"
-    _t="$(product_tracked "$prod")"
-    case "$_t" in
-      entry:*)
-        prod_fail="product-repo reaches the Product through '${_t#*:}', a symlink, submodule or file this repo tracks — what is behind it is this PR's to choose. Point product-repo at the Product itself."
-        return 0 ;;
-      tree:*)
-        _r="${_t#*:}"
-        if git cat-file -e "${BASE}:${_r:+$_r/}.sdlc/hub.json" 2>/dev/null; then base_product "$_r"; return 0; fi
-        prod_fail="product-repo resolves to '${_r:-.}', which holds files this repo tracks, but ${BASE} does not track '${_r:+$_r/}.sdlc/hub.json' there, so it is not a Product kept in this repo. Untrack those files (git rm -r --cached '${_r:-.}') or point product-repo at the Product."
-        return 0 ;;
-    esac
-    # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it.
-    [ ! -d "$prod" ] || return 0
+    ! tracked_verdict "$(product_tracked "$prod")" || return 0
+    if [ -d "$prod" ]; then
+      # Walked once more, from where it really lands, resolved in ONE step from this shell (review 5).
+      # The walk above goes one part at a time in a subshell, and a Linux magic link such as
+      # /proc/self/cwd means a different folder to each process: there it pointed at the walk's own
+      # subshell and found nothing, while this shell read the PR's own copy of a kept Product through it.
+      _phys="$(cd -P "$prod" 2>/dev/null && pwd -P)" || _phys=""
+      if [ -n "$_phys" ]; then ! tracked_verdict "$(product_tracked "$_phys")" || return 0; fi
+      # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it.
+      return 0
+    fi
   fi
   # product-repo reaches NOTHING. Then a Product the base keeps that holds this story's epic is the one
   # meant (E117 review 3): a monorepo value spelled past the repo's own folder name, another machine's
@@ -279,17 +278,35 @@ CANDS
 $_kept
 KEPT
   [ -n "$_kept_here" ] || return 0
+  if [ -n "$product_rel" ]; then _what="product-repo '${product_rel}' reaches nothing"; else _what="link.md names no product-repo"; fi
   if [ "$(printf '%s' "$_kept_here" | grep -c .)" -gt 1 ]; then
-    prod_fail="product-repo '${product_rel}' reaches nothing, and ${BASE} keeps more than one Product holding ${_epic_of} ($(printf '%s' "$_kept_here" | tr '\n' ' ' | sed -E 's/ +$//')) — the gate cannot tell which is meant."
+    prod_fail="${_what}, and ${BASE} keeps more than one Product holding ${_epic_of} ($(printf '%s' "$_kept_here" | tr '\n' ' ' | sed -E 's/ +$//')) — the gate cannot tell which is meant."
     return 0
   fi
   _k="$(printf '%s' "$_kept_here" | head -1)"
   prod_note="${prod_note:+$prod_note
-}product-repo '${product_rel}' reaches nothing here; the Product this repo keeps at '${_k}' on ${BASE} holds ${_epic_of}, so that one is read."
+}${_what} here; the Product this repo keeps at '${_k}' on ${BASE} holds ${_epic_of}, so that one is read."
   product_rel="$_k"
   [ "$_k" != . ] || _k=""
   base_product "$_k"
   return 0
+}
+
+# Act on product_tracked's answer $1: a tracked entry on the way is refused; a tracked folder is read from
+# the base when the base keeps a Product there, and refused otherwise. Returns 1 when there was nothing to
+# act on (the path is not the repo's), so the caller goes on.
+tracked_verdict() {
+  case "$1" in
+    entry:*)
+      prod_fail="product-repo reaches the Product through '${1#*:}', a symlink, submodule or file this repo tracks — what is behind it is this PR's to choose. Point product-repo at the Product itself."
+      return 0 ;;
+    tree:*)
+      _r="${1#*:}"
+      if git cat-file -e "${BASE}:${_r:+$_r/}.sdlc/hub.json" 2>/dev/null; then base_product "$_r"; return 0; fi
+      prod_fail="product-repo resolves to '${_r:-.}', which holds files this repo tracks, but ${BASE} does not track '${_r:+$_r/}.sdlc/hub.json' there, so it is not a Product kept in this repo. Untrack those files (git rm -r --cached '${_r:-.}') or point product-repo at the Product."
+      return 0 ;;
+  esac
+  return 1
 }
 
 # Every Product the base keeps: a tracked `.sdlc/hub.json` with an `epics/` folder beside it (a code repo
