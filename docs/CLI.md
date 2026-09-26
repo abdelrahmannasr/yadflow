@@ -71,8 +71,8 @@ no clone needed.
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
 bypasses the commit atomic guard) — it never reaches a `modified` managed file; `--overwrite-local`
 replaces those (see below). Commit flags: `--type`, `-m/--message`, `--task` (a
-`<story>-T<NN>` id — an explicit value is validated against the spec-link gate and `yad commit`
-fails locally if it is malformed), `--ai
+`<story>-T<NN>` id, the story an `EP-<slug>-S<n>` with a lowercase slug — an explicit value is
+validated against the spec-link gate and `yad commit` fails locally if it is malformed), `--ai
 <claude\|copilot\|cursor\|coderabbit\|none>`, `--contract-change`, `--dry-run`. `open-pr` flags:
 `--repo`, `--risk <low\|medium\|high>`, `--contract-change`, `--base <branch>` (override the resolved
 base — only pass it deliberately; a non-default base loses the AI first pass), `--platform`,

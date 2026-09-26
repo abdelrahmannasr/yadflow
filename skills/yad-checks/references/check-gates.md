@@ -112,11 +112,13 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   - Each story's slice must sit under a story ID (`specs/EP-<slug>-S<n>/contracts/`) and come with its
     `specs/<story>/link.md` — `yad-spec` writes the two together. A slice that is **added or changed**
     without them **FAILS** by name (E117 review 2): deleting `link.md` used to drop a stale pin, and a
-    Spec Kit folder such as `specs/001-name/contracts/` can be tied to no lock. A story whose slice is
-    only **removed** — every changed file under it deleted — needs neither, so a folder can always be
-    cleaned up. This closes the deferral E115 stated as a cost.
-  - When the Product **was reached** and has no `epics/<epic>/`, the slice is an **orphan** and
-    **FAILS** — it used to say "not reachable" and defer.
+    Spec Kit folder such as `specs/001-name/contracts/` can be tied to no lock. A non-story folder
+    whose changed files are all **deletions** passes, so it can always be cleaned up. A story may drop
+    its `link.md` only when its **whole** slice is gone at HEAD (review 3): deleting `link.md` with part
+    of a slice left the rest with nothing pinning it. This closes the deferral E115 stated as a cost.
+  - When the Product folder **was reached** and has no `epics/<epic>/`, the slice is an **orphan** and
+    **FAILS** — it used to say "not reachable" and defer. Removing an orphan's slice (deletions only)
+    passes: no lock exists for it to contradict.
   - The fidelity check runs for **every story whose slice the diff touches**, and **aggregates**: each
     story reports (matched / stale / deferred), and any stale pin fails the gate. `git diff
     --name-only` is path-sorted, so reading one story off the first changed path validated whichever
@@ -350,8 +352,12 @@ hand-made `contract-lock.json` with the hash it pins. Two rules close both:
 
 The costs, stated: in a monorepo the Product is read from the base, so a PR that re-locks the contract
 **and** changes the slice fails the pin check — merge the re-lock first, the rule the gate already states
-("re-locked upstream first"); and a PR that adds a new epic or story **and** its code fails lineage-check,
-epic-open and reconcile-debt as an orphan — merge the Product change first. Frontmatter is read with CR
+("re-locked upstream first"); and a PR that adds a new epic or story **and** its code fails
+contract-check, lineage-check, epic-open and reconcile-debt as an orphan — merge the Product change
+first. When the base keeps a Product (a tracked `.sdlc/hub.json` with an `epics/` folder beside it),
+that is the Product whatever `product-repo` says — a value spelled past the repo's own folder name, or
+another machine's absolute path, cannot be folded to it, and a PR that deleted or moved it left nothing
+on disk to walk (review 3). Its `.gitattributes` entries are dropped before it is written out. Frontmatter is read with CR
 stripped before the `---` fences are matched, so a CRLF Product reads the same as an LF one. The case of a path is folded only where git folds it
 (`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a note, as
 before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.

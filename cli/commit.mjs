@@ -21,8 +21,8 @@ export function buildCommitMessage({ type, subject, task, contractChange = false
   if (/\.$/.test(subject.trim())) throw new Error('subject must not end with a period');
   // A malformed task id (e.g. a bare story `EP-x-S01` with no -T<NN>) commits fine locally but
   // then fails the spec-link CI gate — forcing a history rewrite + force-push. Reject it here so
-  // it never enters a trailer. Well-formed branch-derived ids (taskFromBranch) are stricter and pass;
-  // a lowercase-suffix branch is caught here, matching the case-sensitive spec-link grep.
+  // it never enters a trailer. A branch-derived id (taskFromBranch, which matches without case) is
+  // validated the same way, so `feat/EP-Demo-S01-T01` is caught here too, as spec-link would.
   if (task && !TASK_ID_RE.test(task)) {
     throw new Error(`invalid --task "${task}" (expected EP-<slug>-S<n>-T<NN> with a lowercase slug, e.g. EP-x-S01-T02) — the spec-link CI gate would reject it`);
   }

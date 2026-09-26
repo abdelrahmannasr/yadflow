@@ -226,14 +226,15 @@ SIBLINGS
     prod_note="${_link} names product-repo '${product_rel}', but ${_from} on ${BASE} says '${_base_rel}' — the Product is read from the base value; a new one counts once it merges."
     product_rel="$_base_rel"
   fi
-  [ -n "$product_rel" ] || return 0
   # A Product this repo keeps, asked of the base first (see above). Both joins resolve_product may pick.
   case "$product_rel" in
+    '') _cands="" ;;
     /*|'~'*|'$'*) _cands="$product_rel" ;;
     *) _cands="specs/$1/$product_rel
 $product_rel" ;;
   esac
   while IFS= read -r _cand; do
+    [ -n "$_cand" ] || continue
     _lr="$(lex_rel "$_cand")"
     [ -n "$_lr" ] || continue
     [ "$_lr" != . ] || _lr=""
@@ -241,6 +242,24 @@ $product_rel" ;;
   done <<CANDS
 $_cands
 CANDS
+  # And when product-repo does not name it — spelled past the repo's own folder name, on another
+  # machine's absolute path, or pointing nowhere on the repo's first spec — a Product the base keeps is
+  # still THE Product (E117 review 3). Its text cannot be folded to it, and the disk walk below stops at
+  # the first missing folder: exactly what a PR that deleted or moved it leaves.
+  kept_products
+  if [ -n "$_kept" ]; then
+    if [ "$(printf '%s' "$_kept" | grep -c .)" -gt 1 ]; then
+      prod_fail="${BASE} keeps more than one Product ($(printf '%s' "$_kept" | tr '\n' ' ' | sed -E 's/ +$//')), and product-repo '${product_rel}' names none of them — the gate cannot tell which is meant."
+      return 0
+    fi
+    _k="$(printf '%s' "$_kept" | head -1)"
+    prod_note="${prod_note:+$prod_note
+}product-repo '${product_rel}' does not name the Product this repo keeps at '${_k}' on ${BASE} — that one is read."
+    [ "$_k" != . ] || _k=""
+    base_product "$_k"
+    return 0
+  fi
+  [ -n "$product_rel" ] || return 0
   prod="$(resolve_product "$product_rel" "$1")"
   _t="$(product_tracked "$prod")"
   case "$_t" in
@@ -252,6 +271,23 @@ CANDS
       prod_fail="product-repo resolves to '${_r:-.}', which holds files this repo tracks, but ${BASE} does not track '${_r:+$_r/}.sdlc/hub.json' there, so it is not a Product kept in this repo. Untrack those files (git rm -r --cached '${_r:-.}') or point product-repo at the Product." ;;
   esac
   return 0
+}
+
+# Every Product the base keeps: a tracked `.sdlc/hub.json` with an `epics/` folder beside it (a code repo
+# may track a hub.json of its own; only a Product has epics). One line each, `.` for the root; read once.
+_kept=""
+_kept_read=""
+kept_products() {
+  [ -z "$_kept_read" ] || return 0
+  _kept_read=1
+  while IFS= read -r _h; do
+    [ -n "$_h" ] || continue
+    _d="${_h%.sdlc/hub.json}"; _d="${_d%/}"
+    if [ "$(git cat-file -t "${BASE}:${_d:+$_d/}epics" 2>/dev/null)" = tree ]; then _kept="${_kept}${_d:-.}
+"; fi
+  done <<KEPT
+$(git ls-tree -r -z --name-only "$BASE" 2>/dev/null | tr '\0' '\n' | grep -E '(^|/)\.sdlc/hub\.json$' || true)
+KEPT
 }
 
 # Read the Product this repo keeps at $1 (from the repo root; "" is the root) as it stands on the base:
@@ -279,8 +315,12 @@ base_product() {
     # is the PR's — a `.gitattributes` of `*.md text eol=crlf` or `working-tree-encoding=UTF-16` in the
     # PR wrote the base's files unreadable, and every gate passed. Pointed here, it finds none but the
     # base's own.
+    # The index's own `.gitattributes` entries are dropped before it is written out, for the same reason
+    # (review 3): one merged into the base's epics/ applied `working-tree-encoding=UTF-16` to every file.
     if ! { mkdir -p "${_arch_dir}/${_e}" &&
            GIT_INDEX_FILE="${_arch_dir}.idx" git read-tree "${BASE}:${_e}" &&
+           GIT_INDEX_FILE="${_arch_dir}.idx" git ls-files -z -- ':(glob)**/.gitattributes' |
+             GIT_INDEX_FILE="${_arch_dir}.idx" xargs -0 git update-index --force-remove -- &&
            GIT_WORK_TREE="${_arch_dir}/${_e}" GIT_INDEX_FILE="${_arch_dir}.idx" git checkout-index -a -f; } >/dev/null 2>&1; then
       prod_fail="product-repo resolves to '${_r:-.}', a Product this repo keeps, and '${_e}' could not be read from ${BASE}."
       return 0
@@ -389,12 +429,17 @@ rc=0
 while IFS= read -r story; do
   [ -z "$story" ] && continue
   # This story's own changed and deleted slice paths, matched as text (a folder that is not a story ID
-  # may hold characters a pattern would read). A story whose every changed slice file is DELETED only
-  # removes: that never needs a link.md or a story ID, so a folder can always be cleaned up.
-  story_surface="$(printf '%s\n' "$surface" | awk -v p="specs/${story}/contracts" 'index($0, p) == 1 && (length($0) == length(p) || substr($0, length(p) + 1, 1) == "/")')"
-  story_deleted="$(printf '%s\n' "$deleted" | awk -v p="specs/${story}/contracts" 'index($0, p) == 1 && (length($0) == length(p) || substr($0, length(p) + 1, 1) == "/")')"
+  # may hold characters a pattern would read; the prefix goes in through the environment, because
+  # `awk -v` turns a `\b` in a folder name into a backspace). A story whose every changed slice file is
+  # DELETED only removes (only_removes); one whose slice is also GONE at HEAD (slice_gone) is a whole
+  # clean-up, the only kind that needs no link.md — deleting link.md with PART of a slice used to drop
+  # a stale pin while the rest of the slice stayed (E117 review 3).
+  story_surface="$(printf '%s\n' "$surface" | p="specs/${story}/contracts" awk 'BEGIN { p = ENVIRON["p"] } index($0, p) == 1 && (length($0) == length(p) || substr($0, length(p) + 1, 1) == "/")')"
+  story_deleted="$(printf '%s\n' "$deleted" | p="specs/${story}/contracts" awk 'BEGIN { p = ENVIRON["p"] } index($0, p) == 1 && (length($0) == length(p) || substr($0, length(p) + 1, 1) == "/")')"
   only_removes=""
   [ -n "$story_surface" ] && [ "$story_surface" = "$story_deleted" ] && only_removes=1
+  slice_gone=""
+  if [ -n "$only_removes" ] && ! git cat-file -e "HEAD:specs/${story}/contracts" 2>/dev/null; then slice_gone=1; fi
   link="specs/${story}/link.md"
   if ! story_ok "$story"; then
     if [ -n "$only_removes" ]; then
@@ -409,8 +454,9 @@ while IFS= read -r story; do
   if [ ! -f "$link" ]; then
     # Removing a story's whole slice with its link.md is a clean-up, as before. Adding or changing a
     # slice without its link.md is not (E117 review 2): yad-spec writes the two together, and a PR could
-    # delete link.md to drop a stale pin, or add a slice for an epic that exists nowhere.
-    if [ -n "$only_removes" ]; then
+    # delete link.md to drop a stale pin, or add a slice for an epic that exists nowhere. Nor is removing
+    # PART of one (review 3): what is left is still a slice, with nothing pinning it.
+    if [ -n "$slice_gone" ]; then
       echo "note [contract-check]: no ${link}, and this only removes ${story}'s slice — fidelity check not needed."
       continue
     fi
@@ -493,9 +539,15 @@ while IFS= read -r story; do
     echo "     first (yad-architecture Step 5)."
     rc=1
     continue
-  elif [ -n "$prod" ] && [ -d "${prod}/epics" ] && [ ! -d "${prod}/epics/${epic}" ]; then
+  elif [ -n "$prod" ] && [ -d "$prod" ] && [ ! -d "${prod}/epics/${epic}" ]; then
     # The Product WAS reached, and has no such epic: a slice for an epic that exists nowhere (E117
-    # review 2). It used to say "not reachable" and defer.
+    # review 2). It used to say "not reachable" and defer. "Reached" is the folder itself, as in the three
+    # twin gates — not `epics/` inside it (review 3). Removing such a slice is always allowed: there is
+    # no lock anywhere for it to contradict.
+    if [ -n "$only_removes" ]; then
+      echo "note [contract-check]: ${story}'s slice belongs to ${epic}, which the Product does not have, and this only removes it — allowed."
+      continue
+    fi
     echo "FAIL [contract-check]: ${story}'s slice belongs to ${epic}, which does not exist in the Product (${prod}/epics/) — an orphan slice."
     rc=1
     continue
