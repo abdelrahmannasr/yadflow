@@ -71,14 +71,15 @@ link_val() {
 #    and counts once it merges. Only `product-repo` comes from the base: `contract-lock` is read as the
 #    PR leaves it — a re-spec PR updates the pin, and must.
 #  - a Product this repo KEEPS (a monorepo: the Product and the code in one git repo) is read as it
-#    stands on the base, never as the PR leaves it. Whether it is one is asked of the BASE, from the
-#    path's text alone, before anything on disk: the base tracks `<path>/.sdlc/hub.json`, which every
-#    Product commits. The disk is the PR's — a PR that deleted or moved that folder read as untracked,
-#    and deferred. Any other tracked file under a Product path is refused, so one force-added file
-#    cannot switch the gates to a partial Product; so is a path that runs through a tracked symlink,
-#    submodule or file, where what is behind it is the PR's to choose. "Inside the code repo" is NOT
-#    the test: CI can only check a second repo out INSIDE the workspace, and an untracked checkout
-#    there is not the PR's.
+#    stands on the base, never as the PR leaves it. In order: (1) the path's TEXT names a folder whose
+#    `.sdlc/hub.json` the base tracks (every Product commits one) — asked of the base before the disk,
+#    which is the PR's: a PR that deleted or moved that folder read as untracked, and deferred; (2) the
+#    path is walked on disk: a tracked symlink, submodule or file on the way is refused (what is behind
+#    it is the PR's to choose), and so is a tracked folder that is not a kept Product, so one force-added
+#    file cannot switch the gates to a partial Product; an untracked folder that is there is CI's
+#    checkout, and is read; (3) only when the path reaches NOTHING, a Product the base keeps that holds
+#    this story's epic is the one meant. "Inside the code repo" is NOT the test: CI can only check a
+#    second repo out INSIDE the workspace, and an untracked checkout there is not the PR's.
 # Sets product_rel, prod (the folder to read), prod_note and prod_fail (text; the caller prints them).
 _yad_tmp=""
 _arch_key=""
@@ -138,34 +139,52 @@ $product_rel" ;;
   done <<CANDS
 $_cands
 CANDS
-  # And when product-repo does not name it — spelled past the repo's own folder name, on another
-  # machine's absolute path, or pointing nowhere on the repo's first spec — a Product the base keeps is
-  # still THE Product (E117 review 3). Its text cannot be folded to it, and the disk walk below stops at
-  # the first missing folder: exactly what a PR that deleted or moved it leaves.
+  if [ -n "$product_rel" ]; then
+    prod="$(resolve_product "$product_rel" "$1")"
+    _t="$(product_tracked "$prod")"
+    case "$_t" in
+      entry:*)
+        prod_fail="product-repo reaches the Product through '${_t#*:}', a symlink, submodule or file this repo tracks — what is behind it is this PR's to choose. Point product-repo at the Product itself."
+        return 0 ;;
+      tree:*)
+        _r="${_t#*:}"
+        if git cat-file -e "${BASE}:${_r:+$_r/}.sdlc/hub.json" 2>/dev/null; then base_product "$_r"; return 0; fi
+        prod_fail="product-repo resolves to '${_r:-.}', which holds files this repo tracks, but ${BASE} does not track '${_r:+$_r/}.sdlc/hub.json' there, so it is not a Product kept in this repo. Untrack those files (git rm -r --cached '${_r:-.}') or point product-repo at the Product."
+        return 0 ;;
+    esac
+    # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it.
+    [ ! -d "$prod" ] || return 0
+  fi
+  # product-repo reaches NOTHING. Then a Product the base keeps that holds this story's epic is the one
+  # meant (E117 review 3): a monorepo value spelled past the repo's own folder name, another machine's
+  # absolute path, or a first spec pointing nowhere cannot be folded to it by text, and a PR that deleted
+  # or moved it leaves no disk to walk. Only when nothing is reached (review 4): a kept Product used to
+  # win over the real checkout, so a merged test fixture shaped like a Product was read instead of it.
+  # And only one holding the epic, so such a fixture is not read for stories it knows nothing about.
+  # (In a two-repo setup whose CI checks nothing out, a fixture that DOES hold the epic is read where
+  # the gate used to defer — no weaker than the deferral it replaces.)
   kept_products
-  if [ -n "$_kept" ]; then
-    if [ "$(printf '%s' "$_kept" | grep -c .)" -gt 1 ]; then
-      prod_fail="${BASE} keeps more than one Product ($(printf '%s' "$_kept" | tr '\n' ' ' | sed -E 's/ +$//')), and product-repo '${product_rel}' names none of them — the gate cannot tell which is meant."
-      return 0
-    fi
-    _k="$(printf '%s' "$_kept" | head -1)"
-    prod_note="${prod_note:+$prod_note
-}product-repo '${product_rel}' does not name the Product this repo keeps at '${_k}' on ${BASE} — that one is read."
-    [ "$_k" != . ] || _k=""
-    base_product "$_k"
+  _epic_of="$(story_epic "$1")"
+  _kept_here=""
+  while IFS= read -r _k; do
+    [ -n "$_k" ] || continue
+    _kd="$_k"; [ "$_kd" != . ] || _kd=""
+    if [ "$(git cat-file -t "${BASE}:${_kd:+$_kd/}epics/${_epic_of}" 2>/dev/null)" = tree ]; then _kept_here="${_kept_here}${_k}
+"; fi
+  done <<KEPT
+$_kept
+KEPT
+  [ -n "$_kept_here" ] || return 0
+  if [ "$(printf '%s' "$_kept_here" | grep -c .)" -gt 1 ]; then
+    prod_fail="product-repo '${product_rel}' reaches nothing, and ${BASE} keeps more than one Product holding ${_epic_of} ($(printf '%s' "$_kept_here" | tr '\n' ' ' | sed -E 's/ +$//')) — the gate cannot tell which is meant."
     return 0
   fi
-  [ -n "$product_rel" ] || return 0
-  prod="$(resolve_product "$product_rel" "$1")"
-  _t="$(product_tracked "$prod")"
-  case "$_t" in
-    entry:*)
-      prod_fail="product-repo reaches the Product through '${_t#*:}', a symlink, submodule or file this repo tracks — what is behind it is this PR's to choose. Point product-repo at the Product itself." ;;
-    tree:*)
-      _r="${_t#*:}"
-      if git cat-file -e "${BASE}:${_r:+$_r/}.sdlc/hub.json" 2>/dev/null; then base_product "$_r"; return 0; fi
-      prod_fail="product-repo resolves to '${_r:-.}', which holds files this repo tracks, but ${BASE} does not track '${_r:+$_r/}.sdlc/hub.json' there, so it is not a Product kept in this repo. Untrack those files (git rm -r --cached '${_r:-.}') or point product-repo at the Product." ;;
-  esac
+  _k="$(printf '%s' "$_kept_here" | head -1)"
+  prod_note="${prod_note:+$prod_note
+}product-repo '${product_rel}' reaches nothing here; the Product this repo keeps at '${_k}' on ${BASE} holds ${_epic_of}, so that one is read."
+  product_rel="$_k"
+  [ "$_k" != . ] || _k=""
+  base_product "$_k"
   return 0
 }
 

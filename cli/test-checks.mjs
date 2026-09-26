@@ -1315,9 +1315,61 @@ for (const g of GATES) {
       const r = runGate(g.script, T);
       assert.equal(r.code, 1, `${value}:\n${r.out}`);
       assert.match(r.out, g.expect, value);
-      assert.ok(r.out.includes("does not name the Product this repo keeps at 'hub' on main — that one is read."), `${value}:\n${r.out}`);
+      assert.ok(r.out.includes("reaches nothing here; the Product this repo keeps at 'hub' on main holds EP-demo, so that one is read."), `${value}:\n${r.out}`);
       fs.rmSync(T, { recursive: true, force: true });
     }
+  });
+
+  test(`${g.name} gate: a kept Product shaped like a fixture never wins over the Product CI checked out (E117 review 4)`, () => {
+    // A merged test fixture shaped like a Product (hub.json + epics/, holding the epic, passing) was read
+    // instead of the real, untracked checkout.
+    const T = scaffoldRepo();
+    g.seed(path.join(T, 'product'));
+    productFiles(T, 'test/fixtures/sample', clean, { hub: true });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../product') });
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, g.expect);
+    assert.doesNotMatch(r.out, /keeps at/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: when nothing is reached, only a kept Product holding the epic is read (E117 review 4)`, () => {
+    // A fixture that knows nothing of the story's epic is not read: the gate defers, as before.
+    let T = scaffoldRepo();
+    productFiles(T, 'test/fixtures/sample', (hub) => seedHubEpic(hub, 'EP-other'), { hub: true });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    let r = runGate(g.script, T);
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /keeps at/);
+    fs.rmSync(T, { recursive: true, force: true });
+    // Two that hold it: the gate cannot tell which is meant.
+    T = scaffoldRepo();
+    productFiles(T, 'a', g.seed, { hub: true });
+    productFiles(T, 'b', g.seed, { hub: true });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /keeps more than one Product holding EP-demo \(a b\) — the gate cannot tell which is meant/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: an empty product-repo with a kept Product holding the epic reads it (E117 review 4)`, () => {
+    // The kept Product was "read" and then three gates skipped the check on the empty value.
+    const T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed, { hub: true });
+    onBase(T, {});
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x', ...(g.files || {}),
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', ...(g.extraLink || {}) }),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, g.expect);
+    fs.rmSync(T, { recursive: true, force: true });
   });
 
   test(`${g.name} gate: a .gitattributes merged into the base Product cannot re-encode it (E117 review 3)`, () => {

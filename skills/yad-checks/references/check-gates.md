@@ -354,10 +354,15 @@ The costs, stated: in a monorepo the Product is read from the base, so a PR that
 **and** changes the slice fails the pin check — merge the re-lock first, the rule the gate already states
 ("re-locked upstream first"); and a PR that adds a new epic or story **and** its code fails
 contract-check, lineage-check, epic-open and reconcile-debt as an orphan — merge the Product change
-first. When the base keeps a Product (a tracked `.sdlc/hub.json` with an `epics/` folder beside it),
-that is the Product whatever `product-repo` says — a value spelled past the repo's own folder name, or
-another machine's absolute path, cannot be folded to it, and a PR that deleted or moved it left nothing
-on disk to walk (review 3). Its `.gitattributes` entries are dropped before it is written out. Frontmatter is read with CR
+first. When `product-repo` reaches **nothing** — neither a kept Product by its text nor any folder on
+disk — a Product the base keeps (a tracked `.sdlc/hub.json` with an `epics/` folder beside it) that holds
+the story's epic is the one read: a value spelled past the repo's own folder name, or another machine's
+absolute path, cannot be folded to it, and a PR that deleted or moved it left nothing on disk to walk
+(review 3). Only then, and only one holding the epic (review 4): a kept Product used to win over the
+real checkout, so a merged test fixture shaped like a Product was read instead. Two that hold it
+**FAIL**. In a two-repo setup whose CI checks nothing out, a fixture that does hold the epic is read
+where the gate used to defer — no weaker than that deferral. A kept Product's `.gitattributes` entries
+are dropped before it is written out. Frontmatter is read with CR
 stripped before the `---` fences are matched, so a CRLF Product reads the same as an LF one. The case of a path is folded only where git folds it
 (`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a note, as
 before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
