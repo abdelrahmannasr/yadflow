@@ -260,6 +260,18 @@ CANDS
         prod_fail="product-repo resolves to '${prod}', a folder the gate cannot enter to check where it really is — so it is not read."
         return 0
       fi
+      # Not inside this repo's own git folder (review 7). git never lists `.git/` as tracked, yet a PR
+      # shapes it: a branch named `epics/EP-x/y` makes the folders `.git/refs/…/epics/EP-x/` when CI
+      # fetches, and that read as an untracked checkout holding an open epic with no lock.
+      for _gd in "$(git rev-parse --absolute-git-dir 2>/dev/null)" "$(git rev-parse --git-common-dir 2>/dev/null)"; do
+        [ -n "$_gd" ] || continue
+        _gd="$(cd -P "$_gd" 2>/dev/null && pwd -P)" || continue
+        case "$_phys/" in
+          "$_gd"/*)
+            prod_fail="product-repo resolves to '${prod}', inside this repo's own git folder (${_gd}) — what is there is git's, shaped by branch names, not a Product."
+            return 0 ;;
+        esac
+      done
       ! tracked_verdict "$(product_tracked "$_phys")" || return 0
       # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it.
       return 0

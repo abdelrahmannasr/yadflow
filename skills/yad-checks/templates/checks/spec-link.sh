@@ -60,7 +60,7 @@ while IFS= read -r sha; do
   [ -z "$sha" ] && continue
   short="$(git log -1 --format=%h "$sha")"
   subject="$(git log -1 --format=%s "$sha")"
-  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
+  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | awk '!f && length($0) { print; f = 1 }')"
   exempt=0
   note=''
   if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: "; then

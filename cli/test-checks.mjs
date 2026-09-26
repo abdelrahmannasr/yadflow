@@ -1438,6 +1438,22 @@ for (const g of GATES) {
     fs.rmSync(T, { recursive: true, force: true });
   });
 
+  test(`${g.name} gate: a product-repo inside the repo's own .git folder is refused (E117 review 7)`, () => {
+    // git never lists .git/ as tracked, yet a branch name shapes it: `epics/EP-demo/x` makes
+    // .git/refs/heads/epics/EP-demo/, which read as an untracked checkout holding an open epic, no lock.
+    const T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed, { hub: true });
+    onBase(T, {}); // the first spec: the PR's own product-repo is used
+    git(T, 'branch', 'epics/EP-demo/x');
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '../../.git/refs/heads'),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /inside this repo's own git folder .* not a Product/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
   test(`${g.name} gate: a .gitattributes merged into the base Product cannot re-encode it (E117 review 3)`, () => {
     const T = scaffoldRepo();
     productFiles(T, 'hub', g.seed, { hub: true });
@@ -1648,6 +1664,22 @@ test('reconcile-debt gate: a reached Product without the epic is an orphan, not 
   assert.match(r.out, /epic EP-demo does not exist in the product repo \(orphan story link\)/);
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+for (const [name, script, tag] of [['spec-link', SPEC_LINK, 'spec-link'], ['lineage-check', LINEAGE, 'lineage-check'], ['epic-open', EPIC_OPEN, 'epic-open'], ['reconcile-debt', DEBT, 'reconcile-debt']]) {
+  test(`${name} gate: a commit with a huge run of Task trailers gets a verdict, not a silent exit (E117 review 7)`, () => {
+    // `sed | head -1` left sed writing into a closed pipe; under pipefail the gate died with 141 and no message.
+    const T = scaffoldRepo();
+    seedHubEpic(path.join(T, 'product'), 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } });
+    commit(T, `feat: add thing\n\n${Array.from({ length: 4000 }, () => 'Task: EP-demo-S01-T01').join('\n')}`, {
+      'src/thing.js': 'x',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../product' }),
+    });
+    const r = runGate(script, T);
+    assert.equal(r.code, 0, `a silent exit is 141:\n${r.out}`);
+    assert.ok(r.out.includes(`PASS [${tag}]`), r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
 
 test('contract-check gate: a slice under a folder that is not a story ID is refused by name (E117 review 1)', () => {
   const T = scaffoldRepo();
