@@ -1,3 +1,50 @@
+# [4.0.0-next.2](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.0-next.1...v4.0.0-next.2) (2026-09-26)
+
+
+### Bug Fixes
+
+* **capture:** continue origin's branch when there is no local one; name a refused push (E43 review 2) ([8e2c07d](https://github.com/abdelrahmannasr/yadflow/commit/8e2c07d32d1b6882c7b543b9b3c65f96ca67e919))
+* **capture:** every git call takes the environment runCapture was given (E43) ([c347c94](https://github.com/abdelrahmannasr/yadflow/commit/c347c9460154e6b30472a3a1aae2869354a6fce4))
+* **capture:** prune deleted capture branches; read [a-z] and list brackets as GitHub does (E43 review 3) ([2322dcb](https://github.com/abdelrahmannasr/yadflow/commit/2322dcb0321ff02f0ebf22ecfe61b2979236944d))
+* **capture:** subfolder Products, staged-then-deleted files, a plain push, and a truer workflow scan (E43 review) ([14f0eeb](https://github.com/abdelrahmannasr/yadflow/commit/14f0eeb6e5fe9ce21bdfe5fb168ace88a41d7ad6))
+* **capture:** take design-links.json and test-links.json with the artifacts (E44) ([ad4f2cf](https://github.com/abdelrahmannasr/yadflow/commit/ad4f2cfc1f134c3b17616348081795a09939049a))
+* **checks:** a C-quoted path is an artifact change; warn on a rename-blind workflow (E47 review 4) ([e6af8df](https://github.com/abdelrahmannasr/yadflow/commit/e6af8df0f4dafd3ec593da44114b07c45b67f54a))
+* **checks:** E114 review 1 — one odd name per test, split lines, full hint ([df9f4dc](https://github.com/abdelrahmannasr/yadflow/commit/df9f4dcaf5736bfbd93a49c017ffae257e2b4ef6))
+* **checks:** fold the long s into specs; say a file is a file (E115 review 2) ([373ba16](https://github.com/abdelrahmannasr/yadflow/commit/373ba16c81bc3c0eb5c56bb7adae48441b4f07a8))
+* **checks:** let a PR of step owner files alone through on a Product (E47 review 2) ([f7ff5b0](https://github.com/abdelrahmannasr/yadflow/commit/f7ff5b062a51b455a18190a31ccbd5488fe5785f))
+* **checks:** list a rename by both paths in contract-check and backfill-check (E114) ([09bb4de](https://github.com/abdelrahmannasr/yadflow/commit/09bb4de3f36e0fec0eb247565fc2364a46b482b8))
+* **checks:** list renames and unquoted paths in the hub-checks diff (E47 review 3) ([bc270e0](https://github.com/abdelrahmannasr/yadflow/commit/bc270e0583a7583ffccea94b9ecaa1a11498ec46))
+* **checks:** read specs/ without case; name a failed tree read (E115 review 1) ([a9fb725](https://github.com/abdelrahmannasr/yadflow/commit/a9fb72599a5980e9f2e8307cb87eca9ae31f17ca))
+* **checks:** read the changed list as bytes; check each workflow line (E47 review 5) ([edc850b](https://github.com/abdelrahmannasr/yadflow/commit/edc850b20495a13d376b6f01dc02db61658d4e27))
+* **checks:** refuse a second spelling of contracts/ or a story folder (E115 review 3) ([debc7b6](https://github.com/abdelrahmannasr/yadflow/commit/debc7b68f8bbddf5634322228f633327aba8c50a))
+* **checks:** refuse a symlink or submodule under specs/ in contract-check (E115) ([e93387a](https://github.com/abdelrahmannasr/yadflow/commit/e93387aa036cc40b9d6741291a1ef518a0d03e1b))
+* **checks:** say what the story-spelling rule does not catch (E115 review 4) ([3d36c93](https://github.com/abdelrahmannasr/yadflow/commit/3d36c934406b148c3601c5a6bfdacd40abccbad3))
+* **claims:** find the first capture's base in one git call, with no cap (E46 review 2) ([e4a6fcf](https://github.com/abdelrahmannasr/yadflow/commit/e4a6fcf2a33acba0c4b76b5ba54e99d740dcd1d7))
+* **claims:** keep the once-an-hour memory across a push; own edits only; over-report a missing base (E46 review 1) ([7ab038d](https://github.com/abdelrahmannasr/yadflow/commit/7ab038d436fc9d46009fd31139bd7327083ebac3))
+* **claims:** pin the first-capture search against the person's git config (E46 review 3) ([80db192](https://github.com/abdelrahmannasr/yadflow/commit/80db1926695f60884a47b6a72b5a79f634ac5519))
+* **claims:** read the Yad-Base trailer with a pinned separator (E46 review 4) ([c026fef](https://github.com/abdelrahmannasr/yadflow/commit/c026fef2454f6a5799b6e0f8fe5a04ee6cbbad62))
+* **doctor:** read a gate one bash command at a time (E114 review 2) ([06d3f69](https://github.com/abdelrahmannasr/yadflow/commit/06d3f69113e3b19f3b9cee1cf77a637999372775))
+* **doctor:** satisfy eslint — split on ** instead of a NUL placeholder; no useless assignment (E43) ([aad5822](https://github.com/abdelrahmannasr/yadflow/commit/aad582240fa0b8f4a279b0221100fba967ced20d))
+* **fold:** fold a staged deletion; refuse mid-merge and on a detached HEAD (E44 review 1) ([4391b1b](https://github.com/abdelrahmannasr/yadflow/commit/4391b1b1eb6d22990b672a0d3f64b5fb5e77c5ec))
+* **fold:** name a case-only rename only when git shows the new spelling (E44 review 4) ([2a6395c](https://github.com/abdelrahmannasr/yadflow/commit/2a6395c7f9ae7c7d9ee8bf1877e4cb770b2197c0))
+* **fold:** never run git add with an empty list; refuse a git rm --cached path (E44 review 2) ([cfbaefc](https://github.com/abdelrahmannasr/yadflow/commit/cfbaefc9d8334a20ddbd585b9c2c25a0d31992f7))
+* **fold:** tell a case-only rename from git rm --cached (E44 review 3) ([a374fc3](https://github.com/abdelrahmannasr/yadflow/commit/a374fc314f266354cdf96200b54dfa631423d4c2))
+* **fold:** the Product level is seeded under either spelling; truer words (E44 review 6) ([c711326](https://github.com/abdelrahmannasr/yadflow/commit/c71132643b8c3ca1fb1d0b5c3a4739d0b18209dd))
+* **fold:** the verified seed rule asks ledger-guard's own question; a change-epic's seed rides along (E44) ([f0ee36d](https://github.com/abdelrahmannasr/yadflow/commit/f0ee36d60bad06ac0920b64d97bf16e9f19a7a06))
+* **gate:** a round keeps the fingerprint it opened with; one spelling across approvals and comments (E112 review 2) ([d7dbe57](https://github.com/abdelrahmannasr/yadflow/commit/d7dbe57d507f5c798236715e55b70ef42f273dbe))
+* **gate:** approve keeps the review record; one spelling per person; a round is one version (E112 review) ([6f44c18](https://github.com/abdelrahmannasr/yadflow/commit/6f44c1887ae2c846bdcd1c14cf276624a2be91b6))
+* **owners:** never fold an owner file; name off-chain files in doctor (E47 review 1) ([f23f606](https://github.com/abdelrahmannasr/yadflow/commit/f23f606f220aef583500c6f2a632ee8927307b6c))
+
+
+### Features
+
+* **capture:** yad capture snapshots Shape artifacts onto private yad/wip branches (E43) ([58b0181](https://github.com/abdelrahmannasr/yadflow/commit/58b0181f72fd88e97d391e0e52a46e8b5cdf1183))
+* **claims:** yad claims — who else is editing which artifact, read from the capture branches (E46) ([6668441](https://github.com/abdelrahmannasr/yadflow/commit/66684416b5d3c1a2a04b069cd35b0d7f13e55ddb))
+* **doctor:** warn when a step owner file does nothing (E47) ([b189abd](https://github.com/abdelrahmannasr/yadflow/commit/b189abdbc94aa0a36041d501b9cd09c5577d5a62))
+* **fold:** yad fold <epic> <step> — one clean commit per authoring step (E44) ([a4a5285](https://github.com/abdelrahmannasr/yadflow/commit/a4a52857c2536b83d954e6a313863ecb16ecf01d))
+* **gate:** yad gate approve, comment and advance for a Product with no platform (E112) ([50f7618](https://github.com/abdelrahmannasr/yadflow/commit/50f7618aae85fb269578055e5e12d33e58643fab))
+* **owners:** assign an authoring step to one person (E47) ([f9f9bda](https://github.com/abdelrahmannasr/yadflow/commit/f9f9bdaf31206d8ac4c7d46b4d512f23b1e816d2))
+
 # [4.0.0-next.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.19.0-next.2...v4.0.0-next.1) (2026-09-24)
 
 
