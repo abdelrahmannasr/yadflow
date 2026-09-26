@@ -66,7 +66,18 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 - **Fails closed** if `<base>` can't be resolved — an undiffable range must never report "no surface
   change" and silently green-light a bypass. `<base>` is optional — see
   [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
+- **Refuses any symlink or submodule under `specs/`** (E115), before any other rule. The gate reads
+  paths, and a link lets the content live where no path under `specs/` names it: a symlink at
+  `specs`, `specs/<story>` or `specs/<story>/contracts` hid the slice from every rule, and so did every
+  later edit to the link's target. A symlinked `link.md` redirects the lock pin the fidelity check
+  reads. The check reads the **tree at HEAD** (`git ls-tree -r -z HEAD -- specs`), not the diff, so a
+  link merged before this check existed fails **every PR** in the repo until one PR removes it.
+  `yad-spec` writes real files, so nothing legitimate lives there as a link. Removing a link under
+  `contracts/` is a change to the surface and needs `Contract-Change: yes`; on a lockless epic it takes
+  the removal hatch below. `yad doctor` warns `checks:symlink-blind` for an older copy without this check.
 - Computes the changed files in `<base>..HEAD`.
+- The surface is `specs/<story>/contracts` **and** everything under it: a path that IS
+  `specs/<story>/contracts` (a link being removed) counts too.
 - If **nothing** under `specs/*/contracts/**` changed → **PASS** (normal implementation only *consumes*
   the contract).
 - If the surface slice changed:

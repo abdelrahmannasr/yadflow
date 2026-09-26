@@ -46,6 +46,27 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
 fi
 RANGE="${BASE}..HEAD"
 
+# No symlink and no submodule anywhere under specs/ (E115). The gate reads PATHS: a link lets the
+# content live somewhere the paths below never name. A symlink at `specs`, `specs/<story>` or
+# `specs/<story>/contracts` hid the slice from every rule here, and so did every later edit to the
+# link's target; a symlinked slice file was seen once, when added, and never again. A link.md behind a
+# link redirects the lock pin the fidelity check reads. yad-spec writes real files, so nothing
+# legitimate lives there as a link.
+#
+# Read from the TREE at HEAD, not from the diff, and before the "no surface" PASS below: a link merged
+# before this check existed fails every PR until one PR removes it — no diff would ever show it again.
+# 120000 is a symlink, 160000 a submodule; `-r` lists `specs` itself when `specs` is the link. No
+# `|| true`: a git that fails here must fail the gate.
+links="$(git ls-tree -r -z HEAD -- specs | tr '\0' '\n' | awk -F'\t' '$1 ~ /^120000 / {print "  " $2 " (symlink)"} $1 ~ /^160000 / {print "  " $2 " (submodule)"}')"
+if [ -n "$links" ]; then
+  echo "FAIL [contract-check]: specs/ holds a symlink or a submodule — this gate cannot see what it points at:"
+  printf '%s\n' "$links"
+  echo "  -> replace each one with the real files (yad-spec writes real files). Until then every PR in"
+  echo "     this repo fails here, because the contract surface cannot be checked."
+  echo "     Removing a link is itself a change to specs/: under contracts/ it needs 'Contract-Change: yes'."
+  exit 1
+fi
+
 # How the changed list is built, and why each flag is there (E114):
 #   --no-renames  a rename is listed by BOTH paths, as a delete and an add. Without it git names a
 #                 rename by its NEW path only, so `git mv specs/S1/contracts/api.md docs/api.md`
@@ -57,7 +78,7 @@ RANGE="${BASE}..HEAD"
 # Both lists (this one and `deleted` below) are built the SAME way: the no-lock escape hatch compares
 # them line for line.
 changed="$(git diff --no-renames --name-only -z "$RANGE" | tr '\0' '\n')"
-surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)"
+surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
 
 # Slice paths this diff DELETES. `--name-only` above lists a deleted file exactly like a changed one,
 # which is right for the trailer rule — removing an agreed endpoint IS a surface change — but it
@@ -74,7 +95,7 @@ surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)
 # change and every rule below applies to it unchanged).
 # --no-renames matters here too: a slice MOVED out of contracts/ is a delete of the old path, and
 # without it git reports an `R`, which --diff-filter=D never matches — the hatch would refuse the move.
-deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\0' '\n' | grep -E '^specs/[^/]+/contracts/' || true)"
+deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\0' '\n' | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
 
 if [ -z "$surface" ]; then
   echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts/**)."
@@ -136,7 +157,7 @@ resolve_product() {
 # link.md deferred the whole check before the stale one was ever read (issue #161). Failures are
 # AGGREGATED — every story reports, so one clean-or-deferred story never masks another's stale pin
 # (the same rule spec-link applies per commit).
-stories="$(printf '%s\n' "$surface" | sed -E 's#^specs/([^/]+)/contracts/.*#\1#' | sort -u)"
+stories="$(printf '%s\n' "$surface" | sed -E 's#^specs/([^/]+)/contracts(/.*)?$#\1#' | sort -u)"
 rc=0
 while IFS= read -r story; do
   [ -z "$story" ] && continue
@@ -197,8 +218,8 @@ while IFS= read -r story; do
     # The escape hatch described at the top: with no lock upstream there is no agreed shape for a
     # deletion to contradict, so REMOVING a slice is always allowed here. This is what keeps a
     # short-lane story that should never have had a `contracts/` folder from being unfixable.
-    story_surface="$(printf '%s\n' "$surface" | grep -E "^specs/${story}/contracts/" || true)"
-    story_deleted="$(printf '%s\n' "$deleted" | grep -E "^specs/${story}/contracts/" || true)"
+    story_surface="$(printf '%s\n' "$surface" | grep -E "^specs/${story}/contracts(/|$)" || true)"
+    story_deleted="$(printf '%s\n' "$deleted" | grep -E "^specs/${story}/contracts(/|$)" || true)"
     if [ -n "$story_surface" ] && [ "$story_surface" = "$story_deleted" ]; then
       echo "note [contract-check]: ${story} only REMOVES contract slice files and ${epic} has no lock —"
       echo "  nothing upstream is being contradicted, so the removal is allowed."

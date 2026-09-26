@@ -24997,6 +24997,34 @@ test('E47 doctor: an owner file that does nothing is named as owners:ignored; a 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E115 doctor: an older contract-check that never reads specs/ for links is checks:symlink-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, symlinkBlindText } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:symlink-blind');
+    const TPL = 'skills/yad-checks/templates/checks/contract-check.sh';
+    const shipped = fs.readFileSync(path.join(ROOT, TPL), 'utf8');
+    const put = (dir, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, 'checks/contract-check.sh'), text); };
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    put(backend, shipped);
+    put(T, shipped);
+    assert.deepEqual(blind(), [], 'the shipped gate is fine');
+    // An older gate: no tree read at all. (Built from the shipped one, not from history — CI may clone shallow.)
+    const old = shipped.replace(/^links=.*$/m, 'links=""');
+    assert.notEqual(old, shipped);
+    put(backend, old);
+    const hit = blind();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend is an older copy that does not refuse a symlink or submodule under specs\//);
+    put(T, old);
+    assert.match(blind()[0].message, /^checks\/contract-check\.sh in the Product, backend are older copies/);
+    // A comment naming the command is not the command; a split command is one command.
+    assert.equal(symlinkBlindText('# git ls-tree -r -z HEAD -- specs\n'), true);
+    assert.equal(symlinkBlindText('links="$(git ls-tree -r -z HEAD \\\n  -- specs | tr x y)"\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E114 doctor: an older contract-check or backfill-check that lists a rename by one path is checks:rename-blind', async () => {
   const { T, backend } = scaffold();
   try {

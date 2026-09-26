@@ -527,6 +527,92 @@ test('contract-check gate: one non-UTF-8 file name does not hide the slice under
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------- no symlink, no submodule under specs/ (E115) ----------
+// The gate reads paths. A link lets the content live where no path under specs/ names it, so a link at
+// `specs`, `specs/<story>` or `specs/<story>/contracts` hid the slice from every rule, and so did every
+// later edit to its target. The gate now reads the TREE at HEAD, on every PR.
+
+// A branch whose one commit adds a symlink at `rel` (pointing at `target`), after a docs/api.md on main.
+function linkRepo(rel, target, extra = {}) {
+  const T = scaffoldRepo();
+  commit(T, 'docs: the notes a link could point at', { 'docs/api.md': 'v1\n', ...extra });
+  const base = git(T, 'rev-parse', 'HEAD').toString().trim();
+  fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+  fs.symlinkSync(target, path.join(T, rel));
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'chore: link it');
+  return { T, base };
+}
+
+for (const [rel, target] of [
+  ['specs', 'docs'],
+  ['specs/EP-demo-S01', '../docs'],
+  ['specs/EP-demo-S01/contracts', '../../docs'],
+  ['specs/EP-demo-S01/contracts/api.md', '../../../docs/api.md'],
+  ['specs/EP-demo-S01/link.md', '../../docs/api.md'],
+]) {
+  test(`contract-check gate: a symlink at ${rel} fails, and so does every later PR (E115)`, () => {
+    const { T, base } = linkRepo(rel, target);
+    const r = runGate(CONTRACT, T, [base]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /specs\/ holds a symlink or a submodule/);
+    assert.ok(r.out.includes(`  ${rel} (symlink)`), r.out);
+    // The link is on the base now; a later PR only edits its target — no path under specs/ in the diff.
+    const later = git(T, 'rev-parse', 'HEAD').toString().trim();
+    commit(T, 'docs: edit the notes', { 'docs/api.md': 'v2\n' });
+    const again = runGate(CONTRACT, T, [later]);
+    assert.equal(again.code, 1, `a link merged earlier must not let an edit to its target through:\n${again.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('contract-check gate: a submodule under specs/ fails (E115)', () => {
+  const T = scaffoldRepo();
+  const sha = git(T, 'rev-parse', 'HEAD').toString().trim();
+  git(T, 'update-index', '--add', '--cacheinfo', `160000,${sha},specs/EP-demo-S01/contracts`);
+  git(T, 'commit', '-q', '-m', 'chore: a submodule as the slice');
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, r.out);
+  assert.ok(r.out.includes('  specs/EP-demo-S01/contracts (submodule)'), r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a symlink outside specs/ is not this gate\'s concern (E115)', () => {
+  for (const rel of ['docs-link', 'specsX']) {
+    const { T, base } = linkRepo(rel, 'docs');
+    const r = runGate(CONTRACT, T, [base]);
+    assert.equal(r.code, 0, `${rel}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('contract-check gate: the PR that removes a linked slice under a lockless epic passes (E115)', () => {
+  // Not a dead end. The link's own path `specs/<story>/contracts` (no slash) must count as the surface
+  // AND as deleted, or the REMOVE hatch never sees it.
+  const { T } = linkRepo('specs/EP-demo-S01/contracts', '../../docs', {
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': 'none' }),
+    'product/epics/EP-demo/.sdlc/state.json': '{}\n',
+  });
+  const withLink = git(T, 'rev-parse', 'HEAD').toString().trim();
+  git(T, 'rm', '-q', 'specs/EP-demo-S01/contracts');
+  git(T, 'commit', '-q', '-m', 'chore: drop the linked slice\n\nContract-Change: yes');
+  const r = runGate(CONTRACT, T, [withLink]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /only REMOVES contract slice files/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check reads the surface as contracts(/|$) in every place, and the tree before any PASS (E115)', () => {
+  // One arm and its twin: the hatch compares `surface` and `deleted` line for line, and `stories` names
+  // who is checked. An old `contracts/` form in any of them breaks the removal PR above.
+  const src = fs.readFileSync(CONTRACT, 'utf8');
+  const code = src.split('\n').filter((l) => !/^\s*#/.test(l));
+  assert.deepEqual(code.filter((l) => /contracts\/['"]|contracts\/\.\*/.test(l)), [], 'no old surface pattern left');
+  assert.equal(code.filter((l) => l.includes('contracts(/|$)')).length, 4);
+  assert.equal(code.filter((l) => l.includes('contracts(/.*)?$')).length, 1);
+  assert.ok(src.indexOf('git ls-tree -r -z HEAD -- specs') < src.indexOf('PASS [contract-check]'), 'the tree is read before the first PASS');
+});
+
 // ---------- backfill-check.sh ----------
 const BACKFILL = path.join(ROOT, 'skills/yad-backfill/templates/checks/backfill-check.sh');
 const backfillSpec = (verified) => `---\nfeature: billing\nverified: ${verified}\n---\n# billing\n`;

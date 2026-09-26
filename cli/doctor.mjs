@@ -477,7 +477,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // slice out of specs/<story>/contracts/ (or a file out of src/<feature>/) passes the gate. `yad check
     // --fix` refreshes a wired contract-check nobody changed; one changed by hand is kept, and
     // backfill-check is never wired at all — every copy is placed by hand. Named, not fixed.
-    const renameBlind = [{ where: 'the Product', root }, ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))]
+    const gateRoots = [{ where: 'the Product', root }, ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))];
+    const renameBlind = gateRoots
       .flatMap((x) => RENAME_BLIND_GATES.map((rel) => ({ ...x, rel })))
       .filter((x) => renameBlindGate(path.join(x.root, x.rel)))
       .map((x) => `${x.rel} in ${x.where}`);
@@ -485,6 +486,15 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       check(checks, 'checks:rename-blind', 'project', 'warn',
         `${renameBlind.join(', ')} ${renameBlind.length > 1 ? 'are older copies that list' : 'is an older copy that lists'} a renamed file by its new path only — moving a file out of what the gate guards passes it`,
         'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise copy the shipped template over it (skills/yad-checks/templates/checks/contract-check.sh, skills/yad-backfill/templates/checks/backfill-check.sh) — or build each list as the template does: `git diff --no-renames --name-only -z … | tr \'\\0\' \'\\n\'`, with `export LC_ALL=C` at the top, because `--no-renames` alone still lets git quote an odd path past the gate');
+    }
+    // E115. An older contract-check reads paths only, so a symlink or submodule under specs/ (at `specs`,
+    // `specs/<story>`, `specs/<story>/contracts`, a slice, link.md) hides the slice — and every later edit
+    // to the link's target passes. The current one reads the tree at HEAD first. Named, not fixed.
+    const symlinkBlind = gateRoots.filter((x) => symlinkBlindGate(path.join(x.root, 'checks/contract-check.sh'))).map((x) => x.where);
+    if (symlinkBlind.length) {
+      check(checks, 'checks:symlink-blind', 'project', 'warn',
+        `checks/contract-check.sh in ${symlinkBlind.join(', ')} ${symlinkBlind.length > 1 ? 'are older copies that do' : 'is an older copy that does'} not refuse a symlink or submodule under specs/ — a link there hides the contract slice, and every later edit to its target passes`,
+        'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise copy skills/yad-checks/templates/checks/contract-check.sh over it');
     }
   }
 
@@ -1640,6 +1650,15 @@ export function renameBlindGate(file) {
   let src;
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return renameBlindText(src);
+}
+// E115: a contract-check that never reads the tree under specs/ for links. Read like the one above — a
+// `#` line is prose, a line ending in `\` goes on — and it is enough that ONE command lists `specs`.
+export const symlinkBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b.*\bspecs\b/.test(l));
+export function symlinkBlindGate(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return symlinkBlindText(src);
 }
 
 // `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
