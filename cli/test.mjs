@@ -25011,6 +25011,15 @@ test('E47 doctor: new owner-exempting checks beside a hub workflow that lists re
     assert.match(hit[0].message, /\.github\/workflows\/yad-hub-checks\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
     w('.github/workflows/yad-hub-checks.yml', shipped('skills/yad-checks/templates/github/yad-hub-checks.yml'));
     assert.deepEqual(blind(), [], 'the shipped workflow is fine');
+    // One line fixed and its twin not: still blind (a job the team does not require would let it through).
+    const lines = shipped('skills/yad-checks/templates/github/yad-hub-checks.yml').split('\n');
+    const first = lines.findIndex((l) => l.includes('--no-renames'));
+    lines[first] = lines[first].replace(' --no-renames', '');
+    w('.github/workflows/yad-hub-checks.yml', lines.join('\n'));
+    assert.equal(blind().length, 1);
+    // A comment is neither a blind line nor a fix.
+    w('.github/workflows/yad-hub-checks.yml', `# we used to run git diff --name-only here\n${shipped('skills/yad-checks/templates/github/yad-hub-checks.yml')}`);
+    assert.deepEqual(blind(), []);
     w('.gitlab/ci/yad-hub-checks.yml', 'x: git diff --name-only "origin/main...HEAD"\n');
     assert.match(blind()[0].message, /^\.gitlab\/ci\/yad-hub-checks\.yml/);
     // The Foundation-guard reader still knows both releases of the checks.

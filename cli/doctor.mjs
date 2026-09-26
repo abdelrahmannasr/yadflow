@@ -1621,9 +1621,12 @@ export function ownerChecks(checks, root) {
 export const HUB_CHECK_WORKFLOWS = ['.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml'];
 export function ownerGuardChecks(checks, root) {
   const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
-  const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('.sdlc/owners/'));
+  // The exemption's own pattern, not any mention of the folder: a comment is not a rule.
+  const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('\\.sdlc/owners/[^/]+\\.json$'));
   if (!exempting.length) return;
-  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => { const t = read(rel); return t != null && /--name-only/.test(t) && !/--no-renames/.test(t); });
+  // Line by line: one fixed diff line must not hide its blind twin in the other job.
+  const blindLine = (l) => !/^\s*#/.test(l) && /\bgit\b.*\bdiff\b.*--name-only/.test(l) && !/--no-renames/.test(l);
+  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => (read(rel) || '').split('\n').some(blindLine));
   if (!blind.length) return;
   check(checks, 'owners:rename-blind', 'project', 'warn',
     `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,

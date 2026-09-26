@@ -3721,6 +3721,13 @@ test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifac
     assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, CODE_TPL]).code, 1);
     fs.writeFileSync(quoted, '"epics/EP-x/.sdlc/owners/a\\"b.json"\n');
     assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1, 'a quoted owner-shaped line fails closed');
+    // Raw bytes that are not UTF-8 (quotePath off), read under a UTF-8 locale: GNU grep would drop the line
+    // from its output unless the gate reads bytes (`LC_ALL=C grep -a`). Bites on Linux; macOS grep never drops.
+    fs.writeFileSync(quoted, Buffer.concat([Buffer.from('epics/EP-x/stories/EP-x-S09'), Buffer.from([0xff]), Buffer.from('.md\nepics/EP-x/.sdlc/owners/epic.json\n')]));
+    for (const gate of [[PR_TITLE, 'chore: tidy'], [PR_TEMPLATE, CODE_TPL]]) {
+      const r = runGate(gate[0], T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, gate[1]], { LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' });
+      assert.equal(r.code, 1, r.out);
+    }
     g('checkout', '-q', 'chore/sneak');
     const changed = path.join(T, 'changed.txt');
     const templates = {

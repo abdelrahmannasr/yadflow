@@ -222,7 +222,7 @@ from the event payload):
     Conventional-Commits subject). This is what lets a PR that changes the Product's own workflows/checks
     pass — it has no EP artifact to review.
   - **Anti-bypass guard.** The branch name alone is not trusted: a non-review head that actually
-    changes Shape artifacts (any path under `epics/**`) **FAILS** — those changes must go through
+    changes Shape artifacts (any path under `epics/**` or `foundation/**`) **FAILS** — those changes must go through
     a `review/EP-*` PR and the artifact-review workflow. CI passes the PR's changed paths via
     `--changed <file>` (computed from the diff against the base ref); without that list (a direct
     by-hand caller) the guard is inert and the branch split alone applies. A step owner file
@@ -230,7 +230,8 @@ from the event payload):
     E47) is not a Shape artifact: a PR that changes only owner files passes on any branch. The
     workflow builds the list with `--no-renames` (and `core.quotePath=false`), so a rename INTO
     `owners/` still lists the artifact it removed. A path git still C-quotes (a `"`, `\`, tab or
-    newline in its name) counts as an artifact change and never as an owner file.
+    newline in its name) counts as an artifact change and never as an owner file. Both greps run with
+    `LC_ALL=C grep -a`, so a path with bytes that are not valid UTF-8 is never dropped from the list.
 
 ## 7. pr-template (`templates/checks/pr-template.sh`)
 
@@ -245,7 +246,7 @@ catches a free-form description that bypassed it:
   - any other head → a Product tooling PR, so it requires the `code` task template (`## Summary`,
     `## Impact & Risk`, `## Checklist`, filled `Risk level:`).
   - **Anti-bypass guard** (same as pr-title): a non-review head that changes Shape artifacts
-    (`epics/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
+    (`epics/**` or `foundation/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
     must go through a `review/EP-*` PR. Step owner files alone do not count (E47).
 
 **GitLab truncates the description this gate reads.** `$CI_MERGE_REQUEST_DESCRIPTION` stops at **2700

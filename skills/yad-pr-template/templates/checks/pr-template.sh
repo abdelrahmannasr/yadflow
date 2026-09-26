@@ -58,7 +58,9 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --p
 # No `-q` on the second grep: under pipefail an early exit would SIGPIPE the first and read as "no artifact".
 # `"?`: git still C-quotes a path holding `"`, `\`, a tab or a newline, even with core.quotePath=false. Such a
 # line counts as an artifact, and the owner exemption never matches it — so it fails closed.
-artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -E '^"?(epics|foundation)/' "$CHANGED" | grep -vE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
+# `LC_ALL=C grep -a` on both: with quotePath off a path's high bytes arrive raw, and GNU grep under a UTF-8
+# locale drops a line that is not valid UTF-8 from its output — the pipe would then read as "no artifact".
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
 
 BODY="${ARGS[0]:-}"
 if [ -z "$BODY" ] || [ ! -f "$BODY" ]; then
