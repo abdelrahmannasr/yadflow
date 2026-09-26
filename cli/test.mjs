@@ -40,6 +40,10 @@ const GIT_ENV = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)),
 );
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: GIT_ENV });
+// …and from this process too. GIT_ENV covers the `git()` helper only; the CLI code the tests call in-process
+// (capture, claims, assign) runs git with `process.env`, so under `npm publish` those commits were authored
+// by semantic-release-bot and four E46/E47 tests failed the 4.0.0-next.2 publish after it was tagged.
+for (const k of Object.keys(process.env)) if (/^GIT_(AUTHOR|COMMITTER)_/.test(k)) delete process.env[k];
 
 function scaffold() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-test-'));
