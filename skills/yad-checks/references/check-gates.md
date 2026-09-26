@@ -76,7 +76,12 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   matches `specs` **without case**: on macOS and Windows `Specs/` is the same folder, and git's path
   filter matches exact bytes only. A top folder spelled any other way than `specs` (`Specs/`, `SPECS/`)
   is refused too, even when it holds plain files — the surface rules below are spelled in lowercase and
-  would never see them. A git that cannot read the tree fails the gate with a line that says so.
+  would never see them. `ſpecs` (long s) counts as a second spelling: APFS folds it into `specs`.
+  **So a code repo that already has a `Specs/` folder or submodule (an iOS test folder, say), or a
+  top-level file named `specs` in any case, fails every PR until it is renamed** — on a Mac checkout,
+  `yad-spec` writing `specs/<story>/` would land inside it. `SPECS.md`, `Specs-old/` and a nested
+  `foo/specs/` are not that folder and pass. A git that cannot read the tree fails the gate with a line
+  that says so.
   `yad-spec` writes real files, so nothing legitimate lives there as a link. Removing a link under
   `contracts/` is a change to the surface and needs `Contract-Change: yes`; on a lockless epic it takes
   the removal hatch below. `yad doctor` warns `checks:symlink-blind` for an older copy without this check.

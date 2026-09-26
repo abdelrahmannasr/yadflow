@@ -552,6 +552,8 @@ for (const [rel, target] of [
   ['specs/EP-demo-S01/link.md', '../../docs/api.md'],
   // On macOS and Windows `Specs/` IS `specs/`, and git's path filter matches exact bytes only.
   ['Specs/EP-demo-S01/contracts', '../../docs'],
+  // APFS folds `ſ` (long s, U+017F) into `s`, so `ſpecs/` IS `specs/` there; LC_ALL=C tolower does not.
+  ['\u017fpecs/EP-demo-S01/contracts', '../../docs'],
 ]) {
   test(`contract-check gate: a symlink at ${rel} fails, and so does every later PR (E115)`, () => {
     const { T, base } = linkRepo(rel, target);
@@ -584,13 +586,28 @@ test('contract-check gate: a submodule under specs/, or AS specs, fails (E115)',
 
 test('contract-check gate: a second spelling of specs/ fails, even holding plain files (E115)', () => {
   // A plain file at Specs/<story>/contracts/ is the slice on macOS and Windows, but the surface pattern
-  // is lowercase. The folder is refused once, by its own name — not once per file.
+  // is lowercase. The folder is refused once, by its own name — not once per file. One repo per spelling:
+  // on a case-folding disk two of them would be one folder.
+  for (const top of ['Specs', 'SPECS', '\u017fpecs']) {
+    const T = scaffoldRepo();
+    commit(T, 'feat: widen the API quietly', { [`${top}/EP-demo-S01/contracts/api.md`]: 'new\n', [`${top}/EP-demo-S01/link.md`]: 'x\n' });
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 1, `${top}:\n${r.out}`);
+    assert.equal(r.out.split('\n').filter((l) => l.includes(`  ${top}/ (a folder spelled other than specs`)).length, 1, r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // A FILE with such a name is said to be a file.
   const T = scaffoldRepo();
-  commit(T, 'feat: widen the API quietly', { 'Specs/EP-demo-S01/contracts/api.md': 'new\n', 'Specs/EP-demo-S01/link.md': 'x\n' });
+  commit(T, 'docs: a file', { SPECS: 'x\n' });
   const r = runGate(CONTRACT, T);
   assert.equal(r.code, 1, r.out);
-  assert.equal(r.out.split('\n').filter((l) => l.includes('Specs/ (spelled other than specs/')).length, 1, r.out);
+  assert.ok(r.out.includes('  SPECS (a file spelled other than specs'), r.out);
+  // Names that only START like it are not the folder.
+  const U = scaffoldRepo();
+  commit(U, 'docs: notes', { 'SPECS.md': 'x\n', 'Specs-old/a.md': 'x\n', 'foo/specs/a.md': 'x\n' });
+  assert.equal(runGate(CONTRACT, U).code, 0);
   fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(U, { recursive: true, force: true });
 });
 
 test('contract-check gate: a git that cannot read the tree fails with a line that says so (E115)', () => {

@@ -62,12 +62,14 @@ RANGE="${BASE}..HEAD"
 # link under `Specs/` got past a `-- specs` read, and a plain file at `Specs/<story>/contracts/…` was
 # never on the surface below, which is spelled in lowercase. A top folder spelled any other way than
 # `specs` is refused too, once, by its own name. The name printed is everything after the first tab.
+# `tolower` under LC_ALL=C folds ASCII only, so the one other letter the file systems fold into "specs"
+# is mapped by hand: `ſ` (long s, U+017F, bytes 305 277) — APFS reads `ſpecs/` as `specs/`.
 links="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n' | awk '
-  { t = index($0, "\t"); p = (t ? substr($0, t + 1) : $0); m = (t ? substr($0, 1, t - 1) : ""); lp = tolower(p) }
+  { t = index($0, "\t"); p = (t ? substr($0, t + 1) : $0); m = (t ? substr($0, 1, t - 1) : ""); lp = tolower(p); gsub(/\305\277/, "s", lp) }
   lp !~ /^specs(\/|$)/ { next }
   m ~ /^120000 / { print "  " p " (symlink)"; next }
   m ~ /^160000 / { print "  " p " (submodule)"; next }
-  p !~ /^specs(\/|$)/ { top = p; sub(/\/.*/, "", top); if (!(top in seen)) { seen[top] = 1; print "  " top "/ (spelled other than specs/ — the same folder on macOS and Windows)" } }
+  p !~ /^specs(\/|$)/ { top = p; sub(/\/.*/, "", top); if (!(top in seen)) { seen[top] = 1; print "  " (top == p ? top " (a file" : top "/ (a folder") " spelled other than specs — the same name on macOS and Windows)" } }
 ')" || { echo "FAIL [contract-check]: could not read the tree at HEAD — the links under specs/ cannot be checked."; exit 1; }
 if [ -n "$links" ]; then
   echo "FAIL [contract-check]: specs/ holds a symlink, a submodule or a second spelling — this gate cannot see what it points at:"
