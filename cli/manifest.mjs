@@ -401,10 +401,11 @@ export const ATOMIC_FILE_LIMIT = 3;
 export const TASK_TRAILER = 'Task';
 export const CONTRACT_CHANGE_TRAILER = 'Contract-Change';
 export const COAUTHOR_TRAILER = 'Co-Authored-By';
-// A Task trailer id must be a real <story>-T<NN>. Mirrors the spec-link gate contract
-// (checks/spec-link.sh: `.+-T[0-9]+$`) so an explicit --task that would fail CI is
-// rejected locally at commit time instead of after a push + history rewrite.
-export const TASK_ID_RE = /.+-T\d+$/;
+// A Task trailer id must be a real <story>-T<NN>, the story an `EP-<slug>-S<n>` with a lowercase slug.
+// Mirrors the spec-link gate contract (checks/spec-link.sh: `-T[0-9]+$`, then STORY_RE on the story, E117)
+// so an explicit --task that would fail CI is rejected locally at commit time instead of after a push +
+// history rewrite.
+export const TASK_ID_RE = /^EP-[a-z0-9-]+-S\d+-T\d+$/;
 
 // Per-epic ledger files under epics/<epic>/.sdlc/ (the file source of truth the gate reads/writes).
 export const epicFiles = (epicRoot) => ({

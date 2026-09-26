@@ -60,7 +60,9 @@ is actually present.)
 
 All three resolve the owning epic via `specs/<story>/link.md`'s `product-repo` path (like contract-check
 — absolute as-is, relative to the `link.md`'s own dir) and degrade to a PASS-with-note when the Product is
-not reachable from CI.
+not reachable from CI. (Since E117/E118, `product-repo` is read from the base, a Product the code repo
+tracks is read from the base commit, and `epic:` must be the story ID's prefix — see
+`skills/yad-checks/references/check-gates.md` §8.)
 
 ### 3. Five skills
 - **yad-change** — intake + triage; seeds the threaded change-epic (lineage, inherited state, pointer-lock,

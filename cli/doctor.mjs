@@ -496,6 +496,18 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         `checks/contract-check.sh in ${symlinkBlind.join(', ')} ${symlinkBlind.length > 1 ? 'are older copies that do' : 'is an older copy that does'} not refuse a symlink or submodule under specs/ — a link there hides the contract slice, and every later edit to its target passes`,
         'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise copy skills/yad-checks/templates/checks/contract-check.sh over it');
     }
+    // E117. An older Product-reading gate takes link.md's `product-repo` as the PR leaves it, so a PR can
+    // point it at nothing (a deferral, a PASS) or at a Product it commits itself. The current four read
+    // `product-repo` from the base and a tracked Product from the base commit. Named, not fixed.
+    const pathBlind = gateRoots
+      .flatMap((x) => PRODUCT_PATH_GATES.map((rel) => ({ ...x, rel })))
+      .filter((x) => productPathBlindGate(path.join(x.root, x.rel)))
+      .map((x) => `${x.rel} in ${x.where}`);
+    if (pathBlind.length) {
+      check(checks, 'checks:product-path-blind', 'project', 'warn',
+        `${pathBlind.join(', ')} ${pathBlind.length > 1 ? 'are older copies that read' : 'is an older copy that reads'} the Product from wherever the PR's link.md points — a PR can point it at nothing, or at a Product it commits itself, and pass`,
+        'run `yad check --fix` (it refreshes a wired gate nobody changed by hand); otherwise copy the shipped one over it from skills/yad-checks/templates/checks/');
+    }
   }
 
   ciTagsChecks(checks, root, hub, registry);
@@ -1652,14 +1664,28 @@ export function renameBlindGate(file) {
   return renameBlindText(src);
 }
 // E115: a contract-check that never reads the tree for links under specs/. Read like the one above — a
-// `#` line is prose, a line ending in `\` goes on — and it is enough that ONE command runs `git ls-tree`:
-// no older copy ever did, and the current one reads the whole tree (the name `specs` is in its awk).
+// `#` line is prose, a line ending in `\` goes on — and it is enough that ONE command runs `git ls-tree`
+// on HEAD: no older copy ever did, and the current one reads the whole tree (the name `specs` is in its
+// awk). HEAD, because E117 added a second `git ls-tree`, of the BASE, that finds sibling link.md files.
 export const symlinkBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
-  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b/.test(l));
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b.*\bHEAD\b/.test(l));
 export function symlinkBlindGate(file) {
   let src;
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return symlinkBlindText(src);
+}
+// E117: a Product-reading gate that does not read link.md from the base (`git show`) or a tracked Product
+// from the base commit (`git checkout-index`, from a throwaway index). Read like the two above; no older
+// copy ran either command.
+export const PRODUCT_PATH_GATES = ['checks/contract-check.sh', 'checks/lineage-check.sh', 'checks/epic-open.sh', 'checks/reconcile-debt-check.sh'];
+export const productPathBlindText = (src) => {
+  const lines = src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n').replace(/\\\r?\n/g, ' ').split('\n');
+  return !lines.some((l) => /\bgit\s+show\s/.test(l)) || !lines.some((l) => /\bgit\s+checkout-index\s/.test(l));
+};
+export function productPathBlindGate(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return productPathBlindText(src);
 }
 
 // `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone

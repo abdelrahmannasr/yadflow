@@ -58,7 +58,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
 
 The Phase 6 gates read the owning epic in the **Product** via `specs/<story>/link.md`'s
 `product-repo` path (like contract-check), and degrade to a PASS-with-note when the Product is not reachable
-from CI. See `references/check-gates.md` and `skills/yad-change`.
+from CI. `product-repo` is read from the base, a Product this repo tracks is read from the base commit, and
+`epic:` must be the story ID's prefix — the PR cannot choose what is gated (E117, E118). See `references/check-gates.md` and `skills/yad-change`.
 
 The gates are **CI-agnostic bash** in `checks/`; thin pipeline configs invoke them on GitHub Actions
 and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the skill or let CI run them;

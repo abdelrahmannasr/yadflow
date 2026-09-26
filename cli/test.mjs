@@ -1146,8 +1146,12 @@ test('buildCommitMessage omits co-author for ai=none and rejects bad input', () 
 test('buildCommitMessage rejects a malformed --task the spec-link gate would fail', () => {
   // Bare story with no -T<NN> — commits fine locally today, fails spec-link in CI (#113).
   assert.throws(() => buildCommitMessage({ type: 'feat', subject: 'x', task: 'EP-demo-S01' }), /invalid --task/);
-  // Gate contract is `.+-T<NN>$` (not the stricter branch -S..-T..), so a non-story -T id passes.
-  assert.ok(/Task: foo-T3/.test(buildCommitMessage({ type: 'feat', subject: 'x', task: 'foo-T3' })));
+  // Since E117 the gate also requires the story to be EP-<slug>-S<n> with a lowercase slug, so these
+  // fail locally too, as they would in CI.
+  for (const task of ['foo-T3', 'EP-Demo-S01-T01', 'EP-demo-S01/.-T1']) {
+    assert.throws(() => buildCommitMessage({ type: 'feat', subject: 'x', task }), /invalid --task/, task);
+  }
+  assert.ok(/Task: EP-demo-S01-T03/.test(buildCommitMessage({ type: 'feat', subject: 'x', task: 'EP-demo-S01-T03' })));
 });
 
 test('taskFromBranch derives the story-task id', () => {
@@ -25042,6 +25046,33 @@ test('E115 doctor: an older contract-check that never reads specs/ for links is 
     // A comment naming the command is not the command; a split command is one command.
     assert.equal(symlinkBlindText('# git ls-tree -r -z HEAD -- specs\n'), true);
     assert.equal(symlinkBlindText('links="$(git ls-tree -r -z \\\n  --full-tree HEAD | tr x y)"\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E117 doctor: an older Product-reading gate that takes product-repo as the PR leaves it is checks:product-path-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, productPathBlindText, PRODUCT_PATH_GATES } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:product-path-blind');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates', rel), 'utf8');
+    const put = (dir, rel, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    for (const rel of PRODUCT_PATH_GATES) { put(backend, rel, shipped(rel)); put(T, rel, shipped(rel)); }
+    assert.deepEqual(blind(), [], 'the shipped gates are fine');
+    // An older gate: no base read of link.md. (Built from the shipped one, not from history — CI may clone shallow.)
+    const old = shipped('checks/epic-open.sh').replace(/git show/g, 'true');
+    assert.notEqual(old, shipped('checks/epic-open.sh'));
+    put(backend, 'checks/epic-open.sh', old);
+    const hit = blind();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/epic-open\.sh in backend is an older copy that reads the Product from wherever the PR's link\.md points/);
+    // One without the base-commit read of a tracked Product is blind too.
+    put(T, 'checks/lineage-check.sh', shipped('checks/lineage-check.sh').replace(/git checkout-index/g, 'true'));
+    assert.match(blind()[0].message, /^checks\/lineage-check\.sh in the Product, checks\/epic-open\.sh in backend are older copies/);
+    // A comment naming the command is not the command; a split command is one command.
+    assert.equal(productPathBlindText('# git show x\n# git checkout-index -a\n'), true);
+    assert.equal(productPathBlindText('git \\\n  show x\ngit checkout-index -a\n'), false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
