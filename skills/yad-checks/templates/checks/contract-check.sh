@@ -63,21 +63,34 @@ RANGE="${BASE}..HEAD"
 # never on the surface below, which is spelled in lowercase. A top folder spelled any other way than
 # `specs` is refused too, once, by its own name. The name printed is everything after the first tab.
 # `tolower` under LC_ALL=C folds ASCII only, so the one other letter the file systems fold into "specs"
-# is mapped by hand: `ſ` (long s, U+017F, bytes 305 277) — APFS reads `ſpecs/` as `specs/`.
+# is mapped by hand: `ſ` (long s, U+017F, bytes 305 277) — APFS reads `ſpecs/` as `specs/`. That is
+# `fold` below.
+#
+# The same holds one and two folders down (review 3): `specs/<story>/Contracts/` IS `contracts/` on a
+# Mac, and `specs/EP-x-S01/` and `specs/ep-x-s01/` are one folder there, while every rule below reads
+# exact bytes. So a `contracts` spelled any other way is refused, and so is a second spelling of a
+# story folder — each once, by name. So is a FILE named `specs`, where the folder has to go.
 links="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n' | awk '
-  { t = index($0, "\t"); p = (t ? substr($0, t + 1) : $0); m = (t ? substr($0, 1, t - 1) : ""); lp = tolower(p); gsub(/\305\277/, "s", lp) }
+  function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); return x }
+  function once(k, msg) { if (!(k in said)) { said[k] = 1; print "  " msg } }
+  { t = index($0, "\t"); p = (t ? substr($0, t + 1) : $0); m = (t ? substr($0, 1, t - 1) : ""); lp = fold(p) }
   lp !~ /^specs(\/|$)/ { next }
   m ~ /^120000 / { print "  " p " (symlink)"; next }
   m ~ /^160000 / { print "  " p " (submodule)"; next }
-  p !~ /^specs(\/|$)/ { top = p; sub(/\/.*/, "", top); if (!(top in seen)) { seen[top] = 1; print "  " (top == p ? top " (a file" : top "/ (a folder") " spelled other than specs — the same name on macOS and Windows)" } }
+  p !~ /^specs(\/|$)/ { top = p; sub(/\/.*/, "", top); once(top, (top == p ? top " (a file" : top "/ (a folder") " spelled other than specs — the same name on macOS and Windows)"); next }
+  p == "specs" { print "  specs (a file, where the specs/ folder goes)"; next }
+  { n = split(p, c, "/"); fs = fold(c[2]) }
+  (fs in story) && story[fs] != c[2] { once("s/" c[2], "specs/" story[fs] "/ and specs/" c[2] "/ (one folder on macOS and Windows)") }
+  !(fs in story) { story[fs] = c[2] }
+  n >= 3 && c[3] != "contracts" && fold(c[3]) == "contracts" { once("c/" c[2] "/" c[3], "specs/" c[2] "/" c[3] (n == 3 ? " (a file" : "/ (a folder") " spelled other than contracts — the same name on macOS and Windows)") }
 ')" || { echo "FAIL [contract-check]: could not read the tree at HEAD — the links under specs/ cannot be checked."; exit 1; }
 if [ -n "$links" ]; then
   echo "FAIL [contract-check]: specs/ holds a symlink, a submodule or a second spelling — this gate cannot see what it points at:"
   printf '%s\n' "$links"
-  echo "  -> replace each link with the real files (yad-spec writes real files), and keep one folder,"
-  echo "     spelled specs/. Until then every PR in this repo fails here, because the contract surface"
-  echo "     cannot be checked. Removing a link is itself a change to specs/: under contracts/ it needs"
-  echo "     'Contract-Change: yes'."
+  echo "  -> replace each link with the real files (yad-spec writes real files), and keep ONE spelling"
+  echo "     of each folder: specs/, specs/<story>/, specs/<story>/contracts/. Until then every PR in this"
+  echo "     repo fails here, because the contract surface cannot be checked. Removing a link or merging"
+  echo "     a spelling is itself a change to specs/: under contracts/ it needs 'Contract-Change: yes'."
   exit 1
 fi
 

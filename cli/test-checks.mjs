@@ -610,6 +610,42 @@ test('contract-check gate: a second spelling of specs/ fails, even holding plain
   fs.rmSync(U, { recursive: true, force: true });
 });
 
+// Paths put straight into the index, one blob each — on a case-folding disk (a Mac) two spellings of
+// one folder cannot both exist as files, and git does not care.
+function commitIndexOnly(T, msg, names) {
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'x\n', env: GIT_ENV }).toString().trim();
+  execFileSync('git', ['update-index', '--index-info'], { cwd: T, env: GIT_ENV, input: names.map((n) => `100644 ${blob}\t${n}\n`).join('') });
+  git(T, 'commit', '-q', '-m', msg);
+}
+
+test('contract-check gate: a second spelling of contracts/ or of a story folder fails (E115 review 3)', () => {
+  // `specs/<story>/Contracts/` IS `contracts/` on a Mac; the surface rules read exact bytes.
+  for (const [names, said] of [
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/EP-demo-S01/Contracts/new.md'], '  specs/EP-demo-S01/Contracts/ (a folder spelled other than contracts'],
+    [['specs/EP-demo-S01/CONTRACTS/new.md'], '  specs/EP-demo-S01/CONTRACTS/ (a folder spelled other than contracts'],
+    [['specs/EP-demo-S01/contract\u017f/new.md'], '  specs/EP-demo-S01/contract\u017f/ (a folder spelled other than contracts'],
+    [['specs/EP-demo-S01/Contracts'], '  specs/EP-demo-S01/Contracts (a file spelled other than contracts'],
+    // Every extra spelling is named once (git lists them sorted: EP-, Ep-, ep-).
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/ep-demo-s01/more.md'], '  specs/EP-demo-S01/ and specs/ep-demo-s01/ (one folder on macOS and Windows)'],
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/Ep-Demo-S01/x.md'], '  specs/EP-demo-S01/ and specs/Ep-Demo-S01/ (one folder'],
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/Ep-Demo-S01/x.md'], '  specs/EP-demo-S01/ and specs/ep-demo-s01/ (one folder'],
+    [['specs'], '  specs (a file, where the specs/ folder goes)'],
+  ]) {
+    const T = scaffoldRepo();
+    commitIndexOnly(T, 'feat: add', names);
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 1, `${names}:\n${r.out}`);
+    assert.equal(r.out.split('\n').filter((l) => l.startsWith(said)).length, 1, `${names}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // Names that only look alike are not refused by this rule.
+  const T = scaffoldRepo();
+  commitIndexOnly(T, 'docs: notes', ['specs/EP-demo-S01/contracts.md', 'specs/EP-demo-S01/contracts-old/a.md', 'specs/EP-demo-S01/plan.md', 'specs/EP-demo-S02/plan.md']);
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('contract-check gate: a git that cannot read the tree fails with a line that says so (E115)', () => {
   const T = scaffoldRepo();
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fakegit-'));
