@@ -9,6 +9,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
+// Under `node --test`, this file runs in a child whose STDOUT carries the runner's own binary messages.
+// Many tests here print through console.log (thousands of lines), and on Node 20 that text mixed into
+// the same stream can leave the runner unable to read a message: "Unable to deserialize cloned data",
+// and every result after it is lost. It came and went with small timing changes (#280 hit it on CI's
+// Linux runners; main did not). So under the runner, console.log/info go to stderr instead — unless a
+// test has replaced process.stdout.write to capture what is printed, which must keep seeing it.
+if (process.env.NODE_TEST_CONTEXT) {
+  const write = process.stdout.write;
+  for (const k of ['log', 'info']) {
+    const orig = console[k];
+    console[k] = (...a) => (process.stdout.write === write ? console.error(...a) : orig(...a));
+  }
+}
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 // E62: a record's `by` asks `gh`/`glab` who is logged in. The suite must never ask the developer's real
