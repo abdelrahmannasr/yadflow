@@ -25025,6 +25025,9 @@ test('E114 doctor: an older contract-check or backfill-check that lists a rename
     hit = blind();
     assert.match(hit[0].message, /^checks\/backfill-check\.sh in the Product, checks\/contract-check\.sh in backend are older copies/);
     assert.match(hit[0].hint, /yad check --fix/);
+    // A command split with `\` is one line to bash, and to doctor.
+    put(T, 'checks/backfill-check.sh', shipped(BACKFILL_TPL).replace(/^changed=.*$/m, 'changed="$(git -c core.quotePath=false \\\n  diff --name-only "${BASE}..HEAD")"'));
+    assert.match(blind()[0].message, /checks\/backfill-check\.sh in the Product/);
     // A comment is neither a blind line nor a fix.
     put(backend, 'checks/contract-check.sh', `# we used to run git diff --name-only here\n${shipped(CONTRACT_TPL)}`);
     put(T, 'checks/backfill-check.sh', shipped(BACKFILL_TPL));

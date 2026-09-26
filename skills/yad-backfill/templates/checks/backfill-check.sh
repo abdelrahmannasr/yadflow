@@ -6,7 +6,8 @@
 set -euo pipefail
 # Bytes, not characters (E114). The changed list below carries raw path bytes, and a path that is not
 # valid UTF-8 read under a UTF-8 locale is one GNU grep and sed may skip or leave unmatched — one such
-# file in a diff would hide every other path from the patterns. macOS tools never drop it; Linux CI does.
+# file in a diff would hide every other path from the patterns (Linux CI). On macOS, `tr` and `sed` stop
+# on it with "Illegal byte sequence" instead, so the gate fails with a message that names nothing.
 export LC_ALL=C
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it

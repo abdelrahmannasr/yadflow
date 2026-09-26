@@ -516,7 +516,8 @@ function commitWithRawName(T, msg, files, rawName) {
 
 test('contract-check gate: one non-UTF-8 file name does not hide the slice under a UTF-8 locale (E114)', () => {
   // GNU grep, reading raw bytes under a UTF-8 locale, may treat the list as binary and print no line —
-  // then the surface is empty and the gate PASSes. Bites on Linux CI; macOS grep never drops the line.
+  // then the surface is empty and the gate PASSes (Linux CI). On macOS `tr` stops on the byte instead
+  // ("Illegal byte sequence"), so the gate fails with no surface message — caught here either way.
   const T = scaffoldRepo();
   commitWithRawName(T, 'feat: widen the API quietly', { 'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n' },
     Buffer.concat([Buffer.from('junk'), Buffer.from([0xff]), Buffer.from('.txt')]));
@@ -553,9 +554,21 @@ test('backfill gate: MOVING a file out of a feature being backfilled touches tha
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('backfill gate: a quoted or non-UTF-8 name does not hide a feature (E114)', () => {
+test('backfill gate: a name git quotes even with quotePath off does not hide a feature (E114)', () => {
+  // One odd file alone, so this fails if `-z` goes: `"src/billing/a\"b.js"` never matches src/<feature>/.
   const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
-  commitWithRawName(T, 'feat: touch billing', { 'src/billing/a"b.js': 'x\n' },
+  commit(T, 'feat: touch billing', { 'src/billing/a"b.js': 'x\n' });
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[backfill\]: billing is being backfilled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: a non-UTF-8 name under a UTF-8 locale does not hide a feature (E114)', () => {
+  // One odd file alone, so this fails if `export LC_ALL=C` goes: GNU sed skips the line on Linux, and
+  // macOS `tr` stops on it ("Illegal byte sequence") — either way the billing FAIL is never printed.
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  commitWithRawName(T, 'feat: touch billing', {},
     Buffer.concat([Buffer.from('src/billing/junk'), Buffer.from([0xff]), Buffer.from('.js')]));
   const r = runGate(BACKFILL, T, [base], { LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' });
   assert.equal(r.code, 1, r.out);
