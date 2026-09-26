@@ -33,14 +33,14 @@ yad-hub-pr-title:
   extends: .yad_hub_mr_only
   needs: []
   script:
-    - changed="$(mktemp)"; git diff --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
+    - changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
     - bash checks/pr-title.sh --profile hub --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$CI_MERGE_REQUEST_TITLE"
 
 yad-hub-pr-template:
   extends: .yad_hub_mr_only
   needs: []
   script:
-    - changed="$(mktemp)"; git diff --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
+    - changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
     - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
     - bash checks/pr-template.sh --profile hub --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$body"
 

@@ -1572,6 +1572,17 @@ test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review h
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the Product gates']).code, 0);
   // the legitimate path: a review/EP-* head carries the artifact change and wants the review title
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, 'review: epic.md (EP-demo)']).code, 0);
+  // E47: step owner files alone are not an artifact change; beside a real artifact they change nothing.
+  const owners = path.join(T, 'changed-owners.txt');
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nfoundation/.sdlc/owners/foundation.json\n');
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 0);
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nepics/EP-demo/epic.md\n');
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/sub/x.json\n');
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1, 'only a file directly in owners/');
+  // A long list: the guard must read all of it (pipefail), and still fail.
+  fs.writeFileSync(owners, `${Array.from({ length: 20000 }, (_, i) => `epics/EP-demo/notes/${i}.md`).join('\n')}\n`);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1638,6 +1649,12 @@ test('pr-template gate: hub rejects an artifact change (epics/**) on a non-revie
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, CODE_TPL]).code, 0);
   // the legitimate path: a review/EP-* head still requires the artifact-review template
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, HUB_TPL]).code, 0);
+  // E47: step owner files alone are not an artifact change; beside a real artifact they change nothing.
+  const owners = path.join(T, 'changed-owners.txt');
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nfoundation/.sdlc/owners/foundation.json\n');
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 0);
+  fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nepics/EP-demo/architecture.md\n');
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3672,4 +3689,69 @@ test('proven history: a directory whose name starts with `:` is a directory, nev
   const js = recentAuthorsFor(T, 'main', { entries: parseRiskMap(MAP).entries, changed: [':weird/w.js'] });
   assert.deepEqual(js.authors.map((a) => a.name), ['Colonist'], 'the JS twin agrees');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// E47 review 3: the owner-file exemption made a RENAME the bypass. Plain `git diff --name-only` reports a
+// rename by its new path only, so `git mv epic.md .sdlc/owners/epic.json` listed nothing but an owner file.
+// This runs each hub-checks workflow's OWN diff command against a real repo, then the gates on its answer.
+test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifact change; so is a non-ASCII epic', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e47-mv-'));
+  try {
+    const g = (...a) => git(T, ...a);
+    g('init', '-q', '-b', 'main');
+    // CI's Linux runner has no global git identity to fall back on (the Mac does).
+    g('config', 'user.name', 'Ann Lee'); g('config', 'user.email', 'ann@corp.io'); g('config', 'commit.gpgsign', 'false');
+    fs.mkdirSync(path.join(T, 'epics/EP-x'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), `${'# the reviewed epic\n'.repeat(20)}`);
+    g('add', '-A'); g('commit', '-q', '-m', 'init');
+    g('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    g('checkout', '-q', '-b', 'chore/sneak');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc/owners'), { recursive: true });
+    g('mv', 'epics/EP-x/epic.md', 'epics/EP-x/.sdlc/owners/epic.json');
+    fs.mkdirSync(path.join(T, 'epics/EP-café'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-café/epic.md'), '# new\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'sneak');
+    // A second branch: a story whose name git C-quotes even with quotePath off (`"`), alone.
+    g('checkout', '-q', '-b', 'chore/quoted', 'main');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/stories'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/stories/EP-x-S09"q.md'), '# smuggled\n');
+    g('add', '-A'); g('commit', '-q', '-m', 'quoted');
+    const quoted = path.join(T, 'quoted.txt');
+    fs.writeFileSync(quoted, execFileSync('git', ['-c', 'core.quotePath=false', 'diff', '--no-renames', '--name-only', 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
+    assert.match(fs.readFileSync(quoted, 'utf8'), /^"epics\/EP-x\/stories\/EP-x-S09\\"q\.md"$/m, 'git still quotes it');
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1);
+    assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, CODE_TPL]).code, 1);
+    fs.writeFileSync(quoted, '"epics/EP-x/.sdlc/owners/a\\"b.json"\n');
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1, 'a quoted owner-shaped line fails closed');
+    // Raw bytes that are not UTF-8 (quotePath off), read under a UTF-8 locale: GNU grep would drop the line
+    // from its output unless the gate reads bytes (`LC_ALL=C grep -a`). Bites on Linux; macOS grep never drops.
+    fs.writeFileSync(quoted, Buffer.concat([Buffer.from('epics/EP-x/stories/EP-x-S09'), Buffer.from([0xff]), Buffer.from('.md\nepics/EP-x/.sdlc/owners/epic.json\n')]));
+    for (const gate of [[PR_TITLE, 'chore: tidy'], [PR_TEMPLATE, CODE_TPL]]) {
+      const r = runGate(gate[0], T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, gate[1]], { LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' });
+      assert.equal(r.code, 1, r.out);
+    }
+    g('checkout', '-q', 'chore/sneak');
+    const changed = path.join(T, 'changed.txt');
+    const templates = {
+      'skills/yad-checks/templates/github/yad-hub-checks.yml': /git (.*?diff .*?--name-only) "origin\/\$\{BASE_REF\}\.\.\.HEAD"/g,
+      'skills/yad-checks/templates/gitlab/yad-hub-checks.gitlab-ci.yml': /git (.*?diff .*?--name-only) "origin\/\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME\.\.\.HEAD"/g,
+    };
+    for (const [rel, re] of Object.entries(templates)) {
+      const cmds = [...fs.readFileSync(path.join(ROOT, rel), 'utf8').matchAll(re)].map((m) => m[1]);
+      assert.equal(cmds.length, 2, `${rel}: both jobs build the changed list`);
+      for (const cmd of cmds) {
+        fs.writeFileSync(changed, execFileSync('git', [...cmd.split(/\s+/), 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
+        const list = fs.readFileSync(changed, 'utf8');
+        assert.match(list, /^epics\/EP-x\/epic\.md$/m, `${rel}: the rename's old path is listed`);
+        assert.match(list, /^epics\/EP-café\/epic\.md$/m, `${rel}: a non-ASCII path is not quoted`);
+        const t = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, 'chore: tidy']);
+        assert.equal(t.code, 1, t.out);
+        assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, CODE_TPL]).code, 1);
+      }
+    }
+    // What the old command saw: only the owner file (and a quoted path) — the gates would have passed.
+    fs.writeFileSync(changed, execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
+    assert.doesNotMatch(fs.readFileSync(changed, 'utf8'), /^epics\/EP-x\/epic\.md$/m, 'the test would catch the old command');
+    assert.match(fs.readFileSync(changed, 'utf8'), /^"epics\/EP-caf/m, 'and the old command quoted the non-ASCII path');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

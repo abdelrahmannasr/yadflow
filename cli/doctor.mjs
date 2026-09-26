@@ -22,6 +22,7 @@ import { readProtection, protectionLine, protectionJSON, hideAddresses } from '.
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { readOwners } from './owners.mjs';
 
 const MIN_NODE = 18;
 
@@ -1598,6 +1599,40 @@ export function stepStateChecks(checks, root) {
   }
 }
 
+// `owners:ignored` (E47). A step owner file that cannot be read is skipped in silence everywhere else —
+// `yad next` prints no owner and the capture hook warns nobody — so the assignment the team thinks it made
+// does nothing. Say so here. A file for a step that cannot be assigned, or that is not on the epic's chain,
+// is the same kind of dead line.
+export function ownerChecks(checks, root) {
+  const bad = epicIds(root).flatMap((e) => readOwners(root, e))
+    .filter((o) => o.error || o.onChain === false)
+    .map((o) => (o.error ? o : { ...o, error: `${o.path}: ${o.step} is not on ${o.epic}'s chain` }));
+  if (!bad.length) return;
+  const shown = bad.slice(0, 3).map((o) => o.error).join('; ');
+  check(checks, 'owners:ignored', 'project', 'warn',
+    `${bad.length} step owner file(s) do nothing: ${shown}${bad.length > 3 ? ` (+${bad.length - 3} more)` : ''}`,
+    'such a file is ignored — no owner is shown and the edit-time warning is off. For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them all');
+}
+
+// `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
+// through; that is safe only while the hub-checks workflow lists renames by BOTH paths (`--no-renames`).
+// `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
+// workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
+export const HUB_CHECK_WORKFLOWS = ['.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml'];
+export function ownerGuardChecks(checks, root) {
+  const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
+  // The exemption's own pattern, not any mention of the folder: a comment is not a rule.
+  const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('\\.sdlc/owners/[^/]+\\.json$'));
+  if (!exempting.length) return;
+  // Line by line: one fixed diff line must not hide its blind twin in the other job.
+  const blindLine = (l) => !/^\s*#/.test(l) && /\bgit\b.*\bdiff\b.*--name-only/.test(l) && !/--no-renames/.test(l);
+  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => (read(rel) || '').split('\n').some(blindLine));
+  if (!blind.length) return;
+  check(checks, 'owners:rename-blind', 'project', 'warn',
+    `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,
+    'add `--no-renames` (and `-c core.quotePath=false`) to that workflow\'s `git diff --name-only` lines, as the shipped one has — `yad update` did not replace it because it was changed by hand');
+}
+
 // `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
 // default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
 //
@@ -2026,6 +2061,8 @@ export function collectDoctor(root, { headCount = null } = {}) {
   profileChecks(checks, root);
   skipChecks(checks, root);
   stepStateChecks(checks, root);
+  ownerChecks(checks, root);
+  ownerGuardChecks(checks, root);
   phaseChecks(checks, root);
   laneChecks(checks, root);
   epicChecks(checks, root);

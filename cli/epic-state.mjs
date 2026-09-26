@@ -367,8 +367,9 @@ export function unlistedLedgerDirs(root, ids = epicIds(root)) {
 // new` and the CI conversion can never disagree about whether a Foundation would land unguarded.
 const FOUNDATION_GUARD_ARMS = {
   'checks/ledger-guard.sh': `      ${FOUNDATION_DIR}/*)`,
-  'checks/pr-title.sh': `^(epics|${FOUNDATION_DIR})/`,
-  'checks/pr-template.sh': `^(epics|${FOUNDATION_DIR})/`,
+  // No leading `^`: since E47 the guard reads `^"?(epics|…)/`, and a copy from either release knows the folder.
+  'checks/pr-title.sh': `(epics|${FOUNDATION_DIR})/`,
+  'checks/pr-template.sh': `(epics|${FOUNDATION_DIR})/`,
 };
 
 // The wired checks that are present but predate the Foundation. A check that is not wired at all is not

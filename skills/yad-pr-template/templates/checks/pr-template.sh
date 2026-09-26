@@ -14,6 +14,8 @@
 #     artifacts (epics/**) would otherwise slip past the review workflow with only the code template.
 #     Pass the PR's changed paths via --changed <file> (one path per line); when they touch epics/**
 #     on a non-review head the gate FAILS — artifact changes must go through a review/EP-* PR.
+#     Build the list with `git -c core.quotePath=false diff --no-renames --name-only`: without
+#     --no-renames a rename lists only its new path, and the removed artifact is never seen.
 # The body is passed as a FILE path (single positional arg); CI writes the event body to a temp file
 # (GitHub: github.event.pull_request.body; GitLab: $CI_MERGE_REQUEST_DESCRIPTION).
 set -euo pipefail
@@ -51,7 +53,14 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --p
 
 # True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
-artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -qE '^(epics|foundation)/' "$CHANGED"; }
+# A step owner file (`yad assign`, E47) is not an artifact: an assignment is advice, reviewed by nobody, and
+# a review/EP-* PR would advance the step on merge. So a PR of owner files alone is not an artifact change.
+# No `-q` on the second grep: under pipefail an early exit would SIGPIPE the first and read as "no artifact".
+# `"?`: git still C-quotes a path holding `"`, `\`, a tab or a newline, even with core.quotePath=false. Such a
+# line counts as an artifact, and the owner exemption never matches it — so it fails closed.
+# `LC_ALL=C grep -a` on both: with quotePath off a path's high bytes arrive raw, and GNU grep under a UTF-8
+# locale drops a line that is not valid UTF-8 from its output — the pipe would then read as "no artifact".
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
 
 BODY="${ARGS[0]:-}"
 if [ -z "$BODY" ] || [ ! -f "$BODY" ]; then
