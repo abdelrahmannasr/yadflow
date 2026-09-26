@@ -527,6 +527,175 @@ test('contract-check gate: one non-UTF-8 file name does not hide the slice under
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------- no symlink, no submodule under specs/ (E115) ----------
+// The gate reads paths. A link lets the content live where no path under specs/ names it, so a link at
+// `specs`, `specs/<story>` or `specs/<story>/contracts` hid the slice from every rule, and so did every
+// later edit to its target. The gate now reads the TREE at HEAD, on every PR.
+
+// A branch whose one commit adds a symlink at `rel` (pointing at `target`), after a docs/api.md on main.
+function linkRepo(rel, target, extra = {}) {
+  const T = scaffoldRepo();
+  commit(T, 'docs: the notes a link could point at', { 'docs/api.md': 'v1\n', ...extra });
+  const base = git(T, 'rev-parse', 'HEAD').toString().trim();
+  fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+  fs.symlinkSync(target, path.join(T, rel));
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'chore: link it');
+  return { T, base };
+}
+
+for (const [rel, target] of [
+  ['specs', 'docs'],
+  ['specs/EP-demo-S01', '../docs'],
+  ['specs/EP-demo-S01/contracts', '../../docs'],
+  ['specs/EP-demo-S01/contracts/api.md', '../../../docs/api.md'],
+  ['specs/EP-demo-S01/link.md', '../../docs/api.md'],
+  // On macOS and Windows `Specs/` IS `specs/`, and git's path filter matches exact bytes only.
+  ['Specs/EP-demo-S01/contracts', '../../docs'],
+  // APFS folds `ſ` (long s, U+017F) into `s`, so `ſpecs/` IS `specs/` there; LC_ALL=C tolower does not.
+  ['\u017fpecs/EP-demo-S01/contracts', '../../docs'],
+]) {
+  test(`contract-check gate: a symlink at ${rel} fails, and so does every later PR (E115)`, () => {
+    const { T, base } = linkRepo(rel, target);
+    const r = runGate(CONTRACT, T, [base]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /specs\/ holds a symlink, a submodule or a second spelling/);
+    assert.ok(r.out.includes(`  ${rel} (symlink)`), r.out);
+    // The link is on the base now; a later PR only edits its target — no path under specs/ in the diff.
+    const later = git(T, 'rev-parse', 'HEAD').toString().trim();
+    commit(T, 'docs: edit the notes', { 'docs/api.md': 'v2\n' });
+    const again = runGate(CONTRACT, T, [later]);
+    assert.equal(again.code, 1, `a link merged earlier must not let an edit to its target through:\n${again.out}`);
+    assert.match(again.out, /specs\/ holds a symlink/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('contract-check gate: a submodule under specs/, or AS specs, fails (E115)', () => {
+  for (const rel of ['specs/EP-demo-S01/contracts', 'specs']) {
+    const T = scaffoldRepo();
+    const sha = git(T, 'rev-parse', 'HEAD').toString().trim();
+    git(T, 'update-index', '--add', '--cacheinfo', `160000,${sha},${rel}`);
+    git(T, 'commit', '-q', '-m', 'chore: a submodule');
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes(`  ${rel} (submodule)`), r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('contract-check gate: a second spelling of specs/ fails, even holding plain files (E115)', () => {
+  // A plain file at Specs/<story>/contracts/ is the slice on macOS and Windows, but the surface pattern
+  // is lowercase. The folder is refused once, by its own name — not once per file. One repo per spelling:
+  // on a case-folding disk two of them would be one folder.
+  for (const top of ['Specs', 'SPECS', '\u017fpecs']) {
+    const T = scaffoldRepo();
+    commit(T, 'feat: widen the API quietly', { [`${top}/EP-demo-S01/contracts/api.md`]: 'new\n', [`${top}/EP-demo-S01/link.md`]: 'x\n' });
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 1, `${top}:\n${r.out}`);
+    assert.equal(r.out.split('\n').filter((l) => l.includes(`  ${top}/ (a folder spelled other than specs`)).length, 1, r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // A FILE with such a name is said to be a file.
+  const T = scaffoldRepo();
+  commit(T, 'docs: a file', { SPECS: 'x\n' });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, r.out);
+  assert.ok(r.out.includes('  SPECS (a file spelled other than specs'), r.out);
+  // Names that only START like it are not the folder.
+  const U = scaffoldRepo();
+  commit(U, 'docs: notes', { 'SPECS.md': 'x\n', 'Specs-old/a.md': 'x\n', 'foo/specs/a.md': 'x\n' });
+  assert.equal(runGate(CONTRACT, U).code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(U, { recursive: true, force: true });
+});
+
+// Paths put straight into the index, one blob each — on a case-folding disk (a Mac) two spellings of
+// one folder cannot both exist as files, and git does not care.
+function commitIndexOnly(T, msg, names) {
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'x\n', env: GIT_ENV }).toString().trim();
+  execFileSync('git', ['update-index', '--index-info'], { cwd: T, env: GIT_ENV, input: names.map((n) => `100644 ${blob}\t${n}\n`).join('') });
+  git(T, 'commit', '-q', '-m', msg);
+}
+
+test('contract-check gate: a second spelling of contracts/ or of a story folder fails (E115 review 3)', () => {
+  // `specs/<story>/Contracts/` IS `contracts/` on a Mac; the surface rules read exact bytes.
+  for (const [names, said] of [
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/EP-demo-S01/Contracts/new.md'], '  specs/EP-demo-S01/Contracts/ (a folder spelled other than contracts'],
+    [['specs/EP-demo-S01/CONTRACTS/new.md'], '  specs/EP-demo-S01/CONTRACTS/ (a folder spelled other than contracts'],
+    [['specs/EP-demo-S01/contract\u017f/new.md'], '  specs/EP-demo-S01/contract\u017f/ (a folder spelled other than contracts'],
+    [['specs/EP-demo-S01/Contracts'], '  specs/EP-demo-S01/Contracts (a file spelled other than contracts'],
+    // Every extra spelling is named once (git lists them sorted: EP-, Ep-, ep-).
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/ep-demo-s01/more.md'], '  specs/EP-demo-S01/ and specs/ep-demo-s01/ (one folder on macOS and Windows)'],
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/Ep-Demo-S01/x.md'], '  specs/EP-demo-S01/ and specs/Ep-Demo-S01/ (one folder'],
+    [['specs/EP-demo-S01/contracts/api.md', 'specs/ep-demo-s01/notes.md', 'specs/Ep-Demo-S01/x.md'], '  specs/EP-demo-S01/ and specs/ep-demo-s01/ (one folder'],
+    [['specs'], '  specs (a file, where the specs/ folder goes)'],
+    [['specs/README.md', 'specs/readme.md'], '  specs/README.md and specs/readme.md (one file on macOS and Windows)'],
+  ]) {
+    const T = scaffoldRepo();
+    commitIndexOnly(T, 'feat: add', names);
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 1, `${names}:\n${r.out}`);
+    assert.equal(r.out.split('\n').filter((l) => l.startsWith(said)).length, 1, `${names}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // Names that only look alike are not refused by this rule.
+  const T = scaffoldRepo();
+  commitIndexOnly(T, 'docs: notes', ['specs/EP-demo-S01/contracts.md', 'specs/EP-demo-S01/contracts-old/a.md', 'specs/EP-demo-S01/plan.md', 'specs/EP-demo-S02/plan.md']);
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a git that cannot read the tree fails with a line that says so (E115)', () => {
+  const T = scaffoldRepo();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fakegit-'));
+  const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ncase " $* " in *" ls-tree "*) echo "fatal: broken" >&2; exit 128 ;; esac\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  const r = runGate(CONTRACT, T, ['main'], { PATH: `${bin}:${process.env.PATH}` });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[contract-check\]: could not read the tree at HEAD/);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(bin, { recursive: true, force: true });
+});
+
+test('contract-check gate: a symlink outside specs/ is not this gate\'s concern (E115)', () => {
+  for (const rel of ['docs-link', 'specsX']) {
+    const { T, base } = linkRepo(rel, 'docs');
+    const r = runGate(CONTRACT, T, [base]);
+    assert.equal(r.code, 0, `${rel}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('contract-check gate: the PR that removes a linked slice under a lockless epic passes (E115)', () => {
+  // Not a dead end. The link's own path `specs/<story>/contracts` (no slash) must count as the surface
+  // AND as deleted, or the REMOVE hatch never sees it.
+  const { T } = linkRepo('specs/EP-demo-S01/contracts', '../../docs', {
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': 'none' }),
+    'product/epics/EP-demo/.sdlc/state.json': '{}\n',
+  });
+  const withLink = git(T, 'rev-parse', 'HEAD').toString().trim();
+  git(T, 'rm', '-q', 'specs/EP-demo-S01/contracts');
+  git(T, 'commit', '-q', '-m', 'chore: drop the linked slice\n\nContract-Change: yes');
+  const r = runGate(CONTRACT, T, [withLink]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /only REMOVES contract slice files/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check reads the surface as contracts(/|$) in every place, and the tree before any PASS (E115)', () => {
+  // One arm and its twin: the hatch compares `surface` and `deleted` line for line, and `stories` names
+  // who is checked. An old `contracts/` form in any of them breaks the removal PR above.
+  const src = fs.readFileSync(CONTRACT, 'utf8');
+  const code = src.split('\n').filter((l) => !/^\s*#/.test(l));
+  assert.deepEqual(code.filter((l) => /contracts\/['"]|contracts\/\.\*/.test(l)), [], 'no old surface pattern left');
+  assert.equal(code.filter((l) => l.includes('contracts(/|$)')).length, 4);
+  assert.equal(code.filter((l) => l.includes('contracts(/.*)?$')).length, 1);
+  const read = src.indexOf('git ls-tree -r -z --full-tree HEAD');
+  assert.ok(read >= 0 && read < src.indexOf('PASS [contract-check]'), 'the tree is read before the first PASS');
+});
+
 // ---------- backfill-check.sh ----------
 const BACKFILL = path.join(ROOT, 'skills/yad-backfill/templates/checks/backfill-check.sh');
 const backfillSpec = (verified) => `---\nfeature: billing\nverified: ${verified}\n---\n# billing\n`;

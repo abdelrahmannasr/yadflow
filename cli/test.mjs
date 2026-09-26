@@ -9,6 +9,22 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
+// Under `node --test`, this file runs in a child whose STDOUT carries the runner's own binary messages.
+// On Node 18 to 22 the runner reads the bytes right after a message as the next message's length. A
+// printed line whose THIRD byte is not ASCII — `ok()`'s "  ✓", `info()`'s "  •" (cli/lib.mjs) — makes that
+// length negative, so the runner tries to decode the text, fails with "Unable to deserialize cloned
+// data", and loses every result after it. Whether a line lands right after a message is timing: #280
+// hit it on CI's Linux Node 20 runner while main did not. So under the runner, console.log/info go to
+// stderr instead — unless a test has replaced process.stdout.write to capture what is printed, which
+// must keep seeing it. The same guard is in cli/test-migrate.mjs, the other file that prints such lines.
+if (process.env.NODE_TEST_CONTEXT) {
+  const write = process.stdout.write;
+  for (const k of ['log', 'info']) {
+    const orig = console[k];
+    console[k] = (...a) => (process.stdout.write === write ? console.error(...a) : orig(...a));
+  }
+}
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 // E62: a record's `by` asks `gh`/`glab` who is logged in. The suite must never ask the developer's real
@@ -24997,6 +25013,34 @@ test('E47 doctor: an owner file that does nothing is named as owners:ignored; a 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E115 doctor: an older contract-check that never reads specs/ for links is checks:symlink-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, symlinkBlindText } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:symlink-blind');
+    const TPL = 'skills/yad-checks/templates/checks/contract-check.sh';
+    const shipped = fs.readFileSync(path.join(ROOT, TPL), 'utf8');
+    const put = (dir, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, 'checks/contract-check.sh'), text); };
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    put(backend, shipped);
+    put(T, shipped);
+    assert.deepEqual(blind(), [], 'the shipped gate is fine');
+    // An older gate: no tree read at all. (Built from the shipped one, not from history — CI may clone shallow.)
+    const old = shipped.replace('git ls-tree -r -z --full-tree HEAD', 'true');
+    assert.notEqual(old, shipped);
+    put(backend, old);
+    const hit = blind();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend is an older copy that does not refuse a symlink or submodule under specs\//);
+    put(T, old);
+    assert.match(blind()[0].message, /^checks\/contract-check\.sh in the Product, backend are older copies/);
+    // A comment naming the command is not the command; a split command is one command.
+    assert.equal(symlinkBlindText('# git ls-tree -r -z HEAD -- specs\n'), true);
+    assert.equal(symlinkBlindText('links="$(git ls-tree -r -z \\\n  --full-tree HEAD | tr x y)"\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E114 doctor: an older contract-check or backfill-check that lists a rename by one path is checks:rename-blind', async () => {
   const { T, backend } = scaffold();
   try {
@@ -25085,4 +25129,15 @@ test('E47 doctor: new owner-exempting checks beside a hub workflow that lists re
     const { staleFoundationGuards } = await import('./epic-state.mjs');
     assert.deepEqual(staleFoundationGuards(T), []);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('test files that print ok()/info() lines keep them off the runner stream (the #280 guard)', () => {
+  // A line whose third byte is not ASCII, landing right after a runner message, loses the rest of the file
+  // on Node 18–22. The guard is duplicated in each file that prints such lines; pin both copies.
+  const guard = "console[k] = (...a) => (process.stdout.write === write ? console.error(...a) : orig(...a));";
+  for (const f of ['cli/test.mjs', 'cli/test-migrate.mjs']) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const at = src.indexOf(guard);
+    assert.ok(at >= 0 && at < src.search(/^test\(/m), `${f}: the guard runs before the first test`);
+  }
 });

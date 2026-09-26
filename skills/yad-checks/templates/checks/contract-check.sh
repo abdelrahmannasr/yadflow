@@ -46,6 +46,57 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
 fi
 RANGE="${BASE}..HEAD"
 
+# No symlink and no submodule anywhere under specs/ (E115). The gate reads PATHS: a link lets the
+# content live somewhere the paths below never name. A symlink at `specs`, `specs/<story>` or
+# `specs/<story>/contracts` hid the slice from every rule here, and so did every later edit to the
+# link's target; a symlinked slice file was seen once, when added, and never again. A link.md behind a
+# link redirects the lock pin the fidelity check reads. yad-spec writes real files, so nothing
+# legitimate lives there as a link.
+#
+# Read from the TREE at HEAD, not from the diff, and before the "no surface" PASS below: a link merged
+# before this check existed fails every PR until one PR removes it — no diff would ever show it again.
+# 120000 is a symlink, 160000 a submodule; `-r` lists `specs` itself when `specs` is the link.
+#
+# The WHOLE tree, from the repo root (--full-tree), matched without case: on macOS and Windows `Specs/`
+# IS `specs/`, and git's path filter matches exact bytes only (`:(icase)` is refused by ls-tree). So a
+# link under `Specs/` got past a `-- specs` read, and a plain file at `Specs/<story>/contracts/…` was
+# never on the surface below, which is spelled in lowercase. A top folder spelled any other way than
+# `specs` is refused too, once, by its own name. The name printed is everything after the first tab.
+# `tolower` under LC_ALL=C folds ASCII only, so the one other letter the file systems fold into "specs"
+# is mapped by hand: `ſ` (long s, U+017F, bytes 305 277) — APFS reads `ſpecs/` as `specs/`. That is
+# `fold` below.
+#
+# The same holds one and two folders down (review 3): `specs/<story>/Contracts/` IS `contracts/` on a
+# Mac, and `specs/EP-x-S01/` and `specs/ep-x-s01/` are one folder there, while every rule below reads
+# exact bytes. So a `contracts` spelled any other way is refused, and so is a second spelling of a
+# story folder — each once, by name. So is a FILE named `specs`, where the folder has to go. `fold`
+# knows ASCII case and the long s only: `EP-démo` beside `EP-DÉMO` (or an NFC/NFD twin) is not caught.
+# That costs a skipped lock check at most — the surface grep takes any story spelling — and refusing
+# every non-ASCII story name would refuse real repos.
+links="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n' | awk '
+  function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); return x }
+  function once(k, msg) { if (!(k in said)) { said[k] = 1; print "  " msg } }
+  { t = index($0, "\t"); p = (t ? substr($0, t + 1) : $0); m = (t ? substr($0, 1, t - 1) : ""); lp = fold(p) }
+  lp !~ /^specs(\/|$)/ { next }
+  m ~ /^120000 / { print "  " p " (symlink)"; next }
+  m ~ /^160000 / { print "  " p " (submodule)"; next }
+  p !~ /^specs(\/|$)/ { top = p; sub(/\/.*/, "", top); once(top, (top == p ? top " (a file" : top "/ (a folder") " spelled other than specs — the same name on macOS and Windows)"); next }
+  p == "specs" { print "  specs (a file, where the specs/ folder goes)"; next }
+  { n = split(p, c, "/"); fs = fold(c[2]) }
+  (fs in story) && story[fs] != c[2] { once("s/" c[2], "specs/" story[fs] (n == 2 ? " and specs/" c[2] " (one file" : "/ and specs/" c[2] "/ (one folder") " on macOS and Windows)") }
+  !(fs in story) { story[fs] = c[2] }
+  n >= 3 && c[3] != "contracts" && fold(c[3]) == "contracts" { once("c/" c[2] "/" c[3], "specs/" c[2] "/" c[3] (n == 3 ? " (a file" : "/ (a folder") " spelled other than contracts — the same name on macOS and Windows)") }
+')" || { echo "FAIL [contract-check]: could not read the tree at HEAD — the links under specs/ cannot be checked."; exit 1; }
+if [ -n "$links" ]; then
+  echo "FAIL [contract-check]: specs/ holds a symlink, a submodule or a second spelling — this gate cannot see what it points at:"
+  printf '%s\n' "$links"
+  echo "  -> replace each link with the real files (yad-spec writes real files), and keep ONE spelling"
+  echo "     of each folder: specs/, specs/<story>/, specs/<story>/contracts/. Until then every PR in this"
+  echo "     repo fails here, because the contract surface cannot be checked. Removing a link or merging"
+  echo "     a spelling is itself a change to specs/: under contracts/ it needs 'Contract-Change: yes'."
+  exit 1
+fi
+
 # How the changed list is built, and why each flag is there (E114):
 #   --no-renames  a rename is listed by BOTH paths, as a delete and an add. Without it git names a
 #                 rename by its NEW path only, so `git mv specs/S1/contracts/api.md docs/api.md`
@@ -57,7 +108,7 @@ RANGE="${BASE}..HEAD"
 # Both lists (this one and `deleted` below) are built the SAME way: the no-lock escape hatch compares
 # them line for line.
 changed="$(git diff --no-renames --name-only -z "$RANGE" | tr '\0' '\n')"
-surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)"
+surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
 
 # Slice paths this diff DELETES. `--name-only` above lists a deleted file exactly like a changed one,
 # which is right for the trailer rule — removing an agreed endpoint IS a surface change — but it
@@ -74,10 +125,10 @@ surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)
 # change and every rule below applies to it unchanged).
 # --no-renames matters here too: a slice MOVED out of contracts/ is a delete of the old path, and
 # without it git reports an `R`, which --diff-filter=D never matches — the hatch would refuse the move.
-deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\0' '\n' | grep -E '^specs/[^/]+/contracts/' || true)"
+deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\0' '\n' | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
 
 if [ -z "$surface" ]; then
-  echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts/**)."
+  echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts and everything under it)."
   exit 0
 fi
 
@@ -136,7 +187,7 @@ resolve_product() {
 # link.md deferred the whole check before the stale one was ever read (issue #161). Failures are
 # AGGREGATED — every story reports, so one clean-or-deferred story never masks another's stale pin
 # (the same rule spec-link applies per commit).
-stories="$(printf '%s\n' "$surface" | sed -E 's#^specs/([^/]+)/contracts/.*#\1#' | sort -u)"
+stories="$(printf '%s\n' "$surface" | sed -E 's#^specs/([^/]+)/contracts(/.*)?$#\1#' | sort -u)"
 rc=0
 while IFS= read -r story; do
   [ -z "$story" ] && continue
@@ -197,8 +248,8 @@ while IFS= read -r story; do
     # The escape hatch described at the top: with no lock upstream there is no agreed shape for a
     # deletion to contradict, so REMOVING a slice is always allowed here. This is what keeps a
     # short-lane story that should never have had a `contracts/` folder from being unfixable.
-    story_surface="$(printf '%s\n' "$surface" | grep -E "^specs/${story}/contracts/" || true)"
-    story_deleted="$(printf '%s\n' "$deleted" | grep -E "^specs/${story}/contracts/" || true)"
+    story_surface="$(printf '%s\n' "$surface" | grep -E "^specs/${story}/contracts(/|$)" || true)"
+    story_deleted="$(printf '%s\n' "$deleted" | grep -E "^specs/${story}/contracts(/|$)" || true)"
     if [ -n "$story_surface" ] && [ "$story_surface" = "$story_deleted" ]; then
       echo "note [contract-check]: ${story} only REMOVES contract slice files and ${epic} has no lock —"
       echo "  nothing upstream is being contradicted, so the removal is allowed."

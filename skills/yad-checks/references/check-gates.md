@@ -66,7 +66,36 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 - **Fails closed** if `<base>` can't be resolved — an undiffable range must never report "no surface
   change" and silently green-light a bypass. `<base>` is optional — see
   [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
+- **Refuses any symlink or submodule under `specs/`** (E115), right after the base check and before
+  any surface rule. The gate reads
+  paths, and a link lets the content live where no path under `specs/` names it: a symlink at
+  `specs`, `specs/<story>` or `specs/<story>/contracts` hid the slice from every rule, and so did every
+  later edit to the link's target. A symlinked `link.md` redirects the lock pin the fidelity check
+  reads. The check reads the **tree at HEAD** (`git ls-tree -r -z --full-tree HEAD`), not the diff, so
+  a link merged before this check existed fails **every PR** in the repo until one PR removes it. It
+  matches `specs` **without case**: on macOS and Windows `Specs/` is the same folder, and git's path
+  filter matches exact bytes only. A top folder spelled any other way than `specs` (`Specs/`, `SPECS/`)
+  is refused too, even when it holds plain files — the surface rules below are spelled in lowercase and
+  would never see them. `ſpecs` (long s) counts as a second spelling: APFS folds it into `specs`.
+  The same holds further down: a `contracts` folder spelled any other way (`Contracts/`, `CONTRACTS/`,
+  `contractſ/`) is refused, and so are two story folders that differ only in ASCII case or the long s
+  (`specs/EP-x-S01/` and `specs/ep-x-s01/`) — one folder on a Mac, two to rules that read exact bytes.
+  Other letters are **not** caught: `specs/EP-démo-S01/` beside `specs/EP-DÉMO-S01/`, or the same name in
+  NFC and NFD form, is one folder on a Mac and two here. The surface rule still matches both, so the
+  trailer is still required; at worst the lock check reads no `link.md` and is deferred — something a
+  PR can already do by leaving `link.md` out (E117).
+  A file named exactly `specs` is refused too: the folder has to go there.
+  **So a code repo that already has a `Specs/` folder or submodule (an iOS test folder, say), or a
+  top-level file named `specs` in any case, fails every PR until it is renamed** — on a Mac checkout,
+  `yad-spec` writing `specs/<story>/` would land inside it. `SPECS.md`, `Specs-old/` and a nested
+  `foo/specs/` are not that folder and pass. A git that cannot read the tree fails the gate with a line
+  that says so.
+  `yad-spec` writes real files, so nothing legitimate lives there as a link. Removing a link under
+  `contracts/` is a change to the surface and needs `Contract-Change: yes`; on a lockless epic it takes
+  the removal hatch below. `yad doctor` warns `checks:symlink-blind` for an older copy without this check.
 - Computes the changed files in `<base>..HEAD`.
+- The surface is `specs/<story>/contracts` **and** everything under it: a path that IS
+  `specs/<story>/contracts` (a link being removed) counts too.
 - If **nothing** under `specs/*/contracts/**` changed → **PASS** (normal implementation only *consumes*
   the contract).
 - If the surface slice changed:
