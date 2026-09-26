@@ -24997,6 +24997,41 @@ test('E47 doctor: an owner file that does nothing is named as owners:ignored; a 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E114 doctor: an older contract-check or backfill-check that lists a rename by one path is checks:rename-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:rename-blind');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const put = (dir, rel, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    const CONTRACT_TPL = 'skills/yad-checks/templates/checks/contract-check.sh';
+    const BACKFILL_TPL = 'skills/yad-backfill/templates/checks/backfill-check.sh';
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    put(backend, 'checks/contract-check.sh', shipped(CONTRACT_TPL));
+    put(T, 'checks/backfill-check.sh', shipped(BACKFILL_TPL));
+    assert.deepEqual(blind(), [], 'the shipped gates are fine');
+    // One list fixed and its twin not: still blind (the `deleted` list is the no-lock hatch).
+    const lines = shipped(CONTRACT_TPL).split('\n');
+    const second = lines.findIndex((l) => l.startsWith('deleted=') && l.includes('--no-renames'));
+    assert.ok(second > 0);
+    lines[second] = lines[second].replace(' --no-renames', '');
+    put(backend, 'checks/contract-check.sh', lines.join('\n'));
+    let hit = blind();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend is an older copy that lists a renamed file by its new path only/);
+    // The Product's hand-placed backfill-check, as an older release shipped it.
+    put(T, 'checks/backfill-check.sh', shipped(BACKFILL_TPL).replace(/^changed=.*$/m, 'changed="$(git -c core.quotePath=false diff --name-only "${BASE}..HEAD")"'));
+    hit = blind();
+    assert.match(hit[0].message, /^checks\/backfill-check\.sh in the Product, checks\/contract-check\.sh in backend are older copies/);
+    assert.match(hit[0].hint, /yad check --fix/);
+    // A comment is neither a blind line nor a fix.
+    put(backend, 'checks/contract-check.sh', `# we used to run git diff --name-only here\n${shipped(CONTRACT_TPL)}`);
+    put(T, 'checks/backfill-check.sh', shipped(BACKFILL_TPL));
+    assert.deepEqual(blind(), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E47 doctor: new owner-exempting checks beside a hub workflow that lists renames by one path is owners:rename-blind', async () => {
   const { T, w } = ownersFixture();
   try {

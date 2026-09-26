@@ -7,6 +7,10 @@
 # (link.md's pinned hash must match the product lock). Otherwise FAIL and route back to the
 # architecture gate. Normal implementation that only CONSUMES the contract passes untouched.
 set -euo pipefail
+# Bytes, not characters (E114). The changed list below carries raw path bytes, and a path that is not
+# valid UTF-8 read under a UTF-8 locale is one GNU grep and sed may skip or leave unmatched — one such
+# file in a diff would hide every other path from the patterns. macOS tools never drop it; Linux CI does.
+export LC_ALL=C
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---
@@ -41,10 +45,17 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
 fi
 RANGE="${BASE}..HEAD"
 
-# core.quotePath=false: with the default ON, git wraps any path holding a non-ASCII byte in quotes
-# and octal-escapes it, so a slice like specs/EP-démo-S01/contracts/api.md never matches the pattern
-# below — the surface change would be invisible to the gate it exists to stop.
-changed="$(git -c core.quotePath=false diff --name-only "$RANGE")"
+# How the changed list is built, and why each flag is there (E114):
+#   --no-renames  a rename is listed by BOTH paths, as a delete and an add. Without it git names a
+#                 rename by its NEW path only, so `git mv specs/S1/contracts/api.md docs/api.md`
+#                 took the slice off the surface and the gate never saw it — no trailer needed.
+#   -z | tr       NUL-separated, so git never quotes a path. By default git wraps a path holding a
+#                 non-ASCII byte in quotes and octal-escapes it, and it still quotes one holding a `"`
+#                 or a tab with core.quotePath off — either way a slice like
+#                 specs/EP-démo-S01/contracts/api.md never matched the pattern below.
+# Both lists (this one and `deleted` below) are built the SAME way: the no-lock escape hatch compares
+# them line for line.
+changed="$(git diff --no-renames --name-only -z "$RANGE" | tr '\0' '\n')"
 surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)"
 
 # Slice paths this diff DELETES. `--name-only` above lists a deleted file exactly like a changed one,
@@ -60,7 +71,9 @@ surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)
 # there is no agreed shape for the deletion to contradict. So a delete-only diff is allowed through
 # the no-lock branch (and only that branch — where a lock EXISTS, a deletion is still a real surface
 # change and every rule below applies to it unchanged).
-deleted="$(git -c core.quotePath=false diff --diff-filter=D --name-only "$RANGE" | grep -E '^specs/[^/]+/contracts/' || true)"
+# --no-renames matters here too: a slice MOVED out of contracts/ is a delete of the old path, and
+# without it git reports an `R`, which --diff-filter=D never matches — the hatch would refuse the move.
+deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\0' '\n' | grep -E '^specs/[^/]+/contracts/' || true)"
 
 if [ -z "$surface" ]; then
   echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts/**)."

@@ -85,9 +85,20 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   - A lock the gate can **read but not parse** (truncated, half-written, or a changed schema — no
     `"hash": "sha256:…"`) **FAILS**. It used to short-circuit the comparison into the "hash matches"
     note, i.e. the gate affirmatively reported a match it never made.
-- The changed-file list is read with `core.quotePath=false`. With git's default, a path holding a
-  non-ASCII byte comes back quoted and octal-escaped, so a slice like `specs/EP-démo-S01/contracts/…`
-  never matched the surface pattern and an undeclared widening passed untouched.
+- The changed-file list is read with `git diff --no-renames --name-only -z` (E114):
+  - `--no-renames` lists a rename by **both** paths — a delete of the old one and an add of the new.
+    Without it git names a rename by its new path only, so `git mv specs/S1/contracts/api.md
+    docs/api.md` took the slice off the surface and passed with no `Contract-Change` trailer.
+  - `-z` (NUL-separated) means git never quotes a path. By default git quotes a path holding a
+    non-ASCII byte, and it quotes one holding a `"` or a tab even with `core.quotePath=false` — so a
+    slice like `specs/EP-démo-S01/contracts/…` never matched the surface pattern.
+  - The script runs with `LC_ALL=C` (bytes, not characters), so a file name that is not valid UTF-8
+    cannot make GNU grep drop the list on Linux CI.
+  - The list of **deleted** slice paths (the lockless escape hatch above) is built the same way, so
+    moving a slice out of `contracts/` under a lockless epic is still a removal.
+  - `yad doctor` warns `checks:rename-blind` when an installed `checks/contract-check.sh` (or
+    `checks/backfill-check.sh`) in the Product or a connected repo still lists a rename by one path —
+    a copy changed by hand, which `yad check --fix` keeps.
 - This enforces the Phase 2 rule: the shared surface is owned upstream and is never widened from inside
   a code repo. The hash recipe is in `../yad-architecture/references/contract-format.md`.
 

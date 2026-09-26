@@ -64,3 +64,10 @@ A change is blocked **only until the features it touches** have approved specs â
 - A feature with **no** `specs/backfill/<feature>/` is not this gate's concern (it is either
   forward-spec'd via `yad-spec`, or not yet being backfilled).
 - Fails closed on an unresolvable base ref, like the other gates.
+- A **moved** file counts at both ends (E114). The changed list is `git diff --no-renames --name-only
+  -z`, so `git mv src/<feature>/x.js lib/x.js` still touches `<feature>`; without `--no-renames` git
+  named the move by its new path only and the feature was never checked. `-z` and `LC_ALL=C` keep an
+  odd file name (a `"`, a tab, bytes that are not UTF-8) from hiding a path.
+- This script is never wired by `yad check`; each copy is placed by hand. `yad doctor` warns
+  `checks:rename-blind` when a copy at `checks/backfill-check.sh` (in the Product or a connected repo)
+  is an older one that lists a rename by one path.

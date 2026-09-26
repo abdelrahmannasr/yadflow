@@ -473,6 +473,19 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         `checks/verified-commits.sh in ${oldGates.join(', ')} is an older copy that still enforces the author list`,
         'run `yad check --fix` (it refreshes the gate on a verified ledger and on code repos); on a local-ledger Product, copy skills/yad-checks/templates/checks/verified-commits.sh over it');
     }
+    // E114. An older contract-check / backfill-check names a rename by its new path only, so moving a
+    // slice out of specs/<story>/contracts/ (or a file out of src/<feature>/) passes the gate. `yad check
+    // --fix` refreshes a wired contract-check nobody changed; one changed by hand is kept, and
+    // backfill-check is never wired at all — every copy is placed by hand. Named, not fixed.
+    const renameBlind = [{ where: 'the Product', root }, ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))]
+      .flatMap((x) => RENAME_BLIND_GATES.map((rel) => ({ ...x, rel })))
+      .filter((x) => renameBlindGate(path.join(x.root, x.rel)))
+      .map((x) => `${x.rel} in ${x.where}`);
+    if (renameBlind.length) {
+      check(checks, 'checks:rename-blind', 'project', 'warn',
+        `${renameBlind.join(', ')} ${renameBlind.length > 1 ? 'are older copies that list' : 'is an older copy that lists'} a renamed file by its new path only — moving a file out of what the gate guards passes it`,
+        'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise add `--no-renames` to each `git diff --name-only` line, or copy the shipped template (skills/yad-checks/templates/checks/contract-check.sh, skills/yad-backfill/templates/checks/backfill-check.sh) over it');
+    }
   }
 
   ciTagsChecks(checks, root, hub, registry);
@@ -1618,15 +1631,24 @@ export function ownerChecks(checks, root) {
 // through; that is safe only while the hub-checks workflow lists renames by BOTH paths (`--no-renames`).
 // `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
 // workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
-export const HUB_CHECK_WORKFLOWS = ['.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml'];
+// The installed gates whose changed list must name a rename by both paths (E114), and the test for one
+// that does not. Line by line, and a `#` line is prose: one fixed line must not hide its blind twin.
+export const RENAME_BLIND_GATES = ['checks/contract-check.sh', 'checks/backfill-check.sh'];
+const renameBlindLine = (l) => !/^\s*#/.test(l) && /\bgit\b.*\bdiff\b.*--name-only/.test(l) && !/--no-renames/.test(l);
+export function renameBlindGate(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return src.split('\n').some(renameBlindLine);
+}
+
+export const HUB_CHECK_WORKFLOWS =['.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml'];
 export function ownerGuardChecks(checks, root) {
   const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
   // The exemption's own pattern, not any mention of the folder: a comment is not a rule.
   const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('\\.sdlc/owners/[^/]+\\.json$'));
   if (!exempting.length) return;
   // Line by line: one fixed diff line must not hide its blind twin in the other job.
-  const blindLine = (l) => !/^\s*#/.test(l) && /\bgit\b.*\bdiff\b.*--name-only/.test(l) && !/--no-renames/.test(l);
-  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => (read(rel) || '').split('\n').some(blindLine));
+  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => (read(rel) || '').split('\n').some(renameBlindLine));
   if (!blind.length) return;
   check(checks, 'owners:rename-blind', 'project', 'warn',
     `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,
