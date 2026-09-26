@@ -3699,6 +3699,8 @@ test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifac
   try {
     const g = (...a) => git(T, ...a);
     g('init', '-q', '-b', 'main');
+    // CI's Linux runner has no global git identity to fall back on (the Mac does).
+    g('config', 'user.name', 'Ann Lee'); g('config', 'user.email', 'ann@corp.io'); g('config', 'commit.gpgsign', 'false');
     fs.mkdirSync(path.join(T, 'epics/EP-x'), { recursive: true });
     fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), `${'# the reviewed epic\n'.repeat(20)}`);
     g('add', '-A'); g('commit', '-q', '-m', 'init');
