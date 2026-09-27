@@ -55,7 +55,9 @@ FOLD='function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); return x }'
 # spec.md, <f> counts as being backfilled and unapproved; at `specs` or `specs/backfill`, the gate cannot
 # tell which features are, so every src/<feature> change fails until one PR puts real files back (that PR
 # changes no feature, so it passes).
-base_tree="$(git ls-tree -r -z --full-tree "$BASE" | tr '\0' '\n')" || {
+# `tr '\n\0' '?\n'`: one record per line, and a newline inside a path becomes `?` — split on newlines
+# alone, a file named `notes<newline>100644 blob 0<TAB>src/Billing/y` added a record nobody made (review 2).
+base_tree="$(git ls-tree -r -z --full-tree "$BASE" | tr '\n\0' '?\n')" || {
   echo "FAIL [backfill]: git could not read the tree of '${BASE}' — the gate cannot tell which features are being backfilled."
   exit 1
 }
@@ -80,14 +82,20 @@ bf="$(printf '%s\n' "$specs" | sed -n 's/^[SU] //p' | awk "$FOLD"'{ split($0, c,
 # A second spelling is two spellings of one folder at HEAD at once (`Src/billing/` beside `src/billing/`,
 # or `src/Billing/` beside it): one folder on macOS and Windows, two on Linux CI. A lone `Src/` clashes
 # with nothing, and is read as `src/`.
-head_tree="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n')" || {
+# Lists go to awk IN the stream, each line tagged, never through the environment: a list of every
+# src/ folder passed as a variable hit the size limit ("Argument list too long") in a large repo and
+# failed every PR there (review 2). `tagged T "$list"` prints `T<TAB><line>` for each line that is not
+# empty.
+tagged() { printf '%s\n' "$2" | awk -v t="$1" 'length($0) { print t "\t" $0 }'; }
+head_tree="$(git ls-tree -r -z --full-tree HEAD | tr '\n\0' '?\n')" || {
   echo "FAIL [backfill]: git could not read the tree at HEAD — the gate cannot check src/ for links."
   exit 1
 }
 if [ -n "$bf" ] || [ -n "$blind" ]; then
-  bad="$(printf '%s\n' "$head_tree" | BF="$bf" ALL="${blind:+1}" awk "$FOLD"'
+  bad="$({ tagged B "$bf"; printf '%s\n' "$head_tree"; } | ALL="${blind:+1}" awk "$FOLD"'
     function once(k, s) { if (!(k in done)) { done[k] = 1; print "  " s } }
-    BEGIN { n = split(ENVIRON["BF"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") bf[b[i]] = 1; all = (ENVIRON["ALL"] != "") }
+    BEGIN { all = (ENVIRON["ALL"] != "") }
+    /^B\t/ { bf[substr($0, 3)] = 1; next }
     { t = index($0, "\t"); if (!t) next; p = substr($0, t + 1); m = substr($0, 1, 6); lp = fold(p); ln = (m == "120000" || m == "160000") }
     lp == "src" && ln { print "  " p (m == "120000" ? " (a symlink" : " (a submodule") ", where the src/ folder goes)"; next }
     lp !~ /^src\// { next }
@@ -119,7 +127,10 @@ fi
 # where its path should be, and every src/<feature> change after it was never seen (review 1).
 changed="$(git diff --no-renames --raw -z "${BASE}..HEAD" | while IFS= read -r -d '' h && IFS= read -r -d '' p; do
   printf '%s\t%s\n' "$h" "${p//$'\n'/?}"
-done)"
+done)" || {
+  echo "FAIL [backfill]: git could not list the changes between '${BASE}' and HEAD."
+  exit 1
+}
 # The spellings of each src/<feature> folder, on the base and at HEAD: `<top>/<feature>`, once each.
 spellings() {
   awk "$FOLD"'{ t = index($0, "\t"); if (!t) next; p = substr($0, t + 1); if (fold(p) !~ /^src\/[^\/]+\//) next
@@ -135,18 +146,19 @@ head_sp="$(printf '%s\n' "$head_tree" | spellings)"
 # refusal above, and the spec's approval may itself be waiting on that PR. For the same reason a file
 # deleted from one spelling of a folder the base held in two, when that spelling is gone at HEAD, is not
 # a change either (review 1): without it, neither removing the twin nor approving the spec could pass.
-feats="$(printf '%s\n' "$changed" | BF="$bf" BSP="$base_sp" HSP="$head_sp" awk "$FOLD"'
-  BEGIN {
-    n = split(ENVIRON["BF"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") bf[b[i]] = 1
-    n = split(ENVIRON["BSP"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") cnt[fold(b[i])]++
-    n = split(ENVIRON["HSP"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") here[b[i]] = 1
-  }
+# Only while ANOTHER spelling of that folder is still there at HEAD (review 2): deleting both spellings
+# deletes the feature, and that is a change to it. (A diff header starts with `:`, so the tags below
+# cannot be mistaken for one.)
+feats="$({ tagged B "$bf"; tagged S "$base_sp"; tagged H "$head_sp"; printf '%s\n' "$changed"; } | awk "$FOLD"'
+  /^B\t/ { bf[substr($0, 3)] = 1; next }
+  /^S\t/ { cnt[fold(substr($0, 3))]++; next }
+  /^H\t/ { here[substr($0, 3)] = 1; still[fold(substr($0, 3))] = 1; next }
   { t = index($0, "\t"); if (!t) next; h = substr($0, 1, t - 1); p = substr($0, t + 1); lp = fold(p) }
   lp !~ /^src\/./ { next }
   { split(h, w, " "); om = substr(w[1], 2); nm = w[2]; ln = (om ~ /^1[26]0000$/ || nm ~ /^1[26]0000$/) }
   w[5] == "D" && ln { next }
   { k = split(p, c, "/"); f = fold(c[2]); s = c[1] "/" c[2] }
-  w[5] == "D" && k > 2 && cnt[fold(s)] > 1 && !(s in here) { next }
+  w[5] == "D" && k > 2 && cnt[fold(s)] > 1 && !(s in here) && (fold(s) in still) { next }
   k > 2 || ln || (f in bf) { print f }
 ' | sort -u)"
 

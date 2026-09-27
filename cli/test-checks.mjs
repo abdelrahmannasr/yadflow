@@ -1000,6 +1000,49 @@ test('backfill gate: specs hidden behind a link on the base still refuses a link
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('backfill gate: deleting BOTH spellings of a twin deletes the feature, and is a change to it (E116 review 2)', () => {
+  const { T } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  commitIndexOnly(T, 'chore: a second spelling', ['src/Billing/x.js']);
+  const twin = git(T, 'rev-parse', 'HEAD').toString().trim();
+  git(T, 'rm', '-q', '-r', '--cached', 'src');
+  git(T, 'commit', '-q', '-m', 'chore: drop billing');
+  const r = runGate(BACKFILL, T, [twin]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /billing is being backfilled but its spec is not yet human-approved/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: a file name that spells a tree record adds no record (E116 review 2)', () => {
+  // Split on newlines alone, `notes<newline>100644 blob 0<TAB>src/Billing/y` read as a twin of billing
+  // that does not exist — every PR refused, with advice nobody could follow.
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  // Through --cacheinfo: --index-info reads one entry per line, and cannot take a newline in a name.
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'x\n', env: GIT_ENV }).toString().trim();
+  git(T, 'update-index', '--add', '--cacheinfo', `100644,${blob},notes\n100644 blob 0\tsrc/Billing/y`);
+  git(T, 'commit', '-q', '-m', 'docs: notes');
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /second spelling|src\/Billing/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: a repo with tens of thousands of src/ folders is not refused for its size (E116 review 2)', () => {
+  // The folder lists went to awk through the environment, which has a size limit: "Argument list too
+  // long", exit 126, on every PR.
+  const { T } = renameRepo({ 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'x\n', env: GIT_ENV }).toString().trim();
+  const lines = [];
+  for (let i = 0; i < 50000; i++) lines.push(`100644 ${blob}\tsrc/feature_module_${String(i).padStart(5, '0')}/index.js\n`);
+  execFileSync('git', ['update-index', '--index-info'], { cwd: T, env: GIT_ENV, input: lines.join('') });
+  git(T, 'commit', '-q', '-m', 'chore: many folders');
+  const base = git(T, 'rev-parse', 'HEAD').toString().trim();
+  git(T, 'commit', '-q', '--allow-empty', '-m', 'docs: nothing');
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS \[backfill\]: no src\/<feature> changes/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('backfill gate: a git that cannot read the tree fails with a line that says so (E116)', () => {
   const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n' });
   commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });

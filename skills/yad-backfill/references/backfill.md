@@ -81,8 +81,9 @@ A change is blocked **only until the features it touches** have approved specs â
   the base is backfilling (a code repo may hold real links elsewhere in `src/`). So is a second spelling
   of that folder at the same time (`Src/billing/` or `src/Billing/` beside `src/billing/`), which is one
   folder on macOS and Windows but two on Linux CI; a lone `Src/` clashes with nothing and is read as
-  `src/`. **Not a dead end:** a PR that only deletes a link, or every file of one spelling, is not a
-  change to the feature, so it passes. A link where the spec lives on the base (`specs/backfill/<feature>` or its
+  `src/`. **Not a dead end:** a PR that only deletes a link, or every file of one spelling while
+  another spelling stays, is not a change to the feature, so it passes. (Deleting both spellings deletes
+  the feature, and is a change to it.) A link where the spec lives on the base (`specs/backfill/<feature>` or its
   `spec.md`) makes that feature unapproved; one at `specs` or `specs/backfill` fails every feature change
   until a PR puts the real folder back, and meanwhile every folder under `src/` is checked for links.
   **A repo that keeps `specs` as a symlink** is refused this way on every feature change until it holds
