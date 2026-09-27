@@ -233,8 +233,13 @@ test('a product-link record committed but never pushed is named, with the push a
   git(backend, 'push', '-q', 'origin', 'main');
   git(backend, 'fetch', '-q', 'origin');
   assert.match(hits()[0].message, /^backend has no readable \.sdlc\/product-link\.json on the default branch \(it is not JSON\)/);
-  // A plain --fix leaves a copy that is not JSON alone, so the hint names --overwrite-local (review 7).
-  assert.match(hits()[0].hint, /add `--overwrite-local` for backend, whose copy is not JSON/);
+  // A plain --fix leaves a copy that is not JSON alone, so the hint names --overwrite-local (review 7),
+  // and says the flag reaches every repo in the run (review 8).
+  assert.match(hits()[0].hint, /add `--overwrite-local` for backend, whose copy is not JSON and is otherwise left alone — the flag applies to the whole run/);
+  // Fixed by hand on disk (not committed): the plain command is enough, and the hint does not ask for more.
+  fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{ "git_url": null, "path": ".yad/product", "default_branch": null }\n');
+  assert.match(hits()[0].message, /no readable/);
+  assert.doesNotMatch(hits()[0].hint, /overwrite-local/);
   fs.rmSync(T, { recursive: true, force: true });
   fs.rmSync(origin, { recursive: true, force: true });
 });
@@ -320,7 +325,7 @@ test('a product-link record on a feature branch, or a clone behind origin, is no
     assert.equal(gone.length, 1, 'a record deleted on the default branch is reported from a feature branch');
     assert.match(gone[0].message, /^backend has no \.sdlc\/product-link\.json on the default branch/);
     // …and the fix names the branch switch: `--push` commits only on the default branch.
-    assert.match(gone[0].hint, /first bring each clone to its default branch — backend \(on feat\/y\): `git checkout main && git pull origin main` — or commit the record on the branch each is on/);
+    assert.match(gone[0].hint, /^first bring the clone to its default branch — backend \(on feat\/y\): `git checkout main && git pull origin main` — or commit the record on the branch it is on and merge it with a PR; then from the Product run `yad check --fix --push`/);
     // On a detached HEAD it says so, not "on HEAD" (review 7).
     git(backend, 'checkout', '-q', '--detach');
     assert.match(hits(T)[0].hint, /backend \(on a detached HEAD\): `git checkout main && git pull origin main`/);

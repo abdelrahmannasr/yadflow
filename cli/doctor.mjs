@@ -598,7 +598,10 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
             if (ahead) return { name: r.name, branch, onBranch, why: 'elsewhere' };
           }
         }
-        if (!there) return { name: r.name, branch, offBranch, why: shown.ok ? 'unreadable' : 'missing' };
+        // A copy ON DISK that is not JSON is what a plain --fix leaves alone (review 8) — not the default
+        // branch's copy, which a clone off that branch only picks up once it switches and pulls.
+        const diskBad = !disk && exists(path.join(dir, PRODUCT_LINK));
+        if (!there) return { name: r.name, branch, offBranch, diskBad, why: shown.ok ? 'unreadable' : 'missing' };
         return { name: r.name, branch, offBranch, why: 'stale' };
       })
       .filter(Boolean);
@@ -620,11 +623,13 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           const listed = unlinked.filter((u) => ['missing', 'unreadable', 'stale'].includes(u.why));
           const where = (u) => (u.offBranch === 'HEAD' ? 'a detached HEAD' : u.offBranch);
           const off = listed.filter((u) => u.offBranch);
-          const bad = listed.filter((u) => u.why === 'unreadable');
+          // --overwrite-local only where a plain --fix would leave the copy alone: it is not JSON on disk
+          // now, or will not be once an off-branch clone pulls the default branch's unreadable one.
+          const bad = listed.filter((u) => u.diskBad || (u.why === 'unreadable' && u.offBranch));
           return [
-            'from the Product run `yad check --fix --push`: it writes the record into each connected repo and commits it to the default branch',
-            ...(bad.length ? [`add \`--overwrite-local\` for ${bad.map((u) => u.name).join(', ')}, whose copy is not JSON and is otherwise left alone (it also replaces other files you changed by hand there, after saving each)`] : []),
-            ...(off.length ? [`first bring each clone to its default branch — ${off.map((u) => `${u.name} (on ${where(u)}): \`git checkout ${u.branch} && git pull origin ${u.branch}\``).join('; ')} — or commit the record on the branch each is on and merge it with a PR`] : []),
+            ...(off.length ? [`first bring ${off.length > 1 ? 'each clone' : 'the clone'} to its default branch — ${off.map((u) => `${u.name} (on ${where(u)}): \`git checkout ${u.branch} && git pull origin ${u.branch}\``).join('; ')} — or commit the record on the branch ${off.length > 1 ? 'each is' : 'it is'} on and merge it with a PR`] : []),
+            `${off.length ? 'then ' : ''}from the Product run \`yad check --fix --push\`: it writes the record into each connected repo and commits it to the default branch`,
+            ...(bad.length ? [`add \`--overwrite-local\` for ${bad.map((u) => u.name).join(', ')}, whose copy is not JSON and is otherwise left alone — the flag applies to the whole run: it also replaces files changed by hand in the Product and in every connected repo, after saving each`] : []),
           ].join('; ');
         })());
     }
