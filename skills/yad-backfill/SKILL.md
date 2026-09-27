@@ -78,7 +78,8 @@ a change touching feature A is not blocked by an unverified feature B. Forward-s
 are not this gate's concern. The spec and its `verified: true` are read **from the base**, so an
 approval counts once it is merged — approve in its own PR, before the change (E116). A symlink or
 submodule at `src`, at `src/<feature>` or inside a feature being backfilled fails every PR until one PR
-removes it; so does a second spelling of that folder (`Src/`, `src/Billing/`).
+removes it; so do two spellings of that folder at once (`src/Billing/` beside `src/billing/`) until one
+PR removes one of them.
 
 ### Step 6 — `promote` (flip a stub epic → real, once its spec is approved)
 When a brownfield feature was anchored with a **stub genesis epic** (`yad-stub`) so that defects could

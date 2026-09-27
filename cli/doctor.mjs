@@ -1684,10 +1684,14 @@ export function symlinkBlindGate(file) {
   return symlinkBlindText(src);
 }
 // E116: a backfill-check that reads the spec from the PR's working tree, or never reads the tree at HEAD
-// for links under src/. Read like the ones above; no older copy ran `git ls-tree` or `git cat-file`.
+// for links under src/, or splits its --raw list with `tr`. Read like the ones above; no older copy ran
+// `git ls-tree` or `git cat-file`.
 export const backfillBlindText = (src) => {
   const lines = src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n').replace(/\\\r?\n/g, ' ').split('\n');
-  return !lines.some((l) => /\bgit\b.*\bls-tree\b.*\bHEAD\b/.test(l)) || !lines.some((l) => /\bgit\s+cat-file\s/.test(l));
+  return !lines.some((l) => /\bgit\b.*\bls-tree\b.*\bHEAD\b/.test(l)) || !lines.some((l) => /\bgit\s+cat-file\s/.test(l))
+    // The first E116 copy split its --raw list into lines with `tr`, so one path with a newline hid every
+    // feature after it (review 1). The current one pairs the records NUL by NUL.
+    || lines.some((l) => /\bgit\b.*\bdiff\b.*--raw\b.*\|\s*tr\b/.test(l));
 };
 export function backfillBlindGate(file) {
   let src;

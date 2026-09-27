@@ -75,23 +75,27 @@ bf="$(printf '%s\n' "$specs" | sed -n 's/^[SU] //p' | awk "$FOLD"'{ split($0, c,
 # where no path under src/ names it, so every later edit to the link's target passed. Read from the tree
 # at HEAD, on EVERY PR and before the "no src/<feature> changes" PASS — an edit to the target changes no
 # path under src/ at all. Links elsewhere in src/ are not this gate's concern: a code repo may hold real
-# ones. 120000 is a symlink, 160000 a submodule; `-r` lists `src` itself when `src` is the link.
+# ones. 120000 is a symlink, 160000 a submodule; `-r` lists `src` itself when `src` is the link. When
+# the base hides its specs behind a link (`blind`), every folder under src/ is taken as backfilled here.
+# A second spelling is two spellings of one folder at HEAD at once (`Src/billing/` beside `src/billing/`,
+# or `src/Billing/` beside it): one folder on macOS and Windows, two on Linux CI. A lone `Src/` clashes
+# with nothing, and is read as `src/`.
 head_tree="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n')" || {
   echo "FAIL [backfill]: git could not read the tree at HEAD — the gate cannot check src/ for links."
   exit 1
 }
-if [ -n "$bf" ] && [ -z "$blind" ]; then
-  bad="$(printf '%s\n' "$head_tree" | BF="$bf" awk "$FOLD"'
+if [ -n "$bf" ] || [ -n "$blind" ]; then
+  bad="$(printf '%s\n' "$head_tree" | BF="$bf" ALL="${blind:+1}" awk "$FOLD"'
     function once(k, s) { if (!(k in done)) { done[k] = 1; print "  " s } }
-    BEGIN { n = split(ENVIRON["BF"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") bf[b[i]] = 1 }
+    BEGIN { n = split(ENVIRON["BF"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") bf[b[i]] = 1; all = (ENVIRON["ALL"] != "") }
     { t = index($0, "\t"); if (!t) next; p = substr($0, t + 1); m = substr($0, 1, 6); lp = fold(p); ln = (m == "120000" || m == "160000") }
     lp == "src" && ln { print "  " p (m == "120000" ? " (a symlink" : " (a submodule") ", where the src/ folder goes)"; next }
     lp !~ /^src\// { next }
     { split(p, c, "/"); f = fold(c[2]) }
-    !(f in bf) { next }
-    c[1] != "src" { once("t/" c[1], c[1] "/ (a folder spelled other than src — the same folder on macOS and Windows, and " f " is being backfilled)") }
-    (f in sp) && sp[f] != c[2] { once("f/" f, "src/" sp[f] " and src/" c[2] " (one name on macOS and Windows)") }
-    !(f in sp) { sp[f] = c[2] }
+    !all && !(f in bf) { next }
+    { s = c[1] "/" c[2] }
+    (f in sp) && sp[f] != s { once("f/" f "/" s, sp[f] " and " s " (one name on macOS and Windows)") }
+    !(f in sp) { sp[f] = s }
     m == "120000" { print "  " p " (symlink)"; next }
     m == "160000" { print "  " p " (submodule)"; next }
   ')"
@@ -99,8 +103,8 @@ if [ -n "$bf" ] && [ -z "$blind" ]; then
     echo "FAIL [backfill]: src/ holds a symlink, a submodule or a second spelling where a feature being backfilled lives — this gate cannot see what changes behind it:"
     printf '%s\n' "$bad"
     echo "  -> put the real files in place of each link, and keep one spelling of each folder. A PR that only"
-    echo "     removes a link passes; until then every PR in this repo fails, because an edit to the link's"
-    echo "     target changes no path under src/."
+    echo "     removes a link, or every file of one spelling, passes; until then every PR in this repo fails,"
+    echo "     because an edit to the link's target changes no path under src/."
     exit 1
   fi
 fi
@@ -109,22 +113,40 @@ fi
 # only, so `git mv src/<feature>/x.js lib/x.js` took the file out of a feature being backfilled and the
 # gate never saw the feature. -z | tr: NUL-separated, so git never quotes a path — a quoted one (any
 # non-ASCII byte by default; a `"` or a tab always) never matched src/<feature>/ below. --raw gives each
-# path after a line with its modes and status; with --no-renames every change has exactly one path.
-changed="$(git diff --no-renames --raw -z "${BASE}..HEAD" | tr '\0' '\n')"
+# path after a record with its modes and status; with --no-renames every change has exactly one path.
+# The two are paired here, NUL by NUL, into one line — `<modes and status><TAB><path>` — and a newline
+# inside a path becomes `?`: split into lines first, one file named `a<newline>b` put every later header
+# where its path should be, and every src/<feature> change after it was never seen (review 1).
+changed="$(git diff --no-renames --raw -z "${BASE}..HEAD" | while IFS= read -r -d '' h && IFS= read -r -d '' p; do
+  printf '%s\t%s\n' "$h" "${p//$'\n'/?}"
+done)"
+# The spellings of each src/<feature> folder, on the base and at HEAD: `<top>/<feature>`, once each.
+spellings() {
+  awk "$FOLD"'{ t = index($0, "\t"); if (!t) next; p = substr($0, t + 1); if (fold(p) !~ /^src\/[^\/]+\//) next
+    split(p, c, "/"); s = c[1] "/" c[2]; if (!(s in seen)) { seen[s] = 1; print s } }'
+}
+base_sp="$(printf '%s\n' "$base_tree" | spellings)"
+head_sp="$(printf '%s\n' "$head_tree" | spellings)"
 # Feature = a directory under src/ (src/<feature>/...), folded (E116). A path that IS `src/<feature>` — a
 # link, a submodule or a file put where the folder goes — is that feature too. Top-level src/*.js files
 # are deliberately NOT gated here (they belong to no single feature), so a path that IS `src/<name>`
 # counts only as a link or a submodule (either side), or when <name> is being backfilled. A deleted
 # symlink or submodule is not a change to the feature: removing the link is how a repo gets out of the
-# refusal above, and the spec's approval may itself be waiting on that PR.
-feats="$(printf '%s\n' "$changed" | BF="$bf" awk "$FOLD"'
-  BEGIN { n = split(ENVIRON["BF"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") bf[b[i]] = 1 }
-  NR % 2 == 1 { h = $0; next }
-  { p = $0; lp = fold(p) }
+# refusal above, and the spec's approval may itself be waiting on that PR. For the same reason a file
+# deleted from one spelling of a folder the base held in two, when that spelling is gone at HEAD, is not
+# a change either (review 1): without it, neither removing the twin nor approving the spec could pass.
+feats="$(printf '%s\n' "$changed" | BF="$bf" BSP="$base_sp" HSP="$head_sp" awk "$FOLD"'
+  BEGIN {
+    n = split(ENVIRON["BF"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") bf[b[i]] = 1
+    n = split(ENVIRON["BSP"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") cnt[fold(b[i])]++
+    n = split(ENVIRON["HSP"], b, "\n"); for (i = 1; i <= n; i++) if (b[i] != "") here[b[i]] = 1
+  }
+  { t = index($0, "\t"); if (!t) next; h = substr($0, 1, t - 1); p = substr($0, t + 1); lp = fold(p) }
   lp !~ /^src\/./ { next }
   { split(h, w, " "); om = substr(w[1], 2); nm = w[2]; ln = (om ~ /^1[26]0000$/ || nm ~ /^1[26]0000$/) }
   w[5] == "D" && ln { next }
-  { k = split(p, c, "/"); f = fold(c[2]) }
+  { k = split(p, c, "/"); f = fold(c[2]); s = c[1] "/" c[2] }
+  w[5] == "D" && k > 2 && cnt[fold(s)] > 1 && !(s in here) { next }
   k > 2 || ln || (f in bf) { print f }
 ' | sort -u)"
 

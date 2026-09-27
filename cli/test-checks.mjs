@@ -775,7 +775,10 @@ test('contract-check and backfill-check list every change by both paths, byte-wi
     assert.ok(lists.length >= 1, `${rel}: no changed list found`);
     for (const l of lists) {
       assert.match(l, /--no-renames/, `${rel}: ${l.trim()}`);
-      assert.match(l, / -z .*\| tr '\\0' '\\n'/, `${rel}: ${l.trim()}`);
+      // --raw pairs each path with its header NUL by NUL (E116 review 1): split into lines, a newline in a
+      // path shifted every pair after it.
+      if (/--raw/.test(l)) assert.match(l, / -z .*\| while IFS= read -r -d '' h && IFS= read -r -d '' p; do/, `${rel}: ${l.trim()}`);
+      else assert.match(l, / -z .*\| tr '\\0' '\\n'/, `${rel}: ${l.trim()}`);
     }
     assert.ok(src.indexOf('export LC_ALL=C') >= 0 && src.indexOf('export LC_ALL=C') < src.indexOf(lists[0]), `${rel}: bytes before the list`);
   }
@@ -913,8 +916,8 @@ test('backfill gate: a link where the spec lives on the base is not read as "not
 
 test('backfill gate: a second spelling of src/ or of a backfilled feature fails, once by name (E116)', () => {
   for (const [names, said] of [
-    [['Src/billing/x.js', 'Src/billing/y.js'], '  Src/ (a folder spelled other than src'],
-    [['ſrc/billing/x.js'], '  ſrc/ (a folder spelled other than src'],
+    [['Src/billing/x.js', 'Src/billing/y.js'], '  Src/billing and src/billing (one name on macOS and Windows)'],
+    [['ſrc/billing/x.js'], '  src/billing and ſrc/billing (one name on macOS and Windows)'],
     [['src/Billing/x.js', 'src/Billing/y.js'], '  src/Billing and src/billing (one name on macOS and Windows)'],
   ]) {
     const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(true) });
@@ -932,6 +935,68 @@ test('backfill gate: a second spelling of src/ or of a backfilled feature fails,
   const r = runGate(BACKFILL, T, [b]);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /billing is being backfilled but its spec is not yet human-approved/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: a second spelling on the base is not a dead end, and a lone Src/ is src/ (E116 review 1)', () => {
+  // The base holds src/Billing/ beside src/billing/, and billing is not approved. Removing every file of
+  // one spelling passes; approving first cannot (the twin is still there) — so there is one way out.
+  const { T } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  commitIndexOnly(T, 'chore: a second spelling', ['src/Billing/x.js', 'src/Billing/y.js']);
+  const twin = git(T, 'rev-parse', 'HEAD').toString().trim();
+  git(T, 'rm', '-q', '--cached', 'src/Billing/x.js', 'src/Billing/y.js');
+  git(T, 'commit', '-q', '-m', 'chore: one spelling');
+  const out = runGate(BACKFILL, T, [twin]);
+  assert.equal(out.code, 0, `removing the twin must not be a dead end:\n${out.out}`);
+  // Removing only PART of the twin leaves it there, and is a change to billing.
+  git(T, 'reset', '-q', '--hard', twin);
+  git(T, 'rm', '-q', '--cached', 'src/Billing/x.js');
+  git(T, 'commit', '-q', '-m', 'chore: half');
+  assert.equal(runGate(BACKFILL, T, [twin]).code, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+  // A lone Src/ clashes with nothing: the approval PR passes, and a later change is billing's.
+  const U = scaffoldRepo();
+  fs.mkdirSync(path.join(U, 'specs/backfill/billing'), { recursive: true });
+  fs.writeFileSync(path.join(U, 'specs/backfill/billing/spec.md'), backfillSpec(false));
+  git(U, 'add', 'specs');
+  commitIndexOnly(U, 'chore: base', ['Src/billing/x.js']);
+  const b = git(U, 'rev-parse', 'HEAD').toString().trim();
+  fs.writeFileSync(path.join(U, 'specs/backfill/billing/spec.md'), backfillSpec(true));
+  git(U, 'add', 'specs');
+  git(U, 'commit', '-q', '-m', 'docs: approve billing');
+  const r = runGate(BACKFILL, U, [b]);
+  assert.equal(r.code, 0, r.out);
+  commitIndexOnly(U, 'feat: touch billing', ['Src/billing/y.js']);
+  const r2 = runGate(BACKFILL, U, [b]);
+  assert.equal(r2.code, 1, r2.out);
+  assert.match(r2.out, /billing is being backfilled but its spec is not yet human-approved/);
+  fs.rmSync(U, { recursive: true, force: true });
+});
+
+test('backfill gate: a file name with a newline does not hide a feature (E116 review 1)', () => {
+  // `a<newline>b` sorts before src/. Split into lines, it put every later --raw header where its path
+  // should be, and the billing change was never seen.
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': backfillSpec(false) });
+  commit(T, 'feat: touch billing', { 'a\nb': 'x\n', '.github/x\ny': 'x\n', 'src/billing/pay.js': 'pay(2)\n' });
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[backfill\]: billing is being backfilled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: specs hidden behind a link on the base still refuses a link under src/ (E116 review 1)', () => {
+  // With the specs unreadable, every src/ folder is taken as backfilled for the link check — or a PR
+  // that only edits the target of src/billing passes ("no src/<feature> changes").
+  const { T } = renameRepo({ 'docs/specs/backfill/billing/spec.md': backfillSpec(false), 'lib/billing/a.js': 'a\n' });
+  fs.symlinkSync('docs/specs', path.join(T, 'specs'));
+  fs.mkdirSync(path.join(T, 'src'));
+  fs.symlinkSync('../lib/billing', path.join(T, 'src/billing'));
+  commit(T, 'chore: links');
+  const b = git(T, 'rev-parse', 'HEAD').toString().trim();
+  commit(T, 'feat: edit billing through the link', { 'lib/billing/a.js': 'b\n' });
+  const r = runGate(BACKFILL, T, [b]);
+  assert.equal(r.code, 1, r.out);
+  assert.ok(r.out.includes('  src/billing (symlink)'), r.out);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

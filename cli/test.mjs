@@ -25062,7 +25062,10 @@ test('E116 doctor: an older backfill-check that reads the approval from the PR i
     assert.deepEqual(blind(), [], 'the shipped gate is fine');
     assert.equal(renameBlindText(shipped), false, 'its --raw list still names a rename by both paths');
     // Each half alone is blind. (Built from the shipped one, not from history — CI may clone shallow.)
-    for (const [from, to] of [['git ls-tree -r -z --full-tree HEAD', 'true'], ['git cat-file blob', 'cat']]) {
+    // The first E116 copy: its --raw list split into lines with `tr`.
+    const rawLine = shipped.split('\n').find((l) => l.includes('--raw -z'));
+    const firstCut = `changed="$(git diff --no-renames --raw -z "\${BASE}..HEAD" | tr '\\0' '\\n')"`;
+    for (const [from, to] of [['git ls-tree -r -z --full-tree HEAD', 'true'], ['git cat-file blob', 'cat'], [rawLine, `${firstCut}\n: "$(true`]]) {
       const old = shipped.split(from).join(to);
       assert.notEqual(old, shipped);
       put(backend, old);
