@@ -1100,6 +1100,16 @@ test('backfill gate: every character APFS folds into ASCII is folded (E116 revie
   }
 });
 
+test('backfill gate: a repeated verified: key is read as YAML reads it, the last one wins (E116 review 6)', () => {
+  for (const [first, then, code] of [['true', 'false', 1], ['false', 'true', 0]]) {
+    const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': `---\nverified: ${first}\nverified: ${then}\n---\n# billing\n` });
+    commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });
+    const r = runGate(BACKFILL, T, [base]);
+    assert.equal(r.code, code, `${first} then ${then}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 test('backfill gate: a spec whose frontmatter never closes is not approved by a body line (E116 review 5)', () => {
   const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': '---\nfeature: billing\n# billing\nverified: true\n' });
   commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });

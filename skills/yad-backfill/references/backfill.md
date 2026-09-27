@@ -65,7 +65,7 @@ A change is blocked **only until the features it touches** have approved specs â
   forward-spec'd via `yad-spec`, or not yet being backfilled).
 - Fails closed on an unresolvable base ref, like the other gates.
 - Only a frontmatter that closes counts: a spec that opens `---` and never closes it is unapproved,
-  whatever its body says.
+  whatever its body says. A repeated `verified:` key is read as YAML reads it: the last one wins.
 - A **moved** file counts at both ends (E114). The changed list is `git diff --no-renames --raw
   -z`, each path paired with its header NUL by NUL (so a newline in one name cannot shift the rest), so `git mv src/<feature>/x.js lib/x.js` still touches `<feature>`; without `--no-renames` git
   named the move by its new path only and the feature was never checked. `-z` and `LC_ALL=C` keep an
