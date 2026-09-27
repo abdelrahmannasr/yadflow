@@ -614,13 +614,18 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         ...(unreadable.length ? [`${unreadable.join(', ')} ${unreadable.length > 1 ? 'have' : 'has'} no readable ${PRODUCT_LINK} on the default branch (it is not JSON) — CI cannot read it`] : []),
         ...(stale.length ? [`${stale.join(', ')} ${stale.length > 1 ? 'hold' : 'holds'} a ${PRODUCT_LINK} on disk that differs from the one on the default branch — CI reads the default branch's`] : []),
       ].join('; '),
-        'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch'
-        + (() => {
-          // `--push` commits only on the default branch (review 6): say so where the clone is elsewhere.
-          const off = unlinked.filter((u) => ['missing', 'unreadable', 'stale'].includes(u.why) && u.offBranch);
-          return off.length
-            ? ` — first check out the default branch (${off.map((u) => `\`git checkout ${u.branch}\` in ${u.name}, now on ${u.offBranch}`).join(', ')}), or commit the record on that branch and merge it with a PR`
-            : '';
+        // One step per repo that needs more than the plain command (review 7): which branch it is on, and
+        // --overwrite-local where the copy is not JSON (a plain --fix leaves such a copy alone).
+        (() => {
+          const listed = unlinked.filter((u) => ['missing', 'unreadable', 'stale'].includes(u.why));
+          const where = (u) => (u.offBranch === 'HEAD' ? 'a detached HEAD' : u.offBranch);
+          const off = listed.filter((u) => u.offBranch);
+          const bad = listed.filter((u) => u.why === 'unreadable');
+          return [
+            'from the Product run `yad check --fix --push`: it writes the record into each connected repo and commits it to the default branch',
+            ...(bad.length ? [`add \`--overwrite-local\` for ${bad.map((u) => u.name).join(', ')}, whose copy is not JSON and is otherwise left alone (it also replaces other files you changed by hand there, after saving each)`] : []),
+            ...(off.length ? [`first bring each clone to its default branch — ${off.map((u) => `${u.name} (on ${where(u)}): \`git checkout ${u.branch} && git pull origin ${u.branch}\``).join('; ')} — or commit the record on the branch each is on and merge it with a PR`] : []),
+          ].join('; ');
         })());
     }
     const elsewhere = unlinked.filter((u) => u.why === 'elsewhere');
