@@ -331,7 +331,11 @@ test('E113: an edited or unrecorded bash hook is the team\'s, and one still name
     const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
     cursor.hooks.stop = [{ command: 'bash hooks/yad-capture.sh --final' }];
     fs.writeFileSync(path.join(T, '.cursor/hooks.json'), JSON.stringify(cursor));
-    await fixHooks(T);
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    try { await fixHooks(T); } finally { console.log = orig; }
+    assert.ok(!said.some((l) => /yad-capture\.sh stays/.test(l)), 'a team\'s own command is their choice, and is left in silence');
     assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')), 'the edited copy stays');
     assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), 'still run by the team\'s entry, so it stays');
     assert.ok(!fs.existsSync(path.join(T, 'hooks/ledger-guard-cursor.sh')), 'the untouched, unnamed one goes');
@@ -372,7 +376,14 @@ test('E113 review 1: a kept script is never pending — a local ledger\'s leftov
     // Local ledger: nothing rewrites the guard's old entry, so its script is still run — and so it is not
     // planned for removal at all (planning it, then keeping it, would show it pending on every check).
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ledger: 'local', platform: 'github', default_branch: 'main' }));
-    const plan = legacyHookScriptActions(T).map((a) => a.item);
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    let plan;
+    try { plan = legacyHookScriptActions(T).map((a) => a.item); } finally { console.log = orig; }
+    // No guard is installed with a local ledger, so the advice is to remove the entry, not repoint it (review 4).
+    assert.ok(said.some((l) => /hooks\/ledger-guard\.sh stays — .*has no ledger guard .*remove that entry/.test(l)), said.join('\n'));
+    assert.ok(!said.some((l) => /ledger-guard\.sh stays — .*node hooks/.test(l)));
     assert.ok(!plan.includes('hooks/ledger-guard.sh (removed)'), plan.join());
     assert.ok(plan.includes('hooks/yad-capture.sh (removed)'), 'capture\'s old entry IS rewritten in both ledger modes');
     // A personal settings file, with a Windows-style path.
@@ -428,6 +439,32 @@ test('E113 review 2: a script waiting only on the commit says so', async () => {
     console.log = orig;
     assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays until \.claude\/settings\.json and \.cursor\/hooks\.json are committed as they now stand/.test(l)), said.join('\n'));
   } finally { console.log = orig; cleanup(T); }
+});
+
+test('E113 review 4: a removal planned, then run again by the time it applies, is kept with advice that works', async () => {
+  const { legacyHookScriptActions } = await import('./plan.mjs');
+  const T = await oldProduct();
+  try {
+    await fixHooks(T);
+    fs.writeFileSync(path.join(T, 'hooks/yad-capture.sh'), '#!/usr/bin/env bash\n# yad-capture.sh, as an older yadflow shipped it\n');
+    const { MANAGED_LEDGER } = await import('./manifest.mjs');
+    const { contentSha } = await import('./lib.mjs');
+    const rec = JSON.parse(fs.readFileSync(path.join(T, MANAGED_LEDGER), 'utf8'));
+    rec.files['hooks/yad-capture.sh'] = contentSha(path.join(T, 'hooks/yad-capture.sh'));
+    fs.writeFileSync(path.join(T, MANAGED_LEDGER), JSON.stringify(rec));
+    const [act] = legacyHookScriptActions(T);
+    assert.equal(act.item, 'hooks/yad-capture.sh (removed)');
+    // Between plan and apply (as `yad setup` can leave it), an entry runs the script again.
+    const cfg = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
+    cfg.hooks.afterFileEdit.push({ command: 'hooks/yad-capture.sh' });
+    fs.writeFileSync(path.join(T, '.cursor/hooks.json'), JSON.stringify(cfg));
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    try { act.apply(); } finally { console.log = orig; }
+    assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), 'kept');
+    assert.ok(said.some((l) => /yad-capture\.sh kept — \.cursor\/hooks\.json still runs it; run `yad check --fix`/.test(l)), said.join('\n'));
+  } finally { cleanup(T); }
 });
 
 test('E113 review 1: on Windows doctor names a CRLF checkout, which reads approvals as stale', async () => {

@@ -1163,6 +1163,9 @@ function namedIn(raw, scriptRel) {
 const onDisk = (root) => (file) => { try { return fs.readFileSync(path.join(root, file), 'utf8'); } catch { return null; } };
 // `HEAD:./<file>` is read relative to the Product (the `./`), so a Product in a subfolder of its repository
 // reads its own files. Not a repository, no commit yet, or a file never committed: nothing is committed.
+// The old scripts that belonged to the ledger guard, which only a verified Product has.
+const GUARD_SCRIPTS = new Set(['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']);
+
 // Read once per file per plan, however many old scripts ask (review 3).
 const committed = (root) => {
   const seen = new Map();
@@ -1222,7 +1225,14 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
       const stuck = onDiskAfter.filter((f) => {
         try { return commandsIn(JSON.parse(after(f))).some((cmd) => ours.has(cmd) && namesScript(cmd, scriptRel)); } catch { return false; }
       });
-      if (stuck.length) info(`${scriptRel} stays — ${stuck.join(' and ')} still ${stuck.length > 1 ? 'run' : 'runs'} it through an old yad hook command; change it to the \`node hooks/….mjs\` command yad now writes, then \`yad check --fix\` removes the script`);
+      // The guard is wired only on a verified Product. Anywhere else there is no Node script to point the
+      // entry at, so the way out is to remove it (review 4).
+      const noGuardHere = GUARD_SCRIPTS.has(scriptRel) && !isVerifiedLedger(readJSON(productConfigPath(root)));
+      if (stuck.length) {
+        info(`${scriptRel} stays — ${stuck.join(' and ')} still ${stuck.length > 1 ? 'run' : 'runs'} it through an old yad hook command; ${noGuardHere
+          ? 'this Product has no ledger guard (its ledger is not verified), so remove that entry'
+          : 'change it to the `node hooks/….mjs` command yad now writes'}, then \`yad check --fix\` removes the script`);
+      }
       continue;
     }
     const inHead = namedIn(head, scriptRel);
