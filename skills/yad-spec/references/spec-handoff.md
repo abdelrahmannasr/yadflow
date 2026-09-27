@@ -107,7 +107,10 @@ scalar** — `"..."` or `'...'` is taken literally, and a leading `~`/`$VAR` is 
 unreachable path degrades the Product-reading gates to a PASS-with-note rather than failing them, and
 each one now says so in its output. **CI reads `product-repo` from `link.md` as it stands on the base
 branch** once one is merged (E117): a PR that changes it is read by the old value, and the new one
-counts after the merge. A Product folder that the code repo itself tracks (a monorepo) is read as it
+counts after the merge. **A merged `.sdlc/product-link.json` in the code repo comes before all of it
+(E120):** its `path` (from the repo root, where CI checks the Product out) is what the gates read, and
+`link.md`'s `product-repo` is only a fallback for a repo without one — so write `../../<that path>` here
+when the record exists. A Product folder that the code repo itself tracks (a monorepo) is read as it
 stands on the base commit, so a re-lock must merge before the slice change that pins it.
 **Reachable-but-lockless is a different case and does NOT degrade:** when the Product resolves and
 `epics/<epic>/.sdlc/` is there with no `contract-lock.json` in it, a claimed `Contract-Change: yes`

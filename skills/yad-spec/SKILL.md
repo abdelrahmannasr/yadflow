@@ -95,7 +95,8 @@ to read. See `references/spec-handoff.md` for the exact file map and per-file de
 ### Step 6 — Write link.md back to the story
 Write `demo-repos/<repo>/specs/<story>/link.md` (template in `references/spec-handoff.md`) with
 frontmatter linking the spec back to the product repo: `story`, `epic`, `repo`, `feature-id`,
-`product-repo` (path), `contract-lock` (the hash **copied** from `contract-lock.json`, NOT recomputed
+`product-repo` (path — when the code repo has `.sdlc/product-link.json`, write `../../<its path>`, the
+place CI checks the Product out; the gates read that record first anyway), `contract-lock` (the hash **copied** from `contract-lock.json`, NOT recomputed
 in the code repo — or the literal `none` on a short-lane epic, which has no lock; never a made-up or
 empty hash, which the CI gate reads as a broken lock and fails), `speckit`
 (`installed | not-installed`), `generated` (date). This `link.md` plus the

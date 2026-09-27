@@ -204,6 +204,14 @@ platform login that gave it. The platform, not a stored list, decides who can ap
 If the Product has no remote (`platform: null`) or the verified ledger is disabled, the Shape gate runs
 local with no error — the verified ledger is purely additive.
 
+## The Product-link record (E120)
+Each connected code repo also carries `.sdlc/product-link.json` — the Product's `git_url`, the `path`
+where CI checks the Product out (`.yad/product` by default) and its `default_branch`. It is not written
+here: `yad check --fix` / `yad update` write it (from the Product's own settings) into every connected
+repo, and `--push` commits it to each repo's default branch. The Product-reading gates read it from
+the base; `checks/product-checkout.sh` uses it with the `YAD_PRODUCT_TOKEN` secret. After connecting a
+repo, run `yad check --fix --push`; `yad doctor` warns `repos:product-link-missing` until it is there.
+
 ## Live on-demand (the third context layer)
 The cached pack + map are the default. When a Shape phase needs an **area** not in the map, it may
 re-run Repomix **live**, scoped to that area:

@@ -350,6 +350,7 @@ hand-made `contract-lock.json` with the hash it pins. Two rules close both:
 
 | Rule | What the gate does | Why |
 | --- | --- | --- |
+| The repo's **record** comes first (E120) | `.sdlc/product-link.json` in the code repo — `git_url`, `path` (from the repo root: where CI checks the Product out, `.yad/product` by default) and `default_branch` — is written by `yad check --fix` / `yad update` from the Product and merged on its own. Read from the **base**, its `path` wins over every `link.md`: no gate takes where the Product lives from the PR. A record the PR adds or changes counts once it merges (a note says so). A `link.md` whose own `product-repo` reaches a **different** folder here gets a note; one that reaches nothing (a path on its author's machine) is passed over in silence. A merged record that reaches nothing **defers** (CI has no Product checkout) — it is not the PR's choice, so E119's first-spec FAIL does not apply. With no record on the base, the order below is kept. | A record is one reviewed fact for the whole repo, where `link.md` is one per story and written by each PR's author. |
 | `product-repo` comes from the **base** | Where the Product lives is a fact about the whole repo, so the value is, in order: `link.md` as it stands on the base; else a sibling `specs/<story>/link.md` on the base (a story new in this PR, or a `link.md` that never had a value) — one of the same epic first, and the first whose value reaches a folder here, so one stale `link.md` cannot hand every new story a deferral; else — the repo's first spec — the PR's value. A PR whose value differs gets a note (`… names product-repo 'Y', but specs/<other>/link.md on main says 'X' — the Product is read from the base value; a new one counts once it merges`). | Only `product-repo` is read from the base. `contract-lock` is read as the PR leaves it — a re-spec PR must update the pin. |
 | A **kept** Product is read from the **base commit** | Whether the Product is kept in this repo (a monorepo: the Product and the code in one git repo) is asked of the **base**, from the path's text alone, before anything on disk: the base tracks `<path>/.sdlc/hub.json`, which every Product commits. The disk is the PR's — a PR that deleted or moved the folder read as untracked, and deferred. Its `epics/` is then written out from the base commit through a throwaway index (`git read-tree` + `git checkout-index`), with the work tree pointed at an empty temp folder, and read from there. Not `git archive`, which drops whatever `.gitattributes` marks `export-ignore`; and not with the real work tree, whose `.gitattributes` is the PR's — `*.md text eol=crlf` or `working-tree-encoding=UTF-16` there wrote the base's files unreadable. A symlink or submodule inside the base's `epics/` is **FAIL** by name: a link written out still points where it pointed (an absolute one into the PR's working tree), and a submodule comes out as an empty folder. Any other tracked file under a Product path — a planted folder, or one file force-added under an ignored checkout — **FAILs** by name, with the fix (`git rm -r --cached`). A path that runs through a tracked symlink, submodule or file: **FAIL** by name. The path is walked twice — part by part as written, and again from where it really lands, resolved in one step from the gate's own shell — so an alias such as Linux's `/proc/self/cwd`, which means a different folder to each process, cannot lead the gate into the PR's own tree (review 5). A folder that is there but cannot be entered to find where it really is **FAILs** rather than being read unchecked (review 6). A path whose real location is inside the repo's own git folder also **FAILs**: git never lists `.git/` as tracked, yet branch names shape the folders in it (review 7). The git folder is compared as a folder, not a spelling, so `.GIT` counts on a disk that ignores case (review 8). | "Inside the code repo" is not the test. CI can only check a second repo out inside the workspace (`actions/checkout` `path:`), and an untracked checkout there is not the PR's. |
 | One story ID shape | A story must be `EP-<slug>-S<n>` (lowercase slug), in all four gates and spec-link. **FAIL** by name otherwise. | A story written as a path (`EP-x-S01/.`) named a `link.md` the base read never found. |
@@ -567,6 +568,37 @@ The gates run identically under either CI; the config just invokes the scripts w
   pipeline's globals, where `NX_BASE`/`NX_HEAD` could collide with a host's own Nx setup. The retained greenfield standalone template
   (`templates/gitlab/.gitlab-ci.yml`) carries the same Node default, exact Nx range, and dependency
   installer and test-worker-cap semantics. All `--profile code`.
+
+### Checking the Product out in CI (E120)
+
+The four Product-reading gates can only read a Product that is on disk. Before each of them, both
+workflows run `checks/product-checkout.sh` (wired into every code repo). It reads
+`.sdlc/product-link.json` **from the base** — never as the PR leaves it — and, when the
+`YAD_PRODUCT_TOKEN` secret is set, clones the Product's `default_branch` (depth 1) into the record's
+`path`. To turn it on:
+
+1. From the Product, run `yad check --fix --push`: it writes `.sdlc/product-link.json` into each
+   connected code repo and commits it to the default branch. Set the Product's `git_url` in its
+   `.sdlc/product.json` first (`yad setup` fills it from the `origin` remote).
+2. Make a token that can **read** the Product repository — on GitHub a fine-grained personal access
+   token or a GitHub App token with `contents: read` on that one repo (the workflow's own `GITHUB_TOKEN`
+   cannot read another private repo); on GitLab a project or group access token with `read_repository`.
+3. Add it to the **code repo** as the `YAD_PRODUCT_TOKEN` secret (GitHub: Settings → Secrets and
+   variables → Actions; GitLab: Settings → CI/CD → Variables, **masked**).
+
+What it does in each case:
+
+| Case | Result |
+| --- | --- |
+| No record on the base, no `YAD_PRODUCT_TOKEN` (every PR from a fork), or no `git_url` in the record | A note; nothing is cloned, and the gates defer as before. |
+| The record's `path` is outside the repo, `.`, absolute, or under `.git` | **FAIL** — CI can only check a second repo out inside the workspace. |
+| The `path` holds files this repo tracks | **FAIL** — the gates refuse a tracked Product path anyway. |
+| The folder is already there | Left as it is. |
+| The clone fails with a token set | **FAIL**, naming the URL and branch — a broken setup must not read like a deferral. |
+
+The token is handed to git through its environment (`GIT_CONFIG_COUNT`, git 2.31+) as an HTTP header,
+never on a command line or in a URL; on GitHub the encoded form is masked too. An `ssh` `git_url`
+(`git@host:org/repo.git`) is cloned as the same repo over `https`.
 
 ## Sync with existing CI (merge, never clobber)
 
