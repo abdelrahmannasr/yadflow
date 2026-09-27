@@ -474,6 +474,13 @@ export const REPO_WIRING = {
 // else is a local edit, reported as `modified` and left alone (#164). Committed, so the record
 // travels with the repo instead of living in one person's clone.
 export const MANAGED_LEDGER = '.sdlc/managed.json';
+// E120. Where a connected code repo's Product lives, as a fact of the repo — `git_url`, `path` (from the
+// repo root: where CI checks the Product out) and `default_branch`. Written by `yad check --fix` /
+// `yad update` (the Product knows both sides), merged on its own, and read from the BASE by the four
+// Product-reading gates and checks/product-checkout.sh. NOT `.sdlc/product.json`: that is the Product's
+// own settings file, and a code repo holding one would be taken for a Product.
+export const PRODUCT_LINK = '.sdlc/product-link.json';
+export const PRODUCT_LINK_DEFAULT_PATH = '.yad/product';
 // Suffix for the copy written beside a managed file before its content is replaced without that
 // proof — the local edit is always recoverable from the working tree, not only from git history.
 export const BACKUP_SUFFIX = '.yad-orig';

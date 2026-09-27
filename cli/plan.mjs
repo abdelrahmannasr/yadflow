@@ -5,13 +5,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn, isPlainObject,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn, isPlainObject, run,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
-  productConfigPath,
+  productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
@@ -588,9 +588,59 @@ export function repoActions(root, repo) {
   // whole one-time setup on a repo that never asked for it.
   const wired = Object.keys(ledger).length > 0
     || actions.some((a) => a.status !== 'missing' && a.item.startsWith('checks/'));
+  const link = productLinkAction(root, repo, repoRoot);
+  if (link) actions.push(link);
   if (!wired) return actions;
-  const neverWritten = (a) => !ledger[rel(a.managed.root, a.managed.dest)];
+  // The record is not a template: an absent one on a wired repo is always `new` (nothing to respect).
+  const neverWritten = (a) => !a.managed || !ledger[rel(a.managed.root, a.managed.dest)];
   return actions.map((a) => (a.status === 'missing' && neverWritten(a) ? { ...a, status: 'new' } : a));
+}
+
+// The git repo a folder belongs to (its top level), or '' when it is not in one.
+const gitTop = (dir) => {
+  const r = run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
+  return r.ok ? path.resolve(r.stdout.trim()) : '';
+};
+
+// E120. `.sdlc/product-link.json` in a connected code repo: where its Product lives. Generated, not
+// copied from a template, so it is not in the managed ledger. `git_url` and `default_branch` come from
+// the Product's own settings every time; `path` (where CI checks the Product out) is the team's to
+// change and is kept. Any other key in the file is kept too. A code repo that IS the Product's git repo
+// (a monorepo) gets none: the gates already read a Product kept in the repo from the base.
+function productLinkAction(root, repo, repoRoot) {
+  if (!exists(repoRoot)) return null;
+  const top = gitTop(repoRoot);
+  if (!top || top === gitTop(root)) return null;
+  const dest = path.join(repoRoot, PRODUCT_LINK);
+  const hub = readJSON(productConfigPath(root), {}) || {};
+  let current;
+  try { current = readJSONStrict(dest, null); } catch { current = undefined; }
+  const base = {
+    scope: repo.name,
+    item: PRODUCT_LINK,
+    root: repoRoot,
+    paths: [PRODUCT_LINK],
+  };
+  const want = {
+    git_url: typeof hub.git_url === 'string' && hub.git_url ? hub.git_url : null,
+    path: isPlainObject(current) && typeof current.path === 'string' && current.path ? current.path : PRODUCT_LINK_DEFAULT_PATH,
+    default_branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : 'main',
+  };
+  // A record that does not parse, or is not an object, is someone's: reported and never overwritten by
+  // a plain update; `--overwrite-local` saves it beside itself first, like any managed file.
+  if (current === undefined || (current !== null && !isPlainObject(current))) {
+    const backup = backupPathFor(dest);
+    return {
+      ...base, status: 'modified', backup,
+      apply: () => { fs.copyFileSync(dest, backup); writeJSON(dest, want); },
+    };
+  }
+  const same = current && ['git_url', 'path', 'default_branch'].every((k) => current[k] === want[k]);
+  return {
+    ...base,
+    status: current === null ? 'missing' : same ? 'ok' : 'outdated',
+    apply: () => writeJSON(dest, { ...(current || {}), ...want }),
+  };
 }
 
 // Product wiring (gate-sync + verified-commits CI on the Product itself). Only when the Product has a

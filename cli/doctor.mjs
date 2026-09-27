@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -516,6 +516,35 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       check(checks, 'checks:product-path-blind', 'project', 'warn',
         `${pathBlind.join(', ')} ${pathBlind.length > 1 ? 'are older copies that read' : 'is an older copy that reads'} the Product from wherever the PR's link.md points — a PR can point it at nothing, or at a Product it commits itself, and pass`,
         'run `yad check --fix` (it refreshes a wired gate nobody changed by hand); otherwise copy the shipped one over it from skills/yad-checks/templates/checks/');
+    }
+    // E120. An older Product-reading gate never reads `.sdlc/product-link.json`, so it still takes where
+    // the Product lives from link.md; and a checks workflow the team changed by hand (which `yad update`
+    // keeps) may not run checks/product-checkout.sh, so CI never checks the Product out. Named, not fixed.
+    const recordBlind = [
+      ...gateRoots.flatMap((x) => PRODUCT_PATH_GATES.map((rel) => ({ ...x, rel })))
+        .filter((x) => productRecordBlindGate(path.join(x.root, x.rel))),
+      ...gateRoots.filter((x) => x.where !== 'the Product').flatMap((x) => CHECK_WORKFLOWS.map((rel) => ({ ...x, rel })))
+        .filter((x) => { try { return !/checks\/product-checkout\.sh/.test(fs.readFileSync(path.join(x.root, x.rel), 'utf8')); } catch { return false; } }),
+    ].map((x) => `${x.rel} in ${x.where}`);
+    if (recordBlind.length) {
+      check(checks, 'checks:product-record-blind', 'project', 'warn',
+        `${recordBlind.join(', ')} ${recordBlind.length > 1 ? 'do' : 'does'} not use .sdlc/product-link.json — the gate takes where the Product lives from link.md, or CI never checks the Product out`,
+        'run `yad check --fix` (it refreshes wired files nobody changed by hand); otherwise copy the shipped gate or workflow over it from skills/yad-checks/templates/');
+    }
+    // E120. A connected code repo with no record (and not the Product's own git repo): its gates fall
+    // back to link.md, and CI has nothing to check the Product out from.
+    const unlinked = registry.repos.filter((r) => r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
+      .filter(({ dir }) => exists(dir) && !exists(path.join(dir, PRODUCT_LINK)))
+      .filter(({ dir }) => {
+        const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
+        const t = top(dir);
+        return t && t !== top(root);
+      })
+      .map(({ r }) => r.name);
+    if (unlinked.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${unlinked.join(', ')} ${unlinked.length > 1 ? 'have' : 'has'} no ${PRODUCT_LINK} — the gates there take where the Product lives from link.md, and CI cannot check the Product out`,
+        'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch');
     }
   }
 
@@ -1698,6 +1727,17 @@ export function backfillBlindGate(file) {
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return backfillBlindText(src);
 }
+// E120: a Product-reading gate that never reads `.sdlc/product-link.json` (no non-comment command naming
+// it). Read like the ones above.
+export const productRecordBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*product-link\.json/.test(l));
+export function productRecordBlindGate(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return productRecordBlindText(src);
+}
+// The checks workflows a connected repo may carry (one per platform).
+export const CHECK_WORKFLOWS = ['.github/workflows/yad-checks.yml', '.gitlab/ci/yad-checks.yml'];
 // E117: a Product-reading gate that does not read link.md from the base (`git show`) or a tracked Product
 // from the base commit (`git checkout-index`, from a throwaway index). Read like the two above; no older
 // copy ran either command.

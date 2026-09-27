@@ -107,6 +107,71 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// E120. `.sdlc/product-link.json` in each connected code repo: where its Product lives. Generated from
+// the Product's own settings (git_url, default_branch); `path` is the team's to change and is kept.
+test('check --fix writes each code repo\'s product-link record, refreshes it, and keeps its path (E120)', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/product.git', default_branch: 'trunk' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const file = path.join(backend, '.sdlc/product-link.json');
+  const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(rec.git_url, 'https://github.com/org/product.git');
+  assert.equal(rec.path, '.yad/product');
+  assert.equal(rec.default_branch, 'trunk');
+  const again = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(again.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'ok'), again.out);
+  // The team moves the checkout and adds a note; the Product's URL changes. Both survive the refresh.
+  fs.writeFileSync(file, JSON.stringify({ ...rec, path: 'vendor/product', note: 'ours' }, null, 2) + '\n');
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/renamed.git', default_branch: 'trunk' }));
+  const stale = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(stale.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'outdated'), stale.out);
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.git_url, 'https://github.com/org/renamed.git');
+  assert.equal(after.path, 'vendor/product');
+  assert.equal(after.note, 'ours');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('update adds the product-link record to an already-wired repo; a monorepo gets none (E120)', async () => {
+  const { T, backend } = scaffold();
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const file = path.join(backend, '.sdlc/product-link.json');
+  fs.rmSync(file);
+  // An upgrade from before E120: the repo is wired, the record is new — update (scope changed) adds it.
+  const r = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), r.out);
+  await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+  assert.ok(fs.existsSync(file));
+  // No git_url on the Product: the record still says where the Product goes, with git_url null.
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).git_url, null);
+  fs.rmSync(T, { recursive: true, force: true });
+  // A code repo inside the Product's own git repo (a monorepo) is left alone.
+  const M = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-test-'));
+  git(M, 'init', '-q');
+  fs.mkdirSync(path.join(M, 'app'), { recursive: true });
+  fs.mkdirSync(path.join(M, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(M, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'app', path: 'app', platform: 'github', default_branch: 'main' }] }));
+  const m = await captureConsole(() => reconcile(M, { fix: true }));
+  assert.ok(!fs.existsSync(path.join(M, 'app/.sdlc/product-link.json')), m.out);
+  assert.ok(!m.value.items.some((i) => i.item === '.sdlc/product-link.json'), m.out);
+  fs.rmSync(M, { recursive: true, force: true });
+});
+
+test('an unreadable product-link record is left alone, and --overwrite-local saves it first (E120)', async () => {
+  const { T, backend } = scaffold();
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const file = path.join(backend, '.sdlc/product-link.json');
+  fs.writeFileSync(file, '{ not json');
+  const r = await captureConsole(() => reconcile(T, { fix: true }));
+  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'modified'), r.out);
+  assert.equal(fs.readFileSync(file, 'utf8'), '{ not json');
+  await captureConsole(() => reconcile(T, { fix: true, overwriteLocal: true }));
+  assert.equal(fs.readFileSync(`${file}.yad-orig`, 'utf8'), '{ not json');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).path, '.yad/product');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // A template a later release ADDS to the repo wiring is `missing` on every repo wired before it.
 // `yad update` (--scope=changed) skips `missing` so it never does one-time setup — which, for a wired
 // repo, meant the files that CALL the new template were refreshed (`outdated`) while the template
@@ -25107,6 +25172,48 @@ test('E117 doctor: an older Product-reading gate that takes product-repo as the 
     // A comment naming the command is not the command; a split command is one command.
     assert.equal(productPathBlindText('# git show x\n# git checkout-index -a\n'), true);
     assert.equal(productPathBlindText('git \\\n  show x\ngit checkout-index -a\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E120 doctor: a gate or workflow that never uses the product-link record is checks:product-record-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, productRecordBlindText, PRODUCT_PATH_GATES } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:product-record-blind');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates', rel), 'utf8');
+    const put = (dir, rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    for (const rel of PRODUCT_PATH_GATES) { put(backend, rel, shipped(`checks/${path.basename(rel)}`)); put(T, rel, shipped(`checks/${path.basename(rel)}`)); }
+    put(backend, '.github/workflows/yad-checks.yml', shipped('github/yad-checks.yml'));
+    assert.deepEqual(blind(), [], 'the shipped gates and workflow are fine');
+    // An older gate: it never reads the record. (Built from the shipped one, not from history.)
+    const old = shipped('checks/contract-check.sh').replace(/product-link\.json/g, 'nothing.json');
+    put(backend, 'checks/contract-check.sh', old);
+    // A workflow the team changed by hand, from before the checkout step.
+    put(backend, '.github/workflows/yad-checks.yml', shipped('github/yad-checks.yml').replace(/.*product-checkout.*\n(.*YAD_PRODUCT_TOKEN.*\n)?/g, ''));
+    const hit = blind();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend, \.github\/workflows\/yad-checks\.yml in backend do not use \.sdlc\/product-link\.json/);
+    // A comment naming the file is not a read of it.
+    assert.equal(productRecordBlindText('# git show BASE:.sdlc/product-link.json\n'), true);
+    assert.equal(productRecordBlindText('git cat-file -e "$1:.sdlc/product-link.json"\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E120 doctor: a connected code repo with no product-link record is repos:product-link-missing', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor } = await import('./doctor.mjs');
+    const missing = () => collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+    const hit = missing();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^backend has no \.sdlc\/product-link\.json/);
+    assert.match(hit[0].hint, /yad check --fix --push/);
+    fs.mkdirSync(path.join(backend, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{ "git_url": null, "path": ".yad/product", "default_branch": "main" }\n');
+    assert.deepEqual(missing(), []);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
