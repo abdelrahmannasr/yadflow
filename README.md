@@ -92,11 +92,11 @@ In one pass it produces:
   who has worked in that directory in the last 30 days), and the push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
   `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
   under `checks/`.
-- **An agent guardrail** on a verified Product — `hooks/ledger-guard.sh`, a harness hook that refuses an
+- **An agent guardrail** on a verified Product — `hooks/ledger-guard.mjs`, a harness hook that refuses an
   agent the CI-owned gate-ledger write at the moment it tries it and names the command that owns the
   transition, instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic
   (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority.
-- **Background capture** on every Product, in both ledger modes (E43) — `hooks/yad-capture.sh`, a
+- **Background capture** on every Product, in both ledger modes (E43) — `hooks/yad-capture.mjs`, a
   harness hook that runs `yad capture` after each agent edit. It snapshots every changed Shape artifact
   onto your private `yad/wip/<you>/<epic>` branches, so a draft is never lost and nobody types a git
   command. See [Background capture](#background-capture) below.
@@ -226,11 +226,11 @@ failed pipeline. It needs a hook that can run *before* a write and refuse it. Tw
 | Cursor | `.cursor/hooks.json` | `preToolUse` |
 
 Cursor answers this kind of hook in JSON rather than by exit code, and treats an empty answer as a
-refusal — so a `.cursor` project also gets a small adapter script, `hooks/ledger-guard-cursor.sh`,
+refusal — so a `.cursor` project also gets a small adapter script, `hooks/ledger-guard-cursor.mjs`,
 which always replies properly. Without it the guard would have blocked every file write instead of
 just the gate files.
 
-Every other directory gets the script (`hooks/ledger-guard.sh`) and no wiring — they have no such
+Every other directory gets the script (`hooks/ledger-guard.mjs`) and no wiring — they have no such
 hook, so those agents are guarded by CI alone. `yad doctor` says so by name rather than staying
 silent. The Cursor wiring follows Cursor's published hook protocol and has not yet been exercised
 against a live Cursor session.
@@ -316,8 +316,28 @@ workflow-hygiene flags — derived read-only, so an EM can see how the team actu
 ---
 
 **Platform support.** Linux and macOS are first-class (CI runs the test suite, bash gates, and the
-end-to-end harness on both). On **Windows use [WSL](https://learn.microsoft.com/windows/wsl/)** — native
-PowerShell is not yet supported. Requires **Node.js ≥ 18**.
+end-to-end harness on both). **On Windows, the agent hooks run natively, without WSL** (E113), and the
+CLI code they reach has been fixed for Windows — CI runs the hook scripts and those CLI tests on Windows.
+The rest of the CLI is not yet tested there. Requires **Node.js ≥ 18**.
+
+| On Windows | What to know |
+| --- | --- |
+| Agent hooks | Each hook is a Node script (`hooks/*.mjs`) that the agent runs as `node <script>`, so nothing needs bash or an execute bit. `node` must be on the PATH your agent runs with — if it is not, the hooks silently do not run |
+| Claude Code | Runs hook commands in **Git Bash** (part of Git for Windows). Without Git Bash it falls back to PowerShell, and the hooks do not run there. `yad doctor` warns when it cannot find Git Bash |
+| Cursor | Runs hook commands through PowerShell. The entry is `node hooks/<script>.mjs`, which PowerShell runs as it is |
+| Line endings | Set `git config core.autocrlf input` in the Product clone. With `true` (the Git for Windows default) git checks files out with CRLF line endings. yad's own managed files still compare equal, but an approval is bound to an artifact's exact bytes, so reviews approved elsewhere read as stale. `yad doctor` warns about this on Windows |
+| Check gates | Still bash scripts (`checks/*.sh`). They run on your CI runner, not on your machine |
+| Not yet tested on Windows | The full test suite and the end-to-end harness run on Linux and macOS only. A machine with no Git Bash is not covered for Claude Code |
+
+**Upgrading from a release before E113.** The hooks used to be bash scripts (`hooks/*.sh`). `yad check
+--fix` (or `yad update`) rewrites each hook entry to the Node command and deletes the old script — but
+only a copy yad's own record (`.sdlc/managed.json`) proves it wrote and nobody changed. A script you
+edited, or one your own hook entry still runs, is kept. The old script is also kept until the rewritten
+settings file is **committed**: yad never commits that file for you, and a teammate who pulls must not get
+an entry that runs a deleted script. So the order is: `yad check --fix`, commit `.claude/settings.json` and
+`.cursor/hooks.json`, then `yad check --fix` again to remove the old scripts. Everyone on the team should
+upgrade together: an older yadflow does not know the new entries, and its `check --fix` puts the old
+script and entry back beside them.
 
 **Releases** are a human decision. Merging to `main` never publishes; a person fast-forwards the
 `release` branch, and [semantic-release](https://semantic-release.gitbook.io/) publishes from there

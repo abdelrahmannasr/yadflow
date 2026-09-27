@@ -523,9 +523,18 @@ export const PRODUCT_WIRING = {
 // Harness hooks: the LOCAL half of the ledger rule, installed on the Product beside the CI gates and
 // active under the same verified-ledger predicate (#171). Kept out of `PRODUCT_WIRING` because a hook is not a
 // CI gate — it is advisory, fails open, and its adapter (below) is per-harness, not per-platform.
+//
+// Node scripts, not shell scripts (E113): one file runs on Windows, macOS and Linux, and a harness entry
+// runs it as `node <file>`, so no execute bit is needed — Windows cannot keep one on disk.
 export const HOOK_WIRING = [
-  { src: 'skills/yad-checks/templates/hooks/ledger-guard.sh', dest: 'hooks/ledger-guard.sh', exec: true },
+  { src: 'skills/yad-checks/templates/hooks/ledger-guard.mjs', dest: 'hooks/ledger-guard.mjs' },
 ];
+
+// The shell scripts every hook was before E113. `yad check --fix` rewrites an entry that still names one
+// (each adapter's `legacyCommands`) and then deletes the script — but only a copy the provenance record
+// proves yad wrote and nobody edited. An edited or unrecorded copy is the team's, and may be what their
+// own hand-wired hook runs, so it is left where it is.
+export const LEGACY_HOOK_SCRIPTS = Object.freeze(['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh', 'hooks/yad-capture.sh']);
 
 // Per-harness adapter config: which IDE target gets a hook entry written, where, and in what shape.
 //
@@ -536,10 +545,10 @@ export const HOOK_WIRING = [
 // Cursor — so "no entry here" means "not wired", never "checked and found wanting":
 //
 //   .claude   Claude Code — `PreToolUse` in `.claude/settings.json`, reading the EXIT CODE, so the
-//             entry points straight at the shared `hooks/ledger-guard.sh`.
+//             entry points straight at the shared `hooks/ledger-guard.mjs`.
 //   .cursor   Cursor — `preToolUse` in `.cursor/hooks.json`, a PERMISSION hook that reads a JSON
 //             verdict on STDOUT and treats an empty answer as a refusal. The shared script prints
-//             nothing when it allows, so this entry points at `hooks/ledger-guard-cursor.sh`
+//             nothing when it allows, so this entry points at `hooks/ledger-guard-cursor.mjs`
 //             instead (the `wiring` below), which speaks that protocol.
 //
 // Cursor's `afterFileEdit` is deliberately NOT used: it fires once the edit is already on disk, so it
@@ -564,7 +573,9 @@ export const HOOK_WIRING = [
 // guard that is off while every report says it is on.
 const CLAUDE_PROJECT_DIR_ENV = 'CLAUDE_PROJECT_DIR';
 const CURSOR_PROJECT_DIR_ENV = 'CURSOR_PROJECT_DIR';
-const guardCommand = (envVar) => `"$${envVar}/hooks/ledger-guard.sh"`;
+// `node` then the script: the harness runs the command through a shell (Git Bash on Windows for Claude
+// Code), and `node` is on PATH wherever yadflow runs at all.
+const guardCommand = (envVar) => `node "$${envVar}/hooks/ledger-guard.mjs"`;
 
 export const HOOK_ADAPTERS = Object.freeze({
   '.claude': Object.freeze({
@@ -591,7 +602,10 @@ export const HOOK_ADAPTERS = Object.freeze({
     // is ours to normalise; anything else is the team's, even if it names a similar path. Never widen
     // this to a substring test — a team keeping its own wrapper at `.claude/hooks/ledger-guard.sh`
     // would have their hook silently rewritten to ours.
-    legacyCommands: Object.freeze(['$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh']), // 3.16.x, pre-quoting
+    legacyCommands: Object.freeze([
+      '$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh',   // 3.16.x, pre-quoting
+      '"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"', // the bash script, before E113
+    ]),
   }),
   '.cursor': Object.freeze({
     target: '.cursor',
@@ -610,36 +624,38 @@ export const HOOK_ADAPTERS = Object.freeze({
     // Cursor's `preToolUse` is a PERMISSION hook: it answers in JSON on stdout, and empty stdout is
     // invalid JSON, which BLOCKS. So the plain guard cannot be wired here — it prints nothing when it
     // allows, which would have blocked every file write in a verified project. This wrapper, installed
-    // with the adapter below, always prints a permission answer. It takes no arguments on purpose:
-    // Cursor holds one command STRING and does not document whether it is split by a shell.
+    // with the adapter below, always prints a permission answer. The script itself takes no arguments:
+    // the entry stays a program and one path, the one form Cursor's own docs show.
     wiring: Object.freeze([
-      Object.freeze({ src: 'skills/yad-checks/templates/hooks/ledger-guard-cursor.sh', dest: 'hooks/ledger-guard-cursor.sh', exec: true }),
+      Object.freeze({ src: 'skills/yad-checks/templates/hooks/ledger-guard-cursor.mjs', dest: 'hooks/ledger-guard-cursor.mjs' }),
     ]),
     // RELATIVE, and deliberately not `$CURSOR_PROJECT_DIR/…` — the opposite of the Claude entry above,
     // for a documented reason. Cursor's docs say a project hook RUNS FROM THE PROJECT ROOT, which is
     // the directory holding the `.cursor/hooks.json` this entry lives in, and the same directory
-    // holding `hooks/ledger-guard.sh`. So the relative path always resolves, whatever the harness's
+    // holding `hooks/ledger-guard.mjs`. So the relative path always resolves, whatever the harness's
     // notion of cwd elsewhere.
     //
-    // What they do NOT say is whether the command runs through a shell. That is exactly why there is
-    // no variable and no quotes here: `$CURSOR_PROJECT_DIR` never expanded would be a command not
-    // found, and quotes taken literally by a non-shell exec would be part of the filename. An
-    // unquoted relative path with no variable and no space is the one spelling that works either way
-    // — which matters, because every one of those failures is silent, fails OPEN, and leaves
-    // `yad doctor` truthfully reporting the entry as wired while nothing is ever refused.
+    // What they do NOT say is WHICH shell runs the command — on Windows it is PowerShell. That is why
+    // there is no variable and no quotes here: `$CURSOR_PROJECT_DIR` is not an environment variable to
+    // PowerShell, and a command that begins with a quoted path is not a command to it either. Every one
+    // of those failures is silent, fails OPEN, and leaves `yad doctor` truthfully reporting the entry
+    // as wired while nothing is ever refused.
+    //
+    // E113: `node` and a relative script. Cursor's docs call the command a "shell string" and show
+    // `python3 .cursor/hooks/x.py`, so a program and one argument is a documented form — and on Windows
+    // it is the one that runs at all: PowerShell cannot run a `.sh` file.
     projectDirEnv: CURSOR_PROJECT_DIR_ENV,
-    command: 'hooks/ledger-guard-cursor.sh',
+    command: 'node hooks/ledger-guard-cursor.mjs',
     // This harness answers with a JSON verdict and treats an empty or off-schema answer as a REFUSAL.
     // `yad doctor` uses the flag to catch a hand-wired command that would fail closed — see
     // `miswiredGuardCommand`. An adapter without it reads the exit code, where a silent command is
     // simply a guard that never fires.
     requiresJsonVerdict: true,
-    // Nothing shipped before this release, so there is no past spelling of ours to normalise.
-    legacyCommands: Object.freeze([]),
+    legacyCommands: Object.freeze(['hooks/ledger-guard-cursor.sh']), // the bash script, before E113
   }),
 });
 
-// Background capture (E43): the POST-edit half. After an agent writes a file, `hooks/yad-capture.sh` runs
+// Background capture (E43): the POST-edit half. After an agent writes a file, `hooks/yad-capture.mjs` runs
 // `yad capture --hook`, which snapshots every changed artifact onto the person's private
 // `yad/wip/<name>/<epic>` branches. Unlike the guard it is wired in BOTH ledger modes — capture is about
 // never losing a draft, which matters whoever owns the ledger — and on any Product whose config does not
@@ -647,7 +663,7 @@ export const HOOK_ADAPTERS = Object.freeze({
 // check serve both; `observe: true` marks a hook that only watches (it cannot refuse), so its entry carries
 // no `failClosed`, and a null `matcher` is an event that takes none (Cursor's `afterFileEdit`).
 export const CAPTURE_WIRING = [
-  { src: 'skills/yad-checks/templates/hooks/yad-capture.sh', dest: 'hooks/yad-capture.sh', exec: true },
+  { src: 'skills/yad-checks/templates/hooks/yad-capture.mjs', dest: 'hooks/yad-capture.mjs' },
 ];
 export const CAPTURE_ADAPTERS = Object.freeze({
   '.claude': Object.freeze({
@@ -661,10 +677,11 @@ export const CAPTURE_ADAPTERS = Object.freeze({
     matcher: 'Edit|Write|MultiEdit|NotebookEdit',
     projectDirEnv: CLAUDE_PROJECT_DIR_ENV,
     // Quoted and anchored on the project root, for the reason the guard's entry is (see above).
-    command: `"$${CLAUDE_PROJECT_DIR_ENV}/hooks/yad-capture.sh"`,
+    // `--format claude` is said here, not guessed by the script: Cursor sets `CLAUDE_PROJECT_DIR` too.
+    command: `node "$${CLAUDE_PROJECT_DIR_ENV}/hooks/yad-capture.mjs" --format claude`,
     observe: true,
     wiring: Object.freeze([]),
-    legacyCommands: Object.freeze([]),
+    legacyCommands: Object.freeze([`"$${CLAUDE_PROJECT_DIR_ENV}/hooks/yad-capture.sh"`]), // before E113
   }),
   '.cursor': Object.freeze({
     target: '.cursor',
@@ -678,10 +695,10 @@ export const CAPTURE_ADAPTERS = Object.freeze({
     matcher: null,
     projectDirEnv: CURSOR_PROJECT_DIR_ENV,
     // Relative and unquoted, for the reason the guard's Cursor entry is (see above).
-    command: 'hooks/yad-capture.sh',
+    command: 'node hooks/yad-capture.mjs',
     observe: true,
     wiring: Object.freeze([]),
-    legacyCommands: Object.freeze([]),
+    legacyCommands: Object.freeze(['hooks/yad-capture.sh']), // before E113
   }),
 });
 

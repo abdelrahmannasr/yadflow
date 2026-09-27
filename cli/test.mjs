@@ -15199,7 +15199,7 @@ test('mergeHookSettings adds our entry once and never touches anything else', ()
   assert.equal(first.settings.hooks.PreToolUse.length, 2);
   assert.equal(first.settings.hooks.PreToolUse[0].hooks[0].command, 'echo hi', 'foreign hook survives');
   assert.equal(first.settings.hooks.PreToolUse[1].hooks[0].command, HOOK_COMMAND);
-  assert.match(HOOK_COMMAND, /^"\$CLAUDE_PROJECT_DIR\/.*"$/, 'the path is quoted for the shell');
+  assert.match(HOOK_COMMAND, /^node "\$CLAUDE_PROJECT_DIR\/hooks\/ledger-guard\.mjs"$/, 'node, then the path quoted for the shell (E113)');
   // Idempotent: a second pass is a no-op, so `check` reports ok rather than rewriting forever.
   const second = mergeHookSettings(first.settings);
   assert.equal(second.changed, false);
@@ -15262,17 +15262,16 @@ test('hookActions wires the guard on a verified hub, and nothing with a local le
     const first = hookActions(T, ['.claude']);
     // Both halves ride `yad update` ('new', not 'missing'): applying the entry without the script it
     // points at fires a missing command on every single file edit.
-    assert.deepEqual(first.map((a) => [a.item, a.status]), [['hooks/ledger-guard.sh', 'new'], ['settings.json', 'new']]);
+    assert.deepEqual(first.map((a) => [a.item, a.status]), [['hooks/ledger-guard.mjs', 'new'], ['settings.json', 'new']]);
     for (const a of first) a.apply();
     const applied = hookActions(T, ['.claude']);
     assert.deepEqual(applied.map((a) => a.status), ['ok', 'ok'], 'idempotent');
-    assert.ok(fs.statSync(path.join(T, 'hooks/ledger-guard.sh')).mode & 0o111, 'the script is executable');
-    const settings = JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'));
+        const settings = JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'));
     assert.equal(settings.hooks.PreToolUse.length, 1);
     // The settings file is the team's: it must never enter the `--push` staging allowlist, or an
     // unrelated working-tree edit of theirs rides a chore commit straight to the default branch.
     assert.deepEqual(applied.find((a) => a.item === 'settings.json').paths, []);
-    assert.deepEqual(applied.find((a) => a.item === 'hooks/ledger-guard.sh').paths, ['hooks/ledger-guard.sh']);
+    assert.deepEqual(applied.find((a) => a.item === 'hooks/ledger-guard.mjs').paths, ['hooks/ledger-guard.mjs']);
     // `yad setup` re-applies with force:true, which reaches an `ok` action. Applying one must not
     // rewrite the file — it is the team's, hand-formatting and all, and we own one entry in it.
     const hand = JSON.stringify(settings, null, 4) + '\n';
@@ -15284,7 +15283,7 @@ test('hookActions wires the guard on a verified hub, and nothing with a local le
     assert.equal(hookActions(T, ['.claude']).find((a) => a.item === 'settings.json').status, 'outdated');
     // A target with no hook protocol gets the script only.
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
-    assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.sh']);
+    assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.mjs']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   const fileOnly = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: false } });
   try {
@@ -15368,13 +15367,13 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     assert.equal(hooksCheck().status, 'ok');
     assert.match(hooksCheck().message, /guard wired.*no pre-edit hook protocol on \.agents/);
     // The healthy line names the script Cursor actually invokes, not just the shared one.
-    assert.match(hooksCheck().message, /hooks\/ledger-guard-cursor\.sh/);
+    assert.match(hooksCheck().message, /hooks\/ledger-guard-cursor\.mjs/);
     // ...and losing that wrapper is a gap. `.cursor/hooks.json` names it, so a project that lost it to
     // a gitignore or a partial checkout has Cursor invoking a command that does not exist on every
-    // file write — while the shared `hooks/ledger-guard.sh` sits there making the check look green.
-    fs.rmSync(path.join(T, 'hooks/ledger-guard-cursor.sh'));
+    // file write — while the shared `hooks/ledger-guard.mjs` sits there making the check look green.
+    fs.rmSync(path.join(T, 'hooks/ledger-guard-cursor.mjs'));
     assert.equal(hooksCheck().status, 'warn');
-    assert.match(hooksCheck().message, /not wired: hooks\/ledger-guard-cursor\.sh/);
+    assert.match(hooksCheck().message, /not wired: hooks\/ledger-guard-cursor\.mjs/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // with a local ledger there is nothing to guard, so the check is silent rather than ok.
   const fileOnly = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: false } });
@@ -15466,14 +15465,15 @@ test('hookActions wires every target that has a hook protocol, and only those', 
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
     const both = hookActions(T, ['.claude', '.cursor', '.agents']);
     assert.deepEqual(both.map((a) => a.item),
-      ['hooks/ledger-guard.sh', 'settings.json', 'hooks/ledger-guard-cursor.sh', 'hooks.json']);
+      ['hooks/ledger-guard.mjs', 'settings.json', 'hooks/ledger-guard-cursor.mjs', 'hooks.json']);
     assert.deepEqual(both.map((a) => a.scope), ['hub', '.claude', 'hub', '.cursor']);
     for (const a of both) a.apply();
     assert.deepEqual(hookActions(T, ['.claude', '.cursor', '.agents']).map((a) => a.status), ['ok', 'ok', 'ok', 'ok']);
     // Cursor's relative command is written as seen from the project root, which is where its docs say
     // a project hook runs from — so the file it names has to be there.
-    assert.ok(fs.existsSync(path.join(T, CURSOR.command)), 'the relative command resolves from the project root');
-    assert.ok(fs.statSync(path.join(T, CURSOR.command)).mode & 0o111, 'the wrapper is executable');
+    // E113: the command is `node <script>`, so the script is its last word, and needs no execute bit.
+    assert.match(CURSOR.command, /^node hooks\/[a-z-]+\.mjs$/);
+    assert.ok(fs.existsSync(path.join(T, CURSOR.command.split(' ').pop())), 'the relative script resolves from the project root');
     // The wrapper is installed ONLY for the target that needs it: an unused adapter script in a
     // `.claude`-only tree is a file nobody can explain.
     assert.ok(!hookActions(T, ['.claude']).some((a) => a.item.includes('cursor')), 'no Cursor wrapper without .cursor');
@@ -15482,7 +15482,7 @@ test('hookActions wires every target that has a hook protocol, and only those', 
     // Cursor's file is the team's too — never in the `--push` staging allowlist.
     assert.deepEqual(both.find((a) => a.item === 'hooks.json').paths, []);
     // A target with no protocol still gets the shared script, and no wiring.
-    assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.sh']);
+    assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.mjs']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -15555,7 +15555,7 @@ test('payloadPaths: the structural rule survives a harness that names things dif
   assert.deepEqual(payloadPaths({ tool_input: deep }), []);
 });
 
-test('a wired script that lost its execute bit is outdated, not ok (E11 review)', () => {
+test('a hook script needs no execute bit — the entry runs it with node (E113; was E11 review)', () => {
   const T = hookProduct();
   try {
     fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
@@ -15563,18 +15563,11 @@ test('a wired script that lost its execute bit is outdated, not ok (E11 review)'
     for (const a of hookActions(T, ['.cursor'])) a.apply();
     assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'));
 
-    // Right bytes, no execute bit: the harness entry runs a command that cannot start. It fails, and
-    // both harnesses fail OPEN on a failure that is not an explicit deny — so every ledger edit is
-    // permitted while the bytes still match and nothing reports a thing. `chmod` lives inside
-    // `apply()`, which an `ok` action never reaches, so this had to become a status.
-    for (const rel of ['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']) {
-      fs.chmodSync(path.join(T, rel), 0o644);
-      const act = hookActions(T, ['.cursor']).find((a) => a.item === rel);
-      assert.equal(act.status, 'outdated', rel);
-      act.apply();
-      assert.ok(fs.statSync(path.join(T, rel)).mode & 0o111, `${rel} restored`);
-    }
-    assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'), 'and back to ok');
+    // The bash scripts needed one, and E11 made a lost bit `outdated`. The Node scripts are run as
+    // `node <file>`, so a script at mode 644 is simply installed — and Windows could never show a bit.
+    for (const rel of ['hooks/ledger-guard.mjs', 'hooks/ledger-guard-cursor.mjs']) fs.chmodSync(path.join(T, rel), 0o644);
+    assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'), 'still ok');
+    assert.equal(collectDoctorSync(T).checks.find((c) => c.id === 'hooks').status, 'ok');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -15634,12 +15627,12 @@ test('dropping a target unwires it: our entry comes out, and an orphan wrapper g
     // CURRENT targets — so without this the wrapper is frozen and nothing reports it again.
     const orphans = orphanHookActions(T, ['.claude']);
     assert.deepEqual(orphans.map((a) => [a.item, a.status]),
-      [['hooks.json (removed)', 'removed'], ['hooks/ledger-guard-cursor.sh (removed)', 'removed']]);
+      [['hooks.json (removed)', 'removed'], ['hooks/ledger-guard-cursor.mjs (removed)', 'removed']]);
     assert.deepEqual(orphans.find((a) => a.item.startsWith('hooks.json')).paths, [], 'co-owned: never staged by --push');
     for (const a of orphans) a.apply();
 
-    assert.ok(!fs.existsSync(path.join(T, 'hooks/ledger-guard-cursor.sh')), 'the orphan wrapper is gone');
-    assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')), 'the shared script stays — .claude still needs it');
+    assert.ok(!fs.existsSync(path.join(T, 'hooks/ledger-guard-cursor.mjs')), 'the orphan wrapper is gone');
+    assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.mjs')), 'the shared script stays — .claude still needs it');
     const after = JSON.parse(fs.readFileSync(cursorPath, 'utf8'));
     assert.deepEqual(after.hooks.preToolUse, [{ matcher: 'Shell', command: './scripts/audit.sh' }], 'only OURS came out');
     assert.equal(after.version, 1, 'a version we may not have written is not ours to delete');
@@ -15663,7 +15656,7 @@ test('a hand-wired command that would refuse every write is named, not rewritten
     // `check-gates.md` invites people to hand-wire other harnesses, so this path has a handrail. The
     // mistake is silent and total: an exit-code command on a permission hook answers with empty
     // stdout, which this harness reads as a deny, blocking EVERY write with nothing saying why.
-    for (const bad of ['hooks/ledger-guard.sh', 'bash hooks/ledger-guard-cursor.sh']) {
+    for (const bad of ['hooks/ledger-guard.sh', 'bash hooks/ledger-guard-cursor.sh', 'node hooks/ledger-guard.mjs']) {
       const s2 = JSON.parse(base); s2.hooks.preToolUse[0].command = bad;
       fs.writeFileSync(p, JSON.stringify(s2));
       const c = hooksCheck();
@@ -24407,28 +24400,27 @@ test('E43 people: capture branches, local and remote-tracking, are not counted a
 test('E43 wiring: the capture hook is wired in both ledger modes, in each harness\'s shape, and unwired when the config turns it off', async () => {
   const { captureHookActions, orphanCaptureHookActions, hookEntry } = await import('./plan.mjs');
   const { CAPTURE_ADAPTERS, HOOK_ADAPTERS } = await import('./manifest.mjs');
-  assert.deepEqual(hookEntry(CAPTURE_ADAPTERS['.claude']), { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: '"$CLAUDE_PROJECT_DIR/hooks/yad-capture.sh"' }] });
-  assert.deepEqual(hookEntry(CAPTURE_ADAPTERS['.cursor']), { command: 'hooks/yad-capture.sh' }, 'afterFileEdit takes no matcher, and a watcher states no failClosed');
-  assert.deepEqual(hookEntry(HOOK_ADAPTERS['.cursor']), { matcher: 'Write|Edit|Delete', command: 'hooks/ledger-guard-cursor.sh', failClosed: false }, 'the guard\'s entry is unchanged');
+  assert.deepEqual(hookEntry(CAPTURE_ADAPTERS['.claude']), { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/hooks/yad-capture.mjs" --format claude' }] });
+  assert.deepEqual(hookEntry(CAPTURE_ADAPTERS['.cursor']), { command: 'node hooks/yad-capture.mjs' }, 'afterFileEdit takes no matcher, and a watcher states no failClosed');
+  assert.deepEqual(hookEntry(HOOK_ADAPTERS['.cursor']), { matcher: 'Write|Edit|Delete', command: 'node hooks/ledger-guard-cursor.mjs', failClosed: false }, 'the guard\'s entry is unchanged');
   for (const hub of [{ default_branch: 'main' }, { platform: 'github', ledger: 'verified', default_branch: 'main' }]) {
     const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-wire-'));
     try {
       fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
       fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
       const acts = captureHookActions(T, ['.claude', '.cursor', '.agents']);
-      assert.deepEqual(acts.map((a) => [a.scope, a.item, a.status]), [['hub', 'hooks/yad-capture.sh', 'new'], ['.claude', 'settings.json', 'new'], ['.cursor', 'hooks.json', 'new']], JSON.stringify(hub));
+      assert.deepEqual(acts.map((a) => [a.scope, a.item, a.status]), [['hub', 'hooks/yad-capture.mjs', 'new'], ['.claude', 'settings.json', 'new'], ['.cursor', 'hooks.json', 'new']], JSON.stringify(hub));
       for (const a of acts) a.apply();
-      assert.ok(fs.statSync(path.join(T, 'hooks/yad-capture.sh')).mode & 0o100, 'executable');
-      const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
-      assert.deepEqual(cursor, { version: 1, hooks: { afterFileEdit: [{ command: 'hooks/yad-capture.sh' }] } });
+            const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
+      assert.deepEqual(cursor, { version: 1, hooks: { afterFileEdit: [{ command: 'node hooks/yad-capture.mjs' }] } });
       assert.deepEqual(orphanCaptureHookActions(T, ['.claude', '.cursor']), [], 'nothing orphaned while wanted');
       assert.deepEqual(orphanCaptureHookActions(T, ['.claude']).map((a) => a.item), ['hooks.json (capture entry removed)'], 'a dropped target loses its entry');
       fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, capture: false }));
       assert.deepEqual(captureHookActions(T, ['.claude']), []);
       const gone = orphanCaptureHookActions(T, ['.claude', '.cursor']);
-      assert.deepEqual(gone.map((a) => a.item).sort(), ['hooks.json (capture entry removed)', 'hooks/yad-capture.sh (removed)', 'settings.json (capture entry removed)']);
+      assert.deepEqual(gone.map((a) => a.item).sort(), ['hooks.json (capture entry removed)', 'hooks/yad-capture.mjs (removed)', 'settings.json (capture entry removed)']);
       for (const a of gone) a.apply();
-      assert.ok(!fs.existsSync(path.join(T, 'hooks/yad-capture.sh')));
+      assert.ok(!fs.existsSync(path.join(T, 'hooks/yad-capture.mjs')));
       assert.deepEqual(JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8')), { version: 1 });
     } finally { fs.rmSync(T, { recursive: true, force: true }); }
   }
@@ -24507,8 +24499,7 @@ test('E43 doctor: a Product whose targets have no post-edit hook is told to capt
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '0', ideTargets: ['.agents'] }));
     fs.mkdirSync(path.join(T, '.agents/skills'), { recursive: true });
     fs.mkdirSync(path.join(T, 'hooks'), { recursive: true });
-    fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/hooks/yad-capture.sh'), path.join(T, 'hooks/yad-capture.sh'));
-    fs.chmodSync(path.join(T, 'hooks/yad-capture.sh'), 0o755);
+    fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/hooks/yad-capture.mjs'), path.join(T, 'hooks/yad-capture.mjs'));
     const checks = [];
     captureChecks(T, checks, {});
     const c = checks.find((x) => x.id === 'capture');
@@ -25556,9 +25547,9 @@ test('E47 doctor: new owner-exempting checks beside a hub workflow that lists re
 
 test('test files that print ok()/info() lines keep them off the runner stream (the #280 guard)', () => {
   // A line whose third byte is not ASCII, landing right after a runner message, loses the rest of the file
-  // on Node 18–22. The guard is duplicated in each file that prints such lines; pin both copies.
+  // on Node 18–22. The guard is duplicated in each file that prints such lines; pin every copy.
   const guard = "console[k] = (...a) => (process.stdout.write === write ? console.error(...a) : orig(...a));";
-  for (const f of ['cli/test.mjs', 'cli/test-migrate.mjs']) {
+  for (const f of ['cli/test.mjs', 'cli/test-migrate.mjs', 'cli/test-hooks.mjs']) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const at = src.indexOf(guard);
     assert.ok(at >= 0 && at < src.search(/^test\(/m), `${f}: the guard runs before the first test`);

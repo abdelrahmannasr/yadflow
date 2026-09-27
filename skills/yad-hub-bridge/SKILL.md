@@ -103,7 +103,7 @@ writer** of the ledger. There is no pre-merge CI write — during review the pla
 source of truth (native approvals + threads). On merge, CI re-reads approvals from the platform,
 advances the step, and flips the artifact `status:` on the **default branch** (the only place CI ever
 commits). Also install the `ledger-guard` check (yad-checks) so humans cannot commit gate-state files,
-and its local counterpart `hooks/ledger-guard.sh` — the harness hook that refuses an **agent** the
+and its local counterpart `hooks/ledger-guard.mjs` — the harness hook that refuses an **agent** the
 same write at the moment it tries it, instead of letting it surface as a CI failure later (#171).
 Revoke-on-change is enforced at merge: on **GitHub** in code (an approval whose commit ≠ the merged
 head is dropped — no setting needed); on **GitLab** it has no per-approval commit SHA, so enabling the

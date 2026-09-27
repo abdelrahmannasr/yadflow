@@ -3,13 +3,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import {
-  c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, has,
+  c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, runLauncher, has,
   exists, readJSON, readJSONStrict, writeJSON,
   writeProductConfig,
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, captureHookActions,
+  moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -595,6 +595,9 @@ export async function runSetup(root, opts = {}) {
     applyActions(captureWiring, { force: true });
     wired.push(...captureWiring);
   }
+  // E113: the shell-script hooks a re-run replaces, once the entries above no longer name them.
+  const retiredHooks = legacyHookScriptActions(root, ideTargets);
+  if (retiredHooks.length) applyActions(retiredHooks, { force: true });
   // After every write to a managed path has landed (including the legacy renames), so the recorded
   // sha is the file's final state.
   recordManagedWrites(wired);
@@ -691,7 +694,7 @@ export function packRepo(root, repo) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${repo.name}: packing with repomix …`);
-  const r = run('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
+  const r = runLauncher('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
   if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
   fail(`${repo.name}: repomix failed — ${r.stderr.split('\n')[0] || 'unknown error'}`);
   return false;

@@ -155,10 +155,22 @@ export function fileSha(p) {
   if (!fs.existsSync(p)) return null;
   return 'sha256:' + createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }
-// True when dest exists and its bytes match src exactly.
+// The sha of a file yad INSTALLS, read the way git would give it back: every CRLF counted as LF (E113).
+// On Windows git checks text out with CRLF (`core.autocrlf`, on by default there), so a teammate's clone
+// holds each shipped file with different bytes and the same content — and a byte compare would call every
+// one of them outdated, or edited, for ever. A file with no CR in it hashes exactly as `fileSha` does, so
+// every sha already recorded in `.sdlc/managed.json` still matches. Not for artifact hashes: those are
+// `fileSha`, and an approval is bound to them.
+export function contentSha(p) {
+  if (!fs.existsSync(p)) return null;
+  const bytes = fs.readFileSync(p);
+  const text = bytes.includes(13) ? Buffer.from(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : bytes;
+  return 'sha256:' + createHash('sha256').update(text).digest('hex');
+}
+// True when dest exists and its content matches src, line endings aside (see `contentSha`).
 export function sameContent(src, dest) {
-  const a = fileSha(src);
-  const b = fileSha(dest);
+  const a = contentSha(src);
+  const b = contentSha(dest);
   return a !== null && a === b;
 }
 
@@ -303,6 +315,18 @@ export function run(cmd, args = [], opts = {}) {
   };
 }
 export const has = (cmd) => run(process.platform === 'win32' ? 'where' : 'which', [cmd]).ok;
+
+// An npm launcher (`npm`, `npx`) is a `.cmd` file on Windows, which Node will not start without a shell
+// (since 18.20.2) — a plain spawn fails with EINVAL there. So on Windows it runs through one, each word in
+// double quotes (a Windows path cannot hold a `"`); everywhere else it is spawned directly (E113).
+export function launcherInvocation(cmd, args, platform = process.platform) {
+  if (platform !== 'win32') return { cmd, args, shell: false };
+  return { cmd: [cmd, ...args].map((a) => `"${String(a).replace(/"/g, '')}"`).join(' '), args: [], shell: true };
+}
+export function runLauncher(cmd, args = [], opts = {}) {
+  const inv = launcherInvocation(cmd, args);
+  return run(inv.cmd, inv.args, { ...opts, ...(inv.shell ? { shell: true } : {}) });
+}
 
 // Push HEAD to origin/<target>, rebasing onto it and retrying on rejection — both the Shape gate
 // sync and the Build checkpoint push append-only ledgers to the default branch, so a concurrent

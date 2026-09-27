@@ -52,12 +52,38 @@ jobs:
         run: |
           files=$(npm pack --dry-run --json | node -e "const f=JSON.parse(require('fs').readFileSync(0)).flatMap(x=>x.files.map(y=>y.path)); console.log(f.join('\n'))")
           echo "$files"
-          for leak in .sdlc/ demo-repos/ epics/ cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs cli/fixtures/; do
+          for leak in .sdlc/ demo-repos/ epics/ cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs cli/test-hooks.mjs cli/fixtures/; do
             # Escape regex metachars so the prefix match is literal (".sdlc/" must not match "asdlc/").
             if echo "$files" | grep -q "^${leak//./\\.}"; then echo "::error::tarball leaks $leak"; exit 1; fi
           done
           echo "$files" | grep -q '^bin/yad.mjs' || { echo "::error::bin missing"; exit 1; }
           echo "$files" | grep -q '^skills/' || { echo "::error::skills missing"; exit 1; }
+
+  # Native Windows, no WSL (E113). Not the full suite: it drives bash gates and POSIX paths throughout.
+  # This runs the file written for every OS — the Node hook scripts, run as `node hooks/<script>.mjs` the
+  # way Claude Code and Cursor run them, and the Windows-facing CLI (CRLF checkouts, `.cmd` launchers,
+  # `C:\` and `/c:/` paths, Git Bash detection). The checkout keeps the runner's default
+  # `core.autocrlf=true`, so the scripts under test have CRLF line endings, as on a teammate's machine.
+  windows:
+    name: windows (hooks + CLI, node ${{ matrix.node-version }})
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        # 18 is the oldest Node yadflow supports; 22 is current.
+        node-version: [18, 22]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Hook scripts and the Windows-facing CLI
+        run: node --test cli/test-hooks.mjs
 
   e2e:
     name: e2e (${{ matrix.os }})

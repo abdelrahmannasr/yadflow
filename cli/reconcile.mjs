@@ -13,7 +13,7 @@ import { preflightGuardReadiness } from './hubcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions,
-  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyRepoActions, legacyHubActions,
+  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyHubActions,
   ideTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
@@ -55,6 +55,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     ...orphanHookActions(root, ideTargets),
     // E43: the post-edit capture hook, in both ledger modes.
     ...captureHookActions(root, ideTargets), ...orphanCaptureHookActions(root, ideTargets),
+    // E113: the old shell-script hooks. LAST, so the entries above that named them are rewritten first.
+    ...legacyHookScriptActions(root, ideTargets),
   ];
   if (ideState.needsRepair) {
     actions.push({

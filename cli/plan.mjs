@@ -5,12 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn, isPlainObject, run,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS,
-  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
+  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
 
@@ -29,8 +29,12 @@ const rel = (root, dest) => path.relative(root, dest).split(path.sep).join('/');
 // at it carries fail-open semantics, so every ledger edit is quietly PERMITTED while `yad check` and
 // `yad doctor` both report the guard healthy. Reachable without anyone doing anything odd: a zip or
 // tarball download, `cp` without `-p`, a restrictive umask, `core.fileMode=false`.
+//
+// WINDOWS HAS NO EXECUTE BIT ON DISK (E113): Node reports every file there without one, so the test
+// below would call every gate script outdated for ever, and `--fix` could never clear it. The gates run
+// on the team's CI as `bash checks/<gate>.sh`, which needs no bit, so on Windows a file present counts.
 const isExecutable = (dest) => {
-  try { return !!(fs.statSync(dest).mode & 0o111); } catch { return false; }
+  try { return process.platform === 'win32' || !!(fs.statSync(dest).mode & 0o111); } catch { return false; }
 };
 const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => ({
   scope,
@@ -90,7 +94,7 @@ const wiredFileAction = (scope, item, src, dest, { root, exec = false, ledger = 
   // Compares CONTENT. A file that is outdated only because its execute bit was lost still has the
   // sha we recorded, so it reads as ours and is re-applied with no backup — which is right: nothing
   // of the team's is being discarded, the mode is simply restored.
-  const ours = !!recorded && recorded === fileSha(dest);
+  const ours = !!recorded && recorded === contentSha(dest);
   const backup = ours ? null : backupPathFor(dest);
   return {
     ...base,
@@ -119,7 +123,7 @@ export function recordManagedWrites(actions = []) {
     if (!m || !m.root) continue;
     if (!sameContent(m.src, m.dest)) continue;
     if (!byRoot.has(m.root)) byRoot.set(m.root, {});
-    byRoot.get(m.root)[rel(m.root, m.dest)] = fileSha(m.dest);
+    byRoot.get(m.root)[rel(m.root, m.dest)] = contentSha(m.dest);
   }
   const roots = [];
   for (const [root, written] of byRoot) {
@@ -246,12 +250,10 @@ export function safeIdeTargetsFor(root, input) {
   return targets;
 }
 
-// Is a wired hook script present AND runnable? Shared by the planner (via `fileAction`'s exec rule)
-// and `yad doctor`, so the two cannot disagree about whether the guard is installed.
-export const hookScriptReady = (root, relPath) => {
-  const full = path.join(root, relPath);
-  return !!lstatIfPresent(full) && isExecutable(full);
-};
+// Is a wired hook script present? Shared by the planner and `yad doctor`, so the two cannot disagree about
+// whether the guard is installed. Since E113 every hook is a Node script the entry runs as `node <file>`,
+// so an execute bit is no longer part of "ready" — and Windows could never show one.
+export const hookScriptReady = (root, relPath) => !!lstatIfPresent(path.join(root, relPath))?.isFile();
 
 // Which of these targets are safe to write through, without throwing on the ones that are not.
 // `safeIdeTargetsFor` throws on the first bad target, which is right for an installer and wrong for a
@@ -1042,7 +1044,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
 
 // ---- background capture wiring (E43) -----------------------------------------------------------
 //
-// The post-edit capture hook: `hooks/yad-capture.sh`, plus one entry per IDE target that has a post-edit
+// The post-edit capture hook: `hooks/yad-capture.mjs`, plus one entry per IDE target that has a post-edit
 // protocol. Unlike `hookActions` it is wired in BOTH ledger modes — never losing a draft matters whoever
 // owns the ledger — on any Product (a `.sdlc/hub.json` or `product.json`) whose config does not say
 // `"capture": false`. Only the CONFIG turns the wiring off: `YAD_CAPTURE=0` is one shell's choice, and
@@ -1109,3 +1111,177 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
   return actions;
 }
 
+// ---- the shell-script hooks, retired (E113) -----------------------------------------------------------
+//
+// Every hook was a bash script until E113; each is now a Node script, and the adapters list the old
+// commands as `legacyCommands`, so the same `yad check --fix` that rewrites an entry also installs the new
+// file. This removes the old one — status `removed`, so `yad update` applies it too.
+//
+// ONLY A COPY YAD PROVABLY WROTE. The provenance record (`.sdlc/managed.json`) must hold the script's sha,
+// and the file on disk must still match it. An edited copy, or one from before the record existed, is left
+// alone: the header of each script invited a team to wire it into another harness by hand, and deleting a
+// file their own hook runs would switch that hook off without a word.
+//
+// And never while anything still RUNS it — in two places, both read at PLAN time so `yad check` shows only
+// what `--fix` will really do (an action that plans a removal and then keeps the file would be pending on
+// every run, for ever):
+//   - the settings files AS COMMITTED (HEAD). The rewritten entry is the team's to commit (a settings file is
+//     never staged by `--push`), so until it is, everyone who pulls runs the old command — deleting the
+//     script under it would leave them all a hook that does not exist. The removal waits for a later run,
+//     after the new entry is committed.
+//   - the settings files ON DISK AS THIS RUN WILL LEAVE THEM: each adapter's own entry merged or unmerged
+//     exactly as this run's actions do it (review 2 — excusing our old commands wherever they appeared
+//     also excused copies no action touches, under another event or in `settings.local.json`, and those
+//     were planned, kept, and pending for ever).
+// Both harness settings files are read, plus Claude Code's personal `settings.local.json`, and a command
+// is matched with either kind of slash (`hooks\yad-capture.sh` on Windows).
+const HOOK_SETTINGS_FILES = [...new Set([...Object.values(HOOK_ADAPTERS), ...Object.values(CAPTURE_ADAPTERS)].map((a) => a.settings)), '.claude/settings.local.json'];
+function commandsIn(value, out = []) {
+  if (Array.isArray(value)) { for (const v of value) commandsIn(v, out); return out; }
+  if (!isPlainObject(value)) return out;
+  for (const [k, v] of Object.entries(value)) {
+    if (k === 'command' && typeof v === 'string') out.push(v);
+    else if (k === 'args' && Array.isArray(v)) out.push(...v.filter((a) => typeof a === 'string'));
+    else commandsIn(v, out);
+  }
+  return out;
+}
+const namesScript = (text, scriptRel) => text.replace(/\\/g, '/').includes(scriptRel);
+// Which settings files name the script, read from `raw(file)` (null = absent). A file that will not parse
+// names it when its text does: nothing can be proved about it, so it keeps the script.
+function namedIn(raw, scriptRel) {
+  const where = [];
+  for (const file of HOOK_SETTINGS_FILES) {
+    const text = raw(file);
+    if (text === null) continue;
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { if (namesScript(text, scriptRel)) where.push(file); continue; }
+    if (commandsIn(parsed).some((cmd) => namesScript(cmd, scriptRel))) where.push(file);
+  }
+  return where;
+}
+const onDisk = (root) => (file) => { try { return fs.readFileSync(path.join(root, file), 'utf8'); } catch { return null; } };
+// `HEAD:./<file>` is read relative to the Product (the `./`), so a Product in a subfolder of its repository
+// reads its own files. Not a repository, no commit yet, or a file never committed: nothing is committed.
+// The old scripts that belonged to the ledger guard, which only a verified Product has.
+const GUARD_SCRIPTS = new Set(['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']);
+
+// What to do with an entry that still runs an old script: repoint it at the Node script yad now writes —
+// except a guard script on a Product whose ledger is not verified (or cannot be read), where no guard is
+// installed to point at, so the entry is removed. One sentence for the plan's note AND apply's warning, so
+// the two cannot give different advice (review 5).
+//
+// It never promises what `yad check --fix` will do: both callers are reached only for entries that run has
+// NOT taken out (another event, `settings.local.json`, a file changed since the plan), so the reader acts.
+export function entryAdvice(root, scriptRel) {
+  const hub = readJSON(productConfigPath(root), null);
+  // Capture off: no Node capture script is installed, so there is nothing to point at (review 8).
+  if (!GUARD_SCRIPTS.has(scriptRel) && !captureWanted(root)) {
+    return 'remove each entry that runs it — capture is off here (`"capture": false` in the Product config), so no capture hook should run';
+  }
+  if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(hub)) {
+    return 'point each entry that runs it at the `node hooks/….mjs` command yad now writes, or remove it if that harness should no longer run the hook';
+  }
+  return hub === null
+    ? 'the Product config does not read, so yad cannot tell whether a ledger guard belongs here — fix the config, or remove each entry that runs it'
+    : 'remove each entry that runs it — this Product has no ledger guard (its ledger is not verified), so `yad check --fix` leaves those entries alone';
+}
+
+// Read once per file per plan, however many old scripts ask (review 3).
+const committed = (root) => {
+  const seen = new Map();
+  return (file) => {
+    if (!seen.has(file)) {
+      const r = run('git', ['-C', root, 'show', `HEAD:./${file}`]);
+      seen.set(file, r.ok ? r.stdout : null);
+    }
+    return seen.get(file);
+  };
+};
+// The settings files on disk as this run's hook actions will leave them. The same choices the actions make:
+// the guard's entry merged for a verified Product's current targets and unmerged for its dropped ones
+// (`hookActions` / `orphanHookActions`), nothing done to it with a local ledger; capture's merged for the
+// current targets while capture is wanted and unmerged otherwise (`captureHookActions` /
+// `orphanCaptureHookActions`). A file the merge cannot read is left as it is, as the action leaves it.
+function afterThisRun(root, ideTargets) {
+  const targets = new Set(safeIdeTargetsFor(root, ideTargets));
+  const verified = isVerifiedLedger(readJSON(productConfigPath(root)));
+  const capture = captureWanted(root);
+  const plans = [
+    ...(verified ? Object.values(HOOK_ADAPTERS) : []).map((a) => [a, targets.has(a.target)]),
+    ...Object.values(CAPTURE_ADAPTERS).map((a) => [a, capture && targets.has(a.target)]),
+  ];
+  const read = onDisk(root);
+  return (file) => {
+    const text = read(file);
+    if (text === null) return null;
+    let settings;
+    try { settings = JSON.parse(text); } catch { return text; }
+    if (!isPlainObject(settings)) return text;
+    for (const [adapter, wired] of plans) {
+      if (adapter.settings !== file) continue;
+      const r = wired ? mergeHookSettings(settings, adapter) : unmergeHookSettings(settings, adapter);
+      if (!r.unreadable) settings = r.settings;
+    }
+    return JSON.stringify(settings);
+  };
+}
+export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const ledger = readManagedLedger(root);
+  const actions = [];
+  const head = committed(root);
+  const ours = new Set([...Object.values(HOOK_ADAPTERS), ...Object.values(CAPTURE_ADAPTERS)].flatMap((a) => a.legacyCommands));
+  for (const scriptRel of LEGACY_HOOK_SCRIPTS) {
+    const file = path.join(root, scriptRel);
+    if (!lstatIfPresent(file)?.isFile()) continue;
+    const recorded = ledger[scriptRel];
+    if (!recorded || recorded !== contentSha(file)) continue;
+    const after = afterThisRun(root, ideTargets);
+    const onDiskAfter = namedIn(after, scriptRel);
+    if (onDiskAfter.length) {
+      // Kept because something still runs it. A command of the team's own is their choice and is left in
+      // silence; one of OURS that no action reaches — another event, `settings.local.json` — is stuck, and
+      // is named with the way out (review 3).
+      const stuck = onDiskAfter.filter((f) => {
+        try { return commandsIn(JSON.parse(after(f))).some((cmd) => ours.has(cmd) && namesScript(cmd, scriptRel)); } catch { return false; }
+      });
+      if (stuck.length) {
+        info(`${scriptRel} stays — ${stuck.join(' and ')} still ${stuck.length > 1 ? 'run' : 'runs'} it through an old yad hook command. To clear it: ${entryAdvice(root, scriptRel)}; then \`yad check --fix\` removes the script`);
+      }
+      continue;
+    }
+    const inHead = namedIn(head, scriptRel);
+    if (inHead.length) {
+      // The one wait a person ends: committing the rewritten settings. Said, so the second run is not a mystery.
+      info(`${scriptRel} stays until ${inHead.join(' and ')} ${inHead.length > 1 ? 'are' : 'is'} committed as ${inHead.length > 1 ? 'they now stand' : 'it now stands'} — then \`yad check --fix\` removes it`);
+      continue;
+    }
+    actions.push({
+      scope: 'hub',
+      item: `${scriptRel} (removed)`,
+      status: 'removed',
+      root,
+      paths: [scriptRel, MANAGED_LEDGER],
+      apply: () => {
+        // Checked once more, on disk and with nothing excused: the rewrites above have run by now, so any
+        // command still naming the script is one this run did not take out.
+        const where = namedIn(onDisk(root), scriptRel);
+        if (where.length) {
+          // Reached when a plan's assumption did not hold at apply — e.g. `yad setup`, which does not unwire a
+          // dropped target the way `yad check --fix` does (review 3).
+          warn(`${scriptRel} kept — ${where.join(', ')} still ${where.length > 1 ? 'run' : 'runs'} it. To clear it: ${entryAdvice(root, scriptRel)}`);
+          return;
+        }
+        fs.rmSync(file, { force: true });
+        // Drop its line from the provenance record, so the record lists only files that are there.
+        const current = readManagedLedger(root);
+        if (Object.hasOwn(current, scriptRel)) {
+          delete current[scriptRel];
+          writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: current });
+        }
+      },
+    });
+  }
+  return actions;
+}
