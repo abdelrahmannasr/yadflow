@@ -568,10 +568,23 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // Committed here and never pushed (review 3): a --push whose push was refused (a protected
         // branch) leaves the record `ok` for the writer, so `--fix --push` stages nothing — the fix is to
         // push the commit, not to run it again.
+        // Only when HEAD IS the default branch and has a commit to the record that origin lacks (review
+        // 4): on a feature branch the record wants merging, not pushing; and a clone BEHIND origin (a
+        // teammate changed the record) wants a pull — `git push` would be refused.
         if (onRemote && disk) {
           let head;
           try { const h = run('git', ['show', `HEAD:${PRODUCT_LINK}`], { cwd: dir }); head = h.ok ? JSON.parse(h.stdout) : null; } catch { head = null; }
-          if (head && same(head, disk)) return { name: r.name, branch, why: 'unpushed' };
+          if (head && same(head, disk)) {
+            const cur = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir });
+            const onBranch = cur.ok ? cur.stdout.trim() : '';
+            const count = (range) => {
+              const x = run('git', ['rev-list', '--count', range, '--', PRODUCT_LINK], { cwd: dir });
+              return x.ok ? Number(x.stdout.trim()) || 0 : 0;
+            };
+            if (onBranch && onBranch !== 'HEAD' && onBranch !== branch) return { name: r.name, branch, onBranch, why: 'elsewhere' };
+            if (onBranch === branch && count(`origin/${branch}..HEAD`) > 0) return { name: r.name, branch, why: 'unpushed' };
+            if (onBranch === branch && count(`HEAD..origin/${branch}`) > 0) return { name: r.name, branch, why: 'behind' };
+          }
         }
         if (!there) return { name: r.name, branch, why: shown.ok ? 'unreadable' : 'missing' };
         return { name: r.name, branch, why: 'stale' };
@@ -590,6 +603,18 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         ...(stale.length ? [`${stale.join(', ')} ${stale.length > 1 ? 'hold' : 'holds'} a ${PRODUCT_LINK} on disk that differs from the one on the default branch — CI reads the default branch's`] : []),
       ].join('; '),
         'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch');
+    }
+    const elsewhere = unlinked.filter((u) => u.why === 'elsewhere');
+    if (elsewhere.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        elsewhere.map((u) => `${u.name} has ${PRODUCT_LINK} committed on branch ${u.onBranch}, not on ${u.branch} — CI reads ${u.branch}`).join('; '),
+        `merge it into the default branch (${elsewhere.map((u) => `a PR from ${u.onBranch} into ${u.branch} in ${u.name}`).join(', ')})`);
+    }
+    const behind = unlinked.filter((u) => u.why === 'behind');
+    if (behind.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${behind.map((u) => u.name).join(', ')} ${behind.length > 1 ? 'are' : 'is'} behind the default branch for ${PRODUCT_LINK} — someone changed it there since this clone last pulled`,
+        `pull (${behind.map((u) => `\`git pull\` in ${u.name}`).join(', ')}); the default branch's record is the one CI reads`);
     }
     if (unpushed.length) {
       check(checks, 'repos:product-link-missing', 'project', 'warn',

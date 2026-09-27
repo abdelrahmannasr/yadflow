@@ -237,6 +237,60 @@ test('a product-link record committed but never pushed is named, with the push a
   fs.rmSync(origin, { recursive: true, force: true });
 });
 
+test('a product-link record on a feature branch, or a clone behind origin, is not called unpushed (E120 review 4)', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const setup = async () => {
+    const { T, backend } = scaffold();
+    const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+    git(origin, 'init', '-q', '--bare');
+    git(backend, 'branch', '-q', '-M', 'main');
+    git(backend, 'remote', 'add', 'origin', origin);
+    git(backend, 'push', '-q', 'origin', 'main');
+    fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+    await captureConsole(() => reconcile(T, { fix: true }));
+    return { T, backend, origin };
+  };
+  const hits = (T) => collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  const commitIt = (dir, msg) => git(dir, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', msg);
+  // Committed and pushed on a feature branch (the --allow-branch path): it wants merging, not pushing.
+  {
+    const { T, backend, origin } = await setup();
+    git(backend, 'checkout', '-q', '-b', 'feat/x');
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: record');
+    git(backend, 'push', '-q', 'origin', 'feat/x');
+    const hit = hits(T);
+    assert.equal(hit.length, 1);
+    assert.match(hit[0].message, /^backend has \.sdlc\/product-link\.json committed on branch feat\/x, not on main — CI reads main/);
+    assert.match(hit[0].hint, /a PR from feat\/x into main in backend/);
+    assert.doesNotMatch(hit[0].message + hit[0].hint, /not pushed|git push/);
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(origin, { recursive: true, force: true });
+  }
+  // Published, then a teammate changed the record's path and pushed; this clone fetched, not pulled.
+  {
+    const { T, backend, origin } = await setup();
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: record');
+    git(backend, 'push', '-q', 'origin', 'main');
+    const mate = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-mate-'));
+    git(mate, 'clone', '-q', origin, 'c');
+    const c = path.join(mate, 'c');
+    const rec = JSON.parse(fs.readFileSync(path.join(c, '.sdlc/product-link.json'), 'utf8'));
+    fs.writeFileSync(path.join(c, '.sdlc/product-link.json'), JSON.stringify({ ...rec, path: 'vendor/product' }, null, 2) + '\n');
+    git(c, '-c', 'user.email=a@b.c', '-c', 'user.name=m', 'commit', '-q', '-am', 'chore: move the checkout');
+    git(c, 'push', '-q', 'origin', 'HEAD:main');
+    git(backend, 'fetch', '-q', 'origin');
+    const hit = hits(T);
+    assert.equal(hit.length, 1);
+    assert.match(hit[0].message, /^backend is behind the default branch for \.sdlc\/product-link\.json/);
+    assert.match(hit[0].hint, /`git pull` in backend/);
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(origin, { recursive: true, force: true });
+    fs.rmSync(mate, { recursive: true, force: true });
+  }
+});
+
 test('a product-link record the repo ignores is not `new` forever, and the doctor says why (E120 review 2)', async () => {
   const { T, backend } = scaffold();
   fs.writeFileSync(path.join(backend, '.gitignore'), '.sdlc/\n');
