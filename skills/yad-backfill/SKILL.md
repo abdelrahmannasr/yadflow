@@ -57,17 +57,19 @@ feature: <feature>
 repo: <repo>
 artifact: backfill-spec
 status: draft
-verified: false        # not real until a human approves
+verified: false
 source: repomix         # or "repomix: unavailable" when degraded
 generated: <YYYY-MM-DD>
 ---
 ```
-Mark every uncertain item explicitly (`<!-- unverified: ... -->`); do not fill gaps with invented
-behaviour.
+`verified: false` means the spec is not real until a human approves it. Keep that line free of a `#`
+comment: the gate reads the whole line, so `verified: true   # approved` would not count. Mark every
+uncertain item explicitly (`<!-- unverified: ... -->`); do not fill gaps with invented behaviour.
 
 ### Step 4 — `approve` (human approval — reuse the gate)
 A human reads the draft against the real code and approves it with the same `advance: human` discipline
-as `yad-review-gate` (at least 1 approver who is not the author). On approval set the frontmatter `verified: true` and record
+as `yad-review-gate` (at least 1 approver who is not the author). On approval set the frontmatter line to exactly `verified: true` (lowercase, nothing after it — the
+gate reads it from the base branch, so the approval merges before the change it allows) and record
 the approver(s) + date. Only a `verified: true` backfill spec counts as real.
 
 ### Step 5 — `gate` (block changes per touched feature)
@@ -75,7 +77,11 @@ the approver(s) + date. Only a `verified: true` backfill spec counts as real.
 that feature's spec is `verified: true`. `<base>` is optional and resolves like every other gate's —
 see "Resolving `<base>`" in `../yad-checks/references/check-gates.md`. It is **per touched feature** —
 a change touching feature A is not blocked by an unverified feature B. Forward-spec'd features (those with their own `specs/<story>/`)
-are not this gate's concern.
+are not this gate's concern. The spec and its `verified: true` are read **from the base**, so an
+approval counts once it is merged — approve in its own PR, before the change (E116). A symlink or
+submodule at `src`, at `src/<feature>` or inside a feature being backfilled fails every PR until one PR
+removes it; so do two spellings of that folder at once (`src/Billing/` beside `src/billing/`) until one
+PR removes one of them.
 
 ### Step 6 — `promote` (flip a stub epic → real, once its spec is approved)
 When a brownfield feature was anchored with a **stub genesis epic** (`yad-stub`) so that defects could
