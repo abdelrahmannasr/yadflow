@@ -255,12 +255,14 @@ function push(root, git, name, { hook, now, spawner, env }) {
     const last = Number(state.lastPushAt) || 0;
     if (now - last < PUSH_EVERY_MS) return { pushed: 'later', why: `the last push started under ${PUSH_EVERY_MS / 60000} minutes ago` };
     // Recorded BEFORE the push starts, so two hooks a moment apart cannot both start one.
+    // `windowsHide` below (E113): on Windows a detached console program gets a console window of its own,
+    // so without it every background push would flash one up in front of the person.
     if (stateFile) writeJSON(stateFile, { ...state, lastPushAt: now });
     try {
-      spawner('git', pushArgs(name), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore' }).unref();
+      spawner('git', pushArgs(name), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore', windowsHide: true }).unref();
       // E46: fetch everyone's capture branches in the same window, so the claim check at the next edit reads
       // minutes-old claims, not hours-old ones. Detached too: an edit never waits on it, and a failure is silent.
-      try { spawner('git', fetchAllArgs(), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore' }).unref(); } catch { /* claims read what was last fetched */ }
+      try { spawner('git', fetchAllArgs(), { cwd: root, env: { ...env, ...pushEnv(env) }, detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch { /* claims read what was last fetched */ }
       return { pushed: 'started' };
     } catch (e) {
       return { pushed: 'failed', why: e.message };

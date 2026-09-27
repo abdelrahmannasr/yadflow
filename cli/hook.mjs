@@ -11,11 +11,11 @@
 //   exit 0  allow
 //   exit 2  deny — the reason is on stderr, for the agent to read
 // Claude Code's `PreToolUse` protocol is exactly that — exit 2 blocks the call and feeds stderr back
-// to the model — so `hooks/ledger-guard.sh` wires it with no adapter logic.
+// to the model — so `hooks/ledger-guard.mjs` wires it with no adapter logic.
 //
 // Cursor's `preToolUse` is NOT that. It is a permission hook: it wants a JSON verdict on stdout and
 // treats an empty or off-schema answer as a refusal, so the contract above would block every write.
-// `--format cursor` below answers in that protocol instead, and `hooks/ledger-guard-cursor.sh` is
+// `--format cursor` below answers in that protocol instead, and `hooks/ledger-guard-cursor.mjs` is
 // what Cursor's entry points at. Check which kind a harness is before wiring a new one.
 //
 // FAIL-OPEN, deliberately. No Product, unreadable config, an unparseable payload, no git — every one of
@@ -301,6 +301,12 @@ export function indexDenyMessage({ rel, productRoot }) {
   ].join('\n');
 }
 
+// A Windows path some harnesses send in URL form: `/c:/Users/…`. Cursor has been reported sending exactly
+// that, and `path.resolve` reads it as `C:\c:\Users\…` — a path under no Product, so a ledger edit would
+// be allowed. The leading slash before a drive letter is dropped on Windows; everywhere else a path is
+// left as it came (E113).
+export const windowsPath = (p, platform = process.platform) => (platform === 'win32' && /^\/[A-Za-z]:[\\/]/.test(p) ? p.slice(1) : p);
+
 // The decision, with git injectable so the tests can drive every branch. Returns
 // `{ allow: true }` or `{ allow: false, message, epic, rel }`.
 export function ledgerGuardDecision(paths, { env = process.env, runner = run, payloadCwd = null } = {}) {
@@ -311,7 +317,7 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run, pa
   // inside the agent's tool loop.
   const seededByHub = new Map();
   for (const candidate of paths) {
-    const abs = path.resolve(base, candidate);
+    const abs = path.resolve(base, windowsPath(candidate));
     const productRoot = hubRootFor(abs);
     if (!productRoot) continue;
     // Non-strict on purpose: a hub.json that does not parse is a real problem, but refusing every

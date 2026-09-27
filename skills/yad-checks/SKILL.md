@@ -94,14 +94,15 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     default branch the guard is absolute again. Runs in `yad-hub-checks`; `verified-commits` runs beside
     it in its own `yad-verified-commits` workflow (and requires the bot's signature like any other
     commit's). See `yad-hub-bridge`.
-  - `templates/hooks/ledger-guard.sh` → **Product-only** agent guardrail, active **only in verified mode**
+  - `templates/hooks/ledger-guard.mjs` → **Product-only** agent guardrail, active **only in verified mode**
     (the same `isVerifiedLedger` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
     edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the
-    local half of `checks/ledger-guard.sh` (#171). Installed to `<product>/hooks/ledger-guard.sh` with the
+    local half of `checks/ledger-guard.sh` (#171). Installed to `<product>/hooks/ledger-guard.mjs` with the
     `PreToolUse` entry in `.claude/settings.json`; a `.cursor` project also gets
-    `templates/hooks/ledger-guard-cursor.sh` and a `preToolUse` entry in `.cursor/hooks.json`.
-    Fails OPEN; see "Step 2b" below.
-  - `templates/hooks/yad-capture.sh` → **Product-only**, in **both** ledger modes (E43): the post-edit
+    `templates/hooks/ledger-guard-cursor.mjs` and a `preToolUse` entry in `.cursor/hooks.json`.
+    Fails OPEN; see "Step 2b" below. Every hook is a Node script the entry runs as `node <script>`, so
+    it needs no bash and no execute bit and runs on Windows too (E113).
+  - `templates/hooks/yad-capture.mjs` → **Product-only**, in **both** ledger modes (E43): the post-edit
     harness hook that runs `yad capture --hook`, which snapshots every changed Shape artifact onto the
     person's private `yad/wip/<name>/<epic>` branches without touching the checkout. Wired as a
     `PostToolUse` entry in `.claude/settings.json` and an `afterFileEdit` entry in `.cursor/hooks.json`;
@@ -192,9 +193,9 @@ Commit the wiring on the repo's default branch (it is shared infrastructure, not
 **The Product is wired the same way.** `repo: hub` wires the Product repo itself (platform from `.sdlc/hub.json`)
 with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
 
-**The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.sh` →
-`<product>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. A project
-whose targets include `.cursor` also gets `templates/hooks/ledger-guard-cursor.sh` and a `preToolUse`
+**The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.mjs` →
+`<product>/hooks/ledger-guard.mjs`, plus the `PreToolUse` entry in `.claude/settings.json`. A project
+whose targets include `.cursor` also gets `templates/hooks/ledger-guard-cursor.mjs` and a `preToolUse`
 entry in `.cursor/hooks.json`. `yad setup` and `yad check --fix` install them; nothing by hand.
 
 ### Step 2b — the agent guardrail (harness hooks, verified mode only)
@@ -204,7 +205,7 @@ verified mode the gate ledger is **CI-owned**, so an agent that hand-edits
 nothing connecting cause to effect — and by then the write has to be reverted before the review
 PR/MR can go green.
 
-`hooks/ledger-guard.sh` is the local half of that same rule. It runs as a **harness hook** before a
+`hooks/ledger-guard.mjs` is the local half of that same rule. It runs as a **harness hook** before a
 file-editing tool call and refuses the write up front, naming the command that owns the transition
 (`yad gate open`), so the agent corrects itself instead of failing a pipeline.
 
@@ -214,7 +215,7 @@ file-editing tool call and refuses the write up front, naming the command that o
   straight at the script. Cursor does NOT: its `preToolUse` is a **permission hook**, which wants a
   JSON verdict on stdout and treats an empty or off-schema answer as a refusal — and this script
   prints nothing when it allows, so wiring it there directly would block every file write in the
-  project. Cursor's entry points at `hooks/ledger-guard-cursor.sh` instead, which runs
+  project. Cursor's entry runs `node hooks/ledger-guard-cursor.mjs` instead, which runs
   `yad hook ledger-guard --format cursor` and always answers `{"permission":"allow"}` or
   `{"permission":"deny","user_message":…,"agent_message":…}`. **Check which kind a harness is
   before wiring it by hand.** A hook that fires only AFTER the write, such as Cursor's

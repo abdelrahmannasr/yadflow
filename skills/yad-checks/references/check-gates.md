@@ -678,7 +678,7 @@ title + the code task template), so a PR that changes the Product's own workflow
 `templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
 line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
 
-## The agent guardrail (`templates/hooks/ledger-guard.sh` + `yad hook ledger-guard`)
+## The agent guardrail (`templates/hooks/ledger-guard.mjs` + `yad hook ledger-guard`)
 
 Not a CI gate — a **harness hook**, and the only piece of yadflow that runs *inside* an agent's tool
 loop. It exists because of the gap #171 reported: `checks/ledger-guard.sh` is correct and blocking,
@@ -698,21 +698,29 @@ Two harnesses match that contract, and `yad check --fix` wires both:
 
 | Harness | File | Event | Command |
 |---|---|---|---|
-| Claude Code | `.claude/settings.json` | `PreToolUse` | `"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"` |
-| Cursor | `.cursor/hooks.json` | `preToolUse` | `hooks/ledger-guard-cursor.sh` |
+| Claude Code | `.claude/settings.json` | `PreToolUse` | `node "$CLAUDE_PROJECT_DIR/hooks/ledger-guard.mjs"` |
+| Cursor | `.cursor/hooks.json` | `preToolUse` | `node hooks/ledger-guard-cursor.mjs` |
 
-Any other harness that can run a command and read those two exit codes can use `ledger-guard.sh` by
-hand.
+Any other harness that can run a command and read those two exit codes can use
+`node <product>/hooks/ledger-guard.mjs` by hand.
+
+**Node scripts, not shell scripts (E113).** Every hook was a bash script until E113; each is now a
+dependency-free Node script, so it runs on Windows as it does on macOS and Linux, and needs no execute
+bit. Each finds the Product from its own location, never from a harness variable. On Windows, Claude
+Code runs hook commands in Git Bash (PowerShell without it, where the entry does not run), and Cursor
+runs them through PowerShell, which runs `node hooks/<script>.mjs` as it is. An entry naming an old
+`hooks/*.sh` is rewritten by `yad check --fix`, and the old script is deleted when `.sdlc/managed.json`
+proves yad wrote it unedited and no settings file still runs it.
 
 **Cursor needs a second protocol, and this is the trap.** Its `preToolUse` is a *permission hook*:
 Cursor's docs say that for a permission hook, "invalid JSON or a response that doesn't match the
-hook's schema blocks the action". `ledger-guard.sh` prints **nothing** when it allows — and empty
+hook's schema blocks the action". `ledger-guard.mjs` prints **nothing** when it allows — and empty
 stdout is invalid JSON. Wiring it straight into Cursor would therefore have blocked **every** file
 write in a verified project: fail-closed on everything, the opposite of this guard's whole design, and
 invisible to any test that only checks that a deny denies.
 
-So Cursor gets `hooks/ledger-guard-cursor.sh`, installed only for a project whose targets include
-`.cursor`. It calls `yad hook ledger-guard --format cursor` through the shared script and guarantees a
+So Cursor gets `hooks/ledger-guard-cursor.mjs`, installed only for a project whose targets include
+`.cursor`. It calls `yad hook ledger-guard --format cursor` itself and guarantees a
 permission answer on stdout, whatever happens:
 
 | | stdout | exit |
@@ -734,18 +742,18 @@ as the code for "no JSON to read", so it would discard the reason — and naming
 the transition is the entire point of speaking at edit time. The reason also goes to stderr, where
 Cursor logs it.
 
-The wrapper takes **no arguments**, and every fail-open branch of the shared script (no `yad` on
+The wrapper takes **no arguments**, and every fail-open branch (no `yad` on
 PATH, an install it cannot resolve) is converted into an explicit `allow` answer rather than the
-empty stdout that would block. **Exit 2 is converted into a deny**, not an allow: `ledger-guard.sh`
+empty stdout that would block. **Exit 2 is converted into a deny**, not an allow: the wrapper
 resolves `yad` from the Product's own `node_modules/yadflow` before `PATH`, so a project pinned to a
 yadflow older than `--format` answers in the exit protocol — exit 2 with empty stdout — and treating
 that as "no verdict" would turn a real refusal into a permitted write.
 
-The two commands are spelled differently on purpose. Claude Code runs the string through a shell, so
-its entry uses `$CLAUDE_PROJECT_DIR` and is quoted against a project path containing a space. Cursor
-documents that a project hook runs **from the project root** but not whether the command goes through
-a shell — so its entry is a relative path with no variable and no quotes, the one spelling that works
-either way. Every failure mode here is silent and fails open, which would leave `yad doctor`
+The two commands are spelled differently on purpose. Claude Code runs the string through a shell (Git
+Bash on Windows), so its entry uses `$CLAUDE_PROJECT_DIR` and is quoted against a project path
+containing a space. Cursor documents that a project hook runs **from the project root** but not which
+shell runs the command — PowerShell on Windows — so its entry is `node` and a relative path, with no
+variable and no quotes: PowerShell reads neither. Every failure mode here is silent and fails open, which would leave `yad doctor`
 truthfully reporting an entry that never refuses anything.
 
 Cursor does not document the field names inside `tool_input`, so `payloadPaths` reads any key *named*
@@ -757,10 +765,10 @@ a guard that fails open by design.
 Cursor's wiring follows Cursor's published protocol and has not yet been exercised against a live
 Cursor session.
 
-**Layering.** `hooks/ledger-guard.sh` is only the adapter: it locates `yad` (`$YAD_BIN` → the Product's
+**Layering.** `hooks/ledger-guard.mjs` is only the adapter: it locates `yad` (`$YAD_BIN` → the Product's
 `node_modules/yadflow` → `PATH` → `npx --no-install`) and passes the payload to `yad hook
 ledger-guard`, which holds the decision. So the wiring never hard-codes an install path, and the
-logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`) instead of living in bash.
+logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`; the scripts in `cli/test-hooks.mjs`, on Windows too).
 
 **Scope — identical to the CI gate, on purpose**, down to the details that decide the hard cases:
 
@@ -806,7 +814,7 @@ protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` 
 
 | Path | Owner |
 |---|---|
-| `<product>/hooks/ledger-guard.sh` | fully managed — drift-checked and recorded in `.sdlc/managed.json` like any gate script |
+| `<product>/hooks/ledger-guard.mjs` | fully managed — drift-checked and recorded in `.sdlc/managed.json` like any gate script |
 | `<product>/.claude/settings.json` | **one entry**, merged additively into `hooks.PreToolUse`. See below. |
 
 The settings file is the team's, so the rules around that one entry are deliberately conservative:
@@ -815,7 +823,7 @@ The settings file is the team's, so the rules around that one entry are delibera
   substring. A team keeping its own wrapper at `.claude/hooks/ledger-guard.sh` would otherwise have
   their hook silently rewritten to ours, on the `outdated` path that takes no backup. Matching
   exactly means the worst case is a second entry (the guard runs twice, harmlessly).
-- **The command is quoted** (`"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"`) because the harness runs
+- **The path is quoted** (`node "$CLAUDE_PROJECT_DIR/hooks/ledger-guard.mjs"`) because the harness runs
   it through a shell: unquoted, a project path containing a space word-splits and the guard is
   silently off while `check` and `doctor` still call it wired.
 - **A file that does not parse is never rewritten** — not even by `--overwrite-local`. For a managed

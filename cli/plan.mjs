@@ -5,12 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn, isPlainObject, run,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, isPlainObject, run,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS,
-  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
+  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
 
@@ -29,8 +29,12 @@ const rel = (root, dest) => path.relative(root, dest).split(path.sep).join('/');
 // at it carries fail-open semantics, so every ledger edit is quietly PERMITTED while `yad check` and
 // `yad doctor` both report the guard healthy. Reachable without anyone doing anything odd: a zip or
 // tarball download, `cp` without `-p`, a restrictive umask, `core.fileMode=false`.
+//
+// WINDOWS HAS NO EXECUTE BIT ON DISK (E113): Node reports every file there without one, so the test
+// below would call every gate script outdated for ever, and `--fix` could never clear it. The gates run
+// on the team's CI as `bash checks/<gate>.sh`, which needs no bit, so on Windows a file present counts.
 const isExecutable = (dest) => {
-  try { return !!(fs.statSync(dest).mode & 0o111); } catch { return false; }
+  try { return process.platform === 'win32' || !!(fs.statSync(dest).mode & 0o111); } catch { return false; }
 };
 const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => ({
   scope,
@@ -90,7 +94,7 @@ const wiredFileAction = (scope, item, src, dest, { root, exec = false, ledger = 
   // Compares CONTENT. A file that is outdated only because its execute bit was lost still has the
   // sha we recorded, so it reads as ours and is re-applied with no backup — which is right: nothing
   // of the team's is being discarded, the mode is simply restored.
-  const ours = !!recorded && recorded === fileSha(dest);
+  const ours = !!recorded && recorded === contentSha(dest);
   const backup = ours ? null : backupPathFor(dest);
   return {
     ...base,
@@ -119,7 +123,7 @@ export function recordManagedWrites(actions = []) {
     if (!m || !m.root) continue;
     if (!sameContent(m.src, m.dest)) continue;
     if (!byRoot.has(m.root)) byRoot.set(m.root, {});
-    byRoot.get(m.root)[rel(m.root, m.dest)] = fileSha(m.dest);
+    byRoot.get(m.root)[rel(m.root, m.dest)] = contentSha(m.dest);
   }
   const roots = [];
   for (const [root, written] of byRoot) {
@@ -246,12 +250,10 @@ export function safeIdeTargetsFor(root, input) {
   return targets;
 }
 
-// Is a wired hook script present AND runnable? Shared by the planner (via `fileAction`'s exec rule)
-// and `yad doctor`, so the two cannot disagree about whether the guard is installed.
-export const hookScriptReady = (root, relPath) => {
-  const full = path.join(root, relPath);
-  return !!lstatIfPresent(full) && isExecutable(full);
-};
+// Is a wired hook script present? Shared by the planner and `yad doctor`, so the two cannot disagree about
+// whether the guard is installed. Since E113 every hook is a Node script the entry runs as `node <file>`,
+// so an execute bit is no longer part of "ready" — and Windows could never show one.
+export const hookScriptReady = (root, relPath) => !!lstatIfPresent(path.join(root, relPath))?.isFile();
 
 // Which of these targets are safe to write through, without throwing on the ones that are not.
 // `safeIdeTargetsFor` throws on the first bad target, which is right for an installer and wrong for a
@@ -1109,3 +1111,75 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
   return actions;
 }
 
+// ---- the shell-script hooks, retired (E113) -----------------------------------------------------------
+//
+// Every hook was a bash script until E113; each is now a Node script, and the adapters list the old
+// commands as `legacyCommands`, so the same `yad check --fix` that rewrites an entry also installs the new
+// file. This removes the old one — status `removed`, so `yad update` applies it too.
+//
+// ONLY A COPY YAD PROVABLY WROTE. The provenance record (`.sdlc/managed.json`) must hold the script's sha,
+// and the file on disk must still match it. An edited copy, or one from before the record existed, is left
+// alone: the header of each script invited a team to wire it into another harness by hand, and deleting a
+// file their own hook runs would switch that hook off without a word.
+//
+// And never while anything still RUNS it. Just before deleting, every harness settings file yad knows is
+// read again, and any command string still naming the script — the team's own entry, or ours in a file
+// the merge refused to rewrite — keeps the file, with a warning that names where.
+const HOOK_SETTINGS_FILES = [...new Set([...Object.values(HOOK_ADAPTERS), ...Object.values(CAPTURE_ADAPTERS)].map((a) => a.settings))];
+function commandsIn(value, out = []) {
+  if (Array.isArray(value)) { for (const v of value) commandsIn(v, out); return out; }
+  if (!isPlainObject(value)) return out;
+  for (const [k, v] of Object.entries(value)) {
+    if (k === 'command' && typeof v === 'string') out.push(v);
+    else commandsIn(v, out);
+  }
+  return out;
+}
+// Where the script is still named: settings files whose commands mention it, and any that will not parse
+// but hold its name in their text (nothing can be proved about those, so they keep it too).
+function stillNamedIn(root, scriptRel) {
+  const where = [];
+  for (const rel0 of HOOK_SETTINGS_FILES) {
+    const file = path.join(root, rel0);
+    if (!exists(file)) continue;
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { if (raw.includes(scriptRel)) where.push(rel0); continue; }
+    if (commandsIn(parsed).some((cmd) => cmd.includes(scriptRel))) where.push(rel0);
+  }
+  return where;
+}
+export function legacyHookScriptActions(root) {
+  if (!exists(productConfigPath(root))) return [];
+  const ledger = readManagedLedger(root);
+  const actions = [];
+  for (const scriptRel of LEGACY_HOOK_SCRIPTS) {
+    const file = path.join(root, scriptRel);
+    if (!lstatIfPresent(file)?.isFile()) continue;
+    const recorded = ledger[scriptRel];
+    if (!recorded || recorded !== contentSha(file)) continue;
+    actions.push({
+      scope: 'hub',
+      item: `${scriptRel} (removed)`,
+      status: 'removed',
+      root,
+      paths: [scriptRel, MANAGED_LEDGER],
+      apply: () => {
+        const where = stillNamedIn(root, scriptRel);
+        if (where.length) {
+          warn(`${scriptRel} kept — ${where.join(', ')} still runs it; point that entry at the Node script beside it, then re-run \`yad check --fix\``);
+          return;
+        }
+        fs.rmSync(file, { force: true });
+        // Drop its line from the provenance record, so the record lists only files that are there.
+        const current = readManagedLedger(root);
+        if (Object.hasOwn(current, scriptRel)) {
+          delete current[scriptRel];
+          writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: current });
+        }
+      },
+    });
+  }
+  return actions;
+}

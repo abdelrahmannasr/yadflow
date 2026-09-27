@@ -155,10 +155,22 @@ export function fileSha(p) {
   if (!fs.existsSync(p)) return null;
   return 'sha256:' + createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }
-// True when dest exists and its bytes match src exactly.
+// The sha of a file yad INSTALLS, read the way git would give it back: every CRLF counted as LF (E113).
+// On Windows git checks text out with CRLF (`core.autocrlf`, on by default there), so a teammate's clone
+// holds each shipped file with different bytes and the same content — and a byte compare would call every
+// one of them outdated, or edited, for ever. A file with no CR in it hashes exactly as `fileSha` does, so
+// every sha already recorded in `.sdlc/managed.json` still matches. Not for artifact hashes: those are
+// `fileSha`, and an approval is bound to them.
+export function contentSha(p) {
+  if (!fs.existsSync(p)) return null;
+  const bytes = fs.readFileSync(p);
+  const text = bytes.includes(13) ? Buffer.from(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : bytes;
+  return 'sha256:' + createHash('sha256').update(text).digest('hex');
+}
+// True when dest exists and its content matches src, line endings aside (see `contentSha`).
 export function sameContent(src, dest) {
-  const a = fileSha(src);
-  const b = fileSha(dest);
+  const a = contentSha(src);
+  const b = contentSha(dest);
   return a !== null && a === b;
 }
 

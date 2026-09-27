@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, captureHookActions,
+  moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -595,6 +595,9 @@ export async function runSetup(root, opts = {}) {
     applyActions(captureWiring, { force: true });
     wired.push(...captureWiring);
   }
+  // E113: the shell-script hooks a re-run replaces, once the entries above no longer name them.
+  const retiredHooks = legacyHookScriptActions(root);
+  if (retiredHooks.length) applyActions(retiredHooks, { force: true });
   // After every write to a managed path has landed (including the legacy renames), so the recorded
   // sha is the file's final state.
   recordManagedWrites(wired);
@@ -683,6 +686,17 @@ export function ensurePackIgnored(root) {
   return true;
 }
 
+// `npx` on Windows is `npx.cmd`, which Node will not start without a shell (since 18.20.2), so there
+// it runs through one, each word in double quotes (a Windows path cannot hold a `"`). E113.
+export function npxInvocation(args, platform = process.platform) {
+  if (platform !== 'win32') return { cmd: 'npx', args, shell: false };
+  return { cmd: ['npx', ...args].map((a) => `"${String(a).replace(/"/g, '')}"`).join(' '), args: [], shell: true };
+}
+const runNpx = (args, opts) => {
+  const inv = npxInvocation(args);
+  return run(inv.cmd, inv.args, { ...opts, ...(inv.shell ? { shell: true } : {}) });
+};
+
 // Deterministic repomix pack (code-map generation itself is an AI step, handed off).
 export function packRepo(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
@@ -691,7 +705,7 @@ export function packRepo(root, repo) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${repo.name}: packing with repomix …`);
-  const r = run('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
+  const r = runNpx(['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
   if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
   fail(`${repo.name}: repomix failed — ${r.stderr.split('\n')[0] || 'unknown error'}`);
   return false;
