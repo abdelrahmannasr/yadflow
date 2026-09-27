@@ -1166,6 +1166,19 @@ const onDisk = (root) => (file) => { try { return fs.readFileSync(path.join(root
 // The old scripts that belonged to the ledger guard, which only a verified Product has.
 const GUARD_SCRIPTS = new Set(['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']);
 
+// What to do with an entry that still runs an old script: repoint it at the Node script yad now writes —
+// except a guard script on a Product whose ledger is not verified (or cannot be read), where no guard is
+// installed to point at, so the entry is removed. One sentence for the plan's note AND apply's warning, so
+// the two cannot give different advice (review 5).
+function entryAdvice(root, scriptRel, count) {
+  const hub = readJSON(productConfigPath(root), null);
+  if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(hub)) return 'change it to the `node hooks/….mjs` command yad now writes';
+  const them = count > 1 ? 'those entries' : 'that entry';
+  return hub === null
+    ? `the Product config does not read, so yad cannot tell whether a ledger guard belongs here — fix it, or remove ${them}`
+    : `this Product has no ledger guard (its ledger is not verified), so remove ${them}`;
+}
+
 // Read once per file per plan, however many old scripts ask (review 3).
 const committed = (root) => {
   const seen = new Map();
@@ -1225,13 +1238,8 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
       const stuck = onDiskAfter.filter((f) => {
         try { return commandsIn(JSON.parse(after(f))).some((cmd) => ours.has(cmd) && namesScript(cmd, scriptRel)); } catch { return false; }
       });
-      // The guard is wired only on a verified Product. Anywhere else there is no Node script to point the
-      // entry at, so the way out is to remove it (review 4).
-      const noGuardHere = GUARD_SCRIPTS.has(scriptRel) && !isVerifiedLedger(readJSON(productConfigPath(root)));
       if (stuck.length) {
-        info(`${scriptRel} stays — ${stuck.join(' and ')} still ${stuck.length > 1 ? 'run' : 'runs'} it through an old yad hook command; ${noGuardHere
-          ? 'this Product has no ledger guard (its ledger is not verified), so remove that entry'
-          : 'change it to the `node hooks/….mjs` command yad now writes'}, then \`yad check --fix\` removes the script`);
+        info(`${scriptRel} stays — ${stuck.join(' and ')} still ${stuck.length > 1 ? 'run' : 'runs'} it through an old yad hook command; ${entryAdvice(root, scriptRel, stuck.length)}, then \`yad check --fix\` removes the script`);
       }
       continue;
     }
@@ -1254,7 +1262,7 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
         if (where.length) {
           // Reached when a plan's assumption did not hold at apply — e.g. `yad setup`, which does not unwire a
           // dropped target the way `yad check --fix` does (review 3).
-          warn(`${scriptRel} kept — ${where.join(', ')} still runs it; run \`yad check --fix\`, which rewrites or removes yad's own entries, or point your own entry at the Node script beside it`);
+          warn(`${scriptRel} kept — ${where.join(', ')} still ${where.length > 1 ? 'run' : 'runs'} it; run \`yad check --fix\`, which rewrites or removes yad's own entries — for one of your own: ${entryAdvice(root, scriptRel, where.length)}`);
           return;
         }
         fs.rmSync(file, { force: true });

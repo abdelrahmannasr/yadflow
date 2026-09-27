@@ -389,6 +389,22 @@ test('E113 review 1: a kept script is never pending — a local ledger\'s leftov
     // A personal settings file, with a Windows-style path.
     fs.writeFileSync(path.join(T, '.claude/settings.local.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash hooks\\yad-capture.sh' }] }] } }));
     assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')));
+    // Capture IS installed with a local ledger, so an old capture command of ours is told to repoint, never
+    // to be removed (review 5).
+    fs.writeFileSync(path.join(T, '.claude/settings.local.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"$CLAUDE_PROJECT_DIR/hooks/yad-capture.sh"' }] }] } }));
+    const said2 = [];
+    console.log = (...a) => { said2.push(a.join(' ')); };
+    try { legacyHookScriptActions(T); } finally { console.log = orig; }
+    assert.ok(said2.some((l) => /yad-capture\.sh stays — .*change it to the `node hooks/.test(l)), said2.join('\n'));
+    assert.ok(!said2.some((l) => /yad-capture\.sh stays — .*remove th(at|ose) entr/.test(l)));
+    // A config that does not read: yad cannot know, and says so.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ not json');
+    const said3 = [];
+    console.log = (...a) => { said3.push(a.join(' ')); };
+    try { legacyHookScriptActions(T); } finally { console.log = orig; }
+    assert.ok(said3.some((l) => /ledger-guard\.sh stays — .*does not read, so yad cannot tell/.test(l)), said3.join('\n'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ledger: 'local', platform: 'github', default_branch: 'main' }));
+    fs.writeFileSync(path.join(T, '.claude/settings.local.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash hooks\\yad-capture.sh' }] }] } }));
     await fixHooks(T);
     assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')));
     assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')));
@@ -416,7 +432,7 @@ test('E113 review 2: our old command where no action reaches it — another even
       try { planned = legacyHookScriptActions(T); } finally { console.log = orig; }
       assert.ok(!planned.some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: not planned`);
       // Our own old command, which no action reaches, is stuck: say where, and the way out (review 3).
-      assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays — .* still runs it through an old yad hook command/.test(l)), said.join('\n'));
+      assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays — .* still runs it through an old yad hook command; change it to the `node hooks\/….mjs` command/.test(l)), said.join('\n'));
       await fixHooks(T);
       assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), `${where}: kept`);
       assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: still not pending after --fix`);
@@ -463,7 +479,7 @@ test('E113 review 4: a removal planned, then run again by the time it applies, i
     console.log = (...a) => { said.push(a.join(' ')); };
     try { act.apply(); } finally { console.log = orig; }
     assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), 'kept');
-    assert.ok(said.some((l) => /yad-capture\.sh kept — \.cursor\/hooks\.json still runs it; run `yad check --fix`/.test(l)), said.join('\n'));
+    assert.ok(said.some((l) => /yad-capture\.sh kept — \.cursor\/hooks\.json still runs it; run `yad check --fix`.*change it to the `node hooks/.test(l)), said.join('\n'));
   } finally { cleanup(T); }
 });
 
