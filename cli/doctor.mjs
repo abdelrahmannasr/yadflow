@@ -601,7 +601,10 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // A copy ON DISK that is not JSON is what a plain --fix leaves alone (review 8) — not the default
         // branch's copy, which a clone off that branch only picks up once it switches and pulls.
         const diskBad = !disk && exists(path.join(dir, PRODUCT_LINK));
-        if (!there) return { name: r.name, branch, offBranch, diskBad, why: shown.ok ? 'unreadable' : 'missing' };
+        // Off the default branch, the hint's first step is a switch, and a switch REPLACES a record this
+        // branch tracks with the default branch's (review 9) — so judge the copy it will have then.
+        const trackedHere = !!offBranch && run('git', ['cat-file', '-e', `HEAD:${PRODUCT_LINK}`], { cwd: dir }).ok;
+        if (!there) return { name: r.name, branch, offBranch, diskBad, trackedHere, why: shown.ok ? 'unreadable' : 'missing' };
         return { name: r.name, branch, offBranch, why: 'stale' };
       })
       .filter(Boolean);
@@ -625,7 +628,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           const off = listed.filter((u) => u.offBranch);
           // --overwrite-local only where a plain --fix would leave the copy alone: it is not JSON on disk
           // now, or will not be once an off-branch clone pulls the default branch's unreadable one.
-          const bad = listed.filter((u) => u.diskBad || (u.why === 'unreadable' && u.offBranch));
+          const bad = listed.filter((u) => (!u.offBranch ? u.diskBad
+            : u.trackedHere ? u.why === 'unreadable' : u.diskBad || u.why === 'unreadable'));
           return [
             ...(off.length ? [`first bring ${off.length > 1 ? 'each clone' : 'the clone'} to its default branch — ${off.map((u) => `${u.name} (on ${where(u)}): \`git checkout ${u.branch} && git pull origin ${u.branch}\``).join('; ')} — or commit the record on the branch ${off.length > 1 ? 'each is' : 'it is'} on and merge it with a PR`] : []),
             `${off.length ? 'then ' : ''}from the Product run \`yad check --fix --push\`: it writes the record into each connected repo and commits it to the default branch`,

@@ -329,6 +329,14 @@ test('a product-link record on a feature branch, or a clone behind origin, is no
     // On a detached HEAD it says so, not "on HEAD" (review 7).
     git(backend, 'checkout', '-q', '--detach');
     assert.match(hits(T)[0].hint, /backend \(on a detached HEAD\): `git checkout main && git pull origin main`/);
+    // A broken record committed on feat/y: the switch replaces it with main's (none), so the plain command
+    // is enough — no --overwrite-local, whose run-wide replacing was never needed (review 9).
+    git(backend, 'checkout', '-q', 'feat/y');
+    fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{not json');
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: a broken record on the branch');
+    assert.match(hits(T)[0].message, /^backend has no \.sdlc\/product-link\.json on the default branch/);
+    assert.doesNotMatch(hits(T)[0].hint, /overwrite-local/);
     fs.rmSync(T, { recursive: true, force: true });
     fs.rmSync(origin, { recursive: true, force: true });
     fs.rmSync(mate, { recursive: true, force: true });
