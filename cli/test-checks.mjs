@@ -1101,8 +1101,15 @@ test('backfill gate: every character APFS folds into ASCII is folded (E116 revie
 });
 
 test('backfill gate: a repeated verified: key is read as YAML reads it, the last one wins (E116 review 6)', () => {
-  for (const [first, then, code] of [['true', 'false', 1], ['false', 'true', 0]]) {
-    const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': `---\nverified: ${first}\nverified: ${then}\n---\n# billing\n` });
+  // Any spelling YAML may take for the key counts as a later line (review 7); the last must be exactly
+  // `verified: true`, the key in lowercase.
+  for (const [first, then, code] of [
+    ['verified: true', 'verified: false', 1], ['verified: false', 'verified: true', 0],
+    ['verified: true', '"verified": false', 1], ['verified: true', "'verified': false", 1],
+    ['verified: true', 'verified : false', 1], ['verified: false', 'VERIFIED: true', 1],
+    ['feature: billing', 'verified: True', 0], ['feature: billing', 'Verified: true', 1],
+  ]) {
+    const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': `---\n${first}\n${then}\n---\n# billing\n` });
     commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });
     const r = runGate(BACKFILL, T, [base]);
     assert.equal(r.code, code, `${first} then ${then}:\n${r.out}`);

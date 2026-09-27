@@ -212,9 +212,12 @@ while IFS= read -r f; do
     # `---` and never closes it has no frontmatter, or a body line would count (review 5). Read to the end,
     # never stopped early: under pipefail a closed pipe would read a long approved spec as unapproved.
     fm="$(git cat-file blob "$oid" 2>/dev/null | awk 'NR==1 && /^---[[:space:]]*$/ {f=1; next} f==1 && /^---[[:space:]]*$/ {f=2; next} f==1 {b = b $0 "\n"} END {if (f == 2) printf "%s", b}')" || fm=""
-    # The LAST `verified:` line, as YAML reads a repeated key (review 6): `true` then `false` is false.
-    last="$(printf '%s\n' "$fm" | grep -iE '^verified:' | tail -n 1)" || last=""
-    if ! printf '%s\n' "$last" | grep -qiE '^verified:[[:space:]]*true[[:space:]]*$'; then
+    # The LAST line that could set the key, as YAML reads a repeated key (review 6): `true` then `false`
+    # is false. Any spelling YAML might take for it — quoted, a space before the colon, another case —
+    # is found (review 7), and the last one must be exactly `verified: true` (the key in lowercase, as
+    # YAML keys are case-sensitive; the value as YAML 1.1 reads it). Anything else is not approved.
+    last="$(printf '%s\n' "$fm" | grep -iE "^[\"']?verified[\"']?[[:space:]]*:" | tail -n 1)" || last=""
+    if ! printf '%s\n' "$last" | grep -qE '^verified:[[:space:]]*(true|True|TRUE)[[:space:]]*$'; then
       echo "FAIL [backfill]: ${f} is being backfilled but its spec is not yet human-approved (verified: true) on the base."
       echo "  -> run yad-backfill approve for ${spec} and merge that first: the gate reads the spec"
       echo "     as it stands on the base, so an approval in this same PR does not count."
