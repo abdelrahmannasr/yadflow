@@ -596,7 +596,7 @@ export async function runSetup(root, opts = {}) {
     wired.push(...captureWiring);
   }
   // E113: the shell-script hooks a re-run replaces, once the entries above no longer name them.
-  const retiredHooks = legacyHookScriptActions(root);
+  const retiredHooks = legacyHookScriptActions(root, ideTargets);
   if (retiredHooks.length) applyActions(retiredHooks, { force: true });
   // After every write to a managed path has landed (including the legacy renames), so the recorded
   // sha is the file's final state.

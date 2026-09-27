@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, isPlainObject, run,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -1044,7 +1044,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
 
 // ---- background capture wiring (E43) -----------------------------------------------------------
 //
-// The post-edit capture hook: `hooks/yad-capture.sh`, plus one entry per IDE target that has a post-edit
+// The post-edit capture hook: `hooks/yad-capture.mjs`, plus one entry per IDE target that has a post-edit
 // protocol. Unlike `hookActions` it is wired in BOTH ledger modes — never losing a draft matters whoever
 // owns the ledger — on any Product (a `.sdlc/hub.json` or `product.json`) whose config does not say
 // `"capture": false`. Only the CONFIG turns the wiring off: `YAD_CAPTURE=0` is one shell's choice, and
@@ -1129,7 +1129,10 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
 //     never staged by `--push`), so until it is, everyone who pulls runs the old command — deleting the
 //     script under it would leave them all a hook that does not exist. The removal waits for a later run,
 //     after the new entry is committed.
-//   - the settings files ON DISK, except for our own old commands that this same run rewrites or removes.
+//   - the settings files ON DISK AS THIS RUN WILL LEAVE THEM: each adapter's own entry merged or unmerged
+//     exactly as this run's actions do it (review 2 — excusing our old commands wherever they appeared
+//     also excused copies no action touches, under another event or in `settings.local.json`, and those
+//     were planned, kept, and pending for ever).
 // Both harness settings files are read, plus Claude Code's personal `settings.local.json`, and a command
 // is matched with either kind of slash (`hooks\yad-capture.sh` on Windows).
 const HOOK_SETTINGS_FILES = [...new Set([...Object.values(HOOK_ADAPTERS), ...Object.values(CAPTURE_ADAPTERS)].map((a) => a.settings)), '.claude/settings.local.json'];
@@ -1146,14 +1149,14 @@ function commandsIn(value, out = []) {
 const namesScript = (text, scriptRel) => text.replace(/\\/g, '/').includes(scriptRel);
 // Which settings files name the script, read from `raw(file)` (null = absent). A file that will not parse
 // names it when its text does: nothing can be proved about it, so it keeps the script.
-function namedIn(raw, scriptRel, handled = new Set()) {
+function namedIn(raw, scriptRel) {
   const where = [];
   for (const file of HOOK_SETTINGS_FILES) {
     const text = raw(file);
     if (text === null) continue;
     let parsed;
     try { parsed = JSON.parse(text); } catch { if (namesScript(text, scriptRel)) where.push(file); continue; }
-    if (commandsIn(parsed).some((cmd) => !handled.has(cmd) && namesScript(cmd, scriptRel))) where.push(file);
+    if (commandsIn(parsed).some((cmd) => namesScript(cmd, scriptRel))) where.push(file);
   }
   return where;
 }
@@ -1164,17 +1167,35 @@ const committed = (root) => (file) => {
   const r = run('git', ['-C', root, 'show', `HEAD:./${file}`]);
   return r.ok ? r.stdout : null;
 };
-// Our own old commands that THIS run takes out of the files on disk: capture's always (rewritten while
-// capture is wanted, unmerged once it is not), the guard's only on a verified Product — with a local
-// ledger nothing rewrites or removes a guard entry, so one left over still runs its script.
-function legacyHandledThisRun(root) {
+// The settings files on disk as this run's hook actions will leave them. The same choices the actions make:
+// the guard's entry merged for a verified Product's current targets and unmerged for its dropped ones
+// (`hookActions` / `orphanHookActions`), nothing done to it with a local ledger; capture's merged for the
+// current targets while capture is wanted and unmerged otherwise (`captureHookActions` /
+// `orphanCaptureHookActions`). A file the merge cannot read is left as it is, as the action leaves it.
+function afterThisRun(root, ideTargets) {
+  const targets = new Set(safeIdeTargetsFor(root, ideTargets));
   const verified = isVerifiedLedger(readJSON(productConfigPath(root)));
-  return new Set([
-    ...Object.values(CAPTURE_ADAPTERS).flatMap((a) => a.legacyCommands),
-    ...(verified ? Object.values(HOOK_ADAPTERS).flatMap((a) => a.legacyCommands) : []),
-  ]);
+  const capture = captureWanted(root);
+  const plans = [
+    ...(verified ? Object.values(HOOK_ADAPTERS) : []).map((a) => [a, targets.has(a.target)]),
+    ...Object.values(CAPTURE_ADAPTERS).map((a) => [a, capture && targets.has(a.target)]),
+  ];
+  const read = onDisk(root);
+  return (file) => {
+    const text = read(file);
+    if (text === null) return null;
+    let settings;
+    try { settings = JSON.parse(text); } catch { return text; }
+    if (!isPlainObject(settings)) return text;
+    for (const [adapter, wired] of plans) {
+      if (adapter.settings !== file) continue;
+      const r = wired ? mergeHookSettings(settings, adapter) : unmergeHookSettings(settings, adapter);
+      if (!r.unreadable) settings = r.settings;
+    }
+    return JSON.stringify(settings);
+  };
 }
-export function legacyHookScriptActions(root) {
+export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) {
   if (!exists(productConfigPath(root))) return [];
   const ledger = readManagedLedger(root);
   const actions = [];
@@ -1183,8 +1204,14 @@ export function legacyHookScriptActions(root) {
     if (!lstatIfPresent(file)?.isFile()) continue;
     const recorded = ledger[scriptRel];
     if (!recorded || recorded !== contentSha(file)) continue;
-    const still = [...new Set([...namedIn(committed(root), scriptRel), ...namedIn(onDisk(root), scriptRel, legacyHandledThisRun(root))])];
-    if (still.length) continue;
+    const inHead = namedIn(committed(root), scriptRel);
+    const onDiskAfter = namedIn(afterThisRun(root, ideTargets), scriptRel);
+    if (onDiskAfter.length) continue;
+    if (inHead.length) {
+      // The one wait a person ends: committing the rewritten entry. Said, so the second run is not a mystery.
+      info(`${scriptRel} stays until ${inHead.join(' and ')} ${inHead.length > 1 ? 'are' : 'is'} committed with the new hook entry — then \`yad check --fix\` removes it`);
+      continue;
+    }
     actions.push({
       scope: 'hub',
       item: `${scriptRel} (removed)`,

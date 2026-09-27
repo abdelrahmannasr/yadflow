@@ -385,6 +385,44 @@ test('E113 review 1: a kept script is never pending — a local ledger\'s leftov
   } finally { cleanup(T); }
 });
 
+test('E113 review 2: our old command where no action reaches it — another event, a personal file — keeps the script, and is never pending', async () => {
+  const { legacyHookScriptActions } = await import('./plan.mjs');
+  for (const where of ['Stop in settings.json', 'settings.local.json']) {
+    const T = await oldProduct();
+    try {
+      const entry = { hooks: [{ type: 'command', command: '"$CLAUDE_PROJECT_DIR/hooks/yad-capture.sh"' }] };
+      if (where === 'settings.local.json') {
+        fs.writeFileSync(path.join(T, '.claude/settings.local.json'), JSON.stringify({ hooks: { PostToolUse: [entry] } }));
+      } else {
+        const cfg = JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'));
+        cfg.hooks.Stop = [entry];
+        fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify(cfg));
+      }
+      assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: not planned`);
+      await fixHooks(T);
+      assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), `${where}: kept`);
+      assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: still not pending after --fix`);
+      assert.ok(!fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')), `${where}: an unrelated script still goes`);
+    } finally { cleanup(T); }
+  }
+});
+
+test('E113 review 2: a script waiting only on the commit says so', async () => {
+  const { legacyHookScriptActions } = await import('./plan.mjs');
+  const T = await oldProduct();
+  const g = (...a) => spawnSync('git', ['-c', 'commit.gpgsign=false', '-c', `core.excludesFile=${path.join(T, '.no-global-ignore')}`, ...a], { cwd: T, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  const said = [];
+  const orig = console.log;
+  try {
+    g('init', '-q'); g('add', '-A'); g('commit', '-q', '-m', 'old wiring');
+    await fixHooks(T);
+    console.log = (...a) => { said.push(a.join(' ')); };
+    legacyHookScriptActions(T);
+    console.log = orig;
+    assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays until \.claude\/settings\.json and \.cursor\/hooks\.json are committed/.test(l)), said.join('\n'));
+  } finally { console.log = orig; cleanup(T); }
+});
+
 test('E113 review 1: on Windows doctor names a CRLF checkout, which reads approvals as stale', async () => {
   const { lineEndingChecks } = await import('./doctor.mjs');
   const at = (value, platform = 'win32') => {

@@ -56,7 +56,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // E43: the post-edit capture hook, in both ledger modes.
     ...captureHookActions(root, ideTargets), ...orphanCaptureHookActions(root, ideTargets),
     // E113: the old shell-script hooks. LAST, so the entries above that named them are rewritten first.
-    ...legacyHookScriptActions(root),
+    ...legacyHookScriptActions(root, ideTargets),
   ];
   if (ideState.needsRepair) {
     actions.push({

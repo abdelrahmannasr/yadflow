@@ -2391,7 +2391,8 @@ export function lineEndingChecks(root, checks, { platform = process.platform, ru
   const r = runner('git', ['-C', root, 'config', '--get', 'core.autocrlf']);
   if (!r.ok || r.stdout.trim().toLowerCase() !== 'true') return;
   check(checks, 'line-endings', 'project', 'warn', 'git checks text out here with CRLF line endings (core.autocrlf=true) — an approval is bound to an artifact\'s exact bytes, so reviews approved elsewhere read as stale here',
-    'run `git config core.autocrlf input` in this clone, then `git rm --cached -r . -q && git reset --hard` to check the files out again with LF (commit or stash your work first)');
+    // Three separate commands, not joined with `&&`: Windows PowerShell 5.1, the default shell there, has no `&&`.
+    'commit or stash your work first, then run `git config core.autocrlf input`, then `git rm --cached -r . -q`, then `git reset --hard` — the files come back with LF. `git config --global core.autocrlf input` does the same for every future clone');
 }
 
 // The capture half of `yad doctor` (E43). Three facts: whether capture is on, whether every IDE target with
