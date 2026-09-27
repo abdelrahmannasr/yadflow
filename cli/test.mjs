@@ -172,12 +172,51 @@ test('the product-link record never carries a user name or password from the Pro
   assert.equal(publicGitUrl('ssh://git:pw@host:2222/org/product.git'), 'ssh://git@host:2222/org/product.git');
   assert.equal(publicGitUrl('git@github.com:org/product.git'), 'git@github.com:org/product.git');
   assert.equal(publicGitUrl(''), null);
+  assert.equal(publicGitUrl('https://github.com/org/product.git?access_token=abc#x'), 'https://github.com/org/product.git');
   const { T, backend } = scaffold();
   fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://user:ghp_SECRET@github.com/org/product.git' }));
   await captureConsole(() => reconcile(T, { fix: true }));
   const txt = fs.readFileSync(path.join(backend, '.sdlc/product-link.json'), 'utf8');
   assert.doesNotMatch(txt, /SECRET|user:/);
   assert.equal(JSON.parse(txt).git_url, 'https://github.com/org/product.git');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a product-link record changed on disk is not ok until that change is committed (E120 review 2)', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/product.git', default_branch: 'main' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
+  // The Product moves; a plain --fix (no push) rewrites the record on disk only.
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/renamed.git', default_branch: 'trunk' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const r = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), `a later --push must commit it:\n${r.out}`);
+  // Staged but not committed is still to do.
+  git(backend, 'add', '.sdlc/product-link.json');
+  const staged = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(staged.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), staged.out);
+  // And the doctor says the default branch holds an older one.
+  fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+  const { collectDoctor } = await import('./doctor.mjs');
+  const hit = collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  assert.equal(hit.length, 1);
+  assert.match(hit[0].message, /backend holds a \.sdlc\/product-link\.json on disk that differs from the one on the default branch/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a product-link record the repo ignores is not `new` forever, and the doctor says why (E120 review 2)', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(backend, '.gitignore'), '.sdlc/\n');
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const r = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'ok'), r.out);
+  const { collectDoctor } = await import('./doctor.mjs');
+  const hit = collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  assert.equal(hit.length, 1);
+  assert.match(hit[0].message, /^backend ignores \.sdlc\/product-link\.json \(\.gitignore\), so `yad check --fix --push` cannot commit it/);
+  assert.match(hit[0].hint, /un-ignore/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

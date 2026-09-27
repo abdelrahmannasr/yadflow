@@ -549,16 +549,38 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     const unlinked = registry.repos.filter((r) => r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
       .filter(({ dir }) => exists(dir) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
       .filter(({ dir }) => { const t = top(dir); return t && t !== rootTop; })
-      .filter(({ r, dir }) => {
+      .map(({ r, dir }) => {
         const branch = r.default_branch || 'main';
         const onRemote = run('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`], { cwd: dir }).ok;
-        return !run('git', ['cat-file', '-e', `${onRemote ? `origin/${branch}` : 'HEAD'}:${PRODUCT_LINK}`], { cwd: dir }).ok;
+        const ref = onRemote ? `origin/${branch}` : 'HEAD';
+        const shown = run('git', ['show', `${ref}:${PRODUCT_LINK}`], { cwd: dir });
+        // What is on disk (what yad last wrote) against what the default branch holds (what CI reads):
+        // a record updated on disk and never committed is as stale as a missing one (review 2).
+        let disk = null;
+        try { disk = JSON.parse(fs.readFileSync(path.join(dir, PRODUCT_LINK), 'utf8')); } catch { /* none, or not JSON */ }
+        let there = null;
+        try { there = shown.ok ? JSON.parse(shown.stdout) : null; } catch { there = null; }
+        const ignored = run('git', ['check-ignore', '-q', '--', PRODUCT_LINK], { cwd: dir }).ok;
+        if (!there) return { name: r.name, why: ignored ? 'ignored' : 'missing' };
+        const differs = disk && ['git_url', 'path', 'default_branch'].some((k) => (disk[k] ?? null) !== (there[k] ?? null));
+        return differs ? { name: r.name, why: ignored ? 'ignored' : 'stale' } : null;
       })
-      .map(({ r }) => r.name);
-    if (unlinked.length) {
-      check(checks, 'repos:product-link-missing', 'project', 'warn',
-        `${unlinked.join(', ')} ${unlinked.length > 1 ? 'have' : 'has'} no ${PRODUCT_LINK} on the default branch — the gates there take where the Product lives from link.md, and CI cannot check the Product out`,
+      .filter(Boolean);
+    const named = (why) => unlinked.filter((u) => u.why === why).map((u) => u.name);
+    const missing = named('missing');
+    const stale = named('stale');
+    const ignoredRepos = named('ignored');
+    if (missing.length || stale.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn', [
+        ...(missing.length ? [`${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} no ${PRODUCT_LINK} on the default branch — the gates there take where the Product lives from link.md, and CI cannot check the Product out`] : []),
+        ...(stale.length ? [`${stale.join(', ')} ${stale.length > 1 ? 'hold' : 'holds'} a ${PRODUCT_LINK} on disk that differs from the one on the default branch — CI reads the default branch's`] : []),
+      ].join('; '),
         'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch');
+    }
+    if (ignoredRepos.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${ignoredRepos.join(', ')} ${ignoredRepos.length > 1 ? 'ignore' : 'ignores'} ${PRODUCT_LINK} (.gitignore), so \`yad check --fix --push\` cannot commit it — CI cannot read it`,
+        `un-ignore ${PRODUCT_LINK} in that repo's .gitignore (or \`git add -f\` it), and commit it to the default branch`);
     }
   }
 

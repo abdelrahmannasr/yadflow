@@ -84,13 +84,14 @@ while [ -n "$_rest" ]; do
     exit 1
   fi
 done
-if [ -e "$dest" ]; then
-  echo "note [product-checkout]: '${dest}' is already there — it is not replaced."
-  exit 0
-fi
+# Tracked first (review 2): a tracked folder is also "already there", and read that way it passed.
 if [ -n "$(git ls-files -- "$dest" 2>/dev/null | head -1)" ]; then
   echo "FAIL [product-checkout]: '${dest}' holds files this repo tracks — the Product cannot be checked out there."
   exit 1
+fi
+if [ -e "$dest" ]; then
+  echo "note [product-checkout]: '${dest}' is already there — it is not replaced."
+  exit 0
 fi
 # https only: the token goes in as HTTP basic auth. An ssh form (git@host:org/repo.git or ssh://) is
 # read as the same repo over https; a file:// url (a local test) is cloned as it is.
@@ -98,6 +99,7 @@ case "$url" in
   git@*:*) _h="${url#git@}"; url="https://${_h%%:*}/${_h#*:}" ;;
   ssh://git@*) _h="${url#ssh://git@}"; _hp="${_h%%/*}"; url="https://${_hp%%:*}/${_h#*/}" ;;   # an ssh port is not the https one
   https://*|file://*) ;;
+  http://*) echo "FAIL [product-checkout]: ${rec} on ${BASE} has an http:// git_url — the token is not sent over plain http. Use the https url."; exit 1 ;;
   *) echo "FAIL [product-checkout]: ${rec} on ${BASE} has a git_url git cannot clone over https: '${url}'."; exit 1 ;;
 esac
 # The token never goes on a command line or into a URL, so no process list or log line shows it; git

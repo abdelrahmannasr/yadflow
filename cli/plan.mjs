@@ -613,6 +613,9 @@ export function publicGitUrl(u) {
     // An ssh user (`git@`) is the login name, not a secret, and the checkout reads the url by it.
     if (!/^(git\+)?ssh:$/i.test(x.protocol)) x.username = '';
     x.password = '';
+    // A token can ride in the query or the fragment too (`?access_token=…`); a clone url needs neither.
+    x.search = '';
+    x.hash = '';
     return x.toString();
   } catch { return null; }
 }
@@ -656,10 +659,16 @@ function productLinkAction(root, repo, repoRoot) {
   // Right on disk is not enough: the gates read the record from the default branch, so one that
   // `yad setup` or a plain `--fix` wrote and nobody committed is still to do — `new`, so `--push` stages
   // it (review 1). Before, it read `ok` and was never committed.
-  const committed = () => run('git', ['ls-files', '--error-unmatch', '--', PRODUCT_LINK], { cwd: repoRoot }).ok;
+  // Committed AS IT IS on disk (review 2): tracked alone was not enough — a record a plain `--fix` had
+  // rewritten read `ok` and was never committed, so CI kept the old one. `git diff HEAD` also sees a
+  // staged-only change. A record the repo's .gitignore covers cannot be committed by --push at all:
+  // not `new` forever — `yad doctor` says what to do instead.
+  const git = (...a) => run('git', a, { cwd: repoRoot }).ok;
+  const committed = () => git('ls-files', '--error-unmatch', '--', PRODUCT_LINK) && git('diff', '--quiet', 'HEAD', '--', PRODUCT_LINK);
+  const ignored = () => git('check-ignore', '-q', '--', PRODUCT_LINK);
   return {
     ...base,
-    status: current === null ? 'missing' : !same ? 'outdated' : committed() ? 'ok' : 'new',
+    status: current === null ? 'missing' : !same ? 'outdated' : committed() || ignored() ? 'ok' : 'new',
     apply: () => writeJSON(dest, { ...(current || {}), ...want }),
   };
 }

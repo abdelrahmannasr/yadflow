@@ -415,7 +415,7 @@ test('contract-check gate: a record the PR adds or changes counts once it merges
   });
   const r = runGate(CONTRACT, T);
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /\.sdlc\/product-link\.json is new in this PR — the Product is read from main's link\.md files; the new one counts once it merges/);
+  assert.match(r.out, /\.sdlc\/product-link\.json is new in this PR — where the Product lives is read from main, not from this PR; the new one counts once it merges/);
   assert.match(r.out, /is this repo's first spec/);
   fs.rmSync(T, { recursive: true, force: true });
   // Changed in the PR, to a folder holding a Product that would match: the base record is still read.
@@ -428,7 +428,7 @@ test('contract-check gate: a record the PR adds or changes counts once it merges
     'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../planted', 'contract-lock': `sha256:${A}` }),
   });
   const r2 = runGate(CONTRACT, U, [base]);
-  assert.match(r2.out, /\.sdlc\/product-link\.json changes in this PR — the Product is read from .*'s record/);
+  assert.match(r2.out, /\.sdlc\/product-link\.json changes in this PR — where the Product lives is read from .*, not from this PR/);
   assert.doesNotMatch(r2.out, /hash matches/);
   assert.match(r2.out, /fidelity check deferred/);
   fs.rmSync(U, { recursive: true, force: true });
@@ -1644,13 +1644,21 @@ test('product-checkout: a path outside the repo, a tracked folder, or a failed c
     assert.match(r.out, /must be a folder inside this repo/, p);
     fs.rmSync(T, { recursive: true, force: true });
   }
-  // A folder the repo tracks (missing from the disk here, so the clone would otherwise go ahead).
-  const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, 'prod'), 'prod/x.txt': 'tracked\n' });
-  fs.rmSync(path.join(T, 'prod'), { recursive: true, force: true });
-  const tracked = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
-  assert.equal(tracked.code, 1, tracked.out);
-  assert.match(tracked.out, /'prod' holds files this repo tracks/);
-  fs.rmSync(T, { recursive: true, force: true });
+  // A folder the repo tracks — on disk (review 2: it read as "already there" and passed) and not.
+  for (const onDisk of [true, false]) {
+    const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, 'prod'), 'prod/x.txt': 'tracked\n' });
+    if (!onDisk) fs.rmSync(path.join(T, 'prod'), { recursive: true, force: true });
+    const tracked = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
+    assert.equal(tracked.code, 1, `${onDisk}:\n${tracked.out}`);
+    assert.match(tracked.out, /'prod' holds files this repo tracks/);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // A plain http url: the token is not sent over it.
+  const { T: H, base: bh } = renameRepo({ '.sdlc/product-link.json': recordFor('http://example.com/org/product.git', '.yad/product') });
+  const http = runGate(PRODUCT_CHECKOUT, H, [bh], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(http.code, 1, http.out);
+  assert.match(http.out, /the token is not sent over plain http/);
+  fs.rmSync(H, { recursive: true, force: true });
   // A symlink on the way (tracked by the PR): the clone would land where the link points (review 1).
   const { T: L, base: bl } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, '.yad/product') });
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-out-'));

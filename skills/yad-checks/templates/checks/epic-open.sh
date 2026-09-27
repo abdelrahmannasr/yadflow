@@ -119,8 +119,8 @@ product_for() {
   _rec="$(record_path "$BASE")"
   _rec_head="$(record_path HEAD)"
   if [ "$_rec_head" != "$_rec" ]; then
-    if [ -n "$_rec" ]; then _w="changes in this PR"; _s="record"; else _w="is new in this PR"; _s="link.md files"; fi
-    prod_note=".sdlc/product-link.json ${_w} — the Product is read from ${BASE}'s ${_s}; the new one counts once it merges."
+    if [ -n "$_rec" ]; then _w="changes in this PR"; else _w="is new in this PR"; fi
+    prod_note=".sdlc/product-link.json ${_w} — where the Product lives is read from ${BASE}, not from this PR; the new one counts once it merges."
   fi
   _base_rel="$(base_product_rel "$_link")"
   if [ -z "$_base_rel" ]; then
