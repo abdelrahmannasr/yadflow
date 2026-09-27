@@ -1561,6 +1561,92 @@ const FORMS = [
   { name: 'unfenced link.md', hub: (T) => path.join(T, 'product'), value: () => '../../product', unfenced: true },
 ];
 
+// ---------- product-checkout.sh (E120) ----------
+const PRODUCT_CHECKOUT = path.join(ROOT, 'skills/yad-checks/templates/checks/product-checkout.sh');
+// A Product git repo to clone from (file://), holding one epic.
+function productSource() {
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-product-src-'));
+  git(src, 'init', '-q');
+  git(src, 'config', 'user.name', 'p');
+  git(src, 'config', 'user.email', 'p@corp.io');
+  fs.mkdirSync(path.join(src, 'epics/EP-demo'), { recursive: true });
+  fs.writeFileSync(path.join(src, 'epics/EP-demo/epic.md'), '# demo\n');
+  git(src, 'add', '-A');
+  git(src, 'commit', '-q', '-m', 'seed');
+  git(src, 'branch', '-q', '-M', 'main');
+  return src;
+}
+const recordFor = (url, p, branch = 'main') => JSON.stringify({ git_url: url, path: p, default_branch: branch }, null, 2) + '\n';
+
+test('product-checkout: clones the Product where the base record says, only with the secret (E120)', () => {
+  const src = productSource();
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, '.yad/product') });
+  // No secret: nothing is cloned, the gates defer.
+  const none = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: '' });
+  assert.equal(none.code, 0, none.out);
+  assert.match(none.out, /no YAD_PRODUCT_TOKEN secret — the Product is not checked out/);
+  assert.ok(!fs.existsSync(path.join(T, '.yad/product')));
+  // With it: cloned, and a second run leaves it alone.
+  const r = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't0ken' });
+  assert.equal(r.code, 0, r.out);
+  assert.ok(fs.existsSync(path.join(T, '.yad/product/epics/EP-demo/epic.md')), r.out);
+  assert.doesNotMatch(r.out, /t0ken/);
+  assert.match(runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't0ken' }).out, /already there — it is not replaced/);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(src, { recursive: true, force: true });
+});
+
+test('product-checkout: the record is read from the base, never as the PR leaves it (E120)', () => {
+  const src = productSource();
+  const planted = productSource();
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, '.yad/product') });
+  commit(T, 'chore: point CI elsewhere', { '.sdlc/product-link.json': recordFor(`file://${planted}`, 'mine') });
+  const r = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(r.code, 0, r.out);
+  assert.ok(fs.existsSync(path.join(T, '.yad/product')) && !fs.existsSync(path.join(T, 'mine')), r.out);
+  // No record on the base: nothing to check out, whatever the PR adds.
+  const { T: U, base: b2 } = renameRepo({ 'README.md': 'x\n' });
+  commit(U, 'chore: add a record', { '.sdlc/product-link.json': recordFor(`file://${planted}`, 'mine') });
+  const r2 = runGate(PRODUCT_CHECKOUT, U, [b2], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /no \.sdlc\/product-link\.json on .* nothing to check out/);
+  assert.ok(!fs.existsSync(path.join(U, 'mine')));
+  for (const d of [T, U, src, planted]) fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('product-checkout: a path outside the repo, a tracked folder, or a failed clone FAILs (E120)', () => {
+  const src = productSource();
+  for (const p of ['../escape', '/tmp/abs', '.', '', 'a/../../b', '.git/x']) {
+    const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, p) });
+    const r = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
+    assert.equal(r.code, 1, `${p}:\n${r.out}`);
+    assert.match(r.out, /must be a folder inside this repo/, p);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // A folder the repo tracks (missing from the disk here, so the clone would otherwise go ahead).
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, 'prod'), 'prod/x.txt': 'tracked\n' });
+  fs.rmSync(path.join(T, 'prod'), { recursive: true, force: true });
+  const tracked = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(tracked.code, 1, tracked.out);
+  assert.match(tracked.out, /'prod' holds files this repo tracks/);
+  fs.rmSync(T, { recursive: true, force: true });
+  const { T: U, base: b2 } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}-gone`, '.yad/product') });
+  const bad = runGate(PRODUCT_CHECKOUT, U, [b2], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /FAIL \[product-checkout\]: could not clone the Product/);
+  fs.rmSync(U, { recursive: true, force: true });
+  fs.rmSync(src, { recursive: true, force: true });
+});
+
+test('the shipped workflows run product-checkout before each Product-reading gate (E120)', () => {
+  const gh = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  const gl = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
+  for (const gate of ['contract-check', 'lineage-check', 'epic-open', 'reconcile-debt-check']) {
+    assert.match(gh, new RegExp(`- run: bash checks/product-checkout\\.sh "origin/\\$\\{\\{ github\\.base_ref \\}\\}"\\n {8}env: \\{ YAD_PRODUCT_TOKEN: "\\$\\{\\{ secrets\\.YAD_PRODUCT_TOKEN \\}\\}" \\}\\n {6}- run: bash checks/${gate}\\.sh`), gate);
+    assert.match(gl, new RegExp(`- bash checks/product-checkout\\.sh "origin/\\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"\\n {4}- bash checks/${gate}\\.sh`), gate);
+  }
+});
+
 for (const g of GATES) {
   test(`${g.name} gate: the base record finds the Product a first spec's link.md cannot (E120)`, () => {
     // The first spec points product-repo at the author's machine. Without the record every gate but

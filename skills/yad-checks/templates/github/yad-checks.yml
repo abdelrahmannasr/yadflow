@@ -27,6 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
+      # secret is set; without it this prints a note and the gate defers, as before.
+      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}" }
       - run: bash checks/contract-check.sh "origin/${{ github.base_ref }}"
 
   # E65/E66 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings, and the
@@ -84,6 +88,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
+      # secret is set; without it this prints a note and the gate defers, as before.
+      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}" }
       - run: bash checks/lineage-check.sh "origin/${{ github.base_ref }}"
 
   epic-open:
@@ -92,6 +100,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
+      # secret is set; without it this prints a note and the gate defers, as before.
+      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}" }
       - run: bash checks/epic-open.sh "origin/${{ github.base_ref }}"
 
   reconcile-debt:
@@ -100,6 +112,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
+      # secret is set; without it this prints a note and the gate defers, as before.
+      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}" }
       - run: bash checks/reconcile-debt-check.sh "origin/${{ github.base_ref }}"
 
   # Pattern gates: commit subject + PR title + PR body all follow the convention (profile: code).

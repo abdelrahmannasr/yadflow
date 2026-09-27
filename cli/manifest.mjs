@@ -444,6 +444,8 @@ export const REPO_WIRING = {
     { src: 'skills/yad-checks/templates/checks/lineage-check.sh', dest: 'checks/lineage-check.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/epic-open.sh', dest: 'checks/epic-open.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/reconcile-debt-check.sh', dest: 'checks/reconcile-debt-check.sh', exec: true },
+    // E120. Checks the Product out in CI where .sdlc/product-link.json says, before the four gates above read it.
+    { src: 'skills/yad-checks/templates/checks/product-checkout.sh', dest: 'checks/product-checkout.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     // E65. The CHECK is ours and wired; the map it reads (`.sdlc/risk-map`) is the team's and never is.
