@@ -19,7 +19,9 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    A claimed `Contract-Change` against an epic that has **no lock at all** fails too: an epic on a short
    lane (`chore`/`spike`) has no architecture step and never locks a surface, so it may consume the
    contract but not change it, and the change belongs to a new epic on `classic`. That failure needs the
-   epic's ledger directory to resolve — a Product that is simply not checked out still defers, as before.
+   epic's ledger directory to resolve — a Product that is simply not checked out still defers, as before,
+   except on a repo's **first spec** (no `link.md` on the base names a Product): there a slice change whose
+   `product-repo` reaches nothing **fails** (E119), because the PR chose that value itself.
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
    CI installs and runs through the package manager declared by the repo's standard
    `package.json#packageManager` field (`npm` and `pnpm` are supported; any other manager stays on

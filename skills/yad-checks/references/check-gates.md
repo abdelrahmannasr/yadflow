@@ -369,7 +369,15 @@ where the gate used to defer — no weaker than that deferral. A kept Product's 
 are dropped before it is written out. Frontmatter is read with CR
 stripped before the `---` fences are matched, so a CRLF Product reads the same as an LF one. The case of a path is folded only where git folds it
 (`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a note, as
-before. `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
+before — with one exception in contract-check (E119): on a repo's **first spec**, where no `link.md` on the
+base names a Product and `product-repo` is the PR's own value, a diff that changes a slice and whose
+`product-repo` reaches nothing **FAILs** by name ("… is this repo's first spec …", then "… reaches
+nothing", or "… names no product-repo" when `link.md` has none). A Product that IS reached — checked out, or
+kept in this repo and read from the base — but holds the epic's folder with no ledger in it still defers:
+it is not "nowhere", and the PR cannot shape a base copy. A first
+spec with no slice is unchanged (the surface is read from paths alone), and so is one that only removes a
+slice. **Cost:** a repo whose CI does not check out the Product cannot merge a first spec that carries a
+slice until it does. The other three gates judge the epic, not the surface, and still defer there (E120). `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
 
 **The PR does not choose the epic either (E118).** lineage-check, epic-open and reconcile-debt-check
 read `epic:` from `link.md`. It must equal the story ID's prefix — story `EP-checkout-S01` belongs to
