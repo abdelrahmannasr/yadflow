@@ -382,7 +382,7 @@ test('E113 review 1: a kept script is never pending — a local ledger\'s leftov
     let plan;
     try { plan = legacyHookScriptActions(T).map((a) => a.item); } finally { console.log = orig; }
     // No guard is installed with a local ledger, so the advice is to remove the entry, not repoint it (review 4).
-    assert.ok(said.some((l) => /hooks\/ledger-guard\.sh stays — .*has no ledger guard .*remove that entry/.test(l)), said.join('\n'));
+    assert.ok(said.some((l) => /hooks\/ledger-guard\.sh stays — .*remove each entry that runs it — this Product has no ledger guard/.test(l)), said.join('\n'));
     assert.ok(!said.some((l) => /ledger-guard\.sh stays — .*node hooks/.test(l)));
     assert.ok(!plan.includes('hooks/ledger-guard.sh (removed)'), plan.join());
     assert.ok(plan.includes('hooks/yad-capture.sh (removed)'), 'capture\'s old entry IS rewritten in both ledger modes');
@@ -395,8 +395,8 @@ test('E113 review 1: a kept script is never pending — a local ledger\'s leftov
     const said2 = [];
     console.log = (...a) => { said2.push(a.join(' ')); };
     try { legacyHookScriptActions(T); } finally { console.log = orig; }
-    assert.ok(said2.some((l) => /yad-capture\.sh stays — .*change it to the `node hooks/.test(l)), said2.join('\n'));
-    assert.ok(!said2.some((l) => /yad-capture\.sh stays — .*remove th(at|ose) entr/.test(l)));
+    assert.ok(said2.some((l) => /yad-capture\.sh stays — .*change each entry that runs it to the `node hooks/.test(l)), said2.join('\n'));
+    assert.ok(!said2.some((l) => /yad-capture\.sh stays — .*remove each entry/.test(l)));
     // A config that does not read: yad cannot know, and says so.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ not json');
     const said3 = [];
@@ -432,7 +432,7 @@ test('E113 review 2: our old command where no action reaches it — another even
       try { planned = legacyHookScriptActions(T); } finally { console.log = orig; }
       assert.ok(!planned.some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: not planned`);
       // Our own old command, which no action reaches, is stuck: say where, and the way out (review 3).
-      assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays — .* still runs it through an old yad hook command; change it to the `node hooks\/….mjs` command/.test(l)), said.join('\n'));
+      assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays — .* still runs it through an old yad hook command\. To clear it: change each entry that runs it to the `node hooks\/….mjs` command/.test(l)), said.join('\n'));
       await fixHooks(T);
       assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), `${where}: kept`);
       assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: still not pending after --fix`);
@@ -479,7 +479,30 @@ test('E113 review 4: a removal planned, then run again by the time it applies, i
     console.log = (...a) => { said.push(a.join(' ')); };
     try { act.apply(); } finally { console.log = orig; }
     assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), 'kept');
-    assert.ok(said.some((l) => /yad-capture\.sh kept — \.cursor\/hooks\.json still runs it; run `yad check --fix`.*change it to the `node hooks/.test(l)), said.join('\n'));
+    assert.ok(said.some((l) => /yad-capture\.sh kept — \.cursor\/hooks\.json still runs it\. To clear it: change each entry that runs it to the `node hooks/.test(l)), said.join('\n'));
+  } finally { cleanup(T); }
+});
+
+test('E113 review 6: apply\'s warning for a guard script on a local ledger says remove — check --fix leaves those entries alone', async () => {
+  const { legacyHookScriptActions } = await import('./plan.mjs');
+  const T = await oldProduct();
+  try {
+    // A local ledger whose old guard entries are gone: the script is planned for removal.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ledger: 'local', platform: 'github', default_branch: 'main' }));
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), '{}');
+    fs.writeFileSync(path.join(T, '.cursor/hooks.json'), '{"version":1}');
+    const act = legacyHookScriptActions(T).find((a) => a.item === 'hooks/ledger-guard.sh (removed)');
+    assert.ok(act, 'planned');
+    // Then an old guard entry comes back before apply, in two files.
+    const entry = { hooks: [{ type: 'command', command: '"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"' }] };
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: [entry] } }));
+    fs.writeFileSync(path.join(T, '.claude/settings.local.json'), JSON.stringify({ hooks: { PreToolUse: [entry] } }));
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    try { act.apply(); } finally { console.log = orig; }
+    assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')));
+    assert.ok(said.some((l) => /ledger-guard\.sh kept — \.claude\/settings\.json, \.claude\/settings\.local\.json still run it\. To clear it: remove each entry that runs it — this Product has no ledger guard/.test(l)), said.join('\n'));
   } finally { cleanup(T); }
 });
 
