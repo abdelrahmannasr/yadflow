@@ -285,6 +285,28 @@ test('a product-link record on a feature branch, or a clone behind origin, is no
     assert.equal(hit.length, 1);
     assert.match(hit[0].message, /^backend is behind the default branch for \.sdlc\/product-link\.json/);
     assert.match(hit[0].hint, /`git pull` in backend/);
+    // The same clone on a feature branch cut before the change: CI's copy is the newer one — nothing to say.
+    git(backend, 'checkout', '-q', '-b', 'feat/y');
+    fs.writeFileSync(path.join(backend, 'other.txt'), 'x\n');
+    git(backend, 'add', 'other.txt');
+    commitIt(backend, 'feat: unrelated');
+    assert.deepEqual(hits(T), [], 'a feature branch that is only older than main is not a record problem (review 5)');
+    // Diverged: a record commit here AND a newer one on origin — a push would be refused.
+    git(backend, 'checkout', '-q', 'main');
+    const mine = JSON.parse(fs.readFileSync(path.join(backend, '.sdlc/product-link.json'), 'utf8'));
+    fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), JSON.stringify({ ...mine, path: 'third/place' }, null, 2) + '\n');
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: my own move');
+    const div = hits(T);
+    assert.equal(div.length, 1);
+    assert.match(div[0].message, /^backend has a \.sdlc\/product-link\.json commit the default branch lacks, and the default branch has moved on too/);
+    assert.match(div[0].hint, /^pull \(rebase or merge\)/);
+    // The same commit on a detached HEAD: check out the default branch first.
+    git(backend, 'checkout', '-q', '--detach');
+    const det = hits(T);
+    assert.equal(det.length, 1);
+    assert.match(det[0].message, /on a detached HEAD$/);
+    assert.match(det[0].hint, /`git checkout main` in backend/);
     fs.rmSync(T, { recursive: true, force: true });
     fs.rmSync(origin, { recursive: true, force: true });
     fs.rmSync(mate, { recursive: true, force: true });

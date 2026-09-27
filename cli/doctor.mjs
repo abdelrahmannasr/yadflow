@@ -568,22 +568,29 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // Committed here and never pushed (review 3): a --push whose push was refused (a protected
         // branch) leaves the record `ok` for the writer, so `--fix --push` stages nothing — the fix is to
         // push the commit, not to run it again.
-        // Only when HEAD IS the default branch and has a commit to the record that origin lacks (review
-        // 4): on a feature branch the record wants merging, not pushing; and a clone BEHIND origin (a
-        // teammate changed the record) wants a pull — `git push` would be refused.
+        // The disk copy IS this clone's committed one (HEAD), and origin's differs: which side is ahead is
+        // git's to say, not the copies' (reviews 4–5). One table, every case:
+        //   no commit to the record in origin/<b>..HEAD  → this clone is only behind: on <b>, pull;
+        //                                                  elsewhere, nothing — CI's copy is the newer one
+        //   such a commit, on <b>, origin not ahead      → not pushed: push it
+        //   such a commit, on <b>, origin also ahead     → diverged: pull, settle the record, push
+        //   such a commit, on a detached HEAD            → check out <b> first
+        //   such a commit, on another branch             → merge it into <b> (a PR)
         if (onRemote && disk) {
           let head;
           try { const h = run('git', ['show', `HEAD:${PRODUCT_LINK}`], { cwd: dir }); head = h.ok ? JSON.parse(h.stdout) : null; } catch { head = null; }
           if (head && same(head, disk)) {
             const cur = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir });
-            const onBranch = cur.ok ? cur.stdout.trim() : '';
-            const count = (range) => {
-              const x = run('git', ['rev-list', '--count', range, '--', PRODUCT_LINK], { cwd: dir });
+            const onBranch = cur.ok ? cur.stdout.trim() : 'HEAD';
+            const count = (range, ...only) => {
+              const x = run('git', ['rev-list', '--count', range, ...(only.length ? ['--', ...only] : [])], { cwd: dir });
               return x.ok ? Number(x.stdout.trim()) || 0 : 0;
             };
-            if (onBranch && onBranch !== 'HEAD' && onBranch !== branch) return { name: r.name, branch, onBranch, why: 'elsewhere' };
-            if (onBranch === branch && count(`origin/${branch}..HEAD`) > 0) return { name: r.name, branch, why: 'unpushed' };
-            if (onBranch === branch && count(`HEAD..origin/${branch}`) > 0) return { name: r.name, branch, why: 'behind' };
+            const ahead = count(`origin/${branch}..HEAD`, PRODUCT_LINK) > 0;
+            if (!ahead) return onBranch === branch ? { name: r.name, branch, why: 'behind' } : null;
+            if (onBranch === branch) return { name: r.name, branch, why: count(`HEAD..origin/${branch}`) > 0 ? 'diverged' : 'unpushed' };
+            if (onBranch === 'HEAD') return { name: r.name, branch, why: 'detached' };
+            return { name: r.name, branch, onBranch, why: 'elsewhere' };
           }
         }
         if (!there) return { name: r.name, branch, why: shown.ok ? 'unreadable' : 'missing' };
@@ -615,6 +622,18 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       check(checks, 'repos:product-link-missing', 'project', 'warn',
         `${behind.map((u) => u.name).join(', ')} ${behind.length > 1 ? 'are' : 'is'} behind the default branch for ${PRODUCT_LINK} — someone changed it there since this clone last pulled`,
         `pull (${behind.map((u) => `\`git pull\` in ${u.name}`).join(', ')}); the default branch's record is the one CI reads`);
+    }
+    const diverged = unlinked.filter((u) => u.why === 'diverged');
+    if (diverged.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${diverged.map((u) => u.name).join(', ')} ${diverged.length > 1 ? 'have' : 'has'} a ${PRODUCT_LINK} commit the default branch lacks, and the default branch has moved on too — a push would be refused`,
+        `pull (rebase or merge) in ${diverged.map((u) => u.name).join(', ')}, settle the record, then push — or open a PR`);
+    }
+    const detached = unlinked.filter((u) => u.why === 'detached');
+    if (detached.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${detached.map((u) => u.name).join(', ')} ${detached.length > 1 ? 'have' : 'has'} a ${PRODUCT_LINK} commit the default branch lacks, on a detached HEAD`,
+        `check out the default branch (${detached.map((u) => `\`git checkout ${u.branch}\` in ${u.name}`).join(', ')}), bring the commit onto it, then push`);
     }
     if (unpushed.length) {
       check(checks, 'repos:product-link-missing', 'project', 'warn',
