@@ -316,6 +316,18 @@ export function run(cmd, args = [], opts = {}) {
 }
 export const has = (cmd) => run(process.platform === 'win32' ? 'where' : 'which', [cmd]).ok;
 
+// An npm launcher (`npm`, `npx`) is a `.cmd` file on Windows, which Node will not start without a shell
+// (since 18.20.2) — a plain spawn fails with EINVAL there. So on Windows it runs through one, each word in
+// double quotes (a Windows path cannot hold a `"`); everywhere else it is spawned directly (E113).
+export function launcherInvocation(cmd, args, platform = process.platform) {
+  if (platform !== 'win32') return { cmd, args, shell: false };
+  return { cmd: [cmd, ...args].map((a) => `"${String(a).replace(/"/g, '')}"`).join(' '), args: [], shell: true };
+}
+export function runLauncher(cmd, args = [], opts = {}) {
+  const inv = launcherInvocation(cmd, args);
+  return run(inv.cmd, inv.args, { ...opts, ...(inv.shell ? { shell: true } : {}) });
+}
+
 // Push HEAD to origin/<target>, rebasing onto it and retrying on rejection — both the Shape gate
 // sync and the Build checkpoint push append-only ledgers to the default branch, so a concurrent
 // push is a normal race, not an error. Returns { ok } after up to `attempts` tries; logs each retry.

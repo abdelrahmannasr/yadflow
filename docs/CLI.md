@@ -9,11 +9,13 @@ The module ships a zero-dependency CLI, published to npm as
 no clone needed.
 
 > **Platform support.** Linux and macOS are first-class — the test suite, the bash check gates, and
-> the end-to-end harness all run on both in CI. **Windows works natively, without WSL, for the CLI and
-> the agent hooks** (E113): the hooks are Node scripts, and CI runs them and the Windows-specific CLI
-> tests on Windows. Claude Code needs **Git Bash** (part of Git for Windows) to run hooks there. The
-> bash check gates run on your CI runner, not your machine. The full suite and the end-to-end harness
-> are not yet run on Windows. Requires **Node.js ≥ 18**.
+> the end-to-end harness all run on both in CI. **On Windows the agent hooks run natively, without
+> WSL** (E113): they are Node scripts, and CI runs them and the Windows-facing CLI tests on Windows.
+> Claude Code needs **Git Bash** (part of Git for Windows) to run hooks there. Set
+> `git config core.autocrlf input` in the Product clone — approvals are bound to exact bytes, and a CRLF
+> checkout reads them as stale (`yad doctor` warns). The bash check gates run on your CI runner, not your
+> machine. The rest of the CLI, the full suite and the end-to-end harness are not yet tested on Windows.
+> Requires **Node.js ≥ 18**.
 
 ## Commands
 

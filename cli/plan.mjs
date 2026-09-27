@@ -1122,33 +1122,57 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
 // alone: the header of each script invited a team to wire it into another harness by hand, and deleting a
 // file their own hook runs would switch that hook off without a word.
 //
-// And never while anything still RUNS it. Just before deleting, every harness settings file yad knows is
-// read again, and any command string still naming the script — the team's own entry, or ours in a file
-// the merge refused to rewrite — keeps the file, with a warning that names where.
-const HOOK_SETTINGS_FILES = [...new Set([...Object.values(HOOK_ADAPTERS), ...Object.values(CAPTURE_ADAPTERS)].map((a) => a.settings))];
+// And never while anything still RUNS it — in two places, both read at PLAN time so `yad check` shows only
+// what `--fix` will really do (an action that plans a removal and then keeps the file would be pending on
+// every run, for ever):
+//   - the settings files AS COMMITTED (HEAD). The rewritten entry is the team's to commit (a settings file is
+//     never staged by `--push`), so until it is, everyone who pulls runs the old command — deleting the
+//     script under it would leave them all a hook that does not exist. The removal waits for a later run,
+//     after the new entry is committed.
+//   - the settings files ON DISK, except for our own old commands that this same run rewrites or removes.
+// Both harness settings files are read, plus Claude Code's personal `settings.local.json`, and a command
+// is matched with either kind of slash (`hooks\yad-capture.sh` on Windows).
+const HOOK_SETTINGS_FILES = [...new Set([...Object.values(HOOK_ADAPTERS), ...Object.values(CAPTURE_ADAPTERS)].map((a) => a.settings)), '.claude/settings.local.json'];
 function commandsIn(value, out = []) {
   if (Array.isArray(value)) { for (const v of value) commandsIn(v, out); return out; }
   if (!isPlainObject(value)) return out;
   for (const [k, v] of Object.entries(value)) {
     if (k === 'command' && typeof v === 'string') out.push(v);
+    else if (k === 'args' && Array.isArray(v)) out.push(...v.filter((a) => typeof a === 'string'));
     else commandsIn(v, out);
   }
   return out;
 }
-// Where the script is still named: settings files whose commands mention it, and any that will not parse
-// but hold its name in their text (nothing can be proved about those, so they keep it too).
-function stillNamedIn(root, scriptRel) {
+const namesScript = (text, scriptRel) => text.replace(/\\/g, '/').includes(scriptRel);
+// Which settings files name the script, read from `raw(file)` (null = absent). A file that will not parse
+// names it when its text does: nothing can be proved about it, so it keeps the script.
+function namedIn(raw, scriptRel, handled = new Set()) {
   const where = [];
-  for (const rel0 of HOOK_SETTINGS_FILES) {
-    const file = path.join(root, rel0);
-    if (!exists(file)) continue;
-    let raw;
-    try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
+  for (const file of HOOK_SETTINGS_FILES) {
+    const text = raw(file);
+    if (text === null) continue;
     let parsed;
-    try { parsed = JSON.parse(raw); } catch { if (raw.includes(scriptRel)) where.push(rel0); continue; }
-    if (commandsIn(parsed).some((cmd) => cmd.includes(scriptRel))) where.push(rel0);
+    try { parsed = JSON.parse(text); } catch { if (namesScript(text, scriptRel)) where.push(file); continue; }
+    if (commandsIn(parsed).some((cmd) => !handled.has(cmd) && namesScript(cmd, scriptRel))) where.push(file);
   }
   return where;
+}
+const onDisk = (root) => (file) => { try { return fs.readFileSync(path.join(root, file), 'utf8'); } catch { return null; } };
+// `HEAD:./<file>` is read relative to the Product (the `./`), so a Product in a subfolder of its repository
+// reads its own files. Not a repository, no commit yet, or a file never committed: nothing is committed.
+const committed = (root) => (file) => {
+  const r = run('git', ['-C', root, 'show', `HEAD:./${file}`]);
+  return r.ok ? r.stdout : null;
+};
+// Our own old commands that THIS run takes out of the files on disk: capture's always (rewritten while
+// capture is wanted, unmerged once it is not), the guard's only on a verified Product — with a local
+// ledger nothing rewrites or removes a guard entry, so one left over still runs its script.
+function legacyHandledThisRun(root) {
+  const verified = isVerifiedLedger(readJSON(productConfigPath(root)));
+  return new Set([
+    ...Object.values(CAPTURE_ADAPTERS).flatMap((a) => a.legacyCommands),
+    ...(verified ? Object.values(HOOK_ADAPTERS).flatMap((a) => a.legacyCommands) : []),
+  ]);
 }
 export function legacyHookScriptActions(root) {
   if (!exists(productConfigPath(root))) return [];
@@ -1159,6 +1183,8 @@ export function legacyHookScriptActions(root) {
     if (!lstatIfPresent(file)?.isFile()) continue;
     const recorded = ledger[scriptRel];
     if (!recorded || recorded !== contentSha(file)) continue;
+    const still = [...new Set([...namedIn(committed(root), scriptRel), ...namedIn(onDisk(root), scriptRel, legacyHandledThisRun(root))])];
+    if (still.length) continue;
     actions.push({
       scope: 'hub',
       item: `${scriptRel} (removed)`,
@@ -1166,7 +1192,9 @@ export function legacyHookScriptActions(root) {
       root,
       paths: [scriptRel, MANAGED_LEDGER],
       apply: () => {
-        const where = stillNamedIn(root, scriptRel);
+        // Checked once more, on disk and with nothing excused: the rewrites above have run by now, so any
+        // command still naming the script is one this run did not take out.
+        const where = namedIn(onDisk(root), scriptRel);
         if (where.length) {
           warn(`${scriptRel} kept — ${where.join(', ')} still runs it; point that entry at the Node script beside it, then re-run \`yad check --fix\``);
           return;

@@ -11,7 +11,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { c, log, ok, info, warn, hand, fail, readJSON, run, has, exists } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, readJSON, runLauncher, has, exists } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, platformReady } from './platform.mjs';
 import { gitHead } from './setup.mjs';
@@ -233,8 +233,8 @@ function buildSite(root, t, { npmOptional = false } = {}) {
   const install = exists(path.join(dir, 'package-lock.json')) ? ['ci'] : ['install'];
   const again = 'fix the error npm printed above, then run the command again';
   log(`  ${c.dim('$')} npm ${install[0]} ${c.dim(`(${rel})`)}`);
-  if (!run('npm', install, { cwd: dir, stdio: 'inherit' }).ok) return failed(`${site}: npm ${install[0]} failed`, again);
-  if (!run('npm', ['run', 'build'], { cwd: dir, stdio: 'inherit' }).ok) return failed(`${site}: npm run build failed`, again);
+  if (!runLauncher('npm', install, { cwd: dir, stdio: 'inherit' }).ok) return failed(`${site}: npm ${install[0]} failed`, again);
+  if (!runLauncher('npm', ['run', 'build'], { cwd: dir, stdio: 'inherit' }).ok) return failed(`${site}: npm run build failed`, again);
   ok(`built ${site} ${c.dim('→ ' + path.relative(root, path.join(dir, 'dist')))}`);
   return { site, built: true, error: null };
 }

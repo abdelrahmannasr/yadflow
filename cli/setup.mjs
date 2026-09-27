@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import {
-  c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, has,
+  c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, runLauncher, has,
   exists, readJSON, readJSONStrict, writeJSON,
   writeProductConfig,
 } from './lib.mjs';
@@ -686,17 +686,6 @@ export function ensurePackIgnored(root) {
   return true;
 }
 
-// `npx` on Windows is `npx.cmd`, which Node will not start without a shell (since 18.20.2), so there
-// it runs through one, each word in double quotes (a Windows path cannot hold a `"`). E113.
-export function npxInvocation(args, platform = process.platform) {
-  if (platform !== 'win32') return { cmd: 'npx', args, shell: false };
-  return { cmd: ['npx', ...args].map((a) => `"${String(a).replace(/"/g, '')}"`).join(' '), args: [], shell: true };
-}
-const runNpx = (args, opts) => {
-  const inv = npxInvocation(args);
-  return run(inv.cmd, inv.args, { ...opts, ...(inv.shell ? { shell: true } : {}) });
-};
-
 // Deterministic repomix pack (code-map generation itself is an AI step, handed off).
 export function packRepo(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
@@ -705,7 +694,7 @@ export function packRepo(root, repo) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${repo.name}: packing with repomix …`);
-  const r = runNpx(['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
+  const r = runLauncher('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
   if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
   fail(`${repo.name}: repomix failed — ${r.stderr.split('\n')[0] || 'unknown error'}`);
   return false;

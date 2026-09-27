@@ -343,6 +343,62 @@ test('E113: an edited or unrecorded bash hook is the team\'s, and one still name
   } finally { cleanup(U); }
 });
 
+test('E113 review 1: the old scripts stay until the rewritten settings are COMMITTED, then go', async () => {
+  const { legacyHookScriptActions } = await import('./plan.mjs');
+  const T = await oldProduct();
+  // Unsigned, and blind to the global ignore file: a developer's `commit.gpgsign` would stop the commit, and a
+  // global ignore of `.claude/` would keep the settings out of it.
+  const g = (...a) => spawnSync('git', ['-c', 'commit.gpgsign=false', '-c', `core.excludesFile=${path.join(T, '.no-global-ignore')}`, ...a], { cwd: T, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  try {
+    g('init', '-q'); g('add', '-A'); g('commit', '-q', '-m', 'old wiring');
+    // First run: the entries are rewritten on disk, but HEAD still runs the bash scripts — a push of the
+    // deletion now would give everyone who pulls a hook with no script under it.
+    const first = await fixHooks(T);
+    assert.deepEqual(first.filter((a) => a.status === 'removed'), [], 'no removal is even planned');
+    for (const s of ['ledger-guard.sh', 'ledger-guard-cursor.sh', 'yad-capture.sh']) assert.ok(fs.existsSync(path.join(T, 'hooks', s)), s);
+    assert.deepEqual(legacyHookScriptActions(T), [], '`yad check` shows nothing pending it would not do');
+    // The team commits the new entries: now they go.
+    g('add', '-A'); g('commit', '-q', '-m', 'node hooks');
+    assert.equal(legacyHookScriptActions(T).length, 3);
+    await fixHooks(T);
+    for (const s of ['ledger-guard.sh', 'ledger-guard-cursor.sh', 'yad-capture.sh']) assert.ok(!fs.existsSync(path.join(T, 'hooks', s)), s);
+  } finally { cleanup(T); }
+});
+
+test('E113 review 1: a kept script is never pending — a local ledger\'s leftover guard entry, a personal settings file, a backslash', async () => {
+  const { legacyHookScriptActions } = await import('./plan.mjs');
+  const T = await oldProduct();
+  try {
+    // Local ledger: nothing rewrites the guard's old entry, so its script is still run — and so it is not
+    // planned for removal at all (planning it, then keeping it, would show it pending on every check).
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ledger: 'local', platform: 'github', default_branch: 'main' }));
+    const plan = legacyHookScriptActions(T).map((a) => a.item);
+    assert.ok(!plan.includes('hooks/ledger-guard.sh (removed)'), plan.join());
+    assert.ok(plan.includes('hooks/yad-capture.sh (removed)'), 'capture\'s old entry IS rewritten in both ledger modes');
+    // A personal settings file, with a Windows-style path.
+    fs.writeFileSync(path.join(T, '.claude/settings.local.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash hooks\\yad-capture.sh' }] }] } }));
+    assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')));
+    await fixHooks(T);
+    assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')));
+    assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')));
+    assert.ok(!legacyHookScriptActions(T).some((a) => /ledger-guard\.sh|yad-capture\.sh/.test(a.item)), 'and a second check has nothing pending for them');
+  } finally { cleanup(T); }
+});
+
+test('E113 review 1: on Windows doctor names a CRLF checkout, which reads approvals as stale', async () => {
+  const { lineEndingChecks } = await import('./doctor.mjs');
+  const at = (value, platform = 'win32') => {
+    const checks = [];
+    lineEndingChecks('/p', checks, { platform, runner: () => ({ ok: value !== null, stdout: value ?? '' }) });
+    return checks;
+  };
+  assert.equal(at('true')[0].status, 'warn');
+  assert.match(at('true')[0].hint, /core\.autocrlf input/);
+  assert.deepEqual(at('input'), []);
+  assert.deepEqual(at(null), [], 'unset');
+  assert.deepEqual(at('true', 'linux'), [], 'Windows only');
+});
+
 // ---- the Windows-facing CLI --------------------------------------------------------------------------
 
 test('E113: a CRLF checkout of a shipped file is the same content, and an LF file hashes as it always did', async () => {
@@ -404,10 +460,16 @@ test('E113: the ledger guard refuses a CI-owned write sent as a native path of t
   } finally { cleanup(T); }
 });
 
-test('E113: npx runs through a shell on Windows, each word quoted, and directly elsewhere', async () => {
-  const { npxInvocation } = await import('./setup.mjs');
-  assert.deepEqual(npxInvocation(['repomix@latest', '-o', '/a b/out.md'], 'linux'), { cmd: 'npx', args: ['repomix@latest', '-o', '/a b/out.md'], shell: false });
-  assert.deepEqual(npxInvocation(['repomix@latest', '-o', 'C:\\a b\\out.md'], 'win32'), { cmd: '"npx" "repomix@latest" "-o" "C:\\a b\\out.md"', args: [], shell: true });
+test('E113: an npm launcher runs through a shell on Windows, each word quoted, and directly elsewhere', async () => {
+  const { launcherInvocation } = await import('./lib.mjs');
+  assert.deepEqual(launcherInvocation('npx', ['repomix@latest', '-o', '/a b/out.md'], 'linux'), { cmd: 'npx', args: ['repomix@latest', '-o', '/a b/out.md'], shell: false });
+  assert.deepEqual(launcherInvocation('npx', ['repomix@latest', '-o', 'C:\\a b\\out.md'], 'win32'), { cmd: '"npx" "repomix@latest" "-o" "C:\\a b\\out.md"', args: [], shell: true });
+  assert.deepEqual(launcherInvocation('npm', ['run', 'build'], 'win32'), { cmd: '"npm" "run" "build"', args: [], shell: true });
+  // Both callers go through it — the twin of the repomix fix is `yad docs build`.
+  for (const f of ['cli/setup.mjs', 'cli/docs.mjs']) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    assert.doesNotMatch(src, /\brun\('np[mx]'/, `${f} spawns an npm launcher directly`);
+  }
 });
 
 test('E113: doctor finds Git Bash beside git on Windows, and says what its absence costs', async () => {

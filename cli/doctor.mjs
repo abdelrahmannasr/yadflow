@@ -54,7 +54,7 @@ function check(checks, id, section, status, message, hint = '', extra = null) {
 // PowerShell without it, and the hook entries yad writes (`node "$CLAUDE_PROJECT_DIR/…"`) are bash
 // spelling — so there the agent hooks do not run at all.
 export const bashMissingHint = (platform = process.platform) => (platform === 'win32'
-  ? 'install Git for Windows with its Git Bash — Claude Code runs hook commands in Git Bash, and without it yad\'s ledger guard and wip capture hooks do not run (the check gates themselves run on your CI)'
+  ? 'install Git for Windows with its Git Bash (or set CLAUDE_CODE_GIT_BASH_PATH) — Claude Code runs hook commands in Git Bash, and without it yad\'s hooks do not run under Claude Code; Cursor is not affected, and the check gates run on your CI'
   : 'the check gates are bash scripts — needed only to run one here by hand; your CI runs them');
 
 // Is there a bash this machine's agent hooks can use? Elsewhere, bash on PATH. On Windows, Git Bash —
@@ -78,8 +78,10 @@ export function envChecks(checks) {
   else check(checks, 'git', 'environment', 'fail', 'git not found on PATH [YAD-ENV-001]', 'install git — every yad command needs it');
 
   for (const tool of ['npx', 'bash']) {
-    if (tool === 'bash' ? hasBash() : has(tool)) check(checks, tool, 'environment', 'ok', `${tool} present`);
-    else check(checks, tool, 'environment', 'warn', `${tool} not found on PATH`, tool === 'npx' ? 'repomix packing will be skipped' : bashMissingHint());
+    // On Windows the bash that matters is Git Bash, found beside git rather than on PATH — say so by name.
+    const name = tool === 'bash' && process.platform === 'win32' ? 'Git Bash' : tool;
+    if (tool === 'bash' ? hasBash() : has(tool)) check(checks, tool, 'environment', 'ok', `${name} present`);
+    else check(checks, tool, 'environment', 'warn', name === 'Git Bash' ? 'Git Bash not found' : `${tool} not found on PATH`, tool === 'npx' ? 'repomix packing will be skipped' : bashMissingHint());
   }
 }
 
@@ -354,6 +356,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // Background capture (E43), on any Product in either ledger mode: is the post-edit hook wired, and will
   // a push to the `yad/wip/*` branches start the team's own CI?
   if (exists(productPath)) captureChecks(root, checks, readJSON(productPath, null));
+  if (exists(productPath)) lineEndingChecks(root, checks);
 
   // design.json: parse + shape + tool + MCP confirmation (absent is the normal markdown-only default —
   // pre-feature projects have none, so silence rather than warn when the file does not exist).
@@ -2376,6 +2379,19 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
   }
   if (failed.length) process.exitCode = 1;
   return { ok: failed.length === 0, failed: failed.length, warned: warned.length, checks };
+}
+
+// Line endings on Windows (E113). With `core.autocrlf=true` — the Git for Windows default — git checks
+// every text file out with CRLF. The managed files cope (they are compared line endings aside), but an
+// artifact's approval is bound to its exact bytes: a review approved on LF bytes reads as stale in a CRLF
+// checkout, and an approval recorded there binds bytes CI never sees. So on Windows it is named, with the
+// one setting that avoids it. Silent everywhere else, and when git cannot be asked.
+export function lineEndingChecks(root, checks, { platform = process.platform, runner = run } = {}) {
+  if (platform !== 'win32') return;
+  const r = runner('git', ['-C', root, 'config', '--get', 'core.autocrlf']);
+  if (!r.ok || r.stdout.trim().toLowerCase() !== 'true') return;
+  check(checks, 'line-endings', 'project', 'warn', 'git checks text out here with CRLF line endings (core.autocrlf=true) — an approval is bound to an artifact\'s exact bytes, so reviews approved elsewhere read as stale here',
+    'run `git config core.autocrlf input` in this clone, then `git rm --cached -r . -q && git reset --hard` to check the files out again with LF (commit or stash your work first)');
 }
 
 // The capture half of `yad doctor` (E43). Three facts: whether capture is on, whether every IDE target with
