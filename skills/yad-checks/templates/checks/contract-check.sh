@@ -114,10 +114,13 @@ fi
 #   -z | tr       NUL-separated, so git never quotes a path. By default git wraps a path holding a
 #                 non-ASCII byte in quotes and octal-escapes it, and it still quotes one holding a `"`
 #                 or a tab with core.quotePath off — either way a slice like
-#                 specs/EP-démo-S01/contracts/api.md never matched the pattern below.
+#                 specs/EP-démo-S01/contracts/api.md never matched the pattern below. `tr '\n\0' '?\n'`
+#                 (E121): one path per line, and a newline inside a path becomes `?` — split on
+#                 newlines alone, a file named `notes<newline>specs/S1/contracts/api.md` read as a
+#                 slice change and failed the PR over a file that does not exist.
 # Both lists (this one and `deleted` below) are built the SAME way: the no-lock escape hatch compares
 # them line for line.
-changed="$(git diff --no-renames --name-only -z "$RANGE" | tr '\0' '\n')"
+changed="$(git diff --no-renames --name-only -z "$RANGE" | tr '\n\0' '?\n')"
 surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
 
 # Slice paths this diff DELETES. `--name-only` above lists a deleted file exactly like a changed one,
@@ -135,7 +138,7 @@ surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts(/|$)' || t
 # change and every rule below applies to it unchanged).
 # --no-renames matters here too: a slice MOVED out of contracts/ is a delete of the old path, and
 # without it git reports an `R`, which --diff-filter=D never matches — the hatch would refuse the move.
-deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\0' '\n' | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
+deleted="$(git diff --no-renames --diff-filter=D --name-only -z "$RANGE" | tr '\n\0' '?\n' | grep -E '^specs/[^/]+/contracts(/|$)' || true)"
 
 if [ -z "$surface" ]; then
   echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts and everything under it)."
@@ -217,7 +220,7 @@ product_for() {
   _base_rel="$(base_product_rel "$_link")"
   if [ -z "$_base_rel" ]; then
     # A sibling's value. Every link.md sits at specs/<story>/, so a relative value means the same there.
-    _sibs="$(git ls-tree -r -z --name-only "$BASE" -- specs 2>/dev/null | tr '\0' '\n' | grep -E '^specs/[^/]+/link\.md$' || true)"
+    _sibs="$(git ls-tree -r -z --name-only "$BASE" -- specs 2>/dev/null | tr '\n\0' '?\n' | grep -E '^specs/[^/]+/link\.md$' || true)"
     _first=""; _first_from=""
     for _pass in same other; do
       while IFS= read -r _sib; do
@@ -357,7 +360,7 @@ kept_products() {
     if [ "$(git cat-file -t "${BASE}:${_d:+$_d/}epics" 2>/dev/null)" = tree ]; then _kept="${_kept}${_d:-.}
 "; fi
   done <<KEPT
-$(git ls-tree -r -z --name-only "$BASE" 2>/dev/null | tr '\0' '\n' | grep -E '(^|/)\.sdlc/hub\.json$' || true)
+$(git ls-tree -r -z --name-only "$BASE" 2>/dev/null | tr '\n\0' '?\n' | grep -E '(^|/)\.sdlc/hub\.json$' || true)
 KEPT
 }
 
@@ -374,7 +377,7 @@ base_product() {
   # A symlink or submodule inside it is refused by name, as under specs/ (E115): a link written out
   # still points where it pointed — an absolute one into this PR's working tree — and a submodule comes
   # out as an empty folder, which reads as an epic with no stories.
-  _bad="$(git ls-tree -r -z "${BASE}:${_e}" 2>/dev/null | tr '\0' '\n' | awk '!f && ($1 == "120000" || $1 == "160000") { sub(/^[^\t]*\t/, ""); print; f = 1 }')"
+  _bad="$(git ls-tree -r -z "${BASE}:${_e}" 2>/dev/null | tr '\n\0' '?\n' | awk '!f && ($1 == "120000" || $1 == "160000") { sub(/^[^\t]*\t/, ""); print; f = 1 }')"
   if [ -n "$_bad" ]; then
     prod_fail="'${_e}/${_bad}' on ${BASE} is a symlink or a submodule, so the Product this repo keeps cannot be read from the base. Replace it with the files themselves."
     return 0
@@ -441,7 +444,7 @@ product_tracked() (
   _top="$(git rev-parse --show-toplevel 2>/dev/null)" && _top="$(cd -P "$_top" 2>/dev/null && pwd -P)" || exit 0
   _ps='literal'; [ "$(git config --bool core.ignorecase 2>/dev/null)" = true ] && _ps='literal,icase'
   _in() { case "$1/" in "$_top"/*) _r="${1#"$_top"}"; _r="${_r#/}"; return 0 ;; esac; return 1; }
-  _hit() { git -C "$_top" ls-files -z -- ":(${_ps})$1" 2>/dev/null | tr '\0' '\n'; }
+  _hit() { git -C "$_top" ls-files -z -- ":(${_ps})$1" 2>/dev/null | tr '\n\0' '?\n'; }
   case "$1" in /*) cd / ;; esac
   _rest="$1"
   while [ -n "$_rest" ]; do

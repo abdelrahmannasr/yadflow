@@ -634,6 +634,7 @@ test('contract-check gate: a story folder twin spelled with a character APFS fol
     ['EP-staff-S01', 'EP-staﬀ-S01'], ['EP-fifo-S01', 'EP-ﬁfo-S01'], ['EP-flat-S01', 'EP-ﬂat-S01'],
     ['EP-office-S01', 'EP-oﬃce-S01'], ['EP-waffle-S01', 'EP-waﬄe-S01'], ['EP-stop-S01', 'EP-ﬅop-S01'],
     ['EP-stop-S01', 'EP-ﬆop-S01'], ['EP-sass-S01', 'EP-saſſ-S01'],
+    ['EP-a;b-S01', 'EP-a;b-S01'], ['EP-a`b-S01', 'EP-a`b-S01'],
   ]) {
     const T = scaffoldRepo();
     commitIndexOnly(T, 'docs: notes', [`specs/${story}/plan.md`, `specs/${twin}/notes.md`]);
@@ -647,7 +648,8 @@ test('contract-check gate: a story folder twin spelled with a character APFS fol
 test('contract-check gate: a file name with a newline adds no record to the tree read (E121)', () => {
   // Split on newlines alone, `x<newline>specs` read as a FILE named specs, and a name spelling a whole
   // tree record read as a symlink under specs/ — every PR refused, naming a file that is not there.
-  for (const name of ['x\nspecs', 'notes\n120000 blob 0\tspecs/EP-demo-S01/contracts']) {
+  // The last one is a name in the changed list, not the tree: split there, it read as a slice change.
+  for (const name of ['x\nspecs', 'notes\n120000 blob 0\tspecs/EP-demo-S01/contracts', 'notes\nspecs/EP-demo-S01/contracts/api.md']) {
     const T = scaffoldRepo();
     const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'x\n', env: GIT_ENV }).toString().trim();
     git(T, 'update-index', '--add', '--cacheinfo', `100644,${blob},${name}`);
@@ -656,6 +658,19 @@ test('contract-check gate: a file name with a newline adds no record to the tree
     assert.equal(r.code, 0, `${JSON.stringify(name)}:\n${r.out}`);
     fs.rmSync(T, { recursive: true, force: true });
   }
+});
+
+test('contract-check gate: a slice under a story folder named with a newline is not hidden (E121 review 2)', () => {
+  // Split on newlines alone, `specs/EP-a<newline>b-S01/contracts/api.md` became two lines that matched
+  // nothing: an empty surface, and a PASS. Now the folder reads `EP-a?b-S01`, which is not a story ID.
+  const T = scaffoldRepo();
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'new endpoint\n', env: GIT_ENV }).toString().trim();
+  git(T, 'update-index', '--add', '--cacheinfo', `100644,${blob},specs/EP-a\nb-S01/contracts/api.md`);
+  git(T, 'commit', '-q', '-m', 'feat: widen the API quietly\n\nContract-Change: yes');
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /specs\/EP-a\?b-S01\/contracts is not under a story ID/);
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('contract-check gate: a second spelling of contracts/ or of a story folder fails (E115 review 3)', () => {
@@ -810,7 +825,8 @@ test('contract-check and backfill-check list every change by both paths, byte-wi
       // --raw pairs each path with its header NUL by NUL (E116 review 1): split into lines, a newline in a
       // path shifted every pair after it.
       if (/--raw/.test(l)) assert.match(l, / -z .*\| while IFS= read -r -d '' h && IFS= read -r -d '' p; do/, `${rel}: ${l.trim()}`);
-      else assert.match(l, / -z .*\| tr '\\0' '\\n'/, `${rel}: ${l.trim()}`);
+      // A newline inside a path becomes `?` (E121): split on newlines alone, one odd name made a path.
+      else assert.match(l, / -z .*\| tr '\\n\\0' '\?\\n'/, `${rel}: ${l.trim()}`);
     }
     assert.ok(src.indexOf('export LC_ALL=C') >= 0 && src.indexOf('export LC_ALL=C') < src.indexOf(lists[0]), `${rel}: bytes before the list`);
   }
