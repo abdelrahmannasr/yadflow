@@ -358,6 +358,117 @@ test('contract-check gate: a first spec whose product-repo reaches nothing FAILs
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------- the Product's location is a repo fact (E120) ----------
+// `.sdlc/product-link.json`, merged on its own, says where CI checks the Product out. Read from the base
+// in all four Product-reading gates, it wins over every link.md.
+const productLink = (p) => `{\n  "git_url": "https://example.com/org/product.git",\n  "path": "${p}",\n  "default_branch": "main"\n}\n`;
+// A Product checked out (untracked) at `rel`, holding EP-demo with a lock of `hash`.
+function checkoutProduct(T, rel, hash) {
+  fs.appendFileSync(path.join(T, '.git/info/exclude'), `${rel}/\n`);
+  fs.mkdirSync(path.join(T, rel, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, rel, '.sdlc/hub.json'), '{}\n');
+  fs.mkdirSync(path.join(T, rel, 'epics/EP-demo/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, rel, 'epics/EP-demo/.sdlc/contract-lock.json'), `{ "hash": "sha256:${hash}" }\n`);
+  fs.writeFileSync(path.join(T, rel, 'epics/EP-demo/.sdlc/state.json'), '{}\n');
+}
+
+test('contract-check gate: the base record says where the Product is, and wins over link.md (E120)', () => {
+  const A = 'a'.repeat(64);
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': productLink('.yad/product') });
+  checkoutProduct(T, '.yad/product', A);
+  // A first spec whose link.md points at the author's own machine: passed over in silence.
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../../../elsewhere/product', 'contract-lock': `sha256:${A}` }),
+  });
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /hash matches the product lock/);
+  assert.doesNotMatch(r.out, /first spec|names product-repo/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a link.md reaching a DIFFERENT Product than the record gets a note, and the record is read (E120)', () => {
+  const A = 'a'.repeat(64);
+  const B = 'b'.repeat(64);
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': productLink('.yad/product') });
+  checkoutProduct(T, '.yad/product', A);
+  checkoutProduct(T, 'other', B);
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../other', 'contract-lock': `sha256:${B}` }),
+  });
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 1, `the pin matches the other Product, not the record's:\n${r.out}`);
+  assert.match(r.out, /names product-repo '\.\.\/\.\.\/other', but \.sdlc\/product-link\.json on .* says '\.yad\/product' — the record is read/);
+  assert.match(r.out, /still pins bbbbbbbbbbbb/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a record the PR adds or changes counts once it merges (E120)', () => {
+  // Added in the PR: the base has none, so a first spec pointing nowhere still FAILs (E119), with a note.
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    '.sdlc/product-link.json': productLink('.yad/product'),
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /\.sdlc\/product-link\.json is new in this PR — where the Product lives is read from main, not from this PR; the new one counts once it merges/);
+  assert.match(r.out, /is this repo's first spec/);
+  fs.rmSync(T, { recursive: true, force: true });
+  // Changed in the PR, to a folder holding a Product that would match: the base record is still read.
+  const A = 'a'.repeat(64);
+  const { T: U, base } = renameRepo({ '.sdlc/product-link.json': productLink('.yad/product') });
+  checkoutProduct(U, 'planted', A);
+  commit(U, 'feat: widen API\n\nContract-Change: yes', {
+    '.sdlc/product-link.json': productLink('planted'),
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../planted', 'contract-lock': `sha256:${A}` }),
+  });
+  const r2 = runGate(CONTRACT, U, [base]);
+  assert.match(r2.out, /\.sdlc\/product-link\.json changes in this PR — where the Product lives is read from .*, not from this PR/);
+  assert.doesNotMatch(r2.out, /hash matches/);
+  assert.match(r2.out, /fidelity check deferred/);
+  fs.rmSync(U, { recursive: true, force: true });
+});
+
+test('contract-check gate: on a developer\'s machine the base link.md still finds the Product the record cannot (E120 review 1)', () => {
+  // Nobody cloned into .yad/product here, but the base link.md points at the Product beside the repo.
+  // Still the base's value, never the PR's — so the gate checks rather than defers.
+  const A = 'a'.repeat(64);
+  const { T, base } = renameRepo({
+    '.sdlc/product-link.json': productLink('.yad/product'),
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../side', 'contract-lock': `sha256:${'b'.repeat(64)}` }),
+  });
+  checkoutProduct(T, 'side', A);
+  commit(T, 'feat: widen API\n\nContract-Change: yes', { 'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n' });
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 1, `the stale pin is caught, not deferred:\n${r.out}`);
+  assert.match(r.out, /still pins bbbbbbbbbbbb/);
+  // Once the record's folder IS there (CI's checkout), the record wins again.
+  checkoutProduct(T, '.yad/product', 'b'.repeat(64));
+  const r2 = runGate(CONTRACT, T, [base]);
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /hash matches the product lock/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a merged record that reaches nothing defers — CI has no Product checkout (E120)', () => {
+  // The record is a fact merged on its own, not the PR's choice: no first-spec FAIL.
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': productLink('.yad/product') });
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }),
+  });
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /fidelity check deferred/);
+  assert.doesNotMatch(r.out, /first spec/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('contract-check gate: a first spec whose Product IS reached is not called "nowhere" (E119 review 1)', () => {
   // The Product is checked out and holds the epic's folder, but no ledger in it. That is not a Product
   // that reaches nothing: it defers, as it always has, and says so — not "check the Product out in CI".
@@ -1471,6 +1582,133 @@ const FORMS = [
   { name: 'unfenced link.md', hub: (T) => path.join(T, 'product'), value: () => '../../product', unfenced: true },
 ];
 
+// ---------- product-checkout.sh (E120) ----------
+const PRODUCT_CHECKOUT = path.join(ROOT, 'skills/yad-checks/templates/checks/product-checkout.sh');
+// A Product git repo to clone from (file://), holding one epic.
+function productSource() {
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-product-src-'));
+  git(src, 'init', '-q');
+  git(src, 'config', 'user.name', 'p');
+  git(src, 'config', 'user.email', 'p@corp.io');
+  fs.mkdirSync(path.join(src, 'epics/EP-demo'), { recursive: true });
+  fs.writeFileSync(path.join(src, 'epics/EP-demo/epic.md'), '# demo\n');
+  git(src, 'add', '-A');
+  git(src, 'commit', '-q', '-m', 'seed');
+  git(src, 'branch', '-q', '-M', 'main');
+  return src;
+}
+const recordFor = (url, p, branch = 'main') => JSON.stringify({ git_url: url, path: p, default_branch: branch }, null, 2) + '\n';
+
+test('product-checkout: clones the Product where the base record says, only with the secret (E120)', () => {
+  const src = productSource();
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, '.yad/product') });
+  // No secret: nothing is cloned, the gates defer.
+  const none = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: '' });
+  assert.equal(none.code, 0, none.out);
+  assert.match(none.out, /no YAD_PRODUCT_TOKEN secret — the Product is not checked out/);
+  assert.ok(!fs.existsSync(path.join(T, '.yad/product')));
+  // With it: cloned, and a second run leaves it alone.
+  const r = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't0ken' });
+  assert.equal(r.code, 0, r.out);
+  assert.ok(fs.existsSync(path.join(T, '.yad/product/epics/EP-demo/epic.md')), r.out);
+  assert.doesNotMatch(r.out, /t0ken/);
+  assert.match(runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't0ken' }).out, /already there — it is not replaced/);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(src, { recursive: true, force: true });
+});
+
+test('product-checkout: the record is read from the base, never as the PR leaves it (E120)', () => {
+  const src = productSource();
+  const planted = productSource();
+  const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, '.yad/product') });
+  commit(T, 'chore: point CI elsewhere', { '.sdlc/product-link.json': recordFor(`file://${planted}`, 'mine') });
+  const r = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(r.code, 0, r.out);
+  assert.ok(fs.existsSync(path.join(T, '.yad/product')) && !fs.existsSync(path.join(T, 'mine')), r.out);
+  // No record on the base: nothing to check out, whatever the PR adds.
+  const { T: U, base: b2 } = renameRepo({ 'README.md': 'x\n' });
+  commit(U, 'chore: add a record', { '.sdlc/product-link.json': recordFor(`file://${planted}`, 'mine') });
+  const r2 = runGate(PRODUCT_CHECKOUT, U, [b2], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /no \.sdlc\/product-link\.json on .* nothing to check out/);
+  assert.ok(!fs.existsSync(path.join(U, 'mine')));
+  for (const d of [T, U, src, planted]) fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('product-checkout: a path outside the repo, a tracked folder, or a failed clone FAILs (E120)', () => {
+  const src = productSource();
+  for (const p of ['../escape', '/tmp/abs', '.', '', 'a/../../b', '.git/x']) {
+    const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, p) });
+    const r = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
+    assert.equal(r.code, 1, `${p}:\n${r.out}`);
+    assert.match(r.out, /must be a folder inside this repo/, p);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // A folder the repo tracks — on disk (review 2: it read as "already there" and passed) and not.
+  for (const onDisk of [true, false]) {
+    const { T, base } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, 'prod'), 'prod/x.txt': 'tracked\n' });
+    if (!onDisk) fs.rmSync(path.join(T, 'prod'), { recursive: true, force: true });
+    const tracked = runGate(PRODUCT_CHECKOUT, T, [base], { YAD_PRODUCT_TOKEN: 't' });
+    assert.equal(tracked.code, 1, `${onDisk}:\n${tracked.out}`);
+    assert.match(tracked.out, /'prod' holds files this repo tracks/);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // A plain http url: the token is not sent over it.
+  const { T: H, base: bh } = renameRepo({ '.sdlc/product-link.json': recordFor('http://example.com/org/product.git', '.yad/product') });
+  const http = runGate(PRODUCT_CHECKOUT, H, [bh], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(http.code, 1, http.out);
+  assert.match(http.out, /the token is not sent over plain http/);
+  fs.rmSync(H, { recursive: true, force: true });
+  // A symlink on the way (tracked by the PR): the clone would land where the link points (review 1).
+  const { T: L, base: bl } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, '.yad/product') });
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-out-'));
+  fs.symlinkSync(out, path.join(L, '.yad'));
+  commit(L, 'chore: a link');
+  const linked = runGate(PRODUCT_CHECKOUT, L, [bl], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(linked.code, 1, linked.out);
+  assert.match(linked.out, /'\.yad' is a symlink/);
+  assert.deepEqual(fs.readdirSync(out), []);
+  fs.rmSync(L, { recursive: true, force: true });
+  fs.rmSync(out, { recursive: true, force: true });
+  const { T: U, base: b2 } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}-gone`, '.yad/product') });
+  const bad = runGate(PRODUCT_CHECKOUT, U, [b2], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /FAIL \[product-checkout\]: could not clone the Product/);
+  fs.rmSync(U, { recursive: true, force: true });
+  fs.rmSync(src, { recursive: true, force: true });
+});
+
+test('the shipped workflows run product-checkout before each Product-reading gate (E120)', () => {
+  const gh = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  const gl = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
+  for (const gate of ['contract-check', 'lineage-check', 'epic-open', 'reconcile-debt-check']) {
+    assert.match(gh, new RegExp(`- run: bash checks/product-checkout\\.sh "origin/\\$\\{\\{ github\\.base_ref \\}\\}"\\n {8}env: \\{ YAD_PRODUCT_TOKEN: "\\$\\{\\{ secrets\\.YAD_PRODUCT_TOKEN \\}\\}" \\}\\n {6}- run: bash checks/${gate}\\.sh`), gate);
+    assert.match(gl, new RegExp(`- bash checks/product-checkout\\.sh "origin/\\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"\\n {4}- bash checks/${gate}\\.sh`), gate);
+  }
+});
+
+for (const g of GATES) {
+  test(`${g.name} gate: the base record finds the Product a first spec's link.md cannot (E120)`, () => {
+    // The first spec points product-repo at the author's machine. Without the record every gate but
+    // contract-check deferred on it (E119 covered only contract-check); with it, each reads the Product
+    // CI checked out at the record's path, and sees what is wrong there.
+    const T = scaffoldRepo();
+    onBase(T, { '.sdlc/product-link.json': productLink('.yad/product') });
+    fs.appendFileSync(path.join(T, '.git/info/exclude'), '.yad/\n');
+    g.seed(path.join(T, '.yad/product'));
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x',
+      ...(g.files || {}),
+      'specs/EP-demo-S01/link.md': linkFor(g, '../../../../somewhere/on/my/machine'),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, g.expect);
+    assert.doesNotMatch(r.out, /not reachable|deferred/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 for (const g of GATES) {
   for (const form of FORMS) {
     test(`${g.name} gate: reaches the Product with a ${form.name} product-repo (issue #149)`, () => {
@@ -1507,7 +1745,7 @@ test('contract-check gate: a link.md with no product-repo FAILs by name, not by 
   // defer, and an empty resolution used to interpolate to "/epics/<epic>/…" — a path at the filesystem
   // root, which read as a real location and could match a foreign file on some hosts.
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /is this repo's first spec — no link\.md on main names a Product —\n {2}and it names no product-repo/);
+  assert.match(r.out, /is this repo's first spec — no link\.md on main names a Product, and no \.sdlc\/product-link\.json does —\n {2}and it names no product-repo/);
   assert.doesNotMatch(r.out, /\/epics\//);
   fs.rmSync(T, { recursive: true, force: true });
 });

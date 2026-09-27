@@ -199,6 +199,16 @@ link_val() {
 #    which branch names shape (review 7); (3) only when the path reaches NOTHING, a Product the base keeps that holds
 #    this story's epic is the one meant. "Inside the code repo" is NOT the test: CI can only check a
 #    second repo out INSIDE the workspace, and an untracked checkout there is not the PR's.
+#
+# E120. Before any of that, the repo's own record: `.sdlc/product-link.json`, written by `yad check --fix`
+# / `yad update` and merged on its own. Its `path` (from the repo root; where CI checks the Product out)
+# is read from the BASE and wins over every link.md — so no gate takes where the Product lives from the
+# PR. A record the PR adds or changes counts once it merges (a note says so). A link.md whose own
+# product-repo reaches a DIFFERENT folder here gets a note; one that reaches nothing (a path on its
+# author's machine) is passed over in silence. When the record's path reaches NOTHING — a developer's
+# own run, where nobody cloned into it — the base's link.md order below is used if IT reaches a folder
+# (still the base's, never the PR's); otherwise the record stands, and the gate defers (review 1).
+# With no record on the base, the order above is kept.
 # Sets product_rel, prod (the folder to read), prod_note and prod_fail (text; the caller prints them).
 _yad_tmp=""
 _arch_key=""
@@ -211,12 +221,23 @@ base_product_rel() {
   git show "${BASE}:$1" > "$_yad_tmp/base-link.md" 2>/dev/null || : > "$_yad_tmp/base-link.md"
   link_val product-repo "$_yad_tmp/base-link.md"
 }
+# The `path` of `.sdlc/product-link.json` at $1 (a commit), or empty when there is none or it names none.
+record_path() {
+  git cat-file -e "$1:.sdlc/product-link.json" 2>/dev/null || return 0
+  git show "$1:.sdlc/product-link.json" 2>/dev/null | tr -d '\n\r' | sed -nE 's/.*"path"[[:space:]]*:[[:space:]]*"([^"\\]*)".*/\1/p' || true
+}
 product_for() {
   _link="specs/$1/link.md"
   prod=""; prod_note=""; prod_fail=""
   yad_tmp   # here, in this shell: a $(…) below would set it, and its EXIT trap, in a subshell only
   product_rel="$(link_val product-repo "$_link")"
   _from="$_link"
+  _rec="$(record_path "$BASE")"
+  _rec_head="$(record_path HEAD)"
+  if [ "$_rec_head" != "$_rec" ]; then
+    if [ -n "$_rec" ]; then _w="changes in this PR"; else _w="is new in this PR"; fi
+    prod_note=".sdlc/product-link.json ${_w} — where the Product lives is read from ${BASE}, not from this PR; the new one counts once it merges."
+  fi
   _base_rel="$(base_product_rel "$_link")"
   if [ -z "$_base_rel" ]; then
     # A sibling's value. Every link.md sits at specs/<story>/, so a relative value means the same there.
@@ -238,8 +259,26 @@ SIBLINGS
     done
     if [ -z "$_base_rel" ]; then _base_rel="$_first"; _from="$_first_from"; fi
   fi
-  if [ -n "$_base_rel" ] && [ "$_base_rel" != "$product_rel" ]; then
-    prod_note="${_link} names product-repo '${product_rel}', but ${_from} on ${BASE} says '${_base_rel}' — the Product is read from the base value; a new one counts once it merges."
+  _use_rec=""
+  if [ -n "$_rec" ]; then
+    # Relative to the repo root; link.md values are relative to specs/<story>/, so join it that way.
+    case "$_rec" in /*) _rv="$_rec" ;; *) _rv="../../$_rec" ;; esac
+    if [ -d "$(resolve_product "$_rv" "$1")" ] || [ -z "$_base_rel" ] || [ ! -d "$(resolve_product "$_base_rel" "$1")" ]; then
+      _use_rec=1; _base_rel="$_rv"; _from=".sdlc/product-link.json"
+    fi
+  fi
+  if [ -n "$_use_rec" ]; then
+    # The record wins. Say so only when this link.md's own value reaches a different folder here.
+    _mine="$(resolve_product "$product_rel" "$1")"
+    _theirs="$(resolve_product "$_base_rel" "$1")"
+    if [ -n "$product_rel" ] && [ -d "$_mine" ] && ! [ "$_mine" -ef "$_theirs" ]; then
+      prod_note="${prod_note:+$prod_note
+}${_link} names product-repo '${product_rel}', but .sdlc/product-link.json on ${BASE} says '${_rec}' — the record is read."
+    fi
+    product_rel="$_base_rel"
+  elif [ -n "$_base_rel" ] && [ "$_base_rel" != "$product_rel" ]; then
+    prod_note="${prod_note:+$prod_note
+}${_link} names product-repo '${product_rel}', but ${_from} on ${BASE} says '${_base_rel}' — the Product is read from the base value; a new one counts once it merges."
     product_rel="$_base_rel"
   fi
   # A Product this repo keeps, asked of the base first (see above). Both joins resolve_product may pick.
@@ -628,8 +667,8 @@ while IFS= read -r story; do
     rc=1
     continue
   elif [ -z "$_base_rel" ] && [ -z "$only_removes" ] && { [ -z "$prod" ] || [ ! -d "$prod" ]; }; then
-    # The repo's FIRST spec (E119): no link.md on the base names a Product, so product-repo is this PR's
-    # own value — and it reaches nothing. Deferring here let a PR pick a path that does not exist and
+    # The repo's FIRST spec (E119): no record (.sdlc/product-link.json, E120) and no link.md on the base
+    # names a Product, so product-repo is this PR's own value — and it reaches nothing. Deferring here let a PR pick a path that does not exist and
     # pass a slice change with no lock check at all. This case is known from paths alone: the slice is
     # on the surface, and the base holds no link.md with a value. A value merged on the base that reaches
     # nothing still defers below (a CI job that does not check the Product out); a PR that only removes
@@ -638,13 +677,14 @@ while IFS= read -r story; do
     # the epic's folder but no ledger in it, is not "nowhere", and defers below as it always has. That
     # includes a Product this repo keeps, which product_for falls back to when product-repo reaches
     # nothing: it is read as it stands on the base, so the PR cannot shape it.
-    echo "FAIL [contract-check]: ${link} is this repo's first spec — no link.md on ${BASE} names a Product —"
+    echo "FAIL [contract-check]: ${link} is this repo's first spec — no link.md on ${BASE} names a Product, and no .sdlc/product-link.json does —"
     if [ -n "$product_rel" ]; then
       echo "  and its product-repo '${product_rel}' reaches nothing, so the contract lock cannot be checked."
     else
       echo "  and it names no product-repo, so the contract lock cannot be checked."
     fi
-    echo "  Check the Product out in this repo's CI where product-repo points, or fix product-repo."
+    echo "  Run \`yad check --fix --push\` from the Product: it merges .sdlc/product-link.json, which says where CI"
+    echo "  checks the Product out (with the YAD_PRODUCT_TOKEN secret set). Or fix product-repo."
     rc=1
     continue
   else

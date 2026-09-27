@@ -51,6 +51,9 @@ yad-contract-check:
   extends: .sdlc_mr_only
   needs: []
   script:
+    # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
+    # variable is set (masked); without it this prints a note and the gate defers, as before.
+    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - bash checks/contract-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 # E65/E66 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings, and the
@@ -77,18 +80,27 @@ yad-lineage-check:
   extends: .sdlc_mr_only
   needs: []
   script:
+    # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
+    # variable is set (masked); without it this prints a note and the gate defers, as before.
+    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - bash checks/lineage-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 yad-epic-open:
   extends: .sdlc_mr_only
   needs: []
   script:
+    # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
+    # variable is set (masked); without it this prints a note and the gate defers, as before.
+    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - bash checks/epic-open.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 yad-reconcile-debt:
   extends: .sdlc_mr_only
   needs: []
   script:
+    # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
+    # variable is set (masked); without it this prints a note and the gate defers, as before.
+    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - bash checks/reconcile-debt-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 # Pattern gates: commit subject + MR title + MR body all follow the convention (profile: code).

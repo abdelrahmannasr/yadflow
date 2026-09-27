@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -516,6 +516,160 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       check(checks, 'checks:product-path-blind', 'project', 'warn',
         `${pathBlind.join(', ')} ${pathBlind.length > 1 ? 'are older copies that read' : 'is an older copy that reads'} the Product from wherever the PR's link.md points — a PR can point it at nothing, or at a Product it commits itself, and pass`,
         'run `yad check --fix` (it refreshes a wired gate nobody changed by hand); otherwise copy the shipped one over it from skills/yad-checks/templates/checks/');
+    }
+    // E120. An older Product-reading gate never reads `.sdlc/product-link.json`, so it still takes where
+    // the Product lives from link.md; and a checks workflow the team changed by hand (which `yad update`
+    // keeps) may not run checks/product-checkout.sh, so CI never checks the Product out. Named, not fixed.
+    const blindGates = gateRoots.flatMap((x) => PRODUCT_PATH_GATES.map((rel) => ({ ...x, rel })))
+      .filter((x) => productRecordBlindGate(path.join(x.root, x.rel)))
+      .map((x) => `${x.rel} in ${x.where}`);
+    // A `#` line naming the script is prose, not a step that runs it (review 1).
+    const blindFlows = gateRoots.filter((x) => x.where !== 'the Product').flatMap((x) => CHECK_WORKFLOWS.map((rel) => ({ ...x, rel })))
+      .filter((x) => {
+        let src;
+        try { src = fs.readFileSync(path.join(x.root, x.rel), 'utf8'); } catch { return false; }
+        return !src.split('\n').some((l) => !/^\s*#/.test(l) && /checks\/product-checkout\.sh/.test(l));
+      })
+      .map((x) => `${x.rel} in ${x.where}`);
+    const said = [
+      ...(blindGates.length ? [`${blindGates.join(', ')} ${blindGates.length > 1 ? 'never read' : 'never reads'} .sdlc/product-link.json, so where the Product lives is taken from link.md`] : []),
+      ...(blindFlows.length ? [`${blindFlows.join(', ')} ${blindFlows.length > 1 ? 'do' : 'does'} not run checks/product-checkout.sh, so CI never checks the Product out`] : []),
+    ];
+    if (said.length) {
+      check(checks, 'checks:product-record-blind', 'project', 'warn', said.join('; '),
+        'run `yad check --fix` (it refreshes wired files nobody changed by hand); otherwise copy the shipped gate or workflow over it from skills/yad-checks/templates/');
+    }
+    // E120. A wired code repo (not the Product's own git repo) whose record is not COMMITTED: its gates
+    // fall back to link.md, and CI has nothing to check the Product out from. Committed, not on disk
+    // (review 1): the gates read it from the default branch, and one that setup wrote and nobody
+    // committed looked fine here. Wired only: a repo with no gates has nothing to read it, and the
+    // hint would install its whole wiring.
+    const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
+    const rootTop = top(root);
+    const unlinked = registry.repos.filter((r) => r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
+      .filter(({ dir }) => exists(dir) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
+      .filter(({ dir }) => { const t = top(dir); return t && t !== rootTop; })
+      .map(({ r, dir }) => {
+        const branch = r.default_branch || 'main';
+        const onRemote = run('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`], { cwd: dir }).ok;
+        const ref = onRemote ? `origin/${branch}` : 'HEAD';
+        const shown = run('git', ['show', `${ref}:${PRODUCT_LINK}`], { cwd: dir });
+        // What is on disk (what yad last wrote) against what the default branch holds (what CI reads):
+        // a record updated on disk and never committed is as stale as a missing one (review 2).
+        let disk = null;
+        try { disk = JSON.parse(fs.readFileSync(path.join(dir, PRODUCT_LINK), 'utf8')); } catch { /* none, or not JSON */ }
+        let there;
+        try { there = shown.ok ? JSON.parse(shown.stdout) : null; } catch { there = null; }
+        const ignored = run('git', ['check-ignore', '-q', '--', PRODUCT_LINK], { cwd: dir }).ok;
+        const same = (a, b) => ['git_url', 'path', 'default_branch'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null));
+        const behind = !there || (disk && !same(disk, there));
+        if (!behind) return null;
+        if (ignored) return { name: r.name, branch, why: 'ignored' };
+        // Committed here and never pushed (review 3): a --push whose push was refused (a protected
+        // branch) leaves the record `ok` for the writer, so `--fix --push` stages nothing — the fix is to
+        // push the commit, not to run it again.
+        // The disk copy IS this clone's committed one (HEAD), and origin's differs: which side is ahead is
+        // git's to say, not the copies' (reviews 4–5). One table, every case:
+        //   no commit to the record in origin/<b>..HEAD  → this clone is only behind: on <b>, pull;
+        //                                                  elsewhere, nothing — CI's copy is the newer one
+        //   such a commit, on <b>, origin not ahead      → not pushed: push it
+        //   such a commit, on <b>, origin also ahead     → diverged: pull, settle the record, push
+        //   such a commit, on a detached HEAD            → check out <b> first
+        //   such a commit, on another branch             → merge it into <b> (a PR)
+        // The branch this clone is on: a hint that ends in `--push` only works on <b> (review 6).
+        const cur = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir });
+        const onBranch = cur.ok ? cur.stdout.trim() : 'HEAD';
+        const offBranch = onBranch !== branch ? onBranch : null;
+        if (onRemote && disk) {
+          let head;
+          try { const h = run('git', ['show', `HEAD:${PRODUCT_LINK}`], { cwd: dir }); head = h.ok ? JSON.parse(h.stdout) : null; } catch { head = null; }
+          if (head && same(head, disk)) {
+            const count = (range, ...only) => {
+              const x = run('git', ['rev-list', '--count', range, ...(only.length ? ['--', ...only] : [])], { cwd: dir });
+              return x.ok ? Number(x.stdout.trim()) || 0 : 0;
+            };
+            const ahead = count(`origin/${branch}..HEAD`, PRODUCT_LINK) > 0;
+            // Not ahead and off <b>: nothing to say only while <b> still holds a readable record, which is
+            // then the newer one (review 6: one deleted or broken on <b> was passed over in silence).
+            if (!ahead && onBranch === branch) return { name: r.name, branch, why: 'behind' };
+            if (!ahead && there) return null;
+            if (ahead && onBranch === branch) return { name: r.name, branch, why: count(`HEAD..origin/${branch}`) > 0 ? 'diverged' : 'unpushed' };
+            if (ahead && onBranch === 'HEAD') return { name: r.name, branch, why: 'detached' };
+            if (ahead) return { name: r.name, branch, onBranch, why: 'elsewhere' };
+          }
+        }
+        // A copy ON DISK that is not JSON is what a plain --fix leaves alone (review 8) — not the default
+        // branch's copy, which a clone off that branch only picks up once it switches and pulls.
+        const diskBad = !disk && exists(path.join(dir, PRODUCT_LINK));
+        // Off the default branch, the hint's first step is a switch, and a switch REPLACES a record this
+        // branch tracks with the default branch's (review 9) — so judge the copy it will have then.
+        const trackedHere = !!offBranch && run('git', ['cat-file', '-e', `HEAD:${PRODUCT_LINK}`], { cwd: dir }).ok;
+        if (!there) return { name: r.name, branch, offBranch, diskBad, trackedHere, why: shown.ok ? 'unreadable' : 'missing' };
+        return { name: r.name, branch, offBranch, why: 'stale' };
+      })
+      .filter(Boolean);
+    const named = (why) => unlinked.filter((u) => u.why === why).map((u) => u.name);
+    const missing = named('missing');
+    const unreadable = named('unreadable');
+    const stale = named('stale');
+    const ignoredRepos = named('ignored');
+    const unpushed = unlinked.filter((u) => u.why === 'unpushed');
+    if (missing.length || unreadable.length || stale.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn', [
+        ...(missing.length ? [`${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} no ${PRODUCT_LINK} on the default branch — the gates there take where the Product lives from link.md, and CI cannot check the Product out`] : []),
+        ...(unreadable.length ? [`${unreadable.join(', ')} ${unreadable.length > 1 ? 'have' : 'has'} no readable ${PRODUCT_LINK} on the default branch (it is not JSON) — CI cannot read it`] : []),
+        ...(stale.length ? [`${stale.join(', ')} ${stale.length > 1 ? 'hold' : 'holds'} a ${PRODUCT_LINK} on disk that differs from the one on the default branch — CI reads the default branch's`] : []),
+      ].join('; '),
+        // One step per repo that needs more than the plain command (review 7): which branch it is on, and
+        // --overwrite-local where the copy is not JSON (a plain --fix leaves such a copy alone).
+        (() => {
+          const listed = unlinked.filter((u) => ['missing', 'unreadable', 'stale'].includes(u.why));
+          const where = (u) => (u.offBranch === 'HEAD' ? 'a detached HEAD' : u.offBranch);
+          const off = listed.filter((u) => u.offBranch);
+          // --overwrite-local only where a plain --fix would leave the copy alone: it is not JSON on disk
+          // now, or will not be once an off-branch clone pulls the default branch's unreadable one.
+          const bad = listed.filter((u) => (!u.offBranch ? u.diskBad
+            : u.trackedHere ? u.why === 'unreadable' : u.diskBad || u.why === 'unreadable'));
+          return [
+            ...(off.length ? [`first bring ${off.length > 1 ? 'each clone' : 'the clone'} to its default branch — ${off.map((u) => `${u.name} (on ${where(u)}): \`git checkout ${u.branch} && git pull origin ${u.branch}\``).join('; ')} — or commit the record on the branch ${off.length > 1 ? 'each is' : 'it is'} on and merge it with a PR`] : []),
+            `${off.length ? 'then ' : ''}from the Product run \`yad check --fix --push\`: it writes the record into each connected repo and commits it to the default branch`,
+            ...(bad.length ? [`add \`--overwrite-local\` for ${bad.map((u) => u.name).join(', ')}, whose copy is not JSON and is otherwise left alone — the flag applies to the whole run: it also replaces files changed by hand in the Product and in every connected repo, after saving each`] : []),
+          ].join('; ');
+        })());
+    }
+    const elsewhere = unlinked.filter((u) => u.why === 'elsewhere');
+    if (elsewhere.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        elsewhere.map((u) => `${u.name} has ${PRODUCT_LINK} committed on branch ${u.onBranch}, not on ${u.branch} — CI reads ${u.branch}`).join('; '),
+        `merge it into the default branch (${elsewhere.map((u) => `a PR from ${u.onBranch} into ${u.branch} in ${u.name}`).join(', ')})`);
+    }
+    const behind = unlinked.filter((u) => u.why === 'behind');
+    if (behind.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${behind.map((u) => u.name).join(', ')} ${behind.length > 1 ? 'are' : 'is'} behind the default branch for ${PRODUCT_LINK} — someone changed it there since this clone last pulled`,
+        `pull (${behind.map((u) => `\`git pull origin ${u.branch}\` in ${u.name}`).join(', ')}); the default branch's record is the one CI reads`);
+    }
+    const diverged = unlinked.filter((u) => u.why === 'diverged');
+    if (diverged.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${diverged.map((u) => u.name).join(', ')} ${diverged.length > 1 ? 'have' : 'has'} a ${PRODUCT_LINK} commit the default branch lacks, and the default branch has moved on too — a push would be refused`,
+        `pull (rebase or merge) in ${diverged.map((u) => u.name).join(', ')}, settle the record, then push — or open a PR`);
+    }
+    const detached = unlinked.filter((u) => u.why === 'detached');
+    if (detached.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${detached.map((u) => u.name).join(', ')} ${detached.length > 1 ? 'have' : 'has'} a ${PRODUCT_LINK} commit the default branch lacks, on a detached HEAD`,
+        `check out the default branch (${detached.map((u) => `\`git checkout ${u.branch}\` in ${u.name}`).join(', ')}), bring the commit onto it, then push`);
+    }
+    if (unpushed.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${unpushed.map((u) => u.name).join(', ')} ${unpushed.length > 1 ? 'have' : 'has'} ${PRODUCT_LINK} committed but not pushed — CI reads the default branch, which does not have it yet`,
+        `push that commit (${unpushed.map((u) => `\`git push origin ${u.branch}\` in ${u.name}`).join(', ')}), or open a PR with it if the branch is protected — \`yad check --fix --push\` has nothing left to commit`);
+    }
+    if (ignoredRepos.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${ignoredRepos.join(', ')} ${ignoredRepos.length > 1 ? 'ignore' : 'ignores'} ${PRODUCT_LINK} (.gitignore), so \`yad check --fix --push\` cannot commit it — CI cannot read it`,
+        `un-ignore ${PRODUCT_LINK} in that repo's .gitignore (or \`git add -f\` it), and commit it to the default branch`);
     }
   }
 
@@ -1698,6 +1852,17 @@ export function backfillBlindGate(file) {
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return backfillBlindText(src);
 }
+// E120: a Product-reading gate that never reads `.sdlc/product-link.json` (no non-comment command naming
+// it). Read like the ones above.
+export const productRecordBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
+  .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*product-link\.json/.test(l));
+export function productRecordBlindGate(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return productRecordBlindText(src);
+}
+// The checks workflows a connected repo may carry (one per platform).
+export const CHECK_WORKFLOWS = ['.github/workflows/yad-checks.yml', '.gitlab/ci/yad-checks.yml'];
 // E117: a Product-reading gate that does not read link.md from the base (`git show`) or a tracked Product
 // from the base commit (`git checkout-index`, from a throwaway index). Read like the two above; no older
 // copy ran either command.

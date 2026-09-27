@@ -5,13 +5,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn, isPlainObject,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn, isPlainObject, run,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
-  productConfigPath,
+  productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
@@ -588,9 +588,90 @@ export function repoActions(root, repo) {
   // whole one-time setup on a repo that never asked for it.
   const wired = Object.keys(ledger).length > 0
     || actions.some((a) => a.status !== 'missing' && a.item.startsWith('checks/'));
+  const link = productLinkAction(root, repo, repoRoot);
+  if (link) actions.push(link);
   if (!wired) return actions;
-  const neverWritten = (a) => !ledger[rel(a.managed.root, a.managed.dest)];
+  // The record is not a template: an absent one on a wired repo is always `new` (nothing to respect).
+  const neverWritten = (a) => !a.managed || !ledger[rel(a.managed.root, a.managed.dest)];
   return actions.map((a) => (a.status === 'missing' && neverWritten(a) ? { ...a, status: 'new' } : a));
+}
+
+// The git repo a folder belongs to (its top level), or '' when it is not in one.
+const gitTop = (dir) => {
+  const r = run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
+  return r.ok ? path.resolve(r.stdout.trim()) : '';
+};
+
+// The Product's git_url as a code repo may carry it: no user name or password (review 1). `setup` takes
+// it from `git remote get-url origin`, which can hold a token; the record is committed to every code
+// repo, some of which may be seen by more people than the Product.
+export function publicGitUrl(u) {
+  if (typeof u !== 'string' || !u) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return u; // scp-style ssh (git@host:org/repo) holds no password
+  try {
+    const x = new URL(u);
+    // An ssh user (`git@`) is the login name, not a secret, and the checkout reads the url by it.
+    if (!/^(git\+)?ssh:$/i.test(x.protocol)) x.username = '';
+    x.password = '';
+    // A token can ride in the query or the fragment too (`?access_token=…`); a clone url needs neither.
+    x.search = '';
+    x.hash = '';
+    return x.toString();
+  } catch { return null; }
+}
+
+// E120. `.sdlc/product-link.json` in a connected code repo: where its Product lives. Generated, not
+// copied from a template, so it is not in the managed ledger. `git_url` and `default_branch` come from
+// the Product's own settings every time; `path` (where CI checks the Product out) is the team's to
+// change and is kept. Any other key in the file is kept too. A code repo that IS the Product's git repo
+// (a monorepo) gets none: the gates already read a Product kept in the repo from the base.
+function productLinkAction(root, repo, repoRoot) {
+  if (!exists(repoRoot)) return null;
+  const top = gitTop(repoRoot);
+  if (!top || top === gitTop(root)) return null;
+  const dest = path.join(repoRoot, PRODUCT_LINK);
+  const hub = readJSON(productConfigPath(root), {}) || {};
+  let current;
+  try { current = readJSONStrict(dest, null); } catch { current = undefined; }
+  const base = {
+    scope: repo.name,
+    item: PRODUCT_LINK,
+    root: repoRoot,
+    paths: [PRODUCT_LINK],
+  };
+  const want = {
+    git_url: publicGitUrl(hub.git_url),
+    path: isPlainObject(current) && typeof current.path === 'string' && current.path ? current.path : PRODUCT_LINK_DEFAULT_PATH,
+    // Unknown stays null (review 1): a guessed `main` failed every clone of a Product whose trunk is
+    // `master`; with none, checks/product-checkout.sh clones the remote's own default branch.
+    default_branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : null,
+  };
+  // A record that does not parse, or is not an object, is someone's: reported and never overwritten by
+  // a plain update; `--overwrite-local` saves it beside itself first, like any managed file.
+  if (current === undefined || (current !== null && !isPlainObject(current))) {
+    const backup = backupPathFor(dest);
+    return {
+      ...base, status: 'modified', backup,
+      apply: () => { fs.copyFileSync(dest, backup); writeJSON(dest, want); },
+    };
+  }
+  const same = current && ['git_url', 'path', 'default_branch'].every((k) => current[k] === want[k]);
+  // Right on disk is `ok` — like every wired file `yad setup` leaves for the team to commit, so a fresh
+  // setup reports no drift. But the gates read the record from the default branch, so `--push` must
+  // commit one that is not committed AS IT IS on disk (reviews 1–2: a record setup or a plain --fix had
+  // written, or rewritten, was never committed by a later --push): `pendingCommit` makes reconcile
+  // stage it with the rest. `git diff HEAD` also sees a staged-only change. One the repo's .gitignore
+  // covers cannot be committed by --push at all — `yad doctor` says what to do instead.
+  const git = (...a) => run('git', a, { cwd: repoRoot }).ok;
+  const committed = () => git('ls-files', '--error-unmatch', '--', PRODUCT_LINK) && git('diff', '--quiet', 'HEAD', '--', PRODUCT_LINK);
+  const ignored = () => git('check-ignore', '-q', '--', PRODUCT_LINK);
+  const status = current === null ? 'missing' : !same ? 'outdated' : 'ok';
+  return {
+    ...base,
+    status,
+    pendingCommit: status === 'ok' && !committed() && !ignored(),
+    apply: () => writeJSON(dest, { ...(current || {}), ...want }),
+  };
 }
 
 // Product wiring (gate-sync + verified-commits CI on the Product itself). Only when the Product has a

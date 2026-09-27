@@ -444,6 +444,8 @@ export const REPO_WIRING = {
     { src: 'skills/yad-checks/templates/checks/lineage-check.sh', dest: 'checks/lineage-check.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/epic-open.sh', dest: 'checks/epic-open.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/reconcile-debt-check.sh', dest: 'checks/reconcile-debt-check.sh', exec: true },
+    // E120. Checks the Product out in CI where .sdlc/product-link.json says, before the four gates above read it.
+    { src: 'skills/yad-checks/templates/checks/product-checkout.sh', dest: 'checks/product-checkout.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     // E65. The CHECK is ours and wired; the map it reads (`.sdlc/risk-map`) is the team's and never is.
@@ -472,6 +474,13 @@ export const REPO_WIRING = {
 // else is a local edit, reported as `modified` and left alone (#164). Committed, so the record
 // travels with the repo instead of living in one person's clone.
 export const MANAGED_LEDGER = '.sdlc/managed.json';
+// E120. Where a connected code repo's Product lives, as a fact of the repo — `git_url`, `path` (from the
+// repo root: where CI checks the Product out) and `default_branch`. Written by `yad check --fix` /
+// `yad update` (the Product knows both sides), merged on its own, and read from the BASE by the four
+// Product-reading gates and checks/product-checkout.sh. NOT `.sdlc/product.json`: that is the Product's
+// own settings file, and a code repo holding one would be taken for a Product.
+export const PRODUCT_LINK = '.sdlc/product-link.json';
+export const PRODUCT_LINK_DEFAULT_PATH = '.yad/product';
 // Suffix for the copy written beside a managed file before its content is replaced without that
 // proof — the local edit is always recoverable from the working tree, not only from git history.
 export const BACKUP_SUFFIX = '.yad-orig';

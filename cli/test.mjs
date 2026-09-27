@@ -107,6 +107,303 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// E120. `.sdlc/product-link.json` in each connected code repo: where its Product lives. Generated from
+// the Product's own settings (git_url, default_branch); `path` is the team's to change and is kept.
+test('check --fix writes each code repo\'s product-link record, refreshes it, and keeps its path (E120)', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/product.git', default_branch: 'trunk' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const file = path.join(backend, '.sdlc/product-link.json');
+  const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(rec.git_url, 'https://github.com/org/product.git');
+  assert.equal(rec.path, '.yad/product');
+  assert.equal(rec.default_branch, 'trunk');
+  // Written but not committed: `ok` (a fresh setup reports no drift), but --push must still commit it,
+  // since the gates read it from the default branch (review 1; CI's e2e run).
+  const { repoActions } = await import('./plan.mjs');
+  const linkAction = () => repoActions(T, JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8')).repos[0])
+    .find((a) => a.item === '.sdlc/product-link.json');
+  assert.equal(linkAction().status, 'ok');
+  assert.equal(linkAction().pendingCommit, true);
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
+  const again = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(again.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'ok'), again.out);
+  assert.equal(linkAction().pendingCommit, false);
+  // The team moves the checkout and adds a note; the Product's URL changes. Both survive the refresh.
+  fs.writeFileSync(file, JSON.stringify({ ...rec, path: 'vendor/product', note: 'ours' }, null, 2) + '\n');
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/renamed.git', default_branch: 'trunk' }));
+  const stale = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(stale.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'outdated'), stale.out);
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.git_url, 'https://github.com/org/renamed.git');
+  assert.equal(after.path, 'vendor/product');
+  assert.equal(after.note, 'ours');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('check --fix --push commits a product-link record that setup wrote and nobody committed (E120)', async () => {
+  // Remotes and a git identity in each repo: CI's Linux runner has no identity to guess, so a commit
+  // there needs one (as scaffoldWithRemotes gives), and a failed push would set process.exitCode.
+  const prev = process.exitCode;
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    // Like `yad setup`: the record is written, nothing is committed — and `yad check` reports no drift.
+    await captureConsole(() => reconcile(T, { fix: true }));
+    const after = await captureConsole(() => reconcile(T, { fix: false }));
+    assert.equal(after.value.counts.new + after.value.counts.missing + after.value.counts.outdated, 0, after.out);
+    assert.ok(fs.existsSync(path.join(backend, '.sdlc/product-link.json')));
+    // A later --push commits it to the default branch, though it reads `ok`.
+    const pushed = await captureConsole(() => reconcile(T, { fix: true, push: true }));
+    assert.equal(git(beBare, 'cat-file', '-t', 'main:.sdlc/product-link.json').toString().trim(), 'blob', pushed.out);
+    assert.equal(process.exitCode, 0, pushed.out);
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('update adds the product-link record to an already-wired repo; a monorepo gets none (E120)', async () => {
+  const { T, backend } = scaffold();
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const file = path.join(backend, '.sdlc/product-link.json');
+  fs.rmSync(file);
+  // An upgrade from before E120: the repo is wired, the record is new — update (scope changed) adds it.
+  const r = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), r.out);
+  await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+  assert.ok(fs.existsSync(file));
+  // No git_url and no default_branch on the Product: the record still says where the Product goes, and
+  // guesses neither (a guessed `main` failed every clone of a `master` Product — review 1).
+  const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(rec.git_url, null);
+  assert.equal(rec.default_branch, null);
+  fs.rmSync(T, { recursive: true, force: true });
+  // A code repo inside the Product's own git repo (a monorepo) is left alone.
+  const M = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-test-'));
+  git(M, 'init', '-q');
+  fs.mkdirSync(path.join(M, 'app'), { recursive: true });
+  fs.mkdirSync(path.join(M, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(M, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'app', path: 'app', platform: 'github', default_branch: 'main' }] }));
+  const m = await captureConsole(() => reconcile(M, { fix: true }));
+  assert.ok(!fs.existsSync(path.join(M, 'app/.sdlc/product-link.json')), m.out);
+  assert.ok(!m.value.items.some((i) => i.item === '.sdlc/product-link.json'), m.out);
+  fs.rmSync(M, { recursive: true, force: true });
+});
+
+test('the product-link record never carries a user name or password from the Product\'s git_url (E120 review 1)', async () => {
+  const { publicGitUrl } = await import('./plan.mjs');
+  assert.equal(publicGitUrl('https://user:ghp_SECRET@github.com/org/product.git'), 'https://github.com/org/product.git');
+  assert.equal(publicGitUrl('ssh://git:pw@host:2222/org/product.git'), 'ssh://git@host:2222/org/product.git');
+  assert.equal(publicGitUrl('git@github.com:org/product.git'), 'git@github.com:org/product.git');
+  assert.equal(publicGitUrl(''), null);
+  assert.equal(publicGitUrl('https://github.com/org/product.git?access_token=abc#x'), 'https://github.com/org/product.git');
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://user:ghp_SECRET@github.com/org/product.git' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const txt = fs.readFileSync(path.join(backend, '.sdlc/product-link.json'), 'utf8');
+  assert.doesNotMatch(txt, /SECRET|user:/);
+  assert.equal(JSON.parse(txt).git_url, 'https://github.com/org/product.git');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a product-link record changed on disk is not ok until that change is committed (E120 review 2)', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/product.git', default_branch: 'main' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
+  // The Product moves; a plain --fix (no push) rewrites the record on disk only.
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/renamed.git', default_branch: 'trunk' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const { repoActions } = await import('./plan.mjs');
+  const repo = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8')).repos[0];
+  const linkAction = () => repoActions(T, repo).find((a) => a.item === '.sdlc/product-link.json');
+  assert.equal(linkAction().pendingCommit, true, 'a later --push must commit it');
+  // Staged but not committed is still to do.
+  git(backend, 'add', '.sdlc/product-link.json');
+  assert.equal(linkAction().pendingCommit, true);
+  // And the doctor says the default branch holds an older one.
+  fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+  const { collectDoctor } = await import('./doctor.mjs');
+  const hit = collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  assert.equal(hit.length, 1);
+  assert.match(hit[0].message, /backend holds a \.sdlc\/product-link\.json on disk that differs from the one on the default branch/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a product-link record committed but never pushed is named, with the push as the fix (E120 review 3)', async () => {
+  const { T, backend } = scaffold();
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+  git(origin, 'init', '-q', '--bare');
+  git(backend, 'branch', '-q', '-M', 'main');
+  git(backend, 'remote', 'add', 'origin', origin);
+  git(backend, 'push', '-q', 'origin', 'main');
+  fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+  await captureConsole(() => reconcile(T, { fix: true }));
+  // A --push whose push was refused: committed here, not on origin/main.
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
+  const { collectDoctor } = await import('./doctor.mjs');
+  const hits = () => collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  const hit = hits();
+  assert.equal(hit.length, 1);
+  assert.match(hit[0].message, /^backend has \.sdlc\/product-link\.json committed but not pushed/);
+  assert.match(hit[0].hint, /`git push origin main` in backend/);
+  git(backend, 'push', '-q', 'origin', 'main');
+  git(backend, 'fetch', '-q', 'origin');
+  assert.deepEqual(hits(), []);
+  // A copy on the default branch that does not parse is "no readable" record, not "no" record.
+  fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{ nope');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-am', 'chore: break it');
+  git(backend, 'push', '-q', 'origin', 'main');
+  git(backend, 'fetch', '-q', 'origin');
+  assert.match(hits()[0].message, /^backend has no readable \.sdlc\/product-link\.json on the default branch \(it is not JSON\)/);
+  // A plain --fix leaves a copy that is not JSON alone, so the hint names --overwrite-local (review 7),
+  // and says the flag reaches every repo in the run (review 8).
+  assert.match(hits()[0].hint, /add `--overwrite-local` for backend, whose copy is not JSON and is otherwise left alone — the flag applies to the whole run/);
+  // Fixed by hand on disk (not committed): the plain command is enough, and the hint does not ask for more.
+  fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{ "git_url": null, "path": ".yad/product", "default_branch": null }\n');
+  assert.match(hits()[0].message, /no readable/);
+  assert.doesNotMatch(hits()[0].hint, /overwrite-local/);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(origin, { recursive: true, force: true });
+});
+
+test('a product-link record on a feature branch, or a clone behind origin, is not called unpushed (E120 review 4)', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const setup = async () => {
+    const { T, backend } = scaffold();
+    const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+    git(origin, 'init', '-q', '--bare');
+    git(backend, 'branch', '-q', '-M', 'main');
+    git(backend, 'remote', 'add', 'origin', origin);
+    git(backend, 'push', '-q', 'origin', 'main');
+    fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+    await captureConsole(() => reconcile(T, { fix: true }));
+    return { T, backend, origin };
+  };
+  const hits = (T) => collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  const commitIt = (dir, msg) => git(dir, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', msg);
+  // Committed and pushed on a feature branch (the --allow-branch path): it wants merging, not pushing.
+  {
+    const { T, backend, origin } = await setup();
+    git(backend, 'checkout', '-q', '-b', 'feat/x');
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: record');
+    git(backend, 'push', '-q', 'origin', 'feat/x');
+    const hit = hits(T);
+    assert.equal(hit.length, 1);
+    assert.match(hit[0].message, /^backend has \.sdlc\/product-link\.json committed on branch feat\/x, not on main — CI reads main/);
+    assert.match(hit[0].hint, /a PR from feat\/x into main in backend/);
+    assert.doesNotMatch(hit[0].message + hit[0].hint, /not pushed|git push/);
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(origin, { recursive: true, force: true });
+  }
+  // Published, then a teammate changed the record's path and pushed; this clone fetched, not pulled.
+  {
+    const { T, backend, origin } = await setup();
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: record');
+    git(backend, 'push', '-q', 'origin', 'main');
+    const mate = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-mate-'));
+    // -b main: a new bare repo's HEAD names the runner's default branch (master on CI), not ours.
+    git(mate, 'clone', '-q', '-b', 'main', origin, 'c');
+    const c = path.join(mate, 'c');
+    const rec = JSON.parse(fs.readFileSync(path.join(c, '.sdlc/product-link.json'), 'utf8'));
+    fs.writeFileSync(path.join(c, '.sdlc/product-link.json'), JSON.stringify({ ...rec, path: 'vendor/product' }, null, 2) + '\n');
+    git(c, '-c', 'user.email=a@b.c', '-c', 'user.name=m', 'commit', '-q', '-am', 'chore: move the checkout');
+    git(c, 'push', '-q', 'origin', 'HEAD:main');
+    git(backend, 'fetch', '-q', 'origin');
+    const hit = hits(T);
+    assert.equal(hit.length, 1);
+    assert.match(hit[0].message, /^backend is behind the default branch for \.sdlc\/product-link\.json/);
+    assert.match(hit[0].hint, /`git pull origin main` in backend/);
+    // The same clone on a feature branch cut before the change: CI's copy is the newer one — nothing to say.
+    git(backend, 'checkout', '-q', '-b', 'feat/y');
+    fs.writeFileSync(path.join(backend, 'other.txt'), 'x\n');
+    git(backend, 'add', 'other.txt');
+    commitIt(backend, 'feat: unrelated');
+    assert.deepEqual(hits(T), [], 'a feature branch that is only older than main is not a record problem (review 5)');
+    // Diverged: a record commit here AND a newer one on origin — a push would be refused.
+    git(backend, 'checkout', '-q', 'main');
+    const mine = JSON.parse(fs.readFileSync(path.join(backend, '.sdlc/product-link.json'), 'utf8'));
+    fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), JSON.stringify({ ...mine, path: 'third/place' }, null, 2) + '\n');
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: my own move');
+    const div = hits(T);
+    assert.equal(div.length, 1);
+    assert.match(div[0].message, /^backend has a \.sdlc\/product-link\.json commit the default branch lacks, and the default branch has moved on too/);
+    assert.match(div[0].hint, /^pull \(rebase or merge\)/);
+    // The same commit on a detached HEAD: check out the default branch first.
+    git(backend, 'checkout', '-q', '--detach');
+    const det = hits(T);
+    assert.equal(det.length, 1);
+    assert.match(det[0].message, /on a detached HEAD$/);
+    assert.match(det[0].hint, /`git checkout main` in backend/);
+    // Back on feat/y, and a teammate deletes the record on main: CI has none — not silence (review 6).
+    git(backend, 'checkout', '-q', 'feat/y');
+    git(c, 'pull', '-q', 'origin', 'main');
+    git(c, 'rm', '-q', '.sdlc/product-link.json');
+    git(c, '-c', 'user.email=a@b.c', '-c', 'user.name=m', 'commit', '-q', '-m', 'chore: drop the record');
+    git(c, 'push', '-q', 'origin', 'HEAD:main');
+    git(backend, 'fetch', '-q', 'origin');
+    const gone = hits(T);
+    assert.equal(gone.length, 1, 'a record deleted on the default branch is reported from a feature branch');
+    assert.match(gone[0].message, /^backend has no \.sdlc\/product-link\.json on the default branch/);
+    // …and the fix names the branch switch: `--push` commits only on the default branch.
+    assert.match(gone[0].hint, /^first bring the clone to its default branch — backend \(on feat\/y\): `git checkout main && git pull origin main` — or commit the record on the branch it is on and merge it with a PR; then from the Product run `yad check --fix --push`/);
+    // On a detached HEAD it says so, not "on HEAD" (review 7).
+    git(backend, 'checkout', '-q', '--detach');
+    assert.match(hits(T)[0].hint, /backend \(on a detached HEAD\): `git checkout main && git pull origin main`/);
+    // A broken record committed on feat/y: the switch replaces it with main's (none), so the plain command
+    // is enough — no --overwrite-local, whose run-wide replacing was never needed (review 9).
+    git(backend, 'checkout', '-q', 'feat/y');
+    fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{not json');
+    git(backend, 'add', '.sdlc/product-link.json');
+    commitIt(backend, 'chore: a broken record on the branch');
+    assert.match(hits(T)[0].message, /^backend has no \.sdlc\/product-link\.json on the default branch/);
+    assert.doesNotMatch(hits(T)[0].hint, /overwrite-local/);
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(origin, { recursive: true, force: true });
+    fs.rmSync(mate, { recursive: true, force: true });
+  }
+});
+
+test('a product-link record the repo ignores is not `new` forever, and the doctor says why (E120 review 2)', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(backend, '.gitignore'), '.sdlc/\n');
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const r = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'ok'), r.out);
+  const { repoActions } = await import('./plan.mjs');
+  const repo = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8')).repos[0];
+  assert.equal(repoActions(T, repo).find((a) => a.item === '.sdlc/product-link.json').pendingCommit, false, 'an ignored record is not pushed forever');
+  const { collectDoctor } = await import('./doctor.mjs');
+  const hit = collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  assert.equal(hit.length, 1);
+  assert.match(hit[0].message, /^backend ignores \.sdlc\/product-link\.json \(\.gitignore\), so `yad check --fix --push` cannot commit it/);
+  assert.match(hit[0].hint, /un-ignore/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('an unreadable product-link record is left alone, and --overwrite-local saves it first (E120)', async () => {
+  const { T, backend } = scaffold();
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const file = path.join(backend, '.sdlc/product-link.json');
+  fs.writeFileSync(file, '{ not json');
+  const r = await captureConsole(() => reconcile(T, { fix: true }));
+  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'modified'), r.out);
+  assert.match(r.out, /backend\/\.sdlc\/product-link\.json is not a JSON object — left alone/);
+  assert.equal(fs.readFileSync(file, 'utf8'), '{ not json');
+  await captureConsole(() => reconcile(T, { fix: true, overwriteLocal: true }));
+  assert.equal(fs.readFileSync(`${file}.yad-orig`, 'utf8'), '{ not json');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).path, '.yad/product');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // A template a later release ADDS to the repo wiring is `missing` on every repo wired before it.
 // `yad update` (--scope=changed) skips `missing` so it never does one-time setup — which, for a wired
 // repo, meant the files that CALL the new template were refreshed (`outdated`) while the template
@@ -116,6 +413,9 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
 test('update installs a template newly added to the wiring of an already-wired repo', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
+  // The product-link record is `new` until committed (E120); an install from before is committed.
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
   const ledgerPath = path.join(backend, '.sdlc/managed.json');
   const added = ['checks/package-manager.sh', 'checks/install-deps.sh'];
   // Simulate the install a previous release made: the two templates absent, and no record of them.
@@ -25107,6 +25407,60 @@ test('E117 doctor: an older Product-reading gate that takes product-repo as the 
     // A comment naming the command is not the command; a split command is one command.
     assert.equal(productPathBlindText('# git show x\n# git checkout-index -a\n'), true);
     assert.equal(productPathBlindText('git \\\n  show x\ngit checkout-index -a\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E120 doctor: a gate or workflow that never uses the product-link record is checks:product-record-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, productRecordBlindText, PRODUCT_PATH_GATES } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:product-record-blind');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates', rel), 'utf8');
+    const put = (dir, rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    for (const rel of PRODUCT_PATH_GATES) { put(backend, rel, shipped(`checks/${path.basename(rel)}`)); put(T, rel, shipped(`checks/${path.basename(rel)}`)); }
+    put(backend, '.github/workflows/yad-checks.yml', shipped('github/yad-checks.yml'));
+    assert.deepEqual(blind(), [], 'the shipped gates and workflow are fine');
+    // An older gate: it never reads the record. (Built from the shipped one, not from history.)
+    const old = shipped('checks/contract-check.sh').replace(/product-link\.json/g, 'nothing.json');
+    put(backend, 'checks/contract-check.sh', old);
+    // A workflow the team changed by hand, from before the checkout step.
+    put(backend, '.github/workflows/yad-checks.yml', shipped('github/yad-checks.yml').replace(/.*product-checkout.*\n(.*YAD_PRODUCT_TOKEN.*\n)?/g, ''));
+    const hit = blind();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend never reads \.sdlc\/product-link\.json, so where the Product lives is taken from link\.md; \.github\/workflows\/yad-checks\.yml in backend does not run checks\/product-checkout\.sh, so CI never checks the Product out$/);
+    // A comment naming the script is not a step that runs it.
+    put(backend, 'checks/contract-check.sh', shipped('checks/contract-check.sh'));
+    put(backend, '.github/workflows/yad-checks.yml', '# see checks/product-checkout.sh\njobs: {}\n');
+    assert.match(blind()[0].message, /^\.github\/workflows\/yad-checks\.yml in backend does not run/);
+    // A comment naming the file is not a read of it.
+    assert.equal(productRecordBlindText('# git show BASE:.sdlc/product-link.json\n'), true);
+    assert.equal(productRecordBlindText('git cat-file -e "$1:.sdlc/product-link.json"\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E120 doctor: a connected code repo with no product-link record is repos:product-link-missing', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor } = await import('./doctor.mjs');
+    const missing = () => collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+    // A repo with no gates is not asked for one: the hint would install its whole wiring (review 1).
+    assert.deepEqual(missing(), []);
+    fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(backend, 'checks/contract-check.sh'), '# a wired gate\n');
+    const hit = missing();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^backend has no \.sdlc\/product-link\.json on the default branch/);
+    assert.match(hit[0].hint, /yad check --fix --push/);
+    // On disk but not committed still counts as missing: the gates read it from the default branch.
+    fs.mkdirSync(path.join(backend, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{ "git_url": null, "path": ".yad/product", "default_branch": "main" }\n');
+    assert.equal(missing().length, 1);
+    git(backend, 'add', '.sdlc/product-link.json');
+    git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
+    assert.deepEqual(missing(), []);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

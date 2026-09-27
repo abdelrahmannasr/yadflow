@@ -10,7 +10,7 @@ import {
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
 import { preflightGuardReadiness } from './hubcommit.mjs';
-import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyRepoActions, legacyHubActions,
@@ -135,7 +135,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // `--overwrite-local` replaces it, which still saves the previous content beside it.
   const modified = actions.filter((a) => a.status === 'modified');
   for (const m of modified) {
-    warn(`${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
+    // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
+    warn(m.item === PRODUCT_LINK
+      ? `${m.scope}/${m.item} is not a JSON object — left alone (--overwrite-local saves it and writes a new one)`
+      : `${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
   }
   // A gate-sync fragment is kept like any other edited file — but it also decides which yadflow CI runs.
   // It trusts a committed version only from its own major (`YAD_MAJOR`), and the version stamp is
@@ -192,6 +195,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // only --overwrite-local discards a local edit, and only after backing it up.
     for (const a of actions.filter((a) => a.status === 'ok')) { a.apply(); appliedActions.push(a); }
   }
+  // A file that is right on disk but not committed as it stands, which --push must still commit: the
+  // product-link record (E120) — the gates read it from the default branch, not from anyone's disk.
+  if (push) for (const a of actions) if (a.pendingCommit && !appliedActions.includes(a)) appliedActions.push(a);
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   writeCanonicalStamp();

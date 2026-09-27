@@ -21,7 +21,10 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    contract but not change it, and the change belongs to a new epic on `classic`. That failure needs the
    epic's ledger directory to resolve — a Product that is simply not checked out still defers, as before,
    except on a repo's **first spec** (no `link.md` on the base names a Product): there a slice change whose
-   `product-repo` reaches nothing **fails** (E119), because the PR chose that value itself.
+   `product-repo` reaches nothing **fails** (E119), because the PR chose that value itself. Where the
+   Product lives is a repo fact once `yad check --fix --push` has merged `.sdlc/product-link.json` into
+   the code repo (E120): the gates read it from the base first, and `checks/product-checkout.sh` clones
+   the Product there in CI when the `YAD_PRODUCT_TOKEN` secret is set (see `references/check-gates.md`).
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
    CI installs and runs through the package manager declared by the repo's standard
    `package.json#packageManager` field (`npm` and `pnpm` are supported; any other manager stays on
