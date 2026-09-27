@@ -358,6 +358,26 @@ test('contract-check gate: a first spec whose product-repo reaches nothing FAILs
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('contract-check gate: a first spec whose Product IS reached is not called "nowhere" (E119 review 1)', () => {
+  // The Product is checked out and holds the epic's folder, but no ledger in it. That is not a Product
+  // that reaches nothing: it defers, as it always has, and says so — not "check the Product out in CI".
+  const T = scaffoldRepo();
+  fs.appendFileSync(path.join(T, '.git/info/exclude'), 'product/\n');
+  fs.mkdirSync(path.join(T, 'product/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'product/.sdlc/hub.json'), '{}\n');
+  fs.mkdirSync(path.join(T, 'product/epics/EP-demo'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'product/epics/EP-demo/epic.md'), '# demo\n');
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../product' }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /first spec|reaches nothing/);
+  assert.match(r.out, /fidelity check deferred/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('contract-check gate: a first spec with no slice, or one that only removes a slice, is unchanged (E119)', () => {
   // With no slice the surface is untouched, so neither link.md nor the Product is opened.
   const T = scaffoldRepo();
@@ -1487,7 +1507,7 @@ test('contract-check gate: a link.md with no product-repo FAILs by name, not by 
   // defer, and an empty resolution used to interpolate to "/epics/<epic>/…" — a path at the filesystem
   // root, which read as a real location and could match a foreign file on some hosts.
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /is this repo's first spec — no link\.md on main names a Product —\n {2}and its product-repo reaches nothing/);
+  assert.match(r.out, /is this repo's first spec — no link\.md on main names a Product —\n {2}and it names no product-repo/);
   assert.doesNotMatch(r.out, /\/epics\//);
   fs.rmSync(T, { recursive: true, force: true });
 });
