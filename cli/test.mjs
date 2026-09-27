@@ -284,7 +284,7 @@ test('a product-link record on a feature branch, or a clone behind origin, is no
     const hit = hits(T);
     assert.equal(hit.length, 1);
     assert.match(hit[0].message, /^backend is behind the default branch for \.sdlc\/product-link\.json/);
-    assert.match(hit[0].hint, /`git pull` in backend/);
+    assert.match(hit[0].hint, /`git pull origin main` in backend/);
     // The same clone on a feature branch cut before the change: CI's copy is the newer one — nothing to say.
     git(backend, 'checkout', '-q', '-b', 'feat/y');
     fs.writeFileSync(path.join(backend, 'other.txt'), 'x\n');
@@ -307,6 +307,18 @@ test('a product-link record on a feature branch, or a clone behind origin, is no
     assert.equal(det.length, 1);
     assert.match(det[0].message, /on a detached HEAD$/);
     assert.match(det[0].hint, /`git checkout main` in backend/);
+    // Back on feat/y, and a teammate deletes the record on main: CI has none — not silence (review 6).
+    git(backend, 'checkout', '-q', 'feat/y');
+    git(c, 'pull', '-q', 'origin', 'main');
+    git(c, 'rm', '-q', '.sdlc/product-link.json');
+    git(c, '-c', 'user.email=a@b.c', '-c', 'user.name=m', 'commit', '-q', '-m', 'chore: drop the record');
+    git(c, 'push', '-q', 'origin', 'HEAD:main');
+    git(backend, 'fetch', '-q', 'origin');
+    const gone = hits(T);
+    assert.equal(gone.length, 1, 'a record deleted on the default branch is reported from a feature branch');
+    assert.match(gone[0].message, /^backend has no \.sdlc\/product-link\.json on the default branch/);
+    // …and the fix names the branch switch: `--push` commits only on the default branch.
+    assert.match(gone[0].hint, /first check out the default branch \(`git checkout main` in backend, now on feat\/y\)/);
     fs.rmSync(T, { recursive: true, force: true });
     fs.rmSync(origin, { recursive: true, force: true });
     fs.rmSync(mate, { recursive: true, force: true });

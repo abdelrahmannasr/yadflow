@@ -576,25 +576,30 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         //   such a commit, on <b>, origin also ahead     → diverged: pull, settle the record, push
         //   such a commit, on a detached HEAD            → check out <b> first
         //   such a commit, on another branch             → merge it into <b> (a PR)
+        // The branch this clone is on: a hint that ends in `--push` only works on <b> (review 6).
+        const cur = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir });
+        const onBranch = cur.ok ? cur.stdout.trim() : 'HEAD';
+        const offBranch = onBranch !== branch ? onBranch : null;
         if (onRemote && disk) {
           let head;
           try { const h = run('git', ['show', `HEAD:${PRODUCT_LINK}`], { cwd: dir }); head = h.ok ? JSON.parse(h.stdout) : null; } catch { head = null; }
           if (head && same(head, disk)) {
-            const cur = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir });
-            const onBranch = cur.ok ? cur.stdout.trim() : 'HEAD';
             const count = (range, ...only) => {
               const x = run('git', ['rev-list', '--count', range, ...(only.length ? ['--', ...only] : [])], { cwd: dir });
               return x.ok ? Number(x.stdout.trim()) || 0 : 0;
             };
             const ahead = count(`origin/${branch}..HEAD`, PRODUCT_LINK) > 0;
-            if (!ahead) return onBranch === branch ? { name: r.name, branch, why: 'behind' } : null;
-            if (onBranch === branch) return { name: r.name, branch, why: count(`HEAD..origin/${branch}`) > 0 ? 'diverged' : 'unpushed' };
-            if (onBranch === 'HEAD') return { name: r.name, branch, why: 'detached' };
-            return { name: r.name, branch, onBranch, why: 'elsewhere' };
+            // Not ahead and off <b>: nothing to say only while <b> still holds a readable record, which is
+            // then the newer one (review 6: one deleted or broken on <b> was passed over in silence).
+            if (!ahead && onBranch === branch) return { name: r.name, branch, why: 'behind' };
+            if (!ahead && there) return null;
+            if (ahead && onBranch === branch) return { name: r.name, branch, why: count(`HEAD..origin/${branch}`) > 0 ? 'diverged' : 'unpushed' };
+            if (ahead && onBranch === 'HEAD') return { name: r.name, branch, why: 'detached' };
+            if (ahead) return { name: r.name, branch, onBranch, why: 'elsewhere' };
           }
         }
-        if (!there) return { name: r.name, branch, why: shown.ok ? 'unreadable' : 'missing' };
-        return { name: r.name, branch, why: 'stale' };
+        if (!there) return { name: r.name, branch, offBranch, why: shown.ok ? 'unreadable' : 'missing' };
+        return { name: r.name, branch, offBranch, why: 'stale' };
       })
       .filter(Boolean);
     const named = (why) => unlinked.filter((u) => u.why === why).map((u) => u.name);
@@ -609,7 +614,14 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         ...(unreadable.length ? [`${unreadable.join(', ')} ${unreadable.length > 1 ? 'have' : 'has'} no readable ${PRODUCT_LINK} on the default branch (it is not JSON) — CI cannot read it`] : []),
         ...(stale.length ? [`${stale.join(', ')} ${stale.length > 1 ? 'hold' : 'holds'} a ${PRODUCT_LINK} on disk that differs from the one on the default branch — CI reads the default branch's`] : []),
       ].join('; '),
-        'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch');
+        'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch'
+        + (() => {
+          // `--push` commits only on the default branch (review 6): say so where the clone is elsewhere.
+          const off = unlinked.filter((u) => ['missing', 'unreadable', 'stale'].includes(u.why) && u.offBranch);
+          return off.length
+            ? ` — first check out the default branch (${off.map((u) => `\`git checkout ${u.branch}\` in ${u.name}, now on ${u.offBranch}`).join(', ')}), or commit the record on that branch and merge it with a PR`
+            : '';
+        })());
     }
     const elsewhere = unlinked.filter((u) => u.why === 'elsewhere');
     if (elsewhere.length) {
@@ -621,7 +633,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     if (behind.length) {
       check(checks, 'repos:product-link-missing', 'project', 'warn',
         `${behind.map((u) => u.name).join(', ')} ${behind.length > 1 ? 'are' : 'is'} behind the default branch for ${PRODUCT_LINK} — someone changed it there since this clone last pulled`,
-        `pull (${behind.map((u) => `\`git pull\` in ${u.name}`).join(', ')}); the default branch's record is the one CI reads`);
+        `pull (${behind.map((u) => `\`git pull origin ${u.branch}\` in ${u.name}`).join(', ')}); the default branch's record is the one CI reads`);
     }
     const diverged = unlinked.filter((u) => u.why === 'diverged');
     if (diverged.length) {
