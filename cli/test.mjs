@@ -118,13 +118,18 @@ test('check --fix writes each code repo\'s product-link record, refreshes it, an
   assert.equal(rec.git_url, 'https://github.com/org/product.git');
   assert.equal(rec.path, '.yad/product');
   assert.equal(rec.default_branch, 'trunk');
-  // Written but not committed is still to do: the gates read it from the default branch (review 1).
-  const pending = await captureConsole(() => reconcile(T, { fix: false }));
-  assert.ok(pending.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), pending.out);
+  // Written but not committed: `ok` (a fresh setup reports no drift), but --push must still commit it,
+  // since the gates read it from the default branch (review 1; CI's e2e run).
+  const { repoActions } = await import('./plan.mjs');
+  const linkAction = () => repoActions(T, JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8')).repos[0])
+    .find((a) => a.item === '.sdlc/product-link.json');
+  assert.equal(linkAction().status, 'ok');
+  assert.equal(linkAction().pendingCommit, true);
   git(backend, 'add', '.sdlc/product-link.json');
   git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
   const again = await captureConsole(() => reconcile(T, { fix: false }));
   assert.ok(again.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'ok'), again.out);
+  assert.equal(linkAction().pendingCommit, false);
   // The team moves the checkout and adds a note; the Product's URL changes. Both survive the refresh.
   fs.writeFileSync(file, JSON.stringify({ ...rec, path: 'vendor/product', note: 'ours' }, null, 2) + '\n');
   fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/renamed.git', default_branch: 'trunk' }));
@@ -136,6 +141,24 @@ test('check --fix writes each code repo\'s product-link record, refreshes it, an
   assert.equal(after.path, 'vendor/product');
   assert.equal(after.note, 'ours');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('check --fix --push commits a product-link record that setup wrote and nobody committed (E120)', async () => {
+  const { T, backend } = scaffold();
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+  git(origin, 'init', '-q', '--bare');
+  git(backend, 'branch', '-q', '-M', 'main');
+  git(backend, 'remote', 'add', 'origin', origin);
+  git(backend, 'push', '-q', 'origin', 'main');
+  // Like `yad setup`: the record is written, nothing is committed — and `yad check` reports no drift.
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const after = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.equal(after.value.counts.new + after.value.counts.missing + after.value.counts.outdated, 0, after.out);
+  // A later --push commits it to the default branch, though it reads `ok`.
+  await captureConsole(() => reconcile(T, { fix: true, push: true }));
+  assert.ok(execFileSync('git', ['cat-file', '-e', 'main:.sdlc/product-link.json'], { cwd: origin, stdio: 'pipe' }) !== undefined);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(origin, { recursive: true, force: true });
 });
 
 test('update adds the product-link record to an already-wired repo; a monorepo gets none (E120)', async () => {
@@ -191,12 +214,13 @@ test('a product-link record changed on disk is not ok until that change is commi
   // The Product moves; a plain --fix (no push) rewrites the record on disk only.
   fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://github.com/org/renamed.git', default_branch: 'trunk' }));
   await captureConsole(() => reconcile(T, { fix: true }));
-  const r = await captureConsole(() => reconcile(T, { fix: false }));
-  assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), `a later --push must commit it:\n${r.out}`);
+  const { repoActions } = await import('./plan.mjs');
+  const repo = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8')).repos[0];
+  const linkAction = () => repoActions(T, repo).find((a) => a.item === '.sdlc/product-link.json');
+  assert.equal(linkAction().pendingCommit, true, 'a later --push must commit it');
   // Staged but not committed is still to do.
   git(backend, 'add', '.sdlc/product-link.json');
-  const staged = await captureConsole(() => reconcile(T, { fix: false }));
-  assert.ok(staged.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), staged.out);
+  assert.equal(linkAction().pendingCommit, true);
   // And the doctor says the default branch holds an older one.
   fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
   const { collectDoctor } = await import('./doctor.mjs');
@@ -281,7 +305,8 @@ test('a product-link record on a feature branch, or a clone behind origin, is no
     commitIt(backend, 'chore: record');
     git(backend, 'push', '-q', 'origin', 'main');
     const mate = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-mate-'));
-    git(mate, 'clone', '-q', origin, 'c');
+    // -b main: a new bare repo's HEAD names the runner's default branch (master on CI), not ours.
+    git(mate, 'clone', '-q', '-b', 'main', origin, 'c');
     const c = path.join(mate, 'c');
     const rec = JSON.parse(fs.readFileSync(path.join(c, '.sdlc/product-link.json'), 'utf8'));
     fs.writeFileSync(path.join(c, '.sdlc/product-link.json'), JSON.stringify({ ...rec, path: 'vendor/product' }, null, 2) + '\n');
@@ -349,6 +374,9 @@ test('a product-link record the repo ignores is not `new` forever, and the docto
   await captureConsole(() => reconcile(T, { fix: true }));
   const r = await captureConsole(() => reconcile(T, { fix: false }));
   assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'ok'), r.out);
+  const { repoActions } = await import('./plan.mjs');
+  const repo = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8')).repos[0];
+  assert.equal(repoActions(T, repo).find((a) => a.item === '.sdlc/product-link.json').pendingCommit, false, 'an ignored record is not pushed forever');
   const { collectDoctor } = await import('./doctor.mjs');
   const hit = collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
   assert.equal(hit.length, 1);

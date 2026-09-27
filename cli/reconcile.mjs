@@ -195,6 +195,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // only --overwrite-local discards a local edit, and only after backing it up.
     for (const a of actions.filter((a) => a.status === 'ok')) { a.apply(); appliedActions.push(a); }
   }
+  // A file that is right on disk but not committed as it stands, which --push must still commit: the
+  // product-link record (E120) — the gates read it from the default branch, not from anyone's disk.
+  if (push) for (const a of actions) if (a.pendingCommit && !appliedActions.includes(a)) appliedActions.push(a);
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   writeCanonicalStamp();

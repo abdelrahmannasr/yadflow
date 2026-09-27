@@ -656,19 +656,20 @@ function productLinkAction(root, repo, repoRoot) {
     };
   }
   const same = current && ['git_url', 'path', 'default_branch'].every((k) => current[k] === want[k]);
-  // Right on disk is not enough: the gates read the record from the default branch, so one that
-  // `yad setup` or a plain `--fix` wrote and nobody committed is still to do — `new`, so `--push` stages
-  // it (review 1). Before, it read `ok` and was never committed.
-  // Committed AS IT IS on disk (review 2): tracked alone was not enough — a record a plain `--fix` had
-  // rewritten read `ok` and was never committed, so CI kept the old one. `git diff HEAD` also sees a
-  // staged-only change. A record the repo's .gitignore covers cannot be committed by --push at all:
-  // not `new` forever — `yad doctor` says what to do instead.
+  // Right on disk is `ok` — like every wired file `yad setup` leaves for the team to commit, so a fresh
+  // setup reports no drift. But the gates read the record from the default branch, so `--push` must
+  // commit one that is not committed AS IT IS on disk (reviews 1–2: a record setup or a plain --fix had
+  // written, or rewritten, was never committed by a later --push): `pendingCommit` makes reconcile
+  // stage it with the rest. `git diff HEAD` also sees a staged-only change. One the repo's .gitignore
+  // covers cannot be committed by --push at all — `yad doctor` says what to do instead.
   const git = (...a) => run('git', a, { cwd: repoRoot }).ok;
   const committed = () => git('ls-files', '--error-unmatch', '--', PRODUCT_LINK) && git('diff', '--quiet', 'HEAD', '--', PRODUCT_LINK);
   const ignored = () => git('check-ignore', '-q', '--', PRODUCT_LINK);
+  const status = current === null ? 'missing' : !same ? 'outdated' : 'ok';
   return {
     ...base,
-    status: current === null ? 'missing' : !same ? 'outdated' : committed() || ignored() ? 'ok' : 'new',
+    status,
+    pendingCommit: status === 'ok' && !committed() && !ignored(),
     apply: () => writeJSON(dest, { ...(current || {}), ...want }),
   };
 }
