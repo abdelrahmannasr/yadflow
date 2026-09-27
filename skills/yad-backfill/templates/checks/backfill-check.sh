@@ -44,8 +44,11 @@ fi
 
 # Folded as macOS and Windows fold a name (E116, as E115): `Src/` IS `src/` there, and `src/Billing/` IS
 # `src/billing/`, while git and Linux CI read exact bytes. `tolower` under LC_ALL=C folds ASCII only, so
-# the long s (U+017F, two bytes), which APFS folds into `s`, is mapped by hand.
-FOLD='function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); return x }'
+# the two other letters APFS folds into an ASCII one are mapped by hand: the long s (U+017F) into `s`,
+# and the Kelvin sign (U+212A) into `k` (review 4) — `src/<Kelvin>ey/` IS `src/key/` on a Mac. Not
+# folded, and stated: other non-ASCII case (`CAFÉ` is `café` on a Mac) and NFC/NFD twins; awk cannot
+# fold them, and refusing every non-ASCII feature name would refuse real repos (E115 made the same call).
+FOLD='function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); gsub(/\342\204\252/, "k", x); return x }'
 
 # Which features are being backfilled is read from the BASE, never from the PR (E116). Read from the
 # PR, the gate let a PR approve itself: it could set `verified: true` in the same PR, or delete the spec

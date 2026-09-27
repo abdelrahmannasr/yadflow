@@ -72,7 +72,8 @@ A change is blocked **only until the features it touches** have approved specs �
   and whether each spec says `verified: true`. Read from the PR, a PR could approve itself (set
   `verified: true` in the same PR) or delete the spec and read as "not being backfilled". So an approval
   must merge before the change it allows. A spec the PR adds counts once merged. Names are compared as
-  macOS and Windows compare them (ASCII case and the long s `ſ`): `specs/backfill/Billing/spec.md` is
+  macOS and Windows compare them (ASCII case, the long s `ſ` and the Kelvin sign `K`; other non-ASCII
+  case and NFC/NFD twins are not folded — a stated limit, as in contract-check): `specs/backfill/Billing/spec.md` is
   `billing`'s spec.
 - **No link where a backfilled feature lives** (E116). The gate reads paths, so a symlink or submodule
   at `src`, at `src/<feature>` or inside `src/<feature>/` let the code live where no path under `src/`

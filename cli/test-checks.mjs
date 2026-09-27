@@ -1083,6 +1083,16 @@ test('backfill gate: with the specs hidden, the refusal says every src/ folder i
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('backfill gate: the Kelvin sign is k, as APFS folds it (E116 review 4)', () => {
+  // `src/<U+212A>iosk/` IS `src/kiosk/` on a Mac; on Linux CI it is another folder, never backfilled.
+  const { T, base } = renameRepo({ 'src/kiosk/a.js': 'a\n', 'specs/backfill/kiosk/spec.md': backfillSpec(false) });
+  commitIndexOnly(T, 'feat: a second spelling', ['src/Kiosk/b.js']);
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 1, r.out);
+  assert.ok(r.out.includes('  src/kiosk and src/Kiosk (one name on macOS and Windows)'), r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('backfill gate: a git that cannot read the tree fails with a line that says so (E116)', () => {
   const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n' });
   commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });
