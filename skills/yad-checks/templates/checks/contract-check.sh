@@ -627,6 +627,19 @@ while IFS= read -r story; do
     echo "FAIL [contract-check]: ${story}'s slice belongs to ${epic}, which does not exist in the Product (${prod}/epics/) — an orphan slice."
     rc=1
     continue
+  elif [ -z "$_base_rel" ] && [ -z "$only_removes" ]; then
+    # The repo's FIRST spec (E119): no link.md on the base names a Product, so product-repo is this PR's
+    # own value — and it reaches nothing. Deferring here let a PR pick a path that does not exist and
+    # pass a slice change with no lock check at all. This case is known from paths alone: the slice is
+    # on the surface, and the base holds no link.md with a value. A value merged on the base that reaches
+    # nothing still defers below (a CI job that does not check the Product out); a PR that only removes
+    # a slice passes as before. The other Product-reading gates judge the epic, not the surface, and
+    # still defer here — E120.
+    echo "FAIL [contract-check]: ${link} is this repo's first spec — no link.md on ${BASE} names a Product —"
+    echo "  and its product-repo ${product_rel:+'${product_rel}' }reaches nothing, so the contract lock cannot be checked."
+    echo "  Check the Product out in this repo's CI where product-repo points, or fix product-repo."
+    rc=1
+    continue
   else
     # Say so. A skipped fidelity check used to be indistinguishable from a passed one, which is how a
     # mis-resolved product-repo could turn a stale-pin FAIL into a silent PASS (issue #149).

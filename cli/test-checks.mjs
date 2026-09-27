@@ -220,13 +220,13 @@ test('contract-check gate: surface change without Contract-Change trailer fails'
 });
 
 test('contract-check gate: surface change with Contract-Change: yes passes (no upstream lock reachable)', () => {
-  const T = scaffoldRepo();
+  // A slice needs its link.md (E117 review 2); this one, merged on the base, names a Product CI cannot
+  // reach. (On a repo's FIRST spec the same value FAILs — E119.)
+  const { T, base } = renameRepo({ 'specs/EP-demo-S01/link.md': '---\nstory: EP-demo-S01\nproduct-repo: ../../nowhere\n---\n' });
   commit(T, 'feat: widen API per re-locked contract\n\nContract-Change: yes', {
     'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
-    // A slice needs its link.md (E117 review 2); this one names a Product CI cannot reach.
-    'specs/EP-demo-S01/link.md': '---\nstory: EP-demo-S01\nproduct-repo: ../../nowhere\n---\n',
   });
-  const r = runGate(CONTRACT, T);
+  const r = runGate(CONTRACT, T, [base]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /surface change accompanied by Contract-Change: yes/);
   fs.rmSync(T, { recursive: true, force: true });
@@ -342,19 +342,56 @@ test('contract-check gate: REMOVING a slice under a lockless epic is allowed, or
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('contract-check gate: a first spec whose product-repo reaches nothing FAILs when it carries a slice (E119)', () => {
+  // No link.md on the base names a Product, so product-repo is the PR's own value. Pointed at nothing,
+  // it used to defer — a slice change with no lock check at all.
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere', 'contract-lock': `sha256:${'d'.repeat(64)}` }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[contract-check\]: specs\/EP-demo-S01\/link\.md is this repo's first spec/);
+  assert.match(r.out, /product-repo '\.\.\/\.\.\/nowhere' reaches nothing/);
+  assert.doesNotMatch(r.out, /fidelity check deferred/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a first spec with no slice, or one that only removes a slice, is unchanged (E119)', () => {
+  // With no slice the surface is untouched, so neither link.md nor the Product is opened.
+  const T = scaffoldRepo();
+  commit(T, 'docs: spec the story', { 'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }), 'specs/EP-demo-S01/spec.md': 'x\n' });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /does not touch the contract surface/);
+  fs.rmSync(T, { recursive: true, force: true });
+  // A base link.md with no value (so still a first spec) and a PR that removes part of its slice: a
+  // removal is not a surface the lock could contradict — it defers, as before.
+  const { T: U, base } = renameRepo({
+    'specs/EP-demo-S01/contracts/api.md': 'a\n', 'specs/EP-demo-S01/contracts/b.md': 'b\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01' }),
+  });
+  git(U, 'rm', '-q', 'specs/EP-demo-S01/contracts/b.md');
+  git(U, 'commit', '-q', '-m', 'chore: drop a slice file\n\nContract-Change: yes');
+  const r2 = runGate(CONTRACT, U, [base]);
+  assert.equal(r2.code, 0, r2.out);
+  assert.doesNotMatch(r2.out, /first spec/);
+  fs.rmSync(U, { recursive: true, force: true });
+});
+
 test('contract-check gate: an UNREACHABLE Product still defers — the narrow case is unchanged', () => {
   // The hardening above must not turn every CI job that does not check the Product out into a
   // failure. That case proves nothing either way and has always deferred; only "resolved, and the
   // lock is genuinely absent" is new. Asserted beside its sibling so the two cannot be merged by
-  // someone tidying later.
-  const T = scaffoldRepo();
+  // someone tidying later. The value is on the base: a first spec's own value FAILs instead (E119).
+  const { T, base } = renameRepo({ 'specs/EP-demo-S01/link.md': linkMd({
+    story: 'EP-demo-S01', 'product-repo': '../../nowhere', 'contract-lock': `sha256:${'d'.repeat(64)}`,
+  }) });
   commit(T, 'feat: widen API\n\nContract-Change: yes', {
     'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
-    'specs/EP-demo-S01/link.md': linkMd({
-      story: 'EP-demo-S01', 'product-repo': '../../nowhere', 'contract-lock': `sha256:${'d'.repeat(64)}`,
-    }),
   });
-  const r = runGate(CONTRACT, T);
+  const r = runGate(CONTRACT, T, [base]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /fidelity check deferred/);
   fs.rmSync(T, { recursive: true, force: true });
@@ -1229,8 +1266,9 @@ test('contract-check gate: with no base argument it diffs the remote default bra
     'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }),
   });
   const r = runGate(CONTRACT, T, []); // no base: must resolve origin/HEAD -> origin/develop
-  assert.equal(r.code, 0, `a develop-trunk repo must be diffable without naming the base:\n${r.out}`);
+  // A first spec pointing nowhere FAILs (E119) — and the FAIL names the base it read, which is the point.
   assert.match(r.out, /no base given — diffing against 'origin\/develop'/);
+  assert.match(r.out, /no link\.md on origin\/develop names a Product/, `a develop-trunk repo must be diffable without naming the base:\n${r.out}`);
   assert.doesNotMatch(r.out, /origin\/main/);
   assert.match(r.out, /diff touches the contract surface/);
   fs.rmSync(src, { recursive: true, force: true });
@@ -1438,28 +1476,28 @@ for (const g of GATES) {
   }
 }
 
-test('contract-check gate: a link.md with no product-repo defers by name, not by a /-rooted path', () => {
+test('contract-check gate: a link.md with no product-repo FAILs by name, not by a /-rooted path', () => {
   const T = scaffoldRepo();
   commit(T, 'feat: widen API\n\nContract-Change: yes', {
     'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
     'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01' }), // no product-repo at all
   });
   const r = runGate(CONTRACT, T);
-  assert.equal(r.code, 0, r.out);
-  // An empty resolution used to interpolate to "/epics/<epic>/…" — a path at the filesystem root,
-  // which both reads as a real location in the note and could match a foreign file on some hosts.
-  assert.match(r.out, /not reachable at <no product-repo in link\.md>/);
-  assert.doesNotMatch(r.out, /at \/epics\//);
+  // No base link.md names a Product, so this is a first spec that reaches nothing (E119). It used to
+  // defer, and an empty resolution used to interpolate to "/epics/<epic>/…" — a path at the filesystem
+  // root, which read as a real location and could match a foreign file on some hosts.
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /is this repo's first spec — no link\.md on main names a Product —\n {2}and its product-repo reaches nothing/);
+  assert.doesNotMatch(r.out, /\/epics\//);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('contract-check gate: says so when the product lock is not reachable', () => {
-  const T = scaffoldRepo();
+  const { T, base } = renameRepo({ 'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }) });
   commit(T, 'feat: widen API\n\nContract-Change: yes', {
     'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
-    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }),
   });
-  const r = runGate(CONTRACT, T);
+  const r = runGate(CONTRACT, T, [base]);
   assert.equal(r.code, 0, r.out);
   // A skipped fidelity check used to be indistinguishable from a passed one — which is how a
   // mis-resolved product-repo turned a stale-pin FAIL into a silent PASS.
