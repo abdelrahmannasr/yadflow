@@ -206,6 +206,37 @@ test('a product-link record changed on disk is not ok until that change is commi
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('a product-link record committed but never pushed is named, with the push as the fix (E120 review 3)', async () => {
+  const { T, backend } = scaffold();
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+  git(origin, 'init', '-q', '--bare');
+  git(backend, 'branch', '-q', '-M', 'main');
+  git(backend, 'remote', 'add', 'origin', origin);
+  git(backend, 'push', '-q', 'origin', 'main');
+  fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+  await captureConsole(() => reconcile(T, { fix: true }));
+  // A --push whose push was refused: committed here, not on origin/main.
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
+  const { collectDoctor } = await import('./doctor.mjs');
+  const hits = () => collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+  const hit = hits();
+  assert.equal(hit.length, 1);
+  assert.match(hit[0].message, /^backend has \.sdlc\/product-link\.json committed but not pushed/);
+  assert.match(hit[0].hint, /`git push origin main` in backend/);
+  git(backend, 'push', '-q', 'origin', 'main');
+  git(backend, 'fetch', '-q', 'origin');
+  assert.deepEqual(hits(), []);
+  // A copy on the default branch that does not parse is "no readable" record, not "no" record.
+  fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{ nope');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-am', 'chore: break it');
+  git(backend, 'push', '-q', 'origin', 'main');
+  git(backend, 'fetch', '-q', 'origin');
+  assert.match(hits()[0].message, /^backend has no readable \.sdlc\/product-link\.json on the default branch \(it is not JSON\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(origin, { recursive: true, force: true });
+});
+
 test('a product-link record the repo ignores is not `new` forever, and the doctor says why (E120 review 2)', async () => {
   const { T, backend } = scaffold();
   fs.writeFileSync(path.join(backend, '.gitignore'), '.sdlc/\n');

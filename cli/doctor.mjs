@@ -558,24 +558,43 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // a record updated on disk and never committed is as stale as a missing one (review 2).
         let disk = null;
         try { disk = JSON.parse(fs.readFileSync(path.join(dir, PRODUCT_LINK), 'utf8')); } catch { /* none, or not JSON */ }
-        let there = null;
+        let there;
         try { there = shown.ok ? JSON.parse(shown.stdout) : null; } catch { there = null; }
         const ignored = run('git', ['check-ignore', '-q', '--', PRODUCT_LINK], { cwd: dir }).ok;
-        if (!there) return { name: r.name, why: ignored ? 'ignored' : 'missing' };
-        const differs = disk && ['git_url', 'path', 'default_branch'].some((k) => (disk[k] ?? null) !== (there[k] ?? null));
-        return differs ? { name: r.name, why: ignored ? 'ignored' : 'stale' } : null;
+        const same = (a, b) => ['git_url', 'path', 'default_branch'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null));
+        const behind = !there || (disk && !same(disk, there));
+        if (!behind) return null;
+        if (ignored) return { name: r.name, branch, why: 'ignored' };
+        // Committed here and never pushed (review 3): a --push whose push was refused (a protected
+        // branch) leaves the record `ok` for the writer, so `--fix --push` stages nothing — the fix is to
+        // push the commit, not to run it again.
+        if (onRemote && disk) {
+          let head;
+          try { const h = run('git', ['show', `HEAD:${PRODUCT_LINK}`], { cwd: dir }); head = h.ok ? JSON.parse(h.stdout) : null; } catch { head = null; }
+          if (head && same(head, disk)) return { name: r.name, branch, why: 'unpushed' };
+        }
+        if (!there) return { name: r.name, branch, why: shown.ok ? 'unreadable' : 'missing' };
+        return { name: r.name, branch, why: 'stale' };
       })
       .filter(Boolean);
     const named = (why) => unlinked.filter((u) => u.why === why).map((u) => u.name);
     const missing = named('missing');
+    const unreadable = named('unreadable');
     const stale = named('stale');
     const ignoredRepos = named('ignored');
-    if (missing.length || stale.length) {
+    const unpushed = unlinked.filter((u) => u.why === 'unpushed');
+    if (missing.length || unreadable.length || stale.length) {
       check(checks, 'repos:product-link-missing', 'project', 'warn', [
         ...(missing.length ? [`${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} no ${PRODUCT_LINK} on the default branch — the gates there take where the Product lives from link.md, and CI cannot check the Product out`] : []),
+        ...(unreadable.length ? [`${unreadable.join(', ')} ${unreadable.length > 1 ? 'have' : 'has'} no readable ${PRODUCT_LINK} on the default branch (it is not JSON) — CI cannot read it`] : []),
         ...(stale.length ? [`${stale.join(', ')} ${stale.length > 1 ? 'hold' : 'holds'} a ${PRODUCT_LINK} on disk that differs from the one on the default branch — CI reads the default branch's`] : []),
       ].join('; '),
         'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch');
+    }
+    if (unpushed.length) {
+      check(checks, 'repos:product-link-missing', 'project', 'warn',
+        `${unpushed.map((u) => u.name).join(', ')} ${unpushed.length > 1 ? 'have' : 'has'} ${PRODUCT_LINK} committed but not pushed — CI reads the default branch, which does not have it yet`,
+        `push that commit (${unpushed.map((u) => `\`git push origin ${u.branch}\` in ${u.name}`).join(', ')}), or open a PR with it if the branch is protected — \`yad check --fix --push\` has nothing left to commit`);
     }
     if (ignoredRepos.length) {
       check(checks, 'repos:product-link-missing', 'project', 'warn',
