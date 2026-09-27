@@ -395,7 +395,7 @@ test('E113 review 1: a kept script is never pending — a local ledger\'s leftov
     const said2 = [];
     console.log = (...a) => { said2.push(a.join(' ')); };
     try { legacyHookScriptActions(T); } finally { console.log = orig; }
-    assert.ok(said2.some((l) => /yad-capture\.sh stays — .*change each entry that runs it to the `node hooks/.test(l)), said2.join('\n'));
+    assert.ok(said2.some((l) => /yad-capture\.sh stays — .*point each entry that runs it at the `node hooks/.test(l)), said2.join('\n'));
     assert.ok(!said2.some((l) => /yad-capture\.sh stays — .*remove each entry/.test(l)));
     // A config that does not read: yad cannot know, and says so.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ not json');
@@ -432,7 +432,7 @@ test('E113 review 2: our old command where no action reaches it — another even
       try { planned = legacyHookScriptActions(T); } finally { console.log = orig; }
       assert.ok(!planned.some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: not planned`);
       // Our own old command, which no action reaches, is stuck: say where, and the way out (review 3).
-      assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays — .* still runs it through an old yad hook command\. To clear it: change each entry that runs it to the `node hooks\/….mjs` command/.test(l)), said.join('\n'));
+      assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays — .* still runs it through an old yad hook command\. To clear it: point each entry that runs it at the `node hooks\/….mjs` command/.test(l)), said.join('\n'));
       await fixHooks(T);
       assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), `${where}: kept`);
       assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: still not pending after --fix`);
@@ -479,7 +479,7 @@ test('E113 review 4: a removal planned, then run again by the time it applies, i
     console.log = (...a) => { said.push(a.join(' ')); };
     try { act.apply(); } finally { console.log = orig; }
     assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), 'kept');
-    assert.ok(said.some((l) => /yad-capture\.sh kept — \.cursor\/hooks\.json still runs it\. To clear it: change each entry that runs it to the `node hooks/.test(l)), said.join('\n'));
+    assert.ok(said.some((l) => /yad-capture\.sh kept — \.cursor\/hooks\.json still runs it\. To clear it: point each entry that runs it at the `node hooks/.test(l)), said.join('\n'));
   } finally { cleanup(T); }
 });
 
@@ -504,6 +504,28 @@ test('E113 review 6: apply\'s warning for a guard script on a local ledger says 
     assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')));
     assert.ok(said.some((l) => /ledger-guard\.sh kept — \.claude\/settings\.json, \.claude\/settings\.local\.json still run it\. To clear it: remove each entry that runs it — this Product has no ledger guard/.test(l)), said.join('\n'));
   } finally { cleanup(T); }
+});
+
+test('E113 review 7: the advice for a stuck old entry, every branch in full — and both sentences use it whole', async () => {
+  const { entryAdvice } = await import('./plan.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-advice-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    const hub = (v) => fs.writeFileSync(path.join(T, '.sdlc/hub.json'), typeof v === 'string' ? v : JSON.stringify(v));
+    const repoint = 'point each entry that runs it at the `node hooks/….mjs` command yad now writes, or remove it if that harness should no longer run the hook';
+    hub({ ledger: 'verified', platform: 'github' });
+    for (const s of ['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh', 'hooks/yad-capture.sh']) assert.equal(entryAdvice(T, s), repoint, s);
+    hub({ ledger: 'local', platform: 'github' });
+    assert.equal(entryAdvice(T, 'hooks/yad-capture.sh'), repoint, 'capture is installed with a local ledger');
+    for (const s of ['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']) {
+      assert.equal(entryAdvice(T, s), 'remove each entry that runs it — this Product has no ledger guard (its ledger is not verified), so `yad check --fix` leaves those entries alone');
+    }
+    hub('{ not json');
+    assert.equal(entryAdvice(T, 'hooks/ledger-guard.sh'), 'the Product config does not read, so yad cannot tell whether a ledger guard belongs here — fix the config, or remove each entry that runs it');
+    assert.equal(entryAdvice(T, 'hooks/yad-capture.sh'), repoint);
+  } finally { cleanup(T); }
+  const src = fs.readFileSync(path.join(ROOT, 'cli/plan.mjs'), 'utf8');
+  assert.equal((src.match(/To clear it: \$\{entryAdvice\(root, scriptRel\)\}/g) || []).length, 2, 'the plan note and the apply warning both use it whole');
 });
 
 test('E113 review 1: on Windows doctor names a CRLF checkout, which reads approvals as stale', async () => {

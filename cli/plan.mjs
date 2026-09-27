@@ -1170,10 +1170,13 @@ const GUARD_SCRIPTS = new Set(['hooks/ledger-guard.sh', 'hooks/ledger-guard-curs
 // except a guard script on a Product whose ledger is not verified (or cannot be read), where no guard is
 // installed to point at, so the entry is removed. One sentence for the plan's note AND apply's warning, so
 // the two cannot give different advice (review 5).
-function entryAdvice(root, scriptRel) {
+//
+// It never promises what `yad check --fix` will do: both callers are reached only for entries that run has
+// NOT taken out (another event, `settings.local.json`, a file changed since the plan), so the reader acts.
+export function entryAdvice(root, scriptRel) {
   const hub = readJSON(productConfigPath(root), null);
   if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(hub)) {
-    return 'change each entry that runs it to the `node hooks/….mjs` command yad now writes (`yad check --fix` does that for yad\'s own entries in the files it wires)';
+    return 'point each entry that runs it at the `node hooks/….mjs` command yad now writes, or remove it if that harness should no longer run the hook';
   }
   return hub === null
     ? 'the Product config does not read, so yad cannot tell whether a ledger guard belongs here — fix the config, or remove each entry that runs it'
