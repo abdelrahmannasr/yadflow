@@ -1043,6 +1043,46 @@ test('backfill gate: a repo with tens of thousands of src/ folders is not refuse
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('backfill gate: an approved spec cannot stand in for an unapproved one whose name folds onto it (E116 review 3)', () => {
+  // With a newline written as `?`, `x?y` and `x<newline>y` are one name to the gate. Read by path, the
+  // approved `x?y` spec was read twice and the unapproved one never.
+  const { T } = renameRepo({ 'README.md': 'x\n' });
+  const put = (name, text) => {
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: text, env: GIT_ENV }).toString().trim();
+    git(T, 'update-index', '--add', '--cacheinfo', `100644,${blob},${name}`);
+  };
+  put('specs/backfill/x?y/spec.md', backfillSpec(true));
+  put('specs/backfill/x\ny/spec.md', backfillSpec(false));
+  put('src/x\ny/a.js', 'a\n');
+  git(T, 'commit', '-q', '-m', 'chore: base');
+  const base = git(T, 'rev-parse', 'HEAD').toString().trim();
+  put('src/x\ny/a.js', 'b\n');
+  git(T, 'commit', '-q', '-m', 'feat: touch it');
+  const r = runGate(BACKFILL, T, [base]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /is being backfilled but its spec is not yet human-approved/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('backfill gate: with the specs hidden, the refusal says every src/ folder is checked (E116 review 3)', () => {
+  // A link in a folder no feature owns fails too; the message says why and how to get out.
+  const { T } = renameRepo({ 'docs/specs/backfill/billing/spec.md': backfillSpec(true), 'lib/a.js': 'a\n', 'src/other/o.js': 'o\n' });
+  fs.symlinkSync('docs/specs', path.join(T, 'specs'));
+  fs.symlinkSync('../../lib/a.js', path.join(T, 'src/other/l'));
+  commit(T, 'chore: links');
+  const b = git(T, 'rev-parse', 'HEAD').toString().trim();
+  git(T, 'rm', '-q', 'specs');
+  commit(T, 'docs: real specs', { 'specs/backfill/billing/spec.md': backfillSpec(true) });
+  const r = runGate(BACKFILL, T, [b]);
+  assert.equal(r.code, 1, r.out);
+  assert.ok(r.out.includes('  src/other/l (symlink)'), r.out);
+  assert.match(r.out, /On the base, specs is a symlink or submodule, so the gate cannot tell which/);
+  git(T, 'rm', '-q', 'src/other/l');
+  git(T, 'commit', '-q', '-m', 'chore: drop the link for now');
+  assert.equal(runGate(BACKFILL, T, [b]).code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('backfill gate: a git that cannot read the tree fails with a line that says so (E116)', () => {
   const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n' });
   commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });
@@ -1063,7 +1103,7 @@ test('backfill-check reads both trees before its first PASS (E116)', () => {
   for (const read of ['git ls-tree -r -z --full-tree "$BASE"', 'git ls-tree -r -z --full-tree HEAD']) {
     assert.ok(code.indexOf(read) >= 0 && code.indexOf(read) < pass, `${read} before the first PASS`);
   }
-  assert.match(code, /git cat-file blob "\$\{BASE\}:\$\{spec\}"/, 'the spec is read from the base');
+  assert.match(code, /git cat-file blob "\$oid"/, 'the spec is read from the base, by the object id its tree names');
   assert.doesNotMatch(code, /\[ -f "\$spec" \]/, 'never from the working tree');
 });
 

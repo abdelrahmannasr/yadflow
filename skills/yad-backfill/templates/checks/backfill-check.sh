@@ -61,16 +61,19 @@ base_tree="$(git ls-tree -r -z --full-tree "$BASE" | tr '\n\0' '?\n')" || {
   echo "FAIL [backfill]: git could not read the tree of '${BASE}' — the gate cannot tell which features are being backfilled."
   exit 1
 }
-# One line each: `S <path>` a spec to read, `U <path>` a link where a spec goes, `A <path>` a link above.
+# One line each: `S <oid> <path>` a spec to read, `U - <path>` a link where a spec goes, `A - <path>` a
+# link above. A spec is read by its object id, never by its path again: with a newline written as `?`,
+# `x?y/spec.md` and `x<newline>y/spec.md` are one path here, and reading `<base>:x?y/spec.md` twice let
+# an approved spec stand in for an unapproved one (review 3).
 specs="$(printf '%s\n' "$base_tree" | awk "$FOLD"'
-  { t = index($0, "\t"); if (!t) next; p = substr($0, t + 1); m = substr($0, 1, 6); lp = fold(p) }
+  { t = index($0, "\t"); if (!t) next; p = substr($0, t + 1); m = substr($0, 1, 6); lp = fold(p); split(substr($0, 1, t - 1), h, " ") }
   lp !~ /^specs(\/backfill(\/[^\/]+(\/spec\.md)?)?)?$/ { next }
-  m == "120000" || m == "160000" { print (lp ~ /^specs\/backfill\/[^\/]+/ ? "U " : "A ") p; next }
-  lp ~ /^specs\/backfill\/[^\/]+\/spec\.md$/ { print "S " p }
+  m == "120000" || m == "160000" { print (lp ~ /^specs\/backfill\/[^\/]+/ ? "U - " : "A - ") p; next }
+  lp ~ /^specs\/backfill\/[^\/]+\/spec\.md$/ { print "S " h[3] " " p }
 ')"
-blind="$(printf '%s\n' "$specs" | sed -n 's/^A //p')"
+blind="$(printf '%s\n' "$specs" | sed -n 's/^A - //p')"
 # The folded names of the features being backfilled, one per line.
-bf="$(printf '%s\n' "$specs" | sed -n 's/^[SU] //p' | awk "$FOLD"'{ split($0, c, "/"); print fold(c[3]) }' | sort -u)"
+bf="$(printf '%s\n' "$specs" | sed -n 's/^[SU] [^ ]* //p' | awk "$FOLD"'{ split($0, c, "/"); print fold(c[3]) }' | sort -u)"
 
 # No symlink, no submodule and no second spelling where a feature being backfilled lives (E116). The
 # gate reads PATHS: with a link at `src/<feature>` (or `src`, or inside the feature) the code lives
@@ -113,6 +116,11 @@ if [ -n "$bf" ] || [ -n "$blind" ]; then
     echo "  -> put the real files in place of each link, and keep one spelling of each folder. A PR that only"
     echo "     removes a link, or every file of one spelling, passes; until then every PR in this repo fails,"
     echo "     because an edit to the link's target changes no path under src/."
+    if [ -n "$blind" ]; then
+      echo "     On the base, $(printf '%s' "$blind" | head -n 1) is a symlink or submodule, so the gate cannot tell which"
+      echo "     features are being backfilled and checks EVERY folder under src/ — a link above may belong to no"
+      echo "     backfilled feature. Remove it in the PR that puts the real specs back; add it back after."
+    fi
     exit 1
   fi
 fi
@@ -176,14 +184,14 @@ while IFS= read -r f; do
     rc=1
     continue
   fi
-  mine="$(printf '%s\n' "$specs" | F="$f" awk "$FOLD"'/^[SU] / { split(substr($0, 3), c, "/"); if (fold(c[3]) == ENVIRON["F"]) print }')"
+  mine="$(printf '%s\n' "$specs" | F="$f" awk "$FOLD"'/^[SU] / { r = substr($0, 3); split(substr(r, index(r, " ") + 1), c, "/"); if (fold(c[3]) == ENVIRON["F"]) print }')"
   if [ -z "$mine" ]; then
     echo "note [backfill]: ${f} is not being backfilled (no specs/backfill/${f}/spec.md on the base) — skipped."
     continue
   fi
   ok=1
   while IFS= read -r l; do
-    spec="${l#? }"
+    rest="${l#? }"; oid="${rest%% *}"; spec="${rest#* }"
     case "$l" in
       U\ *) echo "FAIL [backfill]: ${f} is being backfilled, but on the base ${spec} is a symlink or submodule — its spec is not read."
             echo "  -> put the real spec there in its own PR first."
@@ -191,7 +199,7 @@ while IFS= read -r f; do
     esac
     # Read ONLY the YAML frontmatter (between the first two --- lines) so a prose line that merely
     # contains "verified: true" cannot false-pass the gate.
-    fm="$(git cat-file blob "${BASE}:${spec}" 2>/dev/null | awk 'NR==1 && /^---[[:space:]]*$/ {f=1; next} f && /^---[[:space:]]*$/ {f=0; next} f {print}')" || fm=""
+    fm="$(git cat-file blob "$oid" 2>/dev/null | awk 'NR==1 && /^---[[:space:]]*$/ {f=1; next} f && /^---[[:space:]]*$/ {f=0; next} f {print}')" || fm=""
     if ! printf '%s\n' "$fm" | grep -qiE '^verified:[[:space:]]*true[[:space:]]*$'; then
       echo "FAIL [backfill]: ${f} is being backfilled but its spec is not yet human-approved (verified: true) on the base."
       echo "  -> run yad-backfill approve for ${spec} and merge that first: the gate reads the spec"

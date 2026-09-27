@@ -85,7 +85,8 @@ A change is blocked **only until the features it touches** have approved specs â
   another spelling stays, is not a change to the feature, so it passes. (Deleting both spellings deletes
   the feature, and is a change to it.) A link where the spec lives on the base (`specs/backfill/<feature>` or its
   `spec.md`) makes that feature unapproved; one at `specs` or `specs/backfill` fails every feature change
-  until a PR puts the real folder back, and meanwhile every folder under `src/` is checked for links.
+  until a PR puts the real folder back, and meanwhile every folder under `src/` is checked for links â€”
+  so that PR must also remove any link under `src/` (it can come back after); the message says so.
   **A repo that keeps `specs` as a symlink** is refused this way on every feature change until it holds
   real files. A path that IS `src/<feature>` (a link, a submodule, or a file
   where the folder goes) counts as that feature; a top-level `src/*.js` file still does not.
