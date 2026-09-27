@@ -1083,13 +1083,29 @@ test('backfill gate: with the specs hidden, the refusal says every src/ folder i
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('backfill gate: the Kelvin sign is k, as APFS folds it (E116 review 4)', () => {
-  // `src/<U+212A>iosk/` IS `src/kiosk/` on a Mac; on Linux CI it is another folder, never backfilled.
-  const { T, base } = renameRepo({ 'src/kiosk/a.js': 'a\n', 'specs/backfill/kiosk/spec.md': backfillSpec(false) });
-  commitIndexOnly(T, 'feat: a second spelling', ['src/Kiosk/b.js']);
+test('backfill gate: every character APFS folds into ASCII is folded (E116 reviews 4 and 5)', () => {
+  // On a Mac each of these IS the ASCII feature folder; on Linux CI it is another folder, never
+  // backfilled. All 13 characters whose full case fold (then NFD) is ASCII alone, from Unicode's tables.
+  for (const [feature, twin] of [
+    ['kiosk', 'Kiosk'], ['class', 'claß'], ['class', 'claẞ'], ['specs', 'ſpecs'],
+    ['staff', 'staﬀ'], ['fifo', 'ﬁfo'], ['flat', 'ﬂat'], ['office', 'oﬃce'],
+    ['waffle', 'waﬄe'], ['stop', 'ﬅop'], ['stop', 'ﬆop'], ['a;b', 'a;b'], ['a`b', 'a`b'],
+  ]) {
+    const { T, base } = renameRepo({ [`src/${feature}/a.js`]: 'a\n', [`specs/backfill/${feature}/spec.md`]: backfillSpec(false) });
+    commitIndexOnly(T, 'feat: a second spelling', [`src/${twin}/b.js`]);
+    const r = runGate(BACKFILL, T, [base]);
+    assert.equal(r.code, 1, `${twin}:\n${r.out}`);
+    assert.ok(r.out.includes(' (one name on macOS and Windows)'), `${twin}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('backfill gate: a spec whose frontmatter never closes is not approved by a body line (E116 review 5)', () => {
+  const { T, base } = renameRepo({ 'src/billing/pay.js': 'pay()\n', 'specs/backfill/billing/spec.md': '---\nfeature: billing\n# billing\nverified: true\n' });
+  commit(T, 'feat: touch billing', { 'src/billing/pay.js': 'pay(2)\n' });
   const r = runGate(BACKFILL, T, [base]);
   assert.equal(r.code, 1, r.out);
-  assert.ok(r.out.includes('  src/kiosk and src/Kiosk (one name on macOS and Windows)'), r.out);
+  assert.match(r.out, /billing is being backfilled but its spec is not yet human-approved/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

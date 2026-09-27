@@ -44,11 +44,18 @@ fi
 
 # Folded as macOS and Windows fold a name (E116, as E115): `Src/` IS `src/` there, and `src/Billing/` IS
 # `src/billing/`, while git and Linux CI read exact bytes. `tolower` under LC_ALL=C folds ASCII only, so
-# the two other letters APFS folds into an ASCII one are mapped by hand: the long s (U+017F) into `s`,
-# and the Kelvin sign (U+212A) into `k` (review 4) — `src/<Kelvin>ey/` IS `src/key/` on a Mac. Not
-# folded, and stated: other non-ASCII case (`CAFÉ` is `café` on a Mac) and NFC/NFD twins; awk cannot
-# fold them, and refusing every non-ASCII feature name would refuse real repos (E115 made the same call).
-FOLD='function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); gsub(/\342\204\252/, "k", x); return x }'
+# every character APFS folds (full case folding, then NFD) into ASCII alone is mapped by hand, as bytes —
+# all 13 of them, from Unicode's own tables (reviews 4 and 5): ß and ẞ into `ss`, ſ into `s`, the
+# Kelvin sign into `k`, the ligatures ﬀ ﬁ ﬂ ﬃ ﬄ ﬅ ﬆ into their letters, and the Greek question mark and
+# varia into `;` and `` ` ``. So `src/claß/` IS `src/class/` on a Mac, and is read so here. Not folded,
+# and stated: characters that fold into other non-ASCII ones (`CAFÉ` is `café` on a Mac) and NFC/NFD
+# twins; awk cannot fold them, and refusing every non-ASCII feature name would refuse real repos (E115
+# made the same call).
+FOLD='function fold(x) { x = tolower(x)
+  gsub(/\303\237|\341\272\236/, "ss", x); gsub(/\305\277/, "s", x); gsub(/\342\204\252/, "k", x)
+  gsub(/\357\254\200/, "ff", x); gsub(/\357\254\201/, "fi", x); gsub(/\357\254\202/, "fl", x)
+  gsub(/\357\254\203/, "ffi", x); gsub(/\357\254\204/, "ffl", x); gsub(/\357\254\205|\357\254\206/, "st", x)
+  gsub(/\315\276/, ";", x); gsub(/\341\277\257/, "`", x); return x }'
 
 # Which features are being backfilled is read from the BASE, never from the PR (E116). Read from the
 # PR, the gate let a PR approve itself: it could set `verified: true` in the same PR, or delete the spec
@@ -201,8 +208,10 @@ while IFS= read -r f; do
             ok=0; continue ;;
     esac
     # Read ONLY the YAML frontmatter (between the first two --- lines) so a prose line that merely
-    # contains "verified: true" cannot false-pass the gate.
-    fm="$(git cat-file blob "$oid" 2>/dev/null | awk 'NR==1 && /^---[[:space:]]*$/ {f=1; next} f && /^---[[:space:]]*$/ {f=0; next} f {print}')" || fm=""
+    # contains "verified: true" cannot false-pass the gate — and only once it closes: a spec that opens
+    # `---` and never closes it has no frontmatter, or a body line would count (review 5). Read to the end,
+    # never stopped early: under pipefail a closed pipe would read a long approved spec as unapproved.
+    fm="$(git cat-file blob "$oid" 2>/dev/null | awk 'NR==1 && /^---[[:space:]]*$/ {f=1; next} f==1 && /^---[[:space:]]*$/ {f=2; next} f==1 {b = b $0 "\n"} END {if (f == 2) printf "%s", b}')" || fm=""
     if ! printf '%s\n' "$fm" | grep -qiE '^verified:[[:space:]]*true[[:space:]]*$'; then
       echo "FAIL [backfill]: ${f} is being backfilled but its spec is not yet human-approved (verified: true) on the base."
       echo "  -> run yad-backfill approve for ${spec} and merge that first: the gate reads the spec"

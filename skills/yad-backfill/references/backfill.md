@@ -64,6 +64,8 @@ A change is blocked **only until the features it touches** have approved specs �
 - A feature with **no** `specs/backfill/<feature>/` is not this gate's concern (it is either
   forward-spec'd via `yad-spec`, or not yet being backfilled).
 - Fails closed on an unresolvable base ref, like the other gates.
+- Only a frontmatter that closes counts: a spec that opens `---` and never closes it is unapproved,
+  whatever its body says.
 - A **moved** file counts at both ends (E114). The changed list is `git diff --no-renames --raw
   -z`, each path paired with its header NUL by NUL (so a newline in one name cannot shift the rest), so `git mv src/<feature>/x.js lib/x.js` still touches `<feature>`; without `--no-renames` git
   named the move by its new path only and the feature was never checked. `-z` and `LC_ALL=C` keep an
@@ -72,8 +74,10 @@ A change is blocked **only until the features it touches** have approved specs �
   and whether each spec says `verified: true`. Read from the PR, a PR could approve itself (set
   `verified: true` in the same PR) or delete the spec and read as "not being backfilled". So an approval
   must merge before the change it allows. A spec the PR adds counts once merged. Names are compared as
-  macOS and Windows compare them (ASCII case, the long s `ſ` and the Kelvin sign `K`; other non-ASCII
-  case and NFC/NFD twins are not folded — a stated limit, as in contract-check): `specs/backfill/Billing/spec.md` is
+  macOS and Windows compare them: ASCII case, plus the 13 characters a Mac folds into ASCII alone
+  (U+00DF ß and U+1E9E ẞ as `ss`, U+017F ſ as `s`, U+212A Kelvin sign as `k`, the ligatures U+FB00–U+FB06
+  as their letters, U+037E and U+1FEF as `;` and `` ` ``). Other non-ASCII case (`CAFÉ`/`café`) and
+  NFC/NFD twins are not folded — a stated limit, as in contract-check: `specs/backfill/Billing/spec.md` is
   `billing`'s spec.
 - **No link where a backfilled feature lives** (E116). The gate reads paths, so a symlink or submodule
   at `src`, at `src/<feature>` or inside `src/<feature>/` let the code live where no path under `src/`
