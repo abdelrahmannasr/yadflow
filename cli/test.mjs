@@ -144,21 +144,25 @@ test('check --fix writes each code repo\'s product-link record, refreshes it, an
 });
 
 test('check --fix --push commits a product-link record that setup wrote and nobody committed (E120)', async () => {
-  const { T, backend } = scaffold();
-  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
-  git(origin, 'init', '-q', '--bare');
-  git(backend, 'branch', '-q', '-M', 'main');
-  git(backend, 'remote', 'add', 'origin', origin);
-  git(backend, 'push', '-q', 'origin', 'main');
-  // Like `yad setup`: the record is written, nothing is committed — and `yad check` reports no drift.
-  await captureConsole(() => reconcile(T, { fix: true }));
-  const after = await captureConsole(() => reconcile(T, { fix: false }));
-  assert.equal(after.value.counts.new + after.value.counts.missing + after.value.counts.outdated, 0, after.out);
-  // A later --push commits it to the default branch, though it reads `ok`.
-  await captureConsole(() => reconcile(T, { fix: true, push: true }));
-  assert.ok(execFileSync('git', ['cat-file', '-e', 'main:.sdlc/product-link.json'], { cwd: origin, stdio: 'pipe' }) !== undefined);
-  fs.rmSync(T, { recursive: true, force: true });
-  fs.rmSync(origin, { recursive: true, force: true });
+  // Remotes and a git identity in each repo: CI's Linux runner has no identity to guess, so a commit
+  // there needs one (as scaffoldWithRemotes gives), and a failed push would set process.exitCode.
+  const prev = process.exitCode;
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    // Like `yad setup`: the record is written, nothing is committed — and `yad check` reports no drift.
+    await captureConsole(() => reconcile(T, { fix: true }));
+    const after = await captureConsole(() => reconcile(T, { fix: false }));
+    assert.equal(after.value.counts.new + after.value.counts.missing + after.value.counts.outdated, 0, after.out);
+    assert.ok(fs.existsSync(path.join(backend, '.sdlc/product-link.json')));
+    // A later --push commits it to the default branch, though it reads `ok`.
+    const pushed = await captureConsole(() => reconcile(T, { fix: true, push: true }));
+    assert.equal(git(beBare, 'cat-file', '-t', 'main:.sdlc/product-link.json').toString().trim(), 'blob', pushed.out);
+    assert.equal(process.exitCode, 0, pushed.out);
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
 });
 
 test('update adds the product-link record to an already-wired repo; a monorepo gets none (E120)', async () => {
