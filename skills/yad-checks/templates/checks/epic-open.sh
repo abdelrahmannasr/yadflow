@@ -83,6 +83,13 @@ link_val() {
 #    which branch names shape (review 7); (3) only when the path reaches NOTHING, a Product the base keeps that holds
 #    this story's epic is the one meant. "Inside the code repo" is NOT the test: CI can only check a
 #    second repo out INSIDE the workspace, and an untracked checkout there is not the PR's.
+#
+# E120. Before any of that, the repo's own record: `.sdlc/product-link.json`, written by `yad check --fix`
+# / `yad update` and merged on its own. Its `path` (from the repo root; where CI checks the Product out)
+# is read from the BASE and wins over every link.md — so no gate takes where the Product lives from the
+# PR. A record the PR adds or changes counts once it merges (a note says so). A link.md whose own
+# product-repo reaches a DIFFERENT folder here gets a note; one that reaches nothing (a path on its
+# author's machine) is passed over in silence. With no record on the base, the order above is kept.
 # Sets product_rel, prod (the folder to read), prod_note and prod_fail (text; the caller prints them).
 _yad_tmp=""
 _arch_key=""
@@ -95,13 +102,30 @@ base_product_rel() {
   git show "${BASE}:$1" > "$_yad_tmp/base-link.md" 2>/dev/null || : > "$_yad_tmp/base-link.md"
   link_val product-repo "$_yad_tmp/base-link.md"
 }
+# The `path` of `.sdlc/product-link.json` at $1 (a commit), or empty when there is none or it names none.
+record_path() {
+  git cat-file -e "$1:.sdlc/product-link.json" 2>/dev/null || return 0
+  git show "$1:.sdlc/product-link.json" 2>/dev/null | tr -d '\n\r' | sed -nE 's/.*"path"[[:space:]]*:[[:space:]]*"([^"\\]*)".*/\1/p' || true
+}
 product_for() {
   _link="specs/$1/link.md"
   prod=""; prod_note=""; prod_fail=""
   yad_tmp   # here, in this shell: a $(…) below would set it, and its EXIT trap, in a subshell only
   product_rel="$(link_val product-repo "$_link")"
   _from="$_link"
-  _base_rel="$(base_product_rel "$_link")"
+  _rec="$(record_path "$BASE")"
+  _rec_head="$(record_path HEAD)"
+  if [ "$_rec_head" != "$_rec" ]; then
+    if [ -n "$_rec" ]; then _w="changes in this PR"; _s="record"; else _w="is new in this PR"; _s="link.md files"; fi
+    prod_note=".sdlc/product-link.json ${_w} — the Product is read from ${BASE}'s ${_s}; the new one counts once it merges."
+  fi
+  if [ -n "$_rec" ]; then
+    # Relative to the repo root; link.md values are relative to specs/<story>/, so join it that way.
+    case "$_rec" in /*) _base_rel="$_rec" ;; *) _base_rel="../../$_rec" ;; esac
+    _from=".sdlc/product-link.json"
+  else
+    _base_rel="$(base_product_rel "$_link")"
+  fi
   if [ -z "$_base_rel" ]; then
     # A sibling's value. Every link.md sits at specs/<story>/, so a relative value means the same there.
     _sibs="$(git ls-tree -r -z --name-only "$BASE" -- specs 2>/dev/null | tr '\n\0' '?\n' | grep -E '^specs/[^/]+/link\.md$' || true)"
@@ -122,8 +146,18 @@ SIBLINGS
     done
     if [ -z "$_base_rel" ]; then _base_rel="$_first"; _from="$_first_from"; fi
   fi
-  if [ -n "$_base_rel" ] && [ "$_base_rel" != "$product_rel" ]; then
-    prod_note="${_link} names product-repo '${product_rel}', but ${_from} on ${BASE} says '${_base_rel}' — the Product is read from the base value; a new one counts once it merges."
+  if [ -n "$_rec" ]; then
+    # The record wins. Say so only when this link.md's own value reaches a different folder here.
+    _mine="$(resolve_product "$product_rel" "$1")"
+    _theirs="$(resolve_product "$_base_rel" "$1")"
+    if [ -n "$product_rel" ] && [ -d "$_mine" ] && ! [ "$_mine" -ef "$_theirs" ]; then
+      prod_note="${prod_note:+$prod_note
+}${_link} names product-repo '${product_rel}', but .sdlc/product-link.json on ${BASE} says '${_rec}' — the record is read."
+    fi
+    product_rel="$_base_rel"
+  elif [ -n "$_base_rel" ] && [ "$_base_rel" != "$product_rel" ]; then
+    prod_note="${prod_note:+$prod_note
+}${_link} names product-repo '${product_rel}', but ${_from} on ${BASE} says '${_base_rel}' — the Product is read from the base value; a new one counts once it merges."
     product_rel="$_base_rel"
   fi
   # A Product this repo keeps, asked of the base first (see above). Both joins resolve_product may pick.
