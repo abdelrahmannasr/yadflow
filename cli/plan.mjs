@@ -1163,9 +1163,16 @@ function namedIn(raw, scriptRel) {
 const onDisk = (root) => (file) => { try { return fs.readFileSync(path.join(root, file), 'utf8'); } catch { return null; } };
 // `HEAD:./<file>` is read relative to the Product (the `./`), so a Product in a subfolder of its repository
 // reads its own files. Not a repository, no commit yet, or a file never committed: nothing is committed.
-const committed = (root) => (file) => {
-  const r = run('git', ['-C', root, 'show', `HEAD:./${file}`]);
-  return r.ok ? r.stdout : null;
+// Read once per file per plan, however many old scripts ask (review 3).
+const committed = (root) => {
+  const seen = new Map();
+  return (file) => {
+    if (!seen.has(file)) {
+      const r = run('git', ['-C', root, 'show', `HEAD:./${file}`]);
+      seen.set(file, r.ok ? r.stdout : null);
+    }
+    return seen.get(file);
+  };
 };
 // The settings files on disk as this run's hook actions will leave them. The same choices the actions make:
 // the guard's entry merged for a verified Product's current targets and unmerged for its dropped ones
@@ -1199,17 +1206,29 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
   if (!exists(productConfigPath(root))) return [];
   const ledger = readManagedLedger(root);
   const actions = [];
+  const head = committed(root);
+  const ours = new Set([...Object.values(HOOK_ADAPTERS), ...Object.values(CAPTURE_ADAPTERS)].flatMap((a) => a.legacyCommands));
   for (const scriptRel of LEGACY_HOOK_SCRIPTS) {
     const file = path.join(root, scriptRel);
     if (!lstatIfPresent(file)?.isFile()) continue;
     const recorded = ledger[scriptRel];
     if (!recorded || recorded !== contentSha(file)) continue;
-    const inHead = namedIn(committed(root), scriptRel);
-    const onDiskAfter = namedIn(afterThisRun(root, ideTargets), scriptRel);
-    if (onDiskAfter.length) continue;
+    const after = afterThisRun(root, ideTargets);
+    const onDiskAfter = namedIn(after, scriptRel);
+    if (onDiskAfter.length) {
+      // Kept because something still runs it. A command of the team's own is their choice and is left in
+      // silence; one of OURS that no action reaches — another event, `settings.local.json` — is stuck, and
+      // is named with the way out (review 3).
+      const stuck = onDiskAfter.filter((f) => {
+        try { return commandsIn(JSON.parse(after(f))).some((cmd) => ours.has(cmd) && namesScript(cmd, scriptRel)); } catch { return false; }
+      });
+      if (stuck.length) info(`${scriptRel} stays — ${stuck.join(' and ')} still ${stuck.length > 1 ? 'run' : 'runs'} it through an old yad hook command; change it to the \`node hooks/….mjs\` command yad now writes, then \`yad check --fix\` removes the script`);
+      continue;
+    }
+    const inHead = namedIn(head, scriptRel);
     if (inHead.length) {
-      // The one wait a person ends: committing the rewritten entry. Said, so the second run is not a mystery.
-      info(`${scriptRel} stays until ${inHead.join(' and ')} ${inHead.length > 1 ? 'are' : 'is'} committed with the new hook entry — then \`yad check --fix\` removes it`);
+      // The one wait a person ends: committing the rewritten settings. Said, so the second run is not a mystery.
+      info(`${scriptRel} stays until ${inHead.join(' and ')} ${inHead.length > 1 ? 'are' : 'is'} committed as ${inHead.length > 1 ? 'they now stand' : 'it now stands'} — then \`yad check --fix\` removes it`);
       continue;
     }
     actions.push({
@@ -1223,7 +1242,9 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
         // command still naming the script is one this run did not take out.
         const where = namedIn(onDisk(root), scriptRel);
         if (where.length) {
-          warn(`${scriptRel} kept — ${where.join(', ')} still runs it; point that entry at the Node script beside it, then re-run \`yad check --fix\``);
+          // Reached when a plan's assumption did not hold at apply — e.g. `yad setup`, which does not unwire a
+          // dropped target the way `yad check --fix` does (review 3).
+          warn(`${scriptRel} kept — ${where.join(', ')} still runs it; run \`yad check --fix\`, which rewrites or removes yad's own entries, or point your own entry at the Node script beside it`);
           return;
         }
         fs.rmSync(file, { force: true });

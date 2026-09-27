@@ -398,7 +398,14 @@ test('E113 review 2: our old command where no action reaches it — another even
         cfg.hooks.Stop = [entry];
         fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify(cfg));
       }
-      assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: not planned`);
+      const said = [];
+      const orig = console.log;
+      console.log = (...a) => { said.push(a.join(' ')); };
+      let planned;
+      try { planned = legacyHookScriptActions(T); } finally { console.log = orig; }
+      assert.ok(!planned.some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: not planned`);
+      // Our own old command, which no action reaches, is stuck: say where, and the way out (review 3).
+      assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays — .* still runs it through an old yad hook command/.test(l)), said.join('\n'));
       await fixHooks(T);
       assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.sh')), `${where}: kept`);
       assert.ok(!legacyHookScriptActions(T).some((a) => a.item.startsWith('hooks/yad-capture.sh')), `${where}: still not pending after --fix`);
@@ -419,7 +426,7 @@ test('E113 review 2: a script waiting only on the commit says so', async () => {
     console.log = (...a) => { said.push(a.join(' ')); };
     legacyHookScriptActions(T);
     console.log = orig;
-    assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays until \.claude\/settings\.json and \.cursor\/hooks\.json are committed/.test(l)), said.join('\n'));
+    assert.ok(said.some((l) => /hooks\/yad-capture\.sh stays until \.claude\/settings\.json and \.cursor\/hooks\.json are committed as they now stand/.test(l)), said.join('\n'));
   } finally { console.log = orig; cleanup(T); }
 });
 
