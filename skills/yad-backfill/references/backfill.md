@@ -64,10 +64,28 @@ A change is blocked **only until the features it touches** have approved specs �
 - A feature with **no** `specs/backfill/<feature>/` is not this gate's concern (it is either
   forward-spec'd via `yad-spec`, or not yet being backfilled).
 - Fails closed on an unresolvable base ref, like the other gates.
-- A **moved** file counts at both ends (E114). The changed list is `git diff --no-renames --name-only
+- A **moved** file counts at both ends (E114). The changed list is `git diff --no-renames --raw
   -z`, so `git mv src/<feature>/x.js lib/x.js` still touches `<feature>`; without `--no-renames` git
   named the move by its new path only and the feature was never checked. `-z` and `LC_ALL=C` keep an
   odd file name (a `"`, a tab, bytes that are not UTF-8) from hiding a path.
+- **The spec is read from the base** (E116), never from the PR: which features are being backfilled,
+  and whether each spec says `verified: true`. Read from the PR, a PR could approve itself (set
+  `verified: true` in the same PR) or delete the spec and read as "not being backfilled". So an approval
+  must merge before the change it allows. A spec the PR adds counts once merged. Names are compared as
+  macOS and Windows compare them (ASCII case and the long s `ſ`): `specs/backfill/Billing/spec.md` is
+  `billing`'s spec.
+- **No link where a backfilled feature lives** (E116). The gate reads paths, so a symlink or submodule
+  at `src`, at `src/<feature>` or inside `src/<feature>/` let the code live where no path under `src/`
+  names it, and every later edit to the link's target passed. The tree at HEAD is read on every PR,
+  before the "no src/<feature> changes" PASS, and such a link is refused by name — only for a feature
+  the base is backfilling (a code repo may hold real links elsewhere in `src/`). So is a second spelling
+  of that folder (`Src/`, `src/Billing/` beside `src/billing/`), which is one folder on macOS and
+  Windows but two on Linux CI. **Not a dead end:** a PR that only deletes a link is not a change to the
+  feature, so it passes. A link where the spec lives on the base (`specs/backfill/<feature>` or its
+  `spec.md`) makes that feature unapproved; one at `specs` or `specs/backfill` fails every feature change
+  until a PR puts the real folder back. A path that IS `src/<feature>` (a link, a submodule, or a file
+  where the folder goes) counts as that feature; a top-level `src/*.js` file still does not.
 - This script is never wired by `yad check`; each copy is placed by hand. `yad doctor` warns
   `checks:rename-blind` when a copy at `checks/backfill-check.sh` (in the Product or a connected repo)
-  is an older one that lists a rename by one path.
+  is an older one that lists a rename by one path, and `checks:backfill-blind` when it is older than
+  E116 (it reads the approval from the PR, and does not read the tree for links).

@@ -336,7 +336,8 @@ the **one** locked contract; the contract-check blocks a surface bypass in eithe
 **Backfill existing code:** `yad-backfill` packs one feature with **Repomix** (`npx repomix`, secret-scan
 by default), drafts an *unverified* spec ("describe what exists, do not invent"), a human approves it,
 and `backfill-check.sh` blocks a change to that feature until its spec is approved — gated per touched
-feature, never the whole repo.
+feature, never the whole repo. The approval is read from the base branch, so it merges before the
+change it allows.
 
 Build is walked end to end on the worked epic: story **S01** shipped (`status: shipped`,
 three tasks in `build-log.json`), **S03** built across backend + mobile, and a `health` feature
