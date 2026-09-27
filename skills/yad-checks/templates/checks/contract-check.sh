@@ -635,7 +635,9 @@ while IFS= read -r story; do
     # nothing still defers below (a CI job that does not check the Product out); a PR that only removes
     # a slice passes as before. The other Product-reading gates judge the epic, not the surface, and
     # still defer here — E120. Only when the Product is NOT reached (review 1): one that is reached, with
-    # the epic's folder but no ledger in it, is not "nowhere", and defers below as it always has.
+    # the epic's folder but no ledger in it, is not "nowhere", and defers below as it always has. That
+    # includes a Product this repo keeps, which product_for falls back to when product-repo reaches
+    # nothing: it is read as it stands on the base, so the PR cannot shape it.
     echo "FAIL [contract-check]: ${link} is this repo's first spec — no link.md on ${BASE} names a Product —"
     if [ -n "$product_rel" ]; then
       echo "  and its product-repo '${product_rel}' reaches nothing, so the contract lock cannot be checked."

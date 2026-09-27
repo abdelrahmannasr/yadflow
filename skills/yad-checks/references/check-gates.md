@@ -371,7 +371,10 @@ stripped before the `---` fences are matched, so a CRLF Product reads the same a
 (`core.ignorecase`, a Mac checkout), and in ASCII only. A Product absent from CI still defers with a note, as
 before — with one exception in contract-check (E119): on a repo's **first spec**, where no `link.md` on the
 base names a Product and `product-repo` is the PR's own value, a diff that changes a slice and whose
-`product-repo` reaches nothing **FAILs** by name ("… is this repo's first spec … reaches nothing"). A first
+`product-repo` reaches nothing **FAILs** by name ("… is this repo's first spec …", then "… reaches
+nothing", or "… names no product-repo" when `link.md` has none). A Product that IS reached — checked out, or
+kept in this repo and read from the base — but holds the epic's folder with no ledger in it still defers:
+it is not "nowhere", and the PR cannot shape a base copy. A first
 spec with no slice is unchanged (the surface is read from paths alone), and so is one that only removes a
 slice. **Cost:** a repo whose CI does not check out the Product cannot merge a first spec that carries a
 slice until it does. The other three gates judge the epic, not the surface, and still defer there (E120). `yad doctor` warns `checks:product-path-blind` for an older copy of any of the four.
