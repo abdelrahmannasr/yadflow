@@ -496,6 +496,15 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         `checks/contract-check.sh in ${symlinkBlind.join(', ')} ${symlinkBlind.length > 1 ? 'are older copies that do' : 'is an older copy that does'} not refuse a symlink or submodule under specs/ — a link there hides the contract slice, and every later edit to its target passes`,
         'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise copy skills/yad-checks/templates/checks/contract-check.sh over it');
     }
+    // E116. An older backfill-check reads the spec (and its `verified: true`) from the PR itself, so a PR
+    // can approve itself or delete the spec; and it reads paths only, so a symlink or submodule at `src`,
+    // `src/<feature>` or inside the feature hides every later edit to its target. Never wired: named, not fixed.
+    const backfillBlind = gateRoots.filter((x) => backfillBlindGate(path.join(x.root, 'checks/backfill-check.sh'))).map((x) => x.where);
+    if (backfillBlind.length) {
+      check(checks, 'checks:backfill-blind', 'project', 'warn',
+        `checks/backfill-check.sh in ${backfillBlind.join(', ')} ${backfillBlind.length > 1 ? 'are older copies that read' : 'is an older copy that reads'} the approval from the PR itself and does not refuse a symlink under src/ — a PR can approve its own change, and an edit behind a link passes`,
+        'copy skills/yad-backfill/templates/checks/backfill-check.sh over it — backfill-check is never wired, so `yad check --fix` does not refresh it');
+    }
     // E117. An older Product-reading gate takes link.md's `product-repo` as the PR leaves it, so a PR can
     // point it at nothing (a deferral, a PASS) or at a Product it commits itself. The current four read
     // `product-repo` from the base and a tracked Product from the base commit. Named, not fixed.
@@ -1655,7 +1664,7 @@ export function ownerChecks(checks, root) {
 // `\` goes on to the next, as a hand-edited copy may split `git … \ diff --name-only`; then each line is
 // cut at `&&`, `||`, `;` and `|`, so `fixed && \ blind` is two commands, not one.
 export const RENAME_BLIND_GATES = ['checks/contract-check.sh', 'checks/backfill-check.sh'];
-const renameBlindCommand = (c) => /\bgit\b.*\bdiff\b.*--name-only/.test(c) && !/--no-renames/.test(c);
+const renameBlindCommand = (c) => /\bgit\b.*\bdiff\b.*(--name-only|--raw)/.test(c) && !/--no-renames/.test(c);
 export const renameBlindText = (src) => src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
   .replace(/\\\r?\n/g, ' ').split('\n').some((l) => l.split(/&&|\|\||;|\|/).some(renameBlindCommand));
 export function renameBlindGate(file) {
@@ -1673,6 +1682,17 @@ export function symlinkBlindGate(file) {
   let src;
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return symlinkBlindText(src);
+}
+// E116: a backfill-check that reads the spec from the PR's working tree, or never reads the tree at HEAD
+// for links under src/. Read like the ones above; no older copy ran `git ls-tree` or `git cat-file`.
+export const backfillBlindText = (src) => {
+  const lines = src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n').replace(/\\\r?\n/g, ' ').split('\n');
+  return !lines.some((l) => /\bgit\b.*\bls-tree\b.*\bHEAD\b/.test(l)) || !lines.some((l) => /\bgit\s+cat-file\s/.test(l));
+};
+export function backfillBlindGate(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return backfillBlindText(src);
 }
 // E117: a Product-reading gate that does not read link.md from the base (`git show`) or a tracked Product
 // from the base commit (`git checkout-index`, from a throwaway index). Read like the two above; no older

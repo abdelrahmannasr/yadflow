@@ -25049,6 +25049,37 @@ test('E115 doctor: an older contract-check that never reads specs/ for links is 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E116 doctor: an older backfill-check that reads the approval from the PR is checks:backfill-blind', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, backfillBlindText, renameBlindText } = await import('./doctor.mjs');
+    const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:backfill-blind');
+    const shipped = fs.readFileSync(path.join(ROOT, 'skills/yad-backfill/templates/checks/backfill-check.sh'), 'utf8');
+    const put = (dir, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, 'checks/backfill-check.sh'), text); };
+    assert.deepEqual(blind(), [], 'no copies, nothing to say');
+    put(backend, shipped);
+    put(T, shipped);
+    assert.deepEqual(blind(), [], 'the shipped gate is fine');
+    assert.equal(renameBlindText(shipped), false, 'its --raw list still names a rename by both paths');
+    // Each half alone is blind. (Built from the shipped one, not from history — CI may clone shallow.)
+    for (const [from, to] of [['git ls-tree -r -z --full-tree HEAD', 'true'], ['git cat-file blob', 'cat']]) {
+      const old = shipped.split(from).join(to);
+      assert.notEqual(old, shipped);
+      put(backend, old);
+      const hit = blind();
+      assert.equal(hit.length, 1, from);
+      assert.equal(hit[0].status, 'warn');
+      assert.match(hit[0].message, /^checks\/backfill-check\.sh in backend is an older copy that reads the approval from the PR itself/);
+    }
+    put(T, shipped.split('git cat-file blob').join('cat'));
+    assert.match(blind()[0].message, /^checks\/backfill-check\.sh in the Product, backend are older copies/);
+    // A comment naming the command is not the command.
+    assert.equal(backfillBlindText('# git ls-tree -r HEAD\n# git cat-file blob x\n'), true);
+    // A --raw list without --no-renames is rename-blind too.
+    assert.equal(renameBlindText('x="$(git diff --raw -z main..HEAD)"\n'), true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E117 doctor: an older Product-reading gate that takes product-repo as the PR leaves it is checks:product-path-blind', async () => {
   const { T, backend } = scaffold();
   try {
