@@ -57,17 +57,19 @@ feature: <feature>
 repo: <repo>
 artifact: backfill-spec
 status: draft
-verified: false        # not real until a human approves
+verified: false
 source: repomix         # or "repomix: unavailable" when degraded
 generated: <YYYY-MM-DD>
 ---
 ```
-Mark every uncertain item explicitly (`<!-- unverified: ... -->`); do not fill gaps with invented
-behaviour.
+`verified: false` means the spec is not real until a human approves it. Keep that line free of a `#`
+comment: the gate reads the whole line, so `verified: true   # approved` would not count. Mark every
+uncertain item explicitly (`<!-- unverified: ... -->`); do not fill gaps with invented behaviour.
 
 ### Step 4 — `approve` (human approval — reuse the gate)
 A human reads the draft against the real code and approves it with the same `advance: human` discipline
-as `yad-review-gate` (at least 1 approver who is not the author). On approval set the frontmatter `verified: true` and record
+as `yad-review-gate` (at least 1 approver who is not the author). On approval set the frontmatter line to exactly `verified: true` (lowercase, nothing after it — the
+gate reads it from the base branch, so the approval merges before the change it allows) and record
 the approver(s) + date. Only a `verified: true` backfill spec counts as real.
 
 ### Step 5 — `gate` (block changes per touched feature)
