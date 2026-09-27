@@ -626,6 +626,38 @@ function commitIndexOnly(T, msg, names) {
   git(T, 'commit', '-q', '-m', msg);
 }
 
+test('contract-check gate: a story folder twin spelled with a character APFS folds into ASCII fails (E121)', () => {
+  // The same 13 characters backfill-check folds (E116). Each twin holds no slice — one holding a slice
+  // fails anyway, as not a story ID — so only the second-spelling rule can see it.
+  for (const [story, twin] of [
+    ['EP-kiosk-S01', 'EP-Kiosk-S01'], ['EP-class-S01', 'EP-claß-S01'], ['EP-class-S01', 'EP-claẞ-S01'],
+    ['EP-staff-S01', 'EP-staﬀ-S01'], ['EP-fifo-S01', 'EP-ﬁfo-S01'], ['EP-flat-S01', 'EP-ﬂat-S01'],
+    ['EP-office-S01', 'EP-oﬃce-S01'], ['EP-waffle-S01', 'EP-waﬄe-S01'], ['EP-stop-S01', 'EP-ﬅop-S01'],
+    ['EP-stop-S01', 'EP-ﬆop-S01'], ['EP-sass-S01', 'EP-saſſ-S01'],
+  ]) {
+    const T = scaffoldRepo();
+    commitIndexOnly(T, 'docs: notes', [`specs/${story}/plan.md`, `specs/${twin}/notes.md`]);
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 1, `${twin}:\n${r.out}`);
+    assert.match(r.out, /second spelling/, `${twin}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('contract-check gate: a file name with a newline adds no record to the tree read (E121)', () => {
+  // Split on newlines alone, `x<newline>specs` read as a FILE named specs, and a name spelling a whole
+  // tree record read as a symlink under specs/ — every PR refused, naming a file that is not there.
+  for (const name of ['x\nspecs', 'notes\n120000 blob 0\tspecs/EP-demo-S01/contracts']) {
+    const T = scaffoldRepo();
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: T, input: 'x\n', env: GIT_ENV }).toString().trim();
+    git(T, 'update-index', '--add', '--cacheinfo', `100644,${blob},${name}`);
+    git(T, 'commit', '-q', '-m', 'docs: an odd name');
+    const r = runGate(CONTRACT, T);
+    assert.equal(r.code, 0, `${JSON.stringify(name)}:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 test('contract-check gate: a second spelling of contracts/ or of a story folder fails (E115 review 3)', () => {
   // `specs/<story>/Contracts/` IS `contracts/` on a Mac; the surface rules read exact bytes.
   for (const [names, said] of [

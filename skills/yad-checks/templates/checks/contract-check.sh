@@ -62,19 +62,29 @@ RANGE="${BASE}..HEAD"
 # link under `Specs/` got past a `-- specs` read, and a plain file at `Specs/<story>/contracts/…` was
 # never on the surface below, which is spelled in lowercase. A top folder spelled any other way than
 # `specs` is refused too, once, by its own name. The name printed is everything after the first tab.
-# `tolower` under LC_ALL=C folds ASCII only, so the one other letter the file systems fold into "specs"
-# is mapped by hand: `ſ` (long s, U+017F, bytes 305 277) — APFS reads `ſpecs/` as `specs/`. That is
-# `fold` below.
+# `tolower` under LC_ALL=C folds ASCII only, so every character APFS folds (full case folding, then
+# NFD) into ASCII alone is mapped by hand, as bytes — all 13, from Unicode's own tables, the same list
+# as backfill-check (E121): ß and ẞ into `ss`, ſ into `s` (APFS reads `ſpecs/` as `specs/`), the Kelvin
+# sign into `k`, the ligatures ﬀ ﬁ ﬂ ﬃ ﬄ ﬅ ﬆ into their letters, and the Greek question mark and varia
+# into `;` and `` ` ``. That is `fold` below.
 #
 # The same holds one and two folders down (review 3): `specs/<story>/Contracts/` IS `contracts/` on a
 # Mac, and `specs/EP-x-S01/` and `specs/ep-x-s01/` are one folder there, while every rule below reads
 # exact bytes. So a `contracts` spelled any other way is refused, and so is a second spelling of a
 # story folder — each once, by name. So is a FILE named `specs`, where the folder has to go. `fold`
-# knows ASCII case and the long s only: `EP-démo` beside `EP-DÉMO` (or an NFC/NFD twin) is not caught.
-# That costs a skipped lock check at most — the surface grep takes any story spelling — and refusing
-# every non-ASCII story name would refuse real repos.
-links="$(git ls-tree -r -z --full-tree HEAD | tr '\0' '\n' | awk '
-  function fold(x) { x = tolower(x); gsub(/\305\277/, "s", x); return x }
+# does not know other non-ASCII case or NFC/NFD: `EP-démo` beside `EP-DÉMO` (or an NFC/NFD twin) is not
+# caught here. A twin that holds a slice fails anyway — its folder is not a story ID (E117) — and
+# refusing every non-ASCII story name would refuse real repos.
+#
+# `tr '\n\0' '?\n'`: one record per line, and a newline inside a path becomes `?` (E121, as E116
+# review 2). Split on newlines alone, a file named `x<newline>specs` read as a file named `specs`, and
+# one named like a whole record added a link that was not there — every PR refused, naming the wrong file.
+links="$(git ls-tree -r -z --full-tree HEAD | tr '\n\0' '?\n' | awk '
+  function fold(x) { x = tolower(x)
+    gsub(/\303\237|\341\272\236/, "ss", x); gsub(/\305\277/, "s", x); gsub(/\342\204\252/, "k", x)
+    gsub(/\357\254\200/, "ff", x); gsub(/\357\254\201/, "fi", x); gsub(/\357\254\202/, "fl", x)
+    gsub(/\357\254\203/, "ffi", x); gsub(/\357\254\204/, "ffl", x); gsub(/\357\254\205|\357\254\206/, "st", x)
+    gsub(/\315\276/, ";", x); gsub(/\341\277\257/, "`", x); return x }
   function once(k, msg) { if (!(k in said)) { said[k] = 1; print "  " msg } }
   { t = index($0, "\t"); p = (t ? substr($0, t + 1) : $0); m = (t ? substr($0, 1, t - 1) : ""); lp = fold(p) }
   lp !~ /^specs(\/|$)/ { next }
