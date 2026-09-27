@@ -1175,6 +1175,10 @@ const GUARD_SCRIPTS = new Set(['hooks/ledger-guard.sh', 'hooks/ledger-guard-curs
 // NOT taken out (another event, `settings.local.json`, a file changed since the plan), so the reader acts.
 export function entryAdvice(root, scriptRel) {
   const hub = readJSON(productConfigPath(root), null);
+  // Capture off: no Node capture script is installed, so there is nothing to point at (review 8).
+  if (!GUARD_SCRIPTS.has(scriptRel) && !captureWanted(root)) {
+    return 'remove each entry that runs it — capture is off here (`"capture": false` in the Product config), so no capture hook should run';
+  }
   if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(hub)) {
     return 'point each entry that runs it at the `node hooks/….mjs` command yad now writes, or remove it if that harness should no longer run the hook';
   }
