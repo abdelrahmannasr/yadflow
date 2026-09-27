@@ -207,10 +207,13 @@ local with no error — the verified ledger is purely additive.
 ## The Product-link record (E120)
 Each connected code repo also carries `.sdlc/product-link.json` — the Product's `git_url`, the `path`
 where CI checks the Product out (`.yad/product` by default) and its `default_branch`. It is not written
-here: `yad check --fix` / `yad update` write it (from the Product's own settings) into every connected
-repo, and `--push` commits it to each repo's default branch. The Product-reading gates read it from
+here: `yad setup`, `yad check --fix` and `yad update` write it (from the Product's own settings, with
+any user name or password taken out of `git_url`) into every connected repo, and `--push` commits it
+to each repo's default branch — a record on disk that is not committed is reported as `new` until it
+is. The Product-reading gates read it from
 the base; `checks/product-checkout.sh` uses it with the `YAD_PRODUCT_TOKEN` secret. After connecting a
-repo, run `yad check --fix --push`; `yad doctor` warns `repos:product-link-missing` until it is there.
+repo, run `yad check --fix --push`; `yad doctor` warns `repos:product-link-missing` until it is on
+the repo's default branch.
 
 ## Live on-demand (the third context layer)
 The cached pack + map are the default. When a Shape phase needs an **area** not in the map, it may

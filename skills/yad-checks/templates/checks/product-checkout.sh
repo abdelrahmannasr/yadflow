@@ -70,6 +70,20 @@ case "/${dest}/" in
     echo "FAIL [product-checkout]: ${rec} on ${BASE} says path '${dest}' — it must be a folder inside this repo, such as .yad/product."
     exit 1 ;;
 esac
+# And no symlink on the way (review 1): the text above is only text, and a PR can track `.yad` as a link
+# to `../elsewhere` — git clone follows it, so the clone (with the token) would land where the PR chose.
+_p=""
+_rest="$dest"
+while [ -n "$_rest" ]; do
+  _part="${_rest%%/*}"
+  [ "$_part" = "$_rest" ] && _rest="" || _rest="${_rest#*/}"
+  [ -n "$_part" ] || continue
+  _p="${_p:+$_p/}$_part"
+  if [ -L "$_p" ]; then
+    echo "FAIL [product-checkout]: '${_p}' is a symlink — the Product is not checked out through it. Point path in ${rec} at a real folder."
+    exit 1
+  fi
+done
 if [ -e "$dest" ]; then
   echo "note [product-checkout]: '${dest}' is already there — it is not replaced."
   exit 0
@@ -82,7 +96,7 @@ fi
 # read as the same repo over https; a file:// url (a local test) is cloned as it is.
 case "$url" in
   git@*:*) _h="${url#git@}"; url="https://${_h%%:*}/${_h#*:}" ;;
-  ssh://git@*) _h="${url#ssh://git@}"; url="https://${_h}" ;;
+  ssh://git@*) _h="${url#ssh://git@}"; _hp="${_h%%/*}"; url="https://${_hp%%:*}/${_h#*/}" ;;   # an ssh port is not the https one
   https://*|file://*) ;;
   *) echo "FAIL [product-checkout]: ${rec} on ${BASE} has a git_url git cannot clone over https: '${url}'."; exit 1 ;;
 esac

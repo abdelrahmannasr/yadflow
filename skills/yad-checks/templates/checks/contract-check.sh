@@ -205,7 +205,10 @@ link_val() {
 # is read from the BASE and wins over every link.md — so no gate takes where the Product lives from the
 # PR. A record the PR adds or changes counts once it merges (a note says so). A link.md whose own
 # product-repo reaches a DIFFERENT folder here gets a note; one that reaches nothing (a path on its
-# author's machine) is passed over in silence. With no record on the base, the order above is kept.
+# author's machine) is passed over in silence. When the record's path reaches NOTHING — a developer's
+# own run, where nobody cloned into it — the base's link.md order below is used if IT reaches a folder
+# (still the base's, never the PR's); otherwise the record stands, and the gate defers (review 1).
+# With no record on the base, the order above is kept.
 # Sets product_rel, prod (the folder to read), prod_note and prod_fail (text; the caller prints them).
 _yad_tmp=""
 _arch_key=""
@@ -235,13 +238,7 @@ product_for() {
     if [ -n "$_rec" ]; then _w="changes in this PR"; _s="record"; else _w="is new in this PR"; _s="link.md files"; fi
     prod_note=".sdlc/product-link.json ${_w} — the Product is read from ${BASE}'s ${_s}; the new one counts once it merges."
   fi
-  if [ -n "$_rec" ]; then
-    # Relative to the repo root; link.md values are relative to specs/<story>/, so join it that way.
-    case "$_rec" in /*) _base_rel="$_rec" ;; *) _base_rel="../../$_rec" ;; esac
-    _from=".sdlc/product-link.json"
-  else
-    _base_rel="$(base_product_rel "$_link")"
-  fi
+  _base_rel="$(base_product_rel "$_link")"
   if [ -z "$_base_rel" ]; then
     # A sibling's value. Every link.md sits at specs/<story>/, so a relative value means the same there.
     _sibs="$(git ls-tree -r -z --name-only "$BASE" -- specs 2>/dev/null | tr '\n\0' '?\n' | grep -E '^specs/[^/]+/link\.md$' || true)"
@@ -262,7 +259,15 @@ SIBLINGS
     done
     if [ -z "$_base_rel" ]; then _base_rel="$_first"; _from="$_first_from"; fi
   fi
+  _use_rec=""
   if [ -n "$_rec" ]; then
+    # Relative to the repo root; link.md values are relative to specs/<story>/, so join it that way.
+    case "$_rec" in /*) _rv="$_rec" ;; *) _rv="../../$_rec" ;; esac
+    if [ -d "$(resolve_product "$_rv" "$1")" ] || [ -z "$_base_rel" ] || [ ! -d "$(resolve_product "$_base_rel" "$1")" ]; then
+      _use_rec=1; _base_rel="$_rv"; _from=".sdlc/product-link.json"
+    fi
+  fi
+  if [ -n "$_use_rec" ]; then
     # The record wins. Say so only when this link.md's own value reaches a different folder here.
     _mine="$(resolve_product "$product_rel" "$1")"
     _theirs="$(resolve_product "$_base_rel" "$1")"

@@ -602,6 +602,21 @@ const gitTop = (dir) => {
   return r.ok ? path.resolve(r.stdout.trim()) : '';
 };
 
+// The Product's git_url as a code repo may carry it: no user name or password (review 1). `setup` takes
+// it from `git remote get-url origin`, which can hold a token; the record is committed to every code
+// repo, some of which may be seen by more people than the Product.
+export function publicGitUrl(u) {
+  if (typeof u !== 'string' || !u) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return u; // scp-style ssh (git@host:org/repo) holds no password
+  try {
+    const x = new URL(u);
+    // An ssh user (`git@`) is the login name, not a secret, and the checkout reads the url by it.
+    if (!/^(git\+)?ssh:$/i.test(x.protocol)) x.username = '';
+    x.password = '';
+    return x.toString();
+  } catch { return null; }
+}
+
 // E120. `.sdlc/product-link.json` in a connected code repo: where its Product lives. Generated, not
 // copied from a template, so it is not in the managed ledger. `git_url` and `default_branch` come from
 // the Product's own settings every time; `path` (where CI checks the Product out) is the team's to
@@ -622,9 +637,11 @@ function productLinkAction(root, repo, repoRoot) {
     paths: [PRODUCT_LINK],
   };
   const want = {
-    git_url: typeof hub.git_url === 'string' && hub.git_url ? hub.git_url : null,
+    git_url: publicGitUrl(hub.git_url),
     path: isPlainObject(current) && typeof current.path === 'string' && current.path ? current.path : PRODUCT_LINK_DEFAULT_PATH,
-    default_branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : 'main',
+    // Unknown stays null (review 1): a guessed `main` failed every clone of a Product whose trunk is
+    // `master`; with none, checks/product-checkout.sh clones the remote's own default branch.
+    default_branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : null,
   };
   // A record that does not parse, or is not an object, is someone's: reported and never overwritten by
   // a plain update; `--overwrite-local` saves it beside itself first, like any managed file.
@@ -636,9 +653,13 @@ function productLinkAction(root, repo, repoRoot) {
     };
   }
   const same = current && ['git_url', 'path', 'default_branch'].every((k) => current[k] === want[k]);
+  // Right on disk is not enough: the gates read the record from the default branch, so one that
+  // `yad setup` or a plain `--fix` wrote and nobody committed is still to do — `new`, so `--push` stages
+  // it (review 1). Before, it read `ok` and was never committed.
+  const committed = () => run('git', ['ls-files', '--error-unmatch', '--', PRODUCT_LINK], { cwd: repoRoot }).ok;
   return {
     ...base,
-    status: current === null ? 'missing' : same ? 'ok' : 'outdated',
+    status: current === null ? 'missing' : !same ? 'outdated' : committed() ? 'ok' : 'new',
     apply: () => writeJSON(dest, { ...(current || {}), ...want }),
   };
 }

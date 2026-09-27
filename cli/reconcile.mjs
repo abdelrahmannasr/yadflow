@@ -10,7 +10,7 @@ import {
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
 import { preflightGuardReadiness } from './hubcommit.mjs';
-import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyRepoActions, legacyHubActions,
@@ -135,7 +135,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // `--overwrite-local` replaces it, which still saves the previous content beside it.
   const modified = actions.filter((a) => a.status === 'modified');
   for (const m of modified) {
-    warn(`${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
+    // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
+    warn(m.item === PRODUCT_LINK
+      ? `${m.scope}/${m.item} is not a JSON object — left alone (--overwrite-local saves it and writes a new one)`
+      : `${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
   }
   // A gate-sync fragment is kept like any other edited file — but it also decides which yadflow CI runs.
   // It trusts a committed version only from its own major (`YAD_MAJOR`), and the version stamp is

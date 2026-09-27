@@ -434,6 +434,27 @@ test('contract-check gate: a record the PR adds or changes counts once it merges
   fs.rmSync(U, { recursive: true, force: true });
 });
 
+test('contract-check gate: on a developer\'s machine the base link.md still finds the Product the record cannot (E120 review 1)', () => {
+  // Nobody cloned into .yad/product here, but the base link.md points at the Product beside the repo.
+  // Still the base's value, never the PR's — so the gate checks rather than defers.
+  const A = 'a'.repeat(64);
+  const { T, base } = renameRepo({
+    '.sdlc/product-link.json': productLink('.yad/product'),
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../side', 'contract-lock': `sha256:${'b'.repeat(64)}` }),
+  });
+  checkoutProduct(T, 'side', A);
+  commit(T, 'feat: widen API\n\nContract-Change: yes', { 'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n' });
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 1, `the stale pin is caught, not deferred:\n${r.out}`);
+  assert.match(r.out, /still pins bbbbbbbbbbbb/);
+  // Once the record's folder IS there (CI's checkout), the record wins again.
+  checkoutProduct(T, '.yad/product', 'b'.repeat(64));
+  const r2 = runGate(CONTRACT, T, [base]);
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /hash matches the product lock/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('contract-check gate: a merged record that reaches nothing defers — CI has no Product checkout (E120)', () => {
   // The record is a fact merged on its own, not the PR's choice: no first-spec FAIL.
   const { T, base } = renameRepo({ '.sdlc/product-link.json': productLink('.yad/product') });
@@ -1630,6 +1651,17 @@ test('product-checkout: a path outside the repo, a tracked folder, or a failed c
   assert.equal(tracked.code, 1, tracked.out);
   assert.match(tracked.out, /'prod' holds files this repo tracks/);
   fs.rmSync(T, { recursive: true, force: true });
+  // A symlink on the way (tracked by the PR): the clone would land where the link points (review 1).
+  const { T: L, base: bl } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}`, '.yad/product') });
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-out-'));
+  fs.symlinkSync(out, path.join(L, '.yad'));
+  commit(L, 'chore: a link');
+  const linked = runGate(PRODUCT_CHECKOUT, L, [bl], { YAD_PRODUCT_TOKEN: 't' });
+  assert.equal(linked.code, 1, linked.out);
+  assert.match(linked.out, /'\.yad' is a symlink/);
+  assert.deepEqual(fs.readdirSync(out), []);
+  fs.rmSync(L, { recursive: true, force: true });
+  fs.rmSync(out, { recursive: true, force: true });
   const { T: U, base: b2 } = renameRepo({ '.sdlc/product-link.json': recordFor(`file://${src}-gone`, '.yad/product') });
   const bad = runGate(PRODUCT_CHECKOUT, U, [b2], { YAD_PRODUCT_TOKEN: 't' });
   assert.equal(bad.code, 1, bad.out);

@@ -118,6 +118,11 @@ test('check --fix writes each code repo\'s product-link record, refreshes it, an
   assert.equal(rec.git_url, 'https://github.com/org/product.git');
   assert.equal(rec.path, '.yad/product');
   assert.equal(rec.default_branch, 'trunk');
+  // Written but not committed is still to do: the gates read it from the default branch (review 1).
+  const pending = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.ok(pending.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), pending.out);
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
   const again = await captureConsole(() => reconcile(T, { fix: false }));
   assert.ok(again.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'ok'), again.out);
   // The team moves the checkout and adds a note; the Product's URL changes. Both survive the refresh.
@@ -143,8 +148,11 @@ test('update adds the product-link record to an already-wired repo; a monorepo g
   assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'new'), r.out);
   await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
   assert.ok(fs.existsSync(file));
-  // No git_url on the Product: the record still says where the Product goes, with git_url null.
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).git_url, null);
+  // No git_url and no default_branch on the Product: the record still says where the Product goes, and
+  // guesses neither (a guessed `main` failed every clone of a `master` Product — review 1).
+  const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(rec.git_url, null);
+  assert.equal(rec.default_branch, null);
   fs.rmSync(T, { recursive: true, force: true });
   // A code repo inside the Product's own git repo (a monorepo) is left alone.
   const M = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-test-'));
@@ -158,6 +166,21 @@ test('update adds the product-link record to an already-wired repo; a monorepo g
   fs.rmSync(M, { recursive: true, force: true });
 });
 
+test('the product-link record never carries a user name or password from the Product\'s git_url (E120 review 1)', async () => {
+  const { publicGitUrl } = await import('./plan.mjs');
+  assert.equal(publicGitUrl('https://user:ghp_SECRET@github.com/org/product.git'), 'https://github.com/org/product.git');
+  assert.equal(publicGitUrl('ssh://git:pw@host:2222/org/product.git'), 'ssh://git@host:2222/org/product.git');
+  assert.equal(publicGitUrl('git@github.com:org/product.git'), 'git@github.com:org/product.git');
+  assert.equal(publicGitUrl(''), null);
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ git_url: 'https://user:ghp_SECRET@github.com/org/product.git' }));
+  await captureConsole(() => reconcile(T, { fix: true }));
+  const txt = fs.readFileSync(path.join(backend, '.sdlc/product-link.json'), 'utf8');
+  assert.doesNotMatch(txt, /SECRET|user:/);
+  assert.equal(JSON.parse(txt).git_url, 'https://github.com/org/product.git');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('an unreadable product-link record is left alone, and --overwrite-local saves it first (E120)', async () => {
   const { T, backend } = scaffold();
   await captureConsole(() => reconcile(T, { fix: true }));
@@ -165,6 +188,7 @@ test('an unreadable product-link record is left alone, and --overwrite-local sav
   fs.writeFileSync(file, '{ not json');
   const r = await captureConsole(() => reconcile(T, { fix: true }));
   assert.ok(r.value.items.some((i) => i.item === '.sdlc/product-link.json' && i.status === 'modified'), r.out);
+  assert.match(r.out, /backend\/\.sdlc\/product-link\.json is not a JSON object — left alone/);
   assert.equal(fs.readFileSync(file, 'utf8'), '{ not json');
   await captureConsole(() => reconcile(T, { fix: true, overwriteLocal: true }));
   assert.equal(fs.readFileSync(`${file}.yad-orig`, 'utf8'), '{ not json');
@@ -181,6 +205,9 @@ test('an unreadable product-link record is left alone, and --overwrite-local sav
 test('update installs a template newly added to the wiring of an already-wired repo', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
+  // The product-link record is `new` until committed (E120); an install from before is committed.
+  git(backend, 'add', '.sdlc/product-link.json');
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
   const ledgerPath = path.join(backend, '.sdlc/managed.json');
   const added = ['checks/package-manager.sh', 'checks/install-deps.sh'];
   // Simulate the install a previous release made: the two templates absent, and no record of them.
@@ -25194,7 +25221,11 @@ test('E120 doctor: a gate or workflow that never uses the product-link record is
     const hit = blind();
     assert.equal(hit.length, 1);
     assert.equal(hit[0].status, 'warn');
-    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend, \.github\/workflows\/yad-checks\.yml in backend do not use \.sdlc\/product-link\.json/);
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend never reads \.sdlc\/product-link\.json, so where the Product lives is taken from link\.md; \.github\/workflows\/yad-checks\.yml in backend does not run checks\/product-checkout\.sh, so CI never checks the Product out$/);
+    // A comment naming the script is not a step that runs it.
+    put(backend, 'checks/contract-check.sh', shipped('checks/contract-check.sh'));
+    put(backend, '.github/workflows/yad-checks.yml', '# see checks/product-checkout.sh\njobs: {}\n');
+    assert.match(blind()[0].message, /^\.github\/workflows\/yad-checks\.yml in backend does not run/);
     // A comment naming the file is not a read of it.
     assert.equal(productRecordBlindText('# git show BASE:.sdlc/product-link.json\n'), true);
     assert.equal(productRecordBlindText('git cat-file -e "$1:.sdlc/product-link.json"\n'), false);
@@ -25206,13 +25237,21 @@ test('E120 doctor: a connected code repo with no product-link record is repos:pr
   try {
     const { collectDoctor } = await import('./doctor.mjs');
     const missing = () => collectDoctor(T).checks.filter((x) => x.id === 'repos:product-link-missing');
+    // A repo with no gates is not asked for one: the hint would install its whole wiring (review 1).
+    assert.deepEqual(missing(), []);
+    fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(backend, 'checks/contract-check.sh'), '# a wired gate\n');
     const hit = missing();
     assert.equal(hit.length, 1);
     assert.equal(hit[0].status, 'warn');
-    assert.match(hit[0].message, /^backend has no \.sdlc\/product-link\.json/);
+    assert.match(hit[0].message, /^backend has no \.sdlc\/product-link\.json on the default branch/);
     assert.match(hit[0].hint, /yad check --fix --push/);
+    // On disk but not committed still counts as missing: the gates read it from the default branch.
     fs.mkdirSync(path.join(backend, '.sdlc'), { recursive: true });
     fs.writeFileSync(path.join(backend, '.sdlc/product-link.json'), '{ "git_url": null, "path": ".yad/product", "default_branch": "main" }\n');
+    assert.equal(missing().length, 1);
+    git(backend, 'add', '.sdlc/product-link.json');
+    git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: record');
     assert.deepEqual(missing(), []);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

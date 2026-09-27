@@ -520,30 +520,44 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // E120. An older Product-reading gate never reads `.sdlc/product-link.json`, so it still takes where
     // the Product lives from link.md; and a checks workflow the team changed by hand (which `yad update`
     // keeps) may not run checks/product-checkout.sh, so CI never checks the Product out. Named, not fixed.
-    const recordBlind = [
-      ...gateRoots.flatMap((x) => PRODUCT_PATH_GATES.map((rel) => ({ ...x, rel })))
-        .filter((x) => productRecordBlindGate(path.join(x.root, x.rel))),
-      ...gateRoots.filter((x) => x.where !== 'the Product').flatMap((x) => CHECK_WORKFLOWS.map((rel) => ({ ...x, rel })))
-        .filter((x) => { try { return !/checks\/product-checkout\.sh/.test(fs.readFileSync(path.join(x.root, x.rel), 'utf8')); } catch { return false; } }),
-    ].map((x) => `${x.rel} in ${x.where}`);
-    if (recordBlind.length) {
-      check(checks, 'checks:product-record-blind', 'project', 'warn',
-        `${recordBlind.join(', ')} ${recordBlind.length > 1 ? 'do' : 'does'} not use .sdlc/product-link.json — the gate takes where the Product lives from link.md, or CI never checks the Product out`,
+    const blindGates = gateRoots.flatMap((x) => PRODUCT_PATH_GATES.map((rel) => ({ ...x, rel })))
+      .filter((x) => productRecordBlindGate(path.join(x.root, x.rel)))
+      .map((x) => `${x.rel} in ${x.where}`);
+    // A `#` line naming the script is prose, not a step that runs it (review 1).
+    const blindFlows = gateRoots.filter((x) => x.where !== 'the Product').flatMap((x) => CHECK_WORKFLOWS.map((rel) => ({ ...x, rel })))
+      .filter((x) => {
+        let src;
+        try { src = fs.readFileSync(path.join(x.root, x.rel), 'utf8'); } catch { return false; }
+        return !src.split('\n').some((l) => !/^\s*#/.test(l) && /checks\/product-checkout\.sh/.test(l));
+      })
+      .map((x) => `${x.rel} in ${x.where}`);
+    const said = [
+      ...(blindGates.length ? [`${blindGates.join(', ')} ${blindGates.length > 1 ? 'never read' : 'never reads'} .sdlc/product-link.json, so where the Product lives is taken from link.md`] : []),
+      ...(blindFlows.length ? [`${blindFlows.join(', ')} ${blindFlows.length > 1 ? 'do' : 'does'} not run checks/product-checkout.sh, so CI never checks the Product out`] : []),
+    ];
+    if (said.length) {
+      check(checks, 'checks:product-record-blind', 'project', 'warn', said.join('; '),
         'run `yad check --fix` (it refreshes wired files nobody changed by hand); otherwise copy the shipped gate or workflow over it from skills/yad-checks/templates/');
     }
-    // E120. A connected code repo with no record (and not the Product's own git repo): its gates fall
-    // back to link.md, and CI has nothing to check the Product out from.
+    // E120. A wired code repo (not the Product's own git repo) whose record is not COMMITTED: its gates
+    // fall back to link.md, and CI has nothing to check the Product out from. Committed, not on disk
+    // (review 1): the gates read it from the default branch, and one that setup wrote and nobody
+    // committed looked fine here. Wired only: a repo with no gates has nothing to read it, and the
+    // hint would install its whole wiring.
+    const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
+    const rootTop = top(root);
     const unlinked = registry.repos.filter((r) => r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
-      .filter(({ dir }) => exists(dir) && !exists(path.join(dir, PRODUCT_LINK)))
-      .filter(({ dir }) => {
-        const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
-        const t = top(dir);
-        return t && t !== top(root);
+      .filter(({ dir }) => exists(dir) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
+      .filter(({ dir }) => { const t = top(dir); return t && t !== rootTop; })
+      .filter(({ r, dir }) => {
+        const branch = r.default_branch || 'main';
+        const onRemote = run('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`], { cwd: dir }).ok;
+        return !run('git', ['cat-file', '-e', `${onRemote ? `origin/${branch}` : 'HEAD'}:${PRODUCT_LINK}`], { cwd: dir }).ok;
       })
       .map(({ r }) => r.name);
     if (unlinked.length) {
       check(checks, 'repos:product-link-missing', 'project', 'warn',
-        `${unlinked.join(', ')} ${unlinked.length > 1 ? 'have' : 'has'} no ${PRODUCT_LINK} — the gates there take where the Product lives from link.md, and CI cannot check the Product out`,
+        `${unlinked.join(', ')} ${unlinked.length > 1 ? 'have' : 'has'} no ${PRODUCT_LINK} on the default branch — the gates there take where the Product lives from link.md, and CI cannot check the Product out`,
         'run `yad check --fix --push` from the Product: it writes the record into each connected repo and commits it to the default branch');
     }
   }
