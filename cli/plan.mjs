@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -1102,11 +1102,10 @@ export function gitHookState(root) {
   // A core.hooksPath that names the default folder anyway (some tools set it so) is not a tool's folder.
   // `--path-format` needs git 2.31; an older git fails the call, and the setting is then treated as a tool's.
   const common = run('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
-  // `.native`, because on Windows the JS realpath keeps an 8.3 short name (`C:\Users\RUNNER~1\…`, as the
-  // temp folder often comes back) while git answers with the long one; and Windows compares without case.
-  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
-  const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
-  const isDefault = common.ok && same(real(path.dirname(file)), real(path.resolve(common.stdout, 'hooks')));
+  // The folder is compared through its PARENT, which always exists: `.git/hooks` itself may not (a clone
+  // made with an empty template), and a path that does not exist cannot be resolved to compare.
+  const hooksDir = path.dirname(file);
+  const isDefault = common.ok && path.basename(hooksDir) === 'hooks' && samePath(path.dirname(hooksDir), common.stdout);
   if (hooksPath.ok && hooksPath.stdout && !isDefault) {
     // husky points core.hooksPath at `.husky/_`, a folder it generates; the hook a person edits is the one
     // beside it, `.husky/pre-commit`. Name that one, or the advice sends them to a file husky rewrites.

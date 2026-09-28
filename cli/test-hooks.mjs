@@ -972,3 +972,30 @@ test('E48 review 2: doctor says a hook without its execute bit is skipped by git
     assert.match(changed.hint, /saves the current file/);
   } finally { cleanup(T); }
 });
+
+test('E48 review 5: samePath — one place however it is spelled, a missing path is never the same', async () => {
+  const { samePath } = await import('./lib.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-samepath-'));
+  try {
+    fs.mkdirSync(path.join(T, 'a'));
+    assert.ok(samePath(path.join(T, 'a'), path.join(T, 'a', '..', 'a')));
+    // Git's own spelling of the folder (the long name, forward slashes on Windows) against Node's.
+    git(T, 'init', '-q', '.');
+    const top = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: T, encoding: 'utf8' }).stdout.trim();
+    assert.ok(samePath(path.dirname(top), T), `${top} vs ${T}`);
+    assert.equal(samePath(path.join(T, 'missing'), path.join(T, 'missing')), false);
+    assert.equal(samePath(path.join(T, 'a'), T), false);
+  } finally { cleanup(T); }
+});
+
+test('E48 review 5: core.hooksPath naming the default folder is the default even before .git/hooks exists', async () => {
+  const { gitHookState, gitHookActions } = await import('./plan.mjs');
+  const { T, repo, product } = verifiedRepo();
+  try {
+    fs.rmSync(path.join(repo, '.git/hooks'), { recursive: true, force: true });
+    git(repo, 'config', 'core.hooksPath', '.git/hooks');
+    assert.equal(gitHookState(product).state, 'missing');
+    gitHookActions(product)[0].apply();
+    assert.equal(gitHookState(product).state, 'ok', 'the folder is created with the hook');
+  } finally { cleanup(T); }
+});

@@ -21,7 +21,7 @@
 // Task trailer, no Co-Authored-By (human-owned machine state, not an authored code change).
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, warn, fail, hand, run, pushWithRebase } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } from './lib.mjs';
 import { VERSION } from './manifest.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 
@@ -105,9 +105,9 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
   // pathspecs relative to cwd, so we would stage the connected repo's files into the HUB's index and
   // push them to the HUB's remote, mislabeled. Require the worktree top to BE this root.
   const top = git('rev-parse', '--show-toplevel');
-  const sameRepo = top.ok && (() => {
-    try { return fs.realpathSync(top.stdout) === fs.realpathSync(root); } catch { return false; }
-  })();
+  // `samePath`, not a plain realpath compare: on Windows git's long name and Node's 8.3 short name for the
+  // same folder differed, and the repo was skipped with nothing committed.
+  const sameRepo = top.ok && samePath(top.stdout, root);
   if (!sameRepo) {
     warn(`${label}: not its own git repo (missing/renamed clone?) — skipped (changes left in the working tree)`);
     return { label, committed: false, pushed: false, skipped: true, error: false };
