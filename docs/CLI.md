@@ -34,12 +34,14 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
   where the Product is instead (`the Product is product: cd there`), and `yad setup` refuses to make the
   workspace folder a second Product. The same rule holds for a git repo nested inside the Product's own
   folder (`vendor/lib`): it reaches the Product only if the Product registers it.
-- **`risk-map` and `codeowners`** run inside a registered repo work on that repo; run from the Product,
-  on every registered repo, as before.
+- **`risk-map` and `codeowners`** run inside a registered repo's own checkout work on that repo; run from
+  the Product — or from a worktree or repo nested inside a registered one — on every registered repo, as
+  before.
 - **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in, and
-  reads the Product beside it: run anywhere inside a registered repo without `--repo`, it works at that
-  repo's top and takes its recorded name, platform and default branch. A worktree or a repo nested
-  inside it is another checkout: the command works there, as it did before E80.
+  reads the Product beside it: run in a registered repo without `--repo`, it takes that repo's recorded
+  name, platform and default branch. `open-pr` and `review` do so from any folder inside the repo, and
+  work at its top; `commit` and `ship` run from the repo's top, as before. A worktree or a repo nested
+  inside a registered repo is another checkout: the command works there, as it did before E80.
 - **`--dir` always wins.**
 - **A command that writes the Product** (`update`, `check --fix`, `epic new`, `foundation new`,
   `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`, `docs sync --wire`) refuses a
