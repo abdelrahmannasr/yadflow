@@ -16597,6 +16597,9 @@ test('CLI: `yad epic new` is wired end to end, flags and all', () => {
   // missing from VALUE_FLAGS — the flag would be pushed as a positional and the route would silently
   // fall back to `classic`.
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e17cli-'));
+  // A Product: `epic new` refuses to write into a folder that is not one (E80).
+  fs.mkdirSync(path.join(T, '.sdlc'));
+  fs.writeFileSync(path.join(T, '.sdlc', 'hub.json'), '{}');
   try {
     const r = yadRun(T, 'epic', 'new', 'checkout', '--profile', 'analysis-first', '--type', 'chore', '--json');
     assert.equal(r.code, 0, r.out);
@@ -16667,6 +16670,8 @@ test('CLI: `yad roster` was removed, and says where the people model went instea
 
 test('CLI: `--stub` reaches the command through the arg parser', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e17bcli-'));
+  fs.mkdirSync(path.join(T, '.sdlc'));
+  fs.writeFileSync(path.join(T, '.sdlc', 'hub.json'), '{}'); // a Product (E80)
   try {
     const r = yadRun(T, 'epic', 'new', 'legacy', '--stub', '--json');
     assert.equal(r.code, 0, r.out);
@@ -17222,7 +17227,7 @@ test('yad skill list says which answers are the project\'s and which are the eng
 });
 
 test('CLI: `yad skill` reaches the command through the arg parser', () => {
-  const T = skillProject();
+  const T = skillProject({ '.sdlc/hub.json': {} }); // a Product: `skill bind` refuses any other folder (E80)
   try {
     assert.equal(yadRun(T, 'skill', 'bind', 'stories', 'a', 'b').code, 0);
     const j = JSON.parse(yadRun(T, 'skill', 'list', '--json').out);
@@ -25908,5 +25913,307 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     const noClone = e79Yad(T, fresh, ['join', path.join(remotes, 'missing.git')]);
     assert.equal(noClone.status, 1, 'the Product clone is the one fatal failure');
     assert.equal(e79Yad(T, fresh, ['join', '--upload-pack=x']).status, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E80: .yad-workspace.json — commands work from any repo inside ----------
+// A workspace: product/ (a Product, registered repo ../backend) and backend/ (a git repo), plus the file.
+function e80Workspace(T, { file = true } = {}) {
+  const ws = path.join(T, 'ws');
+  const product = path.join(ws, 'product');
+  const backend = path.join(ws, 'backend');
+  fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(product, '.sdlc', 'hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+  fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: '../backend', platform: 'gitlab', default_branch: 'trunk' }] }));
+  fs.mkdirSync(backend, { recursive: true });
+  e79Git(T, backend, 'init', '-q', '-b', 'trunk');
+  e79Git(T, backend, 'commit', '-q', '--allow-empty', '-m', 'init');
+  if (file) fs.writeFileSync(path.join(ws, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'product' }));
+  return { ws, product, backend };
+}
+
+test('E80: findProduct walks up to a Product or a workspace file, and ignores one inside a git repo', async () => {
+  const { findProduct, readWorkspace } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product, backend } = e80Workspace(T);
+    fs.mkdirSync(path.join(product, 'epics', 'EP-a'), { recursive: true });
+    fs.mkdirSync(path.join(backend, 'src', 'deep'), { recursive: true });
+    assert.deepEqual(findProduct(product), { root: product, via: 'here' });
+    assert.deepEqual(findProduct(path.join(product, 'epics', 'EP-a')), { root: product, via: 'above' });
+    const deep = findProduct(path.join(backend, 'src', 'deep'));
+    assert.deepEqual({ ...deep, repo: deep.repo?.name }, { root: product, via: 'workspace', workspace: ws, repo: 'backend' });
+
+    // Review 1: only a repo the Product REGISTERS finds it. A shared folder (~/Projects) holds other
+    // teams' repos too, and the workspace folder itself is one of the places that must find nothing.
+    const other = path.join(ws, 'globex-backend');
+    fs.mkdirSync(other);
+    e79Git(T, other, 'init', '-q');
+    assert.deepEqual(findProduct(other), { elsewhere: product }, 'an unregistered repo beside the Product');
+    assert.deepEqual(findProduct(ws), { elsewhere: product }, 'the workspace folder itself: named, not used');
+
+    // A link to a registered repo still matches (compared on disk).
+    if (process.platform !== 'win32') {
+      fs.symlinkSync(backend, path.join(ws, 'backend-link'));
+      assert.equal(findProduct(path.join(ws, 'backend-link', 'src')).root, product);
+    }
+
+    // A code repo that commits its own workspace file: not used, and the walk STOPS there, saying why.
+    fs.mkdirSync(path.join(backend, 'fake', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(backend, 'fake', '.sdlc', 'hub.json'), '{}');
+    fs.writeFileSync(path.join(backend, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'fake' }));
+    assert.match(findProduct(path.join(backend, 'src')).problem, /inside a git repo, so it is not used/);
+    fs.rmSync(path.join(backend, '.yad-workspace.json'));
+
+    for (const [rec, re] of [[{ version: 1, product: '../elsewhere' }, /one folder name/], [{ version: 1, product: 'nope' }, /not a Product/], ['{', /cannot be read/], [{ version: 2, product: 'product' }, /version 2, and this yadflow reads version 1/]]) {
+      fs.writeFileSync(path.join(ws, '.yad-workspace.json'), typeof rec === 'string' ? rec : JSON.stringify(rec));
+      assert.match(readWorkspace(ws).problem, re);
+      assert.match(findProduct(backend).problem, re);
+    }
+    assert.equal(findProduct(path.join(T)), null, 'nothing above');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 1: a workspace inside a repo that is itself a Product stops there — never writes to the outer one', async () => {
+  const { findProduct } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const outer = path.join(T, 'outer');
+    fs.mkdirSync(path.join(outer, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(outer, '.sdlc', 'hub.json'), '{}');
+    e79Git(T, outer, 'init', '-q');
+    const { backend } = e80Workspace(outer);
+    assert.match(findProduct(backend).problem, /inside a git repo/, 'not the outer Product');
+    const r = e79Yad(T, backend, ['epic', 'new', 'zz']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!fs.existsSync(path.join(outer, 'epics')), 'nothing written to the outer Product');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80: the workspace file is written only where it belongs — never over another, in a repo, or in home/temp', async () => {
+  const { writeWorkspaceFile, workspaceFileState, hasSiblingRepo, registryEntryFor } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product, backend } = e80Workspace(T, { file: false });
+    assert.equal(hasSiblingRepo(product), true);
+    assert.equal(workspaceFileState(product), 'missing');
+    assert.equal(writeWorkspaceFile(product), 'written');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ws, '.yad-workspace.json'), 'utf8')), { version: 1, product: 'product' });
+    assert.equal(writeWorkspaceFile(product), 'ok');
+    fs.writeFileSync(path.join(ws, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'other' }));
+    assert.match(writeWorkspaceFile(product), /skipped: .* names other\//);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ws, '.yad-workspace.json'), 'utf8')).product, 'other', 'never overwritten');
+
+    // Inside a git repo (a Product nested in someone's repo), and directly in the temp folder.
+    const nested = path.join(backend, 'inner', 'product');
+    fs.mkdirSync(path.join(nested, '.sdlc'), { recursive: true });
+    assert.match(writeWorkspaceFile(nested), /inside a git repo/);
+    assert.ok(!fs.existsSync(path.join(backend, 'inner', '.yad-workspace.json')));
+    assert.match(writeWorkspaceFile(T), /home folder, the temp folder/);
+
+    assert.equal(registryEntryFor(product, backend).meta.name, 'backend');
+    assert.equal(registryEntryFor(product, product), null, 'never the Product itself');
+    assert.equal(registryEntryFor(null, backend), null);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80: from a code repo, Product commands run against the Product and say so; --dir wins; writers refuse elsewhere', () => {
+  const T = e79Tmp();
+  try {
+    const { ws, product, backend } = e80Workspace(T);
+    const r = e79Yad(T, backend, ['epic', 'new', 'demo']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(fs.existsSync(path.join(product, 'epics', 'EP-demo')), 'the epic landed in the Product');
+    assert.ok(!fs.existsSync(path.join(backend, 'epics')), 'not in the code repo');
+    assert.match(r.stderr, /Product: \.\.[\\/]product \(from \.yad-workspace\.json\)/);
+
+    const j = e79Yad(T, path.join(product, 'epics'), ['next', '--json']);
+    assert.equal(j.status, 0, j.stdout + j.stderr);
+    JSON.parse(j.stdout);
+    assert.doesNotMatch(j.stdout, /Product:/, 'the note is never in --json stdout');
+    assert.match(j.stderr, /Product: \.\. \(above this folder\)/);
+
+    // --dir always wins: pointed at the code repo, a writer refuses rather than writing there.
+    const d = e79Yad(T, ws, ['kill', '--reason', 'x', '--dir', backend]);
+    assert.equal(d.status, 1, d.stdout + d.stderr);
+    assert.match(d.stdout + d.stderr, /no Product here .* yad kill writes the Product's files/);
+    assert.ok(!fs.existsSync(path.join(backend, '.sdlc')));
+
+    const plain = path.join(T, 'plain');
+    fs.mkdirSync(plain);
+    for (const args of [['epic', 'new', 'x'], ['update'], ['check', '--fix'], ['skill', 'bind', 'epic', 'yad-epic'], ['dial', 'epic', '--to', 'auto'], ['foundation', 'new'], ['docs', 'sync', '--wire']]) {
+      const w = e79Yad(T, plain, args);
+      assert.equal(w.status, 1, `${args.join(' ')}: ${w.stdout}${w.stderr}`);
+      assert.match(w.stdout + w.stderr, /no Product here/);
+    }
+    assert.deepEqual(fs.readdirSync(plain), [], 'nothing written');
+    assert.equal(e79Yad(T, plain, ['check']).status, 0, 'a read-only command keeps its soft answer');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80: a code-repo command stays on its repo and reads the Product beside it', () => {
+  const T = e79Tmp();
+  try {
+    const { backend } = e80Workspace(T);
+    const r = e79Yad(T, backend, ['review', 'context']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const b = JSON.parse(r.stdout);
+    assert.equal(b.repo, 'backend', 'found in the Product\'s registry by its path');
+    assert.equal(b.platform, 'gitlab', 'the recorded platform — the repo has no remote');
+    assert.equal(b.base, 'trunk', 'the recorded default branch');
+    assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(backend), 'still the repo it ran in');
+
+    // From a folder inside the repo, too — and a repo it cannot match keeps the old answer: no platform
+    // borrowed from the Product (a GitLab repo must never be driven with gh).
+    fs.mkdirSync(path.join(backend, 'src'));
+    const sub = JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout);
+    assert.equal(sub.repo, 'backend');
+    assert.equal(fs.realpathSync(sub.repoRoot), fs.realpathSync(backend), 'worked at the repo\'s own top');
+    const other = path.join(path.dirname(backend), 'unregistered');
+    fs.mkdirSync(other);
+    e79Git(T, other, 'init', '-q');
+    const u = JSON.parse(e79Yad(T, other, ['review', 'context']).stdout);
+    assert.equal(u.repo, null);
+    assert.equal(u.platform, null, 'not the Product\'s github');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 1: a repo reached through a link finds its workspace by the path the shell typed', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, () => {
+  const T = e79Tmp();
+  try {
+    const { ws } = e80Workspace(T);
+    // The repo lives elsewhere; the workspace holds a link to it, and the registry names the link.
+    const real = path.join(T, 'elsewhere', 'api');
+    fs.mkdirSync(real, { recursive: true });
+    e79Git(T, real, 'init', '-q', '-b', 'main');
+    fs.symlinkSync(real, path.join(ws, 'api'));
+    const regFile = path.join(ws, 'product', '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'api', path: '../api', platform: 'gitlab', default_branch: 'develop' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'review', 'context'], { cwd: real, env: { ...e79Env(T), PWD: path.join(ws, 'api') }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(JSON.parse(r.stdout).repo, 'api');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80: yad check reports a missing workspace file, check --fix writes it, doctor says so', () => {
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T, { file: false });
+    const c1 = e79Yad(T, product, ['check', '--json']);
+    assert.equal(JSON.parse(c1.stdout).workspaceFile, 'missing');
+    const d1 = e79Yad(T, product, ['doctor', '--json']);
+    assert.equal(JSON.parse(d1.stdout).checks.find((x) => x.id === 'workspace-file').status, 'warn');
+    const c2 = e79Yad(T, product, ['check', '--fix', '--json']);
+    assert.equal(JSON.parse(c2.stdout).workspaceFile, 'written');
+    assert.ok(fs.existsSync(path.join(ws, '.yad-workspace.json')));
+    const d2 = e79Yad(T, product, ['doctor', '--json']);
+    assert.equal(JSON.parse(d2.stdout).checks.find((x) => x.id === 'workspace-file').status, 'ok');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: from the workspace folder itself, yad names the Product and never lets setup make a second one', () => {
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    const n = e79Yad(T, ws, ['next']);
+    assert.match(n.stdout + n.stderr, /this folder is not in a repo the Product registers — the Product is product: cd there, or pass --dir product/);
+    const s = e79Yad(T, ws, ['setup', '--solo']);
+    assert.equal(s.status, 1, s.stdout + s.stderr);
+    assert.match(s.stdout + s.stderr, /this folder is a workspace — its Product is product/);
+    assert.ok(!fs.existsSync(path.join(ws, '.sdlc')) && !fs.existsSync(path.join(ws, '.git')), 'no second Product');
+    assert.ok(fs.existsSync(path.join(product, '.sdlc', 'hub.json')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: yad init ends by saying where to go next', () => {
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    fs.mkdirSync(path.join(ws, 'api'), { recursive: true });
+    e79Git(T, path.join(ws, 'api'), 'init', '-q');
+    const r = e79Yad(T, ws, ['init', '--solo', '--greenfield', '--ide-targets', '.claude']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /start with: cd product && yad next/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: an unregistered repo nested in the Product\'s folder does not reach it; a registered one does', async () => {
+  const { findProduct } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const vendor = path.join(product, 'vendor', 'lib');
+    fs.mkdirSync(path.join(vendor, 'src'), { recursive: true });
+    e79Git(T, vendor, 'init', '-q');
+    assert.equal(findProduct(path.join(vendor, 'src')), null, 'a repo of its own, not registered');
+    const r = e79Yad(T, vendor, ['epic', 'new', 'zz']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!fs.existsSync(path.join(product, 'epics', 'EP-zz')));
+
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'lib', path: 'vendor/lib' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const found = findProduct(path.join(vendor, 'src'));
+    assert.equal(found.root, product);
+    assert.equal(found.repo.name, 'lib');
+    // A plain subfolder of the Product is not a repo of its own: it reaches the Product as before.
+    fs.mkdirSync(path.join(product, 'notes'));
+    assert.equal(findProduct(path.join(product, 'notes')).root, product);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: a registry path in another letter case matches where the disk ignores case', async (t) => {
+  const { findProduct } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    if (!fs.existsSync(path.join(path.dirname(backend), 'BACKEND'))) { t.skip('this disk tells case apart'); return; }
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [{ name: 'backend', path: '../Backend' }] }));
+    assert.equal(findProduct(backend).repo?.name, 'backend');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: risk-map and codeowners run from a code repo work on that repo, not every registered one', () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    const web = path.join(path.dirname(backend), 'web');
+    fs.mkdirSync(web);
+    e79Git(T, web, 'init', '-q');
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'web', path: '../web' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const here = JSON.parse(e79Yad(T, backend, ['risk-map', '--json']).stdout);
+    assert.deepEqual(here.repos.map((r) => r.name), ['backend']);
+    const all = JSON.parse(e79Yad(T, product, ['risk-map', '--json']).stdout);
+    assert.deepEqual(all.repos.map((r) => r.name).sort(), ['backend', 'web'], 'from the Product: every repo, as before');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 3: a worktree or a repo nested in a registered repo is its own checkout — never swapped for the repo\'s', () => {
+  const T = e79Tmp();
+  try {
+    const { backend } = e80Workspace(T);
+    // A worktree inside the repo (the layout Claude Code uses) on its own branch, and a nested repo.
+    e79Git(T, backend, 'worktree', 'add', '-q', '.claude/worktrees/x', '-b', 'feat/x');
+    const wt = path.join(backend, '.claude', 'worktrees', 'x');
+    const nested = path.join(backend, 'vendor', 'lib');
+    fs.mkdirSync(nested, { recursive: true });
+    e79Git(T, nested, 'init', '-q');
+    for (const dir of [wt, nested]) {
+      const b = JSON.parse(e79Yad(T, dir, ['review', 'context']).stdout);
+      assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(dir), `${dir}: works where it runs`);
+      assert.equal(b.repo, null, 'not backend\'s registry entry');
+    }
+    // From a plain folder inside backend itself, it is backend, worked at its top.
+    fs.mkdirSync(path.join(backend, 'src'));
+    const inRepo = JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout);
+    assert.equal(inRepo.repo, 'backend');
+    assert.equal(fs.realpathSync(inRepo.repoRoot), fs.realpathSync(backend));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

@@ -1960,6 +1960,8 @@ test('yad epic new --parent --inherits through the real command line, and a stra
   const bin = new URL('../bin/yad.mjs', import.meta.url).pathname;
   const T = hub();
   approvedEpic(T, 'EP-checkout');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc', 'hub.json'), '{}'); // a Product: `epic new` writes nowhere else (E80)
   const run = (args) => {
     try { return { out: execFileSync('node', [bin, ...args, '--dir', T], { encoding: 'utf8', stdio: 'pipe' }), code: 0 }; } catch (e) { return { out: String(e.stdout), code: e.status }; }
   };

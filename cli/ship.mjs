@@ -28,7 +28,7 @@ export async function runShip(root, opts = {}) {
   // from the committed subject (the full `<type>: …` form), which the pr-title gate expects — passing
   // the bare --message here would override that with a type-less title and fail the gate.
   const opened = await runOpenPr(root, {
-    repo: opts.repo, platform: opts.platform, base: opts.base,
+    repo: opts.repo, product: opts.product, platform: opts.platform, base: opts.base,
     title: opts.title, task: opts.task,
     risk: opts.risk, contractChange: opts.contractChange,
   });

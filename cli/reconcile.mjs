@@ -18,6 +18,7 @@ import {
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
+import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
@@ -179,10 +180,15 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   log('');
   log(c.dim(`summary: ${counts.missing} missing, ${counts.new} new, ${counts.outdated} outdated, ${counts.modified} modified, ${counts.stale} stale, ${counts.legacy} legacy, ${counts.removed} removed, ${counts.ok} ok`));
 
+  // E80: the workspace file beside the Product, for one whose repos live beside it. Per machine, outside
+  // the Product repo — so never staged by --push. Reported here; written by --fix below.
+  const wsNeeded = exists(productConfigPath(root)) && hasSiblingRepo(root);
+  let workspaceFile = wsNeeded ? workspaceFileState(root) : null;
   if (!fix) {
+    if (workspaceFile === 'missing') info(`no ${WORKSPACE_FILE} beside the Product — \`yad check --fix\` writes it, so yad finds the Product from its code repos`);
     if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
-    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [] };
+    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile };
   }
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
@@ -218,6 +224,11 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       root: ledgerRoot, paths: [MANAGED_LEDGER],
     });
   }
+  if (workspaceFile === 'missing') {
+    workspaceFile = writeWorkspaceFile(root) === 'written' ? 'written' : workspaceFileState(root);
+    // Said with its full path: it is the one file this command writes OUTSIDE the Product.
+    if (workspaceFile === 'written') warn(`wrote ${path.join(path.dirname(path.resolve(root)), WORKSPACE_FILE)} (this machine only) — run from inside a repo this Product registers, yad finds the Product; delete the file to stop that`);
+  }
   applied ? ok(`reconciled ${applied} item(s)`) : info('nothing to fix');
   if (modified.length && !overwriteLocal) {
     warn(`${modified.length} locally modified file(s) left untouched — this update did not reach them`);
@@ -252,5 +263,5 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       },
     });
   }
-  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits };
+  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile };
 }

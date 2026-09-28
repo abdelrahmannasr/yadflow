@@ -19,6 +19,38 @@ no clone needed.
 
 ## Commands
 
+**Where a command runs (E80).** A **workspace** is the folder that holds the Product and the code repos
+side by side. It carries `.yad-workspace.json` — `{ "version": 1, "product": "product" }`, the Product
+folder's name and nothing else (the repo list stays in the Product's `repos.json`). It is per machine:
+`yad new`, `init` and `join` write it, and `yad check --fix` writes it for a Product whose registered
+repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say when it is missing).
+
+- **A Product command** (`next`, `gate`, `epic`, `doctor`, `check`, `update`, …) run anywhere inside
+  the Product, or inside any repo the Product **registers** in `repos.json` (any folder in it; a link
+  to it counts), works on the Product and says so on stderr — `Product: ../product (from
+  .yad-workspace.json)` — never on `--json` stdout. Anywhere else in the workspace — the workspace folder
+  itself, a repo the Product does not register — there is no Product: a workspace can be a shared folder
+  such as `~/Projects`, holding other teams' repos, and those must never reach this Product. yad names
+  where the Product is instead (`the Product is product: cd there`), and `yad setup` refuses to make the
+  workspace folder a second Product. The same rule holds for a git repo nested inside the Product's own
+  folder (`vendor/lib`): it reaches the Product only if the Product registers it.
+- **`risk-map` and `codeowners`** run inside a registered repo's own checkout work on that repo; run from
+  the Product (as before), or from a worktree or repo nested inside a registered one, on every registered
+  repo.
+- **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in.
+  `open-pr`, `review` and `ship`'s PR step also read the Product beside it: run in a registered repo
+  without `--repo`, they take that repo's recorded name, platform and default branch. `open-pr` and
+  `review` do so from any folder inside the repo, and work at its top; `commit` and `ship` run from the
+  repo's top, as before. A worktree or a repo nested inside a registered repo is another checkout: the
+  command works there, as it did before E80.
+- **`--dir` always wins.**
+- **A command that writes the Product** (`update`, `check --fix`, `epic new`, `foundation new`,
+  `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`, `docs sync --wire`) refuses a
+  folder that is not a Product, rather than writing its files into a code repo.
+- A workspace file **inside a git work tree** (a repo could commit one pointing at a folder of its own),
+  in your home or temp folder, or of another `version` is not used: yad stops there and says why, rather
+  than going on up to whatever Product lies above. It is never written there either.
+
 | Command | What it does |
 |---------|--------------|
 | `yad new <name>` | Greenfield front door (E79): makes `<name>/product/`, runs `git init` on branch `main`, then runs `setup` inside it (every setup flag passes through; greenfield unless `--brownfield`). Refuses a name with a separator or a leading `.`/`-`, a folder that is not empty, and a folder inside a git repo. **Creates no remote** — it prints the `gh repo create` / `glab repo create` lines (after the first commit) for you to run. |
