@@ -3597,8 +3597,27 @@ test('ledger-guard: yad commit --manual passes the local hook, and the CI check 
     git(repo, 'push', '-q', 'origin', 'main');
     gitHookActions(repo)[0].apply();
     git(repo, 'checkout', '-q', '-B', 'feature');
+    // Nothing to override: an artifact alone is a person's to commit, so --manual would record a false
+    // override. Refused, and nothing is committed.
+    fs.writeFileSync(path.join(repo, 'epics/EP-x/epic.md'), '# e2\n');
+    git(repo, 'add', '-A');
+    const idle = yad('commit', '--type', 'docs', '-m', 'edit the epic', '--manual', '--reason', 'x');
+    assert.equal(idle.status, 1, idle.stdout + idle.stderr);
+    assert.match(idle.stdout + idle.stderr, /nothing staged here is a file the ledger hook refuses/);
+    git(repo, 'reset', '-q', '--hard');
     fs.writeFileSync(path.join(repo, 'epics/EP-x/.sdlc/state.json'), '{"fixed":true}\n');
     git(repo, 'add', '-A');
+
+    // The --json answer names the override; a reason that starts with `-` goes in as --reason=-….
+    const dry = yad('commit', '--type', 'fix', '-m', 'restore the ledger', '--manual', '--reason=-1 approval lost', '--dry-run', '--json');
+    assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+    const answer = JSON.parse(dry.stdout);
+    assert.equal(answer.manual, true);
+    assert.equal(answer.reason, '-1 approval lost');
+    assert.match(answer.message, /^Ledger-Override: -1 approval lost$/m);
+    // A YAD_HOOK_DISABLE left set in the shell must not hide what there is to override.
+    const skipSet = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'commit', '--type', 'fix', '-m', 'x', '--manual', '--reason', 'x', '--dry-run'], { cwd: repo, env: { ...GIT_ENV, YAD_HOOK_DISABLE: '1', NO_COLOR: '1' }, encoding: 'utf8' });
+    assert.equal(skipSet.status, 0, skipSet.stdout + skipSet.stderr);
 
     const hand = spawnSync('git', ['commit', '-q', '-m', 'hand edit'], { cwd: repo, env: { ...GIT_ENV, YAD_BIN: `"${process.execPath}" "${path.join(ROOT, 'bin/yad.mjs')}"` }, encoding: 'utf8' });
     assert.notEqual(hand.status, 0, 'the hook is live: a hand commit is refused');
@@ -3616,7 +3635,7 @@ test('ledger-guard: yad commit --manual passes the local hook, and the CI check 
     const why = '::warning::restore approvals lost in #12';
     const r = yad('commit', '--type', 'fix', '-m', 'restore the ledger', '--manual', '--reason', why);
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stdout + r.stderr, /the ledger-guard check on the pull request still judges this commit/);
+    assert.match(r.stdout + r.stderr, /the ledger-guard check on the pull request still fails this commit/);
     const msg = String(git(repo, 'log', '-1', '--format=%B'));
     assert.match(msg, new RegExp(`^Ledger-Override: ${why.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
 
@@ -3627,6 +3646,23 @@ test('ledger-guard: yad commit --manual passes the local hook, and the CI check 
     assert.ok(ci.out.split('\n').includes(`  ${sha} Ledger-Override: ${why}`), `the reason is quoted, indented so no line starts with ::\n${ci.out}`);
     assert.doesNotMatch(ci.out, /^::/m);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('ledger-guard: a hand-typed Ledger-Override with a carriage return cannot start a workflow-command line (E49 review 1)', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{"x":1}\n');
+  git(T, 'add', '-A');
+  const msgFile = path.join(T, '.git', 'MSG');
+  fs.writeFileSync(msgFile, 'fix: x\n\nLedger-Override: ok\r::error::pwned\u001b[31m\n');
+  git(T, 'commit', '-q', '--no-verify', '-F', msgFile);
+  const r = runGate(LEDGER_GUARD, T, ['main']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Ledger-Override: ok ::error::pwned /, 'quoted, with every control character a space');
+  assert.ok(!r.out.includes('\r') && !r.out.includes('\u001b'), 'no carriage return or escape reaches the log');
+  assert.doesNotMatch(r.out, /^::/m);
+  assert.match(r.out, /these commits carry a Ledger-Override trailer/, 'the note claims only the trailer it sees');
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('ledger-guard: a failing commit with no override prints no override note (E49)', () => {

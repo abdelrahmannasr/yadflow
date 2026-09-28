@@ -1,14 +1,14 @@
 ---
 name: yad-commit
-description: 'Build helper of the gated SDLC. Commit ONE staged atomic change by the conventions — a Conventional-Commits subject, the fixed trailer order (Task → Contract-Change, plus an OPTIONAL Co-Authored-By), and an atomic-file guard (≤3 files). By default the commit carries NO AI footer: the human git author owns it, and a Co-Authored-By trailer is added ONLY when --ai <id> is explicitly passed (claude|copilot|cursor|coderabbit; default none = human-only). The flag is the sole switch — never add the footer on the AI''s own initiative. Drives the zero-dependency `yad commit` CLI; never auto-advances. Use when the user says "commit this", "commit by convention", or "make an atomic commit".'
+description: 'Build helper of the gated SDLC. Commit ONE staged atomic change by the conventions — a Conventional-Commits subject, the fixed trailer order (Task → Contract-Change → Ledger-Override, plus an OPTIONAL Co-Authored-By), and an atomic-file guard (≤3 files). By default the commit carries NO AI footer: the human git author owns it, and a Co-Authored-By trailer is added ONLY when --ai <id> is explicitly passed (claude|copilot|cursor|coderabbit; default none = human-only). The flag is the sole switch — never add the footer on the AI''s own initiative. Drives the zero-dependency `yad commit` CLI; never auto-advances. Use when the user says "commit this", "commit by convention", or "make an atomic commit".'
 ---
 
 # SDLC — Commit by Convention (Build helper)
 
 **Goal:** Turn ONE staged atomic change into a single commit that satisfies the project conventions
 (`CONTRIBUTING.md` / `config.yaml` `build`): a Conventional-Commits subject, the fixed trailer order
-`Task → Contract-Change → Co-Authored-By` (the footer **off by default** — added only via an explicit
-`--ai`), and the atomic-file guard. This is the standalone commit step — the same engine `yad-implement`
+`Task → Contract-Change → Ledger-Override → Co-Authored-By` (the override only with `--manual`; the footer
+**off by default** — added only via an explicit `--ai`), and the atomic-file guard. This is the standalone commit step — the same engine `yad-implement`
 and `yad-ship` use. It **never auto-advances**; it just commits.
 
 ## Conventions
@@ -44,7 +44,9 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
 - `manual` + `reason` — the ledger override (E49), for a PERSON only. On a verified Product a local
   pre-commit hook refuses a commit that changes a CI-owned file (the gate ledger, the Product index).
   `--manual --reason "<why>"` commits past that hook and records the reason as a `Ledger-Override:`
-  trailer. The `ledger-guard` check on the pull request still fails the commit, and quotes the reason.
+  trailer. It is refused when nothing staged is a file that hook refuses. The `ledger-guard` check on
+  the pull request still fails the commit, and quotes the reason. A reason that starts with `-` is
+  passed as `--reason=-…`.
 
 ## On Activation
 

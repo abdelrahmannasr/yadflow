@@ -700,7 +700,7 @@ test('E48: --staged refuses a hand commit that changes an on-base ledger, and na
     assert.match(r.err, /git restore --staged -- \.sdlc\/index\.json epics\/EP-a\/\.sdlc\/state\.json/);
     assert.match(r.err, /yad gate open EP-a <artifact>/);
     assert.match(r.err, /yad commit --manual --reason "<why>" --type <type> -m "<subject>"/, 'the door (E49)');
-    assert.match(r.err, /check on the pull request still judges it/, 'the door says what it does not open');
+    assert.match(r.err, /check on the pull request still fails it/, 'the door says what it does not open');
   } finally { cleanup(T); }
 });
 
@@ -952,7 +952,7 @@ test('E48 review 2: the agent\'s refusal and the commit refusal say the same thi
   for (const [name, m] of [['agent', agent], ['commit', commit]]) {
     assert.match(m, /yad gate repair EP-a --push/, `${name}: the repair that commits`);
     assert.match(m, /yad commit --manual --reason "<why>"/, `${name}: the door for people (E49)`);
-    assert.match(m, /check on the pull request\s+still judges it/, `${name}: and what it does not open`);
+    assert.match(m, /check on the pull request\s+still fails it/, `${name}: and what it does not open`);
     assert.doesNotMatch(m, /reach the default branch|CI still refuses/, `${name}: the check runs on pull requests only`);
     assert.doesNotMatch(m, /\n\n\n/, `${name}: no double blank line`);
   }

@@ -141,7 +141,8 @@ or the Product index `.sdlc/index.json` — the commit is refused, and the messa
 - the yad command that owns the change (`yad gate open`, `yad gate repair <epic> --push`, or CI at
   merge);
 - the way through, when you have decided the change must land anyway:
-  `yad commit --manual --reason "<why>" --type <type> -m "<subject>"` (E49). It commits past this hook
+  `yad commit --manual --reason "<why>" --type <type> -m "<subject>"` (E49; add `--force` when more
+  than 3 files are staged). It is refused when nothing staged is a file this hook refuses. It commits past this hook
   and records your reason in the commit as a trailer — a `Key: value` line at the end of the commit
   message — `Ledger-Override: <why>`. The `ledger-guard` check on the pull request still judges that
   commit. It still fails it, because anyone can type a trailer, and it prints your reason under the FAIL

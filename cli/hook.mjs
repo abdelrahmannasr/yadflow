@@ -271,7 +271,7 @@ export function seededSlugs(productRoot, hub, runner = run) {
 const PERSON_DOOR = [
   'If a person decides this change must land anyway, they commit it with',
   '`yad commit --manual --reason "<why>"` — their call, not the agent\'s. The check on the pull request',
-  'still judges it.',
+  'still fails it.',
   '',
 ];
 
@@ -447,8 +447,8 @@ export function commitDenyMessage({ hits, top }) {
     'replaces, so this hook cannot tell. Run it as `YAD_HOOK_DISABLE=1 git commit --amend`; the check on the',
     'pull request judges the result against its parent.',
     'To commit anyway, with the reason recorded in the commit (it adds a `Ledger-Override:` line):',
-    '  yad commit --manual --reason "<why>" --type <type> -m "<subject>"',
-    'The check on the pull request still judges it, and quotes the reason when it fails.',
+    '  yad commit --manual --reason "<why>" --type <type> -m "<subject>"   (add --force above 3 files)',
+    'The check on the pull request still fails it; a current `ledger-guard` also quotes the reason.',
     `hub: ${roots.join(', ')}`,
   ].join('\n');
 }
@@ -466,13 +466,20 @@ export const cleanGitRunner = (env = process.env) => {
   const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !REPO_ENV.test(k)));
   return (cmd, args = [], opts = {}) => run(cmd, args, { ...opts, env: clean });
 };
+// What the hook would refuse in the staged commit: `{ root, hits }`, `hits` empty when it would allow.
+// `yad commit --manual` (E49) asks the same question, so an override is only recorded when there is
+// something to override.
+export function stagedLedgerHits({ env = process.env, cwd = process.cwd(), git = gitRaw, runner = cleanGitRunner(env) } = {}) {
+  const staged = stagedLedgerCandidates(cwd, git);
+  if (!staged.paths.length) return { root: staged.root, hits: [] };
+  const verdict = ledgerGuardDecision(staged.paths, { env, runner, payloadCwd: staged.root, all: true });
+  return { root: staged.root, hits: verdict.allow ? [] : verdict.hits };
+}
 export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), git = gitRaw, runner = cleanGitRunner(env) } = {}) {
   if (env.YAD_HOOK_DISABLE) return 0;
-  const staged = stagedLedgerCandidates(cwd, git);
-  if (!staged.paths.length) return 0;
-  const verdict = ledgerGuardDecision(staged.paths, { env, runner, payloadCwd: staged.root, all: true });
-  if (verdict.allow) return 0;
-  console.error(commitDenyMessage({ hits: verdict.hits, top: staged.root }));
+  const { root, hits } = stagedLedgerHits({ env, cwd, git, runner });
+  if (!hits.length) return 0;
+  console.error(commitDenyMessage({ hits, top: root }));
   process.exitCode = 2;
   return 2;
 }

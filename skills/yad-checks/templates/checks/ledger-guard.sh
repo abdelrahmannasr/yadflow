@@ -277,6 +277,9 @@ violations=0
 # failing commit still fails. The reason is quoted under the FAIL so the reviewer sees why it was done.
 # Every quoted line starts with two spaces: a reason is the commit author's text, and a line that
 # began with `::` would be read by GitHub Actions as a workflow command.
+# The indent alone is not enough: the runner also ends a log line at a lone carriage return, so every
+# control character in an author's text (CR, ESC, …) becomes a space before it is printed.
+printable() { LC_ALL=C tr '\000-\011\013-\037\177' ' '; }
 overrides=()
 for sha in $commits; do
   touches_ledger=0
@@ -288,14 +291,14 @@ for sha in $commits; do
     case "$f" in
       .sdlc/index.json)                    # the Product index (E19) — derived, CI-written, never a seed
         touches_ledger=1
-        echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+        echo "  ${sha} (author $(git show -s --format='%an' "$sha" | printable)) → $f"
         ;;
       epics/*/.sdlc/contract-lock.json) ;; # artifact-side — allowed
       epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/product-prs.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
         _slug="${f#epics/}"; _slug="${_slug%%/*}"
         is_seeding "$_slug" && continue      # a new epic's seed — not a mutation of a CI-owned ledger
         touches_ledger=1
-        echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+        echo "  ${sha} (author $(git show -s --format='%an' "$sha" | printable)) → $f"
         ;;
       # The Foundation's ledger (E75) — the same files, in the Product level's own folder, under the fixed
       # id EP-foundation. Matched on the path BELOW `foundation/` with a leading `/` put back, so the
@@ -306,7 +309,7 @@ for sha in $commits; do
           */.sdlc/state.json|*/.sdlc/approvals.json|*/.sdlc/comments.json|*/.sdlc/product-prs.json|*/.sdlc/hub-prs.json|*/reviews/*.md)
             is_seeding "EP-foundation" && continue
             touches_ledger=1
-            echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+            echo "  ${sha} (author $(git show -s --format='%an' "$sha" | printable)) → $f"
             ;;
         esac
         ;;
@@ -316,14 +319,14 @@ for sha in $commits; do
     violations=$((violations + 1))
     while IFS= read -r _why; do
       [ -n "$_why" ] && overrides[${#overrides[@]}]="  ${sha} Ledger-Override: ${_why}"
-    done < <(git show -s --format='%(trailers:key=Ledger-Override,valueonly,unfold)' "$sha" 2>/dev/null || true)
+    done < <(git show -s --format='%(trailers:key=Ledger-Override,valueonly,unfold)' "$sha" 2>/dev/null | printable || true)
   fi
 done
 
 if [ "$violations" -gt 0 ]; then
   echo "FAIL [ledger-guard]: ${violations} commit(s) change CI-owned gate files without a verified gate-bot signature. The ledger is CI-owned — let CI sync the gate; do not commit .sdlc/*.json or reviews/*.md yourself."
   if [ "${#overrides[@]}" -gt 0 ]; then
-    echo "note [ledger-guard]: a person committed past the local hook with \`yad commit --manual\` and gave this reason. It is recorded for the reviewer and does not change the verdict:"
+    echo "note [ledger-guard]: these commits carry a Ledger-Override trailer — the reason a person gave for committing past the local hook (\`yad commit --manual\` writes it). It is quoted for the reviewer and does not change the verdict:"
     printf '%s\n' "${overrides[@]}"
   fi
   # An epic's seed is exempt only while its ledger is off the base ref. Once the first review PR merges

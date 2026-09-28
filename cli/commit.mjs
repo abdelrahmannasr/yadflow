@@ -1,7 +1,7 @@
 // `yad commit` — commit by the SDLC conventions (CONTRIBUTING.md / config.yaml build).
 // Subject is Conventional Commits; trailers are emitted in the fixed order
-// Task -> Contract-Change -> Co-Authored-By. The human git author OWNS the commit; the AI is only a
-// co-author (flagged with --ai, or `none` for human-only). An atomic-commit guard keeps diffs small.
+// Task -> Contract-Change -> Ledger-Override -> Co-Authored-By. The human git author OWNS the commit;
+// the AI is only a co-author (flagged with --ai, or `none` for human-only). An atomic-commit guard keeps diffs small.
 // An explicit --task id is validated against the spec-link gate contract (<story>-T<NN>) so a
 // malformed trailer fails locally rather than after a push.
 //
@@ -17,7 +17,7 @@ import {
   TASK_TRAILER, CONTRACT_CHANGE_TRAILER, LEDGER_OVERRIDE_TRAILER, COAUTHOR_TRAILER, TASK_ID_RE,
   productConfigPath,
 } from './manifest.mjs';
-import { OWNING_COMMIT_ENV } from './hook.mjs';
+import { OWNING_COMMIT_ENV, stagedLedgerHits } from './hook.mjs';
 
 // PURE — unit tested directly. Build the full commit message text.
 export function buildCommitMessage({ type, subject, task, contractChange = false, ai = 'none', body = '', override = null }) {
@@ -63,11 +63,22 @@ export async function runCommit(root, opts = {}) {
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
   // --manual and --reason come as a pair: an override with no reason records nothing, and a reason with
   // no --manual would be silently dropped.
-  if (opts.manual && (opts.reason === undefined || opts.reason === true)) { fail('--manual needs --reason "<why>" — the reason is recorded in the commit as a Ledger-Override trailer'); process.exitCode = 1; return; }
+  if (opts.manual && opts.reason === undefined) { fail('--manual needs --reason "<why>" — the reason is recorded in the commit as a Ledger-Override trailer'); process.exitCode = 1; return; }
   if (!opts.manual && opts.reason !== undefined) { fail('--reason is only for --manual (the ledger override)'); process.exitCode = 1; return; }
 
   const staged = run('git', ['diff', '--cached', '--name-only'], { cwd: root }).stdout.split('\n').filter(Boolean);
   if (!staged.length) { fail('nothing staged — `git add` your atomic change first'); process.exitCode = 1; return; }
+
+  // An override is recorded only when there is something to override: a staged file the Product's
+  // ledger hook refuses. In a code repo, on a local ledger, or for a new epic's seed, nothing is.
+  // Asked without the skip switch: a YAD_HOOK_DISABLE left set in the shell would hide every hit.
+  const hookEnv = { ...process.env };
+  delete hookEnv.YAD_HOOK_DISABLE;
+  if (opts.manual && !stagedLedgerHits({ cwd: root, env: hookEnv }).hits.length) {
+    fail('--manual: nothing staged here is a file the ledger hook refuses (it guards the CI-owned ledger on a verified Product) — commit without --manual and --reason');
+    process.exitCode = 1;
+    return;
+  }
 
   if (staged.length > ATOMIC_FILE_LIMIT && !opts.force) {
     fail(`${staged.length} files staged (atomic guard: ≤${ATOMIC_FILE_LIMIT}). Split the change, or pass --force.`);
@@ -105,7 +116,7 @@ export async function runCommit(root, opts = {}) {
   if (!r.ok) { fail(`git commit failed — ${r.stderr.split('\n')[0] || r.code}`); process.exitCode = 1; return { ...answer, committed: false, dryRun: false }; }
   ok(`committed ${staged.length} file(s)${task ? ` for ${task}` : ''}`);
   if (opts.contractChange) warn('Contract-Change: yes — this routes back to the architecture gate');
-  if (opts.manual) warn('Ledger-Override recorded — the ledger-guard check on the pull request still judges this commit, and fails it if it changes a CI-owned file');
+  if (opts.manual) warn('Ledger-Override recorded — the ledger-guard check on the pull request still fails this commit; the reason is there for the reviewer');
   const sha = run('git', ['rev-parse', 'HEAD'], { cwd: root });
   return { ...answer, committed: true, dryRun: false, commit: sha.ok ? sha.stdout : null };
 }

@@ -173,7 +173,8 @@ build:
   # Commit ownership + per-commit AI co-author (yad-implement installs the .gitmessage template).
   # The human git author OWNS the commit; the assisting AI is recorded per-commit as a Co-Authored-By
   # trailer, chosen by the owner from `ai_coauthor.allowed`. The AI is never the author. `none` is an
-  # explicit human-only choice. Trailer order is Task: -> Contract-Change: (if any) -> Co-Authored-By:.
+  # explicit human-only choice. Trailer order is Task: -> Contract-Change: (if any) ->
+  # Ledger-Override: (only with `yad commit --manual --reason`) -> Co-Authored-By:.
   commit_owner: git_author
   ai_coauthor:
     trailer: "Co-Authored-By"
