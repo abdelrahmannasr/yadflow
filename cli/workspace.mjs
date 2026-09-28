@@ -51,18 +51,22 @@ const isEmptyDir = (dir) => { try { return fs.readdirSync(dir).length === 0; } c
 // Empty, or holding only `.git`: a fresh clone of an empty remote.
 const isBareStart = (dir) => { try { return fs.readdirSync(dir).every((n) => n === '.git'); } catch { return false; } };
 
-// `insideWorkspace` judges the path TEXT. A symlink the Product commits (`evil -> ../../..`) makes
-// `evil/x` read as inside and land outside. So the deepest folder that already exists on the way to
-// the target is resolved on disk, and must still be inside the workspace resolved on disk. Folders made
-// below it are new, so they cannot be links.
-function landsInside(productRoot, target) {
+// `insideWorkspace` and `throughGitDir` judge the path TEXT. A link the Product commits makes the text
+// lie: `evil -> ../../..` carries `evil/x` outside the workspace, and `g -> .git` carries `g/hooks` into
+// git's own storage, where a cloned hook or config runs commands (E79 reviews 1 and 3). So a clone
+// target is refused when any folder on the way to it, below the workspace, is a link — a dangling one
+// too. What is not there yet is made by this clone, so it cannot be a link.
+function throughLink(productRoot, target) {
   const root = path.resolve(productRoot);
-  const workspace = fs.realpathSync(path.dirname(root) === root ? root : path.dirname(root));
-  let probe = target;
-  while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
-  let real;
-  try { real = fs.realpathSync(probe); } catch { return false; }
-  return real === workspace || real.startsWith(workspace + path.sep);
+  const workspace = path.dirname(root) === root ? root : path.dirname(root);
+  let cur = workspace;
+  for (const part of path.relative(workspace, target).split(path.sep).filter(Boolean)) {
+    cur = path.join(cur, part);
+    let st;
+    try { st = fs.lstatSync(cur); } catch { return false; }
+    if (st.isSymbolicLink()) return true;
+  }
+  return false;
 }
 const insideGitRepo = (dir) => run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
 
@@ -111,7 +115,7 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
     if (!insideWorkspace(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'outside the workspace (the Product folder\'s parent) — not cloned' }); continue; }
     // Already there: nothing is written, so where a link of this machine's own points does not matter.
     if (exists(path.join(target, '.git'))) { out.present.push(entry); continue; }
-    if (!landsInside(productRoot, target)) { out.failed.push({ ...entry, reason: 'it reaches outside the workspace through a link — not cloned' }); continue; }
+    if (throughLink(productRoot, target)) { out.failed.push({ ...entry, reason: 'a folder on its path is a link, so where the clone lands is not what the path says — not cloned' }); continue; }
     if (exists(target) && !isEmptyDir(target)) { out.failed.push({ ...entry, reason: 'the folder exists and is not a git repo — move it aside and re-run' }); continue; }
     const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
     if (!url) { out.failed.push({ ...entry, reason: 'no git_url recorded — clone it by hand' }); continue; }

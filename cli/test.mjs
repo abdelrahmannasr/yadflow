@@ -25660,7 +25660,7 @@ test('E79 review 1: a link the Product commits cannot carry a clone outside, and
       { name: 'good', path: '../good', git_url: 'u' },
     ] }, { clone });
     assert.deepEqual(r.failed.map((x) => x.name), ['escape', 'through-file', 'dangling']);
-    assert.match(r.failed[0].reason, /through a link/);
+    assert.match(r.failed[0].reason, /a folder on its path is a link/);
     assert.deepEqual(r.present.map((x) => x.name), ['linked'], 'a repo already there behind this machine\'s own link writes nothing');
     assert.deepEqual(r.cloned.map((x) => x.name), ['good'], 'the bad entries did not stop the good one');
     assert.deepEqual(calls, [path.join(T, 'a', 'ws', 'good')]);
@@ -25689,6 +25689,26 @@ test('E79 review 2: a registry path through a .git folder is never cloned or reg
     const registry = { repos: [] };
     assert.equal(registerRepo(product, registry, { name: 'x', rpath: '../.git' }), null);
     assert.deepEqual(registry.repos, []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E79 review 3: a link the Product commits to .git cannot carry a clone into git\'s own storage', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { cloneMissingRepos } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const product = path.join(T, 'ws', 'product');
+    fs.mkdirSync(path.join(product, '.git', 'hooks'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'ws', 'other', '.git'), { recursive: true });
+    fs.symlinkSync('.git', path.join(product, 'g'));
+    fs.symlinkSync('../other/.git', path.join(product, 'g2'));
+    fs.symlinkSync('../../../outside/newdir', path.join(T, 'ws', 'dangling'));
+    const calls = [];
+    const paths = ['g/hooks/pre-commit', 'g/modules/evil', 'g/hooks-new', 'g2/hooks/x', '../dangling', '../dangling/c'];
+    const r = cloneMissingRepos(product, { repos: paths.map((p, i) => ({ name: `l${i}`, path: p, git_url: 'u' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
+    assert.deepEqual(r.failed.map((x) => x.path), paths);
+    assert.ok(r.failed.every((x) => /a folder on its path is a link/.test(x.reason)), JSON.stringify(r.failed));
+    assert.deepEqual(calls, [], 'git never ran');
+    assert.deepEqual(fs.readdirSync(path.join(product, '.git')).sort(), ['hooks'], 'nothing made inside .git');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
