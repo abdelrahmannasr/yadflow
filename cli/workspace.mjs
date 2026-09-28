@@ -130,15 +130,25 @@ function gitClone(url, target, env, { kind = null } = {}) {
 // (CVE-2023-51385; E81 reviews 6–7). No `%` there: git decodes `%24%28` to `$(` before ssh sees it.
 // Only `http(s)://`, which goes to curl and never to ssh, may carry `%` in its user and password (a
 // login that is an email address, `me%40corp.com@`).
-const HOST = String.raw`(?:[\w-]+(?:\.[\w-]+)*|\[[0-9a-f:.]+\])`;
-const USER = String.raw`[\w.~+-]+`;
-const HTTP_USER = String.raw`[\w.~%+-]+`;
-const NETWORK_URL_RE = new RegExp(String.raw`^(?![^/]*::)(?:https?:\/\/(?:${HTTP_USER}(?::${HTTP_USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|(?:ssh|git|git\+ssh|ssh\+git):\/\/(?:${USER}(?::${USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|${USER}@${HOST}:(?!\/\/)|[\w-]{2,}(?:\.[\w-]+)*:(?!\/\/))`, 'i');
+// Each starts with a letter or digit — never `-`, which ssh would read as an option (git refuses it too).
+const HOST = String.raw`(?:\w[\w-]*(?:\.[\w-]+)*|\[[0-9a-f:.]+\])`;
+const USER = String.raw`\w[\w.~+-]*`;
+const HTTP_USER = String.raw`[\w%][\w.~%+-]*`;
+const NETWORK_URL_RE = new RegExp(String.raw`^(?![^/]*::)(?:https?:\/\/(?:${HTTP_USER}(?::${HTTP_USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|(?:ssh|git|git\+ssh|ssh\+git):\/\/(?:${USER}(?::${USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|${USER}@${HOST}:(?!\/\/)|\w[\w-]+(?:\.[\w-]+)*:(?!\/\/))`, 'i');
+// A control character anywhere in the URL, typed or %-encoded (`%0d`, `%1b`), is refused. git decodes
+// the user, password and path of a `scheme://` URL and writes them to the person's credential helper one
+// `key=value` per line: a carriage return there makes a helper that ends lines on it (Git Credential
+// Manager does) read `host=github.com` and hand that token to the URL's own host (CVE-2024-52006); an
+// escape in the user repaints the terminal in git's password prompt (CVE-2024-50349). git before 2.48.1
+// guards against neither (E81 review 8). `%40` and every other printable escape still pass.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]|%(?:[01][0-9a-f]|7f)/i;
 export const localRemotesAllowed = (env = process.env) => env.YAD_ALLOW_LOCAL_REMOTES === '1';
 const folded = (p) => (process.platform === 'darwin' || process.platform === 'win32' ? p.toLowerCase() : p);
 const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
 // { kind: 'network', url } — the URL as recorded; { kind: 'local', url } — the resolved folder; or null.
 export function cloneSource(productRoot, url, env = process.env) {
+  if (CONTROL_RE.test(url)) return null;
   if (NETWORK_URL_RE.test(url)) return { kind: 'network', url };
   if (!localRemotesAllowed(env) || url.includes('%') || url.includes('::')) return null;
   let p = url;
