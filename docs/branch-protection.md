@@ -122,7 +122,8 @@ protected branch, or the push is refused and the ledger never advances.
 
 ## Other direct pushes yad can make
 
-These commands push straight to the default branch: `yad update --push`, `yad checkpoint --push`,
+These commands push straight to the default branch: `yad update --push` (and `yad check --fix --push`),
+`yad checkpoint --push`,
 `yad tidy up --push`, `yad repo refresh --push` and `yad gate repair --push` — and `yad gate ci` when a
 person runs it instead of CI. With protection on, they need someone who may bypass the rules. Anyone
 else can run them without `--push`, commit on a branch, and open a pull request instead (on a verified
@@ -139,8 +140,9 @@ or the Product index `.sdlc/index.json` — the commit is refused, and the messa
 - every refused file, and the `git restore --staged` line that takes them out of the commit;
 - the yad command that owns the change (`yad gate open`, `yad gate repair <epic> --push`, or CI at
   merge);
-- the way through: `YAD_HOOK_DISABLE=1 git commit …` (in PowerShell, `$env:YAD_HOOK_DISABLE=1` first,
-  then `git commit`). The `ledger-guard` check on the pull request still judges that commit.
+- the way through: `YAD_HOOK_DISABLE=1 git commit …` (in PowerShell, `$env:YAD_HOOK_DISABLE=1`, then
+  `git commit`, then `Remove-Item Env:YAD_HOOK_DISABLE` — the setting lasts for the whole window, and it
+  also turns off the agent hook there). The `ledger-guard` check on the pull request still judges that commit.
 
 It follows the CI check's rules, and where it cannot know the answer it allows. So it lets through a
 new epic's first ledger (its seed), artifacts, the contract lock, a merge commit, and a commit authored
@@ -177,6 +179,8 @@ without it allows everything. Where it and the CI check can differ:
 - **The bot is matched by name.** CI also needs the platform's Verified signature, so a commit that only
   claims the `yad-gate-sync` name passes here and fails there.
 - **The base is your clone's `origin/*` refs**, which may be older than the pull request's base.
+- **A Product in a subfolder of its repo**: CI's check and workflows run from the repo's top, so the pull
+  request may have no ledger check at all, while the hook still refuses.
 - **Two Products in one repo** share one `pre-commit`; each `yad check --fix` rewrites it for its own
   folder.
 
