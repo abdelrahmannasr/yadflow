@@ -262,9 +262,10 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   // Strict: a registry that does not parse (a merge-conflict marker left in it) must be SAID, not read as
   // "no repos" — the joiner would get the Product alone with no hint the list was lost.
   let registry;
-  try { registry = readJSONStrict(path.join(product, PROJECT_FILES.reposRegistry), { repos: [] }) || { repos: [] }; }
-  catch { warn(`${PROJECT_FILES.reposRegistry} in the Product cannot be read (not valid JSON) — nothing to clone; fix it in the Product and re-run`); registry = { repos: [] }; }
-  if (!Array.isArray(registry.repos)) warn(`${PROJECT_FILES.reposRegistry} has no list of repos — nothing to clone; fix it in the Product and re-run`);
+  try { registry = readJSONStrict(path.join(product, PROJECT_FILES.reposRegistry), { repos: [] }); }
+  catch (e) { warn(`${PROJECT_FILES.reposRegistry} in the Product cannot be read (${shown((e.message || '').replace(/^corrupt JSON in \S+: /, ''))}) — nothing to clone; fix it in the Product and re-run`); registry = { repos: [] }; }
+  // `null`, `[]`, `5` parse, and hold no list: said too.
+  if (!Array.isArray(registry?.repos)) warn(`${PROJECT_FILES.reposRegistry} has no list of repos — nothing to clone; fix it in the Product and re-run`);
   const repos = cloneMissingRepos(product, registry);
   for (const r of repos.cloned) ok(`cloned ${r.name} → ${r.path}`);
   for (const r of repos.present) info(`${r.name}: ${r.reason || 'already there'}`);

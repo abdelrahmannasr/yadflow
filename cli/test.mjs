@@ -25891,9 +25891,13 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     assert.match(notProduct.stdout + notProduct.stderr, /not a yad Product/);
     // A registry that does not parse is named, and the per-machine steps still run (E79 review 5).
     fs.writeFileSync(path.join(joined, '.sdlc', 'repos.json'), '<<<<<<< HEAD\n{}\n');
+    fs.rmSync(path.join(joined, '.git', 'hooks', 'pre-commit'));
     const corrupt = e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude']);
     assert.equal(corrupt.status, 0, corrupt.stdout + corrupt.stderr);
-    assert.match(corrupt.stdout + corrupt.stderr, /repos\.json in the Product cannot be read \(not valid JSON\)/);
+    assert.match(corrupt.stdout + corrupt.stderr, /repos\.json in the Product cannot be read \(Unexpected token/);
+    assert.ok(fs.existsSync(path.join(joined, '.git', 'hooks', 'pre-commit')), 'the per-machine steps still ran');
+    fs.writeFileSync(path.join(joined, '.sdlc', 'repos.json'), 'null\n');
+    assert.match((({ stdout, stderr }) => stdout + stderr)(e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude'])), /has no list of repos/, 'a file holding null is said too');
     e79Git(T, joined, 'checkout', '--', '.sdlc/repos.json');
 
     const noClone = e79Yad(T, fresh, ['join', path.join(remotes, 'missing.git')]);
