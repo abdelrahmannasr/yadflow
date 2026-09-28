@@ -1102,8 +1102,11 @@ export function gitHookState(root) {
   // A core.hooksPath that names the default folder anyway (some tools set it so) is not a tool's folder.
   // `--path-format` needs git 2.31; an older git fails the call, and the setting is then treated as a tool's.
   const common = run('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  const isDefault = common.ok && real(path.dirname(file)) === real(path.resolve(common.stdout, 'hooks'));
+  // `.native`, because on Windows the JS realpath keeps an 8.3 short name (`C:\Users\RUNNER~1\…`, as the
+  // temp folder often comes back) while git answers with the long one; and Windows compares without case.
+  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
+  const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const isDefault = common.ok && same(real(path.dirname(file)), real(path.resolve(common.stdout, 'hooks')));
   if (hooksPath.ok && hooksPath.stdout && !isDefault) {
     // husky points core.hooksPath at `.husky/_`, a folder it generates; the hook a person edits is the one
     // beside it, `.husky/pre-commit`. Name that one, or the advice sends them to a file husky rewrites.
