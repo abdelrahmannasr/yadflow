@@ -34,6 +34,9 @@ const isCheckout = (root, repo) => runnable(judgeRepo(root, repo));
 // A registry name inside a command the person is invited to copy: as it is only when it is one plain
 // word that starts with a letter or digit (never an option like `--push`), else `<name>` — the shared file could hold `api; curl …|sh` (E81 review 9).
 const asArg = (name) => (typeof name === 'string' && /^\w[\w.-]*$/.test(name) ? name : '<name>');
+// The same for a registry `default_branch` inside a git command to copy: a valid branch name can hold
+// `;`, `|`, `$(` or start a path part with `-` (E81 review 11), so only a plain one is printed.
+const branchArg = (b) => (typeof b === 'string' && /^\w[\w./-]*$/.test(b) && !b.includes('..') ? b : '<default-branch>');
 
 const MIN_NODE = 18;
 
@@ -657,7 +660,11 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         if (!there) return { name: r.name, branch, offBranch, diskBad, trackedHere, why: shown.ok ? 'unreadable' : 'missing' };
         return { name: r.name, branch, offBranch, why: 'stale' };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      // Everything below prints these (E81 review 11): the registry's name and branch, and the clone's own
+      // branch names, made safe once here — names for prose, the branch for the git commands to copy.
+      .map((u) => ({ ...u, name: forTerminal(u.name), branch: branchArg(u.branch),
+        ...(u.onBranch ? { onBranch: forTerminal(u.onBranch) } : {}), ...(u.offBranch ? { offBranch: forTerminal(u.offBranch) } : {}) }));
     const named = (why) => unlinked.filter((u) => u.why === why).map((u) => u.name);
     const missing = named('missing');
     const unreadable = named('unreadable');
@@ -2181,11 +2188,14 @@ export function riskMapChecks(checks, root) {
     const r = checkRepo(repoRoot);
     if (!r.git) continue;
     const id = `risk-map:${repo.name}`;
+    // Printed (E81 review 11): the name in prose through `shown`, and in a command to copy only as a plain word.
+    const nm = forTerminal(repo.name);
+    const arg = asArg(repo.name);
     if (!r.map) {
-      check(checks, id, 'risk-map', 'ok', `${repo.name}: no ${RISK_MAP_FILE} yet — no directory has a risk level (\`yad risk-map draft ${repo.name}\` starts one)`);
+      check(checks, id, 'risk-map', 'ok', `${nm}: no ${RISK_MAP_FILE} yet — no directory has a risk level (\`yad risk-map draft ${arg}\` starts one)`);
       continue;
     }
-    if (!r.findings.length) { check(checks, id, 'risk-map', 'ok', `${repo.name}: every directory has a confirmed level`); continue; }
+    if (!r.findings.length) { check(checks, id, 'risk-map', 'ok', `${nm}: every directory has a confirmed level`); continue; }
     const groups = [];
     for (const f of r.findings) {
       let g = groups.find((x) => x.code === f.code);
@@ -2196,8 +2206,8 @@ export function riskMapChecks(checks, root) {
       const shown = g.targets.slice(0, 3).join(', ') + (g.targets.length > 3 ? ` +${g.targets.length - 3} more` : '');
       return `${g.code}${shown ? ` (${shown})` : ''}`;
     }).join('; ');
-    check(checks, id, 'risk-map', 'warn', `${repo.name}: ${RISK_MAP_FILE} is out of date — ${said}`,
-      `\`yad risk-map check ${repo.name}\` lists each one; fix the map in ${repo.name} through a PR (advisory — it blocks nothing)`,
+    check(checks, id, 'risk-map', 'warn', `${nm}: ${RISK_MAP_FILE} is out of date — ${said}`,
+      `\`yad risk-map check ${arg}\` lists each one; fix the map in ${nm} through a PR (advisory — it blocks nothing)`,
       { findings: r.findings });
   }
 }
@@ -2217,11 +2227,12 @@ export function codeownersChecks(checks, root) {
     const r = checkCodeowners(repoRoot, { platform: repo.platform || null });
     if (!r.git) continue;
     const id = `codeowners:${repo.name}`;
-    const more = `\`yad codeowners check ${repo.name}\``;
-    if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${repo.name}: CODEOWNERS could not be checked — ${r.unknown}`, more); continue; }
-    if (r.none) { check(checks, id, 'codeowners', 'ok', `${repo.name}: no CODEOWNERS — nothing to check`); continue; }
+    const nm = forTerminal(repo.name);   // printed as in riskMapChecks (E81 review 11)
+    const more = `\`yad codeowners check ${asArg(repo.name)}\``;
+    if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS could not be checked — ${r.unknown}`, more); continue; }
+    if (r.none) { check(checks, id, 'codeowners', 'ok', `${nm}: no CODEOWNERS — nothing to check`); continue; }
     const findings = codeownersFindings(r);
-    if (!findings.length) { check(checks, id, 'codeowners', 'ok', `${repo.name}: every ${r.path} line yad can read matches a file`); continue; }
+    if (!findings.length) { check(checks, id, 'codeowners', 'ok', `${nm}: every ${r.path} line yad can read matches a file`); continue; }
     const lines = (code) => findings.filter((f) => f.code === code).map((f) => f.line);
     const listed = (ns) => ns.slice(0, 3).join(', ') + (ns.length > 3 ? ` +${ns.length - 3} more` : '');
     const said = [];
@@ -2231,8 +2242,8 @@ export function codeownersChecks(checks, root) {
     if (dead.length) said.push(`in ${r.path}, ${dead.length === 1 ? '1 line matches' : `${dead.length} lines match`} no file (line${dead.length === 1 ? '' : 's'} ${listed(dead)})`);
     const unread = lines('not-read');
     if (unread.length) said.push(`in ${r.path}, ${unread.length === 1 ? '1 line' : `${unread.length} lines`} yad could not read (line${unread.length === 1 ? '' : 's'} ${listed(unread)})`);
-    check(checks, id, 'codeowners', 'warn', `${repo.name}: CODEOWNERS may be out of date — ${said.join('; ')}`,
-      `${more} lists each one; fix it in ${repo.name} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`,
+    check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS may be out of date — ${said.join('; ')}`,
+      `${more} lists each one; fix it in ${nm} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`,
       { findings });
   }
 }
@@ -2272,7 +2283,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     const onDisk = repoRoot && isCheckout(root, repo) && gitHead(repoRoot);
     // A name with an `@` is hidden in the id too; its place in repos.json keeps the id one word. Nothing
     // validates a repo's name, so a repo literally named `#1` could take the same id — it only labels a line.
-    emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, repo.name, {
+    emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, forTerminal(repo.name), {
       platform: repo.platform || null,
       gitUrl: (typeof repo.git_url === 'string' && repo.git_url) || (onDisk ? origin(repoRoot) : null),
       branch: typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null,
