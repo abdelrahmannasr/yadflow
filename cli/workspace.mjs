@@ -104,7 +104,9 @@ const cloneEnv = () => (process.env.SDLC_NONINTERACTIVE ? { ...process.env, GIT_
 // Returns { cloned, present, failed }, each a list of { name, path, reason? }.
 export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env = cloneEnv() } = {}) {
   const out = { cloned: [], present: [], failed: [] };
-  for (const repo of registry?.repos || []) {
+  // A `repos` that is not a list (`{}`, `5`) is a broken shared file: nothing to clone, and the caller
+  // says so — the per-machine steps still run.
+  for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
     const name = shown(repo?.name || '(unnamed)');
     const rpath = typeof repo?.path === 'string' ? repo.path : '';
     const entry = { name, path: shown(rpath) };
@@ -114,6 +116,8 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
     if (throughGitDir(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'it runs through a .git folder — git\'s own storage, never a code repo; not cloned' }); continue; }
     if (!insideWorkspace(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'outside the workspace (the Product folder\'s parent) — not cloned' }); continue; }
     // Already there: nothing is written, so where a link of this machine's own points does not matter.
+    // "Present" is only ever a skip — anything that later fetches or pulls in a present repo (E81) must
+    // run `throughLink` and `insideWorkspace` on it first.
     if (exists(path.join(target, '.git'))) { out.present.push(entry); continue; }
     if (throughLink(productRoot, target)) { out.failed.push({ ...entry, reason: 'a folder on its path is a link, so where the clone lands is not what the path says — not cloned' }); continue; }
     if (exists(target) && !isEmptyDir(target)) { out.failed.push({ ...entry, reason: 'the folder exists and is not a git repo — move it aside and re-run' }); continue; }
@@ -256,6 +260,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   if (!exists(productConfigPath(product))) return refuse(`${path.join(wsName, PRODUCT_DIR)}/ has no .sdlc/hub.json — that repo is not a yad Product`);
 
   const registry = readJSON(path.join(product, PROJECT_FILES.reposRegistry), { repos: [] }) || { repos: [] };
+  if (!Array.isArray(registry.repos)) warn(`${PROJECT_FILES.reposRegistry} has no list of repos — nothing to clone; fix it in the Product and re-run`);
   const repos = cloneMissingRepos(product, registry);
   for (const r of repos.cloned) ok(`cloned ${r.name} → ${r.path}`);
   for (const r of repos.present) info(`${r.name}: ${r.reason || 'already there'}`);

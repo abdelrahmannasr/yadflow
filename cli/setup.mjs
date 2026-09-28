@@ -100,7 +100,10 @@ export function throughGitDir(root, rpath) {
   const parent = path.dirname(projectRoot);
   const workspace = parent === projectRoot ? projectRoot : parent;
   const parts = path.relative(workspace, path.resolve(projectRoot, rpath)).split(/[\\/]+/);
-  return parts.some((p) => /^\.git$/i.test(p) || /^git~\d+$/i.test(p));
+  // Windows also drops trailing dots and spaces from a name and reads `name:stream` as `name`, so
+  // `.git.`, `.git ` and `.git::$INDEX_ALLOCATION` are all `.git` there — judged as git itself does.
+  const ntfs = (p) => p.split(':')[0].replace(/[. ]+$/, '');
+  return parts.some((p) => /^\.git$/i.test(ntfs(p)) || /^git~\d+$/i.test(ntfs(p)));
 }
 
 // Build the hub.json object for a (re)configure write: the fields this run collected, laid over the

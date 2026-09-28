@@ -25675,7 +25675,9 @@ test('E79 review 2: a registry path through a .git folder is never cloned or reg
   try {
     const product = path.join(T, 'ws', 'product');
     fs.mkdirSync(path.join(product, '.git'), { recursive: true });
-    const bad = ['../.git', '../x/.git', '.git/hooks', '.git/objects/info', '.GIT/x', '../Git~1', '../docs/.Git/hooks'];
+    const bad = ['../.git', '../x/.git', '.git/hooks', '.git/objects/info', '.GIT/x', '../Git~1', '../docs/.Git/hooks',
+      // What Windows reads as `.git` (E79 review 4): trailing dots and spaces dropped, a `:stream` cut off.
+      '../.git.', '../.git ', '../.git::$INDEX_ALLOCATION/x'];
     for (const p of bad) {
       assert.ok(throughGitDir(product, p), p);
       assert.ok(!insideWorkspace(product, p), `${p}: the check setup and doctor share refuses it too`);
@@ -25710,6 +25712,13 @@ test('E79 review 3: a link the Product commits to .git cannot carry a clone into
     assert.deepEqual(calls, [], 'git never ran');
     assert.deepEqual(fs.readdirSync(path.join(product, '.git')).sort(), ['hooks'], 'nothing made inside .git');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E79 review 4: a registry whose repos is not a list clones nothing and does not throw', async () => {
+  const { cloneMissingRepos } = await import('./workspace.mjs');
+  for (const repos of [{}, 5, 'x', null]) {
+    assert.deepEqual(cloneMissingRepos(os.tmpdir(), { repos }, { clone: () => assert.fail('no clone') }), { cloned: [], present: [], failed: [] }, JSON.stringify(repos));
+  }
 });
 
 test('E79 review 2: with --dir, the printed cd lines are relative to where yad ran', () => {
