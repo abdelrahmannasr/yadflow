@@ -284,8 +284,10 @@ violations=0
 # E49: `yad commit --manual --reason` records why a person committed past the local ledger hook, as a
 # `Ledger-Override:` trailer. Anyone can type a trailer, so it changes NOTHING about the verdict — the
 # failing commit still fails. The reason is quoted under the FAIL so the reviewer sees why it was done.
-# Every quoted line starts with two spaces and goes through `printable` (above): a reason is the commit
-# author's text, and a line that began with `::` would be read by GitHub Actions as a workflow command.
+# Every quoted line goes through `printable` (above) and starts with the commit's sha: a reason is the
+# commit author's text, and a line whose first non-blank characters were `::` would be read by GitHub
+# Actions as a workflow command. Indenting alone would not stop that — the runner skips leading spaces —
+# so every line that prints author text starts with text of ours (the sha, `note [ledger-guard]:`).
 overrides=()
 for sha in $commits; do
   touches_ledger=0

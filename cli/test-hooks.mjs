@@ -981,6 +981,21 @@ test('E49 review 2: the door works from a Product in a subfolder of its repo —
   } finally { cleanup(T); }
 });
 
+test('E49 review 3: without --manual, yad commit and yad ship from a subfolder refuse before committing anything', () => {
+  const { T, repo, product } = verifiedRepo({ sub: 'product' });
+  try {
+    edit(product, 'epics/EP-a/epic.md', '# a\n');
+    git(product, 'add', '-A');
+    const before = git(repo, 'rev-parse', 'HEAD').trim();
+    for (const verb of ['commit', 'ship']) {
+      const r = spawnSync(process.execPath, [YAD, verb, '--type', 'docs', '-m', 'edit the epic'], { cwd: product, encoding: 'utf8', env: gitEnv({ NO_COLOR: '1' }), timeout: 30_000 });
+      assert.notEqual(r.status, 0, `${verb}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stdout + r.stderr, /not a git repo/);
+      assert.equal(git(repo, 'rev-parse', 'HEAD').trim(), before, `${verb}: nothing committed`);
+    }
+  } finally { cleanup(T); }
+});
+
 test('E49: yad ship refuses --manual and --reason rather than ignoring them', () => {
   for (const flags of [['--manual', '--reason', 'x'], ['--manual'], ['--reason', 'x']]) {
     const r = spawnSync(process.execPath, [YAD, 'ship', '--type', 'fix', '-m', 'x', ...flags], { cwd: os.tmpdir(), encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });

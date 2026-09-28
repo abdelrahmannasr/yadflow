@@ -60,9 +60,12 @@ export function taskFromBranch(branch = '') {
 
 export async function runCommit(root, opts = {}) {
   log(c.bold('\nyad commit'));
-  // Any folder inside the work tree, not only its top: a Product can be a subfolder of its repo, and the
-  // ledger refusal sends the person to this command from there.
-  if (!run('git', ['rev-parse', '--show-toplevel'], { cwd: root }).ok) { fail('not a git repo'); process.exitCode = 1; return; }
+  // The repo's top, like every other yad command that commits — except the ledger door: a Product can be a
+  // subfolder of its repo, and the hook's refusal sends the person to `--manual` from there. Only there,
+  // because `--manual` also needs a staged file that hook refuses, so it cannot commit into a parent repo
+  // by accident; and `yad ship` (whose open-pr step needs the top) refuses `--manual`.
+  const inRepo = exists(path.join(root, '.git')) || (opts.manual && run('git', ['rev-parse', '--show-toplevel'], { cwd: root }).ok);
+  if (!inRepo) { fail('not a git repo'); process.exitCode = 1; return; }
   // --manual and --reason come as a pair: an override with no reason records nothing, and a reason with
   // no --manual would be silently dropped.
   if (opts.manual && opts.reason === undefined) { fail('--manual needs --reason "<why>" — the reason is recorded in the commit as a Ledger-Override trailer'); process.exitCode = 1; return; }

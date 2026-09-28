@@ -3643,8 +3643,8 @@ test('ledger-guard: yad commit --manual passes the local hook, and the CI check 
     assert.equal(ci.code, 1, `the trailer changes nothing about the verdict\n${ci.out}`);
     assert.match(ci.out, /FAIL \[ledger-guard\]/);
     const sha = String(git(repo, 'rev-parse', 'HEAD')).trim();
-    assert.ok(ci.out.split('\n').includes(`  ${sha} Ledger-Override: ${why}`), `the reason is quoted, indented so no line starts with ::\n${ci.out}`);
-    assert.doesNotMatch(ci.out, /^::/m);
+    assert.ok(ci.out.split('\n').includes(`  ${sha} Ledger-Override: ${why}`), `the reason is quoted after the sha, so no line starts with ::\n${ci.out}`);
+    assert.doesNotMatch(ci.out, /^\s*::/m, 'the runner skips leading spaces');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -3660,7 +3660,7 @@ test('ledger-guard: a hand-typed Ledger-Override with a carriage return cannot s
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Ledger-Override: ok ::error::pwned /, 'quoted, with every control character a space');
   assert.ok(!r.out.includes('\r') && !r.out.includes('\u001b'), 'no carriage return or escape reaches the log');
-  assert.doesNotMatch(r.out, /^::/m);
+  assert.doesNotMatch(r.out, /^\s*::/m, 'the runner skips leading spaces');
   assert.match(r.out, /these commits carry a Ledger-Override trailer/, 'the note claims only the trailer it sees');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -3678,7 +3678,7 @@ test('ledger-guard: a carriage return or newline in a PATH cannot start a workfl
   const r = runGate(LEDGER_GUARD, T, ['main']);
   assert.equal(r.code, 1, r.out);
   assert.ok(!r.out.includes('\r'), `no carriage return reaches the log\n${r.out}`);
-  assert.doesNotMatch(r.out, /^::/m);
+  assert.doesNotMatch(r.out, /^\s*::/m, 'the runner skips leading spaces');
   assert.match(r.out, /reviews\/a ::warning::pwn\.md/);
   assert.match(r.out, /reviews\/b ::error::pwn\.md/);
   assert.match(r.out, /epics\/EP-n ::notice::pwn has no ledger/);
