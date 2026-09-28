@@ -25942,20 +25942,50 @@ test('E80: findProduct walks up to a Product or a workspace file, and ignores on
     assert.deepEqual(findProduct(product), { root: product, via: 'here' });
     assert.deepEqual(findProduct(path.join(product, 'epics', 'EP-a')), { root: product, via: 'above' });
     assert.deepEqual(findProduct(path.join(backend, 'src', 'deep')), { root: product, via: 'workspace', workspace: ws });
-    assert.deepEqual(findProduct(ws), { root: product, via: 'workspace', workspace: ws });
 
-    // A code repo that commits its own workspace file is not trusted: it is inside a git work tree.
+    // Review 1: only a repo the Product REGISTERS finds it. A shared folder (~/Projects) holds other
+    // teams' repos too, and the workspace folder itself is one of the places that must find nothing.
+    const other = path.join(ws, 'globex-backend');
+    fs.mkdirSync(other);
+    e79Git(T, other, 'init', '-q');
+    assert.equal(findProduct(other), null, 'an unregistered repo beside the Product');
+    assert.equal(findProduct(ws), null, 'the workspace folder itself');
+
+    // A link to a registered repo still matches (compared on disk).
+    if (process.platform !== 'win32') {
+      fs.symlinkSync(backend, path.join(ws, 'backend-link'));
+      assert.equal(findProduct(path.join(ws, 'backend-link', 'src')).root, product);
+    }
+
+    // A code repo that commits its own workspace file: not used, and the walk STOPS there, saying why.
     fs.mkdirSync(path.join(backend, 'fake', '.sdlc'), { recursive: true });
     fs.writeFileSync(path.join(backend, 'fake', '.sdlc', 'hub.json'), '{}');
     fs.writeFileSync(path.join(backend, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'fake' }));
-    assert.equal(findProduct(path.join(backend, 'src')).root, product, 'the one in the repo is skipped');
+    assert.match(findProduct(path.join(backend, 'src')).problem, /inside a git repo, so it is not used/);
+    fs.rmSync(path.join(backend, '.yad-workspace.json'));
 
-    for (const [rec, re] of [[{ product: '../elsewhere' }, /one folder name/], [{ product: 'nope' }, /not a Product/], ['{', /cannot be read/]]) {
+    for (const [rec, re] of [[{ version: 1, product: '../elsewhere' }, /one folder name/], [{ version: 1, product: 'nope' }, /not a Product/], ['{', /cannot be read/], [{ version: 2, product: 'product' }, /version 2, and this yadflow reads version 1/]]) {
       fs.writeFileSync(path.join(ws, '.yad-workspace.json'), typeof rec === 'string' ? rec : JSON.stringify(rec));
       assert.match(readWorkspace(ws).problem, re);
       assert.match(findProduct(backend).problem, re);
     }
     assert.equal(findProduct(path.join(T)), null, 'nothing above');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 1: a workspace inside a repo that is itself a Product stops there — never writes to the outer one', async () => {
+  const { findProduct } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const outer = path.join(T, 'outer');
+    fs.mkdirSync(path.join(outer, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(outer, '.sdlc', 'hub.json'), '{}');
+    e79Git(T, outer, 'init', '-q');
+    const { backend } = e80Workspace(outer);
+    assert.match(findProduct(backend).problem, /inside a git repo/, 'not the outer Product');
+    const r = e79Yad(T, backend, ['epic', 'new', 'zz']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!fs.existsSync(path.join(outer, 'epics')), 'nothing written to the outer Product');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -26010,7 +26040,7 @@ test('E80: from a code repo, Product commands run against the Product and say so
 
     const plain = path.join(T, 'plain');
     fs.mkdirSync(plain);
-    for (const args of [['epic', 'new', 'x'], ['update'], ['check', '--fix'], ['skill', 'bind', 'epic', 'yad-epic'], ['dial', 'epic', '--to', 'auto'], ['foundation', 'new']]) {
+    for (const args of [['epic', 'new', 'x'], ['update'], ['check', '--fix'], ['skill', 'bind', 'epic', 'yad-epic'], ['dial', 'epic', '--to', 'auto'], ['foundation', 'new'], ['docs', 'sync', '--wire']]) {
       const w = e79Yad(T, plain, args);
       assert.equal(w.status, 1, `${args.join(' ')}: ${w.stdout}${w.stderr}`);
       assert.match(w.stdout + w.stderr, /no Product here/);
@@ -26031,6 +26061,36 @@ test('E80: a code-repo command stays on its repo and reads the Product beside it
     assert.equal(b.platform, 'gitlab', 'the recorded platform — the repo has no remote');
     assert.equal(b.base, 'trunk', 'the recorded default branch');
     assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(backend), 'still the repo it ran in');
+
+    // From a folder inside the repo, too — and a repo it cannot match keeps the old answer: no platform
+    // borrowed from the Product (a GitLab repo must never be driven with gh).
+    fs.mkdirSync(path.join(backend, 'src'));
+    assert.equal(JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout).repo, 'backend');
+    const other = path.join(path.dirname(backend), 'unregistered');
+    fs.mkdirSync(other);
+    e79Git(T, other, 'init', '-q');
+    const u = JSON.parse(e79Yad(T, other, ['review', 'context']).stdout);
+    assert.equal(u.repo, null);
+    assert.equal(u.platform, null, 'not the Product\'s github');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 1: a repo reached through a link finds its workspace by the path the shell typed', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, () => {
+  const T = e79Tmp();
+  try {
+    const { ws } = e80Workspace(T);
+    // The repo lives elsewhere; the workspace holds a link to it, and the registry names the link.
+    const real = path.join(T, 'elsewhere', 'api');
+    fs.mkdirSync(real, { recursive: true });
+    e79Git(T, real, 'init', '-q', '-b', 'main');
+    fs.symlinkSync(real, path.join(ws, 'api'));
+    const regFile = path.join(ws, 'product', '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'api', path: '../api', platform: 'gitlab', default_branch: 'develop' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'review', 'context'], { cwd: real, env: { ...e79Env(T), PWD: path.join(ws, 'api') }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(JSON.parse(r.stdout).repo, 'api');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

@@ -26,17 +26,21 @@ folder's name and nothing else (the repo list stays in the Product's `repos.json
 repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say when it is missing).
 
 - **A Product command** (`next`, `gate`, `epic`, `doctor`, `check`, `update`, …) run anywhere inside
-  the Product, or in any repo of its workspace, works on the Product and says so on stderr —
-  `Product: ../product (from .yad-workspace.json)` — never on `--json` stdout.
+  the Product, or inside any repo the Product **registers** in `repos.json` (any folder in it; a link
+  to it counts), works on the Product and says so on stderr — `Product: ../product (from
+  .yad-workspace.json)` — never on `--json` stdout. Anywhere else in the workspace — the workspace folder
+  itself, a repo the Product does not register — there is no Product: a workspace can be a shared folder
+  such as `~/Projects`, holding other teams' repos, and those must never reach this Product.
 - **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in, and
-  reads the Product beside it: run from a registered repo without `--repo`, it takes that repo's
+  reads the Product beside it: run inside a registered repo without `--repo`, it takes that repo's
   recorded name, platform and default branch.
 - **`--dir` always wins.**
 - **A command that writes the Product** (`update`, `check --fix`, `epic new`, `foundation new`,
-  `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`) refuses a folder that is not a Product, rather
-  than writing its files into a code repo.
-- The workspace file is **ignored inside a git work tree** (a repo could commit one pointing at a folder
-  of its own) and in your home or temp folder, and never written there.
+  `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`, `docs sync --wire`) refuses a
+  folder that is not a Product, rather than writing its files into a code repo.
+- A workspace file **inside a git work tree** (a repo could commit one pointing at a folder of its own),
+  in your home or temp folder, or of another `version` is not used: yad stops there and says why, rather
+  than going on up to whatever Product lies above. It is never written there either.
 
 | Command | What it does |
 |---------|--------------|

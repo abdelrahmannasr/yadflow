@@ -11,14 +11,20 @@
 //   - a folder that is a Product (it has `.sdlc/hub.json` or `.sdlc/product.json`) — so any subfolder of
 //     the Product finds it;
 //   - a folder holding `.yad-workspace.json` — its `product` names the Product folder beside the repos.
+//     It is used ONLY when `start` is inside a repo that Product registers in its `repos.json`. A
+//     workspace can be a shared folder (`~/Projects`, holding many teams' repos — setup always allowed
+//     that), and a file there must not send an unrelated repo's `yad epic new` or `yad kill` to this
+//     Product (E80 review 1). Anywhere else in the workspace there is no Product.
 //
 // The workspace file is per machine: the workspace folder is not a git repo (`yad new`, `init` and `join`
-// refuse to make one inside a repo). So a `.yad-workspace.json` found INSIDE a git work tree is ignored:
-// a code repo could commit one, pointing yad at a Product folder of its own making.
+// refuse to make one inside a repo). So a `.yad-workspace.json` found INSIDE a git work tree is not used
+// — a code repo could commit one, pointing yad at a Product folder of its own making — nor one in the
+// home or temp folder. The walk STOPS there with the reason, rather than going on up to whatever
+// Product lies above.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { exists, readJSON, writeJSON, samePath } from './lib.mjs';
+import { exists, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 
 export const WORKSPACE_FILE = '.yad-workspace.json';
@@ -36,11 +42,15 @@ function insideGitTree(dir) {
   }
 }
 
+const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+const within = (child, parent) => child === parent || child.startsWith(parent + path.sep);
+
 // Read one workspace file. `{ product }` (an absolute Product root) or `{ problem }`.
 export function readWorkspace(workspaceDir) {
   const file = path.join(workspaceDir, WORKSPACE_FILE);
   const rec = readJSON(file, null);
   if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return { problem: `${file} cannot be read` };
+  if (rec.version !== WORKSPACE_VERSION) return { problem: `${file} is version ${JSON.stringify(rec.version ?? null)}, and this yadflow reads version ${WORKSPACE_VERSION}` };
   if (typeof rec.product !== 'string' || !PRODUCT_NAME_RE.test(rec.product)) return { problem: `${file}: "product" must be one folder name beside it` };
   const product = path.join(workspaceDir, rec.product);
   if (!exists(productConfigPath(product))) return { problem: `${file} names ${rec.product}/, which is not a Product` };
@@ -54,13 +64,37 @@ export function findProduct(start) {
   const from = path.resolve(start);
   for (let d = from; ; d = path.dirname(d)) {
     if (exists(productConfigPath(d))) return { root: d, via: d === from ? 'here' : 'above' };
-    // Ignored inside a git work tree (see above) and in a shared folder (home, temp: see sharedFolder).
-    if (fs.existsSync(path.join(d, WORKSPACE_FILE)) && !insideGitTree(d) && !sharedFolder(d)) {
+    if (fs.existsSync(path.join(d, WORKSPACE_FILE))) {
+      const file = path.join(d, WORKSPACE_FILE);
+      if (insideGitTree(d)) return { problem: `${file} is inside a git repo, so it is not used (a repo could commit one)` };
+      if (sharedFolder(d)) return { problem: `${file} is in your home or temp folder, so it is not used` };
       const ws = readWorkspace(d);
-      return ws.problem ? { problem: ws.problem } : { root: ws.product, via: 'workspace', workspace: d };
+      if (ws.problem) return { problem: ws.problem };
+      // Only for a repo this Product registers — never for any folder that happens to sit beside it.
+      return registeredRepoHolding(ws.product, from) ? { root: ws.product, via: 'workspace', workspace: d } : null;
     }
     if (path.dirname(d) === d) return null;
   }
+}
+
+// The registry entry whose folder holds `dir` — the repo itself or any folder inside it — compared on
+// disk (a link or a different spelling of the same folder still matches). The deepest one wins; the
+// Product's own entry (a monorepo, `.`) never does.
+export function registeredRepoHolding(productRoot, dir) {
+  const at = real(dir);
+  const productAt = real(productRoot);
+  if (!at || !productAt) return null;
+  const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), null);
+  let best = null;
+  let bestAt = '';
+  for (const r of Array.isArray(reg?.repos) ? reg.repos : []) {
+    if (typeof r?.path !== 'string') continue;
+    const repoAt = real(path.resolve(productRoot, r.path));
+    if (!repoAt || repoAt === productAt || !within(at, repoAt) || repoAt.length <= bestAt.length) continue;
+    best = r;
+    bestAt = repoAt;
+  }
+  return best;
 }
 
 // Folders a workspace file is never written into: the home folder, the temp folder and the top of a disk.
@@ -80,7 +114,8 @@ export function hasSiblingRepo(productRoot) {
   return (Array.isArray(reg?.repos) ? reg.repos : []).some((r) => {
     if (typeof r?.path !== 'string') return false;
     const at = path.resolve(root, r.path);
-    return !(at === root || at.startsWith(root + path.sep)) && at.startsWith(workspace + path.sep);
+    // …and is on this machine: a teammate who cloned the Product alone gains nothing from the file.
+    return !(at === root || at.startsWith(root + path.sep)) && at.startsWith(workspace + path.sep) && fs.existsSync(at);
   });
 }
 
@@ -95,6 +130,7 @@ export function workspaceFileState(productRoot) {
   if (insideGitTree(workspace)) return 'other: the folder above the Product is inside a git repo';
   const cur = readJSON(path.join(workspace, WORKSPACE_FILE), null);
   if (cur && cur.product === name && cur.version === WORKSPACE_VERSION) return 'ok';
+  if (cur && cur.product === name) return `other: ${WORKSPACE_FILE} there is version ${JSON.stringify(cur.version ?? null)}, not ${WORKSPACE_VERSION}`;
   if (cur) return `other: ${WORKSPACE_FILE} there names ${typeof cur.product === 'string' ? `${cur.product}/` : 'no Product'}`;
   return 'missing';
 }
@@ -113,10 +149,9 @@ export function writeWorkspaceFile(productRoot) {
 }
 
 // The registry entry for a code repo, read from the Product (E80: a code-repo command run from a
-// sibling repo knows its name, platform and default branch). Never the Product's own entry.
+// sibling repo — or any folder inside it — knows its name, platform and default branch). Never the
+// Product's own entry.
 export function registryEntryFor(productRoot, repoRoot) {
-  if (!productRoot || samePath(productRoot, repoRoot)) return null;
-  const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), null);
-  const repos = Array.isArray(reg?.repos) ? reg.repos : [];
-  return repos.find((r) => typeof r?.path === 'string' && samePath(path.resolve(productRoot, r.path), repoRoot)) || null;
+  if (!productRoot) return null;
+  return registeredRepoHolding(productRoot, repoRoot);
 }

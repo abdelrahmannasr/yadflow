@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
+import fs from 'node:fs';
 import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
 import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
@@ -271,8 +272,8 @@ ${c.bold('Interactive docs (generated sites)')}
 
 ${c.bold('Options')}
   --dir <path>          Target project root. Without it, a Product command finds the Product from
-                        where you are — any folder inside it, or any repo in its workspace
-                        (.yad-workspace.json) — and says so on stderr; a code-repo command
+                        where you are — any folder inside it, or inside a repo it registers
+                        (via .yad-workspace.json) — and says so on stderr; a code-repo command
                         (commit, open-pr, ship, review) works on the repo you are in
   --type <t>            commit: feat|fix|docs|refactor|test|perf|build|ci|chore|revert
   -m, --message <s>     commit: subject / PR title
@@ -426,7 +427,17 @@ function writesProduct(cmd, o) {
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   if (cmd === 'dial') return o.to !== undefined;
+  // `--wire` writes a CI workflow; `--refresh` only rebuilds sites the folder already holds.
+  if (cmd === 'docs') return action === 'sync' && !!o.wire;
   return false;
+}
+
+// Where the person IS, as their shell says it: a repo reached through a link (`ws/backend -> /src/backend`)
+// is inside the workspace by the path they typed, and not by the one the disk resolves to.
+function shellCwd() {
+  const pwd = process.env.PWD;
+  try { if (pwd && path.isAbsolute(pwd) && fs.realpathSync(pwd) === fs.realpathSync(process.cwd())) return pwd; } catch { /* the disk's path, then */ }
+  return process.cwd();
 }
 
 const ALWAYS_JSON = new Set(['gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough']);
@@ -499,7 +510,7 @@ async function main() {
   // on the repo it runs in, and is handed the Product to read (its registry: name, platform, branch).
   const dirGiven = process.argv.slice(2).some((a) => a === '--dir' || a.startsWith('--dir='));
   if (PRODUCT_CMDS.has(cmd) || REPO_CMDS.has(cmd)) {
-    const found = commands.findProduct(o.dir);
+    const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
     if (found?.problem) warn(`${found.problem} — using ${o.dir}`);
     else if (found && REPO_CMDS.has(cmd)) o.product = found.root;
     else if (found && !dirGiven && found.via !== 'here') {
@@ -847,6 +858,7 @@ async function main() {
       const [, action] = o._;
       if (o.epic && !commands.isValidEpicId(o.epic)) { refuse(`invalid epic id: ${o.epic} (expected EP-<slug>, [a-z0-9-] only)`); break; }
       const sync = o.wire ? 'wire' : o.refresh ? 'refresh' : 'check';
+      if (noProduct()) break;
       result = await commands.runDocs(o.dir, { action: action || 'list', epic: o.epic, overview: o.overview, sync, today });
       break;
     }

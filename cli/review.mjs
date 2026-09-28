@@ -51,7 +51,7 @@ function contextBundle(root, { repo, dir, product, pr, runner = run } = {}) {
   const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) return { error: rr.error };
   const { repoRoot, meta } = rr;
-  const platform = platformOf(rr.productRoot, repoRoot, meta);
+  const platform = platformOf(root, repoRoot, meta);
   // Same resolution as `yad open-pr` (#168): without it a repo whose trunk is not `main` grounded the
   // companion on the wrong diff range — or on a branch that does not exist at all. `probe: false`
   // because this caller only wants the base: a configured `default_branch` must answer locally and
@@ -111,7 +111,7 @@ export async function reviewTrailer(root, { repo, dir, product, pr, body, getBod
   const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
   const { repoRoot, meta } = rr;
-  const platform = platformOf(rr.productRoot, repoRoot, meta);
+  const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const cur = getBody(platform, pr, { cwd: repoRoot });
   if (!cur.ok) { fail(`could not read PR #${pr}: ${cur.reason || 'unknown'}`); process.exitCode = 1; return; }
@@ -128,7 +128,7 @@ export async function reviewNudge(root, { repo, dir, product, pr, reader = readP
   const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
   const { repoRoot, meta } = rr;
-  const platform = platformOf(rr.productRoot, repoRoot, meta);
+  const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const pull = reader(platform, pr, { cwd: repoRoot });
   if (!pull.ok) { fail(`could not read PR #${pr}: ${pull.reason}`); process.exitCode = 1; return; }
@@ -153,7 +153,7 @@ export async function reviewReconcile(root, { epic, repo, dir, product, pr, read
   const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
   const { repoRoot, meta } = rr;
-  const platform = platformOf(rr.productRoot, repoRoot, meta);
+  const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const pull = reader(platform, pr, { cwd: repoRoot });
   if (!pull.ok) { fail(`could not read PR #${pr}: ${pull.reason}`); process.exitCode = 1; return; }

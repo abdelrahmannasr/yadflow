@@ -226,7 +226,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   }
   if (workspaceFile === 'missing') {
     workspaceFile = writeWorkspaceFile(root) === 'written' ? 'written' : workspaceFileState(root);
-    if (workspaceFile === 'written') ok(`wrote ../${WORKSPACE_FILE} — yad finds the Product from its code repos (this machine only)`);
+    // Said with its full path: it is the one file this command writes OUTSIDE the Product.
+    if (workspaceFile === 'written') warn(`wrote ${path.join(path.dirname(path.resolve(root)), WORKSPACE_FILE)} (this machine only) — run from inside a repo this Product registers, yad finds the Product; delete the file to stop that`);
   }
   applied ? ok(`reconciled ${applied} item(s)`) : info('nothing to fix');
   if (modified.length && !overwriteLocal) {

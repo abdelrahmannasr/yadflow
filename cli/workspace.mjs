@@ -35,7 +35,7 @@ import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 // E80: the file that lets yad find the Product from any repo in the workspace. Written by all three.
 function noteWorkspaceFile(product) {
   const r = writeWorkspaceFile(product);
-  if (r === 'written') ok(`wrote ${WORKSPACE_FILE} — yad finds the Product from any folder in this workspace`);
+  if (r === 'written') ok(`wrote ${WORKSPACE_FILE} — yad finds the Product from any repo it registers`);
   else if (r.startsWith('skipped')) warn(`${WORKSPACE_FILE} not written (${r.replace(/^skipped: /, '')})`);
   return r;
 }
