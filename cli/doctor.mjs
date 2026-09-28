@@ -15,7 +15,7 @@ import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { judgeRepo, runnable, shown as forTerminal } from './workspace.mjs';
-import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
+import { cliFor, hostFromGitUrl, ambiguousLegacyNames, plainHost } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
@@ -133,7 +133,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     }
     if (hubBroken) { /* reported above */ }
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
-    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
+    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${forTerminal(hub.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
       // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
@@ -177,7 +177,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const unclear = [...ambiguousLegacyNames(hub).keys()];
         if (unclear.length) {
           check(checks, 'people:roster-ambiguous', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
+            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.map(forTerminal).join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
             'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
         }
       }
@@ -204,7 +204,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const acting = isSolo(hub) ? 'solo' : 'team';
         if (hub.mode !== acting) {
           check(checks, 'mode:disagree', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} says mode: ${JSON.stringify(hub.mode)}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
+            `${PROJECT_FILES.hubConfig} says mode: ${JSON.stringify(forTerminal(hub.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
             ['solo', 'team'].includes(hub.mode)
               ? `\`yad mode ${acting}\` keeps what the gates do now; \`yad mode ${hub.mode === 'solo' ? 'solo --reason "<why>"' : 'team'}\` makes the gates follow \`mode\``
               : `\`yad mode ${acting}\` writes a mode the gates recognise`);
@@ -227,9 +227,13 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // instance fails, so an unrelated stale login (e.g. a dead gitlab.com token) would falsely
         // flag a working self-hosted Product — so we SKIP the probe entirely when no host resolves
         // rather than run the flaky unscoped form.
-        const host = hostFromGitUrl(hub.git_url)
+        const rawHost = hostFromGitUrl(hub.git_url)
           || hostFromGitUrl(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
+        // Never asked about or repeated unless it is a plain host name (E81 review 14): it is printed
+        // inside `gh auth login --hostname …` for the person to run.
+        const host = plainHost(rawHost);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
+        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in hub.json (or the origin remote) to name a plain host');
         else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to hub.json so the auth probe can target the right host');
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {

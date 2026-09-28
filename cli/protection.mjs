@@ -24,7 +24,7 @@
 // for the test suite, which must never ask the developer's real account (the `YAD_PLATFORM_LOGIN=0`
 // precedent). `runner` is injectable so every answer is testable without a network.
 import { run, forTerminal } from './lib.mjs';
-import { cliFor, hostFromGitUrl, detectPlatform } from './platform.mjs';
+import { cliFor, hostFromGitUrl, detectPlatform, plainHost } from './platform.mjs';
 
 export const PLATFORM_NAME = { github: 'GitHub', gitlab: 'GitLab' };
 const TIMEOUT = 10_000;
@@ -171,7 +171,7 @@ export function readProtection({ platform, gitUrl, branch = null, branchFrom = '
   // shared registry's `git_url` (or a registered clone's own remote), and it is printed inside
   // `gh auth login --hostname …` for the person to run — `$(curl …|sh)` parses as a host.
   const rawHost = hostFromGitUrl(gitUrl || '');
-  const host = rawHost && /^(?:\w[\w-]*(?:\.[\w-]+)*|\[[0-9a-f:.]+\])$/i.test(rawHost) ? rawHost : null;
+  const host = plainHost(rawHost);
   const repo = repoPathFromGitUrl(gitUrl || '');
   const plat = platform || detectPlatform(gitUrl || '') || null;
   const base = { platform: plat, host, repo, branch, branchFrom, platformDefault: null };

