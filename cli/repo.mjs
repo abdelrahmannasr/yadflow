@@ -152,6 +152,9 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       if (j.state === 'missing') { warn(`${tag} — not cloned on this machine — skipped (\`yad repo clone\`)`); skipped++; continue; }
       if (j.state === 'refused') { warn(`${tag} — ${j.reason} — skipped`); skipped++; continue; }
       if (j.linked) { warn(`${tag} — a folder on its path, inside a repo, is a link, so the checkout is not where the path says — skipped`); skipped++; continue; }
+      // A folder inside another checkout (a monorepo's `apps/web`): switching "its" branch would switch
+      // the whole checkout, on this entry's say-so. Sync the checkout it belongs to instead.
+      if (j.inside) { info(`${tag} — a folder inside the checkout ${shown(path.relative(root, j.inside) || '.')}, not a repo of its own — skipped (sync that checkout)`); skipped++; continue; }
       const repoRoot = j.target || path.resolve(root, repo.path);
       if (!gitHead(repoRoot)) { warn(`${tag} — not a git repo / HEAD unreadable — skipped`); skipped++; continue; }
       if (isDirty(repoRoot)) { warn(`${j.name} — ${c.yellow('dirty')} → SKIPPED (commit/stash first)`); skipped++; continue; }

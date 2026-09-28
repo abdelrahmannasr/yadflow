@@ -25587,9 +25587,10 @@ test('test files that print ok()/info() lines keep them off the runner stream (t
 function e79Env(T, extra = {}) {
   const cfg = path.join(T, 'empty-gitconfig');
   if (!fs.existsSync(cfg)) fs.writeFileSync(cfg, '');
-  return { ...GIT_ENV, GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1', ...extra };
+  // The tests' remotes are bare repos on disk: registered-repo clones allow them only with this (E81 review 3).
+  return { ...GIT_ENV, GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1', YAD_ALLOW_LOCAL_REMOTES: '1', ...extra };
 }
-const e79Yad = (T, cwd, args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd, env: e79Env(T), encoding: 'utf8', timeout: 120_000 });
+const e79Yad = (T, cwd, args, extra = {}) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd, env: e79Env(T, extra), encoding: 'utf8', timeout: 120_000 });
 const e79Git = (T, cwd, ...a) => execFileSync('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', ...a], { cwd, env: e79Env(T), stdio: 'pipe' }).toString().trim();
 // A space in every E79 folder: a home folder like `C:\Users\Jane Doe` must work, and must not reach a message.
 const e79Tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad e79-')));
@@ -25624,16 +25625,16 @@ test('E79: the clone step judges every registry entry, and one failure never sto
     const calls = [];
     const clone = (url, target) => { calls.push([url, target]); return url.includes('broken') ? { ok: false, error: 'fatal: not found' } : { ok: true }; };
     const registry = { repos: [
-      { name: 'self', path: '.', git_url: 'u' },
-      { name: 'escape', path: '../../elsewhere', git_url: 'u' },
-      { name: 'there', path: '../there', git_url: 'u' },
-      { name: 'junk', path: '../junk', git_url: 'u' },
+      { name: 'self', path: '.', git_url: 'https://git.example/u.git' },
+      { name: 'escape', path: '../../elsewhere', git_url: 'https://git.example/u.git' },
+      { name: 'there', path: '../there', git_url: 'https://git.example/u.git' },
+      { name: 'junk', path: '../junk', git_url: 'https://git.example/u.git' },
       { name: 'nourl', path: '../nourl', git_url: null },
       { name: 'dash', path: '../dash', git_url: '--upload-pack=touch /tmp/x' },
-      { name: 'broken', path: '../broken', git_url: 'broken-url' },
-      { name: 'empty', path: '../empty', git_url: 'good-1' },
-      { name: 'nested', path: 'demo-repos/api', git_url: 'good-2' },
-      { name: 'nopath', git_url: 'u' },
+      { name: 'broken', path: '../broken', git_url: 'https://git.example/broken-url.git' },
+      { name: 'empty', path: '../empty', git_url: 'https://git.example/good-1.git' },
+      { name: 'nested', path: 'demo-repos/api', git_url: 'https://git.example/good-2.git' },
+      { name: 'nopath', git_url: 'https://git.example/u.git' },
     ] };
     const r = cloneMissingRepos(product, registry, { clone });
     assert.deepEqual(r.cloned.map((x) => x.name), ['empty', 'nested']);
@@ -25641,7 +25642,7 @@ test('E79: the clone step judges every registry entry, and one failure never sto
     assert.deepEqual(r.failed.map((x) => x.name), ['escape', 'junk', 'nourl', 'dash', 'broken', 'nopath']);
     assert.match(r.failed.find((x) => x.name === 'escape').reason, /outside the workspace/);
     assert.equal(r.failed.find((x) => x.name === 'broken').reason, 'fatal: not found');
-    assert.deepEqual(calls.map(([u]) => u), ['broken-url', 'good-1', 'good-2'], 'git runs only for the entries that passed');
+    assert.deepEqual(calls.map(([u]) => u), ['https://git.example/broken-url.git', 'https://git.example/good-1.git', 'https://git.example/good-2.git'], 'git runs only for the entries that passed');
     assert.equal(calls[2][1], path.join(product, 'demo-repos', 'api'));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -25660,11 +25661,11 @@ test('E79 review 1: a link the Product commits cannot carry a clone outside, and
     const calls = [];
     const clone = (url, target) => { calls.push(target); fs.mkdirSync(target, { recursive: true }); return { ok: true }; };
     const r = cloneMissingRepos(product, { repos: [
-      { name: 'escape', path: 'evil/x', git_url: 'u' },
-      { name: 'through-file', path: '.sdlc/hub.json/x', git_url: 'u' },
-      { name: 'dangling', path: 'dangling/x', git_url: 'u' },
-      { name: 'linked', path: '../linked', git_url: 'u' },
-      { name: 'good', path: '../good', git_url: 'u' },
+      { name: 'escape', path: 'evil/x', git_url: 'https://git.example/u.git' },
+      { name: 'through-file', path: '.sdlc/hub.json/x', git_url: 'https://git.example/u.git' },
+      { name: 'dangling', path: 'dangling/x', git_url: 'https://git.example/u.git' },
+      { name: 'linked', path: '../linked', git_url: 'https://git.example/u.git' },
+      { name: 'good', path: '../good', git_url: 'https://git.example/u.git' },
     ] }, { clone });
     assert.deepEqual(r.failed.map((x) => x.name), ['escape', 'through-file', 'dangling']);
     assert.match(r.failed[0].reason, /a folder on its path is a link/);
@@ -25691,7 +25692,7 @@ test('E79 review 2: a registry path through a .git folder is never cloned or reg
     }
     for (const p of ['.', '../backend', '../.github', '../x.git', 'demo-repos/api']) assert.ok(!throughGitDir(product, p), p);
     const calls = [];
-    const r = cloneMissingRepos(product, { repos: bad.map((p, i) => ({ name: `b${i}`, path: p, git_url: 'u' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
+    const r = cloneMissingRepos(product, { repos: bad.map((p, i) => ({ name: `b${i}`, path: p, git_url: 'https://git.example/u.git' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
     assert.equal(r.failed.length, bad.length);
     assert.ok(r.failed.every((x) => /runs through a \.git folder/.test(x.reason)));
     assert.deepEqual(calls, [], 'git never ran');
@@ -25713,7 +25714,7 @@ test('E79 review 3: a link the Product commits to .git cannot carry a clone into
     fs.symlinkSync('../../../outside/newdir', path.join(T, 'ws', 'dangling'));
     const calls = [];
     const paths = ['g/hooks/pre-commit', 'g/modules/evil', 'g/hooks-new', 'g2/hooks/x', '../dangling', '../dangling/c'];
-    const r = cloneMissingRepos(product, { repos: paths.map((p, i) => ({ name: `l${i}`, path: p, git_url: 'u' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
+    const r = cloneMissingRepos(product, { repos: paths.map((p, i) => ({ name: `l${i}`, path: p, git_url: 'https://git.example/u.git' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
     assert.deepEqual(r.failed.map((x) => x.path), paths);
     assert.ok(r.failed.every((x) => /a folder on its path is a link/.test(x.reason)), JSON.stringify(r.failed));
     assert.deepEqual(calls, [], 'git never ran');
@@ -26235,7 +26236,7 @@ test('E81: judgeRepo says where each registry entry stands, before any git runs'
     fs.mkdirSync(path.join(T, 'src', 'web', '.git'), { recursive: true });
     fs.symlinkSync(path.join(T, 'src', 'web'), path.join(ws, 'web'));
     fs.symlinkSync('../backend', path.join(product, 'evil'));
-    const at = (p, extra = {}) => judgeRepo(product, { name: p, path: p, git_url: 'u', ...extra });
+    const at = (p, extra = {}) => judgeRepo(product, { name: p, path: p, git_url: 'https://git.example/u.git', ...extra });
     assert.equal(at('.').state, 'product');
     assert.equal(at('../backend').state, 'present');
     assert.equal(at('../backend').linked, undefined);
@@ -26244,7 +26245,7 @@ test('E81: judgeRepo says where each registry entry stands, before any git runs'
     assert.equal(at('evil').state, 'present');
     assert.equal(at('evil').linked, true, 'a link inside the Product\'s tree');
     assert.equal(at('../api').state, 'missing');
-    assert.equal(at('../api').url, 'u');
+    assert.equal(at('../api').url, 'https://git.example/u.git');
     assert.equal(at('bare').state, 'refused');
     assert.match(at('bare').reason, /exists and is not a git repo/);
     assert.match(at('../../out').reason, /outside the workspace/);
@@ -26252,7 +26253,7 @@ test('E81: judgeRepo says where each registry entry stands, before any git runs'
     assert.match(at('../api', { git_url: '' }).reason, /no git_url/);
     assert.match(at('../api', { git_url: '-x' }).reason, /starts with "-"/);
     assert.match(judgeRepo(product, { name: 'n' }).reason, /no path/);
-    assert.equal(judgeRepo(product, { name: 'a\u001bb', path: '../api', git_url: 'u' }).name, 'a b', 'shown in the terminal safely');
+    assert.equal(judgeRepo(product, { name: 'a\u001bb', path: '../api', git_url: 'https://git.example/u.git' }).name, 'a b', 'shown in the terminal safely');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -26348,7 +26349,7 @@ test('E81: yad repo sync judges each entry first, and never hands git a branch n
       { name: 'backend', path: '../backend', default_branch: `--upload-pack=touch ${pwned}` },
       { name: 'bare', path: 'bare', default_branch: 'main' },
       { name: 'evil', path: 'evil', default_branch: 'trunk' },
-      { name: 'away', path: '../away', git_url: 'u' },
+      { name: 'away', path: '../away', git_url: 'https://git.example/u.git' },
     ] }));
     // A real remote, so an `--upload-pack` that reached git would run.
     e79Git(T, T, 'init', '-q', '--bare', 'origin.git');
@@ -26541,5 +26542,61 @@ test('E81 review 2: a subfolder of a checkout behind the person\'s own workspace
     const r = e79Yad(T, product, ['repo', 'refresh']);
     assert.doesNotMatch(r.stdout + r.stderr, /yad failed|ERR_INVALID_ARG_TYPE/);
     assert.match(r.stdout, /not a path under \.sdlc\/code-context/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 3: a registered git_url must be a network address — a local path could name a repo the Product commits', async () => {
+  const { cloneUrlOk } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    for (const good of ['https://github.com/o/r.git', 'http://h.example/r', 'ssh://git@h.example/r.git', 'git://h.example/r', 'git@github.com:o/r.git', 'gitlab.example.com:o/r.git']) {
+      assert.ok(cloneUrlOk(product, good, {}), good);
+    }
+    const outside = path.join(T, 'remotes', 'r.git');
+    for (const bad of ['evil', './evil', '../product/evil', path.join(product, 'evil'), `file://${path.join(product, 'evil')}`, 'ext::sh -c touch% /tmp/x', 'fd::17', outside, `file://${outside}`, 'C:\\r.git']) {
+      assert.ok(!cloneUrlOk(product, bad, {}), bad);
+    }
+    // With the door, an absolute local path outside the workspace only.
+    const door = { YAD_ALLOW_LOCAL_REMOTES: '1' };
+    assert.ok(cloneUrlOk(product, outside, door));
+    assert.ok(cloneUrlOk(product, `file://${outside}`, door));
+    for (const bad of ['evil', '../product/evil', path.join(product, 'evil'), path.join(ws, 'other.git'), `file://${path.join(product, 'evil')}`]) {
+      assert.ok(!cloneUrlOk(product, bad, door), `${bad} (door open)`);
+    }
+
+    // End to end: a repo the Product commits, registered by a local path, is never cloned — door or not.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
+      { name: 'api', path: '../api', git_url: path.join(product, 'evil') },
+      { name: 'rel', path: '../rel', git_url: 'product/evil' },
+    ] }));
+    for (const extra of [{ YAD_ALLOW_LOCAL_REMOTES: '' }, {}]) {
+      const r = e79Yad(T, ws, ['repo', 'clone', '--dir', product, '--json'], extra);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      const a = JSON.parse(r.stdout);
+      assert.deepEqual(a.cloned, []);
+      assert.ok(a.failed.every((f) => /not a network address/.test(f.reason)), JSON.stringify(a.failed));
+    }
+    assert.ok(!fs.existsSync(path.join(ws, 'api')) && !fs.existsSync(path.join(ws, 'rel')));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json'], { YAD_ALLOW_LOCAL_REMOTES: '' }).stdout);
+    assert.doesNotMatch(doc.checks.find((c) => c.id === 'repo:api').hint, /run `yad repo clone`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 3: sync leaves a monorepo subfolder to the checkout it belongs to', () => {
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(product, 'apps', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'apps', 'web', 'x'), 'x');
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'x');
+    e79Git(T, product, 'checkout', '-q', '-b', 'feature');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'web', path: 'apps/web', default_branch: 'main' }] }));
+    const r = e79Yad(T, product, ['repo', 'sync']);
+    assert.match(r.stdout, /web .*a folder inside the checkout .*skipped/);
+    assert.equal(e79Git(T, product, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature', 'the Product\'s branch is untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

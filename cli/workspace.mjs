@@ -95,10 +95,35 @@ export function gitInit(dir, branch = 'main') {
   return run('git', ['symbolic-ref', 'HEAD', `refs/heads/${branch}`], { cwd: dir }).ok;
 }
 
-function gitClone(url, target, env) {
-  const r = spawnSync('git', ['clone', '-q', '--', url, target], { encoding: 'utf8', env, windowsHide: true });
+// `localOk` is false for a REGISTERED repo's URL, which the shared registry chose: git then refuses the
+// file transport (git 2.12+), so no folder on this disk — one the Product commits, shaped as a repo
+// whose config runs a command — is ever read as a clone source (E81 review 3). `join`'s Product URL
+// is the person's own, typed by them, so a local one is fine.
+function gitClone(url, target, env, { localOk = true } = {}) {
+  const r = spawnSync('git', ['-c', `protocol.file.allow=${localOk ? 'always' : 'never'}`, 'clone', '-q', '--', url, target], { encoding: 'utf8', env, windowsHide: true });
   return { ok: r.status === 0, error: (r.stderr || r.error?.message || '').trim().split('\n').pop() || `git clone exited ${r.status}` };
 }
+// A registered repo's `git_url` is shared text, handed to `git clone`. Only a network address is cloned:
+// `https://`, `http://`, `ssh://`, `git://`, or scp-style `user@host:path` / `host.domain:path`. A plain
+// path, `file://` or a `<helper>::` URL is refused — a local path can name a folder the Product itself
+// commits (E81 review 3). A team whose remotes really are on a disk sets YAD_ALLOW_LOCAL_REMOTES=1:
+// then an ABSOLUTE local path (or `file://` one) outside the workspace is cloned too.
+const NETWORK_URL_RE = /^(?:(?:https?|ssh|git|git\+ssh|ssh\+git):\/\/[^\s/]|[\w.~-]+@[\w.-]+:(?!\/\/)|[\w-]+(?:\.[\w-]+)+:(?!\/\/))/i;
+export const localRemotesAllowed = (env = process.env) => env.YAD_ALLOW_LOCAL_REMOTES === '1';
+export function cloneUrlOk(productRoot, url, env = process.env) {
+  if (NETWORK_URL_RE.test(url)) return true;
+  if (!localRemotesAllowed(env)) return false;
+  const p = url.replace(/^file:\/\//i, '');
+  if (!path.isAbsolute(p)) return false;
+  const root = path.resolve(productRoot);
+  const workspace = path.dirname(root) === root ? root : path.dirname(root);
+  let real = path.resolve(p);
+  try { real = fs.realpathSync(real); } catch { /* not there: git says so */ }
+  let ws = workspace;
+  try { ws = fs.realpathSync(workspace); } catch { /* as typed */ }
+  return real !== ws && !real.startsWith(ws + path.sep) && real !== workspace && !real.startsWith(workspace + path.sep);
+}
+
 // A clone that needs a password must not sit waiting at a prompt nobody will answer.
 const cloneEnv = () => (process.env.SDLC_NONINTERACTIVE ? { ...process.env, GIT_TERMINAL_PROMPT: '0' } : process.env);
 
@@ -146,6 +171,7 @@ export function judgeRepo(productRoot, repo) {
   const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
   if (!url) return { ...at, state: 'refused', reason: 'no git_url recorded — clone it by hand' };
   if (url.startsWith('-')) return { ...at, state: 'refused', reason: 'the recorded git_url starts with "-"' };
+  if (!cloneUrlOk(productRoot, url)) return { ...at, state: 'refused', reason: 'the recorded git_url is not a network address (https://, ssh://, git:// or user@host:path) — clone it by hand' };
   return { ...at, state: 'missing', url };
 }
 
@@ -234,7 +260,7 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
     let r;
     try {
       fs.mkdirSync(path.dirname(j.target), { recursive: true });
-      r = clone(j.url, j.target, env);
+      r = clone(j.url, j.target, env, { localOk: localRemotesAllowed(env) });
     } catch (e) { r = { ok: false, error: `cannot make its folder (${e.code || e.message})` }; }
     if (r.ok) out.cloned.push(entry);
     else out.failed.push({ ...entry, reason: shown(r.error) });

@@ -50,6 +50,8 @@ repo itself — a draft of that repo's risk map (Step 3b), which the team commit
   directly in `$HOME` — with the Product at `~/product` the workspace becomes `~` and every home-dir
   sibling turns into a registrable repo. The workspace directory itself (`..`) is never registrable.
 - `git_url` — optional remote (SSH or HTTPS; GitHub or GitLab). Used when the repo is not yet on disk.
+  `yad join` and `yad repo clone` clone only a network address (`https://`, `ssh://`, `git://`,
+  `user@host:path`); a local path is refused unless `YAD_ALLOW_LOCAL_REMOTES=1` is set.
 
 yadflow keeps **no list of people** (E62): no roster, no roles, no repo owners, no commit emails. Do not
 ask for them and do not write them.
