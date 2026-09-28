@@ -2541,7 +2541,7 @@ function gitHookCheck(root, checks) {
     // yad writes neither: a folder core.hooksPath names is usually committed and owned by a tool, and a
     // hook without yad's marker line is the team's. The person adds one line instead.
     const why = st.state === 'hooks-path' ? `core.hooksPath is set (${st.hooksPath}), so hooks are run from there` : `${where} is not yad's, so yad left it alone`;
-    const into = st.state === 'hooks-path' ? `the pre-commit hook in ${st.hooksPath}` : where;
+    const into = st.state === 'hooks-path' ? st.editFile : `${where} (and again if a tool rewrites it)`;
     check(checks, 'git-hook', 'project', 'warn', `git pre-commit ledger guard not installed: ${why}`, `add this line to ${into}: ${st.line}`);
   } else if (st.state === 'missing') {
     check(checks, 'git-hook', 'project', 'warn', 'git pre-commit ledger guard not installed in this clone',

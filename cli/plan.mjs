@@ -1071,16 +1071,20 @@ export function gitPreCommitScript(prefix = '') {
     `guard=${shQuote(`${prefix}hooks/ledger-guard.mjs`)}`,
     'command -v node >/dev/null 2>&1 || exit 0',
     '[ -f "$guard" ] || exit 0',
-    'node "$guard" --staged',
-    '[ $? -eq 2 ] && exit 1',
+    'node "$guard" --staged || [ $? -ne 2 ] || exit 1',
     'exit 0',
     '',
   ].join('\n');
 }
 // The line a person adds to a hook yad will not touch, run from the top of the repo.
 // It fails open as the script does: only the guard's refusal (2) stops the commit, and its own status is
-// 0 otherwise, so it is safe as the last line of a hook.
-export const gitHookLine = (prefix = '') => `node ${shQuote(`${prefix}hooks/ledger-guard.mjs`)} --staged; [ $? -ne 2 ] || exit 1`;
+// 0 otherwise, so it is safe as the last line of a hook. Every command that can fail sits on the left of
+// `||`, so it is safe under `sh -e` too (husky runs hooks that way): no guard file, no node, or a crash
+// never stops the commit.
+export const gitHookLine = (prefix = '') => {
+  const guard = shQuote(`${prefix}hooks/ledger-guard.mjs`);
+  return `[ ! -f ${guard} ] || node ${guard} --staged || [ $? -ne 2 ] || exit 1`;
+};
 
 // Where this clone's pre-commit hook is, and whose it is. `{ applies: false }` when there is nothing to
 // install (a local ledger, or no git). Otherwise `{ applies: true, file, expected, prefix, state }` with
@@ -1095,12 +1099,26 @@ export function gitHookState(root) {
   const expected = gitPreCommitScript(prefix);
   const line = gitHookLine(prefix);
   const hooksPath = run('git', ['-C', root, 'config', '--get', 'core.hooksPath']);
-  if (hooksPath.ok && hooksPath.stdout) return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, state: 'hooks-path' };
+  // A core.hooksPath that names the default folder anyway (some tools set it so) is not a tool's folder.
+  const common = run('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const isDefault = common.ok && real(path.dirname(file)) === real(path.resolve(common.stdout, 'hooks'));
+  if (hooksPath.ok && hooksPath.stdout && !isDefault) {
+    // husky points core.hooksPath at `.husky/_`, a folder it generates; the hook a person edits is the one
+    // beside it, `.husky/pre-commit`. Name that one, or the advice sends them to a file husky rewrites.
+    const dir = hooksPath.stdout.replace(/[\\/]+$/, '');
+    const edit = /(^|[\\/])_$/.test(dir) ? `${dir.replace(/[\\/]?_$/, '') || '.'}/pre-commit` : `${dir}/pre-commit`;
+    return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hooks-path' };
+  }
   let text = null;
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
   if (text === null) return { applies: true, file, expected, prefix, state: 'missing' };
   if (!text.includes(GIT_HOOK_MARKER)) return { applies: true, file, expected, prefix, line, state: 'foreign' };
-  return { applies: true, file, expected, prefix, state: text === expected ? 'ok' : 'outdated' };
+  // Git silently skips a hook that is not executable (everywhere but Windows), so right bytes without the
+  // bit are not an installed hook.
+  let runnable = true;
+  if (process.platform !== 'win32') { try { runnable = (fs.statSync(file).mode & 0o111) !== 0; } catch { runnable = false; } }
+  return { applies: true, file, expected, prefix, state: text === expected && runnable ? 'ok' : 'outdated' };
 }
 
 // The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
@@ -1110,8 +1128,10 @@ export function gitHookActions(root) {
   if (!st.applies || st.state === 'foreign' || st.state === 'hooks-path') return [];
   const status = st.state === 'missing' ? 'new' : st.state;
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
-  // the same rule `wiredFileAction` keeps for content it cannot prove it wrote.
-  const backup = st.state === 'outdated' ? backupPathFor(st.file) : null;
+  // the same rule `wiredFileAction` keeps for content it cannot prove it wrote. Not when only the execute
+  // bit is missing: nothing of anyone's is being replaced then.
+  const sameBytes = st.state === 'outdated' && (() => { try { return fs.readFileSync(st.file, 'utf8') === st.expected; } catch { return false; } })();
+  const backup = st.state === 'outdated' && !sameBytes ? backupPathFor(st.file) : null;
   return [{
     scope: 'hub',
     item: 'pre-commit git hook (this clone)',
@@ -1143,9 +1163,11 @@ export function orphanGitHookActions(root) {
 }
 
 // The sentence for a clone where yad may not write the hook, or null.
+// A tool that owns the hook (the pre-commit framework, husky v4) may rewrite it on reinstall, which drops
+// an added line, so the advice says to check after one.
 export function gitHookAdvice(st) {
-  if (st?.state === 'hooks-path') return `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its pre-commit ledger guard; add this line to the pre-commit hook there: ${st.line}`;
-  if (st?.state === 'foreign') return `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger: ${st.line}`;
+  if (st?.state === 'hooks-path') return `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its pre-commit ledger guard; add this line to ${st.editFile}: ${st.line}`;
+  if (st?.state === 'foreign') return `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger (and again if a tool rewrites the hook): ${st.line}`;
   return null;
 }
 

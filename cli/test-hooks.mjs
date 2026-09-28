@@ -700,7 +700,7 @@ test('E48: --staged refuses a hand commit that changes an on-base ledger, and na
     assert.match(r.err, /git restore --staged -- \.sdlc\/index\.json epics\/EP-a\/\.sdlc\/state\.json/);
     assert.match(r.err, /yad gate open EP-a <artifact>/);
     assert.match(r.err, /YAD_HOOK_DISABLE=1 git commit/);
-    assert.match(r.err, /check in CI still refuses it/, 'the door says what it does not open');
+    assert.match(r.err, /check on the pull request still judges it/, 'the door says what it does not open');
   } finally { cleanup(T); }
 });
 
@@ -788,14 +788,20 @@ test('E48: yad never writes over a hook that is not its own, and says which line
     assert.deepEqual(gitHookActions(product), [], 'no action for a foreign hook');
     const st = gitHookState(product);
     assert.equal(st.state, 'foreign');
-    assert.match(gitHookAdvice(st), /add this line to it .*node 'hooks\/ledger-guard\.mjs' --staged; \[ \$\? -ne 2 \] \|\| exit 1$/);
+    assert.match(gitHookAdvice(st), /add this line to it .*: \[ ! -f 'hooks\/ledger-guard\.mjs' \] \|\| node 'hooks\/ledger-guard\.mjs' --staged \|\| \[ \$\? -ne 2 \] \|\| exit 1$/);
     assert.equal(fs.readFileSync(hook, 'utf8'), '#!/bin/sh\nnpx lint-staged\n');
 
     git(repo, 'config', 'core.hooksPath', '.husky');
     assert.deepEqual(gitHookActions(product), [], 'a hooks folder a tool manages is never written');
     assert.equal(gitHookState(product).state, 'hooks-path');
-    assert.match(gitHookAdvice(gitHookState(product)), /core\.hooksPath is set \(\.husky\)/);
+    assert.match(gitHookAdvice(gitHookState(product)), /core\.hooksPath is set \(\.husky\).*add this line to \.husky\/pre-commit:/);
     assert.equal(fs.existsSync(path.join(repo, '.husky')), false);
+    // husky v9 points it at the folder it generates; the hook a person edits is the one beside it.
+    git(repo, 'config', 'core.hooksPath', '.husky/_');
+    assert.equal(gitHookState(product).editFile, '.husky/pre-commit');
+    // A hooksPath that names the default folder anyway is not a tool's folder.
+    git(repo, 'config', 'core.hooksPath', '.git/hooks');
+    assert.equal(gitHookState(product).state, 'foreign', 'judged as the default folder — the foreign hook is still there');
     git(repo, 'config', '--unset', 'core.hooksPath');
 
     // Ours, edited: outdated, and the edit is saved beside it before the rewrite.
@@ -861,7 +867,7 @@ test('E48: doctor reports this clone\'s git hook — missing, installed, someone
     fs.writeFileSync(path.join(repo, '.git/hooks/pre-commit'), '#!/bin/sh\nexit 0\n');
     assert.equal(line().status, 'warn');
     assert.match(line().message, /is not yad's, so yad left it alone/);
-    assert.match(line().hint, /^add this line to \.git\/hooks\/pre-commit: node 'hooks\/ledger-guard\.mjs' --staged/);
+    assert.match(line().hint, /^add this line to \.git\/hooks\/pre-commit \(and again if a tool rewrites it\): \[ ! -f 'hooks\/ledger-guard\.mjs' \]/);
 
     fs.writeFileSync(path.join(product, '.sdlc/product.json'), JSON.stringify({ ledger: 'local', platform: 'github' }));
     assert.equal(line(), undefined, 'a local ledger has no git hook to report');
@@ -878,4 +884,62 @@ test('E48: yad\'s own ledger commits (gate ci/sync, gate repair) tell the git ho
   assert.equal(commits.length, 2, commits.join('\n'));
   assert.ok(commits.every((c) => c.startsWith("['commit'")), 'no commit through the plain git helper');
   assert.equal((src.match(/env: OWNING_COMMIT_ENV\(\)/g) || []).length, 2);
+});
+
+test('E48 review 1: the line for a foreign hook fails open under `sh -e` — only a refusal stops the commit', { skip: IS_WINDOWS && 'sh is Git for Windows\' own there; the line is the same' }, async () => {
+  const { gitHookLine } = await import('./plan.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-githook-line-'));
+  try {
+    const hook = path.join(T, 'pre-commit');
+    fs.writeFileSync(hook, `${gitHookLine('')}\n`);
+    const runIt = () => spawnSync('sh', ['-e', hook], { cwd: T, encoding: 'utf8', env: gitEnv() }).status;
+    assert.equal(runIt(), 0, 'no guard file (a branch cut before it existed)');
+    fs.mkdirSync(path.join(T, 'hooks'));
+    for (const [code, want] of [[0, 0], [1, 0], [2, 1]]) {
+      fs.writeFileSync(path.join(T, 'hooks/ledger-guard.mjs'), `process.exit(${code});\n`);
+      assert.equal(runIt(), want, `a guard exiting ${code}`);
+    }
+    // No node on PATH: exit 127 from the shell, which must not refuse either.
+    const noNode = spawnSync('/bin/sh', ['-e', hook], { cwd: T, encoding: 'utf8', env: { ...gitEnv(), PATH: '/nonexistent' } });
+    assert.equal(noNode.status, 0, noNode.stderr);
+  } finally { cleanup(T); }
+});
+
+test('E48 review 1: a hook without its execute bit is not installed — git skips it', { skip: IS_WINDOWS && 'no execute bit on Windows' }, async () => {
+  const { gitHookActions, gitHookState } = await import('./plan.mjs');
+  const { T, product } = verifiedRepo();
+  try {
+    gitHookActions(product)[0].apply();
+    const st = gitHookState(product);
+    fs.chmodSync(st.file, 0o644);
+    const [a] = gitHookActions(product);
+    assert.equal(a.status, 'outdated');
+    assert.equal(a.backup, null, 'the bytes are yad\'s own: nothing to save');
+    a.apply();
+    assert.equal(gitHookState(product).state, 'ok');
+  } finally { cleanup(T); }
+});
+
+test('E48 review 1: a linked worktree with the Product in a subfolder still refuses the mutation', { skip: IS_WINDOWS && 'the worktree path is POSIX-only here' }, async () => {
+  const { gitHookActions } = await import('./plan.mjs');
+  const { T, repo } = verifiedRepo({ sub: 'prod' });
+  try {
+    gitHookActions(path.join(repo, 'prod'))[0].apply();
+    const wt = path.join(T, 'wt');
+    git(repo, 'worktree', 'add', '-q', '-b', 'side', wt, 'origin/main');
+    fs.writeFileSync(path.join(wt, 'prod/epics/EP-a/.sdlc/state.json'), '{"x":1}\n');
+    const c = spawnSync('git', ['commit', '-q', '-a', '-m', 'hand edit'], { cwd: wt, encoding: 'utf8', env: gitEnv({ YAD_BIN: `"${process.execPath}" "${YAD}"` }) });
+    assert.notEqual(c.status, 0, 'git exports GIT_DIR to a hook; the base read must not follow it');
+    assert.match(c.stderr, /Commit refused/);
+  } finally { cleanup(T); }
+});
+
+test('E48 review 1: the refusal names the repair that commits, the amend-to-undo way through, and no false CI claim', async () => {
+  const { commitDenyMessage } = await import('./hook.mjs');
+  const top = path.join(os.tmpdir(), 'r');
+  const m = commitDenyMessage({ top, hits: [{ kind: 'state', epic: 'EP-a', abs: path.join(top, 'epics/EP-a/.sdlc/state.json'), productRoot: top }] });
+  assert.match(m, /yad gate repair EP-a --push/);
+  assert.match(m, /YAD_HOOK_DISABLE=1 git commit --amend/);
+  assert.match(m, /without `-a`/);
+  assert.doesNotMatch(m, /could not reach the default branch|CI still refuses/, 'the check runs on pull requests only');
 });

@@ -366,8 +366,10 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run, pa
 //     platform can answer — a commit that claims the name without it still fails there.
 //   - A DELETION counts: CI fails a deleted `state.json` (delete-then-re-seed would reset the carve-out).
 //   - A RENAME is two paths, the old and the new (`--no-renames`), as E114 settled for every changed list.
-// Known limit: `git commit --amend` is judged by what it changes against the commit it replaces, so
-// amending a commit that ALREADY changed the ledger passes here. CI still judges the result.
+// Known limit: `git commit --amend` is judged by what it changes against the commit it replaces — git does
+// not tell a pre-commit hook it is an amend. So amending a commit that ALREADY changed the ledger passes
+// here, and amending one to UNDO that change is refused; the message names the way through for the second.
+// The pull request's check judges both correctly.
 //
 // The list is read with `-z` and spawned directly: `run()` trims its output, which would cut a leading
 // space off the first name.
@@ -396,8 +398,9 @@ export function stagedLedgerCandidates(cwd = process.cwd(), git = gitRaw) {
 // back out of the commit, the command that owns each change, and the door.
 //
 // THE DOOR IS HONEST ABOUT WHAT IT OPENS. `YAD_HOOK_DISABLE=1` (or git's own `--no-verify`) lets the
-// commit through on this machine, and nothing more: the `ledger-guard` check in CI still refuses the
-// push. A door that implied otherwise would be a lie about what protects the ledger.
+// commit through on this machine, and nothing more: the `ledger-guard` check still judges it on the pull
+// request (and only there — a direct push to an unprotected default branch meets no check, which is why
+// the message says "pull request"). A door that implied more would be a lie about what protects the ledger.
 export function commitDenyMessage({ hits, top }) {
   const from = (h) => path.relative(top, h.abs).split(path.sep).join('/');
   const files = hits.map(from);
@@ -411,21 +414,26 @@ export function commitDenyMessage({ hits, top }) {
     ...files.map((f) => `  ${f}`),
     '',
     'This Product runs in verified mode, where CI is the sole writer of the gate ledger and the Product',
-    'index. The `ledger-guard` check in CI rejects any commit that changes those files unless it is a Verified',
-    `commit by the ${GIT_BOT} bot, so this commit could not reach the default branch.`,
+    'index. The `ledger-guard` check on a pull request rejects any commit that changes those files unless',
+    `it is a Verified commit by the ${GIT_BOT} bot, so this commit would fail that check.`,
     '',
     `Take ${files.length === 1 ? 'it' : 'them'} out of this commit (run from the top of the repo):`,
     `  git restore --staged -- ${files.map(quote).join(' ')}`,
+    `and commit without \`-a\`, and without ${files.length === 1 ? 'that path' : 'those paths'} after \`git commit\`.`,
     '',
     'Then use the command that owns the change:',
     ...(epics.length ? [
       `  author step done → review opened   yad gate open ${epic} <artifact>`,
       '  the full advance at merge          CI runs `yad gate ci --merged` — nothing to do locally',
-      `  a genuinely broken ledger          yad gate repair ${epic}`,
+      `  a genuinely broken ledger          yad gate repair ${epic} --push`,
     ] : []),
     ...(index ? ['  the Product index                  CI rebuilds it at merge; read it with `yad index --json`'] : []),
     '',
-    'To commit it anyway: YAD_HOOK_DISABLE=1 git commit …  The `ledger-guard` check in CI still refuses it.',
+    '',
+    'Amending a commit to UNDO a ledger change it made? `git commit --amend` is compared with the commit it',
+    'replaces, so this hook cannot tell. Run it as `YAD_HOOK_DISABLE=1 git commit --amend`; the check on the',
+    'pull request judges the result against its parent.',
+    'To commit anyway: YAD_HOOK_DISABLE=1 git commit …  The check on the pull request still judges it.',
     `hub: ${roots.join(', ')}`,
   ].join('\n');
 }
@@ -434,7 +442,16 @@ export function commitDenyMessage({ hits, top }) {
 // pre-commit hook nothing there, and a caller with an open pipe would hang on it (the note at
 // `runLedgerGuardHook`). Exit 0 allows, exit 2 refuses; the wrapper git runs turns only a 2 into a
 // refusal, so a crash here allows (fail-open, as the harness hook does).
-export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), git = gitRaw, runner = run } = {}) {
+// Git exports GIT_DIR (absolute, in a linked worktree), GIT_WORK_TREE and friends to a hook. The base
+// read runs `git -C <productRoot> ls-tree … -- epics`, and with GIT_DIR set git takes `-C`'s directory
+// as the top of the work tree — so a Product in a subfolder listed nothing, every epic read as a seed,
+// and the mutation was allowed. Git finds the repo from the directory alone, worktrees included.
+const REPO_ENV = /^GIT_(DIR|WORK_TREE|PREFIX|INDEX_FILE|COMMON_DIR|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/;
+export const cleanGitRunner = (env = process.env) => {
+  const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !REPO_ENV.test(k)));
+  return (cmd, args = [], opts = {}) => run(cmd, args, { ...opts, env: clean });
+};
+export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), git = gitRaw, runner = cleanGitRunner(env) } = {}) {
   if (env.YAD_HOOK_DISABLE) return 0;
   const staged = stagedLedgerCandidates(cwd, git);
   if (!staged.paths.length) return 0;

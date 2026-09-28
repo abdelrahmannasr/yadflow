@@ -1427,7 +1427,10 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   const indexRebuilt = push ? false : refreshIndexAfterWrite(root, readJSON(productConfigPath(root), null));
   ok(`closed ${closed.length} stranded author step(s): ${c.dim(closed.join(', '))}`);
   if (!push) {
-    hand(`re-run \`yad doctor\` to confirm, then commit epics/*/.sdlc/state.json${indexRebuilt ? ` and ${INDEX_FILE}` : ''} (or re-run with --push)`);
+    // On a verified Product a hand commit of state.json is what the git pre-commit guard refuses (E48), and
+    // that refusal sends the person back here: so the way on is `--push`, whose commit is the owning one.
+    if (isVerifiedLedger(readJSON(productConfigPath(root), null))) hand('re-run `yad doctor` to confirm, then re-run with --push — on a verified Product that commit is the one yad makes; a hand commit of state.json is refused');
+    else hand(`re-run \`yad doctor\` to confirm, then commit epics/*/.sdlc/state.json${indexRebuilt ? ` and ${INDEX_FILE}` : ''} (or re-run with --push)`);
     return did(true);
   }
 
