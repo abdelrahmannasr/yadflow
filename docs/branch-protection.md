@@ -46,7 +46,7 @@ to many repos from an organization. Set these on the default branch:
 |---|---|---|
 | Require a pull request before merging | on | A change reaches the branch only through a reviewed pull request |
 | Required approvals | **1 or more** for a team. **0** in solo mode | A team needs someone other than the author to approve. In solo mode a required approval blocks your own merge, because GitHub does not let an author approve their own pull request |
-| Dismiss stale pull request approvals when new commits are pushed | on | Safe with yad: its CI never pushes to a review branch, so only the author's own new commits reset an approval — which is what should happen |
+| Dismiss stale pull request approvals when new commits are pushed | on | Safe with yad: its CI never pushes to a review branch, so an approval is reset only by a new push to that branch — someone's commit, `yad fold`, or merging the default branch in. A reviewed file that changed needs a new look |
 | Require status checks to pass | on, with the checks listed below | Makes yad's checks block a merge instead of only reporting |
 | Block force pushes | on | A force-push can rewrite the ledger's history |
 | Restrict deletions | on | |
@@ -73,8 +73,8 @@ ledger. When a review pull request merges, the `yad-gate-sync` workflow records 
 that commit straight to the default branch**. A protected default branch refuses that push unless the
 token making it may bypass the rules.
 
-**The built-in Actions token cannot bypass.** A ruleset's bypass list takes roles, teams, GitHub Apps
-and Dependabot — not GitHub Actions. So give the workflow a token whose owner is on the bypass list:
+**The built-in Actions token cannot bypass.** A ruleset's bypass list takes actors such as roles, teams
+and GitHub Apps — never GitHub Actions. So give the workflow a token whose owner is on the bypass list:
 
 1. **A GitHub App** that you add to the ruleset's bypass list, or
 2. **A fine-grained personal access token** (contents: read and write) of someone on the bypass list.
@@ -122,9 +122,11 @@ protected branch, or the push is refused and the ledger never advances.
 
 ## Other direct pushes yad can make
 
-Three commands can push straight to the default branch: `yad update --push`, `yad checkpoint --push`
-and `yad gate repair --push`. With protection on, they need a person who may bypass the rules. Anyone
-else can run them without `--push`, commit on a branch, and open a pull request instead.
+These commands push straight to the default branch: `yad update --push`, `yad checkpoint --push`,
+`yad tidy up --push`, `yad repo refresh --push` and `yad gate repair --push` — and `yad gate ci` when a
+person runs it instead of CI. With protection on, they need someone who may bypass the rules. Anyone
+else can run them without `--push`, commit on a branch, and open a pull request instead (on a verified
+Product, `yad gate repair` is the exception: its ledger commit only makes sense on the default branch).
 
 ## The local git hook (E48)
 
@@ -135,12 +137,14 @@ the files your commit is about to record. If one of them is a file only CI may c
 or the Product index `.sdlc/index.json` — the commit is refused, and the message names:
 
 - every refused file, and the `git restore --staged` line that takes them out of the commit;
-- the yad command that owns the change (`yad gate open`, `yad gate repair`, or CI at merge);
-- the way through: `YAD_HOOK_DISABLE=1 git commit …`. The `ledger-guard` check in CI still refuses
-  that commit, so this only helps when you mean to fix it before you push.
+- the yad command that owns the change (`yad gate open`, `yad gate repair <epic> --push`, or CI at
+  merge);
+- the way through: `YAD_HOOK_DISABLE=1 git commit …` (in PowerShell, `$env:YAD_HOOK_DISABLE=1` first,
+  then `git commit`). The `ledger-guard` check on the pull request still judges that commit.
 
-It refuses exactly what the CI check refuses, and allows what it allows: a new epic's first ledger (its
-seed), artifacts, the contract lock, a merge commit, and a commit authored by the `yad-gate-sync` bot.
+It follows the CI check's rules, and where it cannot know the answer it allows. So it lets through a
+new epic's first ledger (its seed), artifacts, the contract lock, a merge commit, and a commit authored
+by the `yad-gate-sync` bot.
 The ledger commits yad's own `yad gate ci` and `yad gate repair` make pass it too: those are the
 commands the refusal sends you to, and CI's check never judges them (they land on the default branch,
 not in a pull request).
@@ -155,13 +159,25 @@ a tool such as husky sets git's `core.hooksPath`, yad writes nothing and prints 
 hook instead:
 
 ```sh
-node 'hooks/ledger-guard.mjs' --staged; [ $? -ne 2 ] || exit 1
+[ ! -f 'hooks/ledger-guard.mjs' ] || node 'hooks/ledger-guard.mjs' --staged || [ $? -ne 2 ] || exit 1
 ```
 
-(With the Product in a subfolder of the repo, the path starts with that folder; `yad doctor` prints the
-exact line.)
+Only the guard's refusal stops the commit; with no guard file, no node, or a crash, the line allows. It
+is safe under `sh -e`, which husky uses. For husky, add it to `.husky/pre-commit` (git's
+`core.hooksPath` names `.husky/_`, a folder husky generates). With the Product in a subfolder of the
+repo, the path starts with that folder; `yad doctor` prints the exact line and file. A tool that owns
+the hook (such as the pre-commit framework) may rewrite it on reinstall; add the line again after.
 
 **Limits.** The hook is a convenience, not a guard: `git commit --no-verify` skips it, and a clone
-without it allows everything. `git commit --amend` is judged by what it changes against the commit it
-replaces, so amending a commit that already changed the ledger passes. The CI check, made required by
-branch protection, is what actually protects the ledger.
+without it allows everything. Where it and the CI check can differ:
+
+- **`git commit --amend`** is judged against the commit it replaces, because git does not tell the hook
+  it is an amend. Amending a commit that already changed the ledger passes; amending one to **undo**
+  that change is refused, and the message says to run that amend with `YAD_HOOK_DISABLE=1`.
+- **The bot is matched by name.** CI also needs the platform's Verified signature, so a commit that only
+  claims the `yad-gate-sync` name passes here and fails there.
+- **The base is your clone's `origin/*` refs**, which may be older than the pull request's base.
+- **Two Products in one repo** share one `pre-commit`; each `yad check --fix` rewrites it for its own
+  folder.
+
+The CI check, made required by branch protection, is what actually protects the ledger.

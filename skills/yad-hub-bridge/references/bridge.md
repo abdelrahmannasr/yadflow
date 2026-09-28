@@ -293,8 +293,8 @@ push retries with a rebase.
   documented bend of the no-stored-tokens rule; `CI_JOB_TOKEN` can neither read the approvals API nor
   push. Used only for the merge-time default-branch push + the API reads.
 - Protected default branch (GitHub): the merge advance needs to push it, and the built-in Actions token
-  cannot bypass branch protection or a ruleset (a ruleset's bypass list takes roles, teams, GitHub Apps
-  and Dependabot only). Pass a token whose owner may bypass to both jobs' `actions/checkout` — a GitHub
+  cannot bypass branch protection or a ruleset (a ruleset's bypass list takes actors such as roles,
+  teams and GitHub Apps, never GitHub Actions). Pass a token whose owner may bypass to both jobs' `actions/checkout` — a GitHub
   App on the bypass list, or a fine-grained PAT as `SDLC_GATE_TOKEN`. See yadflow's
   `docs/branch-protection.md`.
 

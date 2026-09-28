@@ -31,8 +31,8 @@
 # CI never approves and never merges — the merge click is the human approval act.
 #
 # Protected default branch? Only these jobs push there, and the built-in Actions token cannot get past
-# branch protection or a ruleset: a ruleset's bypass list takes roles, teams, GitHub Apps and Dependabot,
-# not GitHub Actions. So give the push a token whose owner may bypass, and pass it to actions/checkout
+# branch protection or a ruleset: a ruleset's bypass list takes actors such as roles, teams and GitHub
+# Apps, never GitHub Actions. So give the push a token whose owner may bypass, and pass it to actions/checkout
 # below via `with: { token: ${{ secrets.SDLC_GATE_TOKEN }} }`:
 #   a) a GitHub App on the bypass list (its installation token), or
 #   b) a fine-grained PAT of someone on the bypass list, stored as the SDLC_GATE_TOKEN secret.
