@@ -40,8 +40,8 @@ const FOLDER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const validFolderName = (name) => typeof name === 'string' && FOLDER_RE.test(name);
 
 // Text read from a shared file (a repo name, a path) is shown in the terminal: every control character
-// becomes a space, so a registry entry cannot move the cursor or recolour what follows.
-export const shown = (s) => [...String(s ?? '')].map((ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? ' ' : ch)).join('');
+// (C0, DEL and C1 — U+0080–U+009F, which some terminals obey too) becomes a space, so a registry entry cannot move the cursor or recolour what follows.
+export const shown = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) ? ' ' : ch; }).join('');
 
 // A folder as the person's shell reaches it: relative to where they ran yad (which `--dir` may not
 // be), quoted when it holds a space.
@@ -262,8 +262,14 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   // Strict: a registry that does not parse (a merge-conflict marker left in it) must be SAID, not read as
   // "no repos" — the joiner would get the Product alone with no hint the list was lost.
   let registry;
-  try { registry = readJSONStrict(path.join(product, PROJECT_FILES.reposRegistry), { repos: [] }); }
-  catch (e) { warn(`${PROJECT_FILES.reposRegistry} in the Product cannot be read (${shown((e.message || '').replace(/^corrupt JSON in \S+: /, ''))}) — nothing to clone; fix it in the Product and re-run`); registry = { repos: [] }; }
+  const regFile = path.join(product, PROJECT_FILES.reposRegistry);
+  try { registry = readJSONStrict(regFile, { repos: [] }); }
+  catch (e) {
+    // The reason without the absolute path (a home folder name, spaces and all) — the file is named once.
+    const why = (e.message || '').replace(`corrupt JSON in ${regFile}: `, '').split(regFile).join(PROJECT_FILES.reposRegistry);
+    warn(`${PROJECT_FILES.reposRegistry} in the Product cannot be read (${shown(why)}) — nothing to clone; fix it in the Product and re-run`);
+    registry = { repos: [] };
+  }
   // `null`, `[]`, `5` parse, and hold no list: said too.
   if (!Array.isArray(registry?.repos)) warn(`${PROJECT_FILES.reposRegistry} has no list of repos — nothing to clone; fix it in the Product and re-run`);
   const repos = cloneMissingRepos(product, registry);

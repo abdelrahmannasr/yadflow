@@ -25602,6 +25602,7 @@ test('E79: folder names, the workspace name from a URL, and the printed remote s
   assert.ok(remoteSteps({ name: 'acme', platform: 'gitlab', branch: 'trunk' }).includes('git push -u origin trunk'));
   assert.ok(remoteSteps({ name: 'acme', platform: null }).includes('git remote add origin <your remote URL>'));
   assert.equal(shown('a\u001b[31mb\rc'), 'a [31mb c');
+  assert.equal(shown('a\u009b31mb\u007fc\u00a0'), 'a 31mb c\u00a0', 'C1 and DEL too; not a printable character');
 });
 
 test('E79: the clone step judges every registry entry, and one failure never stops the rest', async () => {
@@ -25895,9 +25896,12 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     const corrupt = e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude']);
     assert.equal(corrupt.status, 0, corrupt.stdout + corrupt.stderr);
     assert.match(corrupt.stdout + corrupt.stderr, /repos\.json in the Product cannot be read \(Unexpected token/);
+    assert.doesNotMatch(corrupt.stdout + corrupt.stderr, /corrupt JSON in|yad-e79-/, 'the reason, without the absolute path');
     assert.ok(fs.existsSync(path.join(joined, '.git', 'hooks', 'pre-commit')), 'the per-machine steps still ran');
     fs.writeFileSync(path.join(joined, '.sdlc', 'repos.json'), 'null\n');
-    assert.match((({ stdout, stderr }) => stdout + stderr)(e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude'])), /has no list of repos/, 'a file holding null is said too');
+    const nul = e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude']);
+    assert.equal(nul.status, 0, nul.stdout + nul.stderr);
+    assert.match(nul.stdout + nul.stderr, /has no list of repos/, 'a file holding null is said too');
     e79Git(T, joined, 'checkout', '--', '.sdlc/repos.json');
 
     const noClone = e79Yad(T, fresh, ['join', path.join(remotes, 'missing.git')]);
