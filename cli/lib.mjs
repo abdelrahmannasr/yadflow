@@ -318,7 +318,13 @@ export function writeJSON(p, obj) {
   // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link
   // points (`~/.zshenv`; E81 review 17). `wx` refuses any entry already there, links included.
   const tmp = `${p}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-  fs.writeFileSync(tmp, data, { flag: 'wx' });
+  try { fs.writeFileSync(tmp, data, { flag: 'wx' }); }
+  catch (e) {
+    // A half-written file of our own (a full disk) is removed; an entry that was already there (EEXIST)
+    // is not ours to delete.
+    if (e.code !== 'EEXIST') fs.rmSync(tmp, { force: true });
+    throw e;
+  }
   try {
     fs.renameSync(tmp, p);
   } catch (e) {

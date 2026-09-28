@@ -26896,6 +26896,9 @@ test('E81 review 17: writeJSON never writes through a link at its temp name, and
     const r = e79Yad(T, product, ['repo', 'refresh']);
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stdout + r.stderr, /\.sdlc in the Product is a link/);
+    const pushed = e79Yad(T, product, ['repo', 'refresh', '--push', '--json']);
+    assert.equal(pushed.status, 1);
+    assert.equal(JSON.parse(pushed.stdout).published, null, 'nothing is published after the refusal');
     assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before, 'the folder it names is untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

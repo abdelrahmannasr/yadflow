@@ -131,8 +131,13 @@ export async function runRepo(root, { action = 'list', name, today, push = false
     // (E81 review 17).
     let sdlcLinked = false;
     try { sdlcLinked = fs.lstatSync(path.dirname(regPath)).isSymbolicLink(); } catch { /* not there */ }
-    if (sdlcLinked) { fail(`${path.dirname(PROJECT_FILES.reposRegistry)} in the Product is a link — ${PROJECT_FILES.reposRegistry} was not written`); process.exitCode = 1; }
-    else writeJSON(regPath, registry);
+    if (sdlcLinked) {
+      // A refusal stops here, `--push` included (E81 review 18): nothing is published after it.
+      fail(`${path.dirname(PROJECT_FILES.reposRegistry)} in the Product is a link — ${PROJECT_FILES.reposRegistry} was not written`);
+      process.exitCode = 1;
+      return { action, refreshed, repos: rows, published: null };
+    }
+    writeJSON(regPath, registry);
     refreshed ? ok(`refreshed ${refreshed} repo(s)`) : info('nothing refreshed');
     if (push) {
       // Publish whatever tracked code-context now differs (the AI-regenerated code-maps + the stamped
