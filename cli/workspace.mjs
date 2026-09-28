@@ -54,7 +54,7 @@ export const validFolderName = (name) => typeof name === 'string' && FOLDER_RE.t
 // (C0, DEL and C1 — U+0080–U+009F, which some terminals obey too) becomes a space, so a registry entry cannot move the cursor or recolour what follows.
 // So do the line and paragraph separators and the bidi controls, which can make a line read in another
 // order than it holds (E81 review 9).
-const INVISIBLE = new Set([0x2028, 0x2029, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]);
+const INVISIBLE = new Set([0x2028, 0x2029, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x061c]);
 export const shown = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) || INVISIBLE.has(n) ? ' ' : ch; }).join('');
 
 // A folder as the person's shell reaches it: relative to where they ran yad (which `--dir` may not
@@ -147,7 +147,7 @@ const NETWORK_URL_RE = new RegExp(String.raw`^(?![^/]*::)(?:https?:\/\/(?:${HTTP
 // escape), the line and paragraph separators and the bidi controls are refused raw or as their UTF-8
 // %-escapes too (`%c2%9b`, `%e2%80%ae`; E81 review 9). `%40` and every other printable escape pass.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
-const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]|%(?:[01][0-9a-f]|7f|c2%[89][0-9a-f]|e2%80%(?:a[89a-e]|8[ef])|e2%81%a[6-9])/i;
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]|%(?:[01][0-9a-f]|7f|c2%[89][0-9a-f]|d8%9c|e2%80%(?:a[89a-e]|8[ef])|e2%81%a[6-9])/i;
 export const localRemotesAllowed = (env = process.env) => env.YAD_ALLOW_LOCAL_REMOTES === '1';
 const folded = (p) => (process.platform === 'darwin' || process.platform === 'win32' ? p.toLowerCase() : p);
 const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);

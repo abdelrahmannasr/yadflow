@@ -32,8 +32,8 @@ import { readOwners } from './owners.mjs';
 // The repos check reports every other entry.
 const isCheckout = (root, repo) => runnable(judgeRepo(root, repo));
 // A registry name inside a command the person is invited to copy: as it is only when it is one plain
-// word, else `<name>` — the shared file could hold `api; curl …|sh` (E81 review 9).
-const asArg = (name) => (typeof name === 'string' && /^[\w.-]+$/.test(name) ? name : '<name>');
+// word that starts with a letter or digit (never an option like `--push`), else `<name>` — the shared file could hold `api; curl …|sh` (E81 review 9).
+const asArg = (name) => (typeof name === 'string' && /^\w[\w.-]*$/.test(name) ? name : '<name>');
 
 const MIN_NODE = 18;
 

