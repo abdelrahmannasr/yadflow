@@ -55,6 +55,15 @@ export function detectPlatform(remoteUrl = '') {
 }
 export const gitHead = (cwd) => run('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
 
+// A repo's (one `yad init` found beside the Product) default branch: the remote's published default, else the branch it is on (a repo with
+// no remote has nothing else to say), else main.
+export function detectDefaultBranch(repoDir) {
+  const originHead = run('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd: repoDir });
+  if (originHead.ok && originHead.stdout) return originHead.stdout.replace(/^origin\//, '');
+  const current = run('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: repoDir });
+  return (current.ok && current.stdout) || 'main';
+}
+
 // Containment: a repo path must live inside the WORKSPACE — the Product root's parent. The standard
 // multi-repo layout puts the code repos BESIDE the Product, not under it (project/{product,backend,frontend}),
 // so `../backend` has to register; containing to the Product root instead forced separate git repos to nest
@@ -76,7 +85,25 @@ export function insideWorkspace(root, rpath) {
   const parent = path.dirname(projectRoot);
   const workspace = parent === projectRoot ? projectRoot : parent; // degenerate: root is the fs root
   const resolved = path.resolve(projectRoot, rpath);
+  if (throughGitDir(root, rpath)) return false;
   return resolved === projectRoot || resolved.startsWith(workspace + path.sep);
+}
+
+// A repo path that runs through a `.git` folder is never a code repo (E79 review 2). `yad join` clones
+// every registered path with no person looking, and a clone that lands at `../.git` makes the workspace
+// a repo whose `config` the Product's writer chose (`core.fsmonitor` runs a command on `git status`);
+// one at `.git/hooks` puts their hooks in the Product. Git refuses a `.git` part in a tracked path for
+// the same reason. Matched without case (macOS and Windows file systems ignore it), and Windows' short
+// name for `.git` (`GIT~1`) too.
+export function throughGitDir(root, rpath) {
+  const projectRoot = path.resolve(root);
+  const parent = path.dirname(projectRoot);
+  const workspace = parent === projectRoot ? projectRoot : parent;
+  const parts = path.relative(workspace, path.resolve(projectRoot, rpath)).split(/[\\/]+/);
+  // Windows also drops trailing dots and spaces from a name and reads `name:stream` as `name`, so
+  // `.git.`, `.git ` and `.git::$INDEX_ALLOCATION` are all `.git` there — judged as git itself does.
+  const ntfs = (p) => p.split(':')[0].replace(/[. ]+$/, '');
+  return parts.some((p) => /^\.git$/i.test(ntfs(p)) || /^git~\d+$/i.test(ntfs(p)));
 }
 
 // Build the hub.json object for a (re)configure write: the fields this run collected, laid over the
@@ -92,6 +119,7 @@ export function buildReconfiguredHub(cur, fields) {
 // A path that is not a git repository is rejected and NOTHING is written — a registry entry with
 // syncedHead:null would only surface later as an unexplained "unknown status" in the CI gates.
 export function registerRepo(root, registry, { name, rpath, platform, default_branch = 'main', today = null, pack = true }) {
+  if (throughGitDir(root, rpath)) { warn(`${rpath} runs through a .git folder — not a code repo, skipped`); return null; }
   if (!insideWorkspace(root, rpath)) {
     warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`);
     return null;
@@ -533,6 +561,24 @@ export async function runSetup(root, opts = {}) {
   const known = new Set(registry.repos.map((r) => r.name));
   const greenfield = codebase === 'greenfield';
   const mono = repo_layout === 'monorepo';
+  // `yad init` (E79) found these beside the Product: one yes/no each, with what git already knows about
+  // them — the platform from `origin`, the default branch from origin/HEAD or the branch it is on.
+  for (const d of (opts.discovered || []).filter((x) => !known.has(x.name))) {
+    const repoRoot = path.resolve(root, d.rpath);
+    const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot });
+    const platform = detectPlatform(remote.ok ? remote.stdout : '') || 'github';
+    const default_branch = detectDefaultBranch(repoRoot);
+    // "Connect" means what it means in the loop below: register it, and the wiring step then writes the
+    // CI gates and the PR template into it. Said here, because init asks for every repo at once.
+    if (!(await askYesNo(`Connect and wire ${d.name} (${d.rpath}, ${platform}, default branch ${default_branch}) — writes its CI gates + PR template?`, true))) continue;
+    const repo = registerRepo(root, registry, { name: d.name, rpath: d.rpath, platform, default_branch, today: opts.today ?? null, pack: !greenfield });
+    if (!repo) continue;
+    known.add(d.name);
+    ok(`registered ${d.name}`);
+    if (greenfield) info(`${d.name}: greenfield — skipped repomix pack (run \`yad repo refresh ${d.name}\` once it has code)`);
+    else packRepo(root, repo);
+    if (mono) { info('monorepo — one repo connected'); break; }
+  }
   if (await askYesNo(`Connect a code repo? ${c.dim(`(${registry.repos.length} already registered)`)}`, registry.repos.length === 0)) {
     for (;;) {
       const name = await ask('  repo name (blank to finish)', '');
@@ -540,6 +586,7 @@ export async function runSetup(root, opts = {}) {
       if (known.has(name)) { warn(`${name} already registered — skipping`); continue; }
       // Siblings of the Product are the common layout (project/{product,backend}) — `../backend` is valid.
       const rpath = await ask('    path (relative to project root, e.g. ../backend)', `demo-repos/${name}`);
+      if (throughGitDir(root, rpath)) { warn(`${rpath} runs through a .git folder — not a code repo, skipped`); continue; }
       if (!insideWorkspace(root, rpath)) { warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
       const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();

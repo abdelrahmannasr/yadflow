@@ -9,6 +9,18 @@ const helpText = (profiles) => `${c.bold('yad')} — setup, review-gate & build 
 ${c.dim('Every command but `yad hook` takes --json: one JSON object on stdout, every other line on stderr')}
 ${c.dim('(docs/CLI.md, "--json on every command").')}
 
+${c.bold('Start a workspace')} ${c.dim('(the folder holding product/ and the code repos side by side)')}
+  ${c.dim('--dir: for init, the workspace; for new and join, the folder the workspace is made in')}
+  yad new <name>       Greenfield: make <name>/product/, git init it, run setup inside it. Creates
+                       no remote — prints the gh/glab line to run yourself. Takes the setup flags
+  yad init             Brownfield, in the folder that already holds your repos: make product/ (or
+                       use the one there; --path <folder> names it), run setup, offer each repo found
+  yad join <url> [folder]
+                       Clone the Product into [folder]/product/ (default: the URL's last name) and
+                       every repo it registers; a failed repo clone is reported, never fatal. Then
+                       only per-machine steps: git-ignored skill copies + the git pre-commit hook.
+                       Never commits, pushes, or changes a shared file
+
 ${c.bold('Setup & maintenance')}
   yad setup            Guided first-run setup (profile interview, install, connect & wire repos)
                        profile flags: --solo | --team <n>, --greenfield | --brownfield,
@@ -457,7 +469,7 @@ async function main() {
   // A project written by a newer yadflow is warned about before any command reads it (docs/migrations/
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
-  if (!['hook', 'doctor', 'migrate', 'setup', 'report'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
+  if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
 
   const today = new Date().toISOString().slice(0, 10);
   // What the command returned: under --json, a command that did not answer itself answers with it.
@@ -478,6 +490,23 @@ async function main() {
         ideTargets: o['ide-targets'] === undefined ? undefined : String(o['ide-targets']).split(',').map((t) => t.trim()).filter(Boolean),
       });
       break;
+    // E79: the workspace verbs. `--dir` is never the Product here: for `init` it is the WORKSPACE (the
+    // folder that holds product/ and the code repos); for `new` and `join` it is the folder the workspace
+    // is made IN. The setup flags pass through.
+    case 'new':
+    case 'init':
+    case 'join': {
+      const setupFlags = {
+        today, force: o.force,
+        solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
+        monorepo: o.monorepo, separate: o.separate, tools: o.tools,
+        ideTargets: o['ide-targets'] === undefined ? undefined : String(o['ide-targets']).split(',').map((t) => t.trim()).filter(Boolean),
+      };
+      if (cmd === 'new') result = await commands.runNew(o.dir, o._[1], setupFlags);
+      else if (cmd === 'init') result = await commands.runInit(o.dir, { ...setupFlags, path: o.path });
+      else result = await commands.runJoin(o.dir, o._[1], o._[2], { ideTargets: setupFlags.ideTargets });
+      break;
+    }
     case 'check':
       result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
       break;

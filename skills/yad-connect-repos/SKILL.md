@@ -59,6 +59,8 @@ ask for them and do not write them.
 ### Step 1 — Resolve the repo and its auth (GitHub + GitLab, local user)
 Determine where the code is:
 - If `path` is given and is a git repo (`.git` present) → use it in place.
+- A teammate joining an existing Product gets every registered repo cloned at its recorded `path` by
+  `yad join <url>` (E79) — no need to clone them one by one here.
 - Else if `git_url` is given → **clone it as the local user** into a working location
   (`{code_repos_root}/<repo>/` by `config.yaml` `build.code_repos_root`, or a path the user names):
   ```
