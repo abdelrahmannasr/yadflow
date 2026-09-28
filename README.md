@@ -80,9 +80,10 @@ after saving a `.yad-orig` backup
 
 ## What `npx yadflow setup` installs
 
-![npx yadflow setup — the guided wizard installs the yad-* skills, wires the CI gates, and stamps the .sdlc config](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/setup-wizard.gif)
+![yad new acme — makes acme/product/, runs the guided setup wizard (install the yad-* skills, record the Product, wire the gates, stamp the .sdlc config), then prints the commands that put the Product on GitHub or GitLab](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/setup-wizard.gif)
 
-The wizard is idempotent and profile-driven (solo/team, greenfield/brownfield, monorepo/separate).
+The recording shows `yad new acme`, which runs this wizard inside the new `acme/product/`
+([how to re-record it](https://github.com/abdelrahmannasr/yadflow/blob/main/docs/media/setup-wizard.tape)). The wizard is idempotent and profile-driven (solo/team, greenfield/brownfield, monorepo/separate).
 In one pass it produces:
 
 - **The `yad` CLI** — zero-dependency Node (`setup`, `gate`, `commit`, `open-pr`, `ship`, `repo`,
