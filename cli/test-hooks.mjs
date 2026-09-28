@@ -943,3 +943,32 @@ test('E48 review 1: the refusal names the repair that commits, the amend-to-undo
   assert.match(m, /without `-a`/);
   assert.doesNotMatch(m, /could not reach the default branch|CI still refuses/, 'the check runs on pull requests only');
 });
+
+test('E48 review 2: the agent\'s refusal and the commit refusal say the same things — twins, checked together', async () => {
+  const { denyMessage, commitDenyMessage } = await import('./hook.mjs');
+  const top = path.join(os.tmpdir(), 'r');
+  const agent = denyMessage({ epic: 'EP-a', rel: 'epics/EP-a/.sdlc/state.json', productRoot: top });
+  const commit = commitDenyMessage({ top, hits: [{ kind: 'state', epic: 'EP-a', abs: path.join(top, 'epics/EP-a/.sdlc/state.json'), productRoot: top }] });
+  for (const [name, m] of [['agent', agent], ['commit', commit]]) {
+    assert.match(m, /yad gate repair EP-a --push/, `${name}: the repair that commits`);
+    assert.doesNotMatch(m, /reach the default branch|CI still refuses/, `${name}: the check runs on pull requests only`);
+    assert.doesNotMatch(m, /\n\n\n/, `${name}: no double blank line`);
+  }
+});
+
+test('E48 review 2: doctor says a hook without its execute bit is skipped by git — not "out of date", and no backup promised', { skip: IS_WINDOWS && 'no execute bit on Windows' }, async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { gitHookActions, gitHookState } = await import('./plan.mjs');
+  const { T, product } = verifiedRepo();
+  try {
+    gitHookActions(product)[0].apply();
+    fs.chmodSync(gitHookState(product).file, 0o644);
+    const line = collectDoctor(product).checks.find((x) => x.id === 'git-hook');
+    assert.match(line.message, /installed but not executable .* git skips it/);
+    assert.doesNotMatch(line.hint, /saves the current file/);
+    fs.appendFileSync(gitHookState(product).file, '# mine\n');
+    const changed = collectDoctor(product).checks.find((x) => x.id === 'git-hook');
+    assert.match(changed.message, /out of date/);
+    assert.match(changed.hint, /saves the current file/);
+  } finally { cleanup(T); }
+});

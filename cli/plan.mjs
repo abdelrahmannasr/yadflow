@@ -1100,6 +1100,7 @@ export function gitHookState(root) {
   const line = gitHookLine(prefix);
   const hooksPath = run('git', ['-C', root, 'config', '--get', 'core.hooksPath']);
   // A core.hooksPath that names the default folder anyway (some tools set it so) is not a tool's folder.
+  // `--path-format` needs git 2.31; an older git fails the call, and the setting is then treated as a tool's.
   const common = run('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
   const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
   const isDefault = common.ok && real(path.dirname(file)) === real(path.resolve(common.stdout, 'hooks'));
@@ -1118,7 +1119,8 @@ export function gitHookState(root) {
   // bit are not an installed hook.
   let runnable = true;
   if (process.platform !== 'win32') { try { runnable = (fs.statSync(file).mode & 0o111) !== 0; } catch { runnable = false; } }
-  return { applies: true, file, expected, prefix, state: text === expected && runnable ? 'ok' : 'outdated' };
+  if (text === expected && runnable) return { applies: true, file, expected, prefix, state: 'ok' };
+  return { applies: true, file, expected, prefix, state: 'outdated', why: text === expected ? 'not-executable' : 'changed' };
 }
 
 // The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
