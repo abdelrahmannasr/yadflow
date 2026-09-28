@@ -25889,6 +25889,13 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     const notProduct = e79Yad(T, fresh, ['join', path.join(remotes, 'backend.git'), 'b2']);
     assert.equal(notProduct.status, 1);
     assert.match(notProduct.stdout + notProduct.stderr, /not a yad Product/);
+    // A registry that does not parse is named, and the per-machine steps still run (E79 review 5).
+    fs.writeFileSync(path.join(joined, '.sdlc', 'repos.json'), '<<<<<<< HEAD\n{}\n');
+    const corrupt = e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude']);
+    assert.equal(corrupt.status, 0, corrupt.stdout + corrupt.stderr);
+    assert.match(corrupt.stdout + corrupt.stderr, /repos\.json in the Product cannot be read \(not valid JSON\)/);
+    e79Git(T, joined, 'checkout', '--', '.sdlc/repos.json');
+
     const noClone = e79Yad(T, fresh, ['join', path.join(remotes, 'missing.git')]);
     assert.equal(noClone.status, 1, 'the Product clone is the one fatal failure');
     assert.equal(e79Yad(T, fresh, ['join', '--upload-pack=x']).status, 1);

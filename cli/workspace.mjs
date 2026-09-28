@@ -25,7 +25,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
 import { moduleActions, gitHookActions } from './plan.mjs';
@@ -259,7 +259,11 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   }
   if (!exists(productConfigPath(product))) return refuse(`${path.join(wsName, PRODUCT_DIR)}/ has no .sdlc/hub.json — that repo is not a yad Product`);
 
-  const registry = readJSON(path.join(product, PROJECT_FILES.reposRegistry), { repos: [] }) || { repos: [] };
+  // Strict: a registry that does not parse (a merge-conflict marker left in it) must be SAID, not read as
+  // "no repos" — the joiner would get the Product alone with no hint the list was lost.
+  let registry;
+  try { registry = readJSONStrict(path.join(product, PROJECT_FILES.reposRegistry), { repos: [] }) || { repos: [] }; }
+  catch { warn(`${PROJECT_FILES.reposRegistry} in the Product cannot be read (not valid JSON) — nothing to clone; fix it in the Product and re-run`); registry = { repos: [] }; }
   if (!Array.isArray(registry.repos)) warn(`${PROJECT_FILES.reposRegistry} has no list of repos — nothing to clone; fix it in the Product and re-run`);
   const repos = cloneMissingRepos(product, registry);
   for (const r of repos.cloned) ok(`cloned ${r.name} → ${r.path}`);
