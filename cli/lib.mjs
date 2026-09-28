@@ -1,5 +1,5 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { err } from './errors.mjs';
 import { MIRRORED_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
@@ -314,8 +314,11 @@ export function writeJSON(p, obj) {
     if (fs.readFileSync(p, 'utf8') === data) return;
   } catch { /* missing or unreadable — fall through and write it */ }
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  const tmp = `${p}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, data);
+  // A name nobody can guess, created exclusively (`wx`): a Product can commit `repos.json.<pid>.tmp` as a
+  // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link
+  // points (`~/.zshenv`; E81 review 17). `wx` refuses any entry already there, links included.
+  const tmp = `${p}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+  fs.writeFileSync(tmp, data, { flag: 'wx' });
   try {
     fs.renameSync(tmp, p);
   } catch (e) {

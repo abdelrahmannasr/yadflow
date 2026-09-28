@@ -5,6 +5,7 @@
 // it to origin — a working-tree-only op (it never writes the registry; a dirty tree is skipped).
 // clone (E81): clone every registered repo that is missing on this machine — `yad join`'s clone step,
 // for the repo a teammate registered after you joined. It never runs git in a repo already there.
+import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, writeJSON, run } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
@@ -126,7 +127,12 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       }
       rows.push({ name: repo.name ?? null, refreshed: packed, head: head || null });
     }
-    writeJSON(regPath, registry);
+    // Never through a `.sdlc` the Product commits as a link: the rename would land in the folder it names
+    // (E81 review 17).
+    let sdlcLinked = false;
+    try { sdlcLinked = fs.lstatSync(path.dirname(regPath)).isSymbolicLink(); } catch { /* not there */ }
+    if (sdlcLinked) { fail(`${path.dirname(PROJECT_FILES.reposRegistry)} in the Product is a link — ${PROJECT_FILES.reposRegistry} was not written`); process.exitCode = 1; }
+    else writeJSON(regPath, registry);
     refreshed ? ok(`refreshed ${refreshed} repo(s)`) : info('nothing refreshed');
     if (push) {
       // Publish whatever tracked code-context now differs (the AI-regenerated code-maps + the stamped

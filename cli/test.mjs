@@ -26874,3 +26874,28 @@ test('E81 review 16: refresh never writes through a .gitignore the Product commi
     assert.match(fs.readFileSync(path.join(product, '.gitignore'), 'utf8'), /pack\.md/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E81 review 17: writeJSON never writes through a link at its temp name, and refresh never writes through a linked .sdlc', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { writeJSON } = await import('./lib.mjs');
+  const T = e79Tmp();
+  try {
+    // The old temp name was `<file>.<pid>.tmp`: a link there, dangling, must never be followed.
+    const f = path.join(T, 'repos.json');
+    const target = path.join(T, 'zshenv');
+    fs.symlinkSync(target, `${f}.${process.pid}.tmp`);
+    writeJSON(f, { repos: [] });
+    assert.ok(!fs.existsSync(target), 'nothing written where the link points');
+    assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')), { repos: [] });
+    assert.ok(fs.lstatSync(`${f}.${process.pid}.tmp`).isSymbolicLink(), 'the link is left alone');
+    // A `.sdlc` the Product commits as a link: refresh does not write the registry through it.
+    const { product } = e80Workspace(T);
+    const elsewhere = path.join(T, 'elsewhere');
+    fs.renameSync(path.join(product, '.sdlc'), elsewhere);
+    fs.symlinkSync(elsewhere, path.join(product, '.sdlc'));
+    const before = fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8');
+    const r = e79Yad(T, product, ['repo', 'refresh']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /\.sdlc in the Product is a link/);
+    assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before, 'the folder it names is untouched');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
