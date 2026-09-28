@@ -30,10 +30,15 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
   to it counts), works on the Product and says so on stderr — `Product: ../product (from
   .yad-workspace.json)` — never on `--json` stdout. Anywhere else in the workspace — the workspace folder
   itself, a repo the Product does not register — there is no Product: a workspace can be a shared folder
-  such as `~/Projects`, holding other teams' repos, and those must never reach this Product.
+  such as `~/Projects`, holding other teams' repos, and those must never reach this Product. yad names
+  where the Product is instead (`the Product is product: cd there`), and `yad setup` refuses to make the
+  workspace folder a second Product. The same rule holds for a git repo nested inside the Product's own
+  folder (`vendor/lib`): it reaches the Product only if the Product registers it.
+- **`risk-map` and `codeowners`** run inside a registered repo work on that repo; run from the Product,
+  on every registered repo, as before.
 - **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in, and
-  reads the Product beside it: run inside a registered repo without `--repo`, it takes that repo's
-  recorded name, platform and default branch.
+  reads the Product beside it: run anywhere inside a registered repo without `--repo`, it works at that
+  repo's top and takes its recorded name, platform and default branch.
 - **`--dir` always wins.**
 - **A command that writes the Product** (`update`, `check --fix`, `epic new`, `foundation new`,
   `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`, `docs sync --wire`) refuses a

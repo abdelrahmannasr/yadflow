@@ -42,8 +42,12 @@ function insideGitTree(dir) {
   }
 }
 
-const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
-const within = (child, parent) => child === parent || child.startsWith(parent + path.sep);
+// On disk, as the disk spells it: `.native` returns the stored case (APFS and NTFS ignore case, and the JS
+// realpath keeps whatever case it was given) and Windows' long names for 8.3 short ones — the same rule
+// as `samePath` in lib.mjs. Windows compares without case, too.
+const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+const within = (child, parent) => fold(child) === fold(parent) || fold(child).startsWith(fold(parent) + path.sep);
 
 // Read one workspace file. `{ product }` (an absolute Product root) or `{ problem }`.
 export function readWorkspace(workspaceDir) {
@@ -59,11 +63,29 @@ export function readWorkspace(workspaceDir) {
 
 export const hasProduct = (dir) => exists(productConfigPath(dir));
 
-// → { root, via: 'here' | 'above' | 'workspace', workspace? } | { problem } | null
+// The Product a folder's own workspace file names, when the file is there and usable; else null.
+export function workspaceProduct(dir) {
+  if (!fs.existsSync(path.join(dir, WORKSPACE_FILE)) || insideGitTree(dir)) return null;
+  return readWorkspace(dir).product || null;
+}
+
+// → { root, via: 'here' | 'above' | 'workspace', workspace?, repo? } | { problem } | { elsewhere } | null
+//   `repo`       the registry entry of the code repo `start` is in, when there is one;
+//   `elsewhere`  a workspace's Product, found from a folder that is not in one of its repos (the workspace
+//                folder itself, say) — not used, but worth naming to the person.
 export function findProduct(start) {
   const from = path.resolve(start);
+  // Crossing a git repo's top on the way up: the Product above is some OTHER repo's (E80 review 2). It is
+  // used only when it registers the repo `start` is in — the same rule as the workspace file's, so an
+  // unrelated repo nested in the Product's folder (`vendor/lib`) never writes to it.
+  let crossedRepo = false;
   for (let d = from; ; d = path.dirname(d)) {
-    if (exists(productConfigPath(d))) return { root: d, via: d === from ? 'here' : 'above' };
+    if (exists(productConfigPath(d))) {
+      if (d === from) return { root: d, via: 'here' };
+      const repo = registeredRepoHolding(d, from);
+      if (crossedRepo && !repo) return null;
+      return { root: d, via: 'above', ...(repo ? { repo } : {}) };
+    }
     if (fs.existsSync(path.join(d, WORKSPACE_FILE))) {
       const file = path.join(d, WORKSPACE_FILE);
       if (insideGitTree(d)) return { problem: `${file} is inside a git repo, so it is not used (a repo could commit one)` };
@@ -71,8 +93,10 @@ export function findProduct(start) {
       const ws = readWorkspace(d);
       if (ws.problem) return { problem: ws.problem };
       // Only for a repo this Product registers — never for any folder that happens to sit beside it.
-      return registeredRepoHolding(ws.product, from) ? { root: ws.product, via: 'workspace', workspace: d } : null;
+      const repo = registeredRepoHolding(ws.product, from);
+      return repo ? { root: ws.product, via: 'workspace', workspace: d, repo } : { elsewhere: ws.product };
     }
+    if (fs.existsSync(path.join(d, '.git'))) crossedRepo = true;
     if (path.dirname(d) === d) return null;
   }
 }
@@ -90,7 +114,7 @@ export function registeredRepoHolding(productRoot, dir) {
   for (const r of Array.isArray(reg?.repos) ? reg.repos : []) {
     if (typeof r?.path !== 'string') continue;
     const repoAt = real(path.resolve(productRoot, r.path));
-    if (!repoAt || repoAt === productAt || !within(at, repoAt) || repoAt.length <= bestAt.length) continue;
+    if (!repoAt || fold(repoAt) === fold(productAt) || !within(at, repoAt) || repoAt.length <= bestAt.length) continue;
     best = r;
     bestAt = repoAt;
   }
@@ -100,9 +124,9 @@ export function registeredRepoHolding(productRoot, dir) {
 // Folders a workspace file is never written into: the home folder, the temp folder and the top of a disk.
 // A file there would be found from every folder below it — every project, every test's temp folder.
 function sharedFolder(dir) {
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  const d = real(dir);
-  return path.dirname(d) === d || d === real(os.homedir()) || d === real(os.tmpdir());
+  const onDisk = (p) => fold(real(p) ?? path.resolve(p));
+  const d = onDisk(dir);
+  return path.dirname(d) === d || d === onDisk(os.homedir()) || d === onDisk(os.tmpdir());
 }
 
 // Does a registered repo live BESIDE the Product (not inside it)? Only then does a workspace file help

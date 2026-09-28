@@ -12,7 +12,7 @@
 
 export { runSetup } from '../cli/setup.mjs';
 export { runNew, runInit, runJoin } from '../cli/workspace.mjs';
-export { findProduct, hasProduct, WORKSPACE_FILE } from '../cli/find-product.mjs';
+export { findProduct, hasProduct, workspaceProduct, WORKSPACE_FILE } from '../cli/find-product.mjs';
 export { reconcile } from '../cli/reconcile.mjs';
 export { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
 export { gateApprove, gateComment, gateAdvance } from '../cli/gate-local.mjs';

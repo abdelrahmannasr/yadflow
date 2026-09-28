@@ -29,8 +29,10 @@ function resolveRepo(root, { repo, dir, product }) {
     const found = (reg.repos || []).find((r) => r.name === repo);
     if (found) return { repoRoot: path.resolve(productRoot, found.path), meta: found };
   }
-  const repoRoot = path.resolve(root, dir || '.');
-  return { repoRoot, meta: registryEntryFor(product, repoRoot) };
+  const here = path.resolve(root, dir || '.');
+  const meta = registryEntryFor(product, here);
+  // Matched from a folder inside the repo: work at the repo's own top (its `.git`), as --repo would.
+  return { repoRoot: meta ? path.resolve(productRoot, meta.path) : here, meta };
 }
 
 // Which SDLC stage is this PR? The Product serves two vehicles; a code repo only one. Mirrors the

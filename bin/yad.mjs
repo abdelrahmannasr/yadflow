@@ -505,17 +505,25 @@ async function main() {
     return inJSON() ? emitJSON({ help: stripAnsi(text) }) : log(text);
   }
   // E80: find the Product from wherever yad runs. `--dir` always wins. Otherwise a Product command runs
-  // against the Product found by walking up — from any subfolder of the Product, or from any folder in
-  // its workspace (`.yad-workspace.json`) — and says where, on stderr. A code-repo command keeps acting
+  // against the Product found by walking up — from any subfolder of the Product, or from inside a repo it
+  // registers (through `.yad-workspace.json`) — and says where, on stderr. A code-repo command keeps acting
   // on the repo it runs in, and is handed the Product to read (its registry: name, platform, branch).
   const dirGiven = process.argv.slice(2).some((a) => a === '--dir' || a.startsWith('--dir='));
   if (PRODUCT_CMDS.has(cmd) || REPO_CMDS.has(cmd)) {
     const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
+    const shown = (p) => path.relative(process.cwd(), p) || '.';
     if (found?.problem) warn(`${found.problem} — using ${o.dir}`);
-    else if (found && REPO_CMDS.has(cmd)) o.product = found.root;
-    else if (found && !dirGiven && found.via !== 'here') {
+    else if (found?.elsewhere) {
+      // The workspace folder itself, or a repo the Product does not register: no Product here, but the
+      // person is one `cd` away from it — say so, rather than let "run yad setup" make a second one.
+      if (PRODUCT_CMDS.has(cmd)) warn(`this folder is not in a repo the Product registers — the Product is ${shown(found.elsewhere)}: cd there, or pass --dir ${shown(found.elsewhere)}`);
+    } else if (found?.root && REPO_CMDS.has(cmd)) o.product = found.root;
+    else if (found?.root && !dirGiven && found.via !== 'here') {
       o.dir = found.root;
-      process.stderr.write(c.dim(`Product: ${path.relative(process.cwd(), found.root) || '.'} (${found.via === 'workspace' ? `from ${commands.WORKSPACE_FILE}` : 'above this folder'})\n`));
+      process.stderr.write(c.dim(`Product: ${shown(found.root)} (${found.via === 'workspace' ? `from ${commands.WORKSPACE_FILE}` : 'above this folder'})\n`));
+      // Run from inside one code repo, the per-repo commands work on THAT repo, not on every one the
+      // Product registers (they take the repo's name as their second word).
+      if ((cmd === 'risk-map' || cmd === 'codeowners') && found.repo?.name && o._[2] === undefined) o._[2] = found.repo.name;
     }
   }
   // A command that WRITES the Product never writes into a folder that is not one (a code repo, say).
@@ -523,7 +531,7 @@ async function main() {
   // wrong with it first.
   const noProduct = () => {
     if (!writesProduct(cmd, o) || commands.hasProduct(o.dir)) return false;
-    refuse(`no Product here (${o.dir}) — yad ${cmd} writes the Product's files`, 'run it from the Product, from a folder inside its workspace, or pass --dir <the Product>; `yad new` / `yad init` start one');
+    refuse(`no Product here (${o.dir}) — yad ${cmd} writes the Product's files`, 'run it from the Product, from inside a repo it registers, or pass --dir <the Product>; `yad new` / `yad init` start one');
     return true;
   };
   // A project written by a newer yadflow is warned about before any command reads it (docs/migrations/
@@ -536,6 +544,9 @@ async function main() {
   let result;
   switch (cmd) {
     case 'setup':
+      // A workspace folder holds a Product; it never becomes a second one (E80 review 2 — following
+      // "run yad setup" from the workspace folder did exactly that, and hid the real one from its repos).
+      if (commands.workspaceProduct(o.dir)) { refuse(`this folder is a workspace — its Product is ${path.relative(process.cwd(), commands.workspaceProduct(o.dir)) || '.'}`, 'run `yad setup` there, or `yad next` from inside it'); break; }
       result = await commands.runSetup(o.dir, {
         today, force: o.force,
         solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,

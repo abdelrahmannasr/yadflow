@@ -9,7 +9,7 @@
 //
 // The workspace is the Product folder's parent (`insideWorkspace` in setup.mjs, issue #129). All three
 // commands write `.yad-workspace.json` there (E80, cli/find-product.mjs), so yad finds the Product from
-// any repo in the workspace.
+// inside any repo it registers.
 //
 //   yad new <name>      greenfield: make <name>/product/, `git init` it, run setup inside it
 //   yad init            brownfield: in a folder that already holds code repos, make (or pick) the
@@ -32,7 +32,7 @@ import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './se
 import { moduleActions, gitHookActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 
-// E80: the file that lets yad find the Product from any repo in the workspace. Written by all three.
+// E80: the file that lets yad find the Product from inside the repos it registers. Written by all three.
 function noteWorkspaceFile(product) {
   const r = writeWorkspaceFile(product);
   if (r === 'written') ok(`wrote ${WORKSPACE_FILE} — yad finds the Product from any repo it registers`);
@@ -185,6 +185,7 @@ export async function runNew(cwd, name, opts = {}) {
   log(`  cd ${fromShell(product)}`);
   for (const s of steps) log(`  ${s}`);
   hand('teammates then join with: `yad join <the Product\'s clone URL>`');
+  hand(`then, from here: cd ${fromShell(product)} && yad next`);
   return { workspace, product, platform: hub.platform ?? null, branch, remoteSteps: steps, setup };
 }
 
@@ -227,6 +228,8 @@ export async function runInit(cwd, opts = {}) {
   const setup = await runSetup(product, { ...opts, brownfield: !opts.greenfield, ...layout, discovered });
   if (process.exitCode) return null;
   noteWorkspaceFile(product);
+  // Setup's own "yad next" is said from the Product; the person is still in the workspace folder.
+  hand(`start with: cd ${fromShell(product)} && yad next`);
   return { workspace: cwd, product, found, setup };
 }
 

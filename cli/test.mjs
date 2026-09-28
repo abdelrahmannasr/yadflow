@@ -25941,15 +25941,16 @@ test('E80: findProduct walks up to a Product or a workspace file, and ignores on
     fs.mkdirSync(path.join(backend, 'src', 'deep'), { recursive: true });
     assert.deepEqual(findProduct(product), { root: product, via: 'here' });
     assert.deepEqual(findProduct(path.join(product, 'epics', 'EP-a')), { root: product, via: 'above' });
-    assert.deepEqual(findProduct(path.join(backend, 'src', 'deep')), { root: product, via: 'workspace', workspace: ws });
+    const deep = findProduct(path.join(backend, 'src', 'deep'));
+    assert.deepEqual({ ...deep, repo: deep.repo?.name }, { root: product, via: 'workspace', workspace: ws, repo: 'backend' });
 
     // Review 1: only a repo the Product REGISTERS finds it. A shared folder (~/Projects) holds other
     // teams' repos too, and the workspace folder itself is one of the places that must find nothing.
     const other = path.join(ws, 'globex-backend');
     fs.mkdirSync(other);
     e79Git(T, other, 'init', '-q');
-    assert.equal(findProduct(other), null, 'an unregistered repo beside the Product');
-    assert.equal(findProduct(ws), null, 'the workspace folder itself');
+    assert.deepEqual(findProduct(other), { elsewhere: product }, 'an unregistered repo beside the Product');
+    assert.deepEqual(findProduct(ws), { elsewhere: product }, 'the workspace folder itself: named, not used');
 
     // A link to a registered repo still matches (compared on disk).
     if (process.platform !== 'win32') {
@@ -26065,7 +26066,9 @@ test('E80: a code-repo command stays on its repo and reads the Product beside it
     // From a folder inside the repo, too — and a repo it cannot match keeps the old answer: no platform
     // borrowed from the Product (a GitLab repo must never be driven with gh).
     fs.mkdirSync(path.join(backend, 'src'));
-    assert.equal(JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout).repo, 'backend');
+    const sub = JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout);
+    assert.equal(sub.repo, 'backend');
+    assert.equal(fs.realpathSync(sub.repoRoot), fs.realpathSync(backend), 'worked at the repo\'s own top');
     const other = path.join(path.dirname(backend), 'unregistered');
     fs.mkdirSync(other);
     e79Git(T, other, 'init', '-q');
@@ -26107,5 +26110,87 @@ test('E80: yad check reports a missing workspace file, check --fix writes it, do
     assert.ok(fs.existsSync(path.join(ws, '.yad-workspace.json')));
     const d2 = e79Yad(T, product, ['doctor', '--json']);
     assert.equal(JSON.parse(d2.stdout).checks.find((x) => x.id === 'workspace-file').status, 'ok');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: from the workspace folder itself, yad names the Product and never lets setup make a second one', () => {
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    const n = e79Yad(T, ws, ['next']);
+    assert.match(n.stdout + n.stderr, /this folder is not in a repo the Product registers — the Product is product: cd there, or pass --dir product/);
+    const s = e79Yad(T, ws, ['setup', '--solo']);
+    assert.equal(s.status, 1, s.stdout + s.stderr);
+    assert.match(s.stdout + s.stderr, /this folder is a workspace — its Product is product/);
+    assert.ok(!fs.existsSync(path.join(ws, '.sdlc')) && !fs.existsSync(path.join(ws, '.git')), 'no second Product');
+    assert.ok(fs.existsSync(path.join(product, '.sdlc', 'hub.json')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: yad init ends by saying where to go next', () => {
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    fs.mkdirSync(path.join(ws, 'api'), { recursive: true });
+    e79Git(T, path.join(ws, 'api'), 'init', '-q');
+    const r = e79Yad(T, ws, ['init', '--solo', '--greenfield', '--ide-targets', '.claude']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /start with: cd product && yad next/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: an unregistered repo nested in the Product\'s folder does not reach it; a registered one does', async () => {
+  const { findProduct } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const vendor = path.join(product, 'vendor', 'lib');
+    fs.mkdirSync(path.join(vendor, 'src'), { recursive: true });
+    e79Git(T, vendor, 'init', '-q');
+    assert.equal(findProduct(path.join(vendor, 'src')), null, 'a repo of its own, not registered');
+    const r = e79Yad(T, vendor, ['epic', 'new', 'zz']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!fs.existsSync(path.join(product, 'epics', 'EP-zz')));
+
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'lib', path: 'vendor/lib' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const found = findProduct(path.join(vendor, 'src'));
+    assert.equal(found.root, product);
+    assert.equal(found.repo.name, 'lib');
+    // A plain subfolder of the Product is not a repo of its own: it reaches the Product as before.
+    fs.mkdirSync(path.join(product, 'notes'));
+    assert.equal(findProduct(path.join(product, 'notes')).root, product);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: a registry path in another letter case matches where the disk ignores case', async (t) => {
+  const { findProduct } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    if (!fs.existsSync(path.join(path.dirname(backend), 'BACKEND'))) { t.skip('this disk tells case apart'); return; }
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [{ name: 'backend', path: '../Backend' }] }));
+    assert.equal(findProduct(backend).repo?.name, 'backend');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 2: risk-map and codeowners run from a code repo work on that repo, not every registered one', () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    const web = path.join(path.dirname(backend), 'web');
+    fs.mkdirSync(web);
+    e79Git(T, web, 'init', '-q');
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'web', path: '../web' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const here = JSON.parse(e79Yad(T, backend, ['risk-map', '--json']).stdout);
+    assert.deepEqual(here.repos.map((r) => r.name), ['backend']);
+    const all = JSON.parse(e79Yad(T, product, ['risk-map', '--json']).stdout);
+    assert.deepEqual(all.repos.map((r) => r.name).sort(), ['backend', 'web'], 'from the Product: every repo, as before');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

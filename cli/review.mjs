@@ -34,8 +34,9 @@ function resolveRepo(root, { repo, dir, product }) {
     if (!found) return { error: `repo '${repo}' is not in .sdlc/repos.json — connect it first (yad-connect-repos)` };
     return { repoRoot: path.resolve(productRoot, found.path), meta: found, productRoot };
   }
-  const repoRoot = path.resolve(root, dir || '.');
-  return { repoRoot, meta: registryEntryFor(product, repoRoot), productRoot };
+  const here = path.resolve(root, dir || '.');
+  const meta = registryEntryFor(product, here);
+  return { repoRoot: meta ? path.resolve(productRoot, meta.path) : here, meta, productRoot };
 }
 
 function platformOf(root, repoRoot, meta) {
