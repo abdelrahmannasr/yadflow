@@ -166,21 +166,26 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       const branch = defaultBranch(repoRoot, repo);
       if (!branch) { warn(`${tag} — the recorded default_branch is not a branch name git accepts — skipped (fix it in ${PROJECT_FILES.reposRegistry})`); skipped++; continue; }
       const remote = hasRemote(repoRoot);
+      // Printed through `shown` (E81 review 9): git accepts bytes above 0x7f in a branch name, and the
+      // remote a registered clone fetches from was chosen by the shared registry, so both can carry text
+      // a terminal obeys.
+      const b = shown(branch);
+      const firstLine = (s) => shown(String(s || '').split('\n')[0]);
       if (remote) {
         const f = git(repoRoot, 'fetch', 'origin', branch, '--prune');
-        if (!f.ok) { warn(`${j.name} — fetch failed (${(f.stderr.split('\n')[0]) || 'auth?'}) — skipped`); skipped++; continue; }
+        if (!f.ok) { warn(`${j.name} — fetch failed (${firstLine(f.stderr) || 'auth?'}) — skipped`); skipped++; continue; }
       }
       if (currentBranch(repoRoot) !== branch) {
         const co = git(repoRoot, 'checkout', branch);
-        if (!co.ok) { warn(`${j.name} — cannot switch to ${branch} (${co.stderr.split('\n')[0] || 'no such branch'}) — skipped`); skipped++; continue; }
+        if (!co.ok) { warn(`${j.name} — cannot switch to ${b} (${firstLine(co.stderr) || 'no such branch'}) — skipped`); skipped++; continue; }
       }
       if (remote) {
         const before = gitHead(repoRoot);
         const m = git(repoRoot, 'merge', '--ff-only', `origin/${branch}`);
-        if (!m.ok) { warn(`${j.name} — ${c.yellow('diverged')} on ${branch} → not fast-forwarded (resolve manually)`); skipped++; continue; }
-        ok(`${j.name} ${c.dim('—')} ${before === gitHead(repoRoot) ? `already current on ${branch}` : `switched to ${branch}, pulled (ff)`}`);
+        if (!m.ok) { warn(`${j.name} — ${c.yellow('diverged')} on ${b} → not fast-forwarded (resolve manually)`); skipped++; continue; }
+        ok(`${j.name} ${c.dim('—')} ${before === gitHead(repoRoot) ? `already current on ${b}` : `switched to ${b}, pulled (ff)`}`);
       } else {
-        ok(`${j.name} ${c.dim('—')} on ${branch} (local-only, no remote)`);
+        ok(`${j.name} ${c.dim('—')} on ${b} (local-only, no remote)`);
       }
       synced++;
     }

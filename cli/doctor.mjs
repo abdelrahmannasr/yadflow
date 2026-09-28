@@ -31,6 +31,9 @@ import { readOwners } from './owners.mjs';
 // and never one reached through a link inside a repo's tree (`yad repo sync` and `refresh` skip it too).
 // The repos check reports every other entry.
 const isCheckout = (root, repo) => runnable(judgeRepo(root, repo));
+// A registry name inside a command the person is invited to copy: as it is only when it is one plain
+// word, else `<name>` — the shared file could hold `api; curl …|sh` (E81 review 9).
+const asArg = (name) => (typeof name === 'string' && /^[\w.-]+$/.test(name) ? name : '<name>');
 
 const MIN_NODE = 18;
 
@@ -481,8 +484,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       if (judged.linked) { check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: ${pth} is reached through a link inside a repo's tree, so the checkout is not where the path says — yad skips it`, 'register the checkout at its own path'); continue; }
       const head = judged.state === 'present' || judged.state === 'product' ? gitHead(repoRoot) : null;
       if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${nm}: ${pth} is not a git repository (or has no commits) [YAD-STATE-003]`, cloneHint || 'init/clone the repo, then re-connect it'); continue; }
-      if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + repo.name + '` once it has code');
-      else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + repo.name + '`');
+      if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + asArg(repo.name) + '` once it has code');
+      else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + asArg(repo.name) + '`');
       else check(checks, `repo:${repo.name}`, 'project', 'ok', `${nm}: git repo, context fresh`);
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
@@ -491,7 +494,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     const owned = repoEntries.filter((r) => (Array.isArray(r.domain_owners) && r.domain_owners.length) || (typeof r.domain_owner === 'string' && r.domain_owner));
     if (owned.length) {
       check(checks, 'people:domain-owners-unused', 'project', 'warn',
-        `${PROJECT_FILES.reposRegistry} names domain owners that nothing reads any more: ${owned.map((r) => r.name).join(', ')}`,
+        `${PROJECT_FILES.reposRegistry} names domain owners that nothing reads any more: ${owned.map((r) => forTerminal(r.name)).join(', ')}`,
         'delete `domain_owner` / `domain_owners` when convenient; request reviewers on the PR itself');
     }
     // The verified-commits author allowlist went with the roster too (E62): the gate checks signatures
@@ -499,7 +502,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // list in hub.json and every generated file — so nobody maintains a list that no longer protects.
     const allowFiles = [
       { where: 'the Product', file: path.join(root, '.sdlc', 'verified-authors') },
-      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
+      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
     ].filter((x) => exists(x.file)).map((x) => x.where);
     const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
     if (allowFiles.length || listedAuthors) {
@@ -513,7 +516,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // copy stays and keeps failing commits from unlisted authors (E62 upgrade simulation). Named, not fixed.
     const oldGates = [
       { where: 'the Product', file: path.join(root, 'checks', 'verified-commits.sh') },
-      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
+      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
     ].filter((x) => exists(x.file) && /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(fs.readFileSync(x.file, 'utf8'))).map((x) => x.where);
     if (oldGates.length) {
       check(checks, 'people:allowlist-gate-stale', 'project', 'warn',
@@ -524,7 +527,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // slice out of specs/<story>/contracts/ (or a file out of src/<feature>/) passes the gate. `yad check
     // --fix` refreshes a wired contract-check nobody changed; one changed by hand is kept, and
     // backfill-check is never wired at all — every copy is placed by hand. Named, not fixed.
-    const gateRoots = [{ where: 'the Product', root }, ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))];
+    const gateRoots = [{ where: 'the Product', root }, ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), root: path.resolve(root, r.path) }))];
     const renameBlind = gateRoots
       .flatMap((x) => RENAME_BLIND_GATES.map((rel) => ({ ...x, rel })))
       .filter((x) => renameBlindGate(path.join(x.root, x.rel)))
