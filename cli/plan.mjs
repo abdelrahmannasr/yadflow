@@ -1104,8 +1104,11 @@ export function gitHookState(root) {
   const common = run('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
   // The folder is compared through its PARENT, which always exists: `.git/hooks` itself may not (a clone
   // made with an empty template), and a path that does not exist cannot be resolved to compare.
+  // When the folder does exist, it is compared whole: a setting typed `.git/Hooks` on a disk that ignores
+  // case is the same folder, and the OS gives both sides one spelling.
   const hooksDir = path.dirname(file);
-  const isDefault = common.ok && path.basename(hooksDir) === 'hooks' && samePath(path.dirname(hooksDir), common.stdout);
+  const isDefault = common.ok && (samePath(hooksDir, path.join(common.stdout, 'hooks'))
+    || (path.basename(hooksDir) === 'hooks' && samePath(path.dirname(hooksDir), common.stdout)));
   if (hooksPath.ok && hooksPath.stdout && !isDefault) {
     // husky points core.hooksPath at `.husky/_`, a folder it generates; the hook a person edits is the one
     // beside it, `.husky/pre-commit`. Name that one, or the advice sends them to a file husky rewrites.

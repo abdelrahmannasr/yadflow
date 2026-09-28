@@ -999,3 +999,14 @@ test('E48 review 5: core.hooksPath naming the default folder is the default even
     assert.equal(gitHookState(product).state, 'ok', 'the folder is created with the hook');
   } finally { cleanup(T); }
 });
+
+test('E48 review 6: core.hooksPath typed with another case names the default folder on a disk that ignores case', async () => {
+  const { gitHookState } = await import('./plan.mjs');
+  const { T, repo, product } = verifiedRepo();
+  try {
+    const caseBlind = fs.existsSync(path.join(repo, '.git/HOOKS'));
+    git(repo, 'config', 'core.hooksPath', '.git/Hooks');
+    // On a case-blind disk (Windows, a default Mac) it is the default folder; elsewhere it is another folder.
+    assert.equal(gitHookState(product).state, caseBlind ? 'missing' : 'hooks-path');
+  } finally { cleanup(T); }
+});
