@@ -7,6 +7,9 @@ const GROUPS = [
     phase: 'Setup & reconcile',
     color: '#b7950b',
     items: [
+      'yad new <name> — new product: make <name>/product/ and run setup (no remote created)',
+      'yad init — in the folder holding your repos: make product/, run setup, offer each repo',
+      'yad join <url> [folder] — clone the Product and its repos; per-machine steps only',
       'npx yadflow setup — guided first-run wizard',
       '--json on every command but yad hook (E1) — one object on stdout: { jsonVersion, version, command, ok, …the command\'s own keys, warnings }; a refusal adds error, code and hint; every other line goes to stderr; exit codes unchanged',
       'npx yadflow check [--fix] — report / reconcile drift vs the manifest',

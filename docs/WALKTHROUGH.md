@@ -31,6 +31,11 @@ own yet, so that choice is recorded, not acted on.
 
 ## 0 — One-time setup
 
+> **Starting a workspace (E79):** `yad new <name>` (a new product — makes `<name>/product/` and runs
+> setup inside it), `yad init` (repos you already have — run it in the folder that holds them; it
+> offers each repo it finds) or `yad join <url>` (a teammate — clones the Product and every repo it
+> registers, then installs only per-machine files). They are front doors over the same wizard.
+>
 > **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, Product
 > detection, connect a design/testing/learning tool (each optional), connect repos, wire each
 > repo. Run `… check --fix` any time afterwards to reconcile. The manual steps below are the
