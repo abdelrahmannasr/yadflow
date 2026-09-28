@@ -19,6 +19,25 @@ no clone needed.
 
 ## Commands
 
+**Where a command runs (E80).** A **workspace** is the folder that holds the Product and the code repos
+side by side. It carries `.yad-workspace.json` — `{ "version": 1, "product": "product" }`, the Product
+folder's name and nothing else (the repo list stays in the Product's `repos.json`). It is per machine:
+`yad new`, `init` and `join` write it, and `yad check --fix` writes it for a Product whose registered
+repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say when it is missing).
+
+- **A Product command** (`next`, `gate`, `epic`, `doctor`, `check`, `update`, …) run anywhere inside
+  the Product, or in any repo of its workspace, works on the Product and says so on stderr —
+  `Product: ../product (from .yad-workspace.json)` — never on `--json` stdout.
+- **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in, and
+  reads the Product beside it: run from a registered repo without `--repo`, it takes that repo's
+  recorded name, platform and default branch.
+- **`--dir` always wins.**
+- **A command that writes the Product** (`update`, `check --fix`, `epic new`, `foundation new`,
+  `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`) refuses a folder that is not a Product, rather
+  than writing its files into a code repo.
+- The workspace file is **ignored inside a git work tree** (a repo could commit one pointing at a folder
+  of its own) and in your home or temp folder, and never written there.
+
 | Command | What it does |
 |---------|--------------|
 | `yad new <name>` | Greenfield front door (E79): makes `<name>/product/`, runs `git init` on branch `main`, then runs `setup` inside it (every setup flag passes through; greenfield unless `--brownfield`). Refuses a name with a separator or a leading `.`/`-`, a folder that is not empty, and a folder inside a git repo. **Creates no remote** — it prints the `gh repo create` / `glab repo create` lines (after the first commit) for you to run. |

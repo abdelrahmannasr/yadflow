@@ -57,7 +57,8 @@ npx yadflow setup        #     or run the guided setup inside an existing Produc
 ```
 
 `new` creates nothing outside your machine — it prints the `gh`/`glab` line that puts the Product
-online. `join` never commits or pushes; it only adds per-machine files.
+online. `join` never commits or pushes; it only adds per-machine files. All three leave a small
+`.yad-workspace.json` in the workspace, so `yad` finds the Product from any of your repos.
 
 Then, in your AI IDE, drive the lifecycle by invoking skills by name:
 
