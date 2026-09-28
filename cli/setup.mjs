@@ -549,7 +549,9 @@ export async function runSetup(root, opts = {}) {
     const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot });
     const platform = detectPlatform(remote.ok ? remote.stdout : '') || 'github';
     const default_branch = detectDefaultBranch(repoRoot);
-    if (!(await askYesNo(`Connect ${d.name} (${d.rpath}, ${platform}, default branch ${default_branch})?`, true))) continue;
+    // "Connect" means what it means in the loop below: register it, and the wiring step then writes the
+    // CI gates and the PR template into it. Said here, because init asks for every repo at once.
+    if (!(await askYesNo(`Connect and wire ${d.name} (${d.rpath}, ${platform}, default branch ${default_branch}) — writes its CI gates + PR template?`, true))) continue;
     const repo = registerRepo(root, registry, { name: d.name, rpath: d.rpath, platform, default_branch, today: opts.today ?? null, pack: !greenfield });
     if (!repo) continue;
     known.add(d.name);

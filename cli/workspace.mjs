@@ -44,6 +44,22 @@ export const validFolderName = (name) => typeof name === 'string' && FOLDER_RE.t
 export const shown = (s) => [...String(s ?? '')].map((ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? ' ' : ch)).join('');
 
 const isEmptyDir = (dir) => { try { return fs.readdirSync(dir).length === 0; } catch { return false; } };
+// Empty, or holding only `.git`: a fresh clone of an empty remote.
+const isBareStart = (dir) => { try { return fs.readdirSync(dir).every((n) => n === '.git'); } catch { return false; } };
+
+// `insideWorkspace` judges the path TEXT. A symlink the Product commits (`evil -> ../../..`) makes
+// `evil/x` read as inside and land outside. So the deepest folder that already exists on the way to
+// the target is resolved on disk, and must still be inside the workspace resolved on disk. Folders made
+// below it are new, so they cannot be links.
+function landsInside(productRoot, target) {
+  const root = path.resolve(productRoot);
+  const workspace = fs.realpathSync(path.dirname(root) === root ? root : path.dirname(root));
+  let probe = target;
+  while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+  let real;
+  try { real = fs.realpathSync(probe); } catch { return false; }
+  return real === workspace || real.startsWith(workspace + path.sep);
+}
 const insideGitRepo = (dir) => run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
 
 // The folder `join` makes from a remote URL: its last path segment without `.git`. So the remote
@@ -88,13 +104,19 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
     const target = path.resolve(productRoot, rpath);
     if (target === path.resolve(productRoot)) { out.present.push({ ...entry, reason: 'the Product itself' }); continue; }
     if (!insideWorkspace(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'outside the workspace (the Product folder\'s parent) — not cloned' }); continue; }
+    // Already there: nothing is written, so where a link of this machine's own points does not matter.
     if (exists(path.join(target, '.git'))) { out.present.push(entry); continue; }
+    if (!landsInside(productRoot, target)) { out.failed.push({ ...entry, reason: 'it reaches outside the workspace through a link — not cloned' }); continue; }
     if (exists(target) && !isEmptyDir(target)) { out.failed.push({ ...entry, reason: 'the folder exists and is not a git repo — move it aside and re-run' }); continue; }
     const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
     if (!url) { out.failed.push({ ...entry, reason: 'no git_url recorded — clone it by hand' }); continue; }
     if (url.startsWith('-')) { out.failed.push({ ...entry, reason: 'the recorded git_url starts with "-"' }); continue; }
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    const r = clone(url, target, env);
+    // A path through a file (`.sdlc/hub.json/x`) or a dangling link fails here — for this entry only.
+    let r;
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      r = clone(url, target, env);
+    } catch (e) { r = { ok: false, error: `cannot make its folder (${e.code || e.message})` }; }
     if (r.ok) out.cloned.push(entry);
     else out.failed.push({ ...entry, reason: shown(r.error) });
   }
@@ -158,13 +180,22 @@ export async function runInit(cwd, opts = {}) {
     productName = products[0] || PRODUCT_DIR;
   }
   const product = path.join(cwd, productName);
+  // An existing folder becomes the Product only when it already is one, or has nothing in it yet (a
+  // fresh clone of an empty remote holds just `.git`). Anything else is someone's code: setup would
+  // write the Product's files into it.
+  if (exists(product) && !exists(productConfigPath(product)) && !isBareStart(product)) {
+    return refuse(`${productName}/ already holds files and is not a Product — name a new folder for the Product with --path <folder>`);
+  }
   if (!exists(product)) {
     fs.mkdirSync(product);
     if (!gitInit(product)) return refuse(`git init failed in ${product}`);
     ok(`created ${productName}/ (git, branch main)`);
   } else info(`Product folder: ${productName}/`);
 
-  const found = children.filter((n) => n !== productName && validFolderName(n) && exists(path.join(cwd, n, '.git')));
+  const repos = children.filter((n) => n !== productName && exists(path.join(cwd, n, '.git')));
+  const found = repos.filter(validFolderName);
+  const odd = repos.filter((n) => !validFolderName(n));
+  if (odd.length) warn(`not offered (a repo name must be letters, digits, ".", "_" or "-"): ${odd.map(shown).join(', ')} — connect them with \`yad setup\` under another name`);
   if (found.length) info(`found ${found.length} repo(s) beside it: ${found.join(', ')}`);
   else info('found no repos beside it — connect them later with `yad setup`');
   const discovered = found.map((n) => ({ name: n, rpath: `../${n}` }));
@@ -180,12 +211,16 @@ export async function runInit(cwd, opts = {}) {
 // change everyone sees. So those are counted and named, never written.
 function installLocalSkills(product, ideTargets) {
   const ignored = (rel) => spawnSync('git', ['check-ignore', '-q', '--', rel], { cwd: product, windowsHide: true }).status === 0;
-  const res = { installed: [], shared: [] };
+  // `check-ignore` is asked about a path that may not exist yet, so a folder-only pattern
+  // (`/.claude/skills/yad-*/`) is not matched and the copy is counted as shared — the safe side. Ignore
+  // the folder itself (`.claude/`, `.claude/skills/`) for join to install into it.
+  const res = { installed: [], stale: [], shared: [] };
   for (const a of moduleActions(product, ideTargets)) {
     if (a.status === 'ok') continue;
     const rel = a.paths[0];
-    if ((a.status === 'new' || a.status === 'missing') && rel && ignored(rel)) { a.apply(); res.installed.push(rel); }
-    else res.shared.push(rel || `${a.scope}/${a.item}`);
+    const local = !!rel && ignored(rel);
+    if (local && (a.status === 'new' || a.status === 'missing')) { a.apply(); res.installed.push(rel); }
+    else (local ? res.stale : res.shared).push(rel || `${a.scope}/${a.item}`);
   }
   return res;
 }
@@ -221,6 +256,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   const ideTargets = await selectIdeTargets(product, opts.ideTargets);
   const skills = installLocalSkills(product, ideTargets);
   if (skills.installed.length) ok(`installed ${skills.installed.length} skill folder(s) the Product's git ignores (per machine)`);
+  if (skills.stale.length) info(`${skills.stale.length} per-machine skill copy(ies) differ from this yadflow's — left as they are; \`yad update\` refreshes them`);
   if (skills.shared.length) info(`${skills.shared.length} managed file(s) are missing or out of date here in folders the Product's git does not ignore — writing them is a change the team shares (\`yad update\`), so join leaves them`);
   const hook = gitHookActions(product);
   for (const a of hook) a.apply();
@@ -231,7 +267,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   hand(`start with: cd ${path.join(wsName, PRODUCT_DIR)} && yad next`);
   return {
     workspace, product,
-    repos, skills: { installed: skills.installed, shared: skills.shared.length },
+    repos, skills: { installed: skills.installed, stale: skills.stale.length, shared: skills.shared.length },
     hook: hook.length ? 'installed' : 'unchanged',
   };
 }

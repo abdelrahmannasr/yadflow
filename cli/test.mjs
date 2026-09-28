@@ -25639,6 +25639,64 @@ test('E79: the clone step judges every registry entry, and one failure never sto
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E79 review 1: a link the Product commits cannot carry a clone outside, and a path through a file fails alone', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { cloneMissingRepos } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const product = path.join(T, 'a', 'ws', 'product');
+    fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(product, '.sdlc', 'hub.json'), '{}');
+    fs.symlinkSync('../../..', path.join(product, 'evil'));
+    fs.symlinkSync('nowhere', path.join(product, 'dangling'));
+    fs.mkdirSync(path.join(T, 'a', 'ws', 'mine-elsewhere', '.git'), { recursive: true });
+    fs.symlinkSync(path.join(T, 'a', 'ws', 'mine-elsewhere'), path.join(T, 'a', 'ws', 'linked'));
+    const calls = [];
+    const clone = (url, target) => { calls.push(target); fs.mkdirSync(target, { recursive: true }); return { ok: true }; };
+    const r = cloneMissingRepos(product, { repos: [
+      { name: 'escape', path: 'evil/x', git_url: 'u' },
+      { name: 'through-file', path: '.sdlc/hub.json/x', git_url: 'u' },
+      { name: 'dangling', path: 'dangling/x', git_url: 'u' },
+      { name: 'linked', path: '../linked', git_url: 'u' },
+      { name: 'good', path: '../good', git_url: 'u' },
+    ] }, { clone });
+    assert.deepEqual(r.failed.map((x) => x.name), ['escape', 'through-file', 'dangling']);
+    assert.match(r.failed[0].reason, /through a link/);
+    assert.deepEqual(r.present.map((x) => x.name), ['linked'], 'a repo already there behind this machine\'s own link writes nothing');
+    assert.deepEqual(r.cloned.map((x) => x.name), ['good'], 'the bad entries did not stop the good one');
+    assert.deepEqual(calls, [path.join(T, 'a', 'ws', 'good')]);
+    assert.ok(!fs.existsSync(path.join(T, 'x')), 'nothing made outside');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E79 review 1: yad init never turns someone\'s code into the Product', () => {
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    for (const n of ['product', 'api', 'my app']) {
+      fs.mkdirSync(path.join(ws, n), { recursive: true });
+      e79Git(T, path.join(ws, n), 'init', '-q', '-b', 'main');
+      fs.writeFileSync(path.join(ws, n, 'f'), 'x');
+    }
+    const r = e79Yad(T, ws, ['init', '--solo', '--greenfield']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /product\/ already holds files and is not a Product — name a new folder for the Product with --path <folder>/);
+    assert.ok(!fs.existsSync(path.join(ws, 'product', '.sdlc')), 'nothing written into it');
+    assert.equal(e79Yad(T, ws, ['init', '--path', 'api']).status, 1, '--path to a code repo is refused too');
+
+    const ok = e79Yad(T, ws, ['init', '--path', 'hub', '--solo', '--greenfield', '--ide-targets', '.claude']);
+    assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+    assert.match(ok.stdout + ok.stderr, /not offered .*: my app/);
+    const reg = JSON.parse(fs.readFileSync(path.join(ws, 'hub', '.sdlc', 'repos.json'), 'utf8'));
+    assert.deepEqual(reg.repos.map((x) => x.name).sort(), ['api', 'product'], 'the code repo named product is offered as a code repo');
+
+    // A fresh clone of an empty remote — only `.git` — may become the Product.
+    const ws2 = path.join(T, 'ws2');
+    fs.mkdirSync(path.join(ws2, 'product'), { recursive: true });
+    e79Git(T, path.join(ws2, 'product'), 'init', '-q', '-b', 'main');
+    assert.equal(e79Yad(T, ws2, ['init', '--solo', '--greenfield', '--ide-targets', '.claude']).status, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E79: yad new makes <name>/product on main, runs setup, and prints — never runs — the remote steps', () => {
   const T = e79Tmp();
   try {
@@ -25754,6 +25812,15 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     assert.equal(again.status, 0, again.stdout + again.stderr);
     assert.match(again.stdout + again.stderr, /already cloned/);
     assert.match(again.stdout + again.stderr, /backend: already there/);
+
+    // A per-machine copy older than this yadflow is left alone and named as such — not called shared.
+    const skill = fs.readdirSync(path.join(joined, '.claude', 'skills'))[0];
+    fs.appendFileSync(path.join(joined, '.claude', 'skills', skill, 'SKILL.md'), '\nlocal edit\n');
+    const stale = e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude', '--json']);
+    const sa = JSON.parse(stale.stdout);
+    assert.equal(sa.skills.stale, 1);
+    assert.equal(sa.skills.installed.length, 0);
+    assert.match(fs.readFileSync(path.join(joined, '.claude', 'skills', skill, 'SKILL.md'), 'utf8'), /local edit/);
 
     const notProduct = e79Yad(T, fresh, ['join', path.join(remotes, 'backend.git'), 'b2']);
     assert.equal(notProduct.status, 1);
