@@ -26848,5 +26848,29 @@ test('E81 review 15: the solo people count runs no git in a folder the Product s
     assert.ok(!fs.existsSync(marker), 'no program the Product chose ran');
     assert.match(doc.stdout + doc.stderr, /repo 'evil \[31m': .*its history cannot be counted here/);
     assert.ok(!(doc.stdout + doc.stderr).includes('\u001b[31m'), 'the name is cleaned');
+    // The other callers of the count read the same judged list.
+    for (const args of [['next'], ['mode']]) e79Yad(T, product, args);
+    assert.ok(!fs.existsSync(marker), 'nor through yad next or yad mode');
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(marker, { force: true }); }
+});
+
+test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { ensurePackIgnored } = await import('./setup.mjs');
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const outside = path.join(T, 'outside.txt');
+    fs.writeFileSync(outside, 'mine\n');
+    fs.symlinkSync(outside, path.join(product, '.gitignore'));
+    assert.equal(ensurePackIgnored(product), false);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n', 'the file it points at is untouched');
+    assert.ok(fs.lstatSync(path.join(product, '.gitignore')).isSymbolicLink());
+    fs.rmSync(path.join(product, '.gitignore'));
+    fs.mkdirSync(path.join(T, 'dir'));
+    fs.symlinkSync(path.join(T, 'dir'), path.join(product, '.gitignore'));
+    assert.equal(ensurePackIgnored(product), false, 'a link to a folder: no crash');
+    fs.rmSync(path.join(product, '.gitignore'));
+    assert.equal(ensurePackIgnored(product), true, 'no file: written as before');
+    assert.match(fs.readFileSync(path.join(product, '.gitignore'), 'utf8'), /pack\.md/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

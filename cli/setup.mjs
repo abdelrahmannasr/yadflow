@@ -734,7 +734,12 @@ export const PACK_IGNORE_BLOCK = [
 // and returns true.
 export function ensurePackIgnored(root) {
   const gi = path.join(root, '.gitignore');
-  const lines = exists(gi) ? fs.readFileSync(gi, 'utf8').split('\n') : [];
+  // Only a plain file, or none: the Product can commit `.gitignore` as a link, and reading then writing
+  // through it would append this block to whatever file it points at, outside the workspace (E81 review 16).
+  let st = null;
+  try { st = fs.lstatSync(gi); } catch { /* none yet: written below */ }
+  if (st && !st.isFile()) { warn('.gitignore in the Product is not a plain file (a link?) — the code-context pack ignore line was not added'); return false; }
+  const lines = st ? fs.readFileSync(gi, 'utf8').split('\n') : [];
   if (lines.some((l) => l.trim() === PACK_IGNORE_GLOB)) return false;
   const body = lines.join('\n').replace(/\n*$/, '');
   const prefix = body ? `${body}\n\n` : '';
