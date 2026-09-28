@@ -30,11 +30,13 @@
 #
 # CI never approves and never merges — the merge click is the human approval act.
 #
-# Protected default branch? Only these jobs push there. If the default branch is protected against
-# Actions:
-#   a) add a ruleset bypass so GitHub Actions may push to it, or
-#   b) store a fine-grained PAT as the SDLC_GATE_TOKEN secret and pass it to actions/checkout below
-#      via `with: { token: ${{ secrets.SDLC_GATE_TOKEN }} }` — see references/bridge.md.
+# Protected default branch? Only these jobs push there, and the built-in Actions token cannot get past
+# branch protection or a ruleset: a ruleset's bypass list takes roles, teams, GitHub Apps and Dependabot,
+# not GitHub Actions. So give the push a token whose owner may bypass, and pass it to actions/checkout
+# below via `with: { token: ${{ secrets.SDLC_GATE_TOKEN }} }`:
+#   a) a GitHub App on the bypass list (its installation token), or
+#   b) a fine-grained PAT of someone on the bypass list, stored as the SDLC_GATE_TOKEN secret.
+# See docs/branch-protection.md in the yadflow repo, and references/bridge.md.
 name: yad-gate-sync
 on:
   pull_request:
