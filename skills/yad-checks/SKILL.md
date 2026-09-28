@@ -242,6 +242,16 @@ file-editing tool call and refuses the write up front, naming the command that o
 `yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a verified Product.
 See `references/check-gates.md` §"The agent guardrail".
 
+**The same rule for a person's `git commit` (E48).** On a verified Product, `yad check --fix` also
+installs `.git/hooks/pre-commit` in the clone it runs in. It runs `node hooks/ledger-guard.mjs
+--staged`, which judges the files the commit is about to record by the same rules as the CI gate (a
+merge commit and a `yad-gate-sync` commit pass, as they do in CI) and refuses the commit with the files,
+the `git restore --staged` line and the owning command. It is per clone — git never copies hooks — so
+`yad doctor` warns `git-hook` in a clone that has none. A `pre-commit` that is not yad's, or a
+`core.hooksPath` folder, is never written: print the one line `yad doctor` gives and let the person add
+it. Branch protection is what makes the CI gates hold a merge at all: point the team at yadflow's
+`docs/branch-protection.md`.
+
 ### Step 3 — `run` (run the gates now)
 From inside the repo, run each gate against `base` and report PASS/FAIL per gate:
 ```

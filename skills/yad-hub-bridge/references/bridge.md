@@ -292,8 +292,11 @@ push retries with a rebase.
 - GitLab: a masked `SDLC_GATE_TOKEN` project access token (`read_api` + `write_repository`) — the one
   documented bend of the no-stored-tokens rule; `CI_JOB_TOKEN` can neither read the approvals API nor
   push. Used only for the merge-time default-branch push + the API reads.
-- Protected default branch (GitHub): the merge advance needs to push it — prefer a ruleset bypass for
-  Actions, else a fine-grained PAT as `SDLC_GATE_TOKEN` on the mergesync checkout.
+- Protected default branch (GitHub): the merge advance needs to push it, and the built-in Actions token
+  cannot bypass branch protection or a ruleset (a ruleset's bypass list takes actors such as roles,
+  teams and GitHub Apps, never GitHub Actions). Pass a token whose owner may bypass to both jobs' `actions/checkout` — a GitHub
+  App on the bypass list, or a fine-grained PAT as `SDLC_GATE_TOKEN`. See yadflow's
+  `docs/branch-protection.md`.
 
 **Manual sync & recovery.** In verified mode `yad gate sync` is **advisory** (read-only) — it prints the
 predicate (and any `! may not be met:` / `! if the risk step were enforced:` warning, E73) but writes

@@ -220,6 +220,14 @@ export const CHECK_GATES: CheckGate[] = [
     triggeredBy: 'the agent harness (.claude/settings.json → node hooks/ledger-guard.mjs; .cursor/hooks.json → node hooks/ledger-guard-cursor.mjs)',
     visibleTo: ALL,
   },
+  {
+    name: 'ledger-guard (git hook)',
+    queue: 'git pre-commit hook',
+    timing: 'before a person\'s git commit',
+    description: 'The same rule for a person (E48): .git/hooks/pre-commit runs node hooks/ledger-guard.mjs --staged, which refuses a commit that changes a file the CI ledger-guard would refuse, names each file, the git restore --staged line and the owning command. Allows what CI allows — a seed, artifacts, a merge commit, the yad-gate-sync bot. Per clone (git never copies hooks), installed by yad check --fix on verified Products; never written over a hook of the team\'s own or a core.hooksPath folder. Fails open; YAD_HOOK_DISABLE=1 skips it, and the pull request\'s check still judges the commit.',
+    triggeredBy: 'git commit (.git/hooks/pre-commit → node hooks/ledger-guard.mjs --staged)',
+    visibleTo: ALL,
+  },
 ];
 
 // ─── Connectors (the registries the setup phase writes) — "feature flags" matrix ───

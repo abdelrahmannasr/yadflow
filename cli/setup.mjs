@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions,
+  moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -587,6 +587,15 @@ export async function runSetup(root, opts = {}) {
     applyActions(hookWiring, { force: true });
     wired.push(...hookWiring);
   }
+  // E48: the same guard for a person's `git commit`, installed in this clone's git hooks. Not committed,
+  // so it is not pushed to `wired` (nothing to stage).
+  const gitHook = gitHookActions(root);
+  if (gitHook.length) {
+    log(`  ${c.bold('hub')} ${c.dim('(git pre-commit ledger guard, this clone)')}`);
+    applyActions(gitHook, { force: true });
+  }
+  const gitHookNote = gitHookAdvice(gitHookState(root));
+  if (gitHookNote) warn(gitHookNote);
   // The post-edit capture hook (E43): every change to an artifact is snapshotted onto the person's private
   // `yad/wip/<name>/<epic>` branches. Both ledger modes; `"capture": false` in the Product config turns it off.
   const captureWiring = captureHookActions(root, ideTargets);

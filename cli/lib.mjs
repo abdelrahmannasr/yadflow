@@ -151,6 +151,19 @@ export async function askYesNo(question, def = true) {
 export const asset = (...p) => path.join(PKG_ROOT, ...p);
 export const exists = (p) => fs.existsSync(p);
 
+// Do two paths name the same existing file or folder? Used where one path comes from git and one from Node,
+// which can spell the same place differently: on Windows git answers with the long name while Node's temp
+// folder is often an 8.3 short name (`C:\Users\RUNNER~1\…`) that the JS realpath keeps; `.native` asks
+// Windows for the final name. Windows also compares without case, and a macOS `/var` is `/private/var`.
+// A path that does not exist is never the same as anything (E48).
+export function samePath(a, b, platform = process.platform) {
+  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+  const ra = real(a);
+  const rb = real(b);
+  if (ra === null || rb === null) return false;
+  return platform === 'win32' ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+}
+
 export function fileSha(p) {
   if (!fs.existsSync(p)) return null;
   return 'sha256:' + createHash('sha256').update(fs.readFileSync(p)).digest('hex');

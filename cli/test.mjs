@@ -11240,7 +11240,16 @@ test('doctor: an authoring step stranded behind a done review gate fails with YA
   const bad = r.checks.find((x) => x.id === 'epic:EP-x:stories');
   assert.equal(bad.status, 'fail');
   assert.match(bad.message, /YAD-STATE-005/);
-  assert.match(bad.hint, /yad gate repair EP-x/);
+  assert.match(bad.hint, /yad gate repair EP-x` to close it/, 'a local ledger commits the repair by hand');
+  // E48: on a verified Product a hand commit of state.json is refused by the git guard, so `--push` is named.
+  {
+    const file = path.join(T, '.sdlc/product.json');
+    assert.equal(fs.existsSync(file), false, 'the scaffold has no Product config: a local ledger by default');
+    fs.writeFileSync(file, JSON.stringify({ ledger: 'verified', platform: 'github', default_branch: 'main' }));
+    const v = (await doctorOn(T)).checks.find((x) => x.id === 'epic:EP-x:stories');
+    assert.match(v.hint, /yad gate repair EP-x --push` to close it/);
+    fs.rmSync(file);
+  }
 
   // the healed chain reports nothing — the check is not a permanent tax on a healthy epic
   fs.writeFileSync(path.join(ep, 'state.json'), chain('done'));
