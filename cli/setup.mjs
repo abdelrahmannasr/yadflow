@@ -5,7 +5,7 @@ import os from 'node:os';
 import {
   c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, runLauncher, has,
   exists, readJSON, readJSONStrict, writeJSON,
-  writeProductConfig,
+  writeProductConfig, forTerminal,
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
@@ -746,12 +746,15 @@ export function ensurePackIgnored(root) {
 export function packRepo(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
   const out = path.join(root, repo.contextPack);
-  if (!has('npx')) { warn(`${repo.name}: npx missing — skipped repomix pack`); return false; }
+  // Printed through `forTerminal` (E81 review 12): the name and pack path come from the shared registry,
+  // and repomix's error line from a run in a registered folder.
+  const nm = forTerminal(repo.name);
+  if (!has('npx')) { warn(`${nm}: npx missing — skipped repomix pack`); return false; }
   fs.mkdirSync(path.dirname(out), { recursive: true });
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
-  info(`${repo.name}: packing with repomix …`);
+  info(`${nm}: packing with repomix …`);
   const r = runLauncher('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
-  if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
-  fail(`${repo.name}: repomix failed — ${r.stderr.split('\n')[0] || 'unknown error'}`);
+  if (r.ok) { ok(`${nm}: cached ${forTerminal(repo.contextPack)}`); hand(`${nm}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
+  fail(`${nm}: repomix failed — ${forTerminal(r.stderr.split('\n')[0]) || 'unknown error'}`);
   return false;
 }

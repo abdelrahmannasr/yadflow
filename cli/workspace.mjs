@@ -27,7 +27,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
 import { moduleActions, gitHookActions } from './plan.mjs';
@@ -50,12 +50,9 @@ export const PRODUCT_DIR = 'product';
 const FOLDER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const validFolderName = (name) => typeof name === 'string' && FOLDER_RE.test(name);
 
-// Text read from a shared file (a repo name, a path) is shown in the terminal: every control character
-// (C0, DEL and C1 — U+0080–U+009F, which some terminals obey too) becomes a space, so a registry entry cannot move the cursor or recolour what follows.
-// So do the line and paragraph separators and the bidi controls, which can make a line read in another
-// order than it holds (E81 review 9).
-const INVISIBLE = new Set([0x2028, 0x2029, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x061c]);
-export const shown = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) || INVISIBLE.has(n) ? ' ' : ch; }).join('');
+// Text read from a shared file is shown in the terminal through `shown` — `forTerminal` in lib.mjs, one
+// cleaner for every module that prints registry text (E81 review 12).
+export const shown = forTerminal;
 
 // A folder as the person's shell reaches it: relative to where they ran yad (which `--dir` may not
 // be), quoted when it holds a space.

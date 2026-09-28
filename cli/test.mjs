@@ -26717,3 +26717,27 @@ test('E81 review 11: no doctor command to copy carries a registry name or branch
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E81 review 12: the protection line, the CI tags check and refresh print registry text cleaned for the terminal', async () => {
+  const { readProtection, protectionLine } = await import('./protection.mjs');
+  const esc = 'ma\u001b[31min\u009b\u202e';
+  const hasRaw = (t) => ['\u001b', '\u009b', '\u202e'].some((ch) => t.includes(ch));
+  const r = readProtection({ platform: 'github', gitUrl: 'https://github.com/org/repo', branch: esc }, { env: { YAD_PLATFORM_READ: '0' } });
+  const line = protectionLine(r, { name: 'api' });
+  assert.ok(!hasRaw(`${line.message}\n${line.hint || ''}`), 'the branch is cleaned');
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A GitLab repo whose CI fragment runs a docker job with no tags: its name is printed.
+    fs.mkdirSync(path.join(backend, '.gitlab', 'ci'), { recursive: true });
+    fs.writeFileSync(path.join(backend, '.gitlab', 'ci', 'yad-checks.yml'), 'job:\n  image: node:22\n  script: [x]\n');
+    const name = 'b\u001b[2Jx';
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name, path: '../backend', platform: 'gitlab', default_branch: esc }] }));
+    const doc = e79Yad(T, product, ['doctor']);
+    assert.ok(!hasRaw(doc.stdout + doc.stderr), 'doctor prints no raw control character');
+    // refresh with no npx on PATH: the skip line names the repo, cleaned.
+    const ref = e79Yad(T, product, ['repo', 'refresh'], { PATH: '/usr/bin:/bin' });
+    assert.match(ref.stdout + ref.stderr, /b \[2Jx: npx missing/);
+    assert.ok(!hasRaw(ref.stdout + ref.stderr));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

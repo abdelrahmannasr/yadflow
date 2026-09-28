@@ -23,7 +23,7 @@
 // leaves the machine for anywhere else). `YAD_PLATFORM_READ=0` turns the reads off — for offline work, and
 // for the test suite, which must never ask the developer's real account (the `YAD_PLATFORM_LOGIN=0`
 // precedent). `runner` is injectable so every answer is testable without a network.
-import { run } from './lib.mjs';
+import { run, forTerminal } from './lib.mjs';
 import { cliFor, hostFromGitUrl, detectPlatform } from './platform.mjs';
 
 export const PLATFORM_NAME = { github: 'GitHub', gitlab: 'GitLab' };
@@ -31,7 +31,9 @@ const TIMEOUT = 10_000;
 
 // A word with an `@` after its first character may be an e-mail address, and no address is ever printed
 // (E67). A branch or a repo path is printed as written otherwise.
-export const shown = (w) => (typeof w === 'string' && w.indexOf('@', 1) >= 0 ? 'a name with an @ in it' : `${w}`);
+// Also cleaned for the terminal (E81 review 12): a branch or repo from the shared registry could hold a
+// control character, and every line here prints through this.
+export const shown = (w) => (typeof w === 'string' && w.indexOf('@', 1) >= 0 ? 'a name with an @ in it' : forTerminal(`${w}`));
 
 // The repo's path on its host (`owner/repo`, or `group/sub/project` on GitLab), from a git remote URL in
 // either form. Not the `repoSlug` the doctor used to carry, which kept only the last two parts and so named

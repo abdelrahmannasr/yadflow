@@ -756,7 +756,7 @@ export function ciTagsChecks(checks, root, hub, registry) {
   }
   for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
     if (!isPlainObject(repo) || repo.platform !== 'gitlab' || !repo.path) continue;
-    fragments.push({ scope: repo.name, file: '.gitlab/ci/yad-checks.yml', path: path.join(path.resolve(root, repo.path), '.gitlab/ci/yad-checks.yml') });
+    fragments.push({ scope: forTerminal(repo.name), file: '.gitlab/ci/yad-checks.yml', path: path.join(path.resolve(root, repo.path), '.gitlab/ci/yad-checks.yml') });
   }
   for (const f of fragments) {
     if (untagged(f.path)) {

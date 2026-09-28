@@ -24,6 +24,13 @@ export const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // holds the one object and nothing else — a progress line printed before the answer would otherwise
 // make the whole output unparseable. Each `warn` is also collected into `warnings`, as plain text.
 // A command never calls JSON.stringify toward stdout itself; a test greps for it.
+// Text read from a shared file (a repo name, a path) is shown in the terminal: every control character
+// (C0, DEL and C1 — U+0080–U+009F, which some terminals obey too) becomes a space, so a registry entry cannot move the cursor or recolour what follows.
+// So do the line and paragraph separators and the bidi controls, which can make a line read in another
+// order than it holds (E81 review 9).
+const INVISIBLE = new Set([0x2028, 0x2029, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x061c]);
+export const forTerminal = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) || INVISIBLE.has(n) ? ' ' : ch; }).join('');
+
 export const JSON_VERSION = 1;
 export const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
 let jsonRun = null;
