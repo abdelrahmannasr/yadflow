@@ -181,6 +181,8 @@ without it allows everything. Where it and the CI check can differ:
 - **The base is your clone's `origin/*` refs**, which may be older than the pull request's base.
 - **A Product in a subfolder of its repo**: CI's check and workflows run from the repo's top, so the pull
   request may have no ledger check at all, while the hook still refuses.
+- **A `.git/hooks` that is a link to a folder the team commits**: yad writes its `pre-commit` into that
+  folder when it has none, and a later `git add -A` could commit yad's hook for everyone.
 - **Two Products in one repo** share one `pre-commit`; each `yad check --fix` rewrites it for its own
   folder.
 
