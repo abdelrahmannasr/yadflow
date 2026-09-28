@@ -52,6 +52,8 @@ const SAFE_VERBS = new Set([
   'approve', 'advance', 'comment',
   // E43: the background capture of Shape artifacts.
   'capture',
+  // E79: the workspace verbs (`new` is also `epic new`'s action).
+  'new', 'init', 'join',
 ]);
 
 // Reduce an argv to a safe command line: the leading verb chain (at most `command subcommand`, and

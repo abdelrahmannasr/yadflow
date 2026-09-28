@@ -55,6 +55,15 @@ export function detectPlatform(remoteUrl = '') {
 }
 export const gitHead = (cwd) => run('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
 
+// A repo's (one `yad init` found beside the Product) default branch: the remote's published default, else the branch it is on (a repo with
+// no remote has nothing else to say), else main.
+export function detectDefaultBranch(repoDir) {
+  const originHead = run('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd: repoDir });
+  if (originHead.ok && originHead.stdout) return originHead.stdout.replace(/^origin\//, '');
+  const current = run('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: repoDir });
+  return (current.ok && current.stdout) || 'main';
+}
+
 // Containment: a repo path must live inside the WORKSPACE — the Product root's parent. The standard
 // multi-repo layout puts the code repos BESIDE the Product, not under it (project/{product,backend,frontend}),
 // so `../backend` has to register; containing to the Product root instead forced separate git repos to nest
@@ -533,6 +542,22 @@ export async function runSetup(root, opts = {}) {
   const known = new Set(registry.repos.map((r) => r.name));
   const greenfield = codebase === 'greenfield';
   const mono = repo_layout === 'monorepo';
+  // `yad init` (E79) found these beside the Product: one yes/no each, with what git already knows about
+  // them — the platform from `origin`, the default branch from origin/HEAD or the branch it is on.
+  for (const d of (opts.discovered || []).filter((x) => !known.has(x.name))) {
+    const repoRoot = path.resolve(root, d.rpath);
+    const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot });
+    const platform = detectPlatform(remote.ok ? remote.stdout : '') || 'github';
+    const default_branch = detectDefaultBranch(repoRoot);
+    if (!(await askYesNo(`Connect ${d.name} (${d.rpath}, ${platform}, default branch ${default_branch})?`, true))) continue;
+    const repo = registerRepo(root, registry, { name: d.name, rpath: d.rpath, platform, default_branch, today: opts.today ?? null, pack: !greenfield });
+    if (!repo) continue;
+    known.add(d.name);
+    ok(`registered ${d.name}`);
+    if (greenfield) info(`${d.name}: greenfield — skipped repomix pack (run \`yad repo refresh ${d.name}\` once it has code)`);
+    else packRepo(root, repo);
+    if (mono) { info('monorepo — one repo connected'); break; }
+  }
   if (await askYesNo(`Connect a code repo? ${c.dim(`(${registry.repos.length} already registered)`)}`, registry.repos.length === 0)) {
     for (;;) {
       const name = await ask('  repo name (blank to finish)', '');
