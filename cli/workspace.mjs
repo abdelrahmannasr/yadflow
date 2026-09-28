@@ -7,8 +7,9 @@
 //     backend/      <- a code repo, registered in product/.sdlc/repos.json as `../backend`
 //     frontend/
 //
-// Until E80 writes `.yad-workspace.json`, the workspace is what setup has always called it: the Product
-// folder's parent (`insideWorkspace` in setup.mjs, issue #129).
+// The workspace is the Product folder's parent (`insideWorkspace` in setup.mjs, issue #129). All three
+// commands write `.yad-workspace.json` there (E80, cli/find-product.mjs), so yad finds the Product from
+// any repo in the workspace.
 //
 //   yad new <name>      greenfield: make <name>/product/, `git init` it, run setup inside it
 //   yad init            brownfield: in a folder that already holds code repos, make (or pick) the
@@ -29,6 +30,15 @@ import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStri
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
 import { moduleActions, gitHookActions } from './plan.mjs';
+import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
+
+// E80: the file that lets yad find the Product from any repo in the workspace. Written by all three.
+function noteWorkspaceFile(product) {
+  const r = writeWorkspaceFile(product);
+  if (r === 'written') ok(`wrote ${WORKSPACE_FILE} — yad finds the Product from any folder in this workspace`);
+  else if (r.startsWith('skipped')) warn(`${WORKSPACE_FILE} not written (${r.replace(/^skipped: /, '')})`);
+  return r;
+}
 
 // The Product's folder inside a workspace. `join` clones to it and `new` creates it, so a workspace
 // made by `new` and one made by `join` from its remote look the same.
@@ -161,6 +171,7 @@ export async function runNew(cwd, name, opts = {}) {
 
   const setup = await runSetup(product, { ...opts, greenfield: !opts.brownfield });
   if (process.exitCode) return null;
+  noteWorkspaceFile(product);
 
   // Setup asked for the default branch; the repo has no commit yet, so HEAD can still follow the answer.
   const hub = readJSON(productConfigPath(product), {}) || {};
@@ -215,6 +226,7 @@ export async function runInit(cwd, opts = {}) {
   const layout = opts.monorepo ? {} : { separate: true };
   const setup = await runSetup(product, { ...opts, brownfield: !opts.greenfield, ...layout, discovered });
   if (process.exitCode) return null;
+  noteWorkspaceFile(product);
   return { workspace: cwd, product, found, setup };
 }
 
@@ -283,6 +295,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   if (skills.installed.length) ok(`installed ${skills.installed.length} skill folder(s) the Product's git ignores (per machine)`);
   if (skills.stale.length) info(`${skills.stale.length} per-machine skill copy(ies) differ from this yadflow's — left as they are; \`yad update\` refreshes them`);
   if (skills.shared.length) info(`${skills.shared.length} managed file(s) are missing or out of date here in folders the Product's git does not ignore — writing them is a change the team shares (\`yad update\`), so join leaves them`);
+  noteWorkspaceFile(product);
   const hook = gitHookActions(product);
   for (const a of hook) a.apply();
   if (hook.length) ok('installed the git pre-commit hook in this clone');

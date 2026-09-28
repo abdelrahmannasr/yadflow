@@ -10,6 +10,7 @@ import { log, ok, info, warn, fail, note, run, readJSON, emitJSON, refuse, inJSO
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
+import { registryEntryFor } from './find-product.mjs';
 import {
   detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment, prNumberFromUrl,
   resolveBaseBranch,
@@ -22,14 +23,19 @@ const NUDGE_CMD = 'yad review chat';
 // Resolve the target code repo: --repo <name> from the registry (platform + path), else cwd.
 // An explicit --repo that is NOT in the registry is an error — never silently fall through to cwd (that
 // would operate on the wrong repo). Returns { error } in that case for the caller to surface.
-function resolveRepo(root, { repo, dir }) {
+//
+// `product` (E80) is the Product found from a code repo beside it: the registry, the code map and the
+// epics are read there, and a repo run without --repo is looked up in the registry by its path.
+function resolveRepo(root, { repo, dir, product }) {
+  const productRoot = product || root;
   if (repo) {
-    const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+    const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), { repos: [] });
     const found = (reg.repos || []).find((r) => r.name === repo);
     if (!found) return { error: `repo '${repo}' is not in .sdlc/repos.json — connect it first (yad-connect-repos)` };
-    return { repoRoot: path.resolve(root, found.path), meta: found };
+    return { repoRoot: path.resolve(productRoot, found.path), meta: found, productRoot };
   }
-  return { repoRoot: path.resolve(root, dir || '.'), meta: null };
+  const repoRoot = path.resolve(root, dir || '.');
+  return { repoRoot, meta: registryEntryFor(product, repoRoot), productRoot };
 }
 
 function platformOf(root, repoRoot, meta) {
@@ -41,11 +47,11 @@ function platformOf(root, repoRoot, meta) {
 // Assemble (but don't print) the Build grounding bundle. Shared by `context` and `walkthrough` so the
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
 // Returns { error } on a bad --repo, else { bundle, repoRoot, base }.
-function contextBundle(root, { repo, dir, pr, runner = run } = {}) {
-  const rr = resolveRepo(root, { repo, dir });
+function contextBundle(root, { repo, dir, product, pr, runner = run } = {}) {
+  const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) return { error: rr.error };
   const { repoRoot, meta } = rr;
-  const platform = platformOf(root, repoRoot, meta);
+  const platform = platformOf(rr.productRoot, repoRoot, meta);
   // Same resolution as `yad open-pr` (#168): without it a repo whose trunk is not `main` grounded the
   // companion on the wrong diff range — or on a branch that does not exist at all. `probe: false`
   // because this caller only wants the base: a configured `default_branch` must answer locally and
@@ -58,8 +64,8 @@ function contextBundle(root, { repo, dir, pr, runner = run } = {}) {
     pr: pr || null,
     base,
     diffCmd: `git -C ${repoRoot} diff ${base}...HEAD`,
-    codeMap: meta?.name ? path.join(root, '.sdlc/code-context', meta.name, 'code-map.md') : null,
-    pack: meta?.name ? path.join(root, '.sdlc/code-context', meta.name, 'pack.md') : null,
+    codeMap: meta?.name ? path.join(rr.productRoot, '.sdlc/code-context', meta.name, 'code-map.md') : null,
+    pack: meta?.name ? path.join(rr.productRoot, '.sdlc/code-context', meta.name, 'pack.md') : null,
     contract: meta?.contract || null,
     markers: {
       trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->',
@@ -71,8 +77,8 @@ function contextBundle(root, { repo, dir, pr, runner = run } = {}) {
 
 // `yad review context --repo <r> --pr <n>` — print the grounding bundle the companion uses to generate
 // the trailer / cards and run the chat over the CODE diff (grounded in the repo code-map + the PR).
-export async function reviewContext(root, { repo, dir, pr, runner = run } = {}) {
-  const r = contextBundle(root, { repo, dir, pr, runner });
+export async function reviewContext(root, { repo, dir, product, pr, runner = run } = {}) {
+  const r = contextBundle(root, { repo, dir, product, pr, runner });
   if (r.error) { refuse(r.error, null, { json: true }); return; }
   emitJSON(r.bundle);
   return r.bundle;
@@ -82,8 +88,8 @@ export async function reviewContext(root, { repo, dir, pr, runner = run } = {}) 
 // ordered `stops[]` (the code diff parsed into hunk-anchored, risk-tagged review stops, highest-risk
 // first). The CLI sequences deterministically; the skill (yad-pair-review) walks the stops, generates
 // the per-stop briefing + Socratic question, and runs the two-way session. No LLM here, no ledger write.
-export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = {}) {
-  const r = contextBundle(root, { repo, dir, pr, runner });
+export async function reviewWalkthrough(root, { repo, dir, product, pr, runner = run } = {}) {
+  const r = contextBundle(root, { repo, dir, product, pr, runner });
   if (r.error) { refuse(r.error, null, { json: true }); return; }
   const { bundle, repoRoot, base } = r;
   const diff = runner('git', ['-C', repoRoot, 'diff', `${base}...HEAD`]);
@@ -99,13 +105,13 @@ export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = 
 
 // `yad review trailer --repo <r> --pr <n> --body <text>` — idempotently upsert the 60-sec briefing into
 // the code PR/MR description (delimited block; safe to re-run after a push).
-export async function reviewTrailer(root, { repo, dir, pr, body, getBody = getPrBody, editBody = editPrBody } = {}) {
+export async function reviewTrailer(root, { repo, dir, product, pr, body, getBody = getPrBody, editBody = editPrBody } = {}) {
   if (!pr) { fail('--pr <n> is required'); process.exitCode = 1; return; }
   if (!body || !String(body).trim()) { fail('trailer body is required: `yad review trailer --repo <r> --pr <n> --body <text>`'); process.exitCode = 1; return; }
-  const rr = resolveRepo(root, { repo, dir });
+  const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
   const { repoRoot, meta } = rr;
-  const platform = platformOf(root, repoRoot, meta);
+  const platform = platformOf(rr.productRoot, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const cur = getBody(platform, pr, { cwd: repoRoot });
   if (!cur.ok) { fail(`could not read PR #${pr}: ${cur.reason || 'unknown'}`); process.exitCode = 1; return; }
@@ -117,12 +123,12 @@ export async function reviewTrailer(root, { repo, dir, pr, body, getBody = getPr
 
 // `yad review nudge --repo <r> --pr <n>` — friendly public @-mention on a bare approve (engagement none)
 // of a code PR. A platform comment (carries the noblock marker so it never blocks); call once per PR.
-export async function reviewNudge(root, { repo, dir, pr, reader = readPr, poster = postComment } = {}) {
+export async function reviewNudge(root, { repo, dir, product, pr, reader = readPr, poster = postComment } = {}) {
   if (!pr) { fail('--pr <n> is required'); process.exitCode = 1; return; }
-  const rr = resolveRepo(root, { repo, dir });
+  const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
   const { repoRoot, meta } = rr;
-  const platform = platformOf(root, repoRoot, meta);
+  const platform = platformOf(rr.productRoot, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const pull = reader(platform, pr, { cwd: repoRoot });
   if (!pull.ok) { fail(`could not read PR #${pr}: ${pull.reason}`); process.exitCode = 1; return; }
@@ -141,13 +147,13 @@ export async function reviewNudge(root, { repo, dir, pr, reader = readPr, poster
 // so the build ledger reflects who actually engaged. The first CLI to write build-log.json. Matches the
 // ship record by its `pr` field (url or number); if none exists yet, prints the engineer_review block
 // for the engineer/CI to attach at ship time (we never fabricate a story/task).
-export async function reviewReconcile(root, { epic, repo, dir, pr, reader = readPr } = {}) {
+export async function reviewReconcile(root, { epic, repo, dir, product, pr, reader = readPr } = {}) {
   if (!epic) { fail('--epic <id> is required'); process.exitCode = 1; return; }
   if (!pr) { fail('--pr <n> is required'); process.exitCode = 1; return; }
-  const rr = resolveRepo(root, { repo, dir });
+  const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
   const { repoRoot, meta } = rr;
-  const platform = platformOf(root, repoRoot, meta);
+  const platform = platformOf(rr.productRoot, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const pull = reader(platform, pr, { cwd: repoRoot });
   if (!pull.ok) { fail(`could not read PR #${pr}: ${pull.reason}`); process.exitCode = 1; return; }
@@ -167,7 +173,7 @@ export async function reviewReconcile(root, { epic, repo, dir, pr, reader = read
   // build-log is shard-then-fold now: updateShip mutates the ship's own loose shard (authoritative
   // until `yad tidy up` folds it), or the folded file if already folded — never both.
   const res = updateShip(
-    epicRoot(root, epic),
+    epicRoot(rr.productRoot, epic),
     (s) => s.pr != null && (String(s.pr) === String(pr) || prNumberFromUrl(s.pr) === String(pr)),
     (s) => { s.engineer_review = engineerReview; },
   );

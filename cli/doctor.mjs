@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
+import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
@@ -353,6 +354,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     }
     gitHookCheck(root, checks);
   }
+  // E80: any Product whose repos live beside it.
+  workspaceFileCheck(root, checks);
 
   // Background capture (E43), on any Product in either ledger mode: is the post-edit hook wired, and will
   // a push to the `yad/wip/*` branches start the team's own CI?
@@ -2530,6 +2533,16 @@ export function pushOnEveryBranch(root) {
     if (hit) out.push(`.github/workflows/${n}`);
   }
   return out;
+}
+
+// The workspace file (E80): lets yad find this Product from its code repos. Only for a Product whose
+// registered repos live beside it — per machine, so a teammate who cloned by hand has none.
+function workspaceFileCheck(root, checks) {
+  if (!hasSiblingRepo(root)) return;
+  const st = workspaceFileState(root);
+  if (st === 'ok') check(checks, 'workspace-file', 'project', 'ok', `${WORKSPACE_FILE} beside the Product — yad finds it from the code repos`);
+  else if (st === 'missing') check(checks, 'workspace-file', 'project', 'warn', `no ${WORKSPACE_FILE} beside the Product — run from a code repo, yad does not find the Product`, 'run `yad check --fix` (it writes the file on this machine only)');
+  else check(checks, 'workspace-file', 'project', 'warn', `${WORKSPACE_FILE} not usable: ${st.replace(/^other: /, '')}`, 'run yad from the Product, or pass --dir <the Product>');
 }
 
 // The person's half of the ledger guard (E48): this clone's git pre-commit hook. Per clone, because git

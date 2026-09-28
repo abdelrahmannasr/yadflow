@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
+import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
 import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
 import { runLedgerGuardHook, runStagedLedgerGuard } from '../cli/hook.mjs';
@@ -269,7 +270,10 @@ ${c.bold('Interactive docs (generated sites)')}
   yad docs sync [--check|--refresh|--wire]   Staleness sweep; --wire installs the Pages CI
 
 ${c.bold('Options')}
-  --dir <path>          Target project root (default: cwd)
+  --dir <path>          Target project root. Without it, a Product command finds the Product from
+                        where you are — any folder inside it, or any repo in its workspace
+                        (.yad-workspace.json) — and says so on stderr; a code-repo command
+                        (commit, open-pr, ship, review) works on the repo you are in
   --type <t>            commit: feat|fix|docs|refactor|test|perf|build|ci|chore|revert
   -m, --message <s>     commit: subject / PR title
   --task <id>           commit: Task trailer, EP-<slug>-S<n>-T<NN> (else derived from the branch)
@@ -402,6 +406,29 @@ const ACTIONS = {
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard'] },
 };
+// E80 — how each command finds its folder. A PRODUCT command works on the Product; a REPO command works
+// on the code repo it runs in and reads the Product beside it. The rest take their folder as given:
+// `setup` and `new`/`init`/`join` make one, `report` and `hook` read what is there.
+const PRODUCT_CMDS = new Set([
+  'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
+  'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
+  'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
+  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile',
+]);
+const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review']);
+// The Product commands that WRITE its files without first checking it is one. Run from a code repo they
+// wrote an epic, a dial or the module into it; they refuse instead (E80). The rest either only read, or
+// already refuse a folder that is not a Product.
+function writesProduct(cmd, o) {
+  const action = o._[1];
+  if (cmd === 'update' || cmd === 'kill' || cmd === 'unkill') return true;
+  if (cmd === 'check') return !!o.fix;
+  if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
+  if (cmd === 'skill') return action === 'bind' || action === 'unbind';
+  if (cmd === 'dial') return o.to !== undefined;
+  return false;
+}
+
 const ALWAYS_JSON = new Set(['gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough']);
 export function commandName(words) {
   const [cmd, action] = words;
@@ -466,6 +493,28 @@ async function main() {
     const text = helpText(commands.seedableProfiles());
     return inJSON() ? emitJSON({ help: stripAnsi(text) }) : log(text);
   }
+  // E80: find the Product from wherever yad runs. `--dir` always wins. Otherwise a Product command runs
+  // against the Product found by walking up — from any subfolder of the Product, or from any folder in
+  // its workspace (`.yad-workspace.json`) — and says where, on stderr. A code-repo command keeps acting
+  // on the repo it runs in, and is handed the Product to read (its registry: name, platform, branch).
+  const dirGiven = process.argv.slice(2).some((a) => a === '--dir' || a.startsWith('--dir='));
+  if (PRODUCT_CMDS.has(cmd) || REPO_CMDS.has(cmd)) {
+    const found = commands.findProduct(o.dir);
+    if (found?.problem) warn(`${found.problem} — using ${o.dir}`);
+    else if (found && REPO_CMDS.has(cmd)) o.product = found.root;
+    else if (found && !dirGiven && found.via !== 'here') {
+      o.dir = found.root;
+      process.stderr.write(c.dim(`Product: ${path.relative(process.cwd(), found.root) || '.'} (${found.via === 'workspace' ? `from ${commands.WORKSPACE_FILE}` : 'above this folder'})\n`));
+    }
+  }
+  // A command that WRITES the Product never writes into a folder that is not one (a code repo, say).
+  // Asked by each such command AFTER its own usage checks, so a mistyped command still hears what is
+  // wrong with it first.
+  const noProduct = () => {
+    if (!writesProduct(cmd, o) || commands.hasProduct(o.dir)) return false;
+    refuse(`no Product here (${o.dir}) — yad ${cmd} writes the Product's files`, 'run it from the Product, from a folder inside its workspace, or pass --dir <the Product>; `yad new` / `yad init` start one');
+    return true;
+  };
   // A project written by a newer yadflow is warned about before any command reads it (docs/migrations/
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
@@ -508,9 +557,11 @@ async function main() {
       break;
     }
     case 'check':
+      if (noProduct()) break;
       result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
       break;
     case 'update':
+      if (noProduct()) break;
       result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
       break;
     case 'doctor':
@@ -545,6 +596,7 @@ async function main() {
         refuse(`unknown epic action: ${action ?? '(none)'} (new)`, `usage: yad epic new <slug> [--type feature|chore|change|defect|hotfix] [--profile ${commands.seedableProfiles().join('|')}] [--parent EP-<slug> --inherits <bases>]`);
         break;
       }
+      if (noProduct()) break;
       result = await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
       break;
     }
@@ -555,12 +607,14 @@ async function main() {
         refuse(`unknown foundation action: ${action ?? '(none)'} (new, status)`, 'usage: yad foundation new [--json] | yad foundation status [--json]');
         break;
       }
+      if (noProduct()) break;
       result = await commands.runFoundationNew(o.dir, { today, json: o.json });
       break;
     }
     case 'skill': {
       const [, action, step, ...rest] = o._;
       if (action === 'list' || action === undefined) { result = commands.runSkillList(o.dir, { json: o.json }); break; }
+      if ((action === 'bind' || action === 'unbind') && noProduct()) break;
       if (action === 'bind') { result = commands.runSkillBind(o.dir, { step, skills: rest }); break; }
       if (action === 'unbind') { result = commands.runSkillUnbind(o.dir, { step }); break; }
       refuse(`unknown skill action: ${action} (list, bind, unbind)`, 'usage: yad skill list [--json] | yad skill bind <step> <skill> [<skill> ...] | yad skill unbind <step>');
@@ -599,9 +653,11 @@ async function main() {
       // One word names a Shape author step (project-wide). Three name a Build lane step: epic, story, step.
       const args = o._.slice(1);
       if (args.length === 1) {
+        if (noProduct()) break;
         result = await commands.runDial(o.dir, { step: args[0], to: o.to, json: o.json });
       } else if (args.length === 3) {
         if (!commands.isValidEpicId(args[0])) { refuse(`invalid epic id: ${args[0]} (expected EP-<slug>, [a-z0-9-] only)`); break; }
+        if (noProduct()) break;
         result = await commands.runDial(o.dir, { epic: args[0], story: args[1], step: args[2], repo: o.repo, to: o.to, json: o.json });
       } else {
         refuse('usage: yad dial <step> [--to auto|human]   |   yad dial <epic> <story> --repo <name> <step> [--to auto|human]');
@@ -616,6 +672,7 @@ async function main() {
     case 'kill':
     case 'unkill': {
       if (o._.length > 1) { refuse(`unexpected argument(s): ${o._.slice(1).join(' ')}`); break; }
+      if (noProduct()) break;
       result = await commands.runKill(o.dir, { on: o._[0] === 'kill', reason: o.reason, json: o.json, today });
       break;
     }
@@ -652,14 +709,14 @@ async function main() {
     }
     case 'review': {
       const [, action] = o._;
-      if (action === 'trailer') result = await commands.reviewTrailer(o.dir, { repo: o.repo, pr: o.pr, body: o.body || o.message });
-      else if (action === 'context' || action === 'chat' || action === 'cards') result = await commands.reviewContext(o.dir, { repo: o.repo, pr: o.pr });
-      else if (action === 'walkthrough') result = await commands.reviewWalkthrough(o.dir, { repo: o.repo, pr: o.pr });
-      else if (action === 'nudge') result = await commands.reviewNudge(o.dir, { repo: o.repo, pr: o.pr });
+      if (action === 'trailer') result = await commands.reviewTrailer(o.dir, { repo: o.repo, product: o.product, pr: o.pr, body: o.body || o.message });
+      else if (action === 'context' || action === 'chat' || action === 'cards') result = await commands.reviewContext(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
+      else if (action === 'walkthrough') result = await commands.reviewWalkthrough(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
+      else if (action === 'nudge') result = await commands.reviewNudge(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
       else if (action === 'reconcile') {
         // The epic becomes a path segment under epics/ — reject anything but EP-<slug> (no `../` escape).
         if (!o.epic || !commands.isValidEpicId(o.epic)) { refuse(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`); break; }
-        result = await commands.reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
+        result = await commands.reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, product: o.product, pr: o.pr });
       }
       else { refuse('usage: yad review <trailer|context|walkthrough|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]'); }
       break;
@@ -668,13 +725,13 @@ async function main() {
       result = await commands.runCommit(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, manual: o.manual, reason: o.reason });
       break;
     case 'open-pr':
-      result = await commands.runOpenPr(o.dir, { repo: o.repo, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange });
+      result = await commands.runOpenPr(o.dir, { repo: o.repo, product: o.product, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange });
       break;
     case 'ship':
       // The ledger override is its own act (E49): recorded in its own commit, never folded into a
       // commit-and-open-PR run. Refused, never ignored.
       if (o.manual || o.reason !== undefined) { refuse('yad ship takes no --manual/--reason: commit with `yad commit --manual --reason "<why>" …`, then `yad open-pr`'); break; }
-      result = await commands.runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
+      result = await commands.runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, product: o.product, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
       break;
     case 'checkpoint': {
       let retroShip;

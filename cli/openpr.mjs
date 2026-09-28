@@ -17,15 +17,20 @@ import { baseChangeLevel, changedSince, recentAuthorsFor, suggestedAuthorsFor } 
 import { personLabel } from './riskmap.mjs';
 import { gateOpen } from './gate.mjs';
 import { unfoldedPaths, authorStepOf } from './fold.mjs';
+import { registryEntryFor } from './find-product.mjs';
 
-// Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
-function resolveRepo(root, { repo, dir }) {
+// Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd. `product` (E80) is
+// the Product found from a code repo beside it: the registry is read there, and a repo run without
+// --repo is looked up in it by its path — so its platform and default branch are the recorded ones.
+function resolveRepo(root, { repo, dir, product }) {
+  const productRoot = product || root;
   if (repo) {
-    const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
-    const found = reg.repos.find((r) => r.name === repo);
-    if (found) return { repoRoot: path.resolve(root, found.path), meta: found };
+    const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), { repos: [] });
+    const found = (reg.repos || []).find((r) => r.name === repo);
+    if (found) return { repoRoot: path.resolve(productRoot, found.path), meta: found };
   }
-  return { repoRoot: path.resolve(root, dir || '.'), meta: null };
+  const repoRoot = path.resolve(root, dir || '.');
+  return { repoRoot, meta: registryEntryFor(product, repoRoot) };
 }
 
 // Which SDLC stage is this PR? The Product serves two vehicles; a code repo only one. Mirrors the
