@@ -2,7 +2,7 @@
 // `yad checkpoint` (sync new state) and `yad tidy up` (fold finished shards). Both must commit ONLY on
 // the default branch, so their `[skip ci]` commit never enters a PR's base..HEAD range (where it would
 // strand required checks and fail verified-commits). This module is the single home of that guard.
-import { warn, fail, hand, run } from './lib.mjs';
+import { warn, fail, hand, run, forTerminal } from './lib.mjs';
 
 export const productGit = (root) => (...args) => run('git', args, { cwd: root });
 
@@ -34,12 +34,14 @@ export function resolveDefaultBranch(git, hub) {
 // is the SINGLE documented override — never `--force` (which elsewhere only waives the atomic guard).
 export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false, cmd = 'yad checkpoint' } = {}) {
   if (branch === defaultBranch) return true;
+  // Printed cleaned (E81 review 13): `default_branch` comes from the Product's shared hub.json.
+  const [b, d] = [forTerminal(branch), forTerminal(defaultBranch)];
   if (allowBranch) {
-    warn(`--allow-branch: committing on '${branch}' — pushes go to origin/${branch}, and this commit needs a verified signature to pass the gate in a PR`);
+    warn(`--allow-branch: committing on '${b}' — pushes go to origin/${b}, and this commit needs a verified signature to pass the gate in a PR`);
     return true;
   }
-  fail(`on '${branch}', not the default branch '${defaultBranch}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
-  hand(`switch to '${defaultBranch}' and re-run, or pass --allow-branch to override (set default_branch in .sdlc/hub.json if '${defaultBranch}' is wrong)`);
+  fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
+  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (set default_branch in .sdlc/hub.json if '${d}' is wrong)`);
   process.exitCode = 1;
   return false;
 }

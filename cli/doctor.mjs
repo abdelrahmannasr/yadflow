@@ -2200,7 +2200,7 @@ export function riskMapChecks(checks, root) {
     for (const f of r.findings) {
       let g = groups.find((x) => x.code === f.code);
       if (!g) { g = { code: f.code, targets: [] }; groups.push(g); }
-      if (f.target) g.targets.push(f.target);
+      if (f.target) g.targets.push(forTerminal(f.target));   // a folder name from the repo's own tree (E81 review 13)
     }
     const said = groups.map((g) => {
       const shown = g.targets.slice(0, 3).join(', ') + (g.targets.length > 3 ? ` +${g.targets.length - 3} more` : '');
@@ -2229,7 +2229,7 @@ export function codeownersChecks(checks, root) {
     const id = `codeowners:${repo.name}`;
     const nm = forTerminal(repo.name);   // printed as in riskMapChecks (E81 review 11)
     const more = `\`yad codeowners check ${asArg(repo.name)}\``;
-    if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS could not be checked — ${r.unknown}`, more); continue; }
+    if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS could not be checked — ${forTerminal(r.unknown)}`, more); continue; }
     if (r.none) { check(checks, id, 'codeowners', 'ok', `${nm}: no CODEOWNERS — nothing to check`); continue; }
     const findings = codeownersFindings(r);
     if (!findings.length) { check(checks, id, 'codeowners', 'ok', `${nm}: every ${r.path} line yad can read matches a file`); continue; }
@@ -2347,7 +2347,7 @@ export function indexChecks(checks, root) {
     const head = git('rev-parse', '--abbrev-ref', 'HEAD');
     const main = resolveDefaultBranch(git, hubNow);
     if (head.ok && head.stdout && head.stdout !== main) {
-      check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'is not what this yadflow builds from the work items on this branch'} — expected on '${head.stdout}': it is written on '${main}' only, once this work merges`);
+      check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'is not what this yadflow builds from the work items on this branch'} — expected on '${head.stdout}': it is written on '${forTerminal(main)}' only, once this work merges`);
       return;
     }
   }

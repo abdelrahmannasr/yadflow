@@ -167,7 +167,11 @@ function loggedIn(runner, cli, host, authCache) {
 //                                                            a GitLab answer carries no such key)
 // `kind` names the reason for a hint, so the hint never depends on the words of `why`.
 export function readProtection({ platform, gitUrl, branch = null, branchFrom = 'registry' } = {}, { runner = run, env = process.env, authCache = new Map() } = {}) {
-  const host = hostFromGitUrl(gitUrl || '');
+  // A host that is not a plain host name is never used or repeated (E81 review 13): it comes from the
+  // shared registry's `git_url` (or a registered clone's own remote), and it is printed inside
+  // `gh auth login --hostname …` for the person to run — `$(curl …|sh)` parses as a host.
+  const rawHost = hostFromGitUrl(gitUrl || '');
+  const host = rawHost && /^(?:\w[\w-]*(?:\.[\w-]+)*|\[[0-9a-f:.]+\])$/i.test(rawHost) ? rawHost : null;
   const repo = repoPathFromGitUrl(gitUrl || '');
   const plat = platform || detectPlatform(gitUrl || '') || null;
   const base = { platform: plat, host, repo, branch, branchFrom, platformDefault: null };
@@ -175,10 +179,11 @@ export function readProtection({ platform, gitUrl, branch = null, branchFrom = '
   const cli = cliFor(plat);
   if (!cli) {
     return platform
-      ? unknown('no-platform', `yad does not know the platform ${JSON.stringify(platform)} (it reads GitHub and GitLab)`)
+      ? unknown('no-platform', `yad does not know the platform ${JSON.stringify(forTerminal(platform))} (it reads GitHub and GitLab)`)
       : unknown('no-platform', 'no platform (GitHub or GitLab) is set, so there is no platform to ask');
   }
   if (env.YAD_PLATFORM_READ === '0') return unknown('off', 'platform reads are turned off (YAD_PLATFORM_READ=0)');
+  if (rawHost && !host) return unknown('no-url', 'the git remote URL names a host that is not a plain host name, so yad does not ask about it', { badHost: true });
   if (!host || !repo) return unknown('no-url', 'no git remote URL yad can read, so it cannot tell which repo to ask about');
   if (!runner(process.platform === 'win32' ? 'where' : 'which', [cli], {}).ok) return unknown('no-cli', `${cli} is not installed, so yad cannot ask ${PLATFORM_NAME[plat]}`);
   if (!loggedIn(runner, cli, host, authCache)) return unknown('no-login', `${cli} is not logged in for ${host} (or ${host} did not answer)`);
@@ -442,7 +447,7 @@ function readGitLab(base, runner, unknown) {
         const named = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : null;
         // A rule NAMED "42" and a rule with ID 42 must not read the same, so an id is printed as an id —
         // the shape the GitHub side already uses ("a repo ruleset (id 7)").
-        if (named !== null) out.from.push(`approval rule ${JSON.stringify(named)}`);
+        if (named !== null) out.from.push(`approval rule ${JSON.stringify(forTerminal(named))}`);
         else out.from.push(count(r.id) !== null ? `an approval rule (id ${r.id})` : 'an approval rule');
       }
       // A rule the platform DID return that does not reach this branch: say which way it misses, so the
@@ -684,7 +689,9 @@ function unknownHint(r) {
     case 'no-cli': return `install ${cli} and log in, then run \`yad doctor\` again`;
     case 'no-login': return `run \`${cli} auth login --hostname ${r.host}\`, then \`yad doctor\` again`;
     case 'no-platform': return 'set `platform` (github or gitlab) in yad\'s files — `yad setup` for the Product, `yad repo connect` for a code repo';
-    case 'no-url': return 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
+    case 'no-url': return r.badHost
+      ? 'fix `git_url` in the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product) — or its origin remote — to name a plain host'
+      : 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
     // The access tail turns on what the read PROVED (`cause`), never on the platform: a 404 whose body was
     // not recognised leaves a permission open, and one that named the branch closes it (E109).
     // The tail's noun is GitLab's: GitHub never reaches it, because its reader sets `cause: 'branch'` on

