@@ -102,14 +102,64 @@ function gitClone(url, target, env) {
 // A clone that needs a password must not sit waiting at a prompt nobody will answer.
 const cloneEnv = () => (process.env.SDLC_NONINTERACTIVE ? { ...process.env, GIT_TERMINAL_PROMPT: '0' } : process.env);
 
-// THE CLONE STEP — shared with E81 (detect and fetch missing repos). For each repo the Product's
-// registry lists, put a clone at its `path` (relative to the Product) when none is there.
+// WHERE A REGISTRY ENTRY STANDS ON THIS MACHINE, judged before any git runs (E81). Shared by every
+// command that acts on the registered repos — the clone step (`yad join`, `yad repo clone`), `yad repo
+// list`, `yad repo sync` and `yad doctor` — so one never says "run X" for an entry X then refuses.
 //
-// The registry is SHARED content — anyone who can push to the Product wrote it — so every entry is
-// judged before git runs: a path outside the workspace is refused (the same bound setup keeps), the
-// Product itself (`.`, a monorepo) is not cloned, and the URL is passed after `--` so it can never be
-// read as a git option. A failure is recorded and the next repo is tried: one bad entry never stops
-// the rest (the roadmap: "partial clone failures never fail the whole join").
+// The registry is SHARED content — anyone who can push to the Product wrote it — so a path outside the
+// workspace is refused (the same bound setup keeps), a path through a `.git` folder or a link is refused,
+// and a folder that exists but holds no `.git` is refused too: a Product can commit a folder shaped like
+// a BARE git repo (`HEAD`, `config`, `objects/`), and git run there reads that `config`, whose
+// `core.fsmonitor` runs a command. The Product itself (`.`, a monorepo) is its own state.
+//
+// Returns { name, path, target, state, reason? } — state is one of:
+//   'product'   the Product itself; never cloned
+//   'present'   a git checkout is there (`.git` at the path). `linked` is set when a folder on the way,
+//               deeper than the workspace folder itself, is a link — see `inRepoLink`
+//   'missing'   nothing there yet, and the clone step can make it
+//   'refused'   not there, or not a checkout, and the clone step will not make it; `reason` says why
+export function judgeRepo(productRoot, repo) {
+  const name = shown(repo?.name || '(unnamed)');
+  const rpath = typeof repo?.path === 'string' ? repo.path : '';
+  const entry = { name, path: shown(rpath) };
+  if (!rpath) return { ...entry, state: 'refused', reason: 'no path recorded' };
+  const target = path.resolve(productRoot, rpath);
+  const at = { ...entry, target };
+  if (target === path.resolve(productRoot)) return { ...at, state: 'product', reason: 'the Product itself' };
+  if (throughGitDir(productRoot, rpath)) return { ...at, state: 'refused', reason: 'it runs through a .git folder — git\'s own storage, never a code repo' };
+  if (!insideWorkspace(productRoot, rpath)) return { ...at, state: 'refused', reason: 'outside the workspace (the Product folder\'s parent)' };
+  if (exists(path.join(target, '.git'))) return { ...at, state: 'present', ...(inRepoLink(productRoot, target) ? { linked: true } : {}) };
+  if (throughLink(productRoot, target)) return { ...at, state: 'refused', reason: 'a folder on its path is a link, so where the clone lands is not what the path says' };
+  if (exists(target) && !isEmptyDir(target)) return { ...at, state: 'refused', reason: 'the folder exists and is not a git repo — move it aside and re-run' };
+  const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
+  if (!url) return { ...at, state: 'refused', reason: 'no git_url recorded — clone it by hand' };
+  if (url.startsWith('-')) return { ...at, state: 'refused', reason: 'the recorded git_url starts with "-"' };
+  return { ...at, state: 'missing', url };
+}
+
+// A link on the way to a PRESENT repo that lies inside some repo's tree — deeper than the workspace
+// folder's own children. The workspace folder is the person's: `ws/backend -> /src/backend` is their own
+// layout, and a clone there is theirs. A link any deeper was written by whoever writes that repo — the
+// Product's `evil -> ../../..` — so `yad repo sync` will not run git through it.
+function inRepoLink(productRoot, target) {
+  const root = path.resolve(productRoot);
+  const workspace = path.dirname(root) === root ? root : path.dirname(root);
+  const parts = path.relative(workspace, target).split(path.sep).filter(Boolean);
+  let cur = workspace;
+  for (const [i, part] of parts.entries()) {
+    cur = path.join(cur, part);
+    let st;
+    try { st = fs.lstatSync(cur); } catch { return false; }
+    if (i > 0 && st.isSymbolicLink()) return true;
+  }
+  return false;
+}
+
+// THE CLONE STEP — `yad join` and `yad repo clone` (E81). For each repo the registry lists that
+// `judgeRepo` finds missing, put a clone at its `path` (relative to the Product). The URL is passed after
+// `--` so it can never be read as a git option. A failure is recorded and the next repo is tried: one bad
+// entry never stops the rest (the roadmap: "partial clone failures never fail the whole join"). A present
+// repo is only ever skipped — nothing here runs git in it.
 //
 // Returns { cloned, present, failed }, each a list of { name, path, reason? }.
 export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env = cloneEnv() } = {}) {
@@ -117,33 +167,45 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
   // A `repos` that is not a list (`{}`, `5`) is a broken shared file: nothing to clone, and the caller
   // says so — the per-machine steps still run.
   for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
-    const name = shown(repo?.name || '(unnamed)');
-    const rpath = typeof repo?.path === 'string' ? repo.path : '';
-    const entry = { name, path: shown(rpath) };
-    if (!rpath) { out.failed.push({ ...entry, reason: 'no path recorded' }); continue; }
-    const target = path.resolve(productRoot, rpath);
-    if (target === path.resolve(productRoot)) { out.present.push({ ...entry, reason: 'the Product itself' }); continue; }
-    if (throughGitDir(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'it runs through a .git folder — git\'s own storage, never a code repo; not cloned' }); continue; }
-    if (!insideWorkspace(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'outside the workspace (the Product folder\'s parent) — not cloned' }); continue; }
-    // Already there: nothing is written, so where a link of this machine's own points does not matter.
-    // "Present" is only ever a skip — anything that later fetches or pulls in a present repo (E81) must
-    // run `throughLink` and `insideWorkspace` on it first.
-    if (exists(path.join(target, '.git'))) { out.present.push(entry); continue; }
-    if (throughLink(productRoot, target)) { out.failed.push({ ...entry, reason: 'a folder on its path is a link, so where the clone lands is not what the path says — not cloned' }); continue; }
-    if (exists(target) && !isEmptyDir(target)) { out.failed.push({ ...entry, reason: 'the folder exists and is not a git repo — move it aside and re-run' }); continue; }
-    const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
-    if (!url) { out.failed.push({ ...entry, reason: 'no git_url recorded — clone it by hand' }); continue; }
-    if (url.startsWith('-')) { out.failed.push({ ...entry, reason: 'the recorded git_url starts with "-"' }); continue; }
+    const j = judgeRepo(productRoot, repo);
+    const entry = { name: j.name, path: j.path };
+    if (j.state === 'product') { out.present.push({ ...entry, reason: j.reason }); continue; }
+    if (j.state === 'present') { out.present.push(entry); continue; }
+    if (j.state === 'refused') { out.failed.push({ ...entry, reason: j.reason }); continue; }
     // A path through a file (`.sdlc/hub.json/x`) or a dangling link fails here — for this entry only.
     let r;
     try {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      r = clone(url, target, env);
+      fs.mkdirSync(path.dirname(j.target), { recursive: true });
+      r = clone(j.url, j.target, env);
     } catch (e) { r = { ok: false, error: `cannot make its folder (${e.code || e.message})` }; }
     if (r.ok) out.cloned.push(entry);
     else out.failed.push({ ...entry, reason: shown(r.error) });
   }
   return out;
+}
+
+// What the clone step did, said the same way by `join` and `repo clone`.
+export function reportClones(repos) {
+  for (const r of repos.cloned) ok(`cloned ${r.name} → ${r.path}`);
+  for (const r of repos.present) info(`${r.name}: ${r.reason || 'already there'}`);
+  for (const r of repos.failed) warn(`${r.name} (${r.path}): ${r.reason}`);
+}
+
+// The Product's registry, read strictly (E81, from join): a file that does not parse (a merge-conflict
+// marker left in it) must be SAID, not read as "no repos". Returns { registry, problem } — `problem` is
+// the sentence to show, with the file's absolute path (a home folder name, spaces and all) taken out;
+// `registry` is then `{ repos: [] }`. A file that parses and holds no list (`null`, `[]`, `5`) is a
+// problem too.
+export function readRegistry(productRoot) {
+  const regFile = path.join(productRoot, PROJECT_FILES.reposRegistry);
+  let registry;
+  try { registry = readJSONStrict(regFile, { repos: [] }); }
+  catch (e) {
+    const why = (e.message || '').replace(`corrupt JSON in ${regFile}: `, '').split(regFile).join(PROJECT_FILES.reposRegistry);
+    return { registry: { repos: [] }, problem: `${PROJECT_FILES.reposRegistry} in the Product cannot be read (${shown(why)})` };
+  }
+  if (!Array.isArray(registry?.repos)) return { registry: { repos: [] }, problem: `${PROJECT_FILES.reposRegistry} has no list of repos` };
+  return { registry, problem: null };
 }
 
 // The lines that put the Product on a platform — printed, never run.
@@ -274,23 +336,10 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   }
   if (!exists(productConfigPath(product))) return refuse(`${path.join(wsName, PRODUCT_DIR)}/ has no .sdlc/hub.json — that repo is not a yad Product`);
 
-  // Strict: a registry that does not parse (a merge-conflict marker left in it) must be SAID, not read as
-  // "no repos" — the joiner would get the Product alone with no hint the list was lost.
-  let registry;
-  const regFile = path.join(product, PROJECT_FILES.reposRegistry);
-  try { registry = readJSONStrict(regFile, { repos: [] }); }
-  catch (e) {
-    // The reason without the absolute path (a home folder name, spaces and all) — the file is named once.
-    const why = (e.message || '').replace(`corrupt JSON in ${regFile}: `, '').split(regFile).join(PROJECT_FILES.reposRegistry);
-    warn(`${PROJECT_FILES.reposRegistry} in the Product cannot be read (${shown(why)}) — nothing to clone; fix it in the Product and re-run`);
-    registry = { repos: [] };
-  }
-  // `null`, `[]`, `5` parse, and hold no list: said too.
-  if (!Array.isArray(registry?.repos)) warn(`${PROJECT_FILES.reposRegistry} has no list of repos — nothing to clone; fix it in the Product and re-run`);
+  const { registry, problem } = readRegistry(product);
+  if (problem) warn(`${problem} — nothing to clone; fix it in the Product and re-run`);
   const repos = cloneMissingRepos(product, registry);
-  for (const r of repos.cloned) ok(`cloned ${r.name} → ${r.path}`);
-  for (const r of repos.present) info(`${r.name}: ${r.reason || 'already there'}`);
-  for (const r of repos.failed) warn(`${r.name} (${r.path}): ${r.reason}`);
+  reportClones(repos);
 
   // The per-machine steps.
   const ideTargets = await selectIdeTargets(product, opts.ideTargets);

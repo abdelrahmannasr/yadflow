@@ -14,6 +14,12 @@ import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as ca
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
+import { judgeRepo } from './workspace.mjs';
+
+// A registered path doctor may run git in (E81): a checkout (`.git` there) or the Product itself. A folder
+// with no `.git` could be one the Product commits shaped like a bare repo, and git run there reads its
+// `config`, whose `core.fsmonitor` runs a command. The repos check reports every other entry.
+const isCheckout = (root, repo) => ['present', 'product'].includes(judgeRepo(root, repo).state);
 import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
@@ -447,17 +453,25 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       // would read as "healthy") — an entry with no path is malformed.
       if (!repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${repo.name || '(unnamed)'}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
       const repoRoot = path.resolve(root, repo.path);
+      // Judged before git runs (E81) — the same judgement `yad repo clone` makes, so the hint names that
+      // command only for a repo it would clone, and git never runs in a folder with no `.git` (a
+      // committed folder shaped like a bare repo would have git read its `config`).
+      const judged = judgeRepo(root, repo);
+      const cloneHint = judged.state === 'missing' ? 'run `yad repo clone` to clone it here' : null;
       // A registered repo may be a SIBLING of the Product (`../backend`, the standard multi-repo layout).
       // Such a checkout is legitimately absent wherever only the Product is checked out — Product CI, a fresh
       // clone — so its absence is a warn, not corruption. A missing path INSIDE the project root is
       // still a hard fail: nothing but damage explains it.
       if (!exists(repoRoot)) {
-        if (underProjectRoot(root, repoRoot) || !isRegistrableSibling(root, repo.path)) check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo');
-        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the Product)`, 'expected when only the Product is checked out; clone it alongside the Product to work on it here');
+        if (underProjectRoot(root, repoRoot) || !isRegistrableSibling(root, repo.path)) check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, cloneHint || 'fix the path in repos.json or re-connect the repo');
+        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the Product)`, cloneHint ? `expected when only the Product is checked out; ${cloneHint}` : `expected when only the Product is checked out; \`yad repo clone\` will not clone it (${judged.reason}) — clone it alongside the Product by hand to work on it here`);
         continue;
       }
-      const head = gitHead(repoRoot);
-      if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: ${repo.path} is not a git repository (or has no commits) [YAD-STATE-003]`, 'init/clone the repo, then re-connect it'); continue; }
+      // There, but refused (outside the workspace, through `.git` or a link, or a folder with no `.git`):
+      // said with the reason, and git is not run in it.
+      if (judged.state === 'refused') { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: ${repo.path} — ${judged.reason} [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo'); continue; }
+      const head = judged.state === 'present' || judged.state === 'product' ? gitHead(repoRoot) : null;
+      if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: ${repo.path} is not a git repository (or has no commits) [YAD-STATE-003]`, cloneHint || 'init/clone the repo, then re-connect it'); continue; }
       if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + repo.name + '` once it has code');
       else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + repo.name + '`');
       else check(checks, `repo:${repo.name}`, 'project', 'ok', `${repo.name}: git repo, context fresh`);
@@ -571,7 +585,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
     const rootTop = top(root);
     const unlinked = registry.repos.filter((r) => r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
-      .filter(({ dir }) => exists(dir) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
+      .filter(({ r, dir }) => isCheckout(root, r) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
       .filter(({ dir }) => { const t = top(dir); return t && t !== rootTop; })
       .map(({ r, dir }) => {
         const branch = r.default_branch || 'main';
@@ -2151,7 +2165,7 @@ export function riskMapChecks(checks, root) {
   for (const repo of repos) {
     if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
     const repoRoot = path.resolve(root, repo.path);
-    if (!exists(repoRoot) || !gitHead(repoRoot)) continue;
+    if (!isCheckout(root, repo) || !gitHead(repoRoot)) continue;
     const r = checkRepo(repoRoot);
     if (!r.git) continue;
     const id = `risk-map:${repo.name}`;
@@ -2187,7 +2201,7 @@ export function codeownersChecks(checks, root) {
   for (const repo of repos) {
     if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
     const repoRoot = path.resolve(root, repo.path);
-    if (!exists(repoRoot) || !gitHead(repoRoot)) continue;
+    if (!isCheckout(root, repo) || !gitHead(repoRoot)) continue;
     const r = checkCodeowners(repoRoot, { platform: repo.platform || null });
     if (!r.git) continue;
     const id = `codeowners:${repo.name}`;
@@ -2243,7 +2257,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
   for (const [i, repo] of repos.entries()) {
     if (!repo || typeof repo.name !== 'string' || !repo.name) continue;
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
-    const onDisk = repoRoot && exists(repoRoot) && gitHead(repoRoot);
+    const onDisk = repoRoot && isCheckout(root, repo) && gitHead(repoRoot);
     // A name with an `@` is hidden in the id too; its place in repos.json keeps the id one word. Nothing
     // validates a repo's name, so a repo literally named `#1` could take the same id — it only labels a line.
     emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, repo.name, {

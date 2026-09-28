@@ -35,8 +35,17 @@ tree (branch + fast-forward). It writes **nothing** back to the registry.
 Run `yad repo sync [<repo>]`. For each target repo it performs, in order:
 
 ### Step 1 — Locate and validate the repo
-Resolve the local path from the registry. If the path is not a git repo (no readable `HEAD`), warn and
-skip — there is nothing to switch.
+Resolve the local path from the registry. The registry is **shared content** — anyone who can push to
+the Product wrote it — so the path is judged before any git runs (E81), the same way `yad join` and
+`yad repo clone` judge it. The repo is **skipped with the reason** when:
+- the path is outside the workspace (the Product folder's parent), or runs through a `.git` folder;
+- nothing is there yet — **not cloned on this machine**: run `yad repo clone` to clone it;
+- a folder is there but holds no `.git` (a folder the Product commits could be shaped like a bare git
+  repo, and git run inside it would read its `config`, which can run a command);
+- a folder on the way, **inside a repo's tree**, is a link — the Product's `evil -> ../../..`. A link of
+  your own directly in the workspace folder (`ws/backend -> /src/backend`) is followed.
+
+If the path is a checkout but `HEAD` is unreadable, warn and skip — there is nothing to switch.
 
 ### Step 2 — Skip a dirty working tree (never overwrite local work)
 If `git status --porcelain` is non-empty, the repo has uncommitted changes: **skip it and warn**
@@ -45,6 +54,9 @@ preserving local work is a hard rule.
 
 ### Step 3 — Determine the default branch
 Use the registry `default_branch`. If absent, fall back to the remote's `origin/HEAD`, else `main`.
+A recorded name must be one git accepts as a branch (`git check-ref-format --branch`) and must not
+start with `-`: the name is handed to `git fetch`, where `--upload-pack=<command>` would run a command.
+Any other name skips the repo with the reason (fix it in `.sdlc/repos.json`).
 
 ### Step 4 — Fetch the latest
 If the repo has an `origin` remote: `git fetch origin <default_branch> --prune`. A local-only repo

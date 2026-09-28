@@ -24061,7 +24061,7 @@ test('E1 every command answers --json with one envelope, ok matching its exit co
     ['review', 'context', '--repo', 'nope', '--pr', '1'], ['review', 'trailer', '--repo', 'nope', '--pr', '1', '--body', 'x'],
     ['review', 'nudge', '--repo', 'nope', '--pr', '1'],
     ['commit', '-m', 'x'], ['open-pr'], ['ship', '-m', 'x', '--dry-run'], ['checkpoint'], ['tidy', 'up'], ['tidy'], ['index'],
-    ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'sync'],
+    ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'sync'], ['repo', 'clone'],
     ['risk-map', 'check'], ['codeowners', 'check'], ['roster'], ['docs', 'list'], ['docs', 'sync'], ['thread'], ['thread', 'EP-demo'],
     ['reconcile'], ['hook', 'ledger-guard'], ['setup', '--solo', '--greenfield', '--monorepo'],
   ];
@@ -26216,4 +26216,157 @@ test('E80 review 3: a worktree or a repo nested in a registered repo is its own 
     assert.equal(inRepo.repo, 'backend');
     assert.equal(fs.realpathSync(inRepo.repoRoot), fs.realpathSync(backend));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E81: detect and fetch missing repos (`yad repo clone`) ----------
+test('E81: judgeRepo says where each registry entry stands, before any git runs', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { judgeRepo } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    const product = path.join(ws, 'product');
+    fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(ws, 'backend', '.git'), { recursive: true });
+    // A folder shaped like a bare repo, as a Product could commit one: git run there reads its config.
+    for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(product, 'bare', d), { recursive: true });
+    fs.writeFileSync(path.join(product, 'bare', 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(product, 'bare', 'config'), '[core]\n\tbare = true\n\tfsmonitor = touch pwned\n');
+    // The person's own link, directly in the workspace; and a link the Product commits, to a real checkout.
+    fs.mkdirSync(path.join(T, 'src', 'web', '.git'), { recursive: true });
+    fs.symlinkSync(path.join(T, 'src', 'web'), path.join(ws, 'web'));
+    fs.symlinkSync('../backend', path.join(product, 'evil'));
+    const at = (p, extra = {}) => judgeRepo(product, { name: p, path: p, git_url: 'u', ...extra });
+    assert.equal(at('.').state, 'product');
+    assert.equal(at('../backend').state, 'present');
+    assert.equal(at('../backend').linked, undefined);
+    assert.equal(at('../web').state, 'present', 'the person\'s own link in the workspace folder');
+    assert.equal(at('../web').linked, undefined);
+    assert.equal(at('evil').state, 'present');
+    assert.equal(at('evil').linked, true, 'a link inside the Product\'s tree');
+    assert.equal(at('../api').state, 'missing');
+    assert.equal(at('../api').url, 'u');
+    assert.equal(at('bare').state, 'refused');
+    assert.match(at('bare').reason, /exists and is not a git repo/);
+    assert.match(at('../../out').reason, /outside the workspace/);
+    assert.match(at('../.git').reason, /\.git folder/);
+    assert.match(at('../api', { git_url: '' }).reason, /no git_url/);
+    assert.match(at('../api', { git_url: '-x' }).reason, /starts with "-"/);
+    assert.match(judgeRepo(product, { name: 'n' }).reason, /no path/);
+    assert.equal(judgeRepo(product, { name: 'a\u001bb', path: '../api', git_url: 'u' }).name, 'a b', 'shown in the terminal safely');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81: yad repo clone fetches a repo registered after the join, and never touches one already there', () => {
+  const T = e79Tmp();
+  try {
+    const { ws, product, backend } = e80Workspace(T);
+    const remotes = path.join(T, 'remotes');
+    fs.mkdirSync(remotes);
+    e79Git(T, remotes, 'init', '-q', '--bare', '-b', 'main', 'api.git');
+    const seed = path.join(T, 'seed');
+    e79Git(T, T, 'clone', '-q', path.join(remotes, 'api.git'), seed);
+    fs.writeFileSync(path.join(seed, 'f'), 'x');
+    e79Git(T, seed, 'add', '-A');
+    e79Git(T, seed, 'commit', '-qm', 'init');
+    e79Git(T, seed, 'push', '-q', 'origin', 'main');
+    // A teammate registers api after this machine joined.
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'api', path: '../api', git_url: path.join(remotes, 'api.git'), default_branch: 'main' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const backendHead = e79Git(T, backend, 'rev-parse', 'HEAD');
+
+    // Detect: repo list and doctor both say it, and name the command.
+    const list = e79Yad(T, product, ['repo', 'list', '--json']);
+    const listed = JSON.parse(list.stdout);
+    assert.equal(listed.repos.find((r) => r.name === 'api').state, 'missing');
+    assert.equal(listed.missing, 1);
+    assert.match(e79Yad(T, product, ['repo', 'list']).stdout, /api .*not cloned on this machine[\s\S]*yad repo clone/);
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    const apiCheck = doc.checks.find((c) => c.id === 'repo:api');
+    assert.equal(apiCheck.status, 'warn');
+    assert.match(apiCheck.hint, /yad repo clone/);
+
+    // Fetch — from a code repo too (E80): the command finds the Product.
+    const r = e79Yad(T, backend, ['repo', 'clone', '--json']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const answer = JSON.parse(r.stdout);
+    assert.deepEqual(answer.cloned.map((x) => x.name), ['api']);
+    assert.deepEqual(answer.present.map((x) => x.name), ['backend']);
+    assert.deepEqual(answer.failed, []);
+    assert.ok(fs.existsSync(path.join(ws, 'api', 'f')));
+    assert.equal(e79Git(T, backend, 'rev-parse', 'HEAD'), backendHead, 'the repo already there is not touched');
+    assert.equal(e79Git(T, backend, 'status', '--porcelain'), '');
+    assert.equal(fs.readFileSync(regFile, 'utf8'), JSON.stringify(reg), 'the shared registry is not written');
+
+    // A re-run has nothing to do; a repo it cannot clone exits 1 and the others still count.
+    const again = e79Yad(T, product, ['repo', 'clone']);
+    assert.equal(again.status, 0);
+    assert.match(again.stdout + again.stderr, /nothing missing/);
+    reg.repos.push({ name: 'gone', path: '../gone', git_url: path.join(remotes, 'missing.git') }, { name: 'local', path: '../local' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const bad = e79Yad(T, product, ['repo', 'clone', '--json']);
+    assert.equal(bad.status, 1);
+    assert.deepEqual(JSON.parse(bad.stdout).failed.map((x) => x.name), ['gone', 'local']);
+    const doc2 = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    assert.doesNotMatch(doc2.checks.find((c) => c.id === 'repo:local').hint, /run `yad repo clone`/, 'never "run X" for an entry X refuses');
+    // One by name; an unknown name is refused.
+    assert.equal(e79Yad(T, product, ['repo', 'clone', 'nope']).status, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81: a registry that does not parse is said by every repo action, and refresh never writes over it', () => {
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, '<<<<<<< HEAD\n{}\n');
+    for (const action of ['list', 'refresh', 'sync', 'clone']) {
+      const r = e79Yad(T, product, ['repo', action]);
+      assert.equal(r.status, 1, `${action}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stdout + r.stderr, /repos\.json in the Product cannot be read/, action);
+      assert.doesNotMatch(r.stdout + r.stderr, /yad e81-|yad e79-/, `${action}: no absolute path`);
+    }
+    assert.equal(fs.readFileSync(regFile, 'utf8'), '<<<<<<< HEAD\n{}\n', 'refresh did not replace it with an empty list');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81: yad repo sync judges each entry first, and never hands git a branch name that is an option', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(product, 'bare', d), { recursive: true });
+    fs.writeFileSync(path.join(product, 'bare', 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(product, 'bare', 'config'), '[core]\n\tbare = true\n');
+    fs.symlinkSync('../backend', path.join(product, 'evil'));
+    // Outside T, whose name holds a space: `touch` must be able to make it, or the check proves nothing.
+    const pwned = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-pwned-${process.pid}`);
+    fs.rmSync(pwned, { force: true });
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [
+      { name: 'backend', path: '../backend', default_branch: `--upload-pack=touch ${pwned}` },
+      { name: 'bare', path: 'bare', default_branch: 'main' },
+      { name: 'evil', path: 'evil', default_branch: 'trunk' },
+      { name: 'away', path: '../away', git_url: 'u' },
+    ] }));
+    // A real remote, so an `--upload-pack` that reached git would run.
+    e79Git(T, T, 'init', '-q', '--bare', 'origin.git');
+    e79Git(T, backend, 'remote', 'add', 'origin', path.join(T, 'origin.git'));
+    const r = e79Yad(T, product, ['repo', 'sync', '--json']);
+    const answer = JSON.parse(r.stdout);
+    assert.equal(answer.synced, 0, r.stdout);
+    assert.equal(answer.skipped, 4);
+    const text = e79Yad(T, product, ['repo', 'sync']).stdout;
+    assert.match(text, /backend .*default_branch is not a branch name git accepts/);
+    assert.match(text, /bare .*exists and is not a git repo/);
+    assert.match(text, /evil .*inside a repo, is a link/);
+    assert.match(text, /away .*not cloned on this machine/);
+    assert.ok(!fs.existsSync(pwned), 'the recorded name never reached git as an option');
+    assert.doesNotMatch(text, /fetch failed/, 'git fetch never ran');
+    // refresh and doctor never run git in the bare-shaped folder either.
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    assert.equal(doc.checks.find((c) => c.id === 'repo:bare').status, 'fail');
+    assert.match(doc.checks.find((c) => c.id === 'repo:bare').message, /exists and is not a git repo/);
+    assert.match(e79Yad(T, product, ['repo', 'refresh', 'bare']).stdout, /bare: the folder exists and is not a git repo/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(path.join(fs.realpathSync(os.tmpdir()), `yad-e81-pwned-${process.pid}`), { force: true }); }
 });
