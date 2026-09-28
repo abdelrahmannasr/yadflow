@@ -523,7 +523,11 @@ async function main() {
       process.stderr.write(c.dim(`Product: ${shown(found.root)} (${found.via === 'workspace' ? `from ${commands.WORKSPACE_FILE}` : 'above this folder'})\n`));
       // Run from inside one code repo, the per-repo commands work on THAT repo, not on every one the
       // Product registers (they take the repo's name as their second word).
-      if ((cmd === 'risk-map' || cmd === 'codeowners') && found.repo?.name && o._[2] === undefined) o._[2] = found.repo.name;
+      // The CHECKOUT must be the registered repo (a worktree or nested repo inside it is another one).
+      if ((cmd === 'risk-map' || cmd === 'codeowners') && o._[2] === undefined) {
+        const hit = commands.registryEntryFor(found.root, dirGiven ? o.dir : shellCwd());
+        if (typeof hit?.meta?.name === 'string') o._[2] = hit.meta.name;
+      }
     }
   }
   // A command that WRITES the Product never writes into a folder that is not one (a code repo, say).

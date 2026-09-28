@@ -38,7 +38,8 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
   on every registered repo, as before.
 - **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in, and
   reads the Product beside it: run anywhere inside a registered repo without `--repo`, it works at that
-  repo's top and takes its recorded name, platform and default branch.
+  repo's top and takes its recorded name, platform and default branch. A worktree or a repo nested
+  inside it is another checkout: the command works there, as it did before E80.
 - **`--dir` always wins.**
 - **A command that writes the Product** (`update`, `check --fix`, `epic new`, `foundation new`,
   `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`, `docs sync --wire`) refuses a

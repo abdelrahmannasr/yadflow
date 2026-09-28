@@ -26011,7 +26011,7 @@ test('E80: the workspace file is written only where it belongs — never over an
     assert.ok(!fs.existsSync(path.join(backend, 'inner', '.yad-workspace.json')));
     assert.match(writeWorkspaceFile(T), /home folder, the temp folder/);
 
-    assert.equal(registryEntryFor(product, backend).name, 'backend');
+    assert.equal(registryEntryFor(product, backend).meta.name, 'backend');
     assert.equal(registryEntryFor(product, product), null, 'never the Product itself');
     assert.equal(registryEntryFor(null, backend), null);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -26192,5 +26192,28 @@ test('E80 review 2: risk-map and codeowners run from a code repo work on that re
     assert.deepEqual(here.repos.map((r) => r.name), ['backend']);
     const all = JSON.parse(e79Yad(T, product, ['risk-map', '--json']).stdout);
     assert.deepEqual(all.repos.map((r) => r.name).sort(), ['backend', 'web'], 'from the Product: every repo, as before');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 3: a worktree or a repo nested in a registered repo is its own checkout — never swapped for the repo\'s', () => {
+  const T = e79Tmp();
+  try {
+    const { backend } = e80Workspace(T);
+    // A worktree inside the repo (the layout Claude Code uses) on its own branch, and a nested repo.
+    e79Git(T, backend, 'worktree', 'add', '-q', '.claude/worktrees/x', '-b', 'feat/x');
+    const wt = path.join(backend, '.claude', 'worktrees', 'x');
+    const nested = path.join(backend, 'vendor', 'lib');
+    fs.mkdirSync(nested, { recursive: true });
+    e79Git(T, nested, 'init', '-q');
+    for (const dir of [wt, nested]) {
+      const b = JSON.parse(e79Yad(T, dir, ['review', 'context']).stdout);
+      assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(dir), `${dir}: works where it runs`);
+      assert.equal(b.repo, null, 'not backend\'s registry entry');
+    }
+    // From a plain folder inside backend itself, it is backend, worked at its top.
+    fs.mkdirSync(path.join(backend, 'src'));
+    const inRepo = JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout);
+    assert.equal(inRepo.repo, 'backend');
+    assert.equal(fs.realpathSync(inRepo.repoRoot), fs.realpathSync(backend));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

@@ -172,10 +172,26 @@ export function writeWorkspaceFile(productRoot) {
   return 'written';
 }
 
-// The registry entry for a code repo, read from the Product (E80: a code-repo command run from a
-// sibling repo — or any folder inside it — knows its name, platform and default branch). Never the
-// Product's own entry.
-export function registryEntryFor(productRoot, repoRoot) {
+// The top of the git checkout `dir` is in: the nearest folder holding `.git` (a folder, or the file a
+// worktree or submodule has). Null outside any checkout.
+export function gitTopOf(dir) {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    if (path.dirname(d) === d) return null;
+  }
+}
+
+// The registry entry for the code repo a code-repo command runs in (E80), with the folder to work in.
+// It is the CHECKOUT that must be the registered repo — not merely a folder inside it: a worktree or a
+// repo nested in `backend/` is another checkout, on another branch, and must never be swapped for
+// backend's own (E80 review 3). → { meta, top } or null. Never the Product's own entry.
+export function registryEntryFor(productRoot, dir) {
   if (!productRoot) return null;
-  return registeredRepoHolding(productRoot, repoRoot);
+  const top = gitTopOf(dir);
+  if (!top) return null;
+  const meta = registeredRepoHolding(productRoot, top);
+  if (!meta) return null;
+  const at = real(path.resolve(productRoot, meta.path));
+  const topAt = real(top);
+  return at && topAt && fold(at) === fold(topAt) ? { meta, top } : null;
 }

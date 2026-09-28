@@ -35,8 +35,8 @@ function resolveRepo(root, { repo, dir, product }) {
     return { repoRoot: path.resolve(productRoot, found.path), meta: found, productRoot };
   }
   const here = path.resolve(root, dir || '.');
-  const meta = registryEntryFor(product, here);
-  return { repoRoot: meta ? path.resolve(productRoot, meta.path) : here, meta, productRoot };
+  const hit = registryEntryFor(product, here);
+  return { repoRoot: hit ? hit.top : here, meta: hit ? hit.meta : null, productRoot };
 }
 
 function platformOf(root, repoRoot, meta) {

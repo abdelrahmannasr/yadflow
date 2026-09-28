@@ -30,9 +30,10 @@ function resolveRepo(root, { repo, dir, product }) {
     if (found) return { repoRoot: path.resolve(productRoot, found.path), meta: found };
   }
   const here = path.resolve(root, dir || '.');
-  const meta = registryEntryFor(product, here);
-  // Matched from a folder inside the repo: work at the repo's own top (its `.git`), as --repo would.
-  return { repoRoot: meta ? path.resolve(productRoot, meta.path) : here, meta };
+  // The checkout it runs in, when that checkout is a registered repo: worked at its top, from any
+  // folder inside it. Anything else (a worktree, a nested repo) stays exactly where it is.
+  const hit = registryEntryFor(product, here);
+  return { repoRoot: hit ? hit.top : here, meta: hit ? hit.meta : null };
 }
 
 // Which SDLC stage is this PR? The Product serves two vehicles; a code repo only one. Mirrors the
