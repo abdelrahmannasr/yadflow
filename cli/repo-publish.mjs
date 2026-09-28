@@ -23,6 +23,7 @@ import { platformLogin } from './platform.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
+import { codeContextPathOk } from './workspace.mjs';
 
 // Collapse any whitespace/newline runs to a single space — keeps a hostile `git user.name` or a stray
 // path from breaking the one-line subject or injecting a fake trailer line.
@@ -41,9 +42,11 @@ const packOf = (repo) => repo.contextPack || path.posix.join('.sdlc/code-context
 export function codeMapPathspecs(root, registry = { repos: [] }, name = null) {
   const out = [];
   for (const repo of registry.repos || []) {
-    if (name && repo.name !== name) continue;
+    if (!repo || typeof repo !== 'object' || (name && repo.name !== name)) continue;
     const rel = codeMapOf(repo);
-    if (fs.existsSync(path.join(root, rel))) out.push(rel);
+    // Shared registry text chooses this path, and it is committed and pushed: only under
+    // .sdlc/code-context/ in the Product, never through `..`, `.git` or a link (E81).
+    if (codeContextPathOk(root, rel) && fs.existsSync(path.join(root, rel))) out.push(rel);
   }
   // The registry always rides along — `yad repo refresh` stamps syncedHead/lastSyncedAt into it.
   if (fs.existsSync(path.join(root, PROJECT_FILES.reposRegistry))) out.push(PROJECT_FILES.reposRegistry);
@@ -57,9 +60,9 @@ export function codeMapPathspecs(root, registry = { repos: [] }, name = null) {
 export function packPathspecs(root, registry = { repos: [] }, name = null) {
   const out = [];
   for (const repo of registry.repos || []) {
-    if (name && repo.name !== name) continue;
+    if (!repo || typeof repo !== 'object' || (name && repo.name !== name)) continue;
     const rel = packOf(repo);
-    if (fs.existsSync(path.join(root, rel))) out.push(rel);
+    if (codeContextPathOk(root, rel) && fs.existsSync(path.join(root, rel))) out.push(rel);
   }
   return out;
 }

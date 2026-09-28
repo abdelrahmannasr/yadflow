@@ -26310,6 +26310,7 @@ test('E81: yad repo clone fetches a repo registered after the join, and never to
     assert.deepEqual(JSON.parse(bad.stdout).failed.map((x) => x.name), ['gone', 'local']);
     const doc2 = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
     assert.doesNotMatch(doc2.checks.find((c) => c.id === 'repo:local').hint, /run `yad repo clone`/, 'never "run X" for an entry X refuses');
+    assert.match(e79Yad(T, product, ['repo', 'clone', 'api']).stdout, /api is already on this machine/);
     // One by name; an unknown name is refused.
     assert.equal(e79Yad(T, product, ['repo', 'clone', 'nope']).status, 1);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -26355,6 +26356,15 @@ test('E81: yad repo sync judges each entry first, and never hands git a branch n
     const r = e79Yad(T, product, ['repo', 'sync', '--json']);
     const answer = JSON.parse(r.stdout);
     assert.equal(answer.synced, 0, r.stdout);
+    for (const b of ['@{-1}', '+main', 'a..b']) {
+      const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+      reg.repos[0].default_branch = b;
+      fs.writeFileSync(regFile, JSON.stringify(reg));
+      assert.match(e79Yad(T, product, ['repo', 'sync', 'backend']).stdout, /not a branch name git accepts/, b);
+    }
+    const reg0 = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg0.repos[0].default_branch = `--upload-pack=touch ${pwned}`;
+    fs.writeFileSync(regFile, JSON.stringify(reg0));
     assert.equal(answer.skipped, 4);
     const text = e79Yad(T, product, ['repo', 'sync']).stdout;
     assert.match(text, /backend .*default_branch is not a branch name git accepts/);
@@ -26369,4 +26379,95 @@ test('E81: yad repo sync judges each entry first, and never hands git a branch n
     assert.match(doc.checks.find((c) => c.id === 'repo:bare').message, /exists and is not a git repo/);
     assert.match(e79Yad(T, product, ['repo', 'refresh', 'bare']).stdout, /bare: the folder exists and is not a git repo/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(path.join(fs.realpathSync(os.tmpdir()), `yad-e81-pwned-${process.pid}`), { force: true }); }
+});
+
+test('E81 review 1: a registered folder inside a checkout (the monorepo layout) is present; a bare-shaped one on its way is refused', () => {
+  const T = e79Tmp();
+  // Outside T, whose name holds a space, so the marker command can make it.
+  const marker = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-fsmonitor-${process.pid}`);
+  fs.rmSync(marker, { force: true });
+  try {
+    const { product } = e80Workspace(T);
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(product, 'apps', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'apps', 'web', 'index.js'), 'x');
+    // A folder the Product commits, shaped like a bare repo, with a config that runs a command.
+    const bare = path.join(product, 'apps', 'bare');
+    for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(bare, d), { recursive: true });
+    fs.writeFileSync(path.join(bare, 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(bare, 'config'), `[core]\n\tbare = true\n\tfsmonitor = touch ${marker}\n`);
+    fs.mkdirSync(path.join(bare, 'inner'));
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'monorepo');
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [
+      { name: 'web', path: 'apps/web' },
+      { name: 'bare', path: 'apps/bare' },
+      { name: 'inner', path: 'apps/bare/inner' },
+    ] }));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    const web = doc.checks.find((c) => c.id === 'repo:web');
+    assert.notEqual(web.status, 'fail', web.message);
+    for (const id of ['repo:bare', 'repo:inner']) {
+      const ck = doc.checks.find((c) => c.id === id);
+      assert.equal(ck.status, 'fail');
+      assert.match(ck.message, /shaped like a bare git repo/);
+    }
+    const list = JSON.parse(e79Yad(T, product, ['repo', 'list', '--json']).stdout);
+    assert.deepEqual(list.repos.map((r) => r.state), ['no-pack', 'refused', 'refused']);
+    e79Yad(T, product, ['repo', 'sync']);
+    e79Yad(T, product, ['repo', 'refresh', 'bare']);
+    e79Yad(T, product, ['risk-map', 'check']);
+    assert.ok(!fs.existsSync(marker), 'git never ran in the bare-shaped folder');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(marker, { force: true }); }
+});
+
+test('E81 review 1: refresh skips a checkout behind a link the Product commits, and a pack or code-map path outside .sdlc/code-context', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { codeContextPathOk } = await import('./workspace.mjs');
+  const { codeMapPathspecs } = await import('./repo-publish.mjs');
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    fs.symlinkSync('../backend', path.join(product, 'evil'));
+    fs.mkdirSync(path.join(product, '.sdlc', 'code-context', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'leak.md'), 'x');
+    fs.writeFileSync(path.join(product, '.sdlc', 'code-context', 'x', 'code-map.md'), 'x');
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [
+      { name: 'evil', path: 'evil' },
+      { name: 'backend', path: '../backend', contextPack: '../../../pack.md' },
+      { name: 'b2', path: '../backend', codeMap: 'leak.md' },
+    ] }));
+    const out = e79Yad(T, product, ['repo', 'refresh']).stdout;
+    assert.match(out, /evil: a folder on its path, inside a repo, is a link/);
+    assert.match(out, /backend: its contextPack or codeMap is not a path under \.sdlc\/code-context\//);
+    assert.match(out, /b2: its contextPack or codeMap is not a path/);
+    assert.doesNotMatch(out, /packing with repomix/);
+    for (const bad of ['../x', '/etc/x', 'leak.md', '.sdlc/code-context/../../x', '.sdlc/code-context/.git/x', '.sdlc/code-context/GIT~1/x', 'C:/x', null, '']) {
+      assert.ok(!codeContextPathOk(product, bad), String(bad));
+    }
+    assert.ok(codeContextPathOk(product, '.sdlc/code-context/x/code-map.md'));
+    fs.symlinkSync(T, path.join(product, '.sdlc', 'code-context', 'lnk'));
+    assert.ok(!codeContextPathOk(product, '.sdlc/code-context/lnk/code-map.md'), 'a link on the way');
+    assert.deepEqual(codeMapPathspecs(product, { repos: [{ name: 'b2', codeMap: 'leak.md' }, { name: 'x' }, null] }), ['.sdlc/code-context/x/code-map.md', '.sdlc/repos.json'], 'leak.md is never staged');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 1: an entry that is not an object is named by every repo action and doctor, never a crash', () => {
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [null, 5, { name: 'backend', path: '../backend', default_branch: null }] }));
+    for (const action of ['list', 'refresh', 'sync', 'clone']) {
+      const r = e79Yad(T, product, ['repo', action]);
+      assert.doesNotMatch(r.stdout + r.stderr, /yad failed|Cannot read/, action);
+      assert.match(r.stdout + r.stderr, /2 entries in \.sdlc\/repos\.json are not an object/, action);
+    }
+    // default_branch: null falls back as an absent one does — not refused as a bad name.
+    assert.doesNotMatch(e79Yad(T, product, ['repo', 'sync']).stdout, /not a branch name/);
+    const doc = e79Yad(T, product, ['doctor', '--json']);
+    assert.doesNotMatch(doc.stdout + doc.stderr, /Cannot read/);
+    assert.equal(JSON.parse(doc.stdout).checks.find((c) => c.id === 'repos:not-an-entry').status, 'fail');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

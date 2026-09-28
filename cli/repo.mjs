@@ -8,9 +8,14 @@
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, writeJSON, run } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { judgeRepo, cloneMissingRepos, reportClones, readRegistry } from './workspace.mjs';
+import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPathOk, CODE_CONTEXT_DIR, shown } from './workspace.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { publishCodeContext } from './repo-publish.mjs';
+
+// A repo's pack and code-map paths as the registry gives them, else the conventional place under
+// `.sdlc/code-context/<name>/` (the same defaults repo-publish.mjs uses).
+const packPath = (repo) => repo.contextPack || path.posix.join(CODE_CONTEXT_DIR, String(repo.name), 'pack.md');
+const mapPath = (repo) => repo.codeMap || path.posix.join(CODE_CONTEXT_DIR, String(repo.name), 'code-map.md');
 
 // Strict (E81): a registry that does not parse is said, not read as "no repos" — and `refresh` writes it
 // back, so a lenient read would replace a broken file (and every entry in it) with an empty list.
@@ -35,11 +40,12 @@ const isDirty = (cwd) => { const r = git(cwd, 'status', '--porcelain'); return r
 const currentBranch = (cwd) => { const r = git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD'); return r.ok ? r.stdout : null; };
 // Registry default_branch wins; else origin/HEAD; else 'main'. The registry is shared content, and the
 // name is handed to `git fetch` and `git checkout`: `--upload-pack=<command>` would run a command. So a
-// recorded name must be one git accepts as a branch and must not start with `-`; anything else is null.
+// recorded name must be a valid `refs/heads/<name>` (which also rules out `@{-1}`) and must not start
+// with `-` or `+` (a forced refspec); anything else is null.
 function defaultBranch(cwd, repo) {
-  if (repo.default_branch !== undefined && repo.default_branch !== '') {
+  if (repo.default_branch != null && repo.default_branch !== '') {
     const b = repo.default_branch;
-    return typeof b === 'string' && !b.startsWith('-') && git(cwd, 'check-ref-format', '--branch', b).ok ? b : null;
+    return typeof b === 'string' && !/^[-+]/.test(b) && git(cwd, 'check-ref-format', `refs/heads/${b}`).ok ? b : null;
   }
   const r = git(cwd, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
   return r.ok && r.stdout ? r.stdout.replace(/^origin\//, '') : 'main';
@@ -49,13 +55,18 @@ export async function runRepo(root, { action = 'list', name, today, push = false
   const { regPath, registry, problem } = load(root);
   if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [] }; }
   if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { action, repos: [] }; }
+  // An entry that is not an object (`null`, `5`) is named where it would be acted on, never dereferenced.
+  const isEntry = (r) => !!r && typeof r === 'object' && !Array.isArray(r);
+  const odd = registry.repos.filter((r) => !isEntry(r)).length;
+  if (odd) warn(`${odd} entr${odd > 1 ? 'ies' : 'y'} in ${PROJECT_FILES.reposRegistry} ${odd > 1 ? 'are' : 'is'} not an object — skipped; fix ${odd > 1 ? 'them' : 'it'} in the Product`);
+  const entries = registry.repos.filter(isEntry);
 
   if (action === 'list') {
     log(c.bold('\nconnected repos'));
     let staleCount = 0;
     const rows = [];   // the --json answer (E1): each repo, as the list reads it
     let missing = 0;
-    for (const repo of registry.repos) {
+    for (const repo of entries) {
       // Judged before git runs (E81): only a checkout that is there is read. A missing repo says so and
       // names the command that clones it; a refused entry says why — git is never run in it.
       const j = judgeRepo(root, repo);
@@ -68,34 +79,41 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       const { head, stale, unknown, neverPacked } = staleness(root, repo);
       rows.push({ name: repo.name ?? null, path: repo.path ?? null, head: head || null, syncedHead: repo.syncedHead ?? null,
         state: unknown ? 'unreadable' : neverPacked ? 'no-pack' : stale ? 'stale' : 'fresh' });
-      if (unknown) { warn(`${repo.name} ${c.dim(`(${repo.path})`)} — HEAD unreadable`); continue; }
-      if (neverPacked) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('no code-context pack yet')} (registered without one)`); }
-      else if (stale) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('stale')} (HEAD moved since last pack)`); }
-      else ok(`${repo.name} ${c.dim('— fresh')}`);
+      if (unknown) { warn(`${j.name} ${c.dim(`(${j.path})`)} — HEAD unreadable`); continue; }
+      if (neverPacked) { staleCount++; warn(`${j.name} ${c.dim(`(${j.path})`)} — ${c.yellow('no code-context pack yet')} (registered without one)`); }
+      else if (stale) { staleCount++; warn(`${j.name} ${c.dim(`(${j.path})`)} — ${c.yellow('stale')} (HEAD moved since last pack)`); }
+      else ok(`${j.name} ${c.dim('— fresh')}`);
     }
     if (missing) hand('clone the missing repo(s) with `yad repo clone`');
-    if (staleCount) hand(`refresh with \`yad repo refresh${registry.repos.length > 1 ? ' <name>' : ''}\` (or \`yad repo refresh\` for all)`);
+    if (staleCount) hand(`refresh with \`yad repo refresh${entries.length > 1 ? ' <name>' : ''}\` (or \`yad repo refresh\` for all)`);
     return { action, repos: rows, stale: staleCount, missing };
   }
 
   if (action === 'refresh') {
-    const targets = name ? registry.repos.filter((r) => r.name === name) : registry.repos;
-    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { action, refreshed: 0, repos: [], published: null }; }
+    const targets = name ? entries.filter((r) => r.name === name) : entries;
+    if (name && !targets.length) { fail(`unknown repo: ${shown(name)}`); process.exitCode = 1; return { action, refreshed: 0, repos: [], published: null }; }
     let refreshed = 0;
     let published = null;
     const rows = [];
     for (const repo of targets) {
-      // Judged before git runs (E81), as in `list`: only a checkout that is there is packed.
+      // Judged before git runs (E81), as `sync` judges it: only a checkout that is there is packed, never
+      // one reached through a link inside a repo's tree (repomix would pack wherever the link points,
+      // git logs included). And the pack is written only where the Product keeps code context.
       const j = judgeRepo(root, repo);
-      if (j.state === 'missing' || j.state === 'refused') {
-        warn(`${j.name}: ${j.state === 'missing' ? 'not cloned on this machine (`yad repo clone`)' : j.reason} — skipped`);
+      const why = j.state === 'missing' ? 'not cloned on this machine (`yad repo clone`)'
+        : j.state === 'refused' ? j.reason
+          : j.linked ? 'a folder on its path, inside a repo, is a link, so the checkout is not where the path says'
+            : !codeContextPathOk(root, packPath(repo)) || !codeContextPathOk(root, mapPath(repo)) ? `its contextPack or codeMap is not a path under ${CODE_CONTEXT_DIR}/ in the Product`
+              : null;
+      if (why) {
+        warn(`${j.name}: ${why} — skipped`);
         rows.push({ name: repo.name ?? null, refreshed: false, head: null });
         continue;
       }
       const { head, unknown } = staleness(root, repo);
-      if (unknown) { warn(`${repo.name}: HEAD unreadable — skipped`); rows.push({ name: repo.name ?? null, refreshed: false, head: null }); continue; }
-      log(`  ${c.bold(repo.name)}`);
-      const packed = !!packRepo(root, repo);
+      if (unknown) { warn(`${j.name}: HEAD unreadable — skipped`); rows.push({ name: repo.name ?? null, refreshed: false, head: null }); continue; }
+      log(`  ${c.bold(j.name)}`);
+      const packed = !!packRepo(root, { ...repo, contextPack: packPath(repo) });
       if (packed) {
         repo.syncedHead = head;
         if (today) repo.lastSyncedAt = today;   // always stamp when a date is supplied (the CLI passes today)
@@ -122,8 +140,8 @@ export async function runRepo(root, { action = 'list', name, today, push = false
   }
 
   if (action === 'sync') {
-    const targets = name ? registry.repos.filter((r) => r.name === name) : registry.repos;
-    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { action, synced: 0, skipped: 0, repos: [] }; }
+    const targets = name ? entries.filter((r) => r.name === name) : entries;
+    if (name && !targets.length) { fail(`unknown repo: ${shown(name)}`); process.exitCode = 1; return { action, synced: 0, skipped: 0, repos: [] }; }
     log(c.bold('\nsync connected repos'));
     let synced = 0, skipped = 0;
     for (const repo of targets) {
@@ -162,20 +180,20 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       synced++;
     }
     // A pulled repo's HEAD moves, so its cached code-context pack goes stale — point the human at refresh.
-    // Only the checkouts the loop would run git in (E81) — never a refused entry.
-    const staleCount = registry.repos.filter((r) => ['present', 'product'].includes(judgeRepo(root, r).state) && staleness(root, r).stale).length;
+    // Only the checkouts the loop would run git in (E81) — never a refused or linked entry.
+    const staleCount = entries.filter((r) => { const j = judgeRepo(root, r); return ['present', 'product'].includes(j.state) && !j.linked && staleness(root, r).stale; }).length;
     info(`synced ${synced}, skipped ${skipped}`);
     if (staleCount) hand(`${staleCount} repo(s) now have a stale code-context pack — \`yad repo refresh\` to repack`);
     return { action, synced, skipped, stale: staleCount };
   }
 
   if (action === 'clone') {
-    const targets = name ? registry.repos.filter((r) => r.name === name) : registry.repos;
-    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { action, cloned: [], present: [], failed: [] }; }
+    const targets = name ? entries.filter((r) => r.name === name) : entries;
+    if (name && !targets.length) { fail(`unknown repo: ${shown(name)}`); process.exitCode = 1; return { action, cloned: [], present: [], failed: [] }; }
     log(c.bold('\nclone missing repos'));
     const repos = cloneMissingRepos(root, { repos: targets });
     reportClones(repos);
-    if (!repos.cloned.length && !repos.failed.length) info('nothing missing — every registered repo is on this machine');
+    if (!repos.cloned.length && !repos.failed.length) info(name ? `${shown(name)} is already on this machine` : 'nothing missing — every registered repo is on this machine');
     // Unlike `join` (whose other steps still matter), cloning is this command's only job: a repo it could
     // not clone fails it, so a script sees it.
     if (repos.failed.length) { hand(`${repos.failed.length} repo(s) not cloned — fix what is named above and re-run \`yad repo clone\``); process.exitCode = 1; }

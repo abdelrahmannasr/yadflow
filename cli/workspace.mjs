@@ -114,11 +114,13 @@ const cloneEnv = () => (process.env.SDLC_NONINTERACTIVE ? { ...process.env, GIT_
 //
 // Returns { name, path, target, state, reason? } — state is one of:
 //   'product'   the Product itself; never cloned
-//   'present'   a git checkout is there (`.git` at the path). `linked` is set when a folder on the way,
-//               deeper than the workspace folder itself, is a link — see `inRepoLink`
+//   'present'   a git checkout is there (`.git` at the path), or the path is a folder inside one (`inside`
+//               names the checkout). `linked` is set when a folder on the way, deeper than the workspace
+//               folder itself, is a link — see `inRepoLink`
 //   'missing'   nothing there yet, and the clone step can make it
 //   'refused'   not there, or not a checkout, and the clone step will not make it; `reason` says why
 export function judgeRepo(productRoot, repo) {
+  if (!repo || typeof repo !== 'object' || Array.isArray(repo)) return { name: '(not an entry)', path: '', state: 'refused', reason: 'this entry in repos.json is not an object' };
   const name = shown(repo?.name || '(unnamed)');
   const rpath = typeof repo?.path === 'string' ? repo.path : '';
   const entry = { name, path: shown(rpath) };
@@ -129,12 +131,64 @@ export function judgeRepo(productRoot, repo) {
   if (throughGitDir(productRoot, rpath)) return { ...at, state: 'refused', reason: 'it runs through a .git folder — git\'s own storage, never a code repo' };
   if (!insideWorkspace(productRoot, rpath)) return { ...at, state: 'refused', reason: 'outside the workspace (the Product folder\'s parent)' };
   if (exists(path.join(target, '.git'))) return { ...at, state: 'present', ...(inRepoLink(productRoot, target) ? { linked: true } : {}) };
+  // A folder inside a checkout (the monorepo layout: `apps/web` in the Product's own repo) has no `.git`
+  // of its own, and git finds the checkout by walking up. It is present when nothing on the way is a link
+  // (so the walk git makes is the one read here) and no folder on the way is shaped like a bare repo —
+  // git would stop at that folder and read its `config`.
+  const top = exists(target) && !throughLink(productRoot, target) ? enclosingCheckout(productRoot, target) : null;
+  if (top) {
+    if (bareShapeOnWay(target, top)) return { ...at, state: 'refused', reason: 'a folder on its way is shaped like a bare git repo (HEAD with objects or refs), and git would read its config' };
+    return { ...at, state: 'present', inside: top };
+  }
   if (throughLink(productRoot, target)) return { ...at, state: 'refused', reason: 'a folder on its path is a link, so where the clone lands is not what the path says' };
   if (exists(target) && !isEmptyDir(target)) return { ...at, state: 'refused', reason: 'the folder exists and is not a git repo — move it aside and re-run' };
   const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
   if (!url) return { ...at, state: 'refused', reason: 'no git_url recorded — clone it by hand' };
   if (url.startsWith('-')) return { ...at, state: 'refused', reason: 'the recorded git_url starts with "-"' };
   return { ...at, state: 'missing', url };
+}
+
+// The nearest folder above `target`, below the workspace folder, that holds `.git`: the checkout git
+// finds from `target`. Null when there is none.
+function enclosingCheckout(productRoot, target) {
+  const root = path.resolve(productRoot);
+  const workspace = path.dirname(root) === root ? root : path.dirname(root);
+  for (let cur = path.dirname(target); cur.startsWith(workspace + path.sep); cur = path.dirname(cur)) {
+    if (exists(path.join(cur, '.git'))) return cur;
+  }
+  return null;
+}
+
+// Git takes a folder for a bare repo when it holds `HEAD`, `objects/` and `refs/`; any two of the
+// shape (`HEAD` with either folder) is refused here, the safe side. From `target` up to, not
+// including, the checkout `top`.
+const looksBare = (dir) => exists(path.join(dir, 'HEAD')) && (exists(path.join(dir, 'objects')) || exists(path.join(dir, 'refs')));
+function bareShapeOnWay(target, top) {
+  for (let cur = target; cur !== top && cur.startsWith(top + path.sep); cur = path.dirname(cur)) {
+    if (looksBare(cur)) return true;
+  }
+  return false;
+}
+
+// Where `yad repo refresh` writes a repo's pack and where `--push` stages its code-map: from the SHARED
+// registry (`contextPack`, `codeMap`, or a default built from the repo's `name`). Allowed only under
+// `.sdlc/code-context/` in the Product, with no `..`, no `.git` part and no link on the way — else a
+// registry entry chooses a file outside the Product to write, or one inside it to commit and push.
+export const CODE_CONTEXT_DIR = '.sdlc/code-context';
+export function codeContextPathOk(productRoot, rel) {
+  if (typeof rel !== 'string' || !rel || path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) return false;
+  const norm = path.posix.normalize(rel.replace(/\\/g, '/'));
+  if (!norm.startsWith(`${CODE_CONTEXT_DIR}/`)) return false;
+  const parts = norm.split('/');
+  if (parts.some((p) => p === '..' || /^\.git$/i.test(p.split(':')[0].replace(/[. ]+$/, '')) || /^git~\d+$/i.test(p))) return false;
+  let cur = path.resolve(productRoot);
+  for (const part of parts) {
+    cur = path.join(cur, part);
+    let st;
+    try { st = fs.lstatSync(cur); } catch { return true; }
+    if (st.isSymbolicLink()) return false;
+  }
+  return true;
 }
 
 // A link on the way to a PRESENT repo that lies inside some repo's tree — deeper than the workspace

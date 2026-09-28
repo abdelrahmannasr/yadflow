@@ -40,8 +40,10 @@ the Product wrote it — so the path is judged before any git runs (E81), the sa
 `yad repo clone` judge it. The repo is **skipped with the reason** when:
 - the path is outside the workspace (the Product folder's parent), or runs through a `.git` folder;
 - nothing is there yet — **not cloned on this machine**: run `yad repo clone` to clone it;
-- a folder is there but holds no `.git` (a folder the Product commits could be shaped like a bare git
-  repo, and git run inside it would read its `config`, which can run a command);
+- a folder is there but is not a checkout (a folder the Product commits could be shaped like a bare
+  git repo, and git run inside it would read its `config`, which can run a command). A folder inside a
+  checkout with no `.git` of its own (`apps/web` in a monorepo) counts as there, unless a link is on
+  its way or a folder on its way is shaped like a bare repo;
 - a folder on the way, **inside a repo's tree**, is a link — the Product's `evil -> ../../..`. A link of
   your own directly in the workspace folder (`ws/backend -> /src/backend`) is followed.
 
@@ -54,8 +56,8 @@ preserving local work is a hard rule.
 
 ### Step 3 — Determine the default branch
 Use the registry `default_branch`. If absent, fall back to the remote's `origin/HEAD`, else `main`.
-A recorded name must be one git accepts as a branch (`git check-ref-format --branch`) and must not
-start with `-`: the name is handed to `git fetch`, where `--upload-pack=<command>` would run a command.
+A recorded name must be a valid `refs/heads/<name>` (`git check-ref-format`) and must not start with
+`-` or `+`: the name is handed to `git fetch`, where `--upload-pack=<command>` would run a command.
 Any other name skips the repo with the reason (fix it in `.sdlc/repos.json`).
 
 ### Step 4 — Fetch the latest
