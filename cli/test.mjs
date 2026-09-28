@@ -26623,7 +26623,7 @@ test('E81 review 4: the file transport is only for a URL that passed as a local 
     fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api', path: '../api', git_url: 'evil.com:x' }] }));
     const r = e79Yad(T, product, ['repo', 'clone', '--json']);
     assert.equal(r.status, 1, r.stdout + r.stderr);
-    assert.match(JSON.parse(r.stdout).failed[0].reason, /transport 'file' not allowed/);
+    assert.match(JSON.parse(r.stdout).failed[0].reason, /transport 'file' not allowed — a registered repo is cloned over the network only/);
     assert.ok(!fs.existsSync(path.join(ws, 'api', '.git')), 'nothing cloned');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -26663,10 +26663,10 @@ test('E81 review 5: the clone sets its own GIT_ALLOW_PROTOCOL, and a local sourc
 test('E81 review 6: the host and user of every URL form keep to safe characters — ssh may put them in a shell command', async () => {
   const { cloneSource } = await import('./workspace.mjs');
   const kind = (u) => cloneSource(os.tmpdir(), u, {})?.kind ?? null;
-  for (const good of ['https://github.com/o/r.git', 'https://x-access-token:ghp_abc123@github.com/o/r.git', 'ssh://git@ghe.corp.example:2222/o/r.git', 'ssh://[::1]/r', 'git://h.example/r', 'git+ssh://git@h/r', 'https://h.example', 'git@github.com:o/r.git', 'gh-work:o/r.git']) {
+  for (const good of ['https://me%40corp.com@bitbucket.org/w/r.git', 'https://oauth2:glpat-x_y@gitlab.com/o/r.git', 'https://github.com/o/r.git', 'https://x-access-token:ghp_abc123@github.com/o/r.git', 'ssh://git@ghe.corp.example:2222/o/r.git', 'ssh://[::1]/r', 'git://h.example/r', 'git+ssh://git@h/r', 'https://h.example', 'git@github.com:o/r.git', 'gh-work:o/r.git']) {
     assert.equal(kind(good), 'network', good);
   }
-  for (const bad of ['ssh://a;touch${IFS}x;/r', 'ssh://git@a`id`/r', 'git://a$(touch${IFS}x)/r', 'ssh://a b/r', 'https://h.example\n/r', 'ssh://u;id@h/r', 'git@a$(id):r', 'git@[::1]:r']) {
+  for (const bad of ['ssh://a;touch${IFS}x;/r', 'ssh://git@a`id`/r', 'git://a$(touch${IFS}x)/r', 'ssh://a b/r', 'https://h.example\n/r', 'ssh://u;id@h/r', 'git@a$(id):r', 'git@[::1]:r', 'ssh://u:%24%28id%29@h/r', 'git+ssh://u:%3Bid@h/r', 'ssh://u%3Bid@h/r', 'git://u:a%20b@h/r']) {
     assert.equal(kind(bad), null, bad);
   }
 });

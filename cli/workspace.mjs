@@ -124,12 +124,16 @@ function gitClone(url, target, env, { kind = null } = {}) {
 // disk (links followed, `file:///C:/x` read as Windows does, `%` refused because git decodes it), and git
 // is handed that resolved path — never the typed text, which git could read another way (it tries
 // `<path>.git` when `<path>` is not there; E81 review 5). Compared without case where the disk ignores it.
-// The host (and user) keep to letters, digits, `.`, `_`, `-` (an IPv6 host in brackets) in every form:
-// git hands them to ssh as they are, and an ssh config whose `ProxyCommand` or `Match exec` uses `%h`
-// on an older OpenSSH puts them in a shell command (CVE-2023-51385; E81 review 6).
+// The host keeps to letters, digits, `.`, `_` and `-` (an IPv6 host in brackets), and the user and
+// password to those plus `~` and `+`, in every form git hands to ssh: an ssh config whose `ProxyCommand`
+// or `Match exec` uses `%h` or `%r` on an OpenSSH before 9.6 puts them in a shell command
+// (CVE-2023-51385; E81 reviews 6–7). No `%` there: git decodes `%24%28` to `$(` before ssh sees it.
+// Only `http(s)://`, which goes to curl and never to ssh, may carry `%` in its user and password (a
+// login that is an email address, `me%40corp.com@`).
 const HOST = String.raw`(?:[\w-]+(?:\.[\w-]+)*|\[[0-9a-f:.]+\])`;
 const USER = String.raw`[\w.~+-]+`;
-const NETWORK_URL_RE = new RegExp(String.raw`^(?![^/]*::)(?:(?:https?|ssh|git|git\+ssh|ssh\+git):\/\/(?:${USER}(?::[\w.~%+-]*)?@)?${HOST}(?::\d*)?(?:\/|$)|${USER}@${HOST}:(?!\/\/)|[\w-]{2,}(?:\.[\w-]+)*:(?!\/\/))`, 'i');
+const HTTP_USER = String.raw`[\w.~%+-]+`;
+const NETWORK_URL_RE = new RegExp(String.raw`^(?![^/]*::)(?:https?:\/\/(?:${HTTP_USER}(?::${HTTP_USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|(?:ssh|git|git\+ssh|ssh\+git):\/\/(?:${USER}(?::${USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|${USER}@${HOST}:(?!\/\/)|[\w-]{2,}(?:\.[\w-]+)*:(?!\/\/))`, 'i');
 export const localRemotesAllowed = (env = process.env) => env.YAD_ALLOW_LOCAL_REMOTES === '1';
 const folded = (p) => (process.platform === 'darwin' || process.platform === 'win32' ? p.toLowerCase() : p);
 const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
@@ -149,7 +153,8 @@ export function cloneSource(productRoot, url, env = process.env) {
 }
 
 // A judged entry git may run in: a checkout that is there (or the Product itself), and not reached through
-// a link inside a repo's tree. One test for every command that runs git in registered paths (E81).
+// a link inside a repo's tree (E81). Doctor's checks and `sync`'s stale count use it; the `list`,
+// `refresh` and `sync` loops branch on the same states themselves, to say which one applies.
 export const runnable = (j) => (j.state === 'present' || j.state === 'product') && !j.linked;
 
 // A clone that needs a password must not sit waiting at a prompt nobody will answer.
