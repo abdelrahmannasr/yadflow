@@ -902,7 +902,9 @@ export function epicChecks(checks, root) {
         for (const v of stateInvariants(ledger.state)) {
           check(checks, `epic:${e}:${v.authorStep}`, 'epics', 'fail',
             `${e}: ${v.message} [${v.code}]`,
-            `run \`yad gate repair ${e}\` to close it`);
+            // On a verified Product the repair's hand commit is refused by the git pre-commit guard (E48);
+            // `--push` makes the commit yad owns, so that is the command named there.
+            `run \`yad gate repair ${e}${isVerifiedLedger(readJSON(productConfigPath(root), null)) ? ' --push' : ''}\` to close it`);
         }
         // Migration guard (pre-3.0 model): under the current model CI records the ledger on the
         // default branch only at merge (when the step is already done), and writes nothing during
