@@ -322,7 +322,7 @@ export function writeJSON(p, obj) {
   catch (e) {
     // A half-written file of our own (a full disk) is removed; an entry that was already there (EEXIST)
     // is not ours to delete.
-    if (e.code !== 'EEXIST') fs.rmSync(tmp, { force: true });
+    if (e.code !== 'EEXIST') { try { fs.rmSync(tmp, { force: true }); } catch { /* keep the write's own error */ } }
     throw e;
   }
   try {
