@@ -26600,3 +26600,27 @@ test('E81 review 3: sync leaves a monorepo subfolder to the checkout it belongs 
     assert.equal(e79Git(T, product, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature', 'the Product\'s branch is untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E81 review 4: the file transport is only for a URL that passed as a local path — a local folder named like a host is never cloned', async () => {
+  const { cloneUrlKind } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    const door = { YAD_ALLOW_LOCAL_REMOTES: '1' };
+    assert.equal(cloneUrlKind(product, 'evil.com:x', door), 'network', 'judged as a host, so cloned with the file transport off');
+    assert.equal(cloneUrlKind(product, 'gh-work:org/r.git', {}), 'network', 'an ssh alias with no dot');
+    for (const bad of ['a.b::x', 'codecommit::us-east-1://r', 'x::y/z']) assert.equal(cloneUrlKind(product, bad, door), null, bad);
+    assert.equal(cloneUrlKind(product, `file://${ws.replace(/ws$/, '%77s')}/product/evil`, door), null, 'percent-encoded: refused');
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      assert.equal(cloneUrlKind(product, path.join(product, 'evil').toUpperCase(), door), null, 'another letter case is the same folder');
+    }
+    // End to end, door open: a bare repo the Product commits under a host-like name, reached relative to
+    // where yad runs. git would read it as a local folder; the file transport is off for it.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil.com:x');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api', path: '../api', git_url: 'evil.com:x' }] }));
+    const r = e79Yad(T, product, ['repo', 'clone', '--json']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(JSON.parse(r.stdout).failed[0].reason, /transport 'file' not allowed/);
+    assert.ok(!fs.existsSync(path.join(ws, 'api', '.git')), 'nothing cloned');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
