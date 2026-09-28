@@ -95,7 +95,10 @@ In one pass it produces:
 - **An agent guardrail** on a verified Product — `hooks/ledger-guard.mjs`, a harness hook that refuses an
   agent the CI-owned gate-ledger write at the moment it tries it and names the command that owns the
   transition, instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic
-  (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority.
+  (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority. The same
+  rule guards a person's `git commit` through a `pre-commit` hook `yad check --fix` installs in each clone
+  (E48); it never overwrites a hook of your own. What to turn on in GitHub or GitLab so the CI checks
+  actually hold a merge: [Branch protection](docs/branch-protection.md).
 - **Background capture** on every Product, in both ledger modes (E43) — `hooks/yad-capture.mjs`, a
   harness hook that runs `yad capture` after each agent edit. It snapshots every changed Shape artifact
   onto your private `yad/wip/<you>/<epic>` branches, so a draft is never lost and nobody types a git
