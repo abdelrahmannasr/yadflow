@@ -18,7 +18,7 @@ not read the answer, and the line says why.
 
 | Layer | What it does | How strong |
 |---|---|---|
-| A local git hook (`.git/hooks/pre-commit`) | Refuses a hand commit to the CI-owned ledger on your machine, with a message naming the right command | **Weak.** It lives in one clone, `--no-verify` or `YAD_HOOK_DISABLE=1` skips it, and it allows the commit whenever something is wrong with it |
+| A local git hook (`.git/hooks/pre-commit`) | Refuses a hand commit to the CI-owned ledger on your machine, with a message naming the right command | **Weak.** It lives in one clone, `yad commit --manual`, `--no-verify` or `YAD_HOOK_DISABLE=1` skips it, and it allows the commit whenever something is wrong with it |
 | The agent hook (`hooks/ledger-guard.mjs`) | Refuses an AI agent's edit to the same files, at the moment of the edit | **Weak**, for the same reasons |
 | **Branch protection on the platform** | Refuses a merge that skipped review or failed a check | **Strong. This is the real enforcement** |
 | The `ledger-guard` check in CI | Fails a pull request that changes the CI-owned ledger | **Strong**, but only when branch protection makes that check required |
@@ -140,11 +140,20 @@ or the Product index `.sdlc/index.json` — the commit is refused, and the messa
 - every refused file, and the `git restore --staged` line that takes them out of the commit;
 - the yad command that owns the change (`yad gate open`, `yad gate repair <epic> --push`, or CI at
   merge);
-- the way through: `YAD_HOOK_DISABLE=1 git commit …` (in PowerShell, `$env:YAD_HOOK_DISABLE=1`, then
-  `git commit`, then `Remove-Item Env:YAD_HOOK_DISABLE` — the setting lasts for the whole window, and it
-  also turns off the agent hook there). The `ledger-guard` check on the pull request still judges that commit.
+- the way through, when you have decided the change must land anyway:
+  `yad commit --manual --reason "<why>" --type <type> -m "<subject>"` (E49). It commits past this hook
+  and records your reason in the commit as a trailer — a `Key: value` line at the end of the commit
+  message — `Ledger-Override: <why>`. The `ledger-guard` check on the pull request still judges that
+  commit. It still fails it, because anyone can type a trailer, and it prints your reason under the FAIL
+  so the reviewer sees why. Only yad's own hook is skipped; any other pre-commit hook (husky,
+  lint-staged) still runs. With `ledger-guard` required, that pull request merges only when someone
+  who may bypass the rules merges it past the failed check — the quoted reason is what they read first.
 
-It follows the CI check's rules, and where it cannot know the answer it allows. So it lets through a
+`YAD_HOOK_DISABLE=1 git commit …` also still works, and records nothing (in PowerShell,
+`$env:YAD_HOOK_DISABLE=1`, then `git commit`, then `Remove-Item Env:YAD_HOOK_DISABLE` — the setting
+lasts for the whole window, and it also turns off the agent hook there).
+
+The hook follows the CI check's rules, and where it cannot know the answer it allows. So it lets through a
 new epic's first ledger (its seed), artifacts, the contract lock, a merge commit, and a commit authored
 by the `yad-gate-sync` bot.
 The ledger commits yad's own `yad gate ci` and `yad gate repair` make pass it too: those are the

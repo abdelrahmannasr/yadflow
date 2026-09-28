@@ -233,7 +233,8 @@ file-editing tool call and refuses the write up front, naming the command that o
   skills describe is *correct*, so nothing is wired and nothing is blocked.
 - **It fails OPEN** — no `yad`, no Product, an unreadable config, an unparseable payload all ALLOW, with
   a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
-  skips one command.
+  skips one command. A PERSON who must commit a ledger change anyway uses `yad commit --manual --reason
+  "<why>"` (E49) — never the agent on its own initiative.
 - **Known gaps** (both caught by the CI gate instead): a `Bash` tool call (`sed -i epics/…`) is not
   intercepted — matching it would mean parsing shell; and the hook arms sessions **rooted at the
   Product**, since a harness reads hooks from its own project root — a session opened at the workspace

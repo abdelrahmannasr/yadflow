@@ -798,6 +798,10 @@ an unreadable `hub.json`, an unparseable payload, a `yad` that errors — every 
 with a note on stderr. A local guardrail that failed closed would brick an agent's ability to edit
 anything the moment an install went sideways. The CI gate fails **closed** and is what actually
 protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` skips one command.
+The door for a PERSON is `yad commit --manual --reason "<why>"` (E49): it skips the local hook for that
+one commit and records the reason as a `Ledger-Override:` trailer. `ledger-guard` in CI still FAILS the
+commit — anyone can type a trailer — and prints the reason under the FAIL (each line indented, so an
+author's text never starts a line GitHub Actions would read as a workflow command).
 
 **Known gaps** — both fall through to the CI gate, which is why it stays the authority:
 

@@ -41,6 +41,10 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
   the `Co-Authored-By` trailer appears only when this flag names a tool).
 - `task`    — Task trailer (optional; derived from the branch when omitted).
 - `contractChange` — flag; mark the contract surface touched.
+- `manual` + `reason` — the ledger override (E49), for a PERSON only. On a verified Product a local
+  pre-commit hook refuses a commit that changes a CI-owned file (the gate ledger, the Product index).
+  `--manual --reason "<why>"` commits past that hook and records the reason as a `Ledger-Override:`
+  trailer. The `ledger-guard` check on the pull request still fails the commit, and quotes the reason.
 
 ## On Activation
 
@@ -51,7 +55,7 @@ staged, split it into separate commits rather than passing `--force`.
 ### Step 2 — Commit by convention
 Run the CLI from the repo root:
 ```
-yad commit --type <type> -m "<subject>" [--ai <id>] [--task <id>] [--contract-change] [--dry-run]
+yad commit --type <type> -m "<subject>" [--ai <id>] [--task <id>] [--contract-change] [--manual --reason "<why>"] [--dry-run]
 ```
 Use `--dry-run` first to preview the exact message (subject + trailer block) without committing. The
 CLI validates the type, rejects a trailing period, and emits the trailers in the fixed order.
@@ -66,8 +70,12 @@ the architecture gate. To also open the PR/MR in the same step, use `yad-ship`.
 - **No AI footer by default.** A `Co-Authored-By` trailer is written ONLY when `--ai <id>` is explicitly
   passed; the default is a clean human-only commit. Never add it on your own initiative.
 - **The human author owns the commit.** The AI is at most a `Co-Authored-By` footer, never the author.
-- **Trailer order is fixed:** `Task → Contract-Change → Co-Authored-By` (the footer only when `--ai` is given).
+- **Trailer order is fixed:** `Task → Contract-Change → Ledger-Override → Co-Authored-By` (the override only
+  with `--manual`, the footer only when `--ai` is given).
 - **Never widen the contract here.** A contract touch is flagged (`--contract-change`), not hidden.
+- **Never pass `--manual` on your own initiative.** Committing past the ledger hook is a person's decision.
+  Pass it only when the user asked for it, with the reason they gave. `--manual` needs `--reason`, and the
+  reason must be one line.
 
 ## Reference
 - Branch/commit conventions + the file-boundary rule: `../yad-implement/references/implement-conventions.md`.
