@@ -5,7 +5,7 @@
 // `--json` emits the checks for CI / bug reports.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
@@ -31,9 +31,6 @@ import { readOwners } from './owners.mjs';
 // and never one reached through a link inside a repo's tree (`yad repo sync` and `refresh` skip it too).
 // The repos check reports every other entry.
 const isCheckout = (root, repo) => runnable(judgeRepo(root, repo));
-// A registry name inside a command the person is invited to copy: as it is only when it is one plain
-// word that starts with a letter or digit (never an option like `--push`), else `<name>` — the shared file could hold `api; curl …|sh` (E81 review 9).
-const asArg = (name) => (typeof name === 'string' && /^\w[\w.-]*$/.test(name) ? name : '<name>');
 // The same for a registry `default_branch` inside a git command to copy: a valid branch name can hold
 // `;`, `|`, `$(` or start a path part with `-` (E81 review 11), so only a plain one is printed.
 const branchArg = (b) => (typeof b === 'string' && /^\w[\w./-]*$/.test(b) && !b.includes('..') ? b : '<default-branch>');

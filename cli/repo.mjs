@@ -51,8 +51,11 @@ function defaultBranch(cwd, repo) {
     const b = repo.default_branch;
     return typeof b === 'string' && !/^[-+]/.test(b) && git(cwd, 'check-ref-format', `refs/heads/${b}`).ok ? b : null;
   }
+  // origin/HEAD is what the remote says — the remote the registry chose — so it passes the same test.
   const r = git(cwd, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
-  return r.ok && r.stdout ? r.stdout.replace(/^origin\//, '') : 'main';
+  if (!r.ok || !r.stdout) return 'main';
+  const b = r.stdout.replace(/^origin\//, '');
+  return !/^[-+]/.test(b) && git(cwd, 'check-ref-format', `refs/heads/${b}`).ok ? b : null;
 }
 
 export async function runRepo(root, { action = 'list', name, today, push = false, allowBranch = false } = {}) {
@@ -164,7 +167,7 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       if (!gitHead(repoRoot)) { warn(`${tag} — not a git repo / HEAD unreadable — skipped`); skipped++; continue; }
       if (isDirty(repoRoot)) { warn(`${j.name} — ${c.yellow('dirty')} → SKIPPED (commit/stash first)`); skipped++; continue; }
       const branch = defaultBranch(repoRoot, repo);
-      if (!branch) { warn(`${tag} — the recorded default_branch is not a branch name git accepts — skipped (fix it in ${PROJECT_FILES.reposRegistry})`); skipped++; continue; }
+      if (!branch) { warn(`${tag} — its default branch (recorded, or origin/HEAD) is not a plain branch name git accepts — skipped (fix default_branch in ${PROJECT_FILES.reposRegistry})`); skipped++; continue; }
       const remote = hasRemote(repoRoot);
       // Printed through `shown` (E81 review 9): git accepts bytes above 0x7f in a branch name, and the
       // remote a registered clone fetches from was chosen by the shared registry, so both can carry text

@@ -31,6 +31,11 @@ export const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const INVISIBLE = new Set([0x2028, 0x2029, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x061c]);
 export const forTerminal = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) || INVISIBLE.has(n) ? ' ' : ch; }).join('');
 
+// A registry name inside a command the person is invited to copy: as it is only when it is one plain
+// word that starts with a letter or digit (never an option like `--push`), else `<name>` — the shared
+// file could hold `api; curl …|sh` (E81 reviews 9–10; here since review 15, for doctor and people.mjs).
+export const asArg = (name) => (typeof name === 'string' && /^\w[\w.-]*$/.test(name) ? name : '<name>');
+
 export const JSON_VERSION = 1;
 export const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
 let jsonRun = null;

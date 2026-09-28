@@ -26366,14 +26366,14 @@ test('E81: yad repo sync judges each entry first, and never hands git a branch n
       const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
       reg.repos[0].default_branch = b;
       fs.writeFileSync(regFile, JSON.stringify(reg));
-      assert.match(e79Yad(T, product, ['repo', 'sync', 'backend']).stdout, /not a branch name git accepts/, b);
+      assert.match(e79Yad(T, product, ['repo', 'sync', 'backend']).stdout, /not a plain branch name git accepts/, b);
     }
     const reg0 = JSON.parse(fs.readFileSync(regFile, 'utf8'));
     reg0.repos[0].default_branch = `--upload-pack=touch ${pwned}`;
     fs.writeFileSync(regFile, JSON.stringify(reg0));
     assert.equal(answer.skipped, 4);
     const text = e79Yad(T, product, ['repo', 'sync']).stdout;
-    assert.match(text, /backend .*default_branch is not a branch name git accepts/);
+    assert.match(text, /backend .*default branch \(recorded, or origin\/HEAD\) is not a plain branch name git accepts/);
     assert.match(text, /bare .*exists and is not a git repo/);
     assert.match(text, /evil .*inside a repo, is a link/);
     assert.match(text, /away .*not cloned on this machine/);
@@ -26813,4 +26813,40 @@ test('E81 review 14: doctor builds no login command from a hub host that is not 
     fs.writeFileSync(hubFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
     assert.ok(!hasRaw(e79Yad(T, product, ['doctor'], env).stdout));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 15: the solo people count runs no git in a folder the Product shaped as a repo, and says it could not count it', { skip: process.platform === 'win32' && 'a shell script as gpg.program' }, () => {
+  const T = e79Tmp();
+  const marker = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-r15-${process.pid}`);
+  fs.rmSync(marker, { force: true });
+  try {
+    const { product } = e80Workspace(T);
+    // A repo holding one commit with a signature header, then its git folder copied into the Product as a
+    // plain folder, with a config that runs a program whenever git log checks a signature.
+    const src = path.join(T, 'src');
+    fs.mkdirSync(src);
+    e79Git(T, src, 'init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(src, 'f'), 'x');
+    e79Git(T, src, 'add', '-A');
+    e79Git(T, src, 'commit', '-qm', 'x');
+    const tree = e79Git(T, src, 'rev-parse', 'HEAD^{tree}');
+    const now = Math.floor(Date.now() / 1000);
+    const body = `tree ${tree}\nauthor A <a@example.com> ${now} +0000\ncommitter A <a@example.com> ${now} +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n x\n -----END PGP SIGNATURE-----\n\nsigned\n`;
+    const sha = execFileSync('git', ['hash-object', '-t', 'commit', '-w', '--stdin'], { cwd: src, input: body, env: e79Env(T) }).toString().trim();
+    e79Git(T, src, 'update-ref', 'refs/heads/main', sha);
+    const evil = path.join(product, 'evil');
+    fs.cpSync(path.join(src, '.git'), evil, { recursive: true });
+    const prog = path.join(T, 'gpg.sh');
+    fs.writeFileSync(prog, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`, { mode: 0o755 });
+    fs.appendFileSync(path.join(evil, 'config'), `[core]\n\tbare = true\n[log]\n\tshowSignature = true\n[gpg]\n\tprogram = ${prog}\n`);
+    fs.writeFileSync(path.join(product, '.sdlc', 'hub.json'), JSON.stringify({ platform: null, solo: true }));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'evil\u001b[31m', path: 'evil' }] }));
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'p');
+    const doc = e79Yad(T, product, ['doctor']);
+    assert.ok(!fs.existsSync(marker), 'no program the Product chose ran');
+    assert.match(doc.stdout + doc.stderr, /repo 'evil \[31m': .*its history cannot be counted here/);
+    assert.ok(!(doc.stdout + doc.stderr).includes('\u001b[31m'), 'the name is cleaned');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(marker, { force: true }); }
 });

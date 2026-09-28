@@ -16,7 +16,7 @@
 //      commit never enters a PR's base..HEAD range where it would strand required checks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
+import { c, ok, info, fail, hand, exists, pushWithRebase, forTerminal } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
@@ -242,7 +242,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   } finally {
     for (const h of held) if (!fs.existsSync(h.abs)) fs.writeFileSync(h.abs, h.buf);
   }
-  ok(`published ${fileset.length} file(s): ${c.dim(label)}`);
+  ok(`published ${fileset.length} file(s): ${c.dim(forTerminal(label))}`);   // a registry name can be in it (E81 review 15)
 
   if (!push) return { message, committed: true, pushed: false };
   return { message, committed: true, pushed: pushHead() };
