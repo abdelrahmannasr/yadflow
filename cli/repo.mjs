@@ -8,7 +8,7 @@
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, writeJSON, run } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPathOk, CODE_CONTEXT_DIR, shown } from './workspace.mjs';
+import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPathOk, CODE_CONTEXT_DIR, runnable, shown } from './workspace.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { publishCodeContext, packOf, codeMapOf } from './repo-publish.mjs';
 
@@ -186,7 +186,7 @@ export async function runRepo(root, { action = 'list', name, today, push = false
     }
     // A pulled repo's HEAD moves, so its cached code-context pack goes stale — point the human at refresh.
     // Only the checkouts the loop would run git in (E81) — never a refused or linked entry.
-    const staleCount = entries.filter((r) => { const j = judgeRepo(root, r); return ['present', 'product'].includes(j.state) && !j.linked && staleness(root, r).stale; }).length;
+    const staleCount = entries.filter((r) => runnable(judgeRepo(root, r)) && staleness(root, r).stale).length;
     info(`synced ${synced}, skipped ${skipped}`);
     if (staleCount) hand(`${staleCount} repo(s) now have a stale code-context pack — \`yad repo refresh\` to repack`);
     return { action, synced, skipped, stale: staleCount };

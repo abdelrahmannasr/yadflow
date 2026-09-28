@@ -14,7 +14,7 @@ import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as ca
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
-import { judgeRepo, shown as forTerminal } from './workspace.mjs';
+import { judgeRepo, runnable, shown as forTerminal } from './workspace.mjs';
 import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
@@ -30,7 +30,7 @@ import { readOwners } from './owners.mjs';
 // entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
 // and never one reached through a link inside a repo's tree (`yad repo sync` and `refresh` skip it too).
 // The repos check reports every other entry.
-const isCheckout = (root, repo) => { const j = judgeRepo(root, repo); return ['present', 'product'].includes(j.state) && !j.linked; };
+const isCheckout = (root, repo) => runnable(judgeRepo(root, repo));
 
 const MIN_NODE = 18;
 

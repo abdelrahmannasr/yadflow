@@ -26546,8 +26546,8 @@ test('E81 review 2: a subfolder of a checkout behind the person\'s own workspace
 });
 
 test('E81 review 3: a registered git_url must be a network address — a local path could name a repo the Product commits', async () => {
-  const { cloneUrlKind } = await import('./workspace.mjs');
-  const cloneUrlOk = (...a) => cloneUrlKind(...a) !== null;
+  const { cloneSource } = await import('./workspace.mjs');
+  const cloneUrlOk = (...a) => cloneSource(...a) !== null;
   const T = e79Tmp();
   try {
     const { ws, product } = e80Workspace(T);
@@ -26604,7 +26604,8 @@ test('E81 review 3: sync leaves a monorepo subfolder to the checkout it belongs 
 });
 
 test('E81 review 4: the file transport is only for a URL that passed as a local path — a local folder named like a host is never cloned', async () => {
-  const { cloneUrlKind } = await import('./workspace.mjs');
+  const { cloneSource } = await import('./workspace.mjs');
+  const cloneUrlKind = (...a) => cloneSource(...a)?.kind ?? null;
   const T = e79Tmp();
   try {
     const { ws, product } = e80Workspace(T);
@@ -26657,4 +26658,15 @@ test('E81 review 5: the clone sets its own GIT_ALLOW_PROTOCOL, and a local sourc
     assert.doesNotMatch(doc.stdout + doc.stderr, /must be of type string|yad failed/);
     assert.equal(JSON.parse(doc.stdout).checks.find((c) => c.id === 'repo:n').status, 'fail');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 6: the host and user of every URL form keep to safe characters — ssh may put them in a shell command', async () => {
+  const { cloneSource } = await import('./workspace.mjs');
+  const kind = (u) => cloneSource(os.tmpdir(), u, {})?.kind ?? null;
+  for (const good of ['https://github.com/o/r.git', 'https://x-access-token:ghp_abc123@github.com/o/r.git', 'ssh://git@ghe.corp.example:2222/o/r.git', 'ssh://[::1]/r', 'git://h.example/r', 'git+ssh://git@h/r', 'https://h.example', 'git@github.com:o/r.git', 'gh-work:o/r.git']) {
+    assert.equal(kind(good), 'network', good);
+  }
+  for (const bad of ['ssh://a;touch${IFS}x;/r', 'ssh://git@a`id`/r', 'git://a$(touch${IFS}x)/r', 'ssh://a b/r', 'https://h.example\n/r', 'ssh://u;id@h/r', 'git@a$(id):r', 'git@[::1]:r']) {
+    assert.equal(kind(bad), null, bad);
+  }
 });
