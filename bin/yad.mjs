@@ -2,7 +2,7 @@
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
 import { VERSION } from '../cli/manifest.mjs';
 import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
-import { runLedgerGuardHook } from '../cli/hook.mjs';
+import { runLedgerGuardHook, runStagedLedgerGuard } from '../cli/hook.mjs';
 
 const helpText = (profiles) => `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -46,7 +46,10 @@ ${c.bold('Setup & maintenance')}
                        --format cursor the verdict is JSON on stdout instead, for a harness
                        whose pre-edit hook asks for permission rather than reading an exit
                        code. Wired into .claude/settings.json and .cursor/hooks.json by
-                       setup / check --fix. YAD_HOOK_DISABLE=1 skips.
+                       setup / check --fix. With --staged it judges the files a commit is
+                       about to record instead — the git pre-commit hook check --fix
+                       installs in this clone refuses a person's hand commit to the ledger.
+                       YAD_HOOK_DISABLE=1 skips.
 
 ${c.bold('Team usage (EM adoption & behavior report)')}
   yad usage                            Build a per-member report (HTML) from git + the SDLC ledgers
@@ -314,6 +317,7 @@ function parseArgs(argv) {
     else if (a === '--debt') o.debt = true;
     else if (a === '--new-round') o.newRound = true;
     else if (a === '--hook') o.hook = true;
+    else if (a === '--staged') o.staged = true;
     else if (a === '--stub') o.stub = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
@@ -423,6 +427,8 @@ async function main() {
     // so it takes no --json (E1).
     if (inJSON()) return refuse('yad hook takes no --json — its output is the protocol the agent reads', 'run it without --json');
     if (action !== 'ledger-guard') return refuse(`unknown hook: ${action ?? '(none)'} (ledger-guard)`);
+    // `--staged` is the git pre-commit half (E48): the files come from the index, never from stdin.
+    if (o.staged) { runStagedLedgerGuard(); return; }
     runLedgerGuardHook({ paths: o.path ? [o.path] : [], format: o.format });
     return;
   }

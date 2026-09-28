@@ -14,7 +14,7 @@ import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPa
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyHubActions,
-  ideTargetStateFor, recordManagedWrites,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
@@ -53,6 +53,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     ...productActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
     ...orphanHookActions(root, ideTargets),
+    // E48: this clone's git pre-commit hook — the person's half of the ledger guard.
+    ...gitHookActions(root), ...orphanGitHookActions(root),
     // E43: the post-edit capture hook, in both ledger modes.
     ...captureHookActions(root, ideTargets), ...orphanCaptureHookActions(root, ideTargets),
     // E113: the old shell-script hooks. LAST, so the entries above that named them are rewritten first.
@@ -107,6 +109,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     for (const i of notOk) log(`    ${MARK[i.status]}  ${i.item}`);
   }
   for (const g of gaps) warn(g);
+  // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
+  const gitHookNote = gitHookAdvice(gitHookState(root));
+  if (gitHookNote) warn(gitHookNote);
   const shownInvalid = ideState.invalid.map((v) => {
     try { return JSON.stringify(v) ?? String(v); } catch { return String(v); }
   });

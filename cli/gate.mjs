@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject, writeMirrored, emitJSON, refuse, collectWarning,
 } from './lib.mjs';
+import { OWNING_COMMIT_ENV } from './hook.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate, printable,
@@ -1230,8 +1231,11 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const subject = moved
     ? `chore(gate): move the product level to ${FOUNDATION_DIR}/ (shape 8) [skip ci]`
     : `chore(gate): ${sync} [skip ci]`;
-  const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
-    ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : []));
+  // The owning command's own ledger commit: the git pre-commit guard (E48) refuses HAND commits to these
+  // files, so it is told this one is not. In CI no clone has that hook; a person re-running this locally does.
+  const cm = run('git', ['commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
+    ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : [])],
+  { cwd: root, env: OWNING_COMMIT_ENV() });
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
   ok(`committed gate update: ${c.dim(subject)}`);
   if (!push) return { synced, committed: true, pushed: false };
@@ -1444,7 +1448,8 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   const specs = [spec, ...(branch === defaultBranch && !isVerifiedLedger(readJSON(productConfigPath(root), null)) && stageIndexIfClean(root, git, [spec]) ? [INDEX_FILE] : [])];
 
   const message = buildRepairMessage({ epic, steps: closed });
-  const cm = git('commit', '-m', message, '--', ...specs);
+  // `yad gate repair` IS the command the git pre-commit guard (E48) sends a person to, so its commit passes it.
+  const cm = run('git', ['commit', '-m', message, '--', ...specs], { cwd: root, env: OWNING_COMMIT_ENV() });
   if (!cm.ok) {
     git('reset', '-q', '--', ...specs); // never leave them staged for an unrelated commit to sweep up
     fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);

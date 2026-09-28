@@ -644,3 +644,238 @@ test('E113: a background capture push never opens a console window on Windows', 
   assert.ok(detached.length >= 2, 'the push and the fetch');
   for (const opts of detached) assert.match(opts, /windowsHide: true/, opts);
 });
+
+// ---- the git pre-commit ledger guard (E48) ---------------------------------------------------------
+//
+// Real git repos with a real origin, because every rule here is about what git says: the staged list,
+// a merge in progress, the author, and where `.git/hooks` is.
+const YAD = path.join(ROOT, 'bin/yad.mjs');
+function git(cwd, ...args) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout;
+}
+// A verified Product with EP-a's ledger on origin/main. `sub` puts the Product in a subdirectory of its
+// repo, the monorepo layout. Returns { T, repo, product }.
+function verifiedRepo({ sub = '', ledger = 'verified' } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-githook-'));
+  git(T, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
+  const repo = path.join(T, 'p');
+  git(T, 'clone', '-q', 'origin.git', 'p');
+  git(repo, 'config', 'user.email', 'dev@example.com');
+  git(repo, 'config', 'user.name', 'Dev');
+  git(repo, 'checkout', '-q', '-B', 'main');
+  const product = path.join(repo, sub);
+  fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(product, '.sdlc/product.json'), JSON.stringify({ ledger, platform: 'github', default_branch: 'main' }));
+  fs.mkdirSync(path.join(product, 'epics/EP-a/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(product, 'epics/EP-a/.sdlc/state.json'), '{}\n');
+  fs.mkdirSync(path.join(product, 'hooks'), { recursive: true });
+  fs.copyFileSync(path.join(HOOKS, 'ledger-guard.mjs'), path.join(product, 'hooks/ledger-guard.mjs'));
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'seed');
+  git(repo, 'push', '-q', 'origin', 'main');
+  return { T, repo, product };
+}
+// `bin/yad.mjs` is run directly, so PATH stays whole: the guard needs `git` on it (and without git it
+// allows, which would pass every refusal test here for the wrong reason).
+const gitEnv = (extra = {}) => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(yad_hook_disable|git_author_\w+)$/i.test(k))), ...extra });
+const staged = (cwd, env = {}) => {
+  const r = spawnSync(process.execPath, [YAD, 'hook', 'ledger-guard', '--staged'], { cwd, encoding: 'utf8', env: gitEnv(env), timeout: 30_000 });
+  return { code: r.status, err: r.stderr || '' };
+};
+const edit = (product, rel, text = '{"x":1}\n') => fs.writeFileSync(path.join(product, rel), text);
+
+test('E48: --staged refuses a hand commit that changes an on-base ledger, and names every file', () => {
+  const { T, repo, product } = verifiedRepo();
+  try {
+    edit(product, 'epics/EP-a/.sdlc/state.json');
+    edit(product, '.sdlc/index.json', '{}\n');
+    git(repo, 'add', '-A');
+    const r = staged(repo);
+    assert.equal(r.code, 2, r.err);
+    assert.match(r.err, /Commit refused: it changes 2 files/);
+    assert.match(r.err, /^ {2}\.sdlc\/index\.json$/m);
+    assert.match(r.err, /^ {2}epics\/EP-a\/\.sdlc\/state\.json$/m);
+    assert.match(r.err, /git restore --staged -- \.sdlc\/index\.json epics\/EP-a\/\.sdlc\/state\.json/);
+    assert.match(r.err, /yad gate open EP-a <artifact>/);
+    assert.match(r.err, /YAD_HOOK_DISABLE=1 git commit/);
+    assert.match(r.err, /check in CI still refuses it/, 'the door says what it does not open');
+  } finally { cleanup(T); }
+});
+
+test('E48: --staged allows what the CI check allows — a seed, an artifact, the bot, a merge, a local ledger, the override', () => {
+  const { T, repo, product } = verifiedRepo();
+  try {
+    // A NEW epic's ledger is a seed (#162), and an artifact is always a person's.
+    fs.mkdirSync(path.join(product, 'epics/EP-b/.sdlc'), { recursive: true });
+    edit(product, 'epics/EP-b/.sdlc/state.json', '{}\n');
+    edit(product, 'epics/EP-a/epic.md', '# a\n');
+    git(repo, 'add', '-A');
+    assert.equal(staged(repo).code, 0, 'a seed and an artifact');
+
+    edit(product, 'epics/EP-a/.sdlc/state.json');
+    git(repo, 'add', '-A');
+    assert.equal(staged(repo).code, 2, 'the mutation is refused before the carve-outs below');
+    assert.equal(staged(repo, { YAD_HOOK_DISABLE: '1' }).code, 0, 'the override');
+    assert.equal(staged(repo, { GIT_AUTHOR_NAME: 'yad-gate-sync[bot]' }).code, 0, "the bot's commit, as CI's trusted_bot matches it");
+    assert.equal(staged(repo, { GIT_AUTHOR_EMAIL: 'yad-gate-sync@example.com' }).code, 0, 'the bot by its email');
+
+    // A merge in progress: CI's diff-tree prints nothing for a merge commit, so CI never judges one.
+    fs.writeFileSync(path.join(repo, '.git', 'MERGE_HEAD'), `${git(repo, 'rev-parse', 'HEAD').trim()}\n`);
+    assert.equal(staged(repo).code, 0, 'a merge');
+    fs.rmSync(path.join(repo, '.git', 'MERGE_HEAD'));
+
+    fs.writeFileSync(path.join(product, '.sdlc/product.json'), JSON.stringify({ ledger: 'local', platform: 'github' }));
+    assert.equal(staged(repo).code, 0, 'a local ledger is the person\'s to write');
+  } finally { cleanup(T); }
+});
+
+test('E48: --staged refuses a deletion and both halves of a rename, as CI does', () => {
+  const { T, repo } = verifiedRepo();
+  try {
+    git(repo, 'rm', '-q', '--cached', 'epics/EP-a/.sdlc/state.json');
+    const del = staged(repo);
+    assert.equal(del.code, 2, 'delete-then-re-seed would reset the carve-out');
+    git(repo, 'reset', '-q');
+    git(repo, 'mv', 'epics/EP-a/.sdlc/state.json', 'epics/EP-a/.sdlc/state.old');
+    const mv = staged(repo);
+    assert.equal(mv.code, 2, 'the old path of a rename is a deletion of the ledger');
+    assert.match(mv.err, /epics\/EP-a\/\.sdlc\/state\.json/);
+  } finally { cleanup(T); }
+});
+
+test('E48: nothing staged under a Product, outside git, or no base to read — --staged allows and never reads stdin', () => {
+  const { T, repo } = verifiedRepo();
+  try {
+    // An open pipe on stdin that never closes would hang a hook that read it.
+    const r = spawnSync(process.execPath, [YAD, 'hook', 'ledger-guard', '--staged'], { cwd: repo, encoding: 'utf8', env: gitEnv(), stdio: ['pipe', 'pipe', 'pipe'], timeout: 15_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(staged(T).code, 0, 'outside any repo');
+  } finally { cleanup(T); }
+});
+
+test('E48: the pre-commit hook yad installs refuses a real `git commit`, `git commit -a` too, and a Product in a subdirectory', async () => {
+  const { gitHookActions, gitHookState } = await import('./plan.mjs');
+  for (const sub of ['', 'product']) {
+    const { T, repo, product } = verifiedRepo({ sub });
+    try {
+      const [a] = gitHookActions(product);
+      assert.equal(a.status, 'new');
+      assert.deepEqual(a.paths, [], 'never staged by `yad update --push` — the hook is per clone');
+      a.apply();
+      const st = gitHookState(product);
+      assert.equal(st.state, 'ok');
+      assert.equal(path.resolve(st.file), path.resolve(repo, '.git/hooks/pre-commit'));
+      assert.match(fs.readFileSync(st.file, 'utf8'), new RegExp(`guard='${sub ? `${sub}/` : ''}hooks/ledger-guard.mjs'`));
+      const env = gitEnv({ YAD_BIN: `"${process.execPath}" "${YAD}"` });
+      edit(product, 'epics/EP-a/.sdlc/state.json');
+      const c = spawnSync('git', ['commit', '-q', '-a', '-m', 'hand edit'], { cwd: repo, encoding: 'utf8', env });
+      assert.notEqual(c.status, 0, 'refused');
+      assert.match(c.stderr, /Commit refused/);
+      const ok = spawnSync('git', ['commit', '-q', '-a', '-m', 'hand edit'], { cwd: repo, encoding: 'utf8', env: { ...env, YAD_HOOK_DISABLE: '1' } });
+      assert.equal(ok.status, 0, `the door: ${ok.stderr}`);
+    } finally { cleanup(T); }
+  }
+});
+
+test('E48: yad never writes over a hook that is not its own, and says which line to add', async () => {
+  const { gitHookActions, gitHookState, gitHookAdvice, GIT_HOOK_MARKER } = await import('./plan.mjs');
+  const { T, repo, product } = verifiedRepo();
+  try {
+    const hook = path.join(repo, '.git/hooks/pre-commit');
+    fs.writeFileSync(hook, '#!/bin/sh\nnpx lint-staged\n');
+    assert.deepEqual(gitHookActions(product), [], 'no action for a foreign hook');
+    const st = gitHookState(product);
+    assert.equal(st.state, 'foreign');
+    assert.match(gitHookAdvice(st), /add this line to it .*node 'hooks\/ledger-guard\.mjs' --staged; \[ \$\? -ne 2 \] \|\| exit 1$/);
+    assert.equal(fs.readFileSync(hook, 'utf8'), '#!/bin/sh\nnpx lint-staged\n');
+
+    git(repo, 'config', 'core.hooksPath', '.husky');
+    assert.deepEqual(gitHookActions(product), [], 'a hooks folder a tool manages is never written');
+    assert.equal(gitHookState(product).state, 'hooks-path');
+    assert.match(gitHookAdvice(gitHookState(product)), /core\.hooksPath is set \(\.husky\)/);
+    assert.equal(fs.existsSync(path.join(repo, '.husky')), false);
+    git(repo, 'config', '--unset', 'core.hooksPath');
+
+    // Ours, edited: outdated, and the edit is saved beside it before the rewrite.
+    fs.writeFileSync(hook, `#!/bin/sh\n${GIT_HOOK_MARKER}\necho mine\n`);
+    const [a] = gitHookActions(product);
+    assert.equal(a.status, 'outdated');
+    a.apply();
+    assert.match(fs.readFileSync(`${hook}.yad-orig`, 'utf8'), /echo mine/);
+    assert.equal(gitHookState(product).state, 'ok');
+  } finally { cleanup(T); }
+});
+
+test('E48: a local ledger installs nothing, and removes the hook yad wrote — never an edited one', async () => {
+  const { gitHookActions, orphanGitHookActions, gitPreCommitScript } = await import('./plan.mjs');
+  const { T, repo, product } = verifiedRepo({ ledger: 'local' });
+  try {
+    assert.deepEqual(gitHookActions(product), []);
+    assert.deepEqual(orphanGitHookActions(product), [], 'nothing there, nothing to remove');
+    const hook = path.join(repo, '.git/hooks/pre-commit');
+    fs.writeFileSync(hook, `${gitPreCommitScript('')}# mine\n`);
+    assert.deepEqual(orphanGitHookActions(product), [], 'an edited copy is its owner\'s');
+    fs.writeFileSync(hook, gitPreCommitScript(''));
+    const [rm] = orphanGitHookActions(product);
+    assert.equal(rm.status, 'removed');
+    rm.apply();
+    assert.equal(fs.existsSync(hook), false);
+  } finally { cleanup(T); }
+});
+
+test('E48: the refusal reads right for one file, and quotes a name the shell would split', async () => {
+  const { commitDenyMessage } = await import('./hook.mjs');
+  const top = path.join(os.tmpdir(), 'r');
+  const one = commitDenyMessage({ top, hits: [{ kind: 'state', epic: 'EP-a', abs: path.join(top, 'epics/EP-a/.sdlc/state.json'), productRoot: top }] });
+  assert.match(one, /changes a file only CI/);
+  assert.match(one, /Take it out of this commit/);
+  assert.doesNotMatch(one, /Product index {10}/, 'no index line when the index is not in the commit');
+  const odd = commitDenyMessage({ top, hits: [{ kind: 'review', epic: 'EP-a', abs: path.join(top, "epics/EP-a/reviews/it's mine.md"), productRoot: top }] });
+  assert.match(odd, /git restore --staged -- 'epics\/EP-a\/reviews\/it'\\''s mine\.md'/);
+  const index = commitDenyMessage({ top, hits: [{ kind: 'index', epic: null, abs: path.join(top, '.sdlc/index.json'), productRoot: top }] });
+  assert.doesNotMatch(index, /yad gate open/, 'an index-only refusal names no epic command');
+});
+
+test('E48: doctor reports this clone\'s git hook — missing, installed, someone else\'s — and links the protection guide', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { gitHookActions } = await import('./plan.mjs');
+  const { PROTECTION_GUIDE_URL } = await import('./manifest.mjs');
+  const { T, repo, product } = verifiedRepo();
+  const line = () => collectDoctor(product).checks.find((x) => x.id === 'git-hook');
+  try {
+    assert.equal(line().status, 'warn');
+    assert.match(line().message, /not installed in this clone/);
+    assert.match(line().hint, /yad check --fix/);
+
+    const out = spawnSync(process.execPath, [YAD, 'doctor'], { cwd: product, encoding: 'utf8', env: gitEnv({ YAD_PLATFORM_READ: '0', YAD_NO_UPDATE_CHECK: '1' }) });
+    const text = `${out.stdout}${out.stderr}`;
+    // Team mode with the platform not read: every protection line warns "not known", so the guide follows.
+    assert.ok(text.includes(PROTECTION_GUIDE_URL), text);
+    assert.equal(text.split(PROTECTION_GUIDE_URL).length, 2, 'printed once, at the end of the section');
+
+    gitHookActions(product)[0].apply();
+    assert.equal(line().status, 'ok');
+
+    fs.writeFileSync(path.join(repo, '.git/hooks/pre-commit'), '#!/bin/sh\nexit 0\n');
+    assert.equal(line().status, 'warn');
+    assert.match(line().message, /is not yad's, so yad left it alone/);
+    assert.match(line().hint, /^add this line to \.git\/hooks\/pre-commit: node 'hooks\/ledger-guard\.mjs' --staged/);
+
+    fs.writeFileSync(path.join(product, '.sdlc/product.json'), JSON.stringify({ ledger: 'local', platform: 'github' }));
+    assert.equal(line(), undefined, 'a local ledger has no git hook to report');
+  } finally { cleanup(T); }
+});
+
+test('E48: yad\'s own ledger commits (gate ci/sync, gate repair) tell the git hook they are the owning command', async () => {
+  const { OWNING_COMMIT_ENV } = await import('./hook.mjs');
+  assert.equal(OWNING_COMMIT_ENV().YAD_HOOK_DISABLE, '1');
+  // Every commit gate.mjs makes writes the ledger, and each must pass the hook the refusal points at it.
+  // The e2e drives `gate ci --merged` in a clone that has the hook; this pins that no commit was missed.
+  const src = fs.readFileSync(path.join(ROOT, 'cli/gate.mjs'), 'utf8');
+  const commits = src.match(/\['commit',[^\n]*|git\('commit'/g) || [];
+  assert.equal(commits.length, 2, commits.join('\n'));
+  assert.ok(commits.every((c) => c.startsWith("['commit'")), 'no commit through the plain git helper');
+  assert.equal((src.match(/env: OWNING_COMMIT_ENV\(\)/g) || []).length, 2);
+});

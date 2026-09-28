@@ -1042,6 +1042,113 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
   return actions;
 }
 
+// ---- the git pre-commit hook (E48) ----------------------------------------------------------------
+//
+// The person's half of the ledger guard. `hooks/ledger-guard.mjs` refuses an AGENT's edit; this refuses a
+// PERSON's `git commit` of the same files, by running that same script with `--staged`. Verified-only,
+// like `hookActions`: with a local ledger the person owns the ledger and there is nothing to refuse.
+//
+// PER CLONE, NOT COMMITTED. Git never commits `.git/hooks`, so every clone needs its own copy, and
+// `yad check --fix` (or setup, or update) installs it. That is why nothing here touches the provenance
+// record: that file is committed, and recording this hook in it would tell every teammate's `yad check`
+// the hook is there when their clone has none. Ours is recognised by its marker line instead, and
+// `paths` is empty so `yad update --push` never stages it.
+//
+// NEVER SOMEONE ELSE'S HOOK. A `pre-commit` without our marker is the team's (or husky's, or
+// pre-commit's), and `core.hooksPath` means a tool manages hooks from a folder that is usually committed.
+// Either way nothing is written: `gitHookState` says so, with the one line to add by hand, and doctor
+// and `yad check` print it.
+export const GIT_HOOK_MARKER = '# yadflow ledger-guard (E48)';
+const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+export function gitPreCommitScript(prefix = '') {
+  return [
+    '#!/bin/sh',
+    `${GIT_HOOK_MARKER} — installed in this clone by \`yad check --fix\`.`,
+    '# Refuses a commit that changes a file only CI may change on a verified Product (the gate ledger and',
+    '# the Product index), the same files the `ledger-guard` check in CI refuses. It fails open: with no',
+    '# node, or no guard script, it allows. Skip it once with YAD_HOOK_DISABLE=1. Git runs it from the top',
+    '# of the repo. yad rewrites this file; to stop it, delete the file.',
+    `guard=${shQuote(`${prefix}hooks/ledger-guard.mjs`)}`,
+    'command -v node >/dev/null 2>&1 || exit 0',
+    '[ -f "$guard" ] || exit 0',
+    'node "$guard" --staged',
+    '[ $? -eq 2 ] && exit 1',
+    'exit 0',
+    '',
+  ].join('\n');
+}
+// The line a person adds to a hook yad will not touch, run from the top of the repo.
+// It fails open as the script does: only the guard's refusal (2) stops the commit, and its own status is
+// 0 otherwise, so it is safe as the last line of a hook.
+export const gitHookLine = (prefix = '') => `node ${shQuote(`${prefix}hooks/ledger-guard.mjs`)} --staged; [ $? -ne 2 ] || exit 1`;
+
+// Where this clone's pre-commit hook is, and whose it is. `{ applies: false }` when there is nothing to
+// install (a local ledger, or no git). Otherwise `{ applies: true, file, expected, prefix, state }` with
+// `state` one of: 'missing' | 'ok' | 'outdated' (ours, different bytes) | 'foreign' (a hook that is not
+// ours) | 'hooks-path' (core.hooksPath is set). The last two carry `line`, the one to add by hand.
+export function gitHookState(root) {
+  if (!isVerifiedLedger(readJSON(productConfigPath(root)))) return { applies: false };
+  const where = run('git', ['-C', root, 'rev-parse', '--git-path', 'hooks/pre-commit', '--show-prefix']);
+  if (!where.ok) return { applies: false };
+  const [hookRel, prefix = ''] = where.stdout.split('\n');
+  const file = path.resolve(root, hookRel);
+  const expected = gitPreCommitScript(prefix);
+  const line = gitHookLine(prefix);
+  const hooksPath = run('git', ['-C', root, 'config', '--get', 'core.hooksPath']);
+  if (hooksPath.ok && hooksPath.stdout) return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, state: 'hooks-path' };
+  let text = null;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
+  if (text === null) return { applies: true, file, expected, prefix, state: 'missing' };
+  if (!text.includes(GIT_HOOK_MARKER)) return { applies: true, file, expected, prefix, line, state: 'foreign' };
+  return { applies: true, file, expected, prefix, state: text === expected ? 'ok' : 'outdated' };
+}
+
+// The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
+// and are reported by `gitHookAdvice` instead.
+export function gitHookActions(root) {
+  const st = gitHookState(root);
+  if (!st.applies || st.state === 'foreign' || st.state === 'hooks-path') return [];
+  const status = st.state === 'missing' ? 'new' : st.state;
+  // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
+  // the same rule `wiredFileAction` keeps for content it cannot prove it wrote.
+  const backup = st.state === 'outdated' ? backupPathFor(st.file) : null;
+  return [{
+    scope: 'hub',
+    item: 'pre-commit git hook (this clone)',
+    status,
+    root,
+    paths: [],
+    backup,
+    apply: () => {
+      if (backup) fs.copyFileSync(st.file, backup);
+      fs.mkdirSync(path.dirname(st.file), { recursive: true });
+      fs.writeFileSync(st.file, st.expected, { mode: 0o755 });
+      fs.chmodSync(st.file, 0o755);
+    },
+  }];
+}
+
+// A local ledger: the hook yad installed while the Product was verified has nothing to guard. Removed
+// only when its bytes are exactly what yad writes — an edited copy is left for its owner.
+export function orphanGitHookActions(root) {
+  if (isVerifiedLedger(readJSON(productConfigPath(root)))) return [];
+  const where = run('git', ['-C', root, 'rev-parse', '--git-path', 'hooks/pre-commit', '--show-prefix']);
+  if (!where.ok) return [];
+  const [hookRel, prefix = ''] = where.stdout.split('\n');
+  const file = path.resolve(root, hookRel);
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  if (text !== gitPreCommitScript(prefix)) return [];
+  return [{ scope: 'hub', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
+}
+
+// The sentence for a clone where yad may not write the hook, or null.
+export function gitHookAdvice(st) {
+  if (st?.state === 'hooks-path') return `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its pre-commit ledger guard; add this line to the pre-commit hook there: ${st.line}`;
+  if (st?.state === 'foreign') return `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger: ${st.line}`;
+  return null;
+}
+
 // ---- background capture wiring (E43) -----------------------------------------------------------
 //
 // The post-edit capture hook: `hooks/yad-capture.mjs`, plus one entry per IDE target that has a post-edit

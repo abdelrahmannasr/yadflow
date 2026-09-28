@@ -6,8 +6,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
@@ -351,6 +351,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         ...targets.flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest))];
       check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (${[...new Set(wiredScripts)].join(', ')})${alsoUnguarded}`);
     }
+    gitHookCheck(root, checks);
   }
 
   // Background capture (E43), on any Product in either ledger mode: is the post-edit hook wired, and will
@@ -2365,13 +2366,18 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
   } else {
     log(c.bold(`\nyad doctor  ${c.dim('v' + VERSION)}`));
     let section = '';
+    // E48: the `protection` section ends with where to read how to set protection up, once, when any of
+    // its lines warns. Text only — `--json` keeps its shape.
+    const protectionWarns = checks.some((x) => x.section === 'protection' && x.status === 'warn');
+    const guide = () => { if (section === 'protection' && protectionWarns) hand(`how to set branch protection up for yad: ${PROTECTION_GUIDE_URL}`); };
     for (const x of checks) {
-      if (x.section !== section) { section = x.section; log(`\n  ${c.bold(section)}`); }
+      if (x.section !== section) { guide(); section = x.section; log(`\n  ${c.bold(section)}`); }
       ({ ok, warn, fail })[x.status](x.message);
       // A check may ask for its hint whatever its level (`alwaysHint`): an E70 `protection` line is `ok` in
       // solo mode even when the platform could not be read, and its hint is the fix ("run `gh auth login` …").
       if (x.hint && (x.status !== 'ok' || x.alwaysHint)) hand(x.hint);
     }
+    guide();
     log('');
     if (failed.length) fail(`${failed.length} problem(s) found`);
     else if (warned.length) info(`healthy with ${warned.length} warning(s)`);
@@ -2522,4 +2528,28 @@ export function pushOnEveryBranch(root) {
     if (hit) out.push(`.github/workflows/${n}`);
   }
   return out;
+}
+
+// The person's half of the ledger guard (E48): this clone's git pre-commit hook. Per clone, because git
+// never commits `.git/hooks` — so a teammate who pulled a verified Product has none until their own
+// `yad check --fix`, and this line is how they find out.
+function gitHookCheck(root, checks) {
+  const st = gitHookState(root);
+  if (!st.applies) return;
+  const where = path.relative(root, st.file).split(path.sep).join('/');
+  if (st.state === 'hooks-path' || st.state === 'foreign') {
+    // yad writes neither: a folder core.hooksPath names is usually committed and owned by a tool, and a
+    // hook without yad's marker line is the team's. The person adds one line instead.
+    const why = st.state === 'hooks-path' ? `core.hooksPath is set (${st.hooksPath}), so hooks are run from there` : `${where} is not yad's, so yad left it alone`;
+    const into = st.state === 'hooks-path' ? `the pre-commit hook in ${st.hooksPath}` : where;
+    check(checks, 'git-hook', 'project', 'warn', `git pre-commit ledger guard not installed: ${why}`, `add this line to ${into}: ${st.line}`);
+  } else if (st.state === 'missing') {
+    check(checks, 'git-hook', 'project', 'warn', 'git pre-commit ledger guard not installed in this clone',
+      'run `yad check --fix` — until then a hand `git commit` that changes the CI-owned ledger is refused only by CI, after the push');
+  } else if (st.state === 'outdated') {
+    check(checks, 'git-hook', 'project', 'warn', `git pre-commit ledger guard out of date (${where})`,
+      'run `yad check --fix` — it saves the current file beside it before replacing it');
+  } else {
+    check(checks, 'git-hook', 'project', 'ok', `git pre-commit ledger guard installed in this clone (${where})`);
+  }
 }

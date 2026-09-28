@@ -526,6 +526,10 @@ export const PRODUCT_WIRING = {
 //
 // Node scripts, not shell scripts (E113): one file runs on Windows, macOS and Linux, and a harness entry
 // runs it as `node <file>`, so no execute bit is needed — Windows cannot keep one on disk.
+// The branch-protection setup guide (E48), linked from `yad doctor`'s `protection` section. A URL, not a
+// path: the reader is in their own repo, where `docs/` is not yadflow's.
+export const PROTECTION_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/blob/main/docs/branch-protection.md';
+
 export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.mjs', dest: 'hooks/ledger-guard.mjs' },
 ];

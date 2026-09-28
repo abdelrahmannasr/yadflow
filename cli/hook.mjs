@@ -22,6 +22,7 @@
 // those ALLOWS, with a note on stderr. This is a local guardrail, and one that failed closed would
 // brick an agent's ability to edit anything the moment a config went sideways. The asymmetry is the
 // design: `ledger-guard` in CI fails closed and is what actually protects the ledger.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -309,13 +310,19 @@ export const windowsPath = (p, platform = process.platform) => (platform === 'wi
 
 // The decision, with git injectable so the tests can drive every branch. Returns
 // `{ allow: true }` or `{ allow: false, message, epic, rel }`.
-export function ledgerGuardDecision(paths, { env = process.env, runner = run, payloadCwd = null } = {}) {
+//
+// `all` keeps going after the first refused path and returns every one of them in `hits` (E48). An
+// agent's tool call writes one file, so the first is the answer; a commit carries many, and a message
+// naming only the first would send the person round the refuse-unstage-retry loop once per file.
+// The message is then the caller's to build — `{ allow: false, hits }` with no `message`.
+export function ledgerGuardDecision(paths, { env = process.env, runner = run, payloadCwd = null, all = false } = {}) {
   if (env.YAD_HOOK_DISABLE) return { allow: true, skipped: 'YAD_HOOK_DISABLE' };
   if (!paths.length) return { allow: true };
   const base = baseDirFor(env, runner, payloadCwd);
   // One `ls-tree` per Product, not one per candidate path: a MultiEdit carries many paths and this runs
   // inside the agent's tool loop.
   const seededByHub = new Map();
+  const hits = [];
   for (const candidate of paths) {
     const abs = path.resolve(base, windowsPath(candidate));
     const productRoot = hubRootFor(abs);
@@ -327,14 +334,115 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run, pa
     const rel = path.relative(productRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
     if (!hit) continue;
-    if (hit.kind === 'index') return { allow: false, epic: null, rel, message: indexDenyMessage({ rel, productRoot }) };
-    if (!seededByHub.has(productRoot)) seededByHub.set(productRoot, seededSlugs(productRoot, hub, runner));
-    const seeded = seededByHub.get(productRoot);
-    if (seeded === null) continue;                      // base unreadable — unknown allows
-    if (!seeded.has(fold(hit.epic))) continue;          // creation, not mutation (#162)
-    return { allow: false, epic: hit.epic, rel, message: denyMessage({ epic: hit.epic, rel, productRoot }) };
+    if (hit.kind !== 'index') {
+      if (!seededByHub.has(productRoot)) seededByHub.set(productRoot, seededSlugs(productRoot, hub, runner));
+      const seeded = seededByHub.get(productRoot);
+      if (seeded === null) continue;                      // base unreadable — unknown allows
+      if (!seeded.has(fold(hit.epic))) continue;          // creation, not mutation (#162)
+    }
+    if (!all) {
+      const message = hit.kind === 'index' ? indexDenyMessage({ rel, productRoot }) : denyMessage({ epic: hit.epic, rel, productRoot });
+      return { allow: false, epic: hit.epic, rel, message };
+    }
+    hits.push({ ...hit, abs, productRoot });
   }
-  return { allow: true };
+  return hits.length ? { allow: false, hits } : { allow: true };
+}
+
+// ---- the git pre-commit half (E48) ---------------------------------------------------------------
+//
+// The same rule as the harness hook, asked by git instead of by an agent: `yad hook ledger-guard
+// --staged` reads the files the commit is about to record and refuses the commit when one of them is a
+// CI-owned file the `ledger-guard` check in CI would refuse. It catches a PERSON's hand commit, which the
+// harness hook never sees. Installed per clone by `yad check --fix` as `.git/hooks/pre-commit` (see
+// `gitHookActions` in plan.mjs); verified mode only, exactly like the harness hook.
+//
+// PARITY WITH THE CI CHECK is the whole claim, so each rule below is one the CI script already has:
+//   - A MERGE commit passes. CI lists a commit's files with `git diff-tree`, which prints nothing for a
+//     merge, so CI never judges one. Without this, a `git pull` that merges the bot's ledger commits
+//     into a person's branch would be refused here while CI accepts it.
+//   - The yad-gate-sync BOT passes, matched the way CI's `trusted_bot` matches it (the name or email
+//     holds `yad-gate-sync`). CI then also checks the platform-Verified signature, which only the
+//     platform can answer — a commit that claims the name without it still fails there.
+//   - A DELETION counts: CI fails a deleted `state.json` (delete-then-re-seed would reset the carve-out).
+//   - A RENAME is two paths, the old and the new (`--no-renames`), as E114 settled for every changed list.
+// Known limit: `git commit --amend` is judged by what it changes against the commit it replaces, so
+// amending a commit that ALREADY changed the ledger passes here. CI still judges the result.
+//
+// The list is read with `-z` and spawned directly: `run()` trims its output, which would cut a leading
+// space off the first name.
+export const GIT_BOT = 'yad-gate-sync';
+// The environment yad's OWN ledger commits run git with (`yad gate ci` / `gate sync`, `yad gate repair`).
+// They are the commands the refusal names, so the hook must not refuse them — the CI check never judges
+// them either: it runs on pull requests, and these commits land on the default branch.
+export const OWNING_COMMIT_ENV = () => ({ ...process.env, YAD_HOOK_DISABLE: '1' });
+function gitRaw(args, cwd) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+  return { ok: r.status === 0, stdout: r.stdout || '' };
+}
+export function stagedLedgerCandidates(cwd = process.cwd(), git = gitRaw) {
+  const top = git(['rev-parse', '--show-toplevel'], cwd);
+  if (!top.ok) return { paths: [], skipped: 'not inside a git repository' };
+  const root = top.stdout.replace(/\r?\n$/, '');
+  if (git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], root).ok) return { paths: [], skipped: 'a merge commit — the CI check does not judge merges either' };
+  const ident = git(['var', 'GIT_AUTHOR_IDENT'], root);
+  if (ident.ok && ident.stdout.includes(GIT_BOT)) return { paths: [], skipped: `the ${GIT_BOT} bot's commit` };
+  const names = git(['-c', 'core.quotePath=false', 'diff', '--cached', '--name-only', '--no-renames', '-z'], root);
+  if (!names.ok) return { paths: [], skipped: 'could not list the staged files' };
+  return { root, paths: names.stdout.split('\0').filter(Boolean).map((p) => path.join(root, p)) };
+}
+
+// What the person is told when the commit is refused. It names every refused file, how to take them
+// back out of the commit, the command that owns each change, and the door.
+//
+// THE DOOR IS HONEST ABOUT WHAT IT OPENS. `YAD_HOOK_DISABLE=1` (or git's own `--no-verify`) lets the
+// commit through on this machine, and nothing more: the `ledger-guard` check in CI still refuses the
+// push. A door that implied otherwise would be a lie about what protects the ledger.
+export function commitDenyMessage({ hits, top }) {
+  const from = (h) => path.relative(top, h.abs).split(path.sep).join('/');
+  const files = hits.map(from);
+  const epics = [...new Set(hits.filter((h) => h.kind !== 'index').map((h) => h.epic))];
+  const epic = epics.length === 1 ? epics[0] : '<epic>';
+  const index = hits.some((h) => h.kind === 'index');
+  const roots = [...new Set(hits.map((h) => h.productRoot))];
+  const quote = (f) => (/^[\w./@+-]+$/.test(f) ? f : `'${f.replace(/'/g, `'\\''`)}'`);
+  return [
+    `[yad] Commit refused: it changes ${files.length === 1 ? 'a file' : `${files.length} files`} only CI may change on this Product.`,
+    ...files.map((f) => `  ${f}`),
+    '',
+    'This Product runs in verified mode, where CI is the sole writer of the gate ledger and the Product',
+    'index. The `ledger-guard` check in CI rejects any commit that changes those files unless it is a Verified',
+    `commit by the ${GIT_BOT} bot, so this commit could not reach the default branch.`,
+    '',
+    `Take ${files.length === 1 ? 'it' : 'them'} out of this commit (run from the top of the repo):`,
+    `  git restore --staged -- ${files.map(quote).join(' ')}`,
+    '',
+    'Then use the command that owns the change:',
+    ...(epics.length ? [
+      `  author step done → review opened   yad gate open ${epic} <artifact>`,
+      '  the full advance at merge          CI runs `yad gate ci --merged` — nothing to do locally',
+      `  a genuinely broken ledger          yad gate repair ${epic}`,
+    ] : []),
+    ...(index ? ['  the Product index                  CI rebuilds it at merge; read it with `yad index --json`'] : []),
+    '',
+    'To commit it anyway: YAD_HOOK_DISABLE=1 git commit …  The `ledger-guard` check in CI still refuses it.',
+    `hub: ${roots.join(', ')}`,
+  ].join('\n');
+}
+
+// The `--staged` entry point, for the git pre-commit hook. It never reads stdin: git gives a
+// pre-commit hook nothing there, and a caller with an open pipe would hang on it (the note at
+// `runLedgerGuardHook`). Exit 0 allows, exit 2 refuses; the wrapper git runs turns only a 2 into a
+// refusal, so a crash here allows (fail-open, as the harness hook does).
+export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), git = gitRaw, runner = run } = {}) {
+  if (env.YAD_HOOK_DISABLE) return 0;
+  const staged = stagedLedgerCandidates(cwd, git);
+  if (!staged.paths.length) return 0;
+  const verdict = ledgerGuardDecision(staged.paths, { env, runner, payloadCwd: staged.root, all: true });
+  if (verdict.allow) return 0;
+  console.error(commitDenyMessage({ hits: verdict.hits, top: staged.root }));
+  process.exitCode = 2;
+  return 2;
 }
 
 // Read the harness payload off stdin. Absent, empty, or unparseable all mean "nothing to inspect" —

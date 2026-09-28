@@ -3523,6 +3523,58 @@ test('ledger-guard: the bash reader and isVerifiedLedger agree on every hub.json
 // refreshes this script. Neither implies the other, so BOTH mixed states are real and both must keep
 // the guard armed. If either fails, a verified project silently stops being guarded — which is the
 // single guarantee the mode exists to provide.
+// E48: the git pre-commit hook claims to refuse exactly what this script refuses — minus the Verified
+// signature, which only the platform can answer. So each shape is judged twice, the same change: by the
+// hook while it is staged, and by this script once it is committed. A disagreement either way is a bug —
+// a refusal CI would not make locks a person out, and a pass CI would refuse is the hook going quiet.
+test('ledger-guard: the git pre-commit hook (--staged) and this script agree on every shape (E48)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e48-'));
+  const repo = path.join(T, 'p');
+  git(T, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
+  git(T, 'clone', '-q', 'origin.git', 'p');
+  git(repo, 'config', 'user.name', 'alice');
+  git(repo, 'config', 'user.email', 'alice@corp.io');
+  git(repo, 'checkout', '-q', '-B', 'main');
+  enableVerified(repo, '{"platform":"github","ledger":"verified","default_branch":"main"}\n');
+  commit(repo, 'seed', {
+    'epics/EP-x/epic.md': '# e\n',
+    'epics/EP-x/.sdlc/state.json': '{}\n',
+    'epics/EP-x/.sdlc/approvals.json': '[]\n',
+  });
+  git(repo, 'push', '-q', 'origin', 'main');
+  const write = (files) => {
+    for (const [rel, content] of Object.entries(files)) {
+      const p = path.join(repo, rel);
+      if (content === null) { fs.rmSync(p); continue; }
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, content);
+    }
+  };
+  const shapes = [
+    { name: 'a mutation', files: { 'epics/EP-x/.sdlc/approvals.json': '[1]\n' }, refused: true },
+    { name: 'a deletion', files: { 'epics/EP-x/.sdlc/state.json': null }, refused: true },
+    { name: 'the Product index', files: { '.sdlc/index.json': '{}\n' }, refused: true },
+    { name: 'a review file', files: { 'epics/EP-x/reviews/epic.md': 'x\n' }, refused: true },
+    { name: 'a new epic\'s seed', files: { 'epics/EP-y/.sdlc/state.json': '{}\n', 'epics/EP-y/.sdlc/approvals.json': '[]\n' }, refused: false },
+    { name: 'an artifact', files: { 'epics/EP-x/epic.md': '# changed\n' }, refused: false },
+    { name: 'the contract lock', files: { 'epics/EP-x/.sdlc/contract-lock.json': '{}\n' }, refused: false },
+    { name: 'the bot\'s mutation', files: { 'epics/EP-x/.sdlc/state.json': '{"a":1}\n' }, refused: false, env: { GIT_AUTHOR_NAME: 'yad-gate-sync[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com' } },
+  ];
+  try {
+    for (const sh of shapes) {
+      git(repo, 'checkout', '-q', '-B', 'feature', 'origin/main');
+      write(sh.files);
+      git(repo, 'add', '-A');
+      const env = { ...GIT_ENV, ...(sh.env || {}) };
+      const hook = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'hook', 'ledger-guard', '--staged'], { cwd: repo, env, encoding: 'utf8' });
+      execFileSync('git', ['commit', '-q', '--no-verify', '-m', sh.name], { cwd: repo, env, stdio: 'pipe' });
+      const ci = runGate(LEDGER_GUARD, repo, ['origin/main']);
+      assert.equal(hook.status === 2, sh.refused, `${sh.name}: the hook ${hook.status === 2 ? 'refused' : 'passed'} it\n${hook.stderr}`);
+      assert.equal(ci.code === 1, sh.refused, `${sh.name}: ledger-guard.sh ${ci.code === 1 ? 'refused' : 'passed'} it\n${ci.out}`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('ledger-guard: an un-migrated hub.json still arms the guard (new script, old file)', () => {
   const T = scaffoldRepo();
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
