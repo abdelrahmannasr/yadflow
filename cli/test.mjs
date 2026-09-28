@@ -1443,6 +1443,17 @@ test('buildCommitMessage omits co-author for ai=none and rejects bad input', () 
   assert.throws(() => buildCommitMessage({ type: 'feat', subject: 'x', ai: 'ghost' }), /unknown --ai/);
 });
 
+test('buildCommitMessage records a --manual reason as a Ledger-Override trailer, before the co-author (E49)', () => {
+  const msg = buildCommitMessage({ type: 'fix', subject: 'restore the ledger', task: 'EP-x-S01-T02', contractChange: true, ai: 'claude', override: '  lost in #12 ' });
+  const trailers = msg.split('\n\n').pop().split('\n');
+  assert.deepEqual(trailers.map((l) => l.split(':')[0]), ['Task', 'Contract-Change', 'Ledger-Override', 'Co-Authored-By']);
+  assert.ok(trailers.includes('Ledger-Override: lost in #12'), 'trimmed');
+  assert.doesNotMatch(buildCommitMessage({ type: 'fix', subject: 'x' }), /Ledger-Override/, 'none without --manual');
+  for (const bad of ['', '   ', 'one\ntwo', 'one\rtwo']) {
+    assert.throws(() => buildCommitMessage({ type: 'fix', subject: 'x', override: bad }), /one non-empty line/, JSON.stringify(bad));
+  }
+});
+
 test('buildCommitMessage rejects a malformed --task the spec-link gate would fail', () => {
   // Bare story with no -T<NN> — commits fine locally today, fails spec-link in CI (#113).
   assert.throws(() => buildCommitMessage({ type: 'feat', subject: 'x', task: 'EP-demo-S01' }), /invalid --task/);

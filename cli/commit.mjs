@@ -4,17 +4,23 @@
 // co-author (flagged with --ai, or `none` for human-only). An atomic-commit guard keeps diffs small.
 // An explicit --task id is validated against the spec-link gate contract (<story>-T<NN>) so a
 // malformed trailer fails locally rather than after a push.
+//
+// `--manual --reason` (E49) is the door past the Product's local ledger hook (E48): the commit runs with
+// the hook's skip switch, and the reason is recorded as a `Ledger-Override:` trailer so the reviewer —
+// and the CI `ledger-guard` check, which quotes it — can see why. It opens this machine's hook and
+// nothing more: CI still fails the commit, because anyone can type a trailer.
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, run, exists } from './lib.mjs';
 import {
   COMMIT_TYPES, AI_COAUTHORS, ATOMIC_FILE_LIMIT,
-  TASK_TRAILER, CONTRACT_CHANGE_TRAILER, COAUTHOR_TRAILER, TASK_ID_RE,
+  TASK_TRAILER, CONTRACT_CHANGE_TRAILER, LEDGER_OVERRIDE_TRAILER, COAUTHOR_TRAILER, TASK_ID_RE,
   productConfigPath,
 } from './manifest.mjs';
+import { OWNING_COMMIT_ENV } from './hook.mjs';
 
 // PURE — unit tested directly. Build the full commit message text.
-export function buildCommitMessage({ type, subject, task, contractChange = false, ai = 'none', body = '' }) {
+export function buildCommitMessage({ type, subject, task, contractChange = false, ai = 'none', body = '', override = null }) {
   if (!COMMIT_TYPES.includes(type)) throw new Error(`invalid commit type "${type}" (one of: ${COMMIT_TYPES.join(', ')})`);
   if (!subject || !subject.trim()) throw new Error('commit subject is required');
   if (!(ai in AI_COAUTHORS)) throw new Error(`unknown --ai "${ai}" (one of: ${Object.keys(AI_COAUTHORS).join(', ')})`);
@@ -27,9 +33,16 @@ export function buildCommitMessage({ type, subject, task, contractChange = false
     throw new Error(`invalid --task "${task}" (expected EP-<slug>-S<n>-T<NN> with a lowercase slug, e.g. EP-x-S01-T02) — the spec-link CI gate would reject it`);
   }
 
+  // A trailer is one line: a newline in the reason would end it early and start a line git reads as
+  // body text or as a trailer of its own.
+  if (override !== null && (typeof override !== 'string' || !override.trim() || /[\r\n]/.test(override))) {
+    throw new Error('--reason must be one non-empty line (it becomes the Ledger-Override trailer)');
+  }
+
   const trailers = [];
   if (task) trailers.push(`${TASK_TRAILER}: ${task}`);
   if (contractChange) trailers.push(`${CONTRACT_CHANGE_TRAILER}: yes`);
+  if (override !== null) trailers.push(`${LEDGER_OVERRIDE_TRAILER}: ${override.trim()}`);
   const co = AI_COAUTHORS[ai];
   if (co) trailers.push(`${COAUTHOR_TRAILER}: ${co.name} <${co.email}>`);
 
@@ -48,6 +61,10 @@ export function taskFromBranch(branch = '') {
 export async function runCommit(root, opts = {}) {
   log(c.bold('\nyad commit'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
+  // --manual and --reason come as a pair: an override with no reason records nothing, and a reason with
+  // no --manual would be silently dropped.
+  if (opts.manual && (opts.reason === undefined || opts.reason === true)) { fail('--manual needs --reason "<why>" — the reason is recorded in the commit as a Ledger-Override trailer'); process.exitCode = 1; return; }
+  if (!opts.manual && opts.reason !== undefined) { fail('--reason is only for --manual (the ledger override)'); process.exitCode = 1; return; }
 
   const staged = run('git', ['diff', '--cached', '--name-only'], { cwd: root }).stdout.split('\n').filter(Boolean);
   if (!staged.length) { fail('nothing staged — `git add` your atomic change first'); process.exitCode = 1; return; }
@@ -75,17 +92,20 @@ export async function runCommit(root, opts = {}) {
     message = buildCommitMessage({
       type: opts.type, subject: opts.message, task,
       contractChange: !!opts.contractChange, ai: opts.ai || 'none',
+      override: opts.manual ? String(opts.reason) : null,
     });
   } catch (e) { fail(e.message); process.exitCode = 1; return; }
 
   // The --json answer (E1): what was (or would be) committed.
-  const answer = { message, task: task || null, files: staged, contractChange: !!opts.contractChange };
+  const answer = { message, task: task || null, files: staged, contractChange: !!opts.contractChange, manual: !!opts.manual, reason: opts.manual ? String(opts.reason).trim() : null };
   if (opts.dryRun) { log('\n' + c.dim(message) + '\n'); info('dry run — not committed'); return { ...answer, committed: false, dryRun: true }; }
 
-  const r = run('git', ['commit', '-m', message], { cwd: root });
+  // Only yad's own hook is skipped — any other pre-commit hook (husky, lint-staged) still runs.
+  const r = run('git', ['commit', '-m', message], { cwd: root, ...(opts.manual ? { env: OWNING_COMMIT_ENV() } : {}) });
   if (!r.ok) { fail(`git commit failed — ${r.stderr.split('\n')[0] || r.code}`); process.exitCode = 1; return { ...answer, committed: false, dryRun: false }; }
   ok(`committed ${staged.length} file(s)${task ? ` for ${task}` : ''}`);
   if (opts.contractChange) warn('Contract-Change: yes — this routes back to the architecture gate');
+  if (opts.manual) warn('Ledger-Override recorded — the ledger-guard check on the pull request still judges this commit, and fails it if it changes a CI-owned file');
   const sha = run('git', ['rev-parse', 'HEAD'], { cwd: root });
   return { ...answer, committed: true, dryRun: false, commit: sha.ok ? sha.stdout : null };
 }

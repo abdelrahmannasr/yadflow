@@ -272,6 +272,12 @@ is_seeding() {                      # $1 = epic slug; 0 when that epic has no le
 }
 
 violations=0
+# E49: `yad commit --manual --reason` records why a person committed past the local ledger hook, as a
+# `Ledger-Override:` trailer. Anyone can type a trailer, so it changes NOTHING about the verdict — the
+# failing commit still fails. The reason is quoted under the FAIL so the reviewer sees why it was done.
+# Every quoted line starts with two spaces: a reason is the commit author's text, and a line that
+# began with `::` would be read by GitHub Actions as a workflow command.
+overrides=()
 for sha in $commits; do
   touches_ledger=0
   # quotePath=false + -z on both git reads: a path git chose to escape ("epics/EP-caf\303\251/…") and a
@@ -308,11 +314,18 @@ for sha in $commits; do
   done < <(git -c core.quotePath=false diff-tree --no-commit-id --name-only -r -z "$sha")
   if [ "$touches_ledger" = 1 ] && ! trusted_bot "$sha"; then
     violations=$((violations + 1))
+    while IFS= read -r _why; do
+      [ -n "$_why" ] && overrides[${#overrides[@]}]="  ${sha} Ledger-Override: ${_why}"
+    done < <(git show -s --format='%(trailers:key=Ledger-Override,valueonly,unfold)' "$sha" 2>/dev/null || true)
   fi
 done
 
 if [ "$violations" -gt 0 ]; then
   echo "FAIL [ledger-guard]: ${violations} commit(s) change CI-owned gate files without a verified gate-bot signature. The ledger is CI-owned — let CI sync the gate; do not commit .sdlc/*.json or reviews/*.md yourself."
+  if [ "${#overrides[@]}" -gt 0 ]; then
+    echo "note [ledger-guard]: a person committed past the local hook with \`yad commit --manual\` and gave this reason. It is recorded for the reviewer and does not change the verdict:"
+    printf '%s\n' "${overrides[@]}"
+  fi
   # An epic's seed is exempt only while its ledger is off the base ref. Once the first review PR merges
   # (squashed or rebased, so the SHAs differ), those same seed commits still sitting on a sibling
   # authoring branch read as mutations — the author did nothing wrong and the remedy is a rebase, so

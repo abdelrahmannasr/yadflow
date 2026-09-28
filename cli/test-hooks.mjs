@@ -699,7 +699,7 @@ test('E48: --staged refuses a hand commit that changes an on-base ledger, and na
     assert.match(r.err, /^ {2}epics\/EP-a\/\.sdlc\/state\.json$/m);
     assert.match(r.err, /git restore --staged -- \.sdlc\/index\.json epics\/EP-a\/\.sdlc\/state\.json/);
     assert.match(r.err, /yad gate open EP-a <artifact>/);
-    assert.match(r.err, /YAD_HOOK_DISABLE=1 git commit/);
+    assert.match(r.err, /yad commit --manual --reason "<why>" --type <type> -m "<subject>"/, 'the door (E49)');
     assert.match(r.err, /check on the pull request still judges it/, 'the door says what it does not open');
   } finally { cleanup(T); }
 });
@@ -951,8 +951,29 @@ test('E48 review 2: the agent\'s refusal and the commit refusal say the same thi
   const commit = commitDenyMessage({ top, hits: [{ kind: 'state', epic: 'EP-a', abs: path.join(top, 'epics/EP-a/.sdlc/state.json'), productRoot: top }] });
   for (const [name, m] of [['agent', agent], ['commit', commit]]) {
     assert.match(m, /yad gate repair EP-a --push/, `${name}: the repair that commits`);
+    assert.match(m, /yad commit --manual --reason "<why>"/, `${name}: the door for people (E49)`);
+    assert.match(m, /check on the pull request\s+still judges it/, `${name}: and what it does not open`);
     assert.doesNotMatch(m, /reach the default branch|CI still refuses/, `${name}: the check runs on pull requests only`);
     assert.doesNotMatch(m, /\n\n\n/, `${name}: no double blank line`);
+  }
+});
+
+test('E49: the agent is told the door is a person\'s call, and the index refusal names it too', async () => {
+  const { denyMessage, indexDenyMessage } = await import('./hook.mjs');
+  const top = path.join(os.tmpdir(), 'r');
+  for (const m of [denyMessage({ epic: 'EP-a', rel: 'epics/EP-a/.sdlc/state.json', productRoot: top }), indexDenyMessage({ rel: '.sdlc/index.json', productRoot: top })]) {
+    assert.match(m, /If a person decides this change must land anyway/);
+    assert.match(m, /their call, not the agent's/);
+    assert.match(m, /a person can skip this hook for one command: YAD_HOOK_DISABLE=1/);
+    assert.doesNotMatch(m, /\n\n\n/, 'no double blank line');
+  }
+});
+
+test('E49: yad ship refuses --manual and --reason rather than ignoring them', () => {
+  for (const flags of [['--manual', '--reason', 'x'], ['--manual'], ['--reason', 'x']]) {
+    const r = spawnSync(process.execPath, [YAD, 'ship', '--type', 'fix', '-m', 'x', ...flags], { cwd: os.tmpdir(), encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+    assert.notEqual(r.status, 0, flags.join(' '));
+    assert.match(r.stdout + r.stderr, /yad ship takes no --manual\/--reason/);
   }
 });
 

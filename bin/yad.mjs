@@ -173,7 +173,9 @@ ${c.bold('Review gate (Shape)')}
                         --merged advances the step + flips artifact status on the default branch
 
 ${c.bold('Build helpers')}
-  yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
+  yad commit --type <t> -m <subject> [--manual --reason <why>]
+                                       Commit by convention (trailers, atomic guard); --manual is
+                                       the door past the Product's ledger hook, reason recorded
   yad open-pr [--repo <name>]          Open a task PR/MR against the repo's DEFAULT branch (never a
                                        hardcoded main; --base overrides) — stage-aware on the Product: a
                                        review/EP-* branch opens the Shape artifact-review PR
@@ -261,6 +263,9 @@ ${c.bold('Options')}
   --task <id>           commit: Task trailer, EP-<slug>-S<n>-T<NN> (else derived from the branch)
   --ai <id>             commit: co-author — claude|copilot|cursor|coderabbit|none (default none)
   --contract-change     commit/open-pr: mark the contract surface touched
+  --manual              commit: on a verified Product, commit past the local ledger hook; needs
+                        --reason, recorded as a Ledger-Override trailer. The ledger-guard check
+                        on the pull request still judges the commit, and quotes the reason
   --risk <level>        open-pr: low|medium|high (default low)
   --repo <name>         open-pr: target a registered repo by name
   --base <branch>       open-pr: override the PR/MR base — default is the repo's own default
@@ -298,6 +303,7 @@ function parseArgs(argv) {
     if (a === '--fix') o.fix = true;
     else if (a === '--force') o.force = true;
     else if (a === '--contract-change') o.contractChange = true;
+    else if (a === '--manual') o.manual = true;
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--no-fetch') o.noFetch = true;
     else if (a === '--push') o.push = true;
@@ -630,12 +636,15 @@ async function main() {
       break;
     }
     case 'commit':
-      result = await commands.runCommit(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force });
+      result = await commands.runCommit(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, manual: o.manual, reason: o.reason });
       break;
     case 'open-pr':
       result = await commands.runOpenPr(o.dir, { repo: o.repo, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange });
       break;
     case 'ship':
+      // The ledger override is its own act (E49): recorded in its own commit, never folded into a
+      // commit-and-open-PR run. Refused, never ignored.
+      if (o.manual || o.reason !== undefined) { refuse('yad ship takes no --manual/--reason: commit with `yad commit --manual --reason "<why>" …`, then `yad open-pr`'); break; }
       result = await commands.runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
       break;
     case 'checkpoint': {
