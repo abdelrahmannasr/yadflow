@@ -30,10 +30,13 @@ import { codeContextPathOk } from './workspace.mjs';
 const oneLine = (s = '') => String(s).replace(/\s+/g, ' ').trim();
 
 // The tracked code-map for a repo: the registered path, else the conventional location.
-const codeMapOf = (repo) => repo.codeMap || path.posix.join('.sdlc/code-context', repo.name, 'code-map.md');
+// A registry entry with no `name` (or a name that is not text) and no path of its own has no place
+// here: null, which `codeContextPathOk` refuses — never a throw halfway through a publish (E81 review 2).
+const inContext = (repo, file) => (typeof repo?.name === 'string' && repo.name ? path.posix.join('.sdlc/code-context', repo.name, file) : null);
+export const codeMapOf = (repo) => repo.codeMap || inContext(repo, 'code-map.md');
 
 // The repomix pack for a repo: the registered path, else the conventional location.
-const packOf = (repo) => repo.contextPack || path.posix.join('.sdlc/code-context', repo.name, 'pack.md');
+export const packOf = (repo) => repo.contextPack || inContext(repo, 'pack.md');
 
 // PURE — the repo-relative pathspecs to stage: the registry plus each registered repo's code-map that
 // exists on disk. When `name` is given (a scoped `yad repo refresh <name> --push`), only that repo's

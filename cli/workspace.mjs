@@ -132,12 +132,13 @@ export function judgeRepo(productRoot, repo) {
   if (!insideWorkspace(productRoot, rpath)) return { ...at, state: 'refused', reason: 'outside the workspace (the Product folder\'s parent)' };
   if (exists(path.join(target, '.git'))) return { ...at, state: 'present', ...(inRepoLink(productRoot, target) ? { linked: true } : {}) };
   // A folder inside a checkout (the monorepo layout: `apps/web` in the Product's own repo) has no `.git`
-  // of its own, and git finds the checkout by walking up. It is present when nothing on the way is a link
-  // (so the walk git makes is the one read here) and no folder on the way is shaped like a bare repo —
-  // git would stop at that folder and read its `config`.
-  const top = exists(target) && !throughLink(productRoot, target) ? enclosingCheckout(productRoot, target) : null;
+  // of its own, and git finds the checkout by walking up. It is present when no link deeper than the
+  // workspace folder is on the way (so the walk git makes is the one read here — a link of the person's
+  // own directly in the workspace folder is followed, as for a checkout) and no folder on the way could
+  // be taken for a bare repo, where git would stop and read that folder's `config`.
+  const top = exists(target) && !inRepoLink(productRoot, target) ? enclosingCheckout(productRoot, target) : null;
   if (top) {
-    if (bareShapeOnWay(target, top)) return { ...at, state: 'refused', reason: 'a folder on its way is shaped like a bare git repo (HEAD with objects or refs), and git would read its config' };
+    if (headOnWay(target, top)) return { ...at, state: 'refused', reason: 'a folder on its way holds an entry named HEAD, so git could take it for a bare repo and read its config' };
     return { ...at, state: 'present', inside: top };
   }
   if (throughLink(productRoot, target)) return { ...at, state: 'refused', reason: 'a folder on its path is a link, so where the clone lands is not what the path says' };
@@ -159,13 +160,16 @@ function enclosingCheckout(productRoot, target) {
   return null;
 }
 
-// Git takes a folder for a bare repo when it holds `HEAD`, `objects/` and `refs/`; any two of the
-// shape (`HEAD` with either folder) is refused here, the safe side. From `target` up to, not
-// including, the checkout `top`.
-const looksBare = (dir) => exists(path.join(dir, 'HEAD')) && (exists(path.join(dir, 'objects')) || exists(path.join(dir, 'refs')));
-function bareShapeOnWay(target, top) {
+// Git takes a folder for a bare repo only when it holds `HEAD` — then `objects/` and `refs/` may come
+// from anywhere (a `commondir` file points elsewhere), and `HEAD` may be a link that points nowhere
+// (E81 review 2 made git run a command both ways). So the one sound test is the part git always needs:
+// ANY entry named `HEAD`, of any kind, read with `lstat` so a dangling link counts. The file system
+// matches the name as git's own lookup does (without case on macOS and Windows). From `target` up to,
+// not including, the checkout `top`.
+const hasHead = (dir) => { try { fs.lstatSync(path.join(dir, 'HEAD')); return true; } catch { return false; } };
+function headOnWay(target, top) {
   for (let cur = target; cur !== top && cur.startsWith(top + path.sep); cur = path.dirname(cur)) {
-    if (looksBare(cur)) return true;
+    if (hasHead(cur)) return true;
   }
   return false;
 }

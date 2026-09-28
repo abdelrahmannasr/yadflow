@@ -26411,7 +26411,7 @@ test('E81 review 1: a registered folder inside a checkout (the monorepo layout) 
     for (const id of ['repo:bare', 'repo:inner']) {
       const ck = doc.checks.find((c) => c.id === id);
       assert.equal(ck.status, 'fail');
-      assert.match(ck.message, /shaped like a bare git repo/);
+      assert.match(ck.message, /entry named HEAD/);
     }
     const list = JSON.parse(e79Yad(T, product, ['repo', 'list', '--json']).stdout);
     assert.deepEqual(list.repos.map((r) => r.state), ['no-pack', 'refused', 'refused']);
@@ -26469,5 +26469,77 @@ test('E81 review 1: an entry that is not an object is named by every repo action
     const doc = e79Yad(T, product, ['doctor', '--json']);
     assert.doesNotMatch(doc.stdout + doc.stderr, /Cannot read/);
     assert.equal(JSON.parse(doc.stdout).checks.find((c) => c.id === 'repos:not-an-entry').status, 'fail');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 2: a folder holding any entry named HEAD is never walked through — a dangling HEAD link or a commondir file too', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { judgeRepo } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  const tmp = fs.realpathSync(os.tmpdir());
+  const markers = ['fsmonitor', 'uploadpack'].map((k) => path.join(tmp, `yad-e81-r2-${k}-${process.pid}`));
+  for (const m of markers) fs.rmSync(m, { force: true });
+  try {
+    const { product } = e80Workspace(T);
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    // (a) HEAD a link to nowhere — git still takes the folder for a repo — with a config that runs a command.
+    const web = path.join(product, 'apps', 'web');
+    for (const d of ['objects', 'refs']) { fs.mkdirSync(path.join(web, d), { recursive: true }); fs.writeFileSync(path.join(web, d, '.k'), ''); }
+    fs.symlinkSync('refs/heads/main', path.join(web, 'HEAD'));
+    fs.writeFileSync(path.join(web, 'config'), `[core]\n\tbare = false\n\tworktree = .\n\tfsmonitor = touch ${markers[0]}\n`);
+    // (b) HEAD with a commondir that points at objects and refs elsewhere, whose config sets uploadpack.
+    const cd = path.join(product, 'apps', 'cd');
+    fs.mkdirSync(cd, { recursive: true });
+    fs.writeFileSync(path.join(cd, 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(cd, 'commondir'), '../../evil\n');
+    const evil = path.join(product, 'evil');
+    fs.mkdirSync(path.join(evil, 'objects'), { recursive: true });
+    fs.mkdirSync(path.join(evil, 'refs', 'heads'), { recursive: true });
+    fs.writeFileSync(path.join(evil, 'refs', 'heads', 'main'), `${'1'.repeat(40)}\n`);
+    fs.writeFileSync(path.join(evil, 'config'), `[remote "origin"]\n\turl = ${product}\n\tuploadpack = touch ${markers[1]}\n`);
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'payloads');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
+      { name: 'web', path: 'apps/web', default_branch: 'main' },
+      { name: 'cd', path: 'apps/cd', default_branch: 'main' },
+      { name: 'deep', path: 'apps/web/objects', default_branch: 'main' },
+    ] }));
+    for (const p of ['apps/web', 'apps/cd', 'apps/web/objects']) {
+      const j = judgeRepo(product, { name: 'x', path: p });
+      assert.equal(j.state, 'refused', p);
+      assert.match(j.reason, /entry named HEAD/);
+    }
+    for (const args of [['repo', 'sync'], ['repo', 'list'], ['repo', 'refresh'], ['doctor'], ['risk-map', 'check'], ['codeowners', 'check']]) e79Yad(T, product, args);
+    for (const m of markers) assert.ok(!fs.existsSync(m), `${path.basename(m)}: no command ran`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); for (const m of markers) fs.rmSync(m, { force: true }); }
+});
+
+test('E81 review 2: a subfolder of a checkout behind the person\'s own workspace link is present; a Product link is not read by list', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { judgeRepo } = await import('./workspace.mjs');
+  const { codeMapPathspecs, packPathspecs } = await import('./repo-publish.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    const ext = path.join(T, 'ext', 'mono');
+    fs.mkdirSync(path.join(ext, 'apps', 'web'), { recursive: true });
+    e79Git(T, ext, 'init', '-q', '-b', 'main');
+    fs.symlinkSync(ext, path.join(ws, 'mono'));
+    assert.equal(judgeRepo(product, { name: 'm', path: '../mono' }).state, 'present');
+    const sub = judgeRepo(product, { name: 'w', path: '../mono/apps/web' });
+    assert.equal(sub.state, 'present', sub.reason);
+    assert.equal(sub.inside, path.join(ws, 'mono'));
+    // A link the Product commits: list names it and reads nothing, as sync and refresh skip it.
+    fs.symlinkSync('../mono', path.join(product, 'evil'));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'evil', path: 'evil' }] }));
+    const row = JSON.parse(e79Yad(T, product, ['repo', 'list', '--json']).stdout).repos[0];
+    assert.equal(row.state, 'refused');
+    assert.match(row.reason, /is a link/);
+    // A nameless entry, or one whose name is not text, has no code-context place: skipped, never a throw.
+    const odd = { repos: [{ path: '../x' }, { name: 5, path: '../y' }] };
+    assert.deepEqual(codeMapPathspecs(product, odd), ['.sdlc/repos.json']);
+    assert.deepEqual(packPathspecs(product, odd), []);
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ path: '../mono' }, { name: 5, path: '../mono' }] }));
+    const r = e79Yad(T, product, ['repo', 'refresh']);
+    assert.doesNotMatch(r.stdout + r.stderr, /yad failed|ERR_INVALID_ARG_TYPE/);
+    assert.match(r.stdout, /not a path under \.sdlc\/code-context/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

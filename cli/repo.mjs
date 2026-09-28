@@ -10,12 +10,7 @@ import { c, log, ok, info, warn, hand, fail, writeJSON, run } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPathOk, CODE_CONTEXT_DIR, shown } from './workspace.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { publishCodeContext } from './repo-publish.mjs';
-
-// A repo's pack and code-map paths as the registry gives them, else the conventional place under
-// `.sdlc/code-context/<name>/` (the same defaults repo-publish.mjs uses).
-const packPath = (repo) => repo.contextPack || path.posix.join(CODE_CONTEXT_DIR, String(repo.name), 'pack.md');
-const mapPath = (repo) => repo.codeMap || path.posix.join(CODE_CONTEXT_DIR, String(repo.name), 'code-map.md');
+import { publishCodeContext, packOf, codeMapOf } from './repo-publish.mjs';
 
 // Strict (E81): a registry that does not parse is said, not read as "no repos" — and `refresh` writes it
 // back, so a lenient read would replace a broken file (and every entry in it) with an empty list.
@@ -70,6 +65,8 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       // Judged before git runs (E81): only a checkout that is there is read. A missing repo says so and
       // names the command that clones it; a refused entry says why — git is never run in it.
       const j = judgeRepo(root, repo);
+      // A checkout behind a link inside a repo's tree is not read either, as `sync` and `refresh` skip it.
+      if (j.linked) Object.assign(j, { state: 'refused', reason: 'a folder on its path, inside a repo, is a link, so the checkout is not where the path says' });
       if (j.state === 'missing' || j.state === 'refused') {
         rows.push({ name: repo.name ?? null, path: repo.path ?? null, head: null, syncedHead: repo.syncedHead ?? null, state: j.state === 'missing' ? 'missing' : 'refused', ...(j.reason ? { reason: j.reason } : {}) });
         if (j.state === 'missing') { missing++; warn(`${j.name} ${c.dim(`(${j.path})`)} — ${c.yellow('not cloned on this machine')}`); }
@@ -103,7 +100,7 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       const why = j.state === 'missing' ? 'not cloned on this machine (`yad repo clone`)'
         : j.state === 'refused' ? j.reason
           : j.linked ? 'a folder on its path, inside a repo, is a link, so the checkout is not where the path says'
-            : !codeContextPathOk(root, packPath(repo)) || !codeContextPathOk(root, mapPath(repo)) ? `its contextPack or codeMap is not a path under ${CODE_CONTEXT_DIR}/ in the Product`
+            : !codeContextPathOk(root, packOf(repo)) || !codeContextPathOk(root, codeMapOf(repo)) ? `its contextPack or codeMap is not a path under ${CODE_CONTEXT_DIR}/ in the Product`
               : null;
       if (why) {
         warn(`${j.name}: ${why} — skipped`);
@@ -113,7 +110,7 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       const { head, unknown } = staleness(root, repo);
       if (unknown) { warn(`${j.name}: HEAD unreadable — skipped`); rows.push({ name: repo.name ?? null, refreshed: false, head: null }); continue; }
       log(`  ${c.bold(j.name)}`);
-      const packed = !!packRepo(root, { ...repo, contextPack: packPath(repo) });
+      const packed = !!packRepo(root, { ...repo, contextPack: packOf(repo) });
       if (packed) {
         repo.syncedHead = head;
         if (today) repo.lastSyncedAt = today;   // always stamp when a date is supplied (the CLI passes today)
