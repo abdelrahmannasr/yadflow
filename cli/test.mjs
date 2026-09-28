@@ -25586,7 +25586,8 @@ function e79Env(T, extra = {}) {
 }
 const e79Yad = (T, cwd, args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd, env: e79Env(T), encoding: 'utf8', timeout: 120_000 });
 const e79Git = (T, cwd, ...a) => execFileSync('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', ...a], { cwd, env: e79Env(T), stdio: 'pipe' }).toString().trim();
-const e79Tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e79-')));
+// A space in every E79 folder: a home folder like `C:\Users\Jane Doe` must work, and must not reach a message.
+const e79Tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad e79-')));
 
 test('E79: folder names, the workspace name from a URL, and the printed remote steps', async () => {
   const { validFolderName, workspaceNameFromUrl, remoteSteps, shown } = await import('./workspace.mjs');
@@ -25896,7 +25897,7 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     const corrupt = e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude']);
     assert.equal(corrupt.status, 0, corrupt.stdout + corrupt.stderr);
     assert.match(corrupt.stdout + corrupt.stderr, /repos\.json in the Product cannot be read \(Unexpected token/);
-    assert.doesNotMatch(corrupt.stdout + corrupt.stderr, /corrupt JSON in|yad-e79-/, 'the reason, without the absolute path');
+    assert.doesNotMatch(corrupt.stdout + corrupt.stderr, /corrupt JSON in|yad e79-/, 'the reason, without the absolute path — which holds a space');
     assert.ok(fs.existsSync(path.join(joined, '.git', 'hooks', 'pre-commit')), 'the per-machine steps still ran');
     fs.writeFileSync(path.join(joined, '.sdlc', 'repos.json'), 'null\n');
     const nul = e79Yad(T, fresh, ['join', path.join(remotes, 'acme.git'), '--ide-targets', '.claude']);
