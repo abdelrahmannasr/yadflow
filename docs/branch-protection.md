@@ -146,7 +146,8 @@ or the Product index `.sdlc/index.json` — the commit is refused, and the messa
   and records your reason in the commit as a trailer — a `Key: value` line at the end of the commit
   message — `Ledger-Override: <why>`. The `ledger-guard` check on the pull request still judges that
   commit. It still fails it, because anyone can type a trailer, and it prints your reason under the FAIL
-  so the reviewer sees why. Only yad's own hook is skipped; any other pre-commit hook (husky,
+  so the reviewer sees why (a copy of the check from before E49 fails it without the quote;
+  `yad update` refreshes it). Only yad's own hook is skipped; any other pre-commit hook (husky,
   lint-staged) still runs. With `ledger-guard` required, that pull request merges only when someone
   who may bypass the rules merges it past the failed check — the quoted reason is what they read first.
 

@@ -803,7 +803,7 @@ The door for a PERSON is `yad commit --manual --reason "<why>"` (E49): it skips 
 one commit and records the reason as a `Ledger-Override:` trailer. `ledger-guard` in CI still FAILS the
 commit — anyone can type a trailer — and prints the reason under the FAIL. Each line is indented and
 every control character (a carriage return, an escape) becomes a space, so an author's text never starts
-a line GitHub Actions would read as a workflow command. The author names it prints get the same cleaning.
+a line GitHub Actions would read as a workflow command. The author names and file paths it prints get the same cleaning (a newline in a path becomes a space too).
 
 **Known gaps** — both fall through to the CI gate, which is why it stays the authority:
 

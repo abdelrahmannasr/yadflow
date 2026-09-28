@@ -3665,6 +3665,26 @@ test('ledger-guard: a hand-typed Ledger-Override with a carriage return cannot s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('ledger-guard: a carriage return or newline in a PATH cannot start a workflow-command line either (E49 review 2)', { skip: process.platform === 'win32' && 'no CR or newline in a Windows file name' }, () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  // A review file is CI-owned, so it is printed under the FAIL; a new epic's folder is printed in the
+  // seed note, which runs on a PASS too.
+  commit(T, 'hand edit', {
+    'epics/EP-x/reviews/a\r::warning::pwn.md': 'x\n',
+    'epics/EP-x/reviews/b\n::error::pwn.md': 'x\n',
+    'epics/EP-n\r::notice::pwn/.sdlc/state.json': '{}\n',
+  });
+  const r = runGate(LEDGER_GUARD, T, ['main']);
+  assert.equal(r.code, 1, r.out);
+  assert.ok(!r.out.includes('\r'), `no carriage return reaches the log\n${r.out}`);
+  assert.doesNotMatch(r.out, /^::/m);
+  assert.match(r.out, /reviews\/a ::warning::pwn\.md/);
+  assert.match(r.out, /reviews\/b ::error::pwn\.md/);
+  assert.match(r.out, /epics\/EP-n ::notice::pwn has no ledger/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('ledger-guard: a failing commit with no override prints no override note (E49)', () => {
   const T = scaffoldRepo();
   seedLedgerOnBase(T);

@@ -197,6 +197,15 @@ trusted_bot() {
   signature_verified "$1"
 }
 
+# Text a commit's author chose — a name, a path, a Ledger-Override reason — is printed into the CI log.
+# The GitHub runner ends a log line at a lone carriage return too, so every control character (CR, ESC,
+# …) becomes a space first; otherwise `\r::error::…` inside a path or a reason would start a line
+# GitHub Actions reads as a workflow command.
+# `printable` keeps newlines, for a list read line by line; `oneline` is for one value (a name, a path),
+# where a newline would start a line of its own too.
+printable() { LC_ALL=C tr '\000-\011\013-\037\177' ' '; }
+oneline() { printf '%s' "$1" | LC_ALL=C tr '\000-\037\177' ' '; }
+
 # ---- seeding carve-out: creation is not mutation (#162) ---------------------------------------
 # A brand-new epic's ledger has no CI author. `gate ci` only ADVANCES an existing chain — it bails on
 # a missing state.json ("the review branch is cut from the default branch, so it should carry it") and
@@ -266,7 +275,7 @@ is_seeding() {                      # $1 = epic slug; 0 when that epic has no le
   in_list "$_f" "${base_slugs[@]}"  && return 1
   in_list "$_f" "${noted_slugs[@]}" && return 0
   noted_slugs[${#noted_slugs[@]}]="$_f"
-  if [ "$_f" = "ep-foundation" ]; then _where="foundation"; else _where="epics/$1"; fi
+  if [ "$_f" = "ep-foundation" ]; then _where="foundation"; else _where="epics/$(oneline "$1")"; fi
   echo "note [ledger-guard]: ${_where} has no ledger on ${BASE} — new epic, its seed is exempt (creation, not mutation)."
   return 0
 }
@@ -275,11 +284,8 @@ violations=0
 # E49: `yad commit --manual --reason` records why a person committed past the local ledger hook, as a
 # `Ledger-Override:` trailer. Anyone can type a trailer, so it changes NOTHING about the verdict — the
 # failing commit still fails. The reason is quoted under the FAIL so the reviewer sees why it was done.
-# Every quoted line starts with two spaces: a reason is the commit author's text, and a line that
-# began with `::` would be read by GitHub Actions as a workflow command.
-# The indent alone is not enough: the runner also ends a log line at a lone carriage return, so every
-# control character in an author's text (CR, ESC, …) becomes a space before it is printed.
-printable() { LC_ALL=C tr '\000-\011\013-\037\177' ' '; }
+# Every quoted line starts with two spaces and goes through `printable` (above): a reason is the commit
+# author's text, and a line that began with `::` would be read by GitHub Actions as a workflow command.
 overrides=()
 for sha in $commits; do
   touches_ledger=0
@@ -291,14 +297,14 @@ for sha in $commits; do
     case "$f" in
       .sdlc/index.json)                    # the Product index (E19) — derived, CI-written, never a seed
         touches_ledger=1
-        echo "  ${sha} (author $(git show -s --format='%an' "$sha" | printable)) → $f"
+        echo "  ${sha} (author $(oneline "$(git show -s --format='%an' "$sha")")) → $(oneline "$f")"
         ;;
       epics/*/.sdlc/contract-lock.json) ;; # artifact-side — allowed
       epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/product-prs.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
         _slug="${f#epics/}"; _slug="${_slug%%/*}"
         is_seeding "$_slug" && continue      # a new epic's seed — not a mutation of a CI-owned ledger
         touches_ledger=1
-        echo "  ${sha} (author $(git show -s --format='%an' "$sha" | printable)) → $f"
+        echo "  ${sha} (author $(oneline "$(git show -s --format='%an' "$sha")")) → $(oneline "$f")"
         ;;
       # The Foundation's ledger (E75) — the same files, in the Product level's own folder, under the fixed
       # id EP-foundation. Matched on the path BELOW `foundation/` with a leading `/` put back, so the
@@ -309,7 +315,7 @@ for sha in $commits; do
           */.sdlc/state.json|*/.sdlc/approvals.json|*/.sdlc/comments.json|*/.sdlc/product-prs.json|*/.sdlc/hub-prs.json|*/reviews/*.md)
             is_seeding "EP-foundation" && continue
             touches_ledger=1
-            echo "  ${sha} (author $(git show -s --format='%an' "$sha" | printable)) → $f"
+            echo "  ${sha} (author $(oneline "$(git show -s --format='%an' "$sha")")) → $(oneline "$f")"
             ;;
         esac
         ;;

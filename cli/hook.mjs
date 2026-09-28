@@ -448,7 +448,7 @@ export function commitDenyMessage({ hits, top }) {
     'pull request judges the result against its parent.',
     'To commit anyway, with the reason recorded in the commit (it adds a `Ledger-Override:` line):',
     '  yad commit --manual --reason "<why>" --type <type> -m "<subject>"   (add --force above 3 files)',
-    'The check on the pull request still fails it; a current `ledger-guard` also quotes the reason.',
+    'The check on the pull request still fails it, and quotes the reason.',
     `hub: ${roots.join(', ')}`,
   ].join('\n');
 }

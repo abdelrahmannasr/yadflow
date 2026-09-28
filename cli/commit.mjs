@@ -60,7 +60,9 @@ export function taskFromBranch(branch = '') {
 
 export async function runCommit(root, opts = {}) {
   log(c.bold('\nyad commit'));
-  if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
+  // Any folder inside the work tree, not only its top: a Product can be a subfolder of its repo, and the
+  // ledger refusal sends the person to this command from there.
+  if (!run('git', ['rev-parse', '--show-toplevel'], { cwd: root }).ok) { fail('not a git repo'); process.exitCode = 1; return; }
   // --manual and --reason come as a pair: an override with no reason records nothing, and a reason with
   // no --manual would be silently dropped.
   if (opts.manual && opts.reason === undefined) { fail('--manual needs --reason "<why>" — the reason is recorded in the commit as a Ledger-Override trailer'); process.exitCode = 1; return; }

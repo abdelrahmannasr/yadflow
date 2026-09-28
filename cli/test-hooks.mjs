@@ -969,6 +969,18 @@ test('E49: the agent is told the door is a person\'s call, and the index refusal
   }
 });
 
+test('E49 review 2: the door works from a Product in a subfolder of its repo — where the refusal points', () => {
+  const { T, product } = verifiedRepo({ sub: 'product' });
+  try {
+    edit(product, 'epics/EP-a/.sdlc/state.json');
+    git(product, 'add', '-A');
+    const r = spawnSync(process.execPath, [YAD, 'commit', '--type', 'fix', '-m', 'restore the ledger', '--manual', '--reason', 'lost in #12', '--dry-run'], { cwd: product, encoding: 'utf8', env: gitEnv({ NO_COLOR: '1' }), timeout: 30_000 });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /Ledger-Override: lost in #12/);
+    assert.match(r.stdout, /fine for a Product PR/, 'and it knows it is on the Product');
+  } finally { cleanup(T); }
+});
+
 test('E49: yad ship refuses --manual and --reason rather than ignoring them', () => {
   for (const flags of [['--manual', '--reason', 'x'], ['--manual'], ['--reason', 'x']]) {
     const r = spawnSync(process.execPath, [YAD, 'ship', '--type', 'fix', '-m', 'x', ...flags], { cwd: os.tmpdir(), encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
