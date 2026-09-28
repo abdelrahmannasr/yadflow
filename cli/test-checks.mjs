@@ -3575,6 +3575,126 @@ test('ledger-guard: the git pre-commit hook (--staged) and this script agree on 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// E49: the door is `yad commit --manual --reason`. It must get past the REAL pre-commit hook (the one
+// `check --fix` installs), record the reason as a trailer, and change nothing about the CI verdict —
+// the script still fails the commit and quotes the reason under the FAIL. Both halves in one test:
+// a door that only passed the hook, or a check that only quoted, would each look fine alone.
+test('ledger-guard: yad commit --manual passes the local hook, and the CI check still fails it and quotes the reason (E49)', async () => {
+  const { gitHookActions } = await import('./plan.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e49-'));
+  const repo = path.join(T, 'p');
+  const yad = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: repo, env: { ...GIT_ENV, YAD_BIN: `"${process.execPath}" "${path.join(ROOT, 'bin/yad.mjs')}"`, NO_COLOR: '1' }, encoding: 'utf8' });
+  try {
+    git(T, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
+    git(T, 'clone', '-q', 'origin.git', 'p');
+    git(repo, 'config', 'user.name', 'alice');
+    git(repo, 'config', 'user.email', 'alice@corp.io');
+    git(repo, 'checkout', '-q', '-B', 'main');
+    enableVerified(repo, '{"platform":"github","ledger":"verified","default_branch":"main"}\n');
+    fs.mkdirSync(path.join(repo, 'hooks'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/hooks/ledger-guard.mjs'), path.join(repo, 'hooks/ledger-guard.mjs'));
+    commit(repo, 'seed', { 'epics/EP-x/epic.md': '# e\n', 'epics/EP-x/.sdlc/state.json': '{}\n' });
+    git(repo, 'push', '-q', 'origin', 'main');
+    gitHookActions(repo)[0].apply();
+    git(repo, 'checkout', '-q', '-B', 'feature');
+    // Nothing to override: an artifact alone is a person's to commit, so --manual would record a false
+    // override. Refused, and nothing is committed.
+    fs.writeFileSync(path.join(repo, 'epics/EP-x/epic.md'), '# e2\n');
+    git(repo, 'add', '-A');
+    const idle = yad('commit', '--type', 'docs', '-m', 'edit the epic', '--manual', '--reason', 'x');
+    assert.equal(idle.status, 1, idle.stdout + idle.stderr);
+    assert.match(idle.stdout + idle.stderr, /nothing staged here is a file the ledger hook refuses/);
+    git(repo, 'reset', '-q', '--hard');
+    fs.writeFileSync(path.join(repo, 'epics/EP-x/.sdlc/state.json'), '{"fixed":true}\n');
+    git(repo, 'add', '-A');
+
+    // The --json answer names the override; a reason that starts with `-` goes in as --reason=-….
+    const dry = yad('commit', '--type', 'fix', '-m', 'restore the ledger', '--manual', '--reason=-1 approval lost', '--dry-run', '--json');
+    assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+    const answer = JSON.parse(dry.stdout);
+    assert.equal(answer.manual, true);
+    assert.equal(answer.reason, '-1 approval lost');
+    assert.match(answer.message, /^Ledger-Override: -1 approval lost$/m);
+    // A YAD_HOOK_DISABLE left set in the shell must not hide what there is to override.
+    const skipSet = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'commit', '--type', 'fix', '-m', 'x', '--manual', '--reason', 'x', '--dry-run'], { cwd: repo, env: { ...GIT_ENV, YAD_HOOK_DISABLE: '1', NO_COLOR: '1' }, encoding: 'utf8' });
+    assert.equal(skipSet.status, 0, skipSet.stdout + skipSet.stderr);
+
+    const hand = spawnSync('git', ['commit', '-q', '-m', 'hand edit'], { cwd: repo, env: { ...GIT_ENV, YAD_BIN: `"${process.execPath}" "${path.join(ROOT, 'bin/yad.mjs')}"` }, encoding: 'utf8' });
+    assert.notEqual(hand.status, 0, 'the hook is live: a hand commit is refused');
+    assert.match(hand.stderr, /yad commit --manual --reason "<why>"/, 'and the refusal names the door');
+
+    const bare = yad('commit', '--type', 'fix', '-m', 'restore the ledger', '--manual');
+    assert.equal(bare.status, 1, 'an override with no reason records nothing, so it is refused');
+    assert.match(bare.stdout + bare.stderr, /--manual needs --reason/);
+    const stray = yad('commit', '--type', 'fix', '-m', 'restore the ledger', '--reason', 'x');
+    assert.equal(stray.status, 1, 'a reason without --manual would be dropped, so it is refused');
+    const twoLines = yad('commit', '--type', 'fix', '-m', 'restore the ledger', '--manual', '--reason', 'one\ntwo');
+    assert.equal(twoLines.status, 1, 'a trailer is one line');
+    assert.equal(String(git(repo, 'rev-list', '--count', 'origin/main..HEAD')).trim(), '0', 'none of the refusals committed');
+
+    const why = '::warning::restore approvals lost in #12';
+    const r = yad('commit', '--type', 'fix', '-m', 'restore the ledger', '--manual', '--reason', why);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /the ledger-guard check on the pull request still fails this commit/);
+    const msg = String(git(repo, 'log', '-1', '--format=%B'));
+    assert.match(msg, new RegExp(`^Ledger-Override: ${why.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+
+    const ci = runGate(LEDGER_GUARD, repo, ['origin/main']);
+    assert.equal(ci.code, 1, `the trailer changes nothing about the verdict\n${ci.out}`);
+    assert.match(ci.out, /FAIL \[ledger-guard\]/);
+    const sha = String(git(repo, 'rev-parse', 'HEAD')).trim();
+    assert.ok(ci.out.split('\n').includes(`  ${sha} Ledger-Override: ${why}`), `the reason is quoted after the sha, so no line starts with ::\n${ci.out}`);
+    assert.doesNotMatch(ci.out, /^\s*::/m, 'the runner skips leading spaces');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('ledger-guard: a hand-typed Ledger-Override with a carriage return cannot start a workflow-command line (E49 review 1)', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{"x":1}\n');
+  git(T, 'add', '-A');
+  const msgFile = path.join(T, '.git', 'MSG');
+  fs.writeFileSync(msgFile, 'fix: x\n\nLedger-Override: ok\r::error::pwned\u001b[31m\n');
+  git(T, 'commit', '-q', '--no-verify', '-F', msgFile);
+  const r = runGate(LEDGER_GUARD, T, ['main']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Ledger-Override: ok ::error::pwned /, 'quoted, with every control character a space');
+  assert.ok(!r.out.includes('\r') && !r.out.includes('\u001b'), 'no carriage return or escape reaches the log');
+  assert.doesNotMatch(r.out, /^\s*::/m, 'the runner skips leading spaces');
+  assert.match(r.out, /these commits carry a Ledger-Override trailer/, 'the note claims only the trailer it sees');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: a carriage return or newline in a PATH cannot start a workflow-command line either (E49 review 2)', { skip: process.platform === 'win32' && 'no CR or newline in a Windows file name' }, () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  // A review file is CI-owned, so it is printed under the FAIL; a new epic's folder is printed in the
+  // seed note, which runs on a PASS too.
+  commit(T, 'hand edit', {
+    'epics/EP-x/reviews/a\r::warning::pwn.md': 'x\n',
+    'epics/EP-x/reviews/b\n::error::pwn.md': 'x\n',
+    'epics/EP-n\r::notice::pwn/.sdlc/state.json': '{}\n',
+  });
+  const r = runGate(LEDGER_GUARD, T, ['main']);
+  assert.equal(r.code, 1, r.out);
+  assert.ok(!r.out.includes('\r'), `no carriage return reaches the log\n${r.out}`);
+  assert.doesNotMatch(r.out, /^\s*::/m, 'the runner skips leading spaces');
+  assert.match(r.out, /reviews\/a ::warning::pwn\.md/);
+  assert.match(r.out, /reviews\/b ::error::pwn\.md/);
+  assert.match(r.out, /epics\/EP-n ::notice::pwn has no ledger/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: a failing commit with no override prints no override note (E49)', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  commit(T, 'hand edit', { 'epics/EP-x/.sdlc/state.json': '{"x":1}\n' });
+  const r = runGate(LEDGER_GUARD, T, ['main']);
+  assert.equal(r.code, 1, r.out);
+  assert.doesNotMatch(r.out, /Ledger-Override|yad commit --manual/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('ledger-guard: an un-migrated hub.json still arms the guard (new script, old file)', () => {
   const T = scaffoldRepo();
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });

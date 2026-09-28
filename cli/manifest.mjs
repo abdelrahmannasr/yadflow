@@ -397,9 +397,13 @@ export const AI_COAUTHORS = {
 };
 // Atomic-commit guard: warn/refuse above this many staged files (build plan: ≤3 where possible).
 export const ATOMIC_FILE_LIMIT = 3;
-// Trailer order is fixed: Task -> Contract-Change -> Co-Authored-By (config.yaml build comment).
+// Trailer order is fixed: Task -> Contract-Change -> Ledger-Override -> Co-Authored-By (config.yaml build
+// comment; Ledger-Override is E49's `yad commit --manual --reason`).
 export const TASK_TRAILER = 'Task';
 export const CONTRACT_CHANGE_TRAILER = 'Contract-Change';
+// E49: `yad commit --manual --reason` records why a person committed past the ledger hook. The CI
+// `ledger-guard` check quotes it and still fails the commit — anyone can type a trailer.
+export const LEDGER_OVERRIDE_TRAILER = 'Ledger-Override';
 export const COAUTHOR_TRAILER = 'Co-Authored-By';
 // A Task trailer id must be a real <story>-T<NN>, the story an `EP-<slug>-S<n>` with a lowercase slug.
 // Mirrors the spec-link gate contract (checks/spec-link.sh: `-T[0-9]+$`, then STORY_RE on the story, E117)

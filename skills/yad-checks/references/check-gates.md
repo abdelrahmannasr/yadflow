@@ -259,7 +259,8 @@ non-merge commit in `<base>..HEAD`:
 - **Subject** must be `<type>: <description>` with `<type>` a known Conventional-Commits type
   (`feat|fix|docs|refactor|test|perf|build|ci|chore|revert` — keep in sync with `cli/manifest.mjs`
   `COMMIT_TYPES`) and **no trailing period** — mirroring `cli/commit.mjs` `buildCommitMessage`.
-- **Trailers**, when present, appear in the fixed order `Task → Contract-Change → Co-Authored-By`.
+- **Trailers**, when present, appear in the fixed order `Task → Contract-Change → Ledger-Override →
+  Co-Authored-By` (`Ledger-Override` only from `yad commit --manual --reason`; this gate does not check it).
 - Merge/squash commits (2+ parents) are skipped — their platform-generated subjects are not authored.
 - **Profiles** (`--profile code|hub|product`): the subject rule is identical on both; the gate never requires
   the `Task:` trailer (spec-link owns that on code repos; Product commits are not task-scoped).
@@ -798,6 +799,11 @@ an unreadable `hub.json`, an unparseable payload, a `yad` that errors — every 
 with a note on stderr. A local guardrail that failed closed would brick an agent's ability to edit
 anything the moment an install went sideways. The CI gate fails **closed** and is what actually
 protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` skips one command.
+The door for a PERSON is `yad commit --manual --reason "<why>"` (E49): it skips the local hook for that
+one commit and records the reason as a `Ledger-Override:` trailer. `ledger-guard` in CI still FAILS the
+commit — anyone can type a trailer — and prints the reason under the FAIL. Each line starts with the commit's sha, and every control character (a
+carriage return, an escape) becomes a space, so an author's text never starts a line GitHub Actions would
+read as a workflow command (indenting alone would not do it: the runner skips leading spaces). The author names and file paths it prints get the same cleaning (a newline in a path becomes a space too).
 
 **Known gaps** — both fall through to the CI gate, which is why it stays the authority:
 

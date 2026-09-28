@@ -197,6 +197,15 @@ trusted_bot() {
   signature_verified "$1"
 }
 
+# Text a commit's author chose — a name, a path, a Ledger-Override reason — is printed into the CI log.
+# The GitHub runner ends a log line at a lone carriage return too, so every control character (CR, ESC,
+# …) becomes a space first; otherwise `\r::error::…` inside a path or a reason would start a line
+# GitHub Actions reads as a workflow command.
+# `printable` keeps newlines, for a list read line by line; `oneline` is for one value (a name, a path),
+# where a newline would start a line of its own too.
+printable() { LC_ALL=C tr '\000-\011\013-\037\177' ' '; }
+oneline() { printf '%s' "$1" | LC_ALL=C tr '\000-\037\177' ' '; }
+
 # ---- seeding carve-out: creation is not mutation (#162) ---------------------------------------
 # A brand-new epic's ledger has no CI author. `gate ci` only ADVANCES an existing chain — it bails on
 # a missing state.json ("the review branch is cut from the default branch, so it should carry it") and
@@ -266,12 +275,20 @@ is_seeding() {                      # $1 = epic slug; 0 when that epic has no le
   in_list "$_f" "${base_slugs[@]}"  && return 1
   in_list "$_f" "${noted_slugs[@]}" && return 0
   noted_slugs[${#noted_slugs[@]}]="$_f"
-  if [ "$_f" = "ep-foundation" ]; then _where="foundation"; else _where="epics/$1"; fi
+  if [ "$_f" = "ep-foundation" ]; then _where="foundation"; else _where="epics/$(oneline "$1")"; fi
   echo "note [ledger-guard]: ${_where} has no ledger on ${BASE} — new epic, its seed is exempt (creation, not mutation)."
   return 0
 }
 
 violations=0
+# E49: `yad commit --manual --reason` records why a person committed past the local ledger hook, as a
+# `Ledger-Override:` trailer. Anyone can type a trailer, so it changes NOTHING about the verdict — the
+# failing commit still fails. The reason is quoted under the FAIL so the reviewer sees why it was done.
+# Every quoted line goes through `printable` (above) and starts with the commit's sha: a reason is the
+# commit author's text, and a line whose first non-blank characters were `::` would be read by GitHub
+# Actions as a workflow command. Indenting alone would not stop that — the runner skips leading spaces —
+# so every line that prints author text starts with text of ours (the sha, `note [ledger-guard]:`).
+overrides=()
 for sha in $commits; do
   touches_ledger=0
   # quotePath=false + -z on both git reads: a path git chose to escape ("epics/EP-caf\303\251/…") and a
@@ -282,14 +299,14 @@ for sha in $commits; do
     case "$f" in
       .sdlc/index.json)                    # the Product index (E19) — derived, CI-written, never a seed
         touches_ledger=1
-        echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+        echo "  ${sha} (author $(oneline "$(git show -s --format='%an' "$sha")")) → $(oneline "$f")"
         ;;
       epics/*/.sdlc/contract-lock.json) ;; # artifact-side — allowed
       epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/product-prs.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
         _slug="${f#epics/}"; _slug="${_slug%%/*}"
         is_seeding "$_slug" && continue      # a new epic's seed — not a mutation of a CI-owned ledger
         touches_ledger=1
-        echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+        echo "  ${sha} (author $(oneline "$(git show -s --format='%an' "$sha")")) → $(oneline "$f")"
         ;;
       # The Foundation's ledger (E75) — the same files, in the Product level's own folder, under the fixed
       # id EP-foundation. Matched on the path BELOW `foundation/` with a leading `/` put back, so the
@@ -300,7 +317,7 @@ for sha in $commits; do
           */.sdlc/state.json|*/.sdlc/approvals.json|*/.sdlc/comments.json|*/.sdlc/product-prs.json|*/.sdlc/hub-prs.json|*/reviews/*.md)
             is_seeding "EP-foundation" && continue
             touches_ledger=1
-            echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+            echo "  ${sha} (author $(oneline "$(git show -s --format='%an' "$sha")")) → $(oneline "$f")"
             ;;
         esac
         ;;
@@ -308,11 +325,18 @@ for sha in $commits; do
   done < <(git -c core.quotePath=false diff-tree --no-commit-id --name-only -r -z "$sha")
   if [ "$touches_ledger" = 1 ] && ! trusted_bot "$sha"; then
     violations=$((violations + 1))
+    while IFS= read -r _why; do
+      [ -n "$_why" ] && overrides[${#overrides[@]}]="  ${sha} Ledger-Override: ${_why}"
+    done < <(git show -s --format='%(trailers:key=Ledger-Override,valueonly,unfold)' "$sha" 2>/dev/null | printable || true)
   fi
 done
 
 if [ "$violations" -gt 0 ]; then
   echo "FAIL [ledger-guard]: ${violations} commit(s) change CI-owned gate files without a verified gate-bot signature. The ledger is CI-owned — let CI sync the gate; do not commit .sdlc/*.json or reviews/*.md yourself."
+  if [ "${#overrides[@]}" -gt 0 ]; then
+    echo "note [ledger-guard]: these commits carry a Ledger-Override trailer — the reason a person gave for committing past the local hook (\`yad commit --manual\` writes it). It is quoted for the reviewer and does not change the verdict:"
+    printf '%s\n' "${overrides[@]}"
+  fi
   # An epic's seed is exempt only while its ledger is off the base ref. Once the first review PR merges
   # (squashed or rebased, so the SHAs differ), those same seed commits still sitting on a sibling
   # authoring branch read as mutations — the author did nothing wrong and the remedy is a rebase, so

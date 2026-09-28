@@ -265,6 +265,16 @@ export function seededSlugs(productRoot, hub, runner = run) {
 }
 
 
+// The door, as the AGENT is told it (E49). Committing past the guard is a person's decision, so the
+// agent is told the command exists and that it is not the agent's to run. The commit refusal names the
+// same command to the person (`commitDenyMessage`) — change the two together.
+const PERSON_DOOR = [
+  'If a person decides this change must land anyway, they commit it with',
+  '`yad commit --manual --reason "<why>"` — their call, not the agent\'s. The check on the pull request',
+  'still fails it.',
+  '',
+];
+
 // What the agent is told when the edit is refused. Names the command that owns each transition —
 // the whole point of #171 was that the ledger write had no command behind it.
 export function denyMessage({ epic, rel, productRoot }) {
@@ -283,7 +293,8 @@ export function denyMessage({ epic, rel, productRoot }) {
     'Commit the ARTIFACT only (the .md you authored) and hand off to `yad-review-gate`; the ledger',
     'follows on merge.',
     '',
-    `hub: ${productRoot}   ·   override for one command: YAD_HOOK_DISABLE=1`,
+    ...PERSON_DOOR,
+    `hub: ${productRoot}   ·   a person can skip this hook for one command: YAD_HOOK_DISABLE=1`,
   ].join('\n');
 }
 
@@ -298,7 +309,8 @@ export function indexDenyMessage({ rel, productRoot }) {
     'To read it as the files say it is now:   yad index --json',
     'To see whether the committed one is behind:   yad doctor',
     '',
-    `hub: ${productRoot}   ·   override for one command: YAD_HOOK_DISABLE=1`,
+    ...PERSON_DOOR,
+    `hub: ${productRoot}   ·   a person can skip this hook for one command: YAD_HOOK_DISABLE=1`,
   ].join('\n');
 }
 
@@ -397,10 +409,12 @@ export function stagedLedgerCandidates(cwd = process.cwd(), git = gitRaw) {
 // What the person is told when the commit is refused. It names every refused file, how to take them
 // back out of the commit, the command that owns each change, and the door.
 //
-// THE DOOR IS HONEST ABOUT WHAT IT OPENS. `YAD_HOOK_DISABLE=1` (or git's own `--no-verify`) lets the
-// commit through on this machine, and nothing more: the `ledger-guard` check still judges it on the pull
-// request (and only there — a direct push to an unprotected default branch meets no check, which is why
-// the message says "pull request"). A door that implied more would be a lie about what protects the ledger.
+// THE DOOR IS HONEST ABOUT WHAT IT OPENS. `yad commit --manual --reason` (E49 — it sets
+// `YAD_HOOK_DISABLE=1` for its own `git commit` and records the reason as a `Ledger-Override:` trailer),
+// the bare `YAD_HOOK_DISABLE=1`, or git's own `--no-verify` lets the commit through on this machine, and
+// nothing more: the `ledger-guard` check still judges it on the pull request (and only there — a direct
+// push to an unprotected default branch meets no check, which is why the message says "pull request").
+// A door that implied more would be a lie about what protects the ledger.
 export function commitDenyMessage({ hits, top }) {
   const from = (h) => path.relative(top, h.abs).split(path.sep).join('/');
   const files = hits.map(from);
@@ -432,7 +446,9 @@ export function commitDenyMessage({ hits, top }) {
     'Amending a commit to UNDO a ledger change it made? `git commit --amend` is compared with the commit it',
     'replaces, so this hook cannot tell. Run it as `YAD_HOOK_DISABLE=1 git commit --amend`; the check on the',
     'pull request judges the result against its parent.',
-    'To commit anyway: YAD_HOOK_DISABLE=1 git commit …  The check on the pull request still judges it.',
+    'To commit anyway, with the reason recorded in the commit (it adds a `Ledger-Override:` line):',
+    '  yad commit --manual --reason "<why>" --type <type> -m "<subject>"   (add --force above 3 files)',
+    'The check on the pull request still fails it, and quotes the reason.',
     `hub: ${roots.join(', ')}`,
   ].join('\n');
 }
@@ -450,13 +466,20 @@ export const cleanGitRunner = (env = process.env) => {
   const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !REPO_ENV.test(k)));
   return (cmd, args = [], opts = {}) => run(cmd, args, { ...opts, env: clean });
 };
+// What the hook would refuse in the staged commit: `{ root, hits }`, `hits` empty when it would allow.
+// `yad commit --manual` (E49) asks the same question, so an override is only recorded when there is
+// something to override.
+export function stagedLedgerHits({ env = process.env, cwd = process.cwd(), git = gitRaw, runner = cleanGitRunner(env) } = {}) {
+  const staged = stagedLedgerCandidates(cwd, git);
+  if (!staged.paths.length) return { root: staged.root, hits: [] };
+  const verdict = ledgerGuardDecision(staged.paths, { env, runner, payloadCwd: staged.root, all: true });
+  return { root: staged.root, hits: verdict.allow ? [] : verdict.hits };
+}
 export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), git = gitRaw, runner = cleanGitRunner(env) } = {}) {
   if (env.YAD_HOOK_DISABLE) return 0;
-  const staged = stagedLedgerCandidates(cwd, git);
-  if (!staged.paths.length) return 0;
-  const verdict = ledgerGuardDecision(staged.paths, { env, runner, payloadCwd: staged.root, all: true });
-  if (verdict.allow) return 0;
-  console.error(commitDenyMessage({ hits: verdict.hits, top: staged.root }));
+  const { root, hits } = stagedLedgerHits({ env, cwd, git, runner });
+  if (!hits.length) return 0;
+  console.error(commitDenyMessage({ hits, top: root }));
   process.exitCode = 2;
   return 2;
 }
