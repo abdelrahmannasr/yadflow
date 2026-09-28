@@ -85,7 +85,22 @@ export function insideWorkspace(root, rpath) {
   const parent = path.dirname(projectRoot);
   const workspace = parent === projectRoot ? projectRoot : parent; // degenerate: root is the fs root
   const resolved = path.resolve(projectRoot, rpath);
+  if (throughGitDir(root, rpath)) return false;
   return resolved === projectRoot || resolved.startsWith(workspace + path.sep);
+}
+
+// A repo path that runs through a `.git` folder is never a code repo (E79 review 2). `yad join` clones
+// every registered path with no person looking, and a clone that lands at `../.git` makes the workspace
+// a repo whose `config` the Product's writer chose (`core.fsmonitor` runs a command on `git status`);
+// one at `.git/hooks` puts their hooks in the Product. Git refuses a `.git` part in a tracked path for
+// the same reason. Matched without case (macOS and Windows file systems ignore it), and Windows' short
+// name for `.git` (`GIT~1`) too.
+export function throughGitDir(root, rpath) {
+  const projectRoot = path.resolve(root);
+  const parent = path.dirname(projectRoot);
+  const workspace = parent === projectRoot ? projectRoot : parent;
+  const parts = path.relative(workspace, path.resolve(projectRoot, rpath)).split(/[\\/]+/);
+  return parts.some((p) => /^\.git$/i.test(p) || /^git~\d+$/i.test(p));
 }
 
 // Build the hub.json object for a (re)configure write: the fields this run collected, laid over the
@@ -101,6 +116,7 @@ export function buildReconfiguredHub(cur, fields) {
 // A path that is not a git repository is rejected and NOTHING is written — a registry entry with
 // syncedHead:null would only surface later as an unexplained "unknown status" in the CI gates.
 export function registerRepo(root, registry, { name, rpath, platform, default_branch = 'main', today = null, pack = true }) {
+  if (throughGitDir(root, rpath)) { warn(`${rpath} runs through a .git folder — not a code repo, skipped`); return null; }
   if (!insideWorkspace(root, rpath)) {
     warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`);
     return null;
@@ -567,6 +583,7 @@ export async function runSetup(root, opts = {}) {
       if (known.has(name)) { warn(`${name} already registered — skipping`); continue; }
       // Siblings of the Product are the common layout (project/{product,backend}) — `../backend` is valid.
       const rpath = await ask('    path (relative to project root, e.g. ../backend)', `demo-repos/${name}`);
+      if (throughGitDir(root, rpath)) { warn(`${rpath} runs through a .git folder — not a code repo, skipped`); continue; }
       if (!insideWorkspace(root, rpath)) { warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
       const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();

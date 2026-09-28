@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { runSetup, insideWorkspace, selectIdeTargets } from './setup.mjs';
+import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
 import { moduleActions, gitHookActions } from './plan.mjs';
 
 // The Product's folder inside a workspace. `join` clones to it and `new` creates it, so a workspace
@@ -42,6 +42,10 @@ export const validFolderName = (name) => typeof name === 'string' && FOLDER_RE.t
 // Text read from a shared file (a repo name, a path) is shown in the terminal: every control character
 // becomes a space, so a registry entry cannot move the cursor or recolour what follows.
 export const shown = (s) => [...String(s ?? '')].map((ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? ' ' : ch)).join('');
+
+// A folder as the person's shell reaches it: relative to where they ran yad (which `--dir` may not
+// be), quoted when it holds a space.
+const fromShell = (dir) => { const r = path.relative(process.cwd(), dir) || '.'; return /\s/.test(r) ? `"${r}"` : r; };
 
 const isEmptyDir = (dir) => { try { return fs.readdirSync(dir).length === 0; } catch { return false; } };
 // Empty, or holding only `.git`: a fresh clone of an empty remote.
@@ -103,6 +107,7 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
     if (!rpath) { out.failed.push({ ...entry, reason: 'no path recorded' }); continue; }
     const target = path.resolve(productRoot, rpath);
     if (target === path.resolve(productRoot)) { out.present.push({ ...entry, reason: 'the Product itself' }); continue; }
+    if (throughGitDir(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'it runs through a .git folder — git\'s own storage, never a code repo; not cloned' }); continue; }
     if (!insideWorkspace(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'outside the workspace (the Product folder\'s parent) — not cloned' }); continue; }
     // Already there: nothing is written, so where a link of this machine's own points does not matter.
     if (exists(path.join(target, '.git'))) { out.present.push(entry); continue; }
@@ -158,7 +163,7 @@ export async function runNew(cwd, name, opts = {}) {
   const steps = remoteSteps({ name, platform: hub.platform, branch });
   log('');
   log(c.bold('Put the Product on your platform') + c.dim(' (yad creates nothing outside this machine — run these yourself):'));
-  log(`  cd ${path.join(name, PRODUCT_DIR)}`);
+  log(`  cd ${fromShell(product)}`);
   for (const s of steps) log(`  ${s}`);
   hand('teammates then join with: `yad join <the Product\'s clone URL>`');
   return { workspace, product, platform: hub.platform ?? null, branch, remoteSteps: steps, setup };
@@ -264,7 +269,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
 
   log('');
   if (repos.failed.length) hand(`${repos.failed.length} repo(s) not cloned — fix what is named above and re-run \`yad join ${shown(url)}\`; it keeps what is already there`);
-  hand(`start with: cd ${path.join(wsName, PRODUCT_DIR)} && yad next`);
+  hand(`start with: cd ${fromShell(product)} && yad next`);
   return {
     workspace, product,
     repos, skills: { installed: skills.installed, stale: skills.stale.length, shared: skills.shared.length },

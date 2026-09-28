@@ -9,7 +9,8 @@ const helpText = (profiles) => `${c.bold('yad')} — setup, review-gate & build 
 ${c.dim('Every command but `yad hook` takes --json: one JSON object on stdout, every other line on stderr')}
 ${c.dim('(docs/CLI.md, "--json on every command").')}
 
-${c.bold('Start a workspace')} ${c.dim('(the folder holding product/ and the code repos side by side; run from it, or --dir)')}
+${c.bold('Start a workspace')} ${c.dim('(the folder holding product/ and the code repos side by side)')}
+  ${c.dim('--dir: for init, the workspace; for new and join, the folder the workspace is made in')}
   yad new <name>       Greenfield: make <name>/product/, git init it, run setup inside it. Creates
                        no remote — prints the gh/glab line to run yourself. Takes the setup flags
   yad init             Brownfield, in the folder that already holds your repos: make product/ (or
@@ -489,8 +490,9 @@ async function main() {
         ideTargets: o['ide-targets'] === undefined ? undefined : String(o['ide-targets']).split(',').map((t) => t.trim()).filter(Boolean),
       });
       break;
-    // E79: the workspace verbs. `--dir` here is the WORKSPACE (the folder that holds product/ and the
-    // code repos), not the Product as for every other command. The setup flags pass through.
+    // E79: the workspace verbs. `--dir` is never the Product here: for `init` it is the WORKSPACE (the
+    // folder that holds product/ and the code repos); for `new` and `join` it is the folder the workspace
+    // is made IN. The setup flags pass through.
     case 'new':
     case 'init':
     case 'join': {

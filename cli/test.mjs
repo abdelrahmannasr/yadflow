@@ -25668,6 +25668,41 @@ test('E79 review 1: a link the Product commits cannot carry a clone outside, and
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E79 review 2: a registry path through a .git folder is never cloned or registered', async () => {
+  const { cloneMissingRepos } = await import('./workspace.mjs');
+  const { throughGitDir, insideWorkspace, registerRepo } = await import('./setup.mjs');
+  const T = e79Tmp();
+  try {
+    const product = path.join(T, 'ws', 'product');
+    fs.mkdirSync(path.join(product, '.git'), { recursive: true });
+    const bad = ['../.git', '../x/.git', '.git/hooks', '.git/objects/info', '.GIT/x', '../Git~1', '../docs/.Git/hooks'];
+    for (const p of bad) {
+      assert.ok(throughGitDir(product, p), p);
+      assert.ok(!insideWorkspace(product, p), `${p}: the check setup and doctor share refuses it too`);
+    }
+    for (const p of ['.', '../backend', '../.github', '../x.git', 'demo-repos/api']) assert.ok(!throughGitDir(product, p), p);
+    const calls = [];
+    const r = cloneMissingRepos(product, { repos: bad.map((p, i) => ({ name: `b${i}`, path: p, git_url: 'u' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
+    assert.equal(r.failed.length, bad.length);
+    assert.ok(r.failed.every((x) => /runs through a \.git folder/.test(x.reason)));
+    assert.deepEqual(calls, [], 'git never ran');
+    const registry = { repos: [] };
+    assert.equal(registerRepo(product, registry, { name: 'x', rpath: '../.git' }), null);
+    assert.deepEqual(registry.repos, []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E79 review 2: with --dir, the printed cd lines are relative to where yad ran', () => {
+  const T = e79Tmp();
+  try {
+    fs.mkdirSync(path.join(T, 'work'));
+    const r = e79Yad(T, T, ['new', 'acme', '--dir', 'work', '--solo', '--separate', '--ide-targets', '.claude']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(fs.existsSync(path.join(T, 'work', 'acme', 'product', '.sdlc', 'hub.json')), 'new makes the workspace inside --dir');
+    assert.match(r.stdout + r.stderr, /cd work[\\/]acme[\\/]product/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E79 review 1: yad init never turns someone\'s code into the Product', () => {
   const T = e79Tmp();
   try {
