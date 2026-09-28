@@ -12,6 +12,15 @@ import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPa
 import { gitHead, packRepo } from './setup.mjs';
 import { publishCodeContext, packOf, codeMapOf } from './repo-publish.mjs';
 
+// Why `refresh` will not pack this entry, or null when it will (E81): see the loop in `runRepo`.
+function notPackable(root, repo, j) {
+  if (j.state === 'missing') return 'not cloned on this machine (`yad repo clone`)';
+  if (j.state === 'refused') return j.reason;
+  if (j.linked) return 'a folder on its path, inside a repo, is a link, so the checkout is not where the path says';
+  if (!codeContextPathOk(root, packOf(repo)) || !codeContextPathOk(root, codeMapOf(repo))) return `its contextPack or codeMap is not a path under ${CODE_CONTEXT_DIR}/ in the Product`;
+  return null;
+}
+
 // Strict (E81): a registry that does not parse is said, not read as "no repos" — and `refresh` writes it
 // back, so a lenient read would replace a broken file (and every entry in it) with an empty list.
 function load(root) {
@@ -97,11 +106,7 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       // one reached through a link inside a repo's tree (repomix would pack wherever the link points,
       // git logs included). And the pack is written only where the Product keeps code context.
       const j = judgeRepo(root, repo);
-      const why = j.state === 'missing' ? 'not cloned on this machine (`yad repo clone`)'
-        : j.state === 'refused' ? j.reason
-          : j.linked ? 'a folder on its path, inside a repo, is a link, so the checkout is not where the path says'
-            : !codeContextPathOk(root, packOf(repo)) || !codeContextPathOk(root, codeMapOf(repo)) ? `its contextPack or codeMap is not a path under ${CODE_CONTEXT_DIR}/ in the Product`
-              : null;
+      const why = notPackable(root, repo, j);
       if (why) {
         warn(`${j.name}: ${why} — skipped`);
         rows.push({ name: repo.name ?? null, refreshed: false, head: null });

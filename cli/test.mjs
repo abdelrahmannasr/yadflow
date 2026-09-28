@@ -26546,7 +26546,8 @@ test('E81 review 2: a subfolder of a checkout behind the person\'s own workspace
 });
 
 test('E81 review 3: a registered git_url must be a network address — a local path could name a repo the Product commits', async () => {
-  const { cloneUrlOk } = await import('./workspace.mjs');
+  const { cloneUrlKind } = await import('./workspace.mjs');
+  const cloneUrlOk = (...a) => cloneUrlKind(...a) !== null;
   const T = e79Tmp();
   try {
     const { ws, product } = e80Workspace(T);
@@ -26554,6 +26555,7 @@ test('E81 review 3: a registered git_url must be a network address — a local p
       assert.ok(cloneUrlOk(product, good, {}), good);
     }
     const outside = path.join(T, 'remotes', 'r.git');
+    fs.mkdirSync(outside, { recursive: true });   // a local source must exist (E81 review 5)
     for (const bad of ['evil', './evil', '../product/evil', path.join(product, 'evil'), `file://${path.join(product, 'evil')}`, 'ext::sh -c touch% /tmp/x', 'fd::17', outside, `file://${outside}`, 'C:\\r.git']) {
       assert.ok(!cloneUrlOk(product, bad, {}), bad);
     }
@@ -26622,5 +26624,37 @@ test('E81 review 4: the file transport is only for a URL that passed as a local 
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(JSON.parse(r.stdout).failed[0].reason, /transport 'file' not allowed/);
     assert.ok(!fs.existsSync(path.join(ws, 'api', '.git')), 'nothing cloned');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 5: the clone sets its own GIT_ALLOW_PROTOCOL, and a local source must exist and is judged as the disk resolves it', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { cloneSource } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    // A value the person's environment carries cannot turn the file transport back on.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil.com:x');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api', path: '../api', git_url: 'evil.com:x' }] }));
+    const r = e79Yad(T, product, ['repo', 'clone', '--json'], { GIT_ALLOW_PROTOCOL: 'file:https' });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(JSON.parse(r.stdout).failed[0].reason, /transport 'file' not allowed/);
+    assert.ok(!fs.existsSync(path.join(ws, 'api', '.git')));
+    // The workspace reached through a link (as macOS /var is): a path that does not exist, whose
+    // `.git` twin the Product commits, is refused — not judged as typed.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil.git');
+    fs.symlinkSync(T, path.join(T, 'alias'));
+    const door = { YAD_ALLOW_LOCAL_REMOTES: '1' };
+    const viaLink = path.join(T, 'alias', 'ws', 'product');
+    for (const u of [path.join(viaLink, 'evil'), path.join(viaLink, 'evil.git'), `file://${path.join(viaLink, 'evil.git')}`, path.join(T, 'nowhere.git')]) {
+      assert.equal(cloneSource(product, u, door), null, u);
+    }
+    // An existing folder outside: git is handed the folder as resolved, not the text.
+    fs.mkdirSync(path.join(T, 'remotes', 'r.git'), { recursive: true });
+    assert.deepEqual(cloneSource(product, `file://${path.join(T, 'alias', 'remotes', 'r.git')}`, door), { kind: 'local', url: path.join(T, 'remotes', 'r.git') });
+    // Doctor on a path that is not text: named, never a crash.
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'n', path: 5 }] }));
+    const doc = e79Yad(T, product, ['doctor', '--json']);
+    assert.doesNotMatch(doc.stdout + doc.stderr, /must be of type string|yad failed/);
+    assert.equal(JSON.parse(doc.stdout).checks.find((c) => c.id === 'repo:n').status, 'fail');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

@@ -42,9 +42,10 @@ the Product wrote it — so the path is judged before any git runs (E81), the sa
 - nothing is there yet — **not cloned on this machine**: run `yad repo clone` to clone it;
 - a folder is there but is not a checkout (a folder the Product commits could be shaped like a bare
   git repo, and git run inside it would read its `config`, which can run a command). A folder inside a
-  checkout with no `.git` of its own (`apps/web` in a monorepo) counts as there, unless a link inside a
-  repo's tree is on its way or a folder on its way holds an entry named `HEAD` (git can take such a
-  folder for a bare repo);
+  checkout with no `.git` of its own (`apps/web` in a monorepo) is not refused (unless a link inside a
+  repo's tree or a folder holding an entry named `HEAD` is on its way — git can take such a folder for
+  a bare repo), but sync still skips it: switching its branch would switch the whole checkout, so sync
+  that checkout instead;
 - a folder on the way, **inside a repo's tree**, is a link — the Product's `evil -> ../../..`. A link of
   your own directly in the workspace folder (`ws/backend -> /src/backend`) is followed.
 

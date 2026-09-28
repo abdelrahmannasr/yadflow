@@ -26,6 +26,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
@@ -95,40 +96,51 @@ export function gitInit(dir, branch = 'main') {
   return run('git', ['symbolic-ref', 'HEAD', `refs/heads/${branch}`], { cwd: dir }).ok;
 }
 
-// `localOk` is false for a REGISTERED repo's URL, which the shared registry chose: git then refuses the
-// file transport (git 2.12+), so no folder on this disk — one the Product commits, shaped as a repo
-// whose config runs a command — is ever read as a clone source (E81 review 3). `join`'s Product URL
-// is the person's own, typed by them, so a local one is fine.
-function gitClone(url, target, env, { localOk = true } = {}) {
-  const r = spawnSync('git', ['-c', `protocol.file.allow=${localOk ? 'always' : 'never'}`, 'clone', '-q', '--', url, target], { encoding: 'utf8', env, windowsHide: true });
+// How a clone may reach its source. `join`'s Product URL is the person's own, typed by them: git's own
+// rules. A REGISTERED repo's URL was chosen by the shared registry, so git is told which transports it
+// may use, by `GIT_ALLOW_PROTOCOL` (git 2.6.1+) — which git obeys over every `protocol.*.allow` setting,
+// so a value the person's environment carries cannot widen it (E81 review 5) — and by
+// `protocol.file.allow` as a second word. A network URL gets the network transports only, never the
+// file one: git reads `evil.com:x` as a LOCAL folder when one by that name exists (E81 reviews 3–4). A
+// local source (the YAD_ALLOW_LOCAL_REMOTES door) gets the file transport only.
+const TRANSPORTS = { network: 'https:http:ssh:git', local: 'file' };
+function gitClone(url, target, env, { kind = null } = {}) {
+  const allow = TRANSPORTS[kind];
+  const args = allow ? ['-c', `protocol.file.allow=${kind === 'local' ? 'always' : 'never'}`] : [];
+  const r = spawnSync('git', [...args, 'clone', '-q', '--', url, target], { encoding: 'utf8', env: allow ? { ...env, GIT_ALLOW_PROTOCOL: allow } : env, windowsHide: true });
   return { ok: r.status === 0, error: (r.stderr || r.error?.message || '').trim().split('\n').pop() || `git clone exited ${r.status}` };
 }
+
 // A registered repo's `git_url` is shared text, handed to `git clone`. Only a network address is cloned:
 // `https://`, `http://`, `ssh://`, `git://`, or scp-style `user@host:path` / `host:path` (an ssh alias
 // too). A plain path, `file://` or any `<helper>::` URL is refused — a local path can name a folder the
-// Product itself commits (E81 review 3). The pattern is the first gate, not the only one: git reads
-// `evil.com:x` as a LOCAL folder when one by that name exists, so every such URL is cloned with git's
-// file transport off (`protocol.file.allow=never`, git 2.12+).
+// Product itself commits (E81 review 3). The pattern is the first gate; the transports `gitClone` allows
+// are the second.
 //
-// A team whose remotes really are on a disk sets YAD_ALLOW_LOCAL_REMOTES=1: then an ABSOLUTE local path
-// (or `file://` one) outside the workspace is cloned too — only that URL gets the file transport. `%` is
-// refused there (git decodes it in a `file://` URL and Node would not), and the two paths are compared as
-// the disk spells them, without case where the disk ignores it (E81 review 4).
+// A team whose remotes really are on a disk sets YAD_ALLOW_LOCAL_REMOTES=1: then a local path or
+// `file://` URL is cloned when it names a FOLDER THAT EXISTS outside the workspace. It is resolved on
+// disk (links followed, `file:///C:/x` read as Windows does, `%` refused because git decodes it), and git
+// is handed that resolved path — never the typed text, which git could read another way (it tries
+// `<path>.git` when `<path>` is not there; E81 review 5). Compared without case where the disk ignores it.
 const NETWORK_URL_RE = /^(?![^/]*::)(?:(?:https?|ssh|git|git\+ssh|ssh\+git):\/\/[^\s/]|[\w.~-]+@[\w.-]+:(?!\/\/)|[\w-]{2,}(?:\.[\w-]+)*:(?!\/\/))/i;
 export const localRemotesAllowed = (env = process.env) => env.YAD_ALLOW_LOCAL_REMOTES === '1';
-const onDisk = (p) => { let r = p; try { r = fs.realpathSync.native(p); } catch { /* not there: as typed */ } return process.platform === 'darwin' || process.platform === 'win32' ? r.toLowerCase() : r; };
-// 'network', 'local' (the door is open and the path passed), or null (refused).
-export function cloneUrlKind(productRoot, url, env = process.env) {
-  if (NETWORK_URL_RE.test(url)) return 'network';
-  if (!localRemotesAllowed(env) || url.includes('%') || /::/.test(url)) return null;
-  const p = url.replace(/^file:\/\//i, '');
-  if (!path.isAbsolute(p) || /^[A-Za-z]:?$/.test(p)) return null;
+const folded = (p) => (process.platform === 'darwin' || process.platform === 'win32' ? p.toLowerCase() : p);
+const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+// { kind: 'network', url } — the URL as recorded; { kind: 'local', url } — the resolved folder; or null.
+export function cloneSource(productRoot, url, env = process.env) {
+  if (NETWORK_URL_RE.test(url)) return { kind: 'network', url };
+  if (!localRemotesAllowed(env) || url.includes('%') || url.includes('::')) return null;
+  let p = url;
+  if (/^file:/i.test(url)) { try { p = fileURLToPath(url); } catch { return null; } }
+  if (!path.isAbsolute(p)) return null;
+  let real;
+  try { real = fs.realpathSync.native(p); if (!fs.statSync(real).isDirectory()) return null; } catch { return null; }
   const root = path.resolve(productRoot);
-  const workspace = onDisk(path.dirname(root) === root ? root : path.dirname(root));
-  const real = onDisk(path.resolve(p));
-  return real === workspace || real.startsWith(workspace + path.sep) ? null : 'local';
+  let workspace = path.dirname(root) === root ? root : path.dirname(root);
+  try { workspace = fs.realpathSync.native(workspace); } catch { /* as resolved */ }
+  return under(folded(real), folded(workspace)) ? null : { kind: 'local', url: real };
 }
-export const cloneUrlOk = (productRoot, url, env = process.env) => cloneUrlKind(productRoot, url, env) !== null;
+export const cloneUrlKind = (productRoot, url, env = process.env) => cloneSource(productRoot, url, env)?.kind ?? null;
 
 // A clone that needs a password must not sit waiting at a prompt nobody will answer.
 const cloneEnv = () => (process.env.SDLC_NONINTERACTIVE ? { ...process.env, GIT_TERMINAL_PROMPT: '0' } : process.env);
@@ -143,7 +155,8 @@ const cloneEnv = () => (process.env.SDLC_NONINTERACTIVE ? { ...process.env, GIT_
 // a BARE git repo (`HEAD`, `config`, `objects/`), and git run there reads that `config`, whose
 // `core.fsmonitor` runs a command. The Product itself (`.`, a monorepo) is its own state.
 //
-// Returns { name, path, target, state, reason? } — state is one of:
+// Returns { name, path, target, state, reason?, inside?, linked?, url?, urlKind? } — `url` and `urlKind`
+// ('network' | 'local') only for 'missing': what the clone step hands git. State is one of:
 //   'product'   the Product itself; never cloned
 //   'present'   a git checkout is there (`.git` at the path), or the path is a folder inside one (`inside`
 //               names the checkout). `linked` is set when a folder on the way, deeper than the workspace
@@ -177,9 +190,9 @@ export function judgeRepo(productRoot, repo) {
   const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
   if (!url) return { ...at, state: 'refused', reason: 'no git_url recorded — clone it by hand' };
   if (url.startsWith('-')) return { ...at, state: 'refused', reason: 'the recorded git_url starts with "-"' };
-  const kind = cloneUrlKind(productRoot, url);
-  if (!kind) return { ...at, state: 'refused', reason: 'the recorded git_url is not a network address (https://, ssh://, git:// or user@host:path) — clone it by hand' };
-  return { ...at, state: 'missing', url, urlKind: kind };
+  const src = cloneSource(productRoot, url);
+  if (!src) return { ...at, state: 'refused', reason: 'the recorded git_url is not a network address (https://, http://, ssh://, git://, user@host:path or host:path) — clone it by hand, or set YAD_ALLOW_LOCAL_REMOTES=1 for a local folder outside the workspace' };
+  return { ...at, state: 'missing', url: src.url, urlKind: src.kind };
 }
 
 // The nearest folder above `target`, below the workspace folder, that holds `.git`: the checkout git
@@ -267,9 +280,8 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
     let r;
     try {
       fs.mkdirSync(path.dirname(j.target), { recursive: true });
-      // The file transport only for a URL that passed as a local path — never for one that looks like a
-      // network address, which git may still read as a local folder (E81 review 4).
-      r = clone(j.url, j.target, env, { localOk: j.urlKind === 'local' });
+      // The transports by what the URL passed as (E81 reviews 4–5): see `gitClone`.
+      r = clone(j.url, j.target, env, { kind: j.urlKind });
     } catch (e) { r = { ok: false, error: `cannot make its folder (${e.code || e.message})` }; }
     if (r.ok) out.cloned.push(entry);
     else out.failed.push({ ...entry, reason: shown(r.error) });

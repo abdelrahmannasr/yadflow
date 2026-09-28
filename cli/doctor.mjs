@@ -14,13 +14,7 @@ import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as ca
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
-import { judgeRepo } from './workspace.mjs';
-
-// A registered path doctor may run git in (E81): a checkout (`.git` there) or the Product itself. A folder
-// with no `.git` could be one the Product commits shaped like a bare repo, and git run there reads its
-// `config`, whose `core.fsmonitor` runs a command. The repos check reports every other entry.
-// A checkout reached through a link inside a repo's tree is skipped too: `yad repo sync` and `refresh` skip it.
-const isCheckout = (root, repo) => { const j = judgeRepo(root, repo); return ['present', 'product'].includes(j.state) && !j.linked; };
+import { judgeRepo, shown as forTerminal } from './workspace.mjs';
 import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
@@ -31,6 +25,12 @@ import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 import { readOwners } from './owners.mjs';
+
+// A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
+// entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
+// and never one reached through a link inside a repo's tree (`yad repo sync` and `refresh` skip it too).
+// The repos check reports every other entry.
+const isCheckout = (root, repo) => { const j = judgeRepo(root, repo); return ['present', 'product'].includes(j.state) && !j.linked; };
 
 const MIN_NODE = 18;
 
@@ -456,7 +456,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     for (const repo of repoEntries) {
       // A missing/empty path must NOT fall back to the project root (which is itself a git repo and
       // would read as "healthy") — an entry with no path is malformed.
-      if (!repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${repo.name || '(unnamed)'}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
+      if (typeof repo.path !== 'string' || !repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${forTerminal(repo.name || '(unnamed)')}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
       const repoRoot = path.resolve(root, repo.path);
       // Judged before git runs (E81) — the same judgement `yad repo clone` makes, so the hint names that
       // command only for a repo it would clone, and git never runs in a folder with no `.git` (a
@@ -481,9 +481,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       if (judged.linked) { check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: ${pth} is reached through a link inside a repo's tree, so the checkout is not where the path says — yad skips it`, 'register the checkout at its own path'); continue; }
       const head = judged.state === 'present' || judged.state === 'product' ? gitHead(repoRoot) : null;
       if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${nm}: ${pth} is not a git repository (or has no commits) [YAD-STATE-003]`, cloneHint || 'init/clone the repo, then re-connect it'); continue; }
-      if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + repo.name + '` once it has code');
-      else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + repo.name + '`');
-      else check(checks, `repo:${repo.name}`, 'project', 'ok', `${repo.name}: git repo, context fresh`);
+      if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + repo.name + '` once it has code');
+      else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + repo.name + '`');
+      else check(checks, `repo:${repo.name}`, 'project', 'ok', `${nm}: git repo, context fresh`);
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
     // Per-repo owners went with the roster (E62). Named only where a repo actually lists someone: every
@@ -499,7 +499,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // list in hub.json and every generated file — so nobody maintains a list that no longer protects.
     const allowFiles = [
       { where: 'the Product', file: path.join(root, '.sdlc', 'verified-authors') },
-      ...repoEntries.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
+      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
     ].filter((x) => exists(x.file)).map((x) => x.where);
     const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
     if (allowFiles.length || listedAuthors) {
@@ -513,7 +513,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // copy stays and keeps failing commits from unlisted authors (E62 upgrade simulation). Named, not fixed.
     const oldGates = [
       { where: 'the Product', file: path.join(root, 'checks', 'verified-commits.sh') },
-      ...repoEntries.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
+      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
     ].filter((x) => exists(x.file) && /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(fs.readFileSync(x.file, 'utf8'))).map((x) => x.where);
     if (oldGates.length) {
       check(checks, 'people:allowlist-gate-stale', 'project', 'warn',
@@ -524,7 +524,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // slice out of specs/<story>/contracts/ (or a file out of src/<feature>/) passes the gate. `yad check
     // --fix` refreshes a wired contract-check nobody changed; one changed by hand is kept, and
     // backfill-check is never wired at all — every copy is placed by hand. Named, not fixed.
-    const gateRoots = [{ where: 'the Product', root }, ...repoEntries.filter((r) => r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))];
+    const gateRoots = [{ where: 'the Product', root }, ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))];
     const renameBlind = gateRoots
       .flatMap((x) => RENAME_BLIND_GATES.map((rel) => ({ ...x, rel })))
       .filter((x) => renameBlindGate(path.join(x.root, x.rel)))
@@ -593,7 +593,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // hint would install its whole wiring.
     const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
     const rootTop = top(root);
-    const unlinked = repoEntries.filter((r) => r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
+    const unlinked = repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
       .filter(({ r, dir }) => isCheckout(root, r) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
       .filter(({ dir }) => { const t = top(dir); return t && t !== rootTop; })
       .map(({ r, dir }) => {
