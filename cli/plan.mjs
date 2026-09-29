@@ -681,8 +681,12 @@ export function productProfileGap(file) {
   const list = text.match(/^\s*case\s+"\$PROFILE"\s+in\s+([^)]*)\)/m);
   if (!list) return null;
   if (!list[1].split('|').map((x) => x.trim()).includes('product')) return 'rejects';
-  const mapped = /\[\s*"\$PROFILE"\s*=\s*product\s*\]\s*&&\s*PROFILE=hub\b/.test(text);
-  return /"\$PROFILE"\s*=\s*hub\b/.test(text) && !mapped ? 'unmapped' : null;
+  // Any spelling of the mapping on one line — `[ "$PROFILE" = product ] && PROFILE=hub`, `[[ $PROFILE == product ]]
+  // && …`, a `product) PROFILE=hub ;;` arm — and any spelling of the branch: quoted or not, `=` or `==`.
+  // A comment is prose, not code: the shipped copies explain the mapping in one.
+  const code = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const mapped = /product[^\n]*\bPROFILE=["']?hub\b/.test(code);
+  return /\$\{?PROFILE\}?"?\s*==?\s*["']?hub\b/.test(code) && !mapped ? 'unmapped' : null;
 }
 // What each gap does to a Product PR, and the one fix for both — shared by `yad doctor` and `yad update`.
 export const productProfileEffect = (gap, gate, passing) => (gap === 'rejects'

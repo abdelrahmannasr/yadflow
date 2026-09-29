@@ -1300,6 +1300,17 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
     await reconcile(T, { fix: true }); // puts the new workflow back
     const unmapped = collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh');
     assert.match(unmapped.message, /^checks\/pr-title\.sh accepts `--profile product` but never turns it into `hub`, which \.github\/workflows\/yad-product-checks\.yml passes — so it skips the Product's rules and passes what it should stop$/);
+    // Other spellings of the branch and of the mapping are read as the same thing.
+    for (const [branch, mapping, gap] of [
+      ['if [ $PROFILE = hub ]; then', '', 'unmapped'],
+      ['if [[ "$PROFILE" == hub ]]; then', '', 'unmapped'],
+      ['if [ "$PROFILE" = hub ]; then', '[[ $PROFILE == product ]] && PROFILE=hub', null],
+      ['if [ "$PROFILE" = hub ]; then', 'case "$PROFILE" in product) PROFILE=hub ;; esac', null],
+      ['if [ "$PROFILE" = hub ]; then', '# we used to run [ "$PROFILE" = product ] && PROFILE=hub here', 'unmapped'],
+    ]) {
+      fs.writeFileSync(gate, `case "$PROFILE" in code|hub|product) ;; *) exit 1 ;; esac\n${mapping}\n${branch}\n  :\nfi\n`);
+      assert.equal(productProfileGap(gate), gap, `${branch} / ${mapping}`);
+    }
     // commit-message.sh has no `= hub` branch, so a missing mapping there changes nothing.
     const cm = path.join(T, 'checks/commit-message.sh');
     fs.writeFileSync(cm, fs.readFileSync(cm, 'utf8').replace('[ "$PROFILE" = product ] && PROFILE=hub', ''));
