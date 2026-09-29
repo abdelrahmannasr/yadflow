@@ -59,12 +59,18 @@ them from the list it offers.
 
 | Repo | Workflow file | Checks |
 |---|---|---|
-| Product hub | `.github/workflows/yad-hub-checks.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard` |
+| Product hub | `.github/workflows/yad-product-checks.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard` |
 | Product hub, when the file is there | `.github/workflows/yad-verified-commits.yml` | `verified-commits` |
 | Each code repo | `.github/workflows/yad-checks.yml` | `spec-link`, `contract-check`, `risk-map`, `build-test-lint`, `lineage-check`, `epic-open`, `reconcile-debt`, `commit-message`, `pr-title`, `pr-template`, `verified-commits` |
 
 Some of these jobs skip themselves on a bare title or description edit. GitHub counts a skipped job as
 passed, so requiring them does not block that edit.
+
+Before 4.0 the Product's workflow file was `.github/workflows/yad-hub-checks.yml`, with `name:
+yad-hub-checks`; `yad update` renames it `yad-product-checks`. The job names above did not change, so
+the required checks stay as they are. A workflow of your own that starts on `workflow_run:` of
+`yad-hub-checks`, and a status badge naming the old file or workflow, must be changed by hand; `yad
+doctor` lists each (`renamed-ref:`).
 
 ### The gate bot must be able to push (verified mode)
 
@@ -108,12 +114,15 @@ retries every 15 minutes and fails the same way until the token is there.
 | Merge request approval rules (Settings → Merge requests) | 1 or more approvals for a team, 0 in solo mode | **Premium and Ultimate only.** On GitLab Free an approval never blocks a merge |
 | Remove all approvals when commits are added to the source branch | on | Safe with yad, for the same reason as on GitHub |
 
-The checks run as jobs in the merge request pipeline: on the hub `yad-hub-commit-message`,
-`yad-hub-pr-title`, `yad-hub-pr-template`, `yad-hub-ledger-guard` and, when that file is there,
-`yad-hub-verified-commits`; in a code repo `yad-spec-link`, `yad-contract-check`, `yad-risk-map`,
+The checks run as jobs in the merge request pipeline: on the hub `yad-product-commit-message`,
+`yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard` and, when that file is there,
+`yad-product-verified-commits`; in a code repo `yad-spec-link`, `yad-contract-check`, `yad-risk-map`,
 `yad-build-test-lint`, `yad-lineage-check`, `yad-epic-open`, `yad-reconcile-debt`,
 `yad-commit-message`, `yad-pr-title`, `yad-pr-template` and `yad-verified-commits`. "Pipelines must
-succeed" covers them all.
+succeed" covers them all. Before 4.0 the Product's jobs were named `yad-hub-…`, in a fragment named
+`.gitlab/ci/yad-hub-checks.yml`; `yad update` renames both. The setting names no job, so it needs no
+change — but a job of your own that names an old one (`needs:`, `dependencies:`, `extends:`,
+`!reference`) must be changed by hand, and `yad doctor` lists each (`renamed-ref:`).
 
 **The gate token (verified mode).** The `yad-gate-sync` job pushes the ledger commit to the default
 branch with the project access token stored as the masked CI/CD variable `SDLC_GATE_TOKEN`

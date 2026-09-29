@@ -156,12 +156,12 @@ function gateStep(
     id: `gate-${idSuffix}`,
     title: `Team Review Gate · ${artifact}`,
     description:
-      `The reusable team review + approve gate. Shares the ${artifact} for review, records comments and approvals as files, applies the count rule (${rule}), and advances state ONLY when approval is recorded. When the Product is on a platform, yad-hub-bridge opens the review PR/MR and pulls its comments and approvals back into the file ledger.`,
+      `The reusable team review + approve gate. Shares the ${artifact} for review, records comments and approvals as files, applies the count rule (${rule}), and advances state ONLY when approval is recorded. When the Product is on a platform, yad-product-bridge opens the review PR/MR and pulls its comments and approvals back into the file ledger.`,
     actor: "reviewer",
     status: "in-review",
     stepState: "reviews/*.md · approvals.json · hub-prs.json",
     trigger: `yad-review-gate artifact: ${artifact}`,
-    handler: "yad-review-gate (open → comment → approve → advance) · yad-hub-bridge (review PR/MR)",
+    handler: "yad-review-gate (open → comment → approve → advance) · yad-product-bridge (review PR/MR)",
     activeComponents: ["product-hub", "approvals-json", "state-json", "platform"],
     messages: [
       { id: `g${idSuffix}-1`, from: "product-hub", to: "platform", label: "open review PR/MR", type: "gate", color: "#ca6f1e", delay: 0, duration: 700 },

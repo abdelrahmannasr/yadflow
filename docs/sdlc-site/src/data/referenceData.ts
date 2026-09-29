@@ -206,10 +206,10 @@ export const CHECK_GATES: CheckGate[] = [
   },
   {
     name: 'ledger-guard',
-    queue: 'yad-hub-checks',
+    queue: 'yad-product-checks',
     timing: 'on every Product review PR/MR',
     description: 'Product-only, verified mode only: the gate ledger (.sdlc/{state,approvals,comments,hub-prs}.json, reviews/*.md) is CI-owned, so any commit changing it that is not a verified gate-bot commit FAILS. A brand-new epic\'s ledger is exempt — creation, not mutation (#162); contract-lock.json is artifact-side and exempt too. Fails closed: this is what actually protects the ledger.',
-    triggeredBy: 'GitHub Actions / GitLab CI (yad-hub-checks.yml)',
+    triggeredBy: 'GitHub Actions / GitLab CI (yad-product-checks.yml)',
     visibleTo: ALL,
   },
   {
