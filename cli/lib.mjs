@@ -328,7 +328,7 @@ export function writeJSON(p, obj) {
   try {
     fs.renameSync(tmp, p);
   } catch (e) {
-    fs.rmSync(tmp, { force: true });
+    try { fs.rmSync(tmp, { force: true }); } catch { /* keep the rename's own error */ }
     throw e;
   }
 }
