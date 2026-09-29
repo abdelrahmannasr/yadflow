@@ -166,5 +166,5 @@ export async function runMode(root, { to = null, reason = null, json = false, to
     if (to === 'solo') info(c.dim('`yad doctor` warns if branch protection still requires an approval you cannot give yourself'));
   }
   const back = to === 'solo' ? 'yad mode team' : 'yad mode solo --reason "<why>"';
-  hand(`commit ${PROJECT_FILES.productConfig} and ${PROJECT_FILES.hubConfig} so every machine and CI run sees it  (reverse with \`${back}\`)`);
+  hand(`commit ${PROJECT_FILES.productConfig} and ${PROJECT_FILES.productConfigLegacy} so every machine and CI run sees it  (reverse with \`${back}\`)`);
 }

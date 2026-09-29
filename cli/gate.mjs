@@ -12,8 +12,8 @@ import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate, printable,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
-  upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
-  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
+  upsertProductPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
+  canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
@@ -146,18 +146,18 @@ export function warnIncompleteDiscovery(epicDir, artifact) {
 // Fail fast on a corrupt or wrong-shape Product config: a silently-defaulted hub.json would degrade
 // every gate to local without anyone noticing, and a typo'd platform would read as a local ledger.
 export function loadProduct(root) {
-  const hubFile = productConfigPath(root);
+  const productFile = productConfigPath(root);
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   // Distinguish an ABSENT hub.json (null default → fine, local gate) from one that exists but
   // holds literal `null` (malformed — must not silently downgrade to local).
-  const hub = readJSONStrict(hubFile, null);
-  if (hub === null && fs.existsSync(hubFile)) {
-    throw err('YAD-STATE-002', `${hubFile}: contains \`null\` — expected a config object`, 'fix the file or re-run `yad setup`');
+  const hub = readJSONStrict(productFile, null);
+  if (hub === null && fs.existsSync(productFile)) {
+    throw err('YAD-STATE-002', `${productFile}: contains \`null\` — expected a config object`, 'fix the file or re-run `yad setup`');
   }
   if (hub !== null) {
-    if (typeof hub !== 'object' || Array.isArray(hub)) throw err('YAD-STATE-002', `${hubFile}: expected a JSON object`, 'fix the file or re-run `yad setup`');
+    if (typeof hub !== 'object' || Array.isArray(hub)) throw err('YAD-STATE-002', `${productFile}: expected a JSON object`, 'fix the file or re-run `yad setup`');
     if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) {
-      throw err('YAD-CFG-001', `${hubFile}: unknown platform '${hub.platform}'`, 'expected github, gitlab, or null — fix the file or re-run `yad setup`');
+      throw err('YAD-CFG-001', `${productFile}: unknown platform '${hub.platform}'`, 'expected github, gitlab, or null — fix the file or re-run `yad setup`');
     }
   }
   const registry = readJSONStrict(regFile, { repos: [] });
@@ -567,8 +567,8 @@ function recordComments(comments, { artifact, stepId, today, blocking, aliases =
 // the PR for this artifact's review branch. Without that confirmation a typo'd number naming some
 // unrelated merged-and-approved PR would have its reviewers bound to this artifact's hash and satisfy
 // the gate.
-function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd }) {
-  const recorded = hubPrs.filter((p) => !artifact || p.artifact === artifact);
+function resolveTargets(productPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd }) {
+  const recorded = productPrs.filter((p) => !artifact || p.artifact === artifact);
   const named = number == null || number === '' ? null : Number(number);
   if (named !== null && (!Number.isInteger(named) || named <= 0)) {
     return { targets: [], discovered: false, reason: `--pr must be a positive integer, got '${number}'` };
@@ -578,7 +578,7 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
   const step = findReviewStep(state, artifact);
   if (!step) return { targets: [], discovered: false, reason: `no review step for ${artifact}` };
   const branch = `review/${epic}/${base(artifact)}`;
-  // `upsertHubPr` replaces the whole entry for an artifact, so a record built from scratch DROPS
+  // `upsertProductPr` replaces the whole entry for an artifact, so a record built from scratch DROPS
   // whatever the recorded one carried. That matters when `--pr` names the PR already on file: `nudged`
   // is the idempotency set for the engagement nudge, so losing it makes the next writer run
   // re-@-mention every bare approver on the PR — a platform write, not just a ledger one — and `url`
@@ -653,12 +653,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
 
-  let { approvals, comments, hubPrs, state } = ledger;
+  let { approvals, comments, productPrs, state } = ledger;
   // Migration (see stampLegacyPr): an approval written before PR provenance existed carries no `pr`,
   // so it can never be told apart from one arriving on a replacement PR — and on GitLab, with no
   // submittedAt either, the other proof is unavailable too. The pointer recorded here IS the PR those
   // approvals came from, so stamp them before anything replaces it.
-  for (const p of hubPrs) {
+  for (const p of productPrs) {
     const s = p.number != null ? findReviewStep(state, p.artifact) : null;
     if (s) stampLegacyPr(approvals, s.id, p.number);
   }
@@ -675,14 +675,14 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   }
   approvals = stampedOld.approvals;
   comments = stampedOld.comments;
-  const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
+  const resolved = resolveTargets(productPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
   // Advance in CHAIN order, never in ledger order. `advanceState` opens the step that FOLLOWS the one
   // it closes, so syncing two passing gates out of chain order rewinds the epic: closing
   // architecture-review first (next: ui-design) and epic-review second (next: architecture) reopens the
   // already-done `architecture` author step and points currentStep backward — the YAD-STATE-005 chain
   // inconsistency `yad gate repair` exists to undo. This used to hold only by accident, because
   // hub-prs.json happened to be in insertion order; now that the file is written sorted by artifact
-  // (see canonicalHubPrs) the accident is gone, so make the ordering explicit. `gate ci` is unaffected
+  // (see canonicalProductPrs) the accident is gone, so make the ordering explicit. `gate ci` is unaffected
   // either way — it always names a single artifact.
   const stepIndex = (p) => {
     const s = findReviewStep(state, p.artifact);
@@ -704,7 +704,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   // A pointer resolved from the platform is adopted into the ledger on the WRITER path only. In
   // verified mode this run is advisory and writes nothing, so the human never ends up with a gate-state
   // file in their working tree for the ledger-guard check to reject.
-  if (resolved.discovered && !readOnly) hubPrs = upsertHubPr(hubPrs, targets[0]);
+  if (resolved.discovered && !readOnly) productPrs = upsertProductPr(productPrs, targets[0]);
 
   let synced = 0;
   let advanced = 0;
@@ -875,11 +875,11 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   // here, so the first sweep after the upgrade converges the file once and never churns it again.
   approvals = canonicalApprovals(approvals);
   comments = canonicalComments(comments);
-  hubPrs = canonicalHubPrs(hubPrs);
+  productPrs = canonicalProductPrs(productPrs);
   if (stampedOld.stamped) info(`${epic}: recorded the platform login on ${stampedOld.stamped} older approval/comment record(s) that named a roster name`);
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
-  writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, hubPrs);
+  writeMirrored(ledger.files.productPrs, ledger.files.productPrsLegacy, productPrs);
   writeState(ledger.files.state, state);
   refreshApprovalRecord(epicDir, open, approvals, today); // the dated side file lists them in the same order
   // Only a PERSON's sync (`local`): `gateCi` calls this too, and rebuilds the index itself, inside the
@@ -1003,7 +1003,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
         continue;
       }
       if (!ledger.state) continue;
-      for (const p of ledger.hubPrs || []) {
+      for (const p of ledger.productPrs || []) {
         const step = findReviewStep(ledger.state, p.artifact);
         if (!step || isPassed(step)) continue;
         jobs.push({ epic: e, base: base(p.artifact), artifact: p.artifact, branch: p.branch, pr: p.number });
@@ -1048,7 +1048,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
 
     // The merge event may fire before any hub-prs record exists (Path B never wrote one pre-merge) —
     // build the entry from the event itself so the advance commit carries it onto the default branch.
-    const existing = (ledger.hubPrs || []).find((x) => x.artifact === job.artifact);
+    const existing = (ledger.productPrs || []).find((x) => x.artifact === job.artifact);
     const number = Number(job.pr) || existing?.number || null;
     // Same migration as gateSync, at the one point CI knows the OLD pointer: stamp the approvals it
     // recorded before replacing it, or a re-review on the replacement PR can never be told from a
@@ -1069,11 +1069,11 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       }
     }
     if (!existing || existing.number !== number || existing.branch !== job.branch) {
-      ledger.hubPrs = upsertHubPr(ledger.hubPrs, {
+      ledger.productPrs = upsertProductPr(ledger.productPrs, {
         step: step.id, artifact: job.artifact, platform: hub.platform, number,
         url: existing?.url ?? null, branch: job.branch, lastSyncedAt: existing?.lastSyncedAt ?? null,
       });
-      writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
+      writeMirrored(ledger.files.productPrs, ledger.files.productPrsLegacy, ledger.productPrs);
     }
 
     // No overlay: at merge the artifact is on the default branch CI checked out, so artifactHash
@@ -1253,7 +1253,7 @@ export async function gateComments(root, { epic, artifact, today, reader = readP
   if (!hub?.platform) { warn('no Product platform configured — nothing to fetch'); return { epic, prs }; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
-  const targets = (ledger.hubPrs || []).filter((p) => !artifact || p.artifact === artifact);
+  const targets = (ledger.productPrs || []).filter((p) => !artifact || p.artifact === artifact);
   if (!targets.length) { warn('no review PR recorded — run `yad gate open` first'); return { epic, prs }; }
   for (const pr of targets) {
     const pull = reader(hub.platform, pr.number, { cwd: root });
@@ -1574,16 +1574,16 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     // sync would stamp THAT number on them, so an approval given again on the new PR could never be told
     // from a re-read of the old one and, on GitLab (whose older records hold no submission time), would stay
     // stale for good.
-    const previous = (ledger.hubPrs || []).find((x) => x.artifact === artifact)?.number ?? null;
+    const previous = (ledger.productPrs || []).find((x) => x.artifact === artifact)?.number ?? null;
     // Also when the new URL carries no number: the old pointer is about to be overwritten either way.
     if (previous != null && previous !== opened && stampLegacyPr(ledger.approvals, step.id, previous)) {
       writeJSON(ledger.files.approvals, canonicalApprovals(ledger.approvals));
     }
-    ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: opened, url: r.url, branch, lastSyncedAt: null });
-    writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
+    ledger.productPrs = upsertProductPr(ledger.productPrs, { step: step.id, artifact, platform: hub.platform, number: opened, url: r.url, branch, lastSyncedAt: null });
+    writeMirrored(ledger.files.productPrs, ledger.files.productPrsLegacy, ledger.productPrs);
     // The record was written before the PR existed, and the first close wins, so no later sync can add
     // the number. Add it here, to the record this run wrote and to nothing older (E18).
-    const number = ledger.hubPrs.find((p) => p.artifact === artifact)?.number ?? null;
+    const number = ledger.productPrs.find((p) => p.artifact === artifact)?.number ?? null;
     const closedHere = closesAuthor ? ledger.state.steps.find((s) => s.id === author.id) : null;
     if (number != null && closedHere?.closed?.via === 'review-opened' && closedHere.closed.pr == null) {
       closedHere.closed = closingRecord({ ...closedHere.closed, pr: number });
@@ -1611,7 +1611,7 @@ function reviewBundle(root, { epic, artifact, headCount = null } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) return { error: `no epic state at ${epicDir}` };
-  const pr = (ledger.hubPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
+  const pr = (ledger.productPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
   const art = artifact || pr?.artifact || null;
   const step = art ? findReviewStep(ledger.state, art) : null;
   // E71 — the live capacity count. Its own read, and still once per command: `reviewBundle` has exactly
@@ -1692,7 +1692,7 @@ export async function gateTrailer(root, { epic, artifact, body, number, getBody 
   if (!body || !String(body).trim()) { fail('trailer body is required: `yad gate trailer <epic> <artifact> --body <text>` (the companion generates it)'); process.exitCode = 1; return; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
-  const pr = (ledger.hubPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
+  const pr = (ledger.productPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
   const n = number || pr?.number;
   if (!n) { warn('no PR number — pass `--pr <n>` (in verified mode the PR is recorded in the ledger only at merge)'); return { number: null, posted: false }; }
   const cur = getBody(hub.platform, n, { cwd: root });

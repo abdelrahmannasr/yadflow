@@ -455,12 +455,12 @@ export const canonicalApprovals = (approvals = []) => canonical(approvals, (a) =
 export const canonicalComments = (comments = []) => canonical(comments, (cm) =>
   [cm.step, String(cm.round ?? '').padStart(6, '0'), cm.commenter, cm.role, cm.date].map(field).join('|'));
 
-export const canonicalHubPrs = (hubPrs = []) => canonical(hubPrs, (p) =>
+export const canonicalProductPrs = (productPrs = []) => canonical(productPrs, (p) =>
   [p.artifact, p.step].map(field).join('|'));
 
 // Replace-not-append upsert into hub-prs.json, keyed by artifact (one live review PR per artifact).
-export function upsertHubPr(hubPrs = [], rec) {
-  return canonicalHubPrs([...hubPrs.filter((p) => p.artifact !== rec.artifact), rec]);
+export function upsertProductPr(productPrs = [], rec) {
+  return canonicalProductPrs([...productPrs.filter((p) => p.artifact !== rec.artifact), rec]);
 }
 
 // SHA-256 of the contract surface block (architecture only). Byte-for-byte identical to the recipe
@@ -1448,8 +1448,8 @@ export function loadLedger(epicDir) {
     // file (`preferring`, cli/manifest.mjs). Both are written on every
     // save (see gateSync / gateOpen), so they agree unless someone edited one by hand — which
     // `yad doctor` reports rather than leaving to be discovered.
-    hubPrs: (() => {
-      const f2 = preferring(f.productPrs, f.hubPrs);
+    productPrs: (() => {
+      const f2 = preferring(f.productPrs, f.productPrsLegacy);
       return requireArray(readJSONStrict(f2, []), f2);
     })(),
     contractLock: readJSONStrict(f.contractLock, null),
@@ -3328,7 +3328,7 @@ function reopenedLanes(ledger, { epicId, currentStep, bindings }) {
     .map((s) => {
       if (stepStatus(s) === 'blocked') return { step: s.id, kind: 'blocked', status: 'blocked', record: s.record || null };
       if (s.type === 'author') return { step: s.id, kind: 'author', status: s.status, ...skillFields(stepSkills(s.id, bindings)), artifact: s.artifact };
-      const pr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(s.artifact));
+      const pr = (ledger.productPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(s.artifact));
       return { step: s.id, kind: pr ? 'review-sync' : 'review-open', status: s.status, artifact: s.artifact, pr: pr ? pr.number : null,
         command: `yad gate ${pr ? 'sync' : 'open'} ${epicId} ${s.artifact}` };
     });
@@ -3366,7 +3366,7 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
         ...skillFields(stepSkills(dstep.id, bindings)), artifact: dstep.artifact,
         why: `${dstep.id} is ${dstep.status} — author ${dstep.artifact}` };
     }
-    const dpr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(dstep.artifact));
+    const dpr = (ledger.productPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(dstep.artifact));
     const dverb = dpr ? 'sync' : 'open';
     return { epicId, kind: dpr ? 'review-sync' : 'review-open', step: dstep.id, status: dstep.status,
       artifact: dstep.artifact, pr: dpr ? dpr.number : null,
@@ -3450,7 +3450,7 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
   }
 
   // review+approve: open the review PR if none is recorded yet, else sync the open one.
-  const pr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(step.artifact));
+  const pr = (ledger.productPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(step.artifact));
   const verb = pr ? 'sync' : 'open';
   return { epicId, kind: pr ? 'review-sync' : 'review-open', step: step.id, status: step.status,
     artifact: step.artifact, pr: pr ? pr.number : null, parallel,

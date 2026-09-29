@@ -162,7 +162,7 @@ export async function gateApprove(root, { epic, artifact, by, engagement = null,
   const { epicDir, ledger, step } = g;
   const hash = artifactHash(epicDir, step.artifact);
   const eng = engagement || 'none';
-  // Filter-then-push, keyed on (step, approver), as `upsertHubPr` does: one record per person. A bridge
+  // Filter-then-push, keyed on (step, approver), as `upsertProductPr` does: one record per person. A bridge
   // record (from a platform the Product once had) is left alone — it is another source's history.
   // The same person approving the same content again keeps the record as it was, date included, so a
   // repeat is a byte-identical no-op rather than a new line in the ledger's history.

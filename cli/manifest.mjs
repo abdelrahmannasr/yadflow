@@ -254,7 +254,7 @@ export const PROJECT_FILES = {
   // The product's own settings. `product.json` is the name from shape 3 onward; `hub.json` is what
   // it was called before, and it is NOT dead — see MIRRORED_FILES below.
   productConfig: '.sdlc/product.json',
-  hubConfig: '.sdlc/hub.json',
+  productConfigLegacy: '.sdlc/hub.json',
   designConfig: '.sdlc/design.json',
   testingConfig: '.sdlc/testing.json',
   learningConfig: '.sdlc/learning.json',
@@ -301,7 +301,7 @@ export const PROJECT_FILES = {
 // This costs a duplicated file on disk for two releases. That is the price of not silently disarming
 // a safety gate in somebody else's repository, and it is worth paying.
 export const MIRRORED_FILES = [
-  { canonical: PROJECT_FILES.productConfig, legacy: PROJECT_FILES.hubConfig },
+  { canonical: PROJECT_FILES.productConfig, legacy: PROJECT_FILES.productConfigLegacy },
 ];
 
 // Which of the two names to READ.
@@ -322,7 +322,7 @@ export const MIRRORED_FILES = [
 // found — has their change silently ignored. `yad doctor` reports the two copies drifting apart, so
 // a project that gets into that state is told, rather than left to wonder.
 export const productConfigPath = (root) => {
-  const legacy = path.join(root, PROJECT_FILES.hubConfig);
+  const legacy = path.join(root, PROJECT_FILES.productConfigLegacy);
   return existsSync(legacy) ? legacy : path.join(root, PROJECT_FILES.productConfig);
 };
 
@@ -421,7 +421,7 @@ export const epicFiles = (epicRoot) => ({
   // both `templates/checks/ledger-guard.sh` and `cli/hook.mjs` name it literally, and the guard in a
   // user's repo only learns the new name when they run `yad update`. See MIRRORED_FILES.
   productPrs: `${epicRoot}/.sdlc/product-prs.json`,
-  hubPrs: `${epicRoot}/.sdlc/hub-prs.json`,
+  productPrsLegacy: `${epicRoot}/.sdlc/hub-prs.json`,
   contractLock: `${epicRoot}/.sdlc/contract-lock.json`,
   // The two append-only Build ledgers use shard-then-fold storage (cli/ledger.mjs): writers add
   // one loose shard per entry under the *Dir path (conflict-free concurrent writes); `yad tidy up`

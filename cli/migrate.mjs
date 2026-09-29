@@ -26,7 +26,7 @@ import {
 import { backupPathFor } from './plan.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
 import {
-  artifactHash, canonicalApprovals, canonicalComments, canonicalHubPrs, DISCOVERY_EPIC, epicIds, epicRel,
+  artifactHash, canonicalApprovals, canonicalComments, canonicalProductPrs, DISCOVERY_EPIC, epicIds, epicRel,
   epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isGateStep, isPassed, stampProfile, stampStepStates, stampWorkItemType, writeState,
 } from './epic-state.mjs';
 
@@ -494,8 +494,8 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
     };
     relabel(f.approvals, canonicalApprovals);
     relabel(f.comments, canonicalComments);
-    relabel(f.productPrs, canonicalHubPrs);
-    relabel(f.hubPrs, canonicalHubPrs);
+    relabel(f.productPrs, canonicalProductPrs);
+    relabel(f.productPrsLegacy, canonicalProductPrs);
     for (const rel of move.reshape || []) {
       const file = path.join(root, rel);
       const { obj, version } = applyMigrations(JSON.parse(fs.readFileSync(file, 'utf8')), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
@@ -689,7 +689,7 @@ export function projectJsonFiles(root) {
   for (const epic of epicIds(root)) {
     const epicDir = epicRoot(root, epic);
     const f = epicFiles(epicDir);
-    files.push(f.state, f.approvals, f.comments, preferring(f.productPrs, f.hubPrs), f.contractLock,
+    files.push(f.state, f.approvals, f.comments, preferring(f.productPrs, f.productPrsLegacy), f.contractLock,
       f.buildLog, f.trustLog, f.change, f.reconcileDebt);
     files.push(...shardFiles(f.buildLogDir), ...shardFiles(f.trustLogDir), ...shardFiles(f.buildStateDir));
     // The docs-build cache (cli/docs.mjs) lives in the same directory and is written by the engine,

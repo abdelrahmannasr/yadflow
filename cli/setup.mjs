@@ -442,7 +442,7 @@ export async function runSetup(root, opts = {}) {
       default_branch, ...setupModeFields(root, cur, solo, opts), profile: { codebase, repo_layout, team_size },
     });
     writeProductConfig(root, next);
-    ok(`wrote ${PROJECT_FILES.productConfig} + ${PROJECT_FILES.hubConfig}${solo ? ' (solo mode)' : ''}`);
+    ok(`wrote ${PROJECT_FILES.productConfig} + ${PROJECT_FILES.productConfigLegacy}${solo ? ' (solo mode)' : ''}`);
   }
   // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
   // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.

