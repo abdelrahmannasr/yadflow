@@ -3,7 +3,7 @@
 #
 # Each fragment resolves which yadflow its CI job runs, and trusts a version from a committed file only
 # when it is an exact release of the fragment's OWN major — `YAD_MAJOR` in its `yad-pin` block
-# (skills/yad-hub-bridge/references/bridge.md, "Which yadflow the wired job runs"). `yad update` rewrites
+# (skills/yad-product-bridge/references/bridge.md, "Which yadflow the wired job runs"). `yad update` rewrites
 # the fragment and re-stamps `.sdlc/cli-version.json` together, so the rule costs a user nothing — as
 # long as the fragment says the right major. When it does not, a 4.x release ships a fragment that
 # rejects every 4.x stamp and falls back to `yadflow@3`: CI silently runs an older engine against a
@@ -27,8 +27,8 @@ cd "$ROOT"
 die() { printf '\nRELEASE CHECK FAILED: %s\n' "$*" >&2; exit 1; }
 
 FRAGMENTS=(
-  skills/yad-hub-bridge/templates/github/yad-gate-sync.yml
-  skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml
+  skills/yad-product-bridge/templates/github/yad-gate-sync.yml
+  skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml
 )
 
 # The major each fragment ships with. Every `YAD_MAJOR=<n>` line in every fragment must agree.

@@ -3324,10 +3324,10 @@ test('risk-route: half-filled body still routes (advisory, never aborts)', () =>
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// ---------- hub-route.sh (the Shape analogue) ----------
-const HUB_ROUTE = path.join(ROOT, 'skills/yad-hub-bridge/templates/checks/hub-route.sh');
+// ---------- product-route.sh (the Shape analogue; hub-route.sh before E123) ----------
+const HUB_ROUTE = path.join(ROOT, 'skills/yad-product-bridge/templates/checks/product-route.sh');
 
-test('hub-route: prints the gate count from the risk tags — no roles, and stories no longer route by name (E62)', () => {
+test('product-route: prints the gate count from the risk tags — no roles, and stories no longer route by name (E62)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubroute-'));
   const run = (lines) => runGate(HUB_ROUTE, T, [body(T, lines.join('\n'))]);
   let r = run(['- Artifact: `stories/`', '- **Risk tags:** none', '- **Domains / repos touched:** backend, mobile']);
@@ -3497,7 +3497,7 @@ test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review h
 // ---------- pr-template.sh ----------
 const PR_TEMPLATE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
 const CODE_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/github/pull_request_template.md');
-const HUB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/hub/github/pull_request_template.md');
+const HUB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/product/github/pull_request_template.md');
 
 test('pr-template gate: the real code template passes; a stripped body fails', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
@@ -3570,7 +3570,7 @@ test('pr-template gate: hub rejects an artifact change (epics/**) on a non-revie
 // can lose a required section before the gate reads it. The gate cannot un-truncate the body; what it
 // CAN do is stop reporting "does not use the template" as if the author had ignored it.
 const GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md');
-const HUB_GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/hub/gitlab/merge_request_templates/Default.md');
+const HUB_GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/product/gitlab/merge_request_templates/Default.md');
 
 test('pr-template gate: names the 2700-character GitLab truncation when a section falls past the cutoff', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
@@ -4205,8 +4205,8 @@ test('ledger-guard: an unresolvable base ref FAILs closed (bridge on)', () => {
 // shipped template by sha256, so an edited-in version would report `outdated` forever and be reverted
 // by the next `yad check --fix`. It therefore reads committed files instead, and these tests EXECUTE
 // the real block lifted out of each template rather than asserting on its text.
-const GATE_SYNC_GITHUB = path.join(ROOT, 'skills/yad-hub-bridge/templates/github/yad-gate-sync.yml');
-const GATE_SYNC_GITLAB = path.join(ROOT, 'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml');
+const GATE_SYNC_GITHUB = path.join(ROOT, 'skills/yad-product-bridge/templates/github/yad-gate-sync.yml');
+const GATE_SYNC_GITLAB = path.join(ROOT, 'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml');
 
 // Pull every `# >>> yad-pin` … `# <<< yad-pin` block out of a YAML fragment and undo the block
 // scalar's indentation, so what runs here is what the runner runs.
@@ -4290,7 +4290,7 @@ test('pin-major-check: the fragments must carry the major the release will publi
       for (const [k, v] of [['user.name', 'alice'], ['user.email', 'alice@corp.io'], ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']]) git('config', k, v);
       releaseToolsInto(T);
       fs.copyFileSync(path.join(ROOT, 'scripts/pin-major-check.sh'), path.join(T, 'scripts/pin-major-check.sh'));
-      for (const rel of ['skills/yad-hub-bridge/templates/github/yad-gate-sync.yml', 'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml']) {
+      for (const rel of ['skills/yad-product-bridge/templates/github/yad-gate-sync.yml', 'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml']) {
         fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
         fs.writeFileSync(path.join(T, rel), `steps:\n  - run: |\n      # >>> yad-pin\n      YAD_MAJOR=${major}\n      # <<< yad-pin\n`);
       }
@@ -5246,7 +5246,7 @@ test('risk-map count: run from a subfolder it still reads the base map — never
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('risk-route and hub-route: a Domains line ending in a comma still exits 0', () => {
+test('risk-route and product-route: a Domains line ending in a comma still exits 0', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-risk-'));
   let r = runGate(RISK_ROUTE, T, [body(T, '- Risk level: high\n- Contract surface touched: no\n- Domains touched: auth, billing,\n')]);
   assert.equal(r.code, 0, r.out);
@@ -5661,8 +5661,8 @@ test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifac
     g('checkout', '-q', 'chore/sneak');
     const changed = path.join(T, 'changed.txt');
     const templates = {
-      'skills/yad-checks/templates/github/yad-hub-checks.yml': /git (.*?diff .*?--name-only) "origin\/\$\{BASE_REF\}\.\.\.HEAD"/g,
-      'skills/yad-checks/templates/gitlab/yad-hub-checks.gitlab-ci.yml': /git (.*?diff .*?--name-only) "origin\/\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME\.\.\.HEAD"/g,
+      'skills/yad-checks/templates/github/yad-product-checks.yml': /git (.*?diff .*?--name-only) "origin\/\$\{BASE_REF\}\.\.\.HEAD"/g,
+      'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml': /git (.*?diff .*?--name-only) "origin\/\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME\.\.\.HEAD"/g,
     };
     for (const [rel, re] of Object.entries(templates)) {
       const cmds = [...fs.readFileSync(path.join(ROOT, rel), 'utf8').matchAll(re)].map((m) => m[1]);

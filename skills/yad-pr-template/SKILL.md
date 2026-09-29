@@ -24,11 +24,11 @@ routing helper.
     `<repo>/.gitlab/merge_request_templates/Default.md`
   - `templates/checks/risk-route.sh` → installs to `<repo>/checks/risk-route.sh` (advisory routing helper)
   - **Product variants** (`repo: hub`) — Shape artifact-review PR/MR bodies:
-    `templates/hub/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
-    `templates/hub/gitlab/merge_request_templates/Default.md` →
+    `templates/product/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
+    `templates/product/gitlab/merge_request_templates/Default.md` →
     `{project-root}/.gitlab/merge_request_templates/Default.md`. The Product body carries no `Task:` trailer
-    (Product PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s
-    `templates/checks/hub-route.sh`, run from the skill (nothing installs it into the Product's `checks/`).
+    (Product PRs change artifacts, not code); its routing helper is `yad-product-bridge`'s
+    `templates/checks/product-route.sh`, run from the skill (nothing installs it into the Product's `checks/`).
 - **GitLab reads a truncated description.** The `pr-template` gate is fed
   `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
   that cutoff is invisible to the gate even though the MR shows it, and the failure reads "does not use
@@ -37,7 +37,7 @@ routing helper.
   / `## Checklist`) early, so a truncated body still passes. Long narrative goes **after** them.
   Sections may be reordered freely; deleting one fails the gate. GitHub is unaffected.
 - **Installed code-repo templates are yad-managed.** `yad update` rewrites them on upgrade (the Product
-  variants under `templates/hub/` are copied by hand in Step 2 and are not managed). An edit yad can
+  variants under `templates/product/` are copied by hand in Step 2 and are not managed). An edit yad can
   prove — the file's sha differs from the one it recorded when it wrote the template — is reported as
   `modified` and left alone; a copy it has no record of is replaced after a `.yad-orig` backup (see
   `docs/CLI.md` → *Managed files*). Either way, put knowledge that must survive an upgrade in an ADR
@@ -71,8 +71,8 @@ Copy from this skill's `templates/`:
 - GitHub → `templates/github/pull_request_template.md` to `<repo>/.github/pull_request_template.md`.
 - GitLab → `templates/gitlab/merge_request_templates/Default.md` to
   `<repo>/.gitlab/merge_request_templates/Default.md`.
-- **`repo: hub`** → use the `templates/hub/<platform>/…` variants, installed into `{project-root}`'s own
-  `.github/`/`.gitlab/`. The Product's routing helper (`hub-route.sh`) stays in `yad-hub-bridge`'s
+- **`repo: hub`** → use the `templates/product/<platform>/…` variants, installed into `{project-root}`'s own
+  `.github/`/`.gitlab/`. The Product's routing helper (`product-route.sh`) stays in `yad-product-bridge`'s
   `templates/checks/`; neither this skill nor `yad setup` / `yad check --fix` installs it.
 Drop **only the matching** template (drop both only if the repo genuinely uses both). For code repos also
 install `templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`), beside

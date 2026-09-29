@@ -999,7 +999,7 @@ function printNotRenamedHere(root) {
   log(c.bold('  hub → Product'));
   log(`  ${PROJECT_FILES.productConfig} is the name read; ${PROJECT_FILES.productConfigLegacy} is still written beside it for check gates an older yadflow installed, and v5 deletes it`);
   log(`  ${c.dim('not done here:')}`);
-  log(`    ${c.dim('the names installed into your repos (the yad-hub-checks workflow, the yad-hub-bridge skill) — `yad update` owns those')}`);
+  log(`    ${c.dim('the names installed into your repos (the yad-hub-checks workflow → yad-product-checks, the yad-hub-bridge skill → yad-product-bridge, the GitLab yad-hub-* jobs → yad-product-*) — `yad update` renames those')}`);
   log(`    ${c.dim('your own CI settings and scripts that name .sdlc/hub.json, hub-prs.json or SDLC_HUB_CONFIG — they work until v5; change them to .sdlc/product.json, product-prs.json and SDLC_PRODUCT_CONFIG by hand')}`);
 }
 

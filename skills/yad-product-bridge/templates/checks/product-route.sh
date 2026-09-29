@@ -10,8 +10,8 @@
 # review; it does not approve or merge.
 set -euo pipefail
 
-BODY="${1:?usage: hub-route.sh <hub-pr-description-file>}"
-[ -f "$BODY" ] || { echo "hub-route: file not found: $BODY" >&2; exit 2; }
+BODY="${1:?usage: product-route.sh <product-pr-description-file>}"
+[ -f "$BODY" ] || { echo "product-route: file not found: $BODY" >&2; exit 2; }
 
 # Value side of the FIRST line matching a label regex, comments + markdown markers stripped. Tolerant:
 # a missing label yields empty (never aborts) — an advisory helper must still print for a half-filled body.

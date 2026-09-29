@@ -132,7 +132,7 @@ Why count people: the rule names no person, no role and no step. A stored list o
 stale; repository access decides who can approve.
 
 Four surfaces print the count with its cap: `yad gate sync`, `yad gate status`, the generated
-review-PR body and `yad open-pr`. (`checks/risk-route.sh` and `checks/hub-route.sh` print the count
+review-PR body and `yad open-pr`. (`checks/risk-route.sh` and `checks/product-route.sh` print the count
 without the cap — they cannot count people.) `yad gate sync` and `yad gate status` share one suffix; the review-PR body and `yad
 open-pr` word the cap their own way (below). The shared suffix appears only when the step has a risk
 step. It names the cap only when the cap lowered the ask, and always ends by saying what holds:
@@ -262,19 +262,19 @@ unchanged**: it counts distinct approvers regardless of how they were recorded.
 - On PR/MR open the assignee is whoever opens it: `@me` on GitHub, and the login `glab` reports on GitLab.
   **No reviewers are requested** — the command prints `no reviewers were requested — ask them on the
   PR itself`. `domain:<repo>` labels for the touched domains are still applied. See
-  `../yad-hub-bridge/references/login-roster.md`.
+  `../yad-product-bridge/references/login-roster.md`.
 - `sync` is idempotent (upsert by `(step, approver)`, one record per person; comment records by
   `(step, commenter, round)`, an unchanged round rewritten in place) and never touches **manual** approvals. An older bridge record that carries `role`/`domain` is
-  recognised as `../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced
+  recognised as `../yad-product-bridge/references/login-roster.md` → "Older records" describes, and replaced
   by one login-named record that keeps its fingerprint. Every sync write (`yad gate sync`, `yad gate ci`)
   also records the login on the older records the roster can place for certain; only those it cannot
   place still need the roster on a later sync. A bridge approval records the
   platform's evidence (`approvedAt`, and on GitHub `commit`, `url`, `reviewId`) — for the record only. A revoked approval is superseded **while the step is open**; once
   the step is `done` its approvals are kept as the record of why it passed, and a re-sync only re-binds
-  new ones (see `../yad-hub-bridge/references/bridge.md` → "Idempotent re-sync").
+  new ones (see `../yad-product-bridge/references/bridge.md` → "Idempotent re-sync").
 - The architecture+contract staleness rule applies to bridge approvals too: a re-lock changes the
   surface fingerprint, so bridge approvals of the old surface stop counting (they stay on disk as revoked).
-- No platform / no CLI → the gate runs local with no error. Detail: `../yad-hub-bridge/references/bridge.md`.
+- No platform / no CLI → the gate runs local with no error. Detail: `../yad-product-bridge/references/bridge.md`.
 
 ## Why this shape
 - One approver who is not the author keeps review load low on a small team (design priority 2) while

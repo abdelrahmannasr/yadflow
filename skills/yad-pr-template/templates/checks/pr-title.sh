@@ -4,7 +4,7 @@
 #   --profile code (default) — a Conventional-Commits subject "<type>: <description>", no trailing
 #     period (config.yaml build.pr_title_style: same_as_commit_subject; one task = one PR, the title is
 #     the squash-merge subject). Keep <type> in sync with cli/manifest.mjs COMMIT_TYPES.
-#   --profile hub — a Shape artifact-review title "review: <artifact> (EP-<slug>)", the shape
+#   --profile product (old name: hub) — a Shape artifact-review title "review: <artifact> (EP-<slug>)", the shape
 #     `yad gate open` creates (cli/gate.mjs) — BUT only for review/EP-* head branches. Every other
 #     Product PR is a tooling/code change to the Product itself and follows the code convention; pass the
 #     head ref via --head so the gate can tell the two apart (a tooling PR has no EP artifact to
@@ -39,9 +39,10 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --prof
 #
 # Not because the two sides update separately — they do not: this script and the workflow that passes
 # the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and land together on one `yad update`. It is
-# the plain add-before-remove ladder instead: accept the new spelling now, switch the workflow
-# templates to emit it in a later release, drop the old one after that. Every shipped template still
-# passes `--profile hub` today, so this arm is dead weight until that switch — which is the point.
+# the plain add-before-remove ladder instead: the new spelling was accepted first, the workflow
+# templates switched to emit it in E123 (`yad-product-checks.yml`), and the old one is dropped after
+# that. `hub` stays accepted meanwhile: a team's own workflow, or one they edited and `yad update` kept,
+# may still pass it.
 #
 # Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
 # load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`

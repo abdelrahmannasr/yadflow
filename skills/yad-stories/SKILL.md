@@ -145,7 +145,7 @@ reviewers — the team asks them on the review PR itself. When this gate
 passes the epic becomes **`ready-for-build`** — Build can start **and** the parallel
 **`test-cases`** track opens for the tester (`yad-test-cases`); the two run at the same time. **Never record
 approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review
-PR on the Product (via `yad-hub-bridge`, with a `domain:<repo>` label per touched repo) and
+PR on the Product (via `yad-product-bridge`, with a `domain:<repo>` label per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
 is recorded local.
 

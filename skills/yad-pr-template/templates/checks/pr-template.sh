@@ -5,7 +5,7 @@
 # that bypassed the template.
 #   --profile code (default) — the code-repo task template (yad-pr-template templates/<platform>/):
 #     requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:` (low|medium|high).
-#   --profile hub — the Shape artifact-review template (templates/hub/<platform>/):
+#   --profile product (old name: hub) — the Shape artifact-review template (templates/product/<platform>/):
 #     requires `## Artifact under review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
 #     BUT only for review/EP-* head branches. Every other Product PR is a tooling/code change to the Product
 #     itself and uses the code task template instead; pass the head ref via --head so the gate knows
@@ -40,9 +40,10 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --p
 #
 # Not because the two sides update separately — they do not: this script and the workflow that passes
 # the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and land together on one `yad update`. It is
-# the plain add-before-remove ladder instead: accept the new spelling now, switch the workflow
-# templates to emit it in a later release, drop the old one after that. Every shipped template still
-# passes `--profile hub` today, so this arm is dead weight until that switch — which is the point.
+# the plain add-before-remove ladder instead: the new spelling was accepted first, the workflow
+# templates switched to emit it in E123 (`yad-product-checks.yml`), and the old one is dropped after
+# that. `hub` stays accepted meanwhile: a team's own workflow, or one they edited and `yad update` kept,
+# may still pass it.
 #
 # Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
 # load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`

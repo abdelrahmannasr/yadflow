@@ -1,12 +1,12 @@
 # yad-managed: yad-checks
-# Pattern gates for the PRODUCT. They run with `--profile hub` and split by head branch:
+# Pattern gates for the PRODUCT. They run with `--profile product` and split by head branch:
 #   review/EP-* PRs are Shape artifact-review vehicles — a `review: <artifact> (EP-<slug>)` title
 #     and the Product artifact-review template body.
 #   every other PR is a tooling/code change to the Product itself — a Conventional-Commits title and the
 #     code task template body (same convention the code repos use).
 # The head ref is passed via --head so the gate can tell the two apart. Commit subjects are always
 # Conventional-Commits. Standalone workflow so it never collides with the code-repo yad-checks workflow.
-name: yad-hub-checks
+name: yad-product-checks
 on:
   pull_request:
     # `edited` (beyond the opened/synchronize/reopened defaults) so a PR title/body correction
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - run: bash checks/commit-message.sh --profile hub "origin/${{ github.base_ref }}"
+      - run: bash checks/commit-message.sh --profile product "origin/${{ github.base_ref }}"
 
   # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
   # fetch-depth: 0 + the base ref give us the PR's changed paths, so the gate can reject an artifact
@@ -39,7 +39,7 @@ jobs:
         with: { fetch-depth: 0 }
       - run: |
           changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
-          bash checks/pr-title.sh --profile hub --head "$PR_HEAD" --changed "$changed" "$PR_TITLE"
+          bash checks/pr-title.sh --profile product --head "$PR_HEAD" --changed "$changed" "$PR_TITLE"
 
   pr-template:
     runs-on: ubuntu-latest
@@ -53,7 +53,7 @@ jobs:
       - run: |
           changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
           body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
-          bash checks/pr-template.sh --profile hub --head "$PR_HEAD" --changed "$changed" "$body"
+          bash checks/pr-template.sh --profile product --head "$PR_HEAD" --changed "$changed" "$body"
 
   # The gate ledger is CI-owned: reject non-bot commits to .sdlc/{state,approvals,comments,product-prs,hub-prs}.json
   # or reviews/*.md (.sdlc/contract-lock.json is artifact-side and allowed). The one other exception is a

@@ -320,7 +320,7 @@ docs:
   # tokens — publishing runs as the LOCAL user's own gh/glab or the platform CI. Idempotent, refreshable.
   auth: user
 
-# Product platform + Shape review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
+# Product platform + Shape review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-product-bridge).
 # The Product is itself a git repo on a platform. With a verified ledger, the Shape review/
 # comment/approval cycle runs through a real PR/MR on the Product: a review PR is opened per artifact, reviewers
 # approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `yad-review-gate action: sync`

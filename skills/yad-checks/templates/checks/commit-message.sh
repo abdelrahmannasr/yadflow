@@ -52,9 +52,10 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [commit-message]: unknown 
 #
 # Not because the two sides update separately — they do not: this script and the workflow that passes
 # the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and land together on one `yad update`. It is
-# the plain add-before-remove ladder instead: accept the new spelling now, switch the workflow
-# templates to emit it in a later release, drop the old one after that. Every shipped template still
-# passes `--profile hub` today, so this arm is dead weight until that switch — which is the point.
+# the plain add-before-remove ladder instead: the new spelling was accepted first, the workflow
+# templates switched to emit it in E123 (`yad-product-checks.yml`), and the old one is dropped after
+# that. `hub` stays accepted meanwhile: a team's own workflow, or one they edited and `yad update` kept,
+# may still pass it.
 #
 # Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
 # load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`

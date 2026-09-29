@@ -14,7 +14,7 @@ import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPa
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyHubActions,
-  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
@@ -110,6 +110,12 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     for (const i of notOk) log(`    ${MARK[i.status]}  ${i.item}`);
   }
   for (const g of gaps) warn(g);
+  // E123: the team's own files that name one of our renamed CI names — each with its file and line, the same
+  // list `yad doctor` shows. yad never edits them; the include line it rewrites is said as what it is.
+  for (const h of renamedNameHits(root)) {
+    if (h.rewritten) info(`${h.file}:${h.line} includes the old fragment — ${fix ? 'rewritten' : 'rewritten by `yad check --fix`/`yad update`'} to name ${h.new}`);
+    else warn(`${h.file}:${h.line} names \`${h.old}\`, renamed \`${h.new}\` in 4.0 — yad does not edit this file; change it by hand`);
+  }
   // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
   const gitHookNote = gitHookAdvice(gitHookState(root));
   if (gitHookNote) warn(gitHookNote);
@@ -167,6 +173,14 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     if (kept === null || ships === null || kept === ships) continue;
     warn(`${m.scope}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
     hand(`re-apply your edit on top of the new fragment, or replace it with \`yad update --overwrite-local\` (your copy is saved beside it as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
+  }
+  // A renamed file the team edited (E123): kept under its old name, so say that the rename is half done and
+  // how to finish it. True whatever else this run does: the old file goes on running (GitHub) or being the
+  // one the root .gitlab-ci.yml includes (GitLab) until --overwrite-local replaces it.
+  for (const m of modified.filter((a) => a.rename)) {
+    const { from, to } = m.rename;
+    warn(`${m.scope}/${from} was renamed ${to} in this release, but it was edited, so it is kept — ${from.startsWith('.gitlab/') ? 'the root .gitlab-ci.yml goes on including it' : 'it goes on running'} under its old name`);
+    hand(`\`yad update --overwrite-local\` replaces it with ${to} (your copy is saved as ${path.basename(from)}${BACKUP_SUFFIX}); then copy your edits into ${to}`);
   }
   if (modified.length && !overwriteLocal) {
     hand(`keep the edits (reported as \`modified\` on every check), or replace them with \`yad update --overwrite-local\` — each previous version is saved beside the file as <file>${BACKUP_SUFFIX}`);

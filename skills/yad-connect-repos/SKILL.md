@@ -173,7 +173,7 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 ## Product detection (the Shape review bridge)
 
 The Product is itself a git repo on a platform. This action records that so the Shape review/comment/
-approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-hub-bridge`). It
+approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-product-bridge`). It
 writes only `{project-root}/.sdlc/product.json` and its older name `.sdlc/hub.json` (`config.yaml` `product.config` (older projects: `hub.config`)) — never an epic's state/approvals.
 
 - **`detect-hub`** — detect the Product's own platform and upsert the Product settings: read
@@ -252,7 +252,7 @@ it does not silently re-pack. Refreshing the cache is a human decision. Document
 ## Reference
 - Registry schema + freshness rule: `references/repos-registry.md`.
 - The risk map — format, rubric, what the agent may change: `references/risk-map.md`.
-- Product config (the review bridge): `references/hub-config.md`.
+- Product config (the review bridge): `references/product-config.md`.
 - Repomix command, secret-scan, degrade path, the code-map prompt, and live on-demand:
   `references/code-context.md`.
 - The repomix discipline this reuses (one-feature-at-a-time variant): `../yad-backfill/references/backfill.md`.

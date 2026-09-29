@@ -299,7 +299,7 @@ from the event payload):
 - `--profile code` (default) → a Conventional-Commits subject `<type>: <description>`, no trailing
   period (`config.yaml build.pr_title_style: same_as_commit_subject` — one task = one PR, the title is
   the squash-merge subject).
-- `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
+- `--profile product` (old name `hub`, still accepted) → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
   - `review/EP-*` head (or no `--head` — stays strict) → a Shape artifact-review title
     `review: <artifact> (EP-<slug>)`, the shape `yad gate open` creates.
   - any other head → a tooling/code change to the Product itself, so it follows the `code` convention (a
@@ -324,7 +324,7 @@ catches a free-form description that bypassed it:
 
 - `--profile code` (default) → requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled
   `Risk level:` (`low|medium|high`).
-- `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
+- `--profile product` (old name `hub`, still accepted) → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
   - `review/EP-*` head (or no `--head`) → requires the artifact-review template: `## Artifact under
     review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
   - any other head → a Product tooling PR, so it requires the `code` task template (`## Summary`,
@@ -339,7 +339,7 @@ the author then reads "does not use the template" while looking at a description
 it (#164). GitHub is unaffected (`github.event.pull_request.body` is not truncated). Two mitigations,
 both shipped:
 
-- the GitLab MR templates (`yad-pr-template` `templates/gitlab/…` and `templates/hub/gitlab/…`) carry
+- the GitLab MR templates (`yad-pr-template` `templates/gitlab/…` and `templates/product/gitlab/…`) carry
   the constraint as a comment and keep every required section early, so a truncated body still passes;
 - when a required section is missing **and** the body it read is ≥ 2700 characters, the gate prints a
   `NOTE` naming the truncation and the fix — reorder the required sections above the cutoff and push
@@ -670,7 +670,7 @@ The Product is itself a repo on a platform (recorded in `.sdlc/product.json` by
 `yad-connect-repos action: detect-hub`). `wire repo: hub` targets `{project-root}` and uses the same
 merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "thinking" repo (it has no
 `specs/` or `package.json` build). **What yadflow wires today** (`PRODUCT_WIRING`): `commit-message`,
-`pr-title`, `pr-template` and `ledger-guard` in `yad-hub-checks`, `verified-commits` in its own workflow,
+`pr-title`, `pr-template` and `ledger-guard` in `yad-product-checks`, `verified-commits` in its own workflow,
 and the `yad-update-guard`. The three below are **not shipped** — they are scripts a team writes itself if
 it wants them:
 - **owner-set** — every `epic.md` (and forward artifact) under `epics/EP-*/` carries an `owner`.
@@ -695,14 +695,14 @@ its one include line) whenever `.sdlc/product.json` has a platform with a verifi
 Shape review PRs are held to the same rule as code-repo PRs: platform-Verified signatures only.
 
 The Product **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
-`--profile hub`. The pattern gates split by the PR/MR **head branch** (passed via `--head`): a
+`--profile product`. The pattern gates split by the PR/MR **head branch** (passed via `--head`): a
 `review/EP-*` head is a Shape review PR — Conventional-Commits commit subjects, a
 `review: <artifact> (EP-<slug>)` title, and the Product artifact-review template body; **any other head is
 a tooling/code change to the Product itself** and follows the `code` convention (a Conventional-Commits
 title + the code task template), so a PR that changes the Product's own workflows/checks can pass.
 `yad check --fix` installs the same `checks/*.sh` scripts plus a standalone Product workflow
-(`templates/github/yad-hub-checks.yml` → `.github/workflows/yad-hub-checks.yml`, or the GitLab fragment
-`templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
+(`templates/github/yad-product-checks.yml` → `.github/workflows/yad-product-checks.yml`, or the GitLab fragment
+`templates/gitlab/yad-product-checks.gitlab-ci.yml` → `.gitlab/ci/yad-product-checks.yml` + its one include
 line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
 
 ## The agent guardrail (`templates/hooks/ledger-guard.mjs` + `yad hook ledger-guard`)

@@ -32,7 +32,7 @@ trigger is a parameter, not a hardcoded human.
   `comment` / `approve` / `advance` are the `yad gate comment|approve|advance` commands (E112).
 - For `comment` / `approve`: the reviewer's platform login (or the name they give, when there is no
   platform). No role and no domain. Ask if not provided.
-- `sync` needs no reviewer input — it reads the platform PR/MR review state (via `yad-hub-bridge`).
+- `sync` needs no reviewer input — it reads the platform PR/MR review state (via `yad-product-bridge`).
 
 ## On Activation
 
@@ -118,7 +118,7 @@ transition at merge.
 Do not advance.
 
 If `.sdlc/product.json` (`.sdlc/hub.json` on an older Product) has a non-null `platform` and `gh`/`glab` is authenticated, **`yad gate open` also
-opens the review PR/MR on the Product** (the recipe is `yad-hub-bridge action: open`; do not open a
+opens the review PR/MR on the Product** (the recipe is `yad-product-bridge action: open`; do not open a
 second one), and you report the URL. This holds for a verified ledger and for a local one. The PR
 requests **no reviewers**; the command prints
 `no reviewers were requested — ask them on the PR itself`, so tell the author to ask people on the PR.
@@ -201,17 +201,17 @@ separate, explicit act (`advance`), the way approving a PR never merges it.
 
 **`sync`** — (the platform bridge input path) Pull the Product review PR/MR's review state into the ledger,
 then re-evaluate the rule (Step 3). Read the PR for this step from `.sdlc/product-prs.json` (`hub-prs.json` when that is absent) and use
-`yad-hub-bridge`'s read recipes (`../yad-hub-bridge/references/bridge.md`) to fetch reviews + comments
+`yad-product-bridge`'s read recipes (`../yad-product-bridge/references/bridge.md`) to fetch reviews + comments
 via the local user's `gh`/`glab`. For each:
 - the platform `login` is the name written — `approver` / `commenter` is the login itself. There is no
-  lookup and no role (see `../yad-hub-bridge/references/login-roster.md`);
+  lookup and no role (see `../yad-product-bridge/references/login-roster.md`);
 - an `APPROVED` review / MR approval → append an `approved` record to `approvals.json` tagged
   `"source": "bridge"`; a `CHANGES_REQUESTED` review or an unresolved thread → write to
   `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` + `comments.json` (never an approval). A resolved
   thread, and a companion comment marked `<!-- yad:noblock -->`, is not written.
 **Idempotent:** upsert bridge approvals by `(step, approver)` — one record per person. An older record
 that still carries `role`/`domain` and names a person by their old roster name is recognised as
-`../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced by one
+`../yad-product-bridge/references/login-roster.md` → "Older records" describes, and replaced by one
 login-named record that keeps its fingerprint. Every sync write (`yad gate sync`, `yad gate ci`) also
 records the login on the older records the roster can place for certain, on every step (same reference → "Recording the login on older records").
 A bridge approval records the platform's evidence — `approvedAt`, and on GitHub `commit`, `url` and
@@ -312,7 +312,7 @@ PR/MR are recorded and bound to the new content. `yad gate status` then shows th
 approvals are live against what is in the file today, and how many were revoked — instead of a `done`
 step whose approvals all belong to the version before the edit.
 
-The flow is **merge-driven** (wired by `yad-hub-bridge` `wire`): during review CI writes nothing — the
+The flow is **merge-driven** (wired by `yad-product-bridge` `wire`): during review CI writes nothing — the
 platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review
 branch (so an in-flight approval is never dismissed and required checks never strand). On the human
 **merge** CI re-reads approvals, advances the step, and flips the artifact `status:` on the **default
@@ -338,4 +338,4 @@ write path.
 
 ## Reference
 - Gating details and worked example: `references/gating.md`.
-- The platform PR/MR bridge (`open`/`sync` mechanics, read recipes, login attribution): `../yad-hub-bridge/SKILL.md`.
+- The platform PR/MR bridge (`open`/`sync` mechanics, read recipes, login attribution): `../yad-product-bridge/SKILL.md`.
