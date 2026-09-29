@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
@@ -99,6 +99,9 @@ export function envChecks(checks) {
 // `headCount` is a count of people the caller already read (E74); the CLI passes none, a test passes one.
 export function projectChecks(checks, root, { headCount = null } = {}) {
   const productPath = productConfigPath(root);
+  // The file actually read (E122: product.json when it exists), named in every message below — naming
+  // the old one would send a person to edit the file that is not read, which is a refused drift.
+  const settingsRel = path.relative(root, productPath).split(path.sep).join('/');
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const verPath = path.join(root, PROJECT_FILES.version);
   if (!exists(productPath) && !exists(regPath) && !exists(verPath)) {
@@ -119,18 +122,18 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // hub.json: parse + shape
   let hub = null;
   if (!exists(productPath)) {
-    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform');
+    check(checks, 'hub', 'project', 'warn', `${settingsRel} absent — local gate`, 'run `yad setup` to configure a platform');
   } else {
     let hubBroken = false;
     try {
       hub = readJSONStrict(productPath, null);
     } catch (e) {
       hubBroken = true;
-      check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
+      check(checks, 'hub', 'project', 'fail', `${settingsRel} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
     }
     if (hubBroken) { /* reported above */ }
-    else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
-    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${forTerminal(hub.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
+    else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${settingsRel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${settingsRel}: unknown platform '${forTerminal(hub.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
       // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
@@ -156,14 +159,14 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           } catch { /* an unreadable ledger is reported by its own check */ }
         }
         const when = !hub.platform
-          ? 'nothing reads it on a Product with no platform — delete the `roster` key'
+          ? `nothing reads it on a Product with no platform — delete the \`roster\` key from ${settingsEditHint(root)}`
           : waiting
-            ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(hub) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key`
+            ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(hub) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key from ${settingsEditHint(root)}`
             : unplaced
-              ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key once those reviews are closed`
-              : 'no older record needs it any more — delete the `roster` key';
+              ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key from ${settingsEditHint(root)} once those reviews are closed`
+              : `no older record needs it any more — delete the \`roster\` key from ${settingsEditHint(root)}`;
         check(checks, 'people:roster-unused', 'project', 'warn',
-          `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
+          `${settingsRel} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
           when);
         // Those pairs are exact only when the roster is: a name two logins share cannot say which person an
         // older record means. Named here, because on an open review that approval may then have to be given
@@ -174,7 +177,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const unclear = [...ambiguousLegacyNames(hub).keys()];
         if (unclear.length) {
           check(checks, 'people:roster-ambiguous', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.map(forTerminal).join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
+            `${settingsRel} roster name(s) ${unclear.map(forTerminal).join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
             'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
         }
       }
@@ -201,7 +204,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const acting = isSolo(hub) ? 'solo' : 'team';
         if (hub.mode !== acting) {
           check(checks, 'mode:disagree', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} says mode: ${JSON.stringify(forTerminal(hub.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
+            `${settingsRel} says mode: ${JSON.stringify(forTerminal(hub.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
             ['solo', 'team'].includes(hub.mode)
               ? `\`yad mode ${acting}\` keeps what the gates do now; \`yad mode ${hub.mode === 'solo' ? 'solo --reason "<why>"' : 'team'}\` makes the gates follow \`mode\``
               : `\`yad mode ${acting}\` writes a mode the gates recognise`);
@@ -216,8 +219,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // is required regardless.
         if (!hostFromGitUrl(hub.git_url)) {
           check(checks, 'hub-git-url', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
-            'add git_url to hub.json (or re-run `yad setup`) — auth/PR checks need the Product host');
+            `${settingsRel} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
+            `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
@@ -230,8 +233,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // inside `gh auth login --hostname …` for the person to run.
         const host = plainHost(rawHost);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
-        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in hub.json (or the origin remote) to name a plain host');
-        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to hub.json so the auth probe can target the right host');
+        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', `fix git_url in ${settingsEditHint(root)} (or fix the origin remote) to name a plain host`);
+        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', `add git_url to ${settingsEditHint(root)}, so the auth probe can target the right host`);
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
@@ -510,10 +513,10 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     ].filter((x) => exists(x.file)).map((x) => x.where);
     const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
     if (allowFiles.length || listedAuthors) {
-      const what = [listedAuthors ? `\`verified_authors\` in ${PROJECT_FILES.hubConfig}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
+      const what = [listedAuthors ? `\`verified_authors\` in ${settingsRel}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
       check(checks, 'people:verified-authors-unused', 'project', 'warn',
         `${what} — the verified-commits gate no longer reads an author list; it checks signatures only`,
-        'delete them when convenient; write access to the repo decides who can author a commit');
+        `delete them when convenient${listedAuthors ? ` (\`verified_authors\` from ${settingsEditHint(root)})` : ''}; write access to the repo decides who can author a commit`);
     }
     // A wired `verified-commits.sh` from before E62 still ENFORCES the author list. On a verified ledger
     // `yad check --fix` refreshes it; on a local ledger the Product's CI files are not managed, so an older
@@ -947,7 +950,7 @@ export function epicChecks(checks, root) {
         // default branch only at merge (when the step is already done), and writes nothing during
         // review — so an OPEN (non-done) review PR recorded here means it was opened under an older
         // model. Merge/close it under the version that opened it before relying on the CI flow.
-        const openPr = (ledger.hubPrs || []).find((p) => {
+        const openPr = (ledger.productPrs || []).find((p) => {
           const step = ledger.state.steps.find((s) => s.id === p.step);
           return !!step && !isPassed(step);
         });
@@ -1142,20 +1145,21 @@ function shapeCheckFor(checks, id, label, rows, engine) {
 // reaches it, which is how the drift report is proven before there is any drift to report.
 // A file that lives under two names must say the same thing under both. The engine writes them
 // together, so they only drift when something outside the engine touched one — a person editing the
-// name they happen to know, a script, a half-finished merge. The older name is the authoritative one
-// this major, so a silent drift means the OTHER copy is being ignored, which is the kind of thing
-// people lose an afternoon to. Say it out loud instead.
+// name they happen to know, a script, a half-finished merge. Since E122 no command reads a drifted
+// pair (every one refuses, YAD-STATE-008), so this is a failure, with the one command that ends it.
+// When the pair agrees, one plain line says why the old name is still there and when it goes.
 export function mirrorChecks(checks, root) {
-  const pairs = [...MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy }))];
+  const pairs = MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy, epic: null }));
   // The per-epic PR ledger is renamed the same way, so it drifts the same way. It is not in
   // MIRRORED_FILES because that list is project-relative and this one exists once per epic.
   // `epicIds` reads with `withFileTypes`, so a dangling symlink is simply not a directory — it cannot
   // throw here and take the whole health check down, which is what the old `statSync` guard was for.
   for (const e of epicIds(root)) {
     const f = epicFiles(epicRel(e));
-    pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
+    pairs.push({ canonical: f.productPrs, legacy: f.productPrsLegacy, epic: e });
   }
-  for (const { canonical, legacy } of pairs) {
+  let kept = false;
+  for (const { canonical, legacy, epic } of pairs) {
     const a = path.join(root, canonical);
     const b = path.join(root, legacy);
     // Only the settings file reaches this branch in practice: the per-epic PR ledgers are top-level
@@ -1181,13 +1185,20 @@ export function mirrorChecks(checks, root) {
       continue;
     }
     if (!exists(a)) continue;
-    let same;
-    try { same = fs.readFileSync(a, 'utf8') === fs.readFileSync(b, 'utf8'); } catch { continue; }
-    if (same) continue;
+    if (!mirrorDrift(a, b)) { if (!epic) kept = true; continue; }
+    // An epic's drifted pair is already a failure of that epic's own check (`loadLedger` refuses it,
+    // with the same code and hint), so it is not said twice.
+    if (epic) continue;
     check(
-      checks, `mirror:${canonical}`, 'shape', 'warn',
-      `${canonical} and ${legacy} do not match — ${legacy} is the one being read`,
-      'they are two names for one file while the rename settles. Copy the one you meant to keep over the other, then re-run the command that writes it',
+      checks, `mirror:${canonical}`, 'shape', 'fail',
+      `${canonical} and ${legacy} say different things — every command refuses until one is chosen [YAD-STATE-008]`,
+      'run `yad migrate` to see the difference, then `yad migrate --apply` to choose the copy to keep (or `--apply --keep product` / `--keep hub`)',
+    );
+  }
+  if (kept) {
+    check(
+      checks, 'mirror:legacy-names', 'shape', 'ok',
+      `${PROJECT_FILES.productConfigLegacy} (and each epic's hub-prs.json) is kept beside the new name for check gates an older yadflow installed — ${PROJECT_FILES.productConfig} is the one read, and v5 deletes the old name`,
     );
   }
 }

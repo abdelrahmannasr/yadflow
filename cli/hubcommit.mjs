@@ -3,6 +3,7 @@
 // the default branch, so their `[skip ci]` commit never enters a PR's base..HEAD range (where it would
 // strand required checks and fail verified-commits). This module is the single home of that guard.
 import { warn, fail, hand, run, forTerminal } from './lib.mjs';
+import { SETTINGS_EDIT_HINT, settingsEditHint } from './manifest.mjs';
 
 export const productGit = (root) => (...args) => run('git', args, { cwd: root });
 
@@ -32,7 +33,8 @@ export function resolveDefaultBranch(git, hub) {
 // Guard: only commit on the default branch. Returns true when OK; on a non-default branch it prints the
 // refusal + sets a non-zero exit code, unless `allowBranch` overrides (with a warning). `--allow-branch`
 // is the SINGLE documented override — never `--force` (which elsewhere only waives the atomic guard).
-export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false, cmd = 'yad checkpoint' } = {}) {
+// `root` (the Product) lets the hint name the exact settings file to edit; without it the hint says it in words.
+export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false, cmd = 'yad checkpoint', root = null } = {}) {
   if (branch === defaultBranch) return true;
   // Printed cleaned (E81 review 13): `default_branch` comes from the Product's shared hub.json.
   const [b, d] = [forTerminal(branch), forTerminal(defaultBranch)];
@@ -41,7 +43,7 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
     return true;
   }
   fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
-  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (set default_branch in .sdlc/hub.json if '${d}' is wrong)`);
+  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (if '${d}' is wrong, set default_branch in ${root ? settingsEditHint(root) : SETTINGS_EDIT_HINT})`);
   process.exitCode = 1;
   return false;
 }

@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash, randomBytes } from 'node:crypto';
 import { err } from './errors.mjs';
-import { MIRRORED_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
+import { MIRRORED_FILES, SCHEMA_VERSION, VERSION, mirrorDrift, preferring } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -313,6 +313,12 @@ export function writeJSON(p, obj) {
   try {
     if (fs.readFileSync(p, 'utf8') === data) return;
   } catch { /* missing or unreadable — fall through and write it */ }
+  writeFileAtomic(p, data);
+}
+
+// Write `data` to `p` through a fresh temporary file and a rename: a crash leaves the old file or the new
+// one, never half of either, and a link standing at `p` is replaced rather than followed.
+export function writeFileAtomic(p, data) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   // A name nobody can guess, created exclusively (`wx`): a Product can commit `repos.json.<pid>.tmp` as a
   // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link
@@ -378,26 +384,23 @@ export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
   return { ok: false };
 }
 
-// ---- the product config, which lives under two names for one major -----------------------------
+// ---- the product config, which lives under two names until v5 ----------------------------------
 //
-// Read through `productConfigPath` (manifest.mjs), which every reader in cli/ now does. Write
-// through here: BOTH names, every time.
+// Read through `productConfigPath` (manifest.mjs), which every reader in cli/ does. Write through
+// here: BOTH names, every time.
 //
-// The duplicate is not sloppiness. `templates/checks/ledger-guard.sh` sits committed inside the
-// user's own repository and opens `.sdlc/hub.json` by that literal path; it is refreshed by
-// `yad update`, which is a separate act from `yad migrate`. So a migrated-but-not-updated project is
-// a real state, and if only the new name existed its guard would find nothing, read no platform,
-// call the ledger local, and stop rejecting human commits to it. An upgrade that silently disarms a
-// safety gate is worse than a duplicated file.
+// The duplicate is not sloppiness. The check gates sit committed inside the user's own repository,
+// and the ones installed before E122 open `.sdlc/hub.json` by that literal path; they are refreshed by
+// `yad update`, which is a separate act from `yad migrate`. So a project whose gates are older than
+// its CLI is a real state, and if only the new name existed its `ledger-guard` would find nothing,
+// read no platform, call the ledger local, and stop rejecting human commits to it. An upgrade that
+// silently disarms a safety gate is worse than a duplicated file. v5 deletes the old name.
 //
-// Order matters, and it follows which file is AUTHORITATIVE — the old name, this major
-// (`productConfigPath`, cli/manifest.mjs). The new name is written first, so if the second write
-// fails the readers are all still on the untouched old copy: nothing has half-changed underneath
-// them. Writing the authoritative file first would leave every reader on new settings while the
-// mirror still says something else, which is the harder failure to notice.
+// Order: the old name first, then the new one, which readers use (`preferring`, cli/manifest.mjs).
+// If the second write fails, the pair disagrees and every command refuses until `yad migrate`
+// settles it (`mirrorDrift`) — loud, never a silent half-change. The authoritative copy is the one
+// left untouched in that case, so the refusal shows the settings every reader was already using.
 //
-// `yad doctor` reports the two copies disagreeing either way, so a half-written pair is visible
-// rather than silent.
 // Write a file that lives under two names. Returns the paths it actually wrote — empty when there
 // was nothing to do.
 //
@@ -410,19 +413,20 @@ export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
 // readable; only a genuine change writes, and then it writes both.
 export function writeMirrored(canonicalPath, legacyPath, obj) {
   // Compare against the AUTHORITATIVE copy — the same one readers use (`preferring`,
-  // cli/manifest.mjs), which is the legacy name while it exists. Comparing against the other file
+  // cli/manifest.mjs), which is the new name whenever it exists. Comparing against the other file
   // would let the two rules disagree about whether anything changed.
-  const readable = fs.existsSync(legacyPath) ? legacyPath : canonicalPath;
+  const readable = preferring(canonicalPath, legacyPath);
   const next = `${JSON.stringify(writeShape(canonicalPath, obj), null, 2)}\n`;
   // "Unchanged" means BOTH names are already right. A half-made pair — one side missing — is work
   // to do even when the readable copy matches, or the pair can never be repaired: the comparison
   // says nothing changed, nothing is written, and `yad doctor` reports the missing file for ever.
+  // A drifted pair fails the same test (the other copy is not `next`), so a write repairs it too.
   const bothPresent = fs.existsSync(canonicalPath) && fs.existsSync(legacyPath);
   try {
-    if (bothPresent && fs.readFileSync(readable, 'utf8') === next) return [];
+    if (bothPresent && fs.readFileSync(readable, 'utf8') === next && !mirrorDrift(canonicalPath, legacyPath)) return [];
   } catch { /* unreadable — treat as a first write and fall through */ }
-  writeJSON(canonicalPath, obj);
   writeJSON(legacyPath, obj);
+  writeJSON(canonicalPath, obj);
   return [canonicalPath, legacyPath];
 }
 

@@ -5,7 +5,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
-import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
+import { PROJECT_FILES , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
   detectPlatform, createPr, platformLogin, resolveBaseBranch,
 } from './platform.mjs';
@@ -297,7 +297,7 @@ export async function runOpenPr(root, opts = {}) {
   if (platformDefault && platformDefault !== baseBranch) {
     warn(`base '${baseBranch}' is not the repo default '${platformDefault}' — CodeRabbit skips auto-review on a non-default base unless .coderabbit.yaml lists it under reviews.base_branches, and retargeting later does NOT undo the skip`);
     if (baseSource === 'registry' || baseSource === 'hub') {
-      hand(`the configured default_branch (${baseSource === 'hub' ? '.sdlc/hub.json' : '.sdlc/repos.json'}) disagrees with the platform — reconcile them, or allow '${baseBranch}' in .coderabbit.yaml`);
+      hand(`the configured default_branch (${baseSource === 'hub' ? settingsEditHint(root) : '.sdlc/repos.json'}) disagrees with the platform — reconcile them, or allow '${baseBranch}' in .coderabbit.yaml`);
     } else {
       hand(`open against '${platformDefault}' (or pass --base ${platformDefault}) unless you meant to stack this PR`);
     }

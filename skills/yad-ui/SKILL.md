@@ -184,7 +184,7 @@ Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. 
 (`design: none`), do **not** write `design-links.json`.
 
 ### Step 5 — Advance the authoring step (NOT the gate)
-**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
+**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name):
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects

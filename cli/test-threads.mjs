@@ -341,7 +341,7 @@ test('gatePredicate: a stub-parent inherited step with boundHash:null passes (no
 test('nextAction: a stub epic routes to backfill-pending (not to authoring the epic)', () => {
   const mkStub = (currentStep, kind) => ({
     state: { epicId: 'EP-stub', kind, currentStep, steps: [{ id: 'epic', type: 'author', status: 'blocked' }] },
-    hubPrs: [], buildStates: [],
+    productPrs: [], buildStates: [],
   });
   // Detected by state.kind === 'stub' ...
   const a = nextAction(mkStub('backfill-pending', 'stub'), { epic: 'EP-stub' });
@@ -360,7 +360,7 @@ test('promote (light) clears BOTH sources: nextAction stops calling it a stub an
   assert.equal(isStubEpic(T, 'EP-promoted'), false);                    // frontmatter reader
   // A half-promoted epic left on the sentinel would misreport — assert the promoted state does NOT:
   const promoted = { state: { epicId: 'EP-promoted', currentStep: 'backfill-done',
-    steps: [{ id: 'epic', type: 'author', status: 'blocked' }] }, hubPrs: [], buildStates: [] };
+    steps: [{ id: 'epic', type: 'author', status: 'blocked' }] }, productPrs: [], buildStates: [] };
   const a = nextAction(promoted, { epic: 'EP-promoted' });             // ledger reader
   assert.equal(a.kind, 'backfill-done');                               // documented anchor, NOT backfill-pending
   assert.match(a.why, /documented/i);
@@ -392,7 +392,7 @@ test('backfillAnchorKind: one classifier drives nextAction + preconditionsMet �
   // wins (conservative — "still needs promoting"), and BOTH readers agree, closing the divergence.
   const corrupt = { kind: 'stub', currentStep: 'backfill-done', steps: [{ id: 'epic', type: 'author', status: 'blocked' }] };
   assert.equal(backfillAnchorKind(corrupt), 'stub');
-  assert.equal(nextAction({ state: { epicId: 'EP-x', ...corrupt }, hubPrs: [], buildStates: [] }, { epic: 'EP-x' }).kind, 'backfill-pending');
+  assert.equal(nextAction({ state: { epicId: 'EP-x', ...corrupt }, productPrs: [], buildStates: [] }, { epic: 'EP-x' }).kind, 'backfill-pending');
   assert.match(preconditionsMet(corrupt, 'epic').reason, /stub \(backfill pending\)/);  // NOT "documented anchor"
 });
 
@@ -1420,13 +1420,13 @@ test('nextAction walks the Foundation like the old front-zero, under its own id 
     { id: 'foundation', type: 'author', artifact: 'foundation/', status: a },
     { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: r },
   ] });
-  const author = nextAction({ state: st('foundation', 'in_progress', 'todo'), hubPrs: [] }, { epic: FOUNDATION_EPIC });
+  const author = nextAction({ state: st('foundation', 'in_progress', 'todo'), productPrs: [] }, { epic: FOUNDATION_EPIC });
   assert.equal(author.kind, 'author');
   assert.equal(author.skill, 'yad-discovery');
-  const open = nextAction({ state: st('foundation-review', 'done', 'in_review'), hubPrs: [] }, { epic: FOUNDATION_EPIC });
+  const open = nextAction({ state: st('foundation-review', 'done', 'in_review'), productPrs: [] }, { epic: FOUNDATION_EPIC });
   assert.equal(open.command, 'yad gate open EP-foundation foundation/');
   assert.equal(open.parallel, undefined, 'no parallel track on the product level');
-  const done = nextAction({ state: st('foundation-done', 'done', 'done'), hubPrs: [] }, { epic: FOUNDATION_EPIC });
+  const done = nextAction({ state: st('foundation-done', 'done', 'done'), productPrs: [] }, { epic: FOUNDATION_EPIC });
   assert.equal(done.kind, 'foundation-done');
   assert.match(done.why, /Foundation approved/);
   assert.equal(preconditionsMet(null, 'foundation').ok, true, 'an entry step, like epic / analysis');

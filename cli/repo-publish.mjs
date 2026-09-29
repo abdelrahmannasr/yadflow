@@ -154,7 +154,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
 
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, hub);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad repo refresh --push' })) return;
+  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad repo refresh --push', root })) return;
 
   // Stage the EXPLICIT allowlist (code-maps + registry), scoped so an unrelated pre-staged file is never
   // swept in and the user's index is left untouched — mirrors `runCheckpoint`. NEVER `git add -A` and

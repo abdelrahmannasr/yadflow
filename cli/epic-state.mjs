@@ -7,8 +7,8 @@ import fs from 'node:fs';
 import { isPlainObject, readJSON, readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
-  ADVANCE_FROM_AUTOMATION, AUTOMATION_FROM_ADVANCE, DRIVER_FROM_ASSISTANCE, epicFiles, preferring,
-  PROJECT_FILES, SCHEMA_VERSION, stepAdvance,
+  ADVANCE_FROM_AUTOMATION, AUTOMATION_FROM_ADVANCE, DRIVER_FROM_ASSISTANCE, epicFiles, mirrorDrift, preferring,
+  productDrift, PROJECT_FILES, SCHEMA_VERSION, stepAdvance,
 } from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
@@ -347,6 +347,24 @@ export function epicIds(root) {
   return ids.sort();
 }
 
+// E122: a renamed file whose two names say different things (MIRRORED_FILES, cli/manifest.mjs). No
+// command picks one of them, so each refuses with this — `yad doctor` and `yad migrate` excepted: one
+// reports the drift, the other ends it. `pairs` is what `productDrift` found, project-relative.
+export const driftError = (pairs) => err(
+  'YAD-STATE-008',
+  `${pairs.map((p) => `${p.canonical} and ${p.legacy}`).join('; ')} say different things — they are one file under two names until v5, so yad reads neither`,
+  'run `yad migrate` to see the difference, then `yad migrate --apply` to choose the copy to keep (or `--apply --keep product` / `--keep hub`)',
+);
+
+// The drift under a Product root, as the error to throw, or null. Listing `epics/` can fail on a broken
+// tree; that is left to the command, which reports it in its own words.
+export function productDriftError(root) {
+  let dirs = [];
+  try { dirs = epicIds(root).map(epicRel); } catch { /* the settings file is still checked */ }
+  const pairs = productDrift(root, dirs);
+  return pairs.length ? driftError(pairs) : null;
+}
+
 // The folders under `epics/` that hold a `.sdlc/` but that `epicIds` did not name: a name that is not a
 // valid id, a symlinked epic (`Dirent.isDirectory()` is false for a symlink), and `epics/EP-foundation`.
 // That guard is right for an enumerator that turns a name into a path segment, and wrong for anything
@@ -455,12 +473,12 @@ export const canonicalApprovals = (approvals = []) => canonical(approvals, (a) =
 export const canonicalComments = (comments = []) => canonical(comments, (cm) =>
   [cm.step, String(cm.round ?? '').padStart(6, '0'), cm.commenter, cm.role, cm.date].map(field).join('|'));
 
-export const canonicalHubPrs = (hubPrs = []) => canonical(hubPrs, (p) =>
+export const canonicalProductPrs = (productPrs = []) => canonical(productPrs, (p) =>
   [p.artifact, p.step].map(field).join('|'));
 
 // Replace-not-append upsert into hub-prs.json, keyed by artifact (one live review PR per artifact).
-export function upsertHubPr(hubPrs = [], rec) {
-  return canonicalHubPrs([...hubPrs.filter((p) => p.artifact !== rec.artifact), rec]);
+export function upsertProductPr(productPrs = [], rec) {
+  return canonicalProductPrs([...productPrs.filter((p) => p.artifact !== rec.artifact), rec]);
 }
 
 // SHA-256 of the contract surface block (architecture only). Byte-for-byte identical to the recipe
@@ -1444,12 +1462,12 @@ export function loadLedger(epicDir) {
     state: validateState(readJSONStrict(f.state, null), f.state),
     approvals: requireArray(readJSONStrict(f.approvals, []), f.approvals),
     comments: requireArray(readJSONStrict(f.comments, []), f.comments),
-    // Read the OLD name while it exists, the new one otherwise — the same tie-break as the settings
-    // file (`preferring`, cli/manifest.mjs). Both are written on every
-    // save (see gateSync / gateOpen), so they agree unless someone edited one by hand — which
-    // `yad doctor` reports rather than leaving to be discovered.
-    hubPrs: (() => {
-      const f2 = preferring(f.productPrs, f.hubPrs);
+    // Read the new name when it exists, the old one otherwise — the same rule as the settings file
+    // (`preferring`, cli/manifest.mjs). Both are written on every save (see gateSync / gateOpen), so
+    // they agree unless something outside yad edited one; then neither is read (E122).
+    productPrs: (() => {
+      if (mirrorDrift(f.productPrs, f.productPrsLegacy)) throw driftError([{ canonical: f.productPrs, legacy: f.productPrsLegacy }]);
+      const f2 = preferring(f.productPrs, f.productPrsLegacy);
       return requireArray(readJSONStrict(f2, []), f2);
     })(),
     contractLock: readJSONStrict(f.contractLock, null),
@@ -3328,7 +3346,7 @@ function reopenedLanes(ledger, { epicId, currentStep, bindings }) {
     .map((s) => {
       if (stepStatus(s) === 'blocked') return { step: s.id, kind: 'blocked', status: 'blocked', record: s.record || null };
       if (s.type === 'author') return { step: s.id, kind: 'author', status: s.status, ...skillFields(stepSkills(s.id, bindings)), artifact: s.artifact };
-      const pr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(s.artifact));
+      const pr = (ledger.productPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(s.artifact));
       return { step: s.id, kind: pr ? 'review-sync' : 'review-open', status: s.status, artifact: s.artifact, pr: pr ? pr.number : null,
         command: `yad gate ${pr ? 'sync' : 'open'} ${epicId} ${s.artifact}` };
     });
@@ -3366,7 +3384,7 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
         ...skillFields(stepSkills(dstep.id, bindings)), artifact: dstep.artifact,
         why: `${dstep.id} is ${dstep.status} — author ${dstep.artifact}` };
     }
-    const dpr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(dstep.artifact));
+    const dpr = (ledger.productPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(dstep.artifact));
     const dverb = dpr ? 'sync' : 'open';
     return { epicId, kind: dpr ? 'review-sync' : 'review-open', step: dstep.id, status: dstep.status,
       artifact: dstep.artifact, pr: dpr ? dpr.number : null,
@@ -3450,7 +3468,7 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
   }
 
   // review+approve: open the review PR if none is recorded yet, else sync the open one.
-  const pr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(step.artifact));
+  const pr = (ledger.productPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(step.artifact));
   const verb = pr ? 'sync' : 'open';
   return { epicId, kind: pr ? 'review-sync' : 'review-open', step: step.id, status: step.status,
     artifact: step.artifact, pr: pr ? pr.number : null, parallel,

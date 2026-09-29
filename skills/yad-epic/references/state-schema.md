@@ -206,7 +206,7 @@ A chain missing steps still matches — dropping `ui-design` is normal. An epic 
 nothing gets NO `profile` key from the migration: inventing one would silence `step:off-route` by
 making the file agree with itself.
 
-> **Two different things are called a profile.** This one is the lifecycle route. `hub.json.profile` is
+> **Two different things are called a profile.** This one is the lifecycle route. `product.json.profile` is
 > the unrelated setup record `yad setup` writes: `{ codebase, repo_layout, team_size }`.
 
 ### The six phases
@@ -632,7 +632,7 @@ Append-only ledger (an array), the machine-readable counterpart to the `reviews/
 written by `yad gate comment` (E112, no platform) also carries `artifactHash`, the fingerprint of the
 artifact its round was opened with (a late record joining the round carries the same one): a round is one version, so `--new-round` opens the next only after an edit. An older entry may still carry `role` and `domain`; the gate never reads them, and while the roster is on disk the next sync write records the login on it, keeping the old name in `rosterName` — unless two records in one round would then name the same login (E64).
 
-## `hub-prs.json`
+## `product-prs.json` (and `hub-prs.json`)
 Present only when the Shape review runs through the platform bridge. Per review step, the review
 PR/MR opened on the Product (sibling of `approvals.json`, so the locked `state.json` step shape is untouched):
 
@@ -640,8 +640,9 @@ PR/MR opened on the Product (sibling of `approvals.json`, so the locked `state.j
 { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab", "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": "<YYYY-MM-DD or null>" }
 ```
 
-The same array is written under two names: `product-prs.json` (the name from shape 3) and `hub-prs.json`
-(the old name, kept for one major). `yad gate sync` may add `nudged`, the logins it has already asked to
+The same array is written under two names, with identical bytes: `product-prs.json` (the name from shape 3,
+read first) and `hub-prs.json` (the old name, written until v5 and read only when `product-prs.json` is
+absent — E122). `yad gate sync` may add `nudged`, the logins it has already asked to
 use the review companion, so it never asks them twice.
 
 ## `design-links.json`

@@ -21,14 +21,14 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CHECKS = path.join(ROOT, 'skills/yad-checks/templates/checks');
 const RISK_ROUTE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/risk-route.sh');
 
-// Strip ambient git identity env (see cli/test.mjs for why) — and the two vars the gates resolve their
-// base from: SDLC_BASE (the base branch) and SDLC_HUB_CONFIG (which hub.json to read default_branch
-// out of). The repo's own docs tell developers to `export SDLC_BASE=…`, so leaking either would
+// Strip ambient git identity env (see cli/test.mjs for why) — and the vars the gates resolve their
+// base from: SDLC_BASE (the base branch), and SDLC_PRODUCT_CONFIG / SDLC_HUB_CONFIG (which settings
+// file to read default_branch out of; E122 added the first). The repo's own docs tell developers to `export SDLC_BASE=…`, so leaking either would
 // silence the no-base tests below on exactly the machines that followed the docs. Per-test overrides
 // still work — runGate merges its `env` argument on top of this.
 const GIT_ENV = Object.fromEntries(
   Object.entries(process.env).filter(
-    ([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && k !== 'SDLC_BASE' && k !== 'SDLC_HUB_CONFIG',
+    ([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && k !== 'SDLC_BASE' && k !== 'SDLC_HUB_CONFIG' && k !== 'SDLC_PRODUCT_CONFIG',
   ),
 );
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: GIT_ENV });
@@ -1810,11 +1810,12 @@ function onBase(T, files) {
 
 // Write a Product as files under <T>/<dir> (to be committed, unlike <T>/product). `hub` adds the
 // `.sdlc/hub.json` every Product commits — what makes a tracked folder a monorepo's Product.
-function productFiles(T, dir, seed, { hub = false } = {}) {
+// `names` picks which settings names it tracks (E122: a Product is found by either, both until v5).
+function productFiles(T, dir, seed, { hub = false, names = ['hub.json'] } = {}) {
   seed(path.join(T, dir));
   if (hub) {
     fs.mkdirSync(path.join(T, dir, '.sdlc'), { recursive: true });
-    fs.writeFileSync(path.join(T, dir, '.sdlc/hub.json'), '{}\n');
+    for (const n of names) fs.writeFileSync(path.join(T, dir, '.sdlc', n), '{}\n');
   }
   return dir;
 }
@@ -1836,7 +1837,7 @@ for (const g of GATES) {
       });
       const r = runGate(g.script, T);
       assert.equal(r.code, 1, `${dir}: a planted Product must not be read:\n${r.out}`);
-      assert.ok(r.out.includes(`product-repo resolves to '${dir}', which holds files this repo tracks, but main does not track '${dir}/.sdlc/hub.json' there, so it is not a Product kept in this repo`), r.out);
+      assert.ok(r.out.includes(`product-repo resolves to '${dir}', which holds files this repo tracks, but main does not track '${dir}/.sdlc/product.json' (or the older hub.json) there, so it is not a Product kept in this repo`), r.out);
       assert.doesNotMatch(r.out, /hash matches|not reachable/);
       fs.rmSync(T, { recursive: true, force: true });
     }
@@ -1876,7 +1877,7 @@ for (const g of GATES) {
     });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
-    assert.ok(r.out.includes("product-repo resolves to 'product', which holds files this repo tracks, but main does not track 'product/.sdlc/hub.json' there"), r.out);
+    assert.ok(r.out.includes("product-repo resolves to 'product', which holds files this repo tracks, but main does not track 'product/.sdlc/product.json' (or the older hub.json) there"), r.out);
     assert.match(r.out, /git rm -r --cached 'product'/);
     fs.rmSync(T, { recursive: true, force: true });
   });
@@ -2054,6 +2055,31 @@ for (const g of GATES) {
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, g.expect);
     assert.doesNotMatch(r.out, /keeps at/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a monorepo Product is found by either settings name, and counted once with both (E122)`, () => {
+    // Tracking only the new name: still a Product kept in this repo, read from the base.
+    let T = scaffoldRepo();
+    productFiles(T, 'hub', g.seed, { hub: true, names: ['product.json'] });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
+    fs.rmSync(path.join(T, 'hub'), { recursive: true, force: true });
+    productFiles(T, 'hub', clean);
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    let r = runGate(g.script, T);
+    assert.equal(r.code, 1, `the base's Product must be read:\n${r.out}`);
+    assert.match(r.out, g.expect);
+    assert.match(r.out, /the Product at 'hub' is kept in this repo, so it is read as it stands on main/);
+    fs.rmSync(T, { recursive: true, force: true });
+    // Both names, and nothing reached: ONE Product holding the epic, not "more than one".
+    T = scaffoldRepo();
+    productFiles(T, 'a', g.seed, { hub: true, names: ['product.json', 'hub.json'] });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    r = runGate(g.script, T);
+    assert.doesNotMatch(r.out, /keeps more than one Product/, r.out);
+    assert.equal(r.code, 1, `the one kept Product must be read:\n${r.out}`);
+    assert.match(r.out, g.expect);
     fs.rmSync(T, { recursive: true, force: true });
   });
 
@@ -2532,6 +2558,149 @@ test('every base-taking gate carries the SAME base-resolution block, byte for by
   for (const f of rest) {
     assert.equal(region(f), canonical, `${f} drifted from the canonical base-resolution block`);
   }
+});
+
+// E122: every gate that reads the Product's settings reads them through ONE block, byte for byte — twelve
+// copies of a rule drift one arm at a time unless something pins them together.
+const SETTINGS_GATES = [...BASE_TAKING_GATES, 'skills/yad-checks/templates/checks/product-checkout.sh'];
+// The shared part is the function; the line that calls it is each gate's own, because one gate is
+// advisory (risk-map never fails the build, so a disagreement is a note there).
+const settingsBlock = (file) => {
+  const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
+  const start = src.indexOf('# --- shared Product settings file');
+  const fn = src.indexOf('\nproduct_config() {\n', start);
+  const end = src.indexOf('\n}\n', fn);
+  assert.ok(start >= 0 && fn > start && end > fn, `${file}: the Product settings block was not found`);
+  return src.slice(start, end + 3);
+};
+const RISK_MAP_GATE = 'skills/yad-checks/templates/checks/risk-map-check.sh';
+
+test('every gate that reads the Product settings carries the SAME settings block, and reads nothing else (E122)', () => {
+  const canonical = settingsBlock(SETTINGS_GATES[0]);
+  for (const f of SETTINGS_GATES) {
+    assert.equal(settingsBlock(f), canonical, `${f} drifted from the canonical settings block`);
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    // The old default is gone everywhere: a gate that still says it reads hub.json first.
+    assert.doesNotMatch(src, /SDLC_HUB_CONFIG:-\.sdlc\/hub\.json/, `${f} still defaults to hub.json`);
+    // Every blocking gate stops on a disagreement, right after the block; the advisory one notes it.
+    const call = f === RISK_MAP_GATE ? 'if ! PRODUCT_CONFIG="$(product_config 2>/dev/null)"; then\n' : 'PRODUCT_CONFIG="$(product_config)" || exit 1\n';
+    const at = src.indexOf(settingsBlock(f)) + settingsBlock(f).length;
+    assert.equal(src.slice(at, at + call.length) === call || src.indexOf(call, at) > at, true, `${f}: the settings block is not followed by its call`);
+    if (f !== RISK_MAP_GATE) assert.equal(src.slice(at, at + call.length), call, `${f}: the call must follow the block directly`);
+    // ...and nothing reads the file before the block has resolved it: `resolve_base` is only DEFINED
+    // above, so what counts is where it runs, and every read outside it.
+    const outside = src.replace(/\nresolve_base\(\) \{\n[\s\S]*?\n\}\n/, '\n');
+    const reads = [outside.indexOf('$(resolve_base)'), outside.indexOf('"$PRODUCT_CONFIG"')].filter((i) => i >= 0);
+    assert.ok(reads.length && Math.min(...reads) > outside.indexOf(call), `${f}: the settings are read before they are resolved`);
+  }
+});
+
+test('the settings block: new name first, the old as a fallback, and two that disagree FAIL (E122)', () => {
+  const block = settingsBlock(SETTINGS_GATES[0]);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-settings-'));
+  fs.mkdirSync(path.join(T, '.sdlc'));
+  const put = (name, body) => (body === null ? fs.rmSync(path.join(T, name), { force: true }) : fs.writeFileSync(path.join(T, name), body));
+  const run = (env = {}) => {
+    const r = spawnSync('bash', ['-c', `set -euo pipefail\n${block}PRODUCT_CONFIG="$(product_config)" || exit 1\nprintf '%s' "$PRODUCT_CONFIG"`], {
+      cwd: T, encoding: 'utf8', env: { ...GIT_ENV, ...env },
+    });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+  try {
+    const A = '{"platform":"github"}\n';
+    const B = '{"platform":"gitlab"}\n';
+    const rows = [
+      // [product.json, hub.json, env, exit, path read or message]
+      [A, A, {}, 0, '.sdlc/product.json'],
+      [A, null, {}, 0, '.sdlc/product.json'],
+      [null, A, {}, 0, '.sdlc/hub.json'],
+      [null, null, {}, 0, '.sdlc/hub.json'], // no Product settings at all: the old behaviour, nothing to read
+      [A, B, {}, 1, /\.sdlc\/product\.json and \.sdlc\/hub\.json say different things/],
+      // The environment names the file: it wins over the disk, and the disk's drift is not its business.
+      [A, B, { SDLC_PRODUCT_CONFIG: 'p.json' }, 0, 'p.json'],
+      [A, B, { SDLC_HUB_CONFIG: 'h.json' }, 0, 'h.json'],
+      [A, A, { SDLC_PRODUCT_CONFIG: 'p.json', SDLC_HUB_CONFIG: 'p.json' }, 0, 'p.json'],
+      [A, A, { SDLC_PRODUCT_CONFIG: 'p.json', SDLC_HUB_CONFIG: 'same.json' }, 0, 'p.json'],
+      [A, A, { SDLC_PRODUCT_CONFIG: 'p.json', SDLC_HUB_CONFIG: 'h.json' }, 1, /SDLC_PRODUCT_CONFIG \(p\.json\) and SDLC_HUB_CONFIG \(h\.json\) name files that say different things/],
+    ];
+    put('p.json', A); put('same.json', A); put('h.json', B);
+    for (const [prod, hub, env, code, want] of rows) {
+      put('.sdlc/product.json', prod);
+      put('.sdlc/hub.json', hub);
+      const r = run(env);
+      const label = `${prod ? 'product' : '-'}/${hub ? 'hub' : '-'} ${JSON.stringify(env)}`;
+      assert.equal(r.code, code, `${label}: ${r.err}`);
+      if (typeof want === 'string') assert.equal(r.out, want, label);
+      else { assert.match(r.err, want, label); assert.match(r.err, /^FAIL \[product-settings\]/, label); assert.equal(r.out, '', label); }
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('risk-map stays advisory on two settings files that disagree, and reads them from the repo root (E122)', () => {
+  const T = scaffoldRepo();
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"default_branch":"main"}\n');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"default_branch":"trunk"}\n');
+  commit(T, 'feat: a thing', { 'src/a.js': 'x\n' });
+  let r = runGate(path.join(CHECKS, 'risk-map-check.sh'), T, []);
+  assert.equal(r.code, 0, `advisory means exit 0 on every input:\n${r.out}`);
+  assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  assert.doesNotMatch(r.out, /FAIL \[product-settings\]/);
+  // From a subfolder: the settings are the root's, so the same note, not a silent pass on nothing.
+  fs.mkdirSync(path.join(T, 'src/deep'), { recursive: true });
+  r = runGate(path.join(CHECKS, 'risk-map-check.sh'), path.join(T, 'src/deep'), []);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  // `--level` answers in machine lines on stdout (read by risk-route.sh); the note goes to stderr there.
+  // No base named (GIT_ENV has no SDLC_BASE), so `resolve_base` runs and reads the settings file.
+  const lv = spawnSync('bash', [path.join(CHECKS, 'risk-map-check.sh'), '--level'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+  assert.equal(lv.status, 0, lv.stderr);
+  assert.doesNotMatch(lv.stdout, /note \[risk-map\]|say different things/, `stdout is machine lines only: ${JSON.stringify(lv.stdout)}`);
+  assert.ok(lv.stdout.trim(), 'and it still answers');
+  assert.match(lv.stderr, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  assert.doesNotMatch(lv.stderr, /No such file or directory/, 'no stray error from reading an empty file name');
+  // The common case: a code repo with no settings file at all. Every gate's `resolve_base` reads it; a
+  // missing file must say nothing (bash reports `< file` before a trailing `2>/dev/null` applies).
+  for (const n of ['product.json', 'hub.json']) fs.rmSync(path.join(T, '.sdlc', n));
+  const none = spawnSync('bash', [path.join(CHECKS, 'risk-map-check.sh'), '--level'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+  assert.equal(none.status, 0, none.stderr);
+  assert.doesNotMatch(none.stderr, /No such file or directory/, 'no stray error from a missing settings file');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: no settings file at all passes quietly — no stray "No such file" on stderr (E122)', () => {
+  const T = scaffoldRepo();
+  const r = spawnSync('bash', [LEDGER_GUARD, 'main'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /PASS \[ledger-guard\]/);
+  assert.doesNotMatch(r.stderr, /No such file or directory/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard reads the new settings name first, and guards on a Product that has only it (E122)', () => {
+  // Verified under product.json alone: guarded. The same under hub.json alone: still guarded (older Products).
+  for (const name of ['product.json', 'hub.json']) {
+    const T = scaffoldRepo();
+    seedLedgerOnBase(T);
+    for (const n of ['product.json', 'hub.json']) fs.rmSync(path.join(T, '.sdlc', n), { force: true });
+    fs.writeFileSync(path.join(T, '.sdlc', name), '{"platform":"github","ledger":"verified"}\n');
+    commit(T, 'hand-edit the index', { '.sdlc/index.json': '{"inputs":"x","items":[]}\n' });
+    const r = runGate(LEDGER_GUARD, T);
+    assert.equal(r.code, 1, `${name}: ${r.out}`);
+    assert.match(r.out, /→ \.sdlc\/index\.json/, name);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  // product.json says local and wins; a stale hub.json that says verified is a drift, which FAILS loudly
+  // rather than guarding or not guarding on a guess.
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"platform":"github","ledger":"local"}\n');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","ledger":"verified"}\n');
+  commit(T, 'hand-edit the index', { '.sdlc/index.json': '{"inputs":"x","items":[]}\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \[product-settings\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('every base-taking gate actually CONSUMES resolve_base (no hardcoded origin/main default)', () => {
@@ -3751,8 +3920,9 @@ test('ledger-guard: a non-bot commit to .sdlc/index.json FAILS; the Product conf
   const U = scaffoldRepo();
   seedLedgerOnBase(U);
   commit(U, 'switch mode', {
+    // The same bytes under both names: two that disagree fail every gate on their own (E122).
     '.sdlc/hub.json': '{"platform":"github","bridge_enabled":true,"mode":"team"}\n',
-    '.sdlc/product.json': '{"platform":"github","bridge_enabled":true}\n',
+    '.sdlc/product.json': '{"platform":"github","bridge_enabled":true,"mode":"team"}\n',
     '.sdlc/repos.json': '{"repos":[]}\n',
     '.sdlc/index.json.bak': 'x\n',
     'docs/.sdlc/index.json': '{}\n',
@@ -4200,6 +4370,11 @@ test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot t
   assert.equal(resolvePin(block, stamp(`${M}.0.0-next.1`)), `${M}.0.0-next.1`);
   assert.equal(resolvePin(block, hub(`${M}.16.0-rc.1`)), `${M}.16.0-rc.1`);
   assert.equal(resolvePin(block, { '.sdlc/hub.json': `{\n "gate_sync_version":\n  "${M}.15.9"\n}` }), `${M}.15.9`);
+  // E122: the Product settings are read under the new name first; the old one only when it is absent.
+  const product = (v) => ({ '.sdlc/product.json': v === null ? '{}' : `{"gate_sync_version":"${v}"}` });
+  assert.equal(resolvePin(block, { ...hub(`${M}.14.0`), ...product(`${M}.13.0`) }), `${M}.13.0`, 'product.json wins');
+  assert.equal(resolvePin(block, { ...hub(`${M}.14.0`), ...product(null), ...stamp(`${M}.15.3`) }), `${M}.15.3`, 'a product.json with no pin is not a fall-through to hub.json');
+  assert.equal(resolvePin(block, product(`${M}.13.0`)), `${M}.13.0`);
   }
 });
 

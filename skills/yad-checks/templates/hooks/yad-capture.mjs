@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 // script's OWN location, never from the harness's working directory or its project-root variable
 // (whose form on Windows, `C:\…` or `/c/…`, no harness documents). `realpathSync` so a script reached
 // through a symbolic link still finds its own Product.
-const HUB_ROOT = path.dirname(path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))));
+const PRODUCT_ROOT = path.dirname(path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))));
 const IS_WINDOWS = process.platform === 'win32';
 
 // A command found on PATH, or null. On Windows the npm launchers are `.cmd` files.
@@ -60,7 +60,7 @@ function resolveYad() {
     const [file, ...args] = override;
     return { file, args, shell: IS_WINDOWS && /\.(cmd|bat)$/i.test(file) };
   }
-  const local = path.join(HUB_ROOT, 'node_modules', 'yadflow', 'bin', 'yad.mjs');
+  const local = path.join(PRODUCT_ROOT, 'node_modules', 'yadflow', 'bin', 'yad.mjs');
   if (fs.existsSync(local)) return { file: process.execPath, args: [local], shell: false };
   const yad = onPath('yad');
   if (yad) {
@@ -103,7 +103,7 @@ async function main() {
   if (process.env.YAD_CAPTURE === '0') return;
   const yad = resolveYad();
   if (!yad) {
-    process.stderr.write(`  • yad capture: no \`yad\` on PATH and none installed in ${HUB_ROOT} — nothing captured\n`);
+    process.stderr.write(`  • yad capture: no \`yad\` on PATH and none installed in ${PRODUCT_ROOT} — nothing captured\n`);
     return;
   }
   // Only `--format claude` is passed through; anything else on the command line is not ours to forward.
@@ -111,7 +111,7 @@ async function main() {
   const i = argv.indexOf('--format');
   const format = i >= 0 && argv[i + 1] === 'claude' ? ['--format', 'claude'] : [];
   // stdin is closed for the child: the payload was drained above and capture reads none.
-  runYad(yad, ['capture', '--hook', ...format, '--dir', HUB_ROOT], { stdio: ['ignore', 'inherit', 'inherit'] });
+  runYad(yad, ['capture', '--hook', ...format, '--dir', PRODUCT_ROOT], { stdio: ['ignore', 'inherit', 'inherit'] });
 }
 
 main().catch((e) => { process.stderr.write(`  • yad capture: ${e?.message || e}\n`); }).finally(() => process.exit(0));

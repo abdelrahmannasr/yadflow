@@ -318,7 +318,7 @@ export async function runCheckpoint(root, opts = {}) {
   const defaultBranch = resolveDefaultBranch(git, hub);
 
   // Default-branch guard (invariant 2) — shared with `yad tidy up`.
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad checkpoint' })) return;
+  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad checkpoint', root })) return;
 
   // --retro-ship (#142): record a retroactive build-log ship for a PRE-TRACKING story (merged before
   // the Build ledger existed, so it has no ship and its `status:` flip can't be carried). Done

@@ -22,7 +22,7 @@ trigger is a parameter, not a hardcoded human.
 - Operate on one epic: `{project-root}/epics/EP-<slug>/`. The Product level is the exception:
   `EP-foundation` lives at `{project-root}/foundation/` (its `.sdlc/` and `reviews/` are there).
 - State files: `.sdlc/state.json`, `.sdlc/approvals.json`, `.sdlc/comments.json`, and (when the verified ledger is
-  used) `.sdlc/hub-prs.json`. Review records: `reviews/`.
+  used) `.sdlc/product-prs.json` (written together with its older name `hub-prs.json`). Review records: `reviews/`.
 - The artifact base name drops the extension (`epic.md` → `epic`; story `stories/...S01.md` → `stories-S01`).
 
 ## Inputs
@@ -78,7 +78,7 @@ and nothing else.
 
 ### Step 2 — Dispatch on `action`
 
-> **Check the mode first — in verified mode you write nothing to the ledger.** Read `.sdlc/hub.json`:
+> **Check the mode first — in verified mode you write nothing to the ledger.** Read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name):
 > **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present. Under the verified ledger
 > the ledger is CI-owned — `ledger-guard` rejects any non-bot commit touching
 > `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or `epics/*/reviews/*.md` (and the
@@ -117,14 +117,14 @@ transition at merge.
 
 Do not advance.
 
-If `.sdlc/hub.json` has a non-null `platform` and `gh`/`glab` is authenticated, **`yad gate open` also
+If `.sdlc/product.json` (`.sdlc/hub.json` on an older Product) has a non-null `platform` and `gh`/`glab` is authenticated, **`yad gate open` also
 opens the review PR/MR on the Product** (the recipe is `yad-hub-bridge action: open`; do not open a
 second one), and you report the URL. This holds for a verified ledger and for a local one. The PR
 requests **no reviewers**; the command prints
 `no reviewers were requested — ask them on the PR itself`, so tell the author to ask people on the PR.
-The PR is recorded in `epics/<epic>/.sdlc/hub-prs.json` (`{step, artifact, platform, number, url, branch, lastSyncedAt}`):
+The PR is recorded in `epics/<epic>/.sdlc/product-prs.json` and `hub-prs.json`, same bytes (`{step, artifact, platform, number, url, branch, lastSyncedAt}`):
 **by CI at merge** in verified mode (`ledger: "verified"`, or, before `yad migrate`, `bridge_enabled: true` /
-legacy `bridge: true` — `.sdlc/hub.json` is the only source the CLI reads, see `isVerifiedLedger` in
+legacy `bridge: true` — `.sdlc/product.json` (else `.sdlc/hub.json`) is the only source the CLI reads, see `isVerifiedLedger` in
 `cli/manifest.mjs`), and by `yad gate open` itself on a local ledger. Never write it by hand (see `sync`
 below). With no platform, or when the PR cannot be opened on a local ledger, the step is still
 `in_review` locally — no error. (In verified mode a failed open writes nothing; open the PR by hand and
@@ -200,7 +200,7 @@ The command prints the verdict (Step 3) itself. Recording an approval does NOT a
 separate, explicit act (`advance`), the way approving a PR never merges it.
 
 **`sync`** — (the platform bridge input path) Pull the Product review PR/MR's review state into the ledger,
-then re-evaluate the rule (Step 3). Read the PR for this step from `.sdlc/hub-prs.json` and use
+then re-evaluate the rule (Step 3). Read the PR for this step from `.sdlc/product-prs.json` (`hub-prs.json` when that is absent) and use
 `yad-hub-bridge`'s read recipes (`../yad-hub-bridge/references/bridge.md`) to fetch reviews + comments
 via the local user's `gh`/`glab`. For each:
 - the platform `login` is the name written — `approver` / `commenter` is the login itself. There is no
@@ -223,7 +223,7 @@ it. **Manual approvals (no `source` tag) are never touched.** For the architectu
 fingerprint a bridge approval is bound to is the contract surface, so a re-lock makes every approval of
 the old surface stale: it stays on disk and no longer counts (re-lock invalidates platform approvals
 too). Then refresh the `approved.md`
-record, set the PR ledger's `lastSyncedAt`, and **re-evaluate Step 3**. **Never hand-write either PR-ledger file.** It lives under two names while the rename settles — `product-prs.json` and `hub-prs.json` — and the engine writes both together. Writing one leaves the pair disagreeing, and `yad doctor` will report it. Use `yad gate`, which keeps them in step.  Under the PR-driven CLI (`yad
+record, set the PR ledger's `lastSyncedAt`, and **re-evaluate Step 3**. **Never hand-write either PR-ledger file.** It lives under two names until v5 — `product-prs.json` (read first) and `hub-prs.json` — and the engine writes both together. Writing one leaves the pair disagreeing, and then every yad command refuses (YAD-STATE-008) until `yad migrate --apply` settles it. Use `yad gate`, which keeps them in step.  Under the PR-driven CLI (`yad
 gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-resolved, approved PR
 (the merge is the human act); otherwise it records state and holds the step `in_review`.
 

@@ -36,15 +36,15 @@ Holds **no credentials** — every field is a plain reference. Auth is always th
 `target: "none"` records `{ "target": "none", "publishRepo": null, "basePath": "/", "source":
 "unavailable", ... }`.
 
-## Platform auto-detection (from `.sdlc/hub.json`)
+## Platform auto-detection (from `.sdlc/product.json`)
 
-When `target` is not given, map the Product's `platform` the same way `yad-connect-repos` maps a repo host:
+When `target` is not given, read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name) and map the Product's `platform` the same way `yad-connect-repos` maps a repo host:
 
-| `hub.json` `platform` | default `target` |
+| `product.json` `platform` | default `target` |
 |-----------------------|------------------|
 | `github` | `github-pages` |
 | `gitlab` | `gitlab-pages` |
-| `null` / no hub.json | `none` (build-only) |
+| `null` / no settings file | `none` (build-only) |
 
 ## Base-path resolution table
 

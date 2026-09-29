@@ -32,7 +32,7 @@ the Product.
     `pull_request_template.md`, so the Product `pr-template` gate passes.
   In a code repo nothing changes — it reads the repo's own committed code-task template.
 - **Base branch** — **resolved, never assumed.** In order: `--base` → the repo's `default_branch` in
-  `.sdlc/repos.json` → (for a PR against the Product itself) `hub.json`'s `default_branch` → what the
+  `.sdlc/repos.json` → (for a PR against the Product itself) `product.json`'s `default_branch` (`hub.json` on an older Product) → what the
   platform reports (`gh repo view --json defaultBranchRef` / `glab api projects/:id`) → local
   `origin/HEAD` → `main`. The same **configuration-outranks-the-remote** order `yad repo sync` and the
   contract-check gate already use (they stop at `origin/HEAD`; only this chain also asks the platform).

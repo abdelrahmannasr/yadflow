@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { note, readJSON, run } from './lib.mjs';
-import { isVerifiedLedger , productConfigPath, HOOK_PROJECT_DIR_ENVS } from './manifest.mjs';
+import { isVerifiedLedger, mirrorDrift, productConfigPath, HOOK_PROJECT_DIR_ENVS, PROJECT_FILES } from './manifest.mjs';
 import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
@@ -156,7 +156,7 @@ export function payloadPaths(payload) {
   return [...new Set(out)];
 }
 
-// The Product a path belongs to: the nearest ancestor holding `.sdlc/hub.json`.
+// The Product a path belongs to: the nearest ancestor holding `.sdlc/product.json` or `.sdlc/hub.json`.
 //
 // Resolved from the PATH, never from the session. The documented layout puts code repos BESIDE the
 // Product (`project/{product,backend,mobile}` — see `insideWorkspace` in setup.mjs), so a session opened
@@ -275,6 +275,25 @@ const PERSON_DOOR = [
   '',
 ];
 
+// The settings a guard decision reads. Non-strict on purpose: a hub.json that does not parse is a real
+// problem, but refusing every edit in the repo is not this hook's way of reporting it (`yad doctor`
+// says so properly).
+//
+// E122: when `product.json` and `hub.json` say different things, every other command refuses; the hook
+// cannot — it runs inside the agent's tool loop — so it GUARDS: the Product is verified when EITHER copy
+// says so. A drift must never disarm the guard; the worst it can do is refuse an edit a local Product
+// would have allowed, and the message then says why and what ends it.
+export function guardConfig(productRoot) {
+  const product = path.join(productRoot, PROJECT_FILES.productConfig);
+  const legacy = path.join(productRoot, PROJECT_FILES.productConfigLegacy);
+  if (!mirrorDrift(product, legacy)) return { hub: readJSON(productConfigPath(productRoot), null), drift: false };
+  const both = [readJSON(product, null), readJSON(legacy, null)];
+  return { hub: both.find(isVerifiedLedger) ?? both[0], drift: true };
+}
+
+const driftLine = (productRoot) =>
+  `note: ${path.join(productRoot, PROJECT_FILES.productConfig)} and ${PROJECT_FILES.productConfigLegacy} say different things, and one of them is verified, so this edit is guarded — run \`yad migrate\` to choose the copy to keep`;
+
 // What the agent is told when the edit is refused. Names the command that owns each transition —
 // the whole point of #171 was that the ledger write had no command behind it.
 export function denyMessage({ epic, rel, productRoot }) {
@@ -339,9 +358,7 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run, pa
     const abs = path.resolve(base, windowsPath(candidate));
     const productRoot = hubRootFor(abs);
     if (!productRoot) continue;
-    // Non-strict on purpose: a hub.json that does not parse is a real problem, but refusing every
-    // edit in the repo is not this hook's way of reporting it (`yad doctor` says so properly).
-    const hub = readJSON(productConfigPath(productRoot), null);
+    const { hub, drift } = guardConfig(productRoot);
     if (!isVerifiedLedger(hub)) continue;
     const rel = path.relative(productRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
@@ -354,9 +371,9 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run, pa
     }
     if (!all) {
       const message = hit.kind === 'index' ? indexDenyMessage({ rel, productRoot }) : denyMessage({ epic: hit.epic, rel, productRoot });
-      return { allow: false, epic: hit.epic, rel, message };
+      return { allow: false, epic: hit.epic, rel, message: drift ? `${message}\n${driftLine(productRoot)}` : message };
     }
-    hits.push({ ...hit, abs, productRoot });
+    hits.push({ ...hit, abs, productRoot, drift });
   }
   return hits.length ? { allow: false, hits } : { allow: true };
 }
@@ -443,6 +460,7 @@ export function commitDenyMessage({ hits, top }) {
     ] : []),
     ...(index ? ['  the Product index                  CI rebuilds it at merge; read it with `yad index --json`'] : []),
     '',
+    ...[...new Set(hits.filter((h) => h.drift).map((h) => h.productRoot))].map((r) => `${driftLine(r)}\n`),
     'Amending a commit to UNDO a ledger change it made? `git commit --amend` is compared with the commit it',
     'replaces, so this hook cannot tell. Run it as `YAD_HOOK_DISABLE=1 git commit --amend`; the check on the',
     'pull request judges the result against its parent.',

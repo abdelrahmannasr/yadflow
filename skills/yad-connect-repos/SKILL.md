@@ -174,9 +174,12 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 
 The Product is itself a git repo on a platform. This action records that so the Shape review/comment/
 approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-hub-bridge`). It
-writes only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (older projects: `hub.config`)) — never an epic's state/approvals.
+writes only `{project-root}/.sdlc/product.json` and its older name `.sdlc/hub.json` (`config.yaml` `product.config` (older projects: `hub.config`)) — never an epic's state/approvals.
 
-- **`detect-hub`** — detect the Product's own platform and upsert `.sdlc/hub.json`. Run
+- **`detect-hub`** — detect the Product's own platform and upsert the Product settings: read
+  `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name), then write
+  `.sdlc/product.json` and copy it byte for byte to `.sdlc/hub.json` (`cp .sdlc/product.json .sdlc/hub.json`;
+  both until v5 — two that differ by even a space are refused, YAD-STATE-008 — E122). Run
   `git remote get-url origin` **on the Product** and read the host with the SAME logic Step 1 uses for code
   repos: `github.com` → `github`, GitLab host → `gitlab`, no remote → `platform: null`. Record
   `git_url`, `default_branch`, `detectedAt`, and **all three of** `ledger`, `bridge_enabled` and

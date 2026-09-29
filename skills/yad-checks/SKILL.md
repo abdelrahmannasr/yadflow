@@ -79,13 +79,13 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
   - `templates/checks/{spec-link,contract-check,package-manager,install-deps,build-test-lint,verified-commits,risk-map-check}.sh`
-  - `templates/checks/ledger-guard.sh` → **Product-only** gate, active **only in verified mode** — hub.json
-    carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
+  - `templates/checks/ledger-guard.sh` → **Product-only** gate, active **only in verified mode** — `product.json`
+    (`hub.json` on an older Product) carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
     (or the legacy `bridge`) true. The same predicate
     `isVerifiedLedger` (`cli/manifest.mjs`) applies, so the gate and the CLI can never disagree about who owns the
     ledger (#186). A no-op otherwise, when humans legitimately own it. On review PRs it FAILs any
     commit that touches the
-    CI-owned gate ledger (`.sdlc/{state,approvals,comments,hub-prs}.json`, `reviews/*.md`) unless it
+    CI-owned gate ledger (`.sdlc/{state,approvals,comments,product-prs,hub-prs}.json`, `reviews/*.md`) unless it
     is a **verified gate-bot commit** — bot-authored AND platform-Verified, since author text alone is
     spoofable. `.sdlc/contract-lock.json` is artifact-side and exempt. So is a **new epic's seed**:
     no CI path can create a ledger (`gate ci` only *advances* an existing chain, at merge, on the
@@ -137,7 +137,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 ### Step 1 — Resolve the code repo
 Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path` in `.sdlc/repos.json`); confirm
 it is its own git repo. Operate inside it with absolute paths. For `repo: hub`, the target is
-`{project-root}` itself and the platform comes from `.sdlc/hub.json` — see "Wiring the Product" in
+`{project-root}` itself and the platform comes from `.sdlc/product.json` (`.sdlc/hub.json` on an older Product) — see "Wiring the Product" in
 `references/check-gates.md`.
 
 ### Step 2 — `wire` (install the gates, syncing with any existing CI)
@@ -190,7 +190,7 @@ Re-running `wire` is **idempotent** — markers (`# yad-managed: yad-checks`,
 `# yad-managed-include: yad-checks`) and the include-entry check make a second run a no-op.
 Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff).
 
-**The Product is wired the same way.** `repo: hub` wires the Product repo itself (platform from `.sdlc/hub.json`)
+**The Product is wired the same way.** `repo: hub` wires the Product repo itself (platform from `.sdlc/product.json`)
 with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
 
 **The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.mjs` →
@@ -224,7 +224,7 @@ file-editing tool call and refuses the write up front, naming the command that o
 - **Targets with no such hook are named, not skipped.** `.agents`, `.gemini`, `.zencoder` and
   `.opencode` get the script and no wiring, and `yad doctor` says which of a project's targets are
   guarded by CI alone. Silence about an unguarded target reads as a guarded one.
-- **Same scope as the CI gate**, deliberately: guarded are `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`
+- **Same scope as the CI gate**, deliberately: guarded are `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json`
   and `epics/*/reviews/*.md` (at the gate's own glob depth, which spans `/`); exempt are
   `contract-lock.json`, `change.json`, and every artifact. A **new** epic's ledger is exempt too —
   creation, not mutation (#162), decided by listing the epics the **base ref** carries (an

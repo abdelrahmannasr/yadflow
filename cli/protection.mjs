@@ -24,6 +24,7 @@
 // for the test suite, which must never ask the developer's real account (the `YAD_PLATFORM_LOGIN=0`
 // precedent). `runner` is injectable so every answer is testable without a network.
 import { run, forTerminal } from './lib.mjs';
+import { SETTINGS_EDIT_HINT } from './manifest.mjs';
 import { cliFor, hostFromGitUrl, detectPlatform, plainHost } from './platform.mjs';
 
 export const PLATFORM_NAME = { github: 'GitHub', gitlab: 'GitLab' };
@@ -690,8 +691,8 @@ function unknownHint(r) {
     case 'no-login': return `run \`${cli} auth login --hostname ${r.host}\`, then \`yad doctor\` again`;
     case 'no-platform': return 'set `platform` (github or gitlab) in yad\'s files — `yad setup` for the Product, `yad repo connect` for a code repo';
     case 'no-url': return r.badHost
-      ? 'fix `git_url` in the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product) — or its origin remote — to name a plain host'
-      : 'add `git_url` to the repo\'s entry in .sdlc/repos.json (.sdlc/product.json, or hub.json, for the Product), or give the repo an origin remote';
+      ? `fix \`git_url\` in the repo's entry in .sdlc/repos.json (for the Product, ${SETTINGS_EDIT_HINT}) — or its origin remote — to name a plain host`
+      : `add \`git_url\` to the repo's entry in .sdlc/repos.json (for the Product, ${SETTINGS_EDIT_HINT}), or give the repo an origin remote`;
     // The access tail turns on what the read PROVED (`cause`), never on the platform: a 404 whose body was
     // not recognised leaves a permission open, and one that named the branch closes it (E109).
     // The tail's noun is GitLab's: GitHub never reaches it, because its reader sets `cause: 'branch'` on
@@ -706,7 +707,7 @@ function unknownHint(r) {
     case 'no-flag': return `ask someone who can see ${PLATFORM_NAME[r.platform] || 'the platform'}'s settings for ${shown(r.branch) === r.branch ? `\`${r.branch}\`` : shown(r.branch)}`;
     // One action per open cause (E110): yad's files name no branch, and on GitLab the repository may be
     // unreadable — turned off (an Owner turns it on) or too little access (a Maintainer or Owner grants it).
-    case 'no-default': return `set \`default_branch\` in yad's files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)${r.defaultMayBeHidden
+    case 'no-default': return `set \`default_branch\` in yad's files (.sdlc/repos.json, or for the Product ${SETTINGS_EDIT_HINT})${r.defaultMayBeHidden
       ? `. GitLab also hides the default from a login that cannot read the repository: ${REPO_ACTIONS} — then run \`yad doctor\` again`
       : ''}`;
     case 'no-repo': return `check \`git_url\` in yad's files, or ask for access to the ${r.platform === 'gitlab' ? 'project' : 'repo'}`;

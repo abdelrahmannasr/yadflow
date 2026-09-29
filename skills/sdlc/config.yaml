@@ -70,7 +70,7 @@ lifecycle:
   # marks any step optional. Each epic RECORDS its route as `profile` in `state.json`
   # (file shape 6); `yad epic new` writes it when it seeds the chain, and for an epic that predates the
   # field `yad migrate` fills it in by matching the chain. The chain stays the truth — `yad doctor`
-  # compares the two. NOT the `hub.json` `profile`, which is the unrelated setup record
+  # compares the two. NOT the `product.json` `profile`, which is the unrelated setup record
   # { codebase, repo_layout, team_size }.
   profiles: [classic, analysis-first, chore, spike, discovery, foundation]
   # The PRODUCT level's phase (E75) — a ladder of its own, run once per product before any epic, and
@@ -113,7 +113,7 @@ review_gate:
   # only the base holds a gate.
   default_reviewers: 1          # legacy, not read since E62
   # Solo mode (a lone developer): a relaxed, opt-in safety guarantee, recorded per-project in
-  # .sdlc/hub.json (`solo: true`). On GitHub you CANNOT approve your own PR, so requiring an approval
+  # .sdlc/product.json (`solo: true`). On GitHub you CANNOT approve your own PR, so requiring an approval
   # would deadlock a solo user. Solo waives the APPROVAL requirement only — the review PR/MR and its
   # MERGE stay (CI still runs on the PR, and the merge is what advances the step). Net: the gate passes
   # on `merged + all comment threads resolved`, no approval needed. NOT a default; team gates are
@@ -137,7 +137,7 @@ review_gate:
   # default: both count, a bare approve still passes but draws a friendly public @-mention nudge so
   # review quality is VISIBLE without blocking anyone ("visible, not impossible"). Flip to true to make
   # only verified approvals count (the signal is gameable by design — it raises the cost of a rubber-
-  # stamp, it does not prove a human read the artifact). Persisted per-project in hub.json as
+  # stamp, it does not prove a human read the artifact). Persisted per-project in product.json as
   # `review.requireEngagement`; companion comments carry `<!-- yad:noblock -->` so they never block.
   require_engagement: false
   # Pair Review (yad-pair-review) — the guided, two-way, TEACHING walkthrough; the AI-driven 5th
@@ -331,9 +331,9 @@ docs:
 # both. The paths below carry both names too, for the same reason the files do.
 product:
   config: "{project-root}/.sdlc/product.json"          # product platform (committed, like repos.json); no roster since E62
-  config_legacy: "{project-root}/.sdlc/hub.json"       # the older name, still written and still the one READ this major
+  config_legacy: "{project-root}/.sdlc/hub.json"       # the older name: still written with identical bytes until v5; read only when product.json is absent (E122)
   pr_ledger: "{project-root}/epics/EP-<slug>/.sdlc/product-prs.json"       # per-step review-PR record (sibling of approvals.json)
-  pr_ledger_legacy: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"    # the older name — written alongside it AND still the one read, like config_legacy
+  pr_ledger_legacy: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"    # the older name — written alongside it; read only when product-prs.json is absent, like config_legacy
   bridge: true                                         # master enable; false => local Shape gates everywhere
   platforms: [github, gitlab]                          # detected from the Product's own `git remote get-url origin`
   artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact

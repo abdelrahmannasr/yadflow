@@ -236,7 +236,7 @@ Notes:
 *(**Always run this**, on both entry modes. The chain is seeded by now either way — by `yad-analysis`,
 by `yad epic new` in Step 5, or by `yad epic new` before this skill was invoked — and `epic.md` is
 written. This is the step that closes the authoring step and opens its gate.)*
-**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
+**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name):
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
