@@ -9,7 +9,7 @@ no roles, no commit emails (E62). It is a single object for the Product itself �
 
 `{project-root}/.sdlc/product.json`, written together with its older name `{project-root}/.sdlc/hub.json`
 (E122). Read `product.json` first; read `hub.json` only on an older Product that has only that name.
-Every save writes both names with identical content, until v5 deletes `hub.json` (check gates an older
+Every save writes both names with the same bytes, until v5 deletes `hub.json` (check gates an older
 yadflow installed read `hub.json` by path). If both exist and their bytes differ, every yad command but
 `yad doctor`, `yad migrate` and `yad report` refuses with `YAD-STATE-008`, and the CI gates FAIL;
 `yad migrate --apply` (or `--apply --keep product` / `--keep hub`) chooses the copy to keep. To edit a
@@ -73,7 +73,7 @@ closed.
 run `git remote get-url origin` **on the Product itself** and read the host —
 `github.com` → `github`, `gitlab.com`/self-hosted GitLab → `gitlab`, no remote → `platform: null`.
 Auth is the **local user's own** `gh`/`glab`/git credentials; **no tokens are ever stored** (same rule
-as the registry). `detect-hub` upserts the file in place, under both names with identical content — it is idempotent and safe to re-run.
+as the registry). `detect-hub` upserts the file in place: it writes `product.json`, then copies it byte for byte to `hub.json` (`cp`) — idempotent and safe to re-run.
 
 **`git_url` is required whenever `platform` is non-null.** `yad doctor` uses it to scope the auth
 probe to the Product's own host (an unscoped `glab auth status` fails on any unrelated broken instance),

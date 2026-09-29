@@ -20250,7 +20250,7 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
 // what an unreadable repository looks like. Both causes are said, and the hint names an action for each.
 test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', () => {
   const GL_NONE = "no default branch is set in yad's files, and GitLab named none (GitLab names it only to a login that can read the project's repository)";
-  const FILES = 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json — hub.json on an older Product)';
+  const FILES = 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json for the Product, then `yad migrate --apply --keep product`)';
   // The same two actions as E109's `no-repository`, word for word — a non-owner can ask for the repository
   // to be turned on, since more access cannot help while it is off (E110's review).
   const HIDDEN = '. GitLab also hides the default from a login that cannot read the repository: if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
@@ -26988,6 +26988,8 @@ test('E122: every command refuses a drifted pair with YAD-STATE-008; doctor fail
     const mj = JSON.parse(m.stdout);
     assert.deepEqual(mj.drift.map((x) => [x.canonical, x.legacy, x.differences]), [['.sdlc/product.json', '.sdlc/hub.json', ['`platform` differs']]]);
     assert.equal(mj.kept, null);
+    // The preview names both names of the pair: which one the apply rewrites is the person's choice.
+    assert.ok(['.sdlc/product.json', '.sdlc/hub.json'].every((f) => mj.changed.includes(f)), JSON.stringify(mj.changed));
     // An epic's PR ledger that drifts is refused the same way, once the settings agree.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), fs.readFileSync(path.join(T, '.sdlc/product.json')));
     fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
@@ -27062,5 +27064,46 @@ test('E122: the ledger hook guards a drifted pair when EITHER copy is verified, 
     v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
     assert.equal(v.allow, false);
     assert.doesNotMatch(v.message, /say different things/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: doctor names the settings file it actually read — product.json when it exists', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122doc-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    const bad = '{"platform":"githbu"}\n';
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), bad);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), bad);
+    let r = await doctorOn(T);
+    let c = r.checks.find((x) => x.id === 'hub');
+    assert.match(c.message, /^\.sdlc\/product\.json: unknown platform/, 'the file to fix is the one read');
+    // An older Product with only the old name: that one is named.
+    fs.rmSync(path.join(T, '.sdlc/product.json'));
+    r = await doctorOn(T);
+    c = r.checks.find((x) => x.id === 'hub');
+    assert.match(c.message, /^\.sdlc\/hub\.json: unknown platform/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: on a verified Product, settling an epic\'s PR-ledger pair says how to commit the CI-owned repair', async () => {
+  const { runMigrate } = await import('./migrate.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122v-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    const cfg = '{"schemaVersion":10,"platform":"github","git_url":"https://github.com/a/b","ledger":"verified"}\n';
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), cfg);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), cfg);
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[{"artifact":"epic.md"}]\n');
+    const said = [];
+    const origErr = console.error;
+    console.error = (...a) => said.push(a.map(String).join(' '));
+    let out;
+    try { ({ out } = await captureConsole(() => runMigrate(T, { apply: true, keep: 'product' }))); } finally { console.error = origErr; }
+    const all = `${out}\n${said.join('\n')}`;
+    assert.match(all, /epics\/EP-x\/\.sdlc\/hub-prs\.json is CI-owned on this verified Product/);
+    assert.match(all, /yad commit --manual --reason/);
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), 'utf8'), '[]\n', 'the repair is still made');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

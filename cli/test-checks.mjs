@@ -2563,13 +2563,17 @@ test('every base-taking gate carries the SAME base-resolution block, byte for by
 // E122: every gate that reads the Product's settings reads them through ONE block, byte for byte — twelve
 // copies of a rule drift one arm at a time unless something pins them together.
 const SETTINGS_GATES = [...BASE_TAKING_GATES, 'skills/yad-checks/templates/checks/product-checkout.sh'];
+// The shared part is the function; the line that calls it is each gate's own, because one gate is
+// advisory (risk-map never fails the build, so a disagreement is a note there).
 const settingsBlock = (file) => {
   const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
   const start = src.indexOf('# --- shared Product settings file');
-  const end = src.indexOf('\nPRODUCT_CONFIG="$(product_config)" || exit 1\n', start);
-  assert.ok(start >= 0 && end > start, `${file}: the Product settings block was not found`);
-  return src.slice(start, end + '\nPRODUCT_CONFIG="$(product_config)" || exit 1\n'.length);
+  const fn = src.indexOf('\nproduct_config() {\n', start);
+  const end = src.indexOf('\n}\n', fn);
+  assert.ok(start >= 0 && fn > start && end > fn, `${file}: the Product settings block was not found`);
+  return src.slice(start, end + 3);
 };
+const RISK_MAP_GATE = 'skills/yad-checks/templates/checks/risk-map-check.sh';
 
 test('every gate that reads the Product settings carries the SAME settings block, and reads nothing else (E122)', () => {
   const canonical = settingsBlock(SETTINGS_GATES[0]);
@@ -2578,8 +2582,16 @@ test('every gate that reads the Product settings carries the SAME settings block
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     // The old default is gone everywhere: a gate that still says it reads hub.json first.
     assert.doesNotMatch(src, /SDLC_HUB_CONFIG:-\.sdlc\/hub\.json/, `${f} still defaults to hub.json`);
-    // ...and nothing reads the file before the block has resolved it.
-    assert.ok(src.indexOf('"$PRODUCT_CONFIG"') > src.indexOf('PRODUCT_CONFIG="$(product_config)"'), `${f}: the settings are read before they are resolved`);
+    // Every blocking gate stops on a disagreement, right after the block; the advisory one notes it.
+    const call = f === RISK_MAP_GATE ? 'if ! PRODUCT_CONFIG="$(product_config 2>/dev/null)"; then\n' : 'PRODUCT_CONFIG="$(product_config)" || exit 1\n';
+    const at = src.indexOf(settingsBlock(f)) + settingsBlock(f).length;
+    assert.equal(src.slice(at, at + call.length) === call || src.indexOf(call, at) > at, true, `${f}: the settings block is not followed by its call`);
+    if (f !== RISK_MAP_GATE) assert.equal(src.slice(at, at + call.length), call, `${f}: the call must follow the block directly`);
+    // ...and nothing reads the file before the block has resolved it: `resolve_base` is only DEFINED
+    // above, so what counts is where it runs, and every read outside it.
+    const outside = src.replace(/\nresolve_base\(\) \{\n[\s\S]*?\n\}\n/, '\n');
+    const reads = [outside.indexOf('$(resolve_base)'), outside.indexOf('"$PRODUCT_CONFIG"')].filter((i) => i >= 0);
+    assert.ok(reads.length && Math.min(...reads) > outside.indexOf(call), `${f}: the settings are read before they are resolved`);
   }
 });
 
@@ -2589,7 +2601,7 @@ test('the settings block: new name first, the old as a fallback, and two that di
   fs.mkdirSync(path.join(T, '.sdlc'));
   const put = (name, body) => (body === null ? fs.rmSync(path.join(T, name), { force: true }) : fs.writeFileSync(path.join(T, name), body));
   const run = (env = {}) => {
-    const r = spawnSync('bash', ['-c', `set -euo pipefail\n${block}printf '%s' "$PRODUCT_CONFIG"`], {
+    const r = spawnSync('bash', ['-c', `set -euo pipefail\n${block}PRODUCT_CONFIG="$(product_config)" || exit 1\nprintf '%s' "$PRODUCT_CONFIG"`], {
       cwd: T, encoding: 'utf8', env: { ...GIT_ENV, ...env },
     });
     return { code: r.status, out: r.stdout, err: r.stderr };
@@ -2622,6 +2634,24 @@ test('the settings block: new name first, the old as a fallback, and two that di
       else { assert.match(r.err, want, label); assert.match(r.err, /^FAIL \[product-settings\]/, label); assert.equal(r.out, '', label); }
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('risk-map stays advisory on two settings files that disagree, and reads them from the repo root (E122)', () => {
+  const T = scaffoldRepo();
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"default_branch":"main"}\n');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"default_branch":"trunk"}\n');
+  commit(T, 'feat: a thing', { 'src/a.js': 'x\n' });
+  let r = runGate(path.join(CHECKS, 'risk-map-check.sh'), T, []);
+  assert.equal(r.code, 0, `advisory means exit 0 on every input:\n${r.out}`);
+  assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  assert.doesNotMatch(r.out, /FAIL \[product-settings\]/);
+  // From a subfolder: the settings are the root's, so the same note, not a silent pass on nothing.
+  fs.mkdirSync(path.join(T, 'src/deep'), { recursive: true });
+  r = runGate(path.join(CHECKS, 'risk-map-check.sh'), path.join(T, 'src/deep'), []);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('ledger-guard reads the new settings name first, and guards on a Product that has only it (E122)', () => {
@@ -4317,6 +4347,11 @@ test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot t
   assert.equal(resolvePin(block, stamp(`${M}.0.0-next.1`)), `${M}.0.0-next.1`);
   assert.equal(resolvePin(block, hub(`${M}.16.0-rc.1`)), `${M}.16.0-rc.1`);
   assert.equal(resolvePin(block, { '.sdlc/hub.json': `{\n "gate_sync_version":\n  "${M}.15.9"\n}` }), `${M}.15.9`);
+  // E122: the Product settings are read under the new name first; the old one only when it is absent.
+  const product = (v) => ({ '.sdlc/product.json': v === null ? '{}' : `{"gate_sync_version":"${v}"}` });
+  assert.equal(resolvePin(block, { ...hub(`${M}.14.0`), ...product(`${M}.13.0`) }), `${M}.13.0`, 'product.json wins');
+  assert.equal(resolvePin(block, { ...hub(`${M}.14.0`), ...product(null), ...stamp(`${M}.15.3`) }), `${M}.15.3`, 'a product.json with no pin is not a fall-through to hub.json');
+  assert.equal(resolvePin(block, product(`${M}.13.0`)), `${M}.13.0`);
   }
 });
 

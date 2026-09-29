@@ -313,6 +313,12 @@ export function writeJSON(p, obj) {
   try {
     if (fs.readFileSync(p, 'utf8') === data) return;
   } catch { /* missing or unreadable — fall through and write it */ }
+  writeFileAtomic(p, data);
+}
+
+// Write `data` to `p` through a fresh temporary file and a rename: a crash leaves the old file or the new
+// one, never half of either, and a link standing at `p` is replaced rather than followed.
+export function writeFileAtomic(p, data) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   // A name nobody can guess, created exclusively (`wx`): a Product can commit `repos.json.<pid>.tmp` as a
   // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link

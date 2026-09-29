@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig, emitJSON, collectWarning } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -734,8 +734,10 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
 
   const rows = [];
   for (const file of projectJsonFiles(root)) {
-    const rel = path.relative(root, file);
-    if (moving && rel.split(path.sep).join('/').startsWith(moving)) continue;
+    // Forward slashes on every OS: the mirrored-pair, state-file and drift-repair checks all compare
+    // project-relative paths spelled that way, and on Windows `path.relative` says `.sdlc\product.json`.
+    const rel = path.relative(root, file).split(path.sep).join('/');
+    if (moving && rel.startsWith(moving)) continue;
     const raw = readRaw(file);
     if (!raw.ok) {
       rows.push({ file: rel, from: null, to: null, action: 'unreadable', changes: false, stamped: false, detail: raw.error });
@@ -915,8 +917,11 @@ function settleDrift(root, pairs, keep) {
       throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);
     }
     const dst = path.join(root, to);
-    fs.copyFileSync(dst, backupPathFor(dst));
-    fs.copyFileSync(src, dst);
+    writeFileAtomic(backupPathFor(dst), fs.readFileSync(dst));
+    // The kept copy's exact bytes — the gates compare with `cmp -s` — written through a temporary file
+    // and a rename, so a crash never leaves a half file, and a link committed at `dst` is replaced, never
+    // written through.
+    writeFileAtomic(dst, fs.readFileSync(src));
     written.push(to);
   }
   return written;
@@ -989,6 +994,13 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
   }
 
   const plan = planMigration(root, { migrations });
+  // On a verified Product an epic's PR ledger is CI's to write, and `ledger-guard` refuses a person's
+  // commit of it. The repair is still made — the pair has to agree before any command runs — and the
+  // way to commit it is named: a drift there came from a hand edit that got past the guard already.
+  const ciOwnedSettled = plan.verified ? settledFiles.filter((f) => !f.startsWith('.sdlc/')) : [];
+  if (ciOwnedSettled.length) {
+    warn(`${ciOwnedSettled.join(', ')} ${ciOwnedSettled.length === 1 ? 'is' : 'are'} CI-owned on this verified Product: the ledger-guard check refuses a hand commit of ${ciOwnedSettled.length === 1 ? 'it' : 'them'} — commit the repair with \`yad commit --manual --reason "<why>" --type chore -m "<subject>"\`, which records the reason the check quotes`);
+  }
   const move = plan.product?.action === 'move' ? plan.product : null;
   const pending = plan.rows.filter((r) => r.changes);
   const blocked = plan.rows.filter((r) => r.action === 'ahead' || r.action === 'unreadable');
@@ -1063,7 +1075,11 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
       // The preview names each row's mirror partner too (`creates` / `rewrites`), exactly as the text
       // report does: the apply writes the product config under BOTH names, so leaving the partner out
       // made this list shorter than the apply's `written` — a preview that under-reports.
+      // A drifted pair names BOTH its names on a preview: which one the apply rewrites depends on the
+      // copy the person keeps, and a preview may over-report, never under-report. Its `rows` are planned
+      // from the copy read now (the new name); an apply that keeps the old copy plans from that one.
       changed: apply ? written : [...new Set([
+        ...drift.flatMap((d) => [d.canonical, d.legacy]),
         ...(move ? productMoveFiles(move) : []),
         ...pending.flatMap((r) => [r.file, ...(r.creates ?? []), ...(r.rewrites ?? [])]),
       ])],

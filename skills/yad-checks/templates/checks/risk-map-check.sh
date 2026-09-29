@@ -44,30 +44,6 @@
 # The rules have a twin in cli/riskmap.mjs (`yad risk-map check`, `yad doctor`). Change one, change the
 # other: a test runs both over the same repos and compares what they report.
 set -euo pipefail
-
-# --- shared Product settings file (byte-identical across the gates; they are standalone by design, so
-# --- it is duplicated, not sourced) ---
-# The Product's settings live under two names until v5: `.sdlc/product.json`, read first from 4.0, and
-# `.sdlc/hub.json`, which an older yadflow wrote and its gates read. The environment may name the file
-# instead: SDLC_PRODUCT_CONFIG, or the older SDLC_HUB_CONFIG. Two names that say different things are
-# never settled by picking one — the CLI refuses the same way (YAD-STATE-008) — so the gate FAILS and
-# names both. Said on stderr and returned as a failure: this runs inside `$(...)`, where an `exit` would
-# only leave the subshell. `cmp -s` is byte for byte, like the CLI's own comparison.
-product_config() {
-  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ] && [ -n "${SDLC_HUB_CONFIG:-}" ] \
-    && [ "$SDLC_PRODUCT_CONFIG" != "$SDLC_HUB_CONFIG" ] && ! cmp -s "$SDLC_PRODUCT_CONFIG" "$SDLC_HUB_CONFIG"; then
-    echo "FAIL [product-settings]: SDLC_PRODUCT_CONFIG (${SDLC_PRODUCT_CONFIG}) and SDLC_HUB_CONFIG (${SDLC_HUB_CONFIG}) name files that say different things. Set only SDLC_PRODUCT_CONFIG." >&2
-    return 1
-  fi
-  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ]; then printf '%s' "$SDLC_PRODUCT_CONFIG"; return 0; fi
-  if [ -n "${SDLC_HUB_CONFIG:-}" ]; then printf '%s' "$SDLC_HUB_CONFIG"; return 0; fi
-  if [ -f .sdlc/product.json ] && [ -f .sdlc/hub.json ] && ! cmp -s .sdlc/product.json .sdlc/hub.json; then
-    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. Run \`yad migrate\` in the Product to choose the copy to keep, and commit both." >&2
-    return 1
-  fi
-  if [ -f .sdlc/product.json ]; then printf '%s' .sdlc/product.json; else printf '%s' .sdlc/hub.json; fi
-}
-PRODUCT_CONFIG="$(product_config)" || exit 1
 # Bytes, not characters, for every tool below: a Mac `tr` in a UTF-8 locale dies on a path that is not
 # valid UTF-8 ("Illegal byte sequence"), which pipefail would turn into a failing exit, and a UTF-8-aware
 # awk (macOS 26's) splits some non-ASCII whitespace differently from mawk, older awks and cli/riskmap.mjs.
@@ -114,9 +90,40 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 
-# Every path below is from the repo root — the map, the file list, `.sdlc/hub.json` — so a run from a
+# Every path below is from the repo root — the map, the file list, the Product settings — so a run from a
 # subfolder reads the same repo as CI does, which always runs at the root.
 cd "$(git rev-parse --show-toplevel)"
+
+# --- shared Product settings file (byte-identical across the gates; they are standalone by design, so
+# --- it is duplicated, not sourced) ---
+# The Product's settings live under two names until v5: `.sdlc/product.json`, read first from 4.0, and
+# `.sdlc/hub.json`, which an older yadflow wrote and its gates read. The environment may name the file
+# instead: SDLC_PRODUCT_CONFIG, or the older SDLC_HUB_CONFIG. Two names that say different things are
+# never settled by picking one — the CLI refuses the same way (YAD-STATE-008) — so the gate FAILS and
+# names both. Said on stderr and returned as a failure: this runs inside `$(...)`, where an `exit` would
+# only leave the subshell. `cmp -s` is byte for byte, like the CLI's own comparison.
+product_config() {
+  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ] && [ -n "${SDLC_HUB_CONFIG:-}" ] \
+    && [ "$SDLC_PRODUCT_CONFIG" != "$SDLC_HUB_CONFIG" ] && ! cmp -s "$SDLC_PRODUCT_CONFIG" "$SDLC_HUB_CONFIG"; then
+    echo "FAIL [product-settings]: SDLC_PRODUCT_CONFIG (${SDLC_PRODUCT_CONFIG}) and SDLC_HUB_CONFIG (${SDLC_HUB_CONFIG}) name files that say different things. Set only SDLC_PRODUCT_CONFIG." >&2
+    return 1
+  fi
+  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ]; then printf '%s' "$SDLC_PRODUCT_CONFIG"; return 0; fi
+  if [ -n "${SDLC_HUB_CONFIG:-}" ]; then printf '%s' "$SDLC_HUB_CONFIG"; return 0; fi
+  if [ -f .sdlc/product.json ] && [ -f .sdlc/hub.json ] && ! cmp -s .sdlc/product.json .sdlc/hub.json; then
+    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. Run \`yad migrate\` in the Product to choose the copy to keep, and commit both." >&2
+    return 1
+  fi
+  if [ -f .sdlc/product.json ]; then printf '%s' .sdlc/product.json; else printf '%s' .sdlc/hub.json; fi
+}
+# Read here, at the repo root, not where the run started. And advisory to the end: two settings files
+# that disagree fail the other gates, but here they are a note, and neither is read.
+# `--level` answers in one line on stdout, so there the note goes to stderr.
+if ! PRODUCT_CONFIG="$(product_config 2>/dev/null)"; then
+  _drift="note [risk-map]: .sdlc/product.json and .sdlc/hub.json say different things (or SDLC_PRODUCT_CONFIG and SDLC_HUB_CONFIG do) — neither is read; run \`yad migrate\` in the Product."
+  if [ "$LEVEL_ONLY" = 1 ]; then echo "$_drift" >&2; else echo "$_drift"; fi
+  PRODUCT_CONFIG=""
+fi
 
 BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"
 [ "$LEVEL_ONLY" = 1 ] || [ -n "${1:-}" ] || [ -n "${SDLC_BASE:-}" ] || echo "note [risk-map]: no base given — diffing against '${BASE}'."

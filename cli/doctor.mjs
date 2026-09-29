@@ -99,6 +99,9 @@ export function envChecks(checks) {
 // `headCount` is a count of people the caller already read (E74); the CLI passes none, a test passes one.
 export function projectChecks(checks, root, { headCount = null } = {}) {
   const productPath = productConfigPath(root);
+  // The file actually read (E122: product.json when it exists), named in every message below — naming
+  // the old one would send a person to edit the file that is not read, which is a refused drift.
+  const settingsRel = path.relative(root, productPath).split(path.sep).join('/');
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const verPath = path.join(root, PROJECT_FILES.version);
   if (!exists(productPath) && !exists(regPath) && !exists(verPath)) {
@@ -119,18 +122,18 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // hub.json: parse + shape
   let hub = null;
   if (!exists(productPath)) {
-    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.productConfigLegacy} absent — local gate`, 'run `yad setup` to configure a platform');
+    check(checks, 'hub', 'project', 'warn', `${settingsRel} absent — local gate`, 'run `yad setup` to configure a platform');
   } else {
     let hubBroken = false;
     try {
       hub = readJSONStrict(productPath, null);
     } catch (e) {
       hubBroken = true;
-      check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.productConfigLegacy} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
+      check(checks, 'hub', 'project', 'fail', `${settingsRel} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
     }
     if (hubBroken) { /* reported above */ }
-    else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.productConfigLegacy} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
-    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.productConfigLegacy}: unknown platform '${forTerminal(hub.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
+    else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${settingsRel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${settingsRel}: unknown platform '${forTerminal(hub.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
       // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
@@ -163,7 +166,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
               ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key once those reviews are closed`
               : 'no older record needs it any more — delete the `roster` key';
         check(checks, 'people:roster-unused', 'project', 'warn',
-          `${PROJECT_FILES.productConfigLegacy} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
+          `${settingsRel} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
           when);
         // Those pairs are exact only when the roster is: a name two logins share cannot say which person an
         // older record means. Named here, because on an open review that approval may then have to be given
@@ -174,7 +177,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const unclear = [...ambiguousLegacyNames(hub).keys()];
         if (unclear.length) {
           check(checks, 'people:roster-ambiguous', 'project', 'warn',
-            `${PROJECT_FILES.productConfigLegacy} roster name(s) ${unclear.map(forTerminal).join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
+            `${settingsRel} roster name(s) ${unclear.map(forTerminal).join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
             'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
         }
       }
@@ -201,7 +204,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const acting = isSolo(hub) ? 'solo' : 'team';
         if (hub.mode !== acting) {
           check(checks, 'mode:disagree', 'project', 'warn',
-            `${PROJECT_FILES.productConfigLegacy} says mode: ${JSON.stringify(forTerminal(hub.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
+            `${settingsRel} says mode: ${JSON.stringify(forTerminal(hub.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
             ['solo', 'team'].includes(hub.mode)
               ? `\`yad mode ${acting}\` keeps what the gates do now; \`yad mode ${hub.mode === 'solo' ? 'solo --reason "<why>"' : 'team'}\` makes the gates follow \`mode\``
               : `\`yad mode ${acting}\` writes a mode the gates recognise`);
@@ -216,7 +219,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // is required regardless.
         if (!hostFromGitUrl(hub.git_url)) {
           check(checks, 'hub-git-url', 'project', 'warn',
-            `${PROJECT_FILES.productConfigLegacy} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
+            `${settingsRel} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
             'add git_url to .sdlc/product.json, then `yad migrate --apply --keep product` (or re-run `yad setup`) — auth/PR checks need the Product host');
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
@@ -230,8 +233,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // inside `gh auth login --hostname …` for the person to run.
         const host = plainHost(rawHost);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
-        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in .sdlc/product.json (or the origin remote) to name a plain host');
-        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to .sdlc/product.json so the auth probe can target the right host');
+        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in .sdlc/product.json, then `yad migrate --apply --keep product` (or fix the origin remote) to name a plain host');
+        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to .sdlc/product.json, then `yad migrate --apply --keep product`, so the auth probe can target the right host');
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
@@ -510,7 +513,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     ].filter((x) => exists(x.file)).map((x) => x.where);
     const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
     if (allowFiles.length || listedAuthors) {
-      const what = [listedAuthors ? `\`verified_authors\` in ${PROJECT_FILES.productConfigLegacy}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
+      const what = [listedAuthors ? `\`verified_authors\` in ${settingsRel}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
       check(checks, 'people:verified-authors-unused', 'project', 'warn',
         `${what} — the verified-commits gate no longer reads an author list; it checks signatures only`,
         'delete them when convenient; write access to the repo decides who can author a commit');

@@ -961,7 +961,10 @@ main()
     // Require a TTY on BOTH ends: stdout for the message, stdin so the y/N prompt can be answered
     // (a TTY stdout with piped/closed stdin would otherwise hang on readline).
     const offerReport = !inJSON() && process.stdin.isTTY && process.stdout.isTTY && !process.env.SDLC_NONINTERACTIVE
-      && !process.env.YAD_NO_REPORT && process.argv[2] !== 'report';
+      && !process.env.YAD_NO_REPORT && process.argv[2] !== 'report'
+      // Two copies of the project's own settings that disagree (E122) are the project's state, not a
+      // yadflow bug: the refusal already names the one command that ends it.
+      && err?.code !== 'YAD-STATE-008';
     if (offerReport) {
       try {
         if (await askYesNo('\nReport this failure to the yadflow team?', false)) {
