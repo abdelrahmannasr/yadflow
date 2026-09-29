@@ -7,7 +7,14 @@ no roles, no commit emails (E62). It is a single object for the Product itself �
 
 ## Location
 
-`{project-root}/.sdlc/hub.json`
+`{project-root}/.sdlc/product.json`, written together with its older name `{project-root}/.sdlc/hub.json`
+(E122). Read `product.json` first; read `hub.json` only on an older Product that has only that name.
+Every save writes both names with identical content, until v5 deletes `hub.json` (check gates an older
+yadflow installed read `hub.json` by path). If both exist and their bytes differ, every yad command but
+`yad doctor`, `yad migrate` and `yad report` refuses with `YAD-STATE-008`, and the CI gates FAIL;
+`yad migrate --apply` (or `--apply --keep product` / `--keep hub`) chooses the copy to keep. To edit a
+setting by hand, edit `product.json`, then run `yad migrate --apply --keep product` (it copies it over
+`hub.json`).
 
 (`config.yaml` `product.config` (older projects: `hub.config`).) Created/updated by `yad-connect-repos action: detect-hub`.
 
@@ -66,7 +73,7 @@ closed.
 run `git remote get-url origin` **on the Product itself** and read the host —
 `github.com` → `github`, `gitlab.com`/self-hosted GitLab → `gitlab`, no remote → `platform: null`.
 Auth is the **local user's own** `gh`/`glab`/git credentials; **no tokens are ever stored** (same rule
-as the registry). `detect-hub` upserts `hub.json` in place — it is idempotent and safe to re-run.
+as the registry). `detect-hub` upserts the file in place, under both names with identical content — it is idempotent and safe to re-run.
 
 **`git_url` is required whenever `platform` is non-null.** `yad doctor` uses it to scope the auth
 probe to the Product's own host (an unscoped `glab auth status` fails on any unrelated broken instance),
@@ -90,7 +97,7 @@ Keep all three in step.
   review opens a PR/MR on the Product and `yad-review-gate action: sync` pulls platform state into the ledger.
 - `ledger: "local"`, `platform: null`, or no/unauthenticated CLI → the gate falls back to the
   existing **local** flow with no error. The file ledger is the source of truth in both modes.
-- The master switch `config.yaml` `product.bridge: false` (older projects: `hub.bridge`) disables the verified ledger globally regardless of `hub.json`.
+- The master switch `config.yaml` `product.bridge: false` (older projects: `hub.bridge`) disables the verified ledger globally regardless of `product.json`.
 
 ## Review Companion engagement (`review.requireEngagement`)
 
@@ -103,12 +110,12 @@ read the artifact. Applies to both the Shape gate and the Build engineer review.
 
 ## Git tracking
 
-Commit `hub.json` — it is small, reviewable, and carries no secrets or tokens. The only people data in it is the login or git name in `mode_set.by`, plus
+Commit `product.json` and `hub.json` together — it is small, reviewable, and carries no secrets or tokens. The only people data in it is the login or git name in `mode_set.by`, plus
 whatever an older `roster` still lists.
 This mirrors how `repos.json` and the per-epic `.sdlc/` state are committed.
 
 ## Greenfield
 
-A brand-new Product has no `hub.json`. That is valid — the Shape gate runs local until `detect-hub`
+A brand-new Product has no `product.json` (and no `hub.json`). That is valid — the Shape gate runs local until `detect-hub`
 records a platform. The verified ledger is purely additive; nothing about authoring or the gate predicate changes.
 ```

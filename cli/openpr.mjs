@@ -297,7 +297,7 @@ export async function runOpenPr(root, opts = {}) {
   if (platformDefault && platformDefault !== baseBranch) {
     warn(`base '${baseBranch}' is not the repo default '${platformDefault}' — CodeRabbit skips auto-review on a non-default base unless .coderabbit.yaml lists it under reviews.base_branches, and retargeting later does NOT undo the skip`);
     if (baseSource === 'registry' || baseSource === 'hub') {
-      hand(`the configured default_branch (${baseSource === 'hub' ? '.sdlc/hub.json' : '.sdlc/repos.json'}) disagrees with the platform — reconcile them, or allow '${baseBranch}' in .coderabbit.yaml`);
+      hand(`the configured default_branch (${baseSource === 'hub' ? '.sdlc/product.json' : '.sdlc/repos.json'}) disagrees with the platform — reconcile them, or allow '${baseBranch}' in .coderabbit.yaml`);
     } else {
       hand(`open against '${platformDefault}' (or pass --base ${platformDefault}) unless you meant to stack this PR`);
     }

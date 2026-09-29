@@ -153,10 +153,10 @@ None of these decides anything any more. `yad doctor` warns so the team can dele
 
 | Warning | What is left on disk |
 |---|---|
-| `people:roster-unused` | a non-empty `roster` in `.sdlc/hub.json` — still read for its name → login pairs only (see "Older records"); the hint counts the older records still waiting for a gate write to record their login, and says when it is safe to delete |
+| `people:roster-unused` | a non-empty `roster` in `.sdlc/product.json` — still read for its name → login pairs only (see "Older records"); the hint counts the older records still waiting for a gate write to record their login, and says when it is safe to delete |
 | `people:roster-ambiguous` | a roster name given to more than one login (only checked when the roster is non-empty) |
 | `people:domain-owners-unused` | a repo in `.sdlc/repos.json` that lists `domain_owner` / `domain_owners` |
-| `people:verified-authors-unused` | a `verified_authors` list in `.sdlc/hub.json`, or a `.sdlc/verified-authors` file in the Product or a connected repo |
+| `people:verified-authors-unused` | a `verified_authors` list in `.sdlc/product.json`, or a `.sdlc/verified-authors` file in the Product or a connected repo |
 | `people:allowlist-gate-stale` | an older `checks/verified-commits.sh` that still enforces the author list (a local-ledger Product's CI files are not refreshed by `yad check --fix`) |
 
 `yad roster` is removed (typing it prints a notice and exits 1), and `yad setup` collects no reviewers,

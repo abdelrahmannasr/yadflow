@@ -102,7 +102,7 @@ repository access decides who may approve. A review with no login is not counted
   (there is no per-comment id). A new round is opened only when the commenters or their counts change;
   an unchanged re-read rewrites the latest round in place, keeping its date. Comment rounds are recorded
   for an **open** step only, so re-visiting a merged review does not append a new round per pass.
-- Update the step's `hub-prs.json` `lastSyncedAt` when the sync **learned something** — every sync on
+- Update the step's PR-ledger `lastSyncedAt` (`product-prs.json` + `hub-prs.json`, same bytes) when the sync **learned something** — every sync on
   an open step, and on a closed one only when the approval record actually changed (a re-opened review
   that was re-approved). An identical re-sync leaves it alone, so the ledger does not churn.
 - **Write the ledgers in a canonical order.** `approvals.json`, `comments.json` and the PR ledger
@@ -124,7 +124,7 @@ permanently. On an older yadflow the workaround is to disable the pipeline sched
 advance gates via the push path; only the catch-up for squash merges and bare approvals is lost.
 Since the wired job now runs an exact pin rather than floating on the major, that upgrade is a
 deliberate act: `yad update` (which re-stamps `.sdlc/cli-version.json`), or a `gate_sync_version` in
-`hub.json` — see the version table below.
+`.sdlc/product.json` — see the version table below.
 
 ## Contract re-lock invalidates prior platform approvals too
 
@@ -204,7 +204,7 @@ and fall back to the major the fragment ships with — `YAD_MAJOR` in its `yad-p
 | # | Source | Set it in |
 |---|---|---|
 | 1 | `YAD_VERSION` — used **verbatim**, the operator's override | GitHub: Settings → Secrets and variables → Actions → **Variables**. GitLab: Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
-| 2 | `.sdlc/hub.json` → `gate_sync_version` — this Product's committed pin | edit `hub.json`, commit it |
+| 2 | `.sdlc/product.json` → `gate_sync_version` (`.sdlc/hub.json` when `product.json` is absent) — this Product's committed pin | edit `product.json`, run `yad migrate --apply --keep product` (it copies it over `hub.json`; two that differ are refused, YAD-STATE-008), commit both |
 | 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the Product | `yad update` re-stamps it |
 | 4 | `$YAD_MAJOR` — floating major, only when nothing above resolves. While only prereleases of that major exist (`4.0.0-next.N`) npm cannot resolve a bare major, so the job says so on stderr first; a Product wired by that release always has a stamp that resolves | — |
 
@@ -217,7 +217,7 @@ so anything that is not an exact release of this major is skipped, loudly, in fa
 
 **A new major moves both files at once.** `yad update` rewrites the fragment from the release's template
 and re-stamps `.sdlc/cli-version.json` in the same run, so a Product that updates to 4.x gets a fragment
-with `YAD_MAJOR=4` and a `4.x` stamp together. A `gate_sync_version` pin in `hub.json` from the old major
+with `YAD_MAJOR=4` and a `4.x` stamp together. A `gate_sync_version` pin in `product.json` from the old major
 is then SKIPPED (the job logs `ignoring pin … not an exact 4.x release`) — update it or remove it. A
 fragment the team EDITED is kept by `yad update` while the stamp still moves, so an edited fragment on
 the old major would skip the new stamp; `yad update` names that case, and `--overwrite-local` replaces
@@ -307,7 +307,7 @@ the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged` (th
 unlike advisory `yad gate sync`). Local mode (no platform) keeps `yad gate sync` as the local writer.
 The file ledger is still the source of truth.
 
-Because CI records the `hub-prs.json` pointer only at merge, a review the ledger has never seen still
+Because CI records the PR-ledger pointer (`product-prs.json` + `hub-prs.json`) only at merge, a review the ledger has never seen still
 has to be nameable — otherwise `sync` refuses a PR that is sitting merged on the platform. With no
 recorded pointer, `yad gate sync <epic> <artifact>` resolves the PR/MR from the review branch
 (`review/<epic>/<artifact>`) itself, and `--pr <n>` names it outright:

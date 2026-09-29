@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
@@ -217,7 +217,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         if (!hostFromGitUrl(hub.git_url)) {
           check(checks, 'hub-git-url', 'project', 'warn',
             `${PROJECT_FILES.productConfigLegacy} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
-            'add git_url to hub.json (or re-run `yad setup`) — auth/PR checks need the Product host');
+            'add git_url to .sdlc/product.json, then `yad migrate --apply --keep product` (or re-run `yad setup`) — auth/PR checks need the Product host');
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
@@ -230,8 +230,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // inside `gh auth login --hostname …` for the person to run.
         const host = plainHost(rawHost);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
-        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in hub.json (or the origin remote) to name a plain host');
-        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to hub.json so the auth probe can target the right host');
+        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in .sdlc/product.json (or the origin remote) to name a plain host');
+        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to .sdlc/product.json so the auth probe can target the right host');
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
@@ -1142,20 +1142,21 @@ function shapeCheckFor(checks, id, label, rows, engine) {
 // reaches it, which is how the drift report is proven before there is any drift to report.
 // A file that lives under two names must say the same thing under both. The engine writes them
 // together, so they only drift when something outside the engine touched one — a person editing the
-// name they happen to know, a script, a half-finished merge. The older name is the authoritative one
-// this major, so a silent drift means the OTHER copy is being ignored, which is the kind of thing
-// people lose an afternoon to. Say it out loud instead.
+// name they happen to know, a script, a half-finished merge. Since E122 no command reads a drifted
+// pair (every one refuses, YAD-STATE-008), so this is a failure, with the one command that ends it.
+// When the pair agrees, one plain line says why the old name is still there and when it goes.
 export function mirrorChecks(checks, root) {
-  const pairs = [...MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy }))];
+  const pairs = MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy, epic: null }));
   // The per-epic PR ledger is renamed the same way, so it drifts the same way. It is not in
   // MIRRORED_FILES because that list is project-relative and this one exists once per epic.
   // `epicIds` reads with `withFileTypes`, so a dangling symlink is simply not a directory — it cannot
   // throw here and take the whole health check down, which is what the old `statSync` guard was for.
   for (const e of epicIds(root)) {
     const f = epicFiles(epicRel(e));
-    pairs.push({ canonical: f.productPrs, legacy: f.productPrsLegacy });
+    pairs.push({ canonical: f.productPrs, legacy: f.productPrsLegacy, epic: e });
   }
-  for (const { canonical, legacy } of pairs) {
+  let kept = false;
+  for (const { canonical, legacy, epic } of pairs) {
     const a = path.join(root, canonical);
     const b = path.join(root, legacy);
     // Only the settings file reaches this branch in practice: the per-epic PR ledgers are top-level
@@ -1181,13 +1182,20 @@ export function mirrorChecks(checks, root) {
       continue;
     }
     if (!exists(a)) continue;
-    let same;
-    try { same = fs.readFileSync(a, 'utf8') === fs.readFileSync(b, 'utf8'); } catch { continue; }
-    if (same) continue;
+    if (!mirrorDrift(a, b)) { if (!epic) kept = true; continue; }
+    // An epic's drifted pair is already a failure of that epic's own check (`loadLedger` refuses it,
+    // with the same code and hint), so it is not said twice.
+    if (epic) continue;
     check(
-      checks, `mirror:${canonical}`, 'shape', 'warn',
-      `${canonical} and ${legacy} do not match — ${legacy} is the one being read`,
-      'they are two names for one file while the rename settles. Copy the one you meant to keep over the other, then re-run the command that writes it',
+      checks, `mirror:${canonical}`, 'shape', 'fail',
+      `${canonical} and ${legacy} say different things — every command refuses until one is chosen [YAD-STATE-008]`,
+      'run `yad migrate` to see the difference, then `yad migrate --apply` to choose the copy to keep (or `--apply --keep product` / `--keep hub`)',
+    );
+  }
+  if (kept) {
+    check(
+      checks, 'mirror:legacy-names', 'shape', 'ok',
+      `${PROJECT_FILES.productConfigLegacy} (and each epic's hub-prs.json) is kept beside the new name for check gates an older yadflow installed — ${PROJECT_FILES.productConfig} is the one read, and v5 deletes the old name`,
     );
   }
 }

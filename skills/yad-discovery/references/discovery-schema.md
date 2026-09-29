@@ -15,7 +15,7 @@
 
 The project discovery phase ("epic zero") lives under `{project-root}/epics/EP-discovery/`. It reuses
 the per-epic ledger files (`.sdlc/state.json`, `approvals.json`, `comments.json`, `reviews/`,
-`hub-prs.json`) unchanged — `EP-discovery` is a valid epic id, so the existing gate, PR/MR bridge, CI
+`product-prs.json` + `hub-prs.json`) unchanged — `EP-discovery` is a valid epic id, so the existing gate, PR/MR bridge, CI
 sync, and `yad next` all operate on it. What is special is the `kind: "discovery"` marker on the state
 object and the 2-step chain.
 

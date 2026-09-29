@@ -34,7 +34,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
 ## Inputs
 
 - `action` — `connect` (default) | `refresh` | `list` | `disconnect`.
-- `target` — `github-pages` | `gitlab-pages` | `none`. Default **auto-detected** from `.sdlc/hub.json`
+- `target` — `github-pages` | `gitlab-pages` | `none`. Default **auto-detected** from `.sdlc/product.json`
   `platform` (github → `github-pages`, gitlab → `gitlab-pages`, null/no Product → `none`).
 - `scope` — `hub` (default) | `<repo-name>` | `dedicated`. Where the Pages site is published from (the
   Product repo, one connected code repo, or a dedicated docs repo).
@@ -44,7 +44,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
 ## On Activation
 
 ### Step 1 — Resolve the target + detect the platform (the publish adapter)
-Determine the `target`. If not given, read `{project-root}/.sdlc/hub.json` `platform` and map it the same
+Determine the `target`. If not given, read `{project-root}/.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name) `platform` and map it the same
 way the Product bridge maps repos: `github` → `github-pages`, `gitlab` → `gitlab-pages`, `null`/no Product →
 `none` (deliberate build-only). Reject a `target` value outside the three providers (fall back to the
 detected default with a warning, the way `registerRepo` falls back on an unknown platform).
@@ -61,7 +61,7 @@ tokens**; everything in the registry is a plain reference. Do **not** install a 
 
 ### Step 2 — Decide the publish scope + resolve the base path
 Resolve `scope` → `publishRepo`:
-- `hub` (default) → publish from the Product repo (read its name from `hub.json` `git_url`).
+- `hub` (default) → publish from the Product repo (read its name from `product.json` `git_url`).
 - `<repo-name>` → publish from that connected code repo (must exist in `.sdlc/repos.json`).
 - `dedicated` → a dedicated docs repo the user names (recorded as `publishRepo`).
 

@@ -45,7 +45,7 @@ reserved `EP-discovery` epic; that older spelling is still read (see Step 1).
   - on a **verified** ledger CI owns that ledger and it cannot be moved by hand — keep working in
     `epics/EP-discovery/`, and review it with `yad gate open EP-discovery discovery/`.
 
-Detect the project mode from `{project-root}/.sdlc/hub.json` `profile.codebase`
+Detect the project mode from `{project-root}/.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name) `profile.codebase`
 (`greenfield` | `brownfield`, set by `yad setup`). If absent, ask the user; default `greenfield`.
 
 ### Step 2 — Shape with the field-expert lenses (assist: analyst + pm)

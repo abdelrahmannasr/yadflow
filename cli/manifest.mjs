@@ -274,60 +274,62 @@ export const PROJECT_FILES = {
 
 // ---- files that changed NAME in shape 3 --------------------------------------------------------
 //
-// `hub` became `Product`, so `.sdlc/hub.json` became `.sdlc/product.json`. A field rename is easy;
-// a FILE rename is not, because a file is opened by name from outside this codebase:
+// `hub` became `Product`, so `.sdlc/hub.json` became `.sdlc/product.json` (and each epic's
+// `hub-prs.json` became `product-prs.json`). A field rename is easy; a FILE rename is not, because a
+// file is opened by name from outside this codebase:
 //
-//   - `templates/checks/ledger-guard.sh` is committed inside the USER's repo and opens
-//     `.sdlc/hub.json` by that literal path. It is refreshed by `yad update`, which is a separate act
-//     from `yad migrate` with no ordering between them.
-//   - So a project WILL exist that has been migrated but not updated. Its guard would open a path
-//     that no longer exists, read no platform, conclude the ledger is local, and stop rejecting human
+//   - the check gates (`templates/checks/*.sh`, `checks/verified-commits.sh`) are committed inside
+//     the USER's repo, and the ones installed before E122 open `.sdlc/hub.json` by that literal
+//     path. They are refreshed by `yad update`, which is a separate act from `yad migrate`.
+//   - So a project WILL exist whose gates are older than its CLI. If only the new name existed, such
+//     a `ledger-guard` would read no platform, conclude the ledger is local, and stop rejecting human
 //     commits to it — the audit trail disarmed by an upgrade.
 //
-// Hence: for one whole major version BOTH files exist, and the OLD name is the one that is READ.
-// `product.json` is written on every save so that it is there, correct, and ready — but nothing
-// depends on it yet. `productConfigPath` picks the old name whenever it exists and falls back to the
-// new one, so a project holding either name alone still works.
+// Hence BOTH names are written on every save (`writeMirrored`, cli/lib.mjs) until v5, and the gates
+// installed from this release on read the new name first.
 //
-// Reading the new name first is the tempting version and it is wrong: the moment two names exist and
-// the new one wins, everything that writes the old one — the guard above, a script someone wrote,
-// a person editing the file they know — is silently ignored.
+// The ladder (E122, 2026-09-28). It was three majors — add, switch, delete — and is now two, because
+// 4.0.0 reached `@next` only and no ordinary user lived with the add-only stage:
+//   v3           the new name appeared beside the old one; the OLD one was read
+//   v4 (this)    the NEW name is read; the old one is still written, for the gates above;
+//                `yad doctor` says v5 deletes it
+//   v5           the old name is deleted (a shape of its own, with a `MIGRATIONS` step)
 //
-// The ladder is add, then switch, then remove:
-//   this major   the new name appears and is maintained; the old one is still read
-//   next major   the new name becomes the one read, and `yad doctor` warns about the old
-//   after that   the old name is deleted
-//
-// This costs a duplicated file on disk for two releases. That is the price of not silently disarming
-// a safety gate in somebody else's repository, and it is worth paying.
+// Two copies that DISAGREE are never settled by picking one. Whichever name won, somebody's edit —
+// a person editing the name they know, a script, an older gate's world view — would be silently
+// ignored. So every command refuses (`mirrorDrift`, checked once in bin/yad.mjs and again in
+// `loadLedger`), names both files, and points at `yad migrate`, which asks which copy wins.
 export const MIRRORED_FILES = [
   { canonical: PROJECT_FILES.productConfig, legacy: PROJECT_FILES.productConfigLegacy },
 ];
 
-// Which of the two names to READ.
-//
-// The OLD name wins while it exists, and that is deliberate. Renaming a file across an ecosystem
-// takes three releases, not one:
-//
-//   this major   the new name appears and is written on every save. The OLD name is still the one
-//                that counts, so everything that already reads it keeps working — the ledger-guard
-//                committed in the user's repo, a script somebody wrote, a person editing the file
-//                they know. Nothing can be silently ignored, because the file everyone knows is
-//                still authoritative.
-//   next major   the new name becomes authoritative and `yad doctor` warns about the old one.
-//   the one after that   the old name is deleted.
-//
-// Reading the NEW name first this early looks tidier and is a trap: the moment two names exist and
-// the new one wins, anyone who edits the old one — including our own fixtures, which is how this was
-// found — has their change silently ignored. `yad doctor` reports the two copies drifting apart, so
-// a project that gets into that state is told, rather than left to wonder.
-export const productConfigPath = (root) => {
-  const legacy = path.join(root, PROJECT_FILES.productConfigLegacy);
-  return existsSync(legacy) ? legacy : path.join(root, PROJECT_FILES.productConfig);
+// Which of the two names to READ: the new one when it exists, the old one otherwise, and the new one
+// again when neither does (so "absent" is reported under the name people should use). A project
+// holding either name alone still works. Pure on purpose — it is a probe used by every directory
+// walk that asks "is this a Product?", so it must never throw; the refusal lives in `mirrorDrift`.
+export const preferring = (canonical, legacy) => (existsSync(canonical) || !existsSync(legacy) ? canonical : legacy);
+
+export const productConfigPath = (root) =>
+  preferring(path.join(root, PROJECT_FILES.productConfig), path.join(root, PROJECT_FILES.productConfigLegacy));
+
+// Both names present and saying different things. Byte for byte, like `yad doctor` and the gates
+// (`cmp -s`): the engine writes both from one string, so any difference at all came from outside it.
+// A copy that cannot be read counts as different — it is not the same file.
+export const mirrorDrift = (canonical, legacy) => {
+  if (!existsSync(canonical) || !existsSync(legacy)) return false;
+  try { return readFileSync(canonical, 'utf8') !== readFileSync(legacy, 'utf8'); } catch { return true; }
 };
 
-// Same rule for a renamed file inside an epic's ledger.
-export const preferring = (canonical, legacy) => (existsSync(legacy) ? legacy : canonical);
+// The drifted pairs under a Product root, project-relative: the settings file and every epic's PR
+// ledger. Empty when nothing disagrees. `epicDirs` is passed in (manifest.mjs lists no folders).
+export const productDrift = (root, epicDirs = []) => {
+  const pairs = [...MIRRORED_FILES];
+  for (const e of epicDirs) {
+    const f = epicFiles(e);
+    pairs.push({ canonical: f.productPrs, legacy: f.productPrsLegacy });
+  }
+  return pairs.filter(({ canonical, legacy }) => mirrorDrift(path.join(root, canonical), path.join(root, legacy)));
+};
 
 // Who writes the ledger. Two values, and the switch lives in `.sdlc/hub.json`:
 //
@@ -362,7 +364,8 @@ export const isVerifiedLedger = (hub) => {
 //   assistance: none | review | heavy         ->  driver:  human | pair  | agent
 //   automation: human_approve | machine_advance  ->  advance: human | auto
 //
-// Same rule as `.sdlc/hub.json` above: BOTH are written, and the OLD one wins while it exists.
+// BOTH spellings are written, and the OLD one wins while it exists. (Not the rule the renamed files
+// follow since E122 — those read the new name first. The dials keep old-first until their own switch.)
 // The old name is what the 29 skills that hand-write `state.json` still emit, and what an older CLI
 // still reads. A step whose dials disagree is a project mid-upgrade, not a decision — `yad doctor`
 // reports it and `yad migrate` closes it.
@@ -417,9 +420,9 @@ export const epicFiles = (epicRoot) => ({
   approvals: `${epicRoot}/.sdlc/approvals.json`,
   comments: `${epicRoot}/.sdlc/comments.json`,
   // The record of review PR/MRs opened on the product. `product-prs.json` is the name from shape 3
-  // onward; `hub-prs.json` is what it was called before and is written alongside it for one major —
-  // both `templates/checks/ledger-guard.sh` and `cli/hook.mjs` name it literally, and the guard in a
-  // user's repo only learns the new name when they run `yad update`. See MIRRORED_FILES.
+  // onward and the one read from v4; `hub-prs.json` is what it was called before and is still written
+  // beside it until v5 — `templates/checks/ledger-guard.sh` guards both names, and a guard in a user's
+  // repo only learns anything new when they run `yad update`. See MIRRORED_FILES.
   productPrs: `${epicRoot}/.sdlc/product-prs.json`,
   productPrsLegacy: `${epicRoot}/.sdlc/hub-prs.json`,
   contractLock: `${epicRoot}/.sdlc/contract-lock.json`,

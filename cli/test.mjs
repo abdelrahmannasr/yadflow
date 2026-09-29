@@ -81,6 +81,12 @@ async function captureConsole(fn) {
 // Import after env is irrelevant (reconcile is non-interactive).
 const { reconcile } = await import('./reconcile.mjs');
 
+// E122: the PR ledger as a test seeds it — under both names, the way the engine writes it. Seeding only the
+// old name beside a new one the engine already wrote is a drift, which every command refuses.
+const writePrLedger = (sdlcDir, body) => {
+  for (const f of ['product-prs.json', 'hub-prs.json']) fs.writeFileSync(path.join(sdlcDir, f), body);
+};
+
 test('check --fix installs module + wires repo, then is idempotent', async () => {
   const { T } = scaffold();
   const r1 = await reconcile(T, { fix: true });
@@ -3390,7 +3396,7 @@ function scaffoldEpic() {
   const reopened = JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-test/architecture', lastSyncedAt: null },
   ]);
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), reopened);
+  writePrLedger(path.join(ep, '.sdlc'), reopened);
   fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), reopened);
   return { T, ep };
 }
@@ -3555,7 +3561,7 @@ test('E62 upgrade: an older fingerprint FORM that is still live is not "stale" �
         { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
       ] }));
       const ptr = JSON.stringify([{ step: 'epic-review', artifact: 'epic.md', platform: 'gitlab', number: 5, url: 'http://x/5', branch: 'review/EP-test/epic', lastSyncedAt: null }]);
-      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), ptr);
+      writePrLedger(path.join(ep, '.sdlc'), ptr);
       fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), ptr);
       const { acceptedHashes } = await import('./epic-state.mjs');
       const accepted = acceptedHashes(ep, 'epic.md');
@@ -4236,7 +4242,7 @@ test('gate sync: EP-discovery advances through the SAME gate to discovery-done (
       { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'in_review', risk_tags: [] },
     ],
   }));
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
     { step: 'discovery-review', artifact: 'discovery/', platform: 'github', number: 4, url: 'http://x/4', branch: 'review/EP-discovery/discovery', lastSyncedAt: null },
   ]));
   const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
@@ -4273,7 +4279,7 @@ test('gate sync: EP-foundation advances through the SAME gate at foundation/ to 
         { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: 'in_review', risk_tags: [] },
       ],
     }));
-    fs.writeFileSync(path.join(fd, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(fd, '.sdlc'), JSON.stringify([
       { step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 5, url: 'http://x/5', branch: 'review/EP-foundation/foundation', lastSyncedAt: null },
     ]));
     const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
@@ -4434,7 +4440,7 @@ async function reopenAndReapprove(reviews) {
   assert.ok(stale.every((a) => a.artifactHash !== newHash), 'the re-lock revoked the prior approvals');
 
   // A NEW review MR/PR for the re-opened step, approved by the same reviewers, merged.
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 11, url: 'http://x/11', branch: 'review/EP-test/architecture', lastSyncedAt: null },
   ]));
   await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => first });
@@ -4533,7 +4539,7 @@ test('gate sync: advances multiple passing gates in CHAIN order, never in ledger
   );
   fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
   // Ledger order is alphabetical (what canonicalProductPrs writes) — the REVERSE of the chain here.
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: null, branch: 'review/EP-test/architecture', lastSyncedAt: null },
     { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: null, branch: 'review/EP-test/epic', lastSyncedAt: null },
   ]));
@@ -4564,7 +4570,7 @@ test('gate sync: a two-step ledger is order-stable under a rotating re-sync (iss
   fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
   const productPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
   productPrs.push({ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null });
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(productPrs));
+  writePrLedger(path.join(ep, '.sdlc'), JSON.stringify(productPrs));
 
   const sync = (artifact, today) => gateSync(T, { epic: 'EP-test', artifact, today, reader: () => fullApproval });
   // Advance both gates, then let one full sweep settle the ledger.
@@ -4646,7 +4652,7 @@ test('gate sync: a done step never posts engagement nudges on its merged PR', as
 // through by hand has none — `gate sync` used to refuse it outright and the advance was unreachable.
 test('gate sync: resolves an unrecorded review PR from the review branch (issue #158)', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the verified ledger case
+  writePrLedger(path.join(ep, '.sdlc'), '[]'); // nothing recorded — the verified ledger case
   const seen = [];
   const finder = (platform, branch) => { seen.push([platform, branch]); return { ok: true, number: 42, url: 'http://x/42' }; };
   await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => fullApproval, finder });
@@ -4660,7 +4666,7 @@ test('gate sync: resolves an unrecorded review PR from the review branch (issue 
 
 test('gate sync: --pr names the review PR directly, without a branch lookup', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const finder = () => { throw new Error('must not be called when --pr is given'); };
   const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
   await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: '42', reader: () => fullApproval, finder, branchOf });
@@ -4706,7 +4712,7 @@ test('gate sync: --pr naming the recorded PR keeps its url and nudge history', a
 
 test('gate sync: --pr naming a PR on another branch is refused, not bound to this artifact', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const out = [];
   const restore = console.log;
   console.log = (s = '') => out.push(String(s));
@@ -4742,7 +4748,7 @@ test('gate sync: a non-numeric --pr is rejected before it reaches the platform',
 
 test('gate sync: an unconfirmable --pr warns but is taken at the human\'s word', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const out = [];
   const restore = console.log;
   console.log = (s = '') => out.push(String(s));
@@ -4761,7 +4767,7 @@ test('gate sync: an unconfirmable --pr warns but is taken at the human\'s word',
 
 test('gate sync: an unresolvable review PR reports the recovery, not a bare refusal', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  writePrLedger(path.join(ep, '.sdlc'), '[]');
   const out = [];
   const restore = console.log;
   console.log = (s = '') => out.push(String(s));
@@ -7358,7 +7364,7 @@ test('gate sync on a deferred step says its review is still owed — not "alread
     }));
     // A review PR opened BEFORE the step was deferred — the one way a deferred step still has one, since
     // `yad gate open` now refuses it.
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
       { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
     ]));
     const pr = { ok: true, state: 'OPEN', merged: false, headOid: 'abc', reviews: [], threads: [] };
@@ -7403,7 +7409,7 @@ test('a re-opened review goes through `yad gate open` and `yad gate sync` beside
     // A debt being paid back is no longer `deferred`, so `gate status` names it on the open review.
     assert.match(await grab(() => gateStatus(T, { epic: 'EP-x' })), /ui-design-review .*owed as debt — being paid back/);
 
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
       { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 9, url: 'http://x/9', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
     ]));
     const merged = { ok: true, state: 'merged', merged: true, headOid: 'a', threads: [], reviews: [
@@ -7472,7 +7478,7 @@ test('gate sync honours a skip only when the epic\'s route allows it', async () 
         { id: 'stories', type: 'author', artifact: 'stories/', status: 'blocked', risk_tags: [] },
       ],
     }));
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([
       { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
     ]));
     return { T, ep };
@@ -8241,21 +8247,22 @@ test('yad mode writes both names and the record, names the open reviews, reads b
     assert.deepEqual(w.openReviews, [{ epic: 'EP-test', step: 'architecture-review' }]);
     assert.equal(w.openReviewsKnown, true);
 
+    // The name read since E122 is product.json, so that is the file a person edits.
     // The gates read the old flag, so a hand edit that leaves `mode` behind reads one way and acts another.
-    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...read('hub.json'), solo: true }));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ ...read('product.json'), solo: true }));
     r = await run(() => runMode(T, {}));
     assert.match(r.out, /mode: solo/);
     assert.match(r.out, /the file also says mode: "team", but the old `solo` flag is the one read/);
     r = await run(() => runMode(T, { to: 'solo' }));
     assert.equal(r.failed, false, 'correcting the name is not a switch, so no reason is asked');
     assert.match(r.out, /already solo — `mode` now matches `solo`/);
-    assert.equal(read('hub.json').mode, 'solo');
+    assert.equal(read('product.json').mode, 'solo');
 
-    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ nope');
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{ nope');
     r = await run(() => runMode(T, { to: 'team' }));
     assert.equal(r.failed, true);
     assert.match(r.out, /does not parse — nothing is written over it/);
-    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), '{ nope');
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), '{ nope');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e10-'));
@@ -9839,7 +9846,7 @@ test('gate ci sweep: syncs every open review PR, one commit, holds the unapprove
       { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'blocked', risk_tags: [] },
     ],
   }));
-  fs.writeFileSync(path.join(ep2, '.sdlc/hub-prs.json'), JSON.stringify([
+  writePrLedger(path.join(ep2, '.sdlc'), JSON.stringify([
     { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 9, url: 'http://x/9', branch: 'review/EP-two/epic', lastSyncedAt: null },
   ]));
   git(T, 'init', '-q');
@@ -10881,9 +10888,11 @@ test('doctor mirror: two copies of the settings that disagree are reported, not 
   const r = await doctorOn(T);
   const m = r.checks.find((c) => c.id.startsWith('mirror:'));
   assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
-  assert.equal(m.status, 'warn');
-  assert.match(m.message, /do not match/);
-  assert.match(m.message, /hub\.json is the one being read/, 'and it says WHICH one wins, not just that they differ');
+  // E122: no copy wins — every command refuses the pair, so doctor fails it and names the command that ends it.
+  assert.equal(m.status, 'fail');
+  assert.match(m.message, /say different things — every command refuses until one is chosen \[YAD-STATE-008\]/);
+  assert.match(m.hint, /yad migrate --apply/);
+  assert.ok(!r.checks.some((c) => c.id === 'mirror:legacy-names'), 'no "kept beside" line for a pair that disagrees');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10911,10 +10920,12 @@ test('doctor mirror: a per-epic PR ledger whose two copies disagree is reported'
   fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
   fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[{"artifact":"architecture.md"}]\n');
   const r = await doctorOn(T);
-  const m = r.checks.find((c) => c.id.includes('product-prs'));
+  // Reported once, by the epic's own check — `loadLedger` refuses the pair — not a second time as a mirror.
+  const m = r.checks.find((c) => c.id === 'epic:EP-x');
   assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
-  assert.equal(m.status, 'warn');
-  assert.match(m.message, /hub-prs\.json is the one being read/);
+  assert.equal(m.status, 'fail');
+  assert.match(m.message, /product-prs\.json and .*hub-prs\.json say different things.*\[YAD-STATE-008\]/);
+  assert.ok(!r.checks.some((c) => c.id.startsWith('mirror:') && c.id.includes('product-prs')), 'not said twice');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10925,7 +10936,10 @@ test('doctor mirror: two copies that agree say nothing at all', async () => {
   fs.writeFileSync(path.join(T, '.sdlc/product.json'), same);
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), same);
   const r = await doctorOn(T);
-  assert.equal(r.checks.filter((c) => c.id.startsWith('mirror:')).length, 0, 'a healthy pair is not a finding');
+  // A healthy pair is not a finding: one plain line says why the old name is still there, and when it goes.
+  const mirror = r.checks.filter((c) => c.id.startsWith('mirror:'));
+  assert.deepEqual(mirror.map((c) => [c.id, c.status]), [['mirror:legacy-names', 'ok']]);
+  assert.match(mirror[0].message, /product\.json is the one read, and v5 deletes the old name/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -12232,7 +12246,7 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
       for (const [, , file, , to] of cases) if (to) flip(path.join(ep, file), to);
       fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ epicId: 'EP-legacy', currentStep: 'ready-for-build', steps }));
       fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(approvals));
-      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(productPrs));
+      writePrLedger(path.join(ep, '.sdlc'), JSON.stringify(productPrs));
 
       const status = await grab(() => gateStatus(T, { epic: 'EP-legacy' }));
       for (const [review] of cases) {
@@ -12274,7 +12288,7 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
           { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: 'in_review', risk_tags: [] },
         ],
       }));
-      fs.writeFileSync(path.join(fd, '.sdlc/hub-prs.json'), JSON.stringify([
+      writePrLedger(path.join(fd, '.sdlc'), JSON.stringify([
         { step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 5, url: 'http://x/5', branch: 'review/EP-foundation/foundation', lastSyncedAt: null },
       ]));
       const merged = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', threads: [],
@@ -21383,7 +21397,7 @@ test('E72 review: a step that passes by its SKIP shortcut records no cap — not
     fs.writeFileSync(stateFile, JSON.stringify(s0));
     fs.writeFileSync(path.join(ep, 'ui-design.md'), '---\nid: EP-test\nartifact: ui-design\n---\n# ui\n');
     const prs = JSON.stringify([{ step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/ui-design', lastSyncedAt: null }]);
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), prs);
+    writePrLedger(path.join(ep, '.sdlc'), prs);
     fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), prs);
     const none = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', artifact: 'ui-design.md', today: '2026-06-09', reader: () => none, headCount: e72Count(2) }));
@@ -21950,7 +21964,7 @@ test('E73 gate sync: two open reviews print a line about the whole Product once,
       { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-test/architecture', lastSyncedAt: null },
       { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null },
     ]);
-    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), prs);
+    writePrLedger(path.join(ep, '.sdlc'), prs);
     fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), prs);
     const open = { ok: true, state: 'open', merged: false, headOid: 'a', reviews: [], threads: [] };
     const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => open, headCount: e73Count(1, 0) }));
@@ -25858,8 +25872,9 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     e79Git(T, backend, 'push', '-q', 'origin', 'main');
     // The team ignores its skill copies, and runs verified (so the per-clone git hook applies).
     fs.writeFileSync(path.join(product, '.gitignore'), '.claude/\n');
-    const productFile = path.join(product, '.sdlc', 'hub.json');
-    fs.writeFileSync(productFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(productFile, 'utf8')), platform: 'github', ledger: 'verified' }));
+    // Both names, the same bytes: one edited alone is a drift, which every command refuses (E122).
+    const settings = JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(product, '.sdlc', 'product.json'), 'utf8')), platform: 'github', ledger: 'verified' });
+    for (const f of ['product.json', 'hub.json']) fs.writeFileSync(path.join(product, '.sdlc', f), settings);
     fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
       { name: 'backend', path: '../backend', git_url: path.join(remotes, 'backend.git'), platform: 'github', default_branch: 'main' },
       { name: 'escape', path: '../../outside', git_url: path.join(remotes, 'backend.git') },
@@ -26900,5 +26915,152 @@ test('E81 review 17: writeJSON never writes through a link at its temp name, and
     assert.equal(pushed.status, 1);
     assert.equal(JSON.parse(pushed.stdout).published, null, 'nothing is published after the refusal');
     assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before, 'the folder it names is untouched');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E122: the new names are read first, and two names that disagree are refused ----------
+
+test('E122: preferring / productConfigPath read the new name first, the old as a fallback, the new when neither exists', async () => {
+  const { preferring, productConfigPath, mirrorDrift, productDrift } = await import('./manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122-'));
+  try {
+    const sdlc = path.join(T, '.sdlc');
+    fs.mkdirSync(sdlc);
+    const p = path.join(sdlc, 'product.json');
+    const h = path.join(sdlc, 'hub.json');
+    assert.equal(productConfigPath(T), p, 'neither: named by the new name');
+    fs.writeFileSync(h, '{}\n');
+    assert.equal(productConfigPath(T), h, 'the old name alone is still read');
+    fs.writeFileSync(p, '{}\n');
+    assert.equal(productConfigPath(T), p, 'both: the new name');
+    assert.equal(preferring(p, h), p);
+    assert.equal(mirrorDrift(p, h), false, 'the same bytes are no drift');
+    fs.writeFileSync(h, '{ }\n');
+    assert.equal(mirrorDrift(p, h), true, 'any byte differs: drift, like `cmp -s` in the gates');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[1]\n');
+    assert.deepEqual(productDrift(T, ['epics/EP-x']).map((d) => d.canonical), ['.sdlc/product.json', 'epics/EP-x/.sdlc/product-prs.json']);
+    fs.rmSync(h);
+    assert.equal(mirrorDrift(p, h), false, 'one name alone is no drift');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: writeMirrored compares against the new name, writes both, and a write repairs a drifted pair', async () => {
+  const { writeMirrored } = await import('./lib.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122w-'));
+  try {
+    const p = path.join(T, '.sdlc/product.json');
+    const h = path.join(T, '.sdlc/hub.json');
+    fs.mkdirSync(path.dirname(p));
+    const obj = { schemaVersion: 3, platform: 'github' };
+    const bytes = `${JSON.stringify(obj, null, 2)}\n`;
+    fs.writeFileSync(p, bytes);
+    fs.writeFileSync(h, '{"platform":"gitlab"}\n');
+    // The new name already says it — but the old one does not, so this is work, not a no-op.
+    assert.deepEqual(writeMirrored(p, h, obj), [p, h]);
+    assert.equal(fs.readFileSync(h, 'utf8'), bytes, 'the drift is repaired by the write');
+    assert.deepEqual(writeMirrored(p, h, obj), [], 'and now nothing changes');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: every command refuses a drifted pair with YAD-STATE-008; doctor fails it; migrate previews it', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122cli-'));
+  const yad = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], { encoding: 'utf8', env: { ...process.env, SDLC_NONINTERACTIVE: '1' } });
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), '{"version":"4.0.0"}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"schemaVersion":10,"platform":null}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    for (const args of [['next'], ['history', 'list'], ['index']]) {
+      const r = yad(...args, '--json');
+      assert.equal(r.status, 1, `${args.join(' ')}: ${r.stdout}${r.stderr}`);
+      const j = JSON.parse(r.stdout);
+      assert.equal(j.code, 'YAD-STATE-008', args.join(' '));
+      assert.match(j.error, /\.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+      assert.match(j.hint, /yad migrate/);
+    }
+    const d = yad('doctor', '--json');
+    assert.equal(d.status, 1, 'doctor runs, and fails on the drift');
+    assert.ok(JSON.parse(d.stdout).checks.some((c) => c.id === 'mirror:.sdlc/product.json' && c.status === 'fail'));
+    const m = yad('migrate', '--json');
+    assert.equal(m.status, 0, m.stderr);
+    const mj = JSON.parse(m.stdout);
+    assert.deepEqual(mj.drift.map((x) => [x.canonical, x.legacy, x.differences]), [['.sdlc/product.json', '.sdlc/hub.json', ['`platform` differs']]]);
+    assert.equal(mj.kept, null);
+    // An epic's PR ledger that drifts is refused the same way, once the settings agree.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), fs.readFileSync(path.join(T, '.sdlc/product.json')));
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({ epicId: 'EP-x', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'in_progress' }] }));
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[{"artifact":"epic.md"}]\n');
+    const e = yad('next', 'EP-x', '--json');
+    assert.equal(e.status, 1);
+    assert.match(JSON.parse(e.stdout).error, /epics\/EP-x\/\.sdlc\/product-prs\.json and epics\/EP-x\/\.sdlc\/hub-prs\.json say different things/);
+    // `--keep product` ends it; the command then runs.
+    const k = yad('migrate', '--apply', '--keep', 'product', '--json');
+    assert.equal(k.status, 0, k.stdout + k.stderr);
+    assert.equal(JSON.parse(k.stdout).kept, 'product');
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), 'utf8'), '[]\n');
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json.yad-orig'), 'utf8'), '[{"artifact":"epic.md"}]\n', 'the copy not kept is backed up');
+    const after = yad('next', '--json');
+    assert.equal(after.status, 0, after.stdout + after.stderr);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: yad migrate --apply asks which copy to keep, refuses without an answer, and writes nothing then', async () => {
+  const { runMigrate } = await import('./migrate.mjs');
+  const drifted = () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122m-'));
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"schemaVersion":10,"platform":"gitlab"}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    return T;
+  };
+  const both = (T) => ['product.json', 'hub.json'].map((f) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc', f), 'utf8')).platform);
+  // The person answers.
+  let T = drifted();
+  try {
+    let asked = '';
+    await captureConsole(() => runMigrate(T, { apply: true }, { choose: (q) => { asked = q; return 'hub'; } }));
+    assert.match(asked, /keep which: product \(the new name\) or hub \(the old name\)/);
+    assert.deepEqual(both(T), ['github', 'github']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // No answer, a wrong answer, a --json run with no --keep, a --keep that is not a choice: nothing written.
+  for (const [opts, extra, code, msg] of [
+    [{ apply: true }, { choose: () => '' }, 'YAD-STATE-008', /stopped — nothing was written/],
+    [{ apply: true }, { choose: () => 'both' }, 'YAD-STATE-008', /"both" is not product or hub/],
+    [{ apply: true, json: true }, {}, 'YAD-CLI-001', /a --json run cannot ask which copy to keep/],
+    [{ apply: true, keep: 'new' }, {}, 'YAD-STATE-008', /--keep takes product or hub, not "new"/],
+  ]) {
+    T = drifted();
+    try {
+      await assert.rejects(() => runMigrate(T, opts, extra), (e) => e.code === code && msg.test(e.message) && /--keep/.test(e.hint));
+      assert.deepEqual(both(T), ['gitlab', 'github'], `${msg}: nothing written`);
+      assert.ok(!fs.existsSync(path.join(T, '.sdlc/product.json.yad-orig')) && !fs.existsSync(path.join(T, '.sdlc/hub.json.yad-orig')), `${msg}: no backup either`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('E122: the ledger hook guards a drifted pair when EITHER copy is verified, and says why', () => {
+  const T = hookProduct({ hub: { platform: 'gitlab', ledger: 'local', default_branch: 'main' } });
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', ledger: 'local', default_branch: 'main' }));
+    assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json').allow, true, 'both local: nothing to guard');
+    // The new name says local, the old one verified: guarded, never disarmed by the drift.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ledger: 'verified', default_branch: 'main' }));
+    let v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
+    assert.equal(v.allow, false);
+    assert.match(v.message, /product\.json and \.sdlc\/hub\.json say different things, and one of them is verified, so this edit is guarded — run `yad migrate`/);
+    // The other way round too.
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', ledger: 'verified', default_branch: 'main' }));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ledger: 'local', default_branch: 'main' }));
+    v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
+    assert.equal(v.allow, false);
+    // No drift, new name verified, old one gone: guarded from product.json alone.
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
+    assert.equal(v.allow, false);
+    assert.doesNotMatch(v.message, /say different things/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

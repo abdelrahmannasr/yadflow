@@ -17,10 +17,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig, emitJSON, collectWarning } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig, emitJSON, collectWarning } from './lib.mjs';
+import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
-  MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES, preferring, productConfigPath, SCHEMA_VERSION,
+  MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES, preferring, productConfigPath, productDrift, SCHEMA_VERSION,
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
@@ -857,6 +858,104 @@ function printProductMove(p, { apply }) {
   log(`    ${c.dim(`a full copy stays at ${p.backup}/`)}`);
 }
 
+// ---- two names that say different things (E122) -----------------------------------------------
+//
+// `.sdlc/product.json` + `.sdlc/hub.json`, and each epic's `product-prs.json` + `hub-prs.json`, are one
+// file under two names until v5. When they disagree every other command refuses (YAD-STATE-008), and
+// this is the command that ends it. It runs whatever shape the project is on: the drift is not a shape
+// step, it is a repair — like the product-level move above, work outside the per-file rows.
+//
+// Only a person knows which copy they meant, so nothing is chosen for them: the preview shows the
+// difference, and `--apply` asks — or, with no terminal or under `--json` (where a command never asks,
+// E1), takes `--keep product` / `--keep hub` and refuses without it. The copy kept is written over the
+// other one byte for byte, after the other one is backed up beside itself as `<file>.yad-orig`.
+export const KEEP_CHOICES = ['product', 'hub'];
+
+// What differs, in words a person can check against the files: the top-level keys of an object, the
+// positions of an array. Never the values — they can be long, and the files are right there.
+export function describeDrift(aPath, bPath) {
+  let a; let b;
+  try { a = JSON.parse(fs.readFileSync(aPath, 'utf8')); } catch { return [`${path.basename(aPath)} does not parse`]; }
+  try { b = JSON.parse(fs.readFileSync(bPath, 'utf8')); } catch { return [`${path.basename(bPath)} does not parse`]; }
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+    const out = keys.filter((k) => !same(a[k], b[k])).map((k) => (!(k in a) ? `\`${k}\` only in ${path.basename(bPath)}` : !(k in b) ? `\`${k}\` only in ${path.basename(aPath)}` : `\`${k}\` differs`));
+    // Same keys and values in another order, or only the spacing differs: still two different files.
+    return out.length ? out : ['the same settings, written differently (spacing or key order)'];
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const n = Math.max(a.length, b.length);
+    const at = [];
+    for (let i = 0; i < n; i++) if (!same(a[i], b[i])) at.push(i + 1);
+    const count = a.length === b.length ? '' : `${path.basename(aPath)} has ${a.length} entries, ${path.basename(bPath)} ${b.length}; `;
+    return at.length ? [`${count}entries ${at.join(', ')} differ`] : ['the same entries, written differently (spacing or key order)'];
+  }
+  return ['the two files hold different kinds of value'];
+}
+
+// Every drifted pair under `root`, project-relative, with what differs.
+export function driftedPairs(root) {
+  let dirs = [];
+  try { dirs = epicIds(root).map(epicRel); } catch { /* the settings file is still checked */ }
+  return productDrift(root, dirs).map(({ canonical, legacy }) => ({
+    canonical, legacy, differences: describeDrift(path.join(root, canonical), path.join(root, legacy)),
+  }));
+}
+
+// Settle each pair on the copy `keep` names. Returns the paths written (the losing names).
+function settleDrift(root, pairs, keep) {
+  const written = [];
+  for (const { canonical, legacy } of pairs) {
+    const [from, to] = keep === 'product' ? [canonical, legacy] : [legacy, canonical];
+    const src = path.join(root, from);
+    // A copy that does not parse is not one to keep: settling on it would leave two broken files and
+    // every command refusing them for another reason.
+    try { JSON.parse(fs.readFileSync(src, 'utf8')); } catch {
+      throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);
+    }
+    const dst = path.join(root, to);
+    fs.copyFileSync(dst, backupPathFor(dst));
+    fs.copyFileSync(src, dst);
+    written.push(to);
+  }
+  return written;
+}
+
+// Which copy wins: the flag, else the person at the terminal. `choose` stands in for the prompt in tests.
+async function chooseKeep(pairs, { keep, json, choose }) {
+  if (keep) return keep;
+  const flagHint = 'pass `--keep product` to keep .sdlc/product.json (and each product-prs.json), or `--keep hub` to keep the old names — `yad migrate` shows the difference first';
+  if (json) throw err('YAD-CLI-001', 'a --json run cannot ask which copy to keep', flagHint);
+  if (!choose && (!process.stdin.isTTY || process.env.SDLC_NONINTERACTIVE)) throw err('YAD-STATE-008', 'there is no terminal to ask which copy to keep', flagHint);
+  const question = `${pairs.length === 1 ? 'Two copies disagree' : `${pairs.length} pairs disagree`} — keep which: product (the new name) or hub (the old name)? Enter to stop`;
+  const answer = String(await (choose ? choose(question) : ask(question, ''))).trim().toLowerCase();
+  if (!answer) throw err('YAD-STATE-008', 'stopped — nothing was written', flagHint);
+  if (!KEEP_CHOICES.includes(answer)) throw err('YAD-STATE-008', `"${answer}" is not product or hub — nothing was written`, flagHint);
+  return answer;
+}
+
+function printDrift(pairs) {
+  log('');
+  log(c.bold('  two names that disagree'));
+  for (const p of pairs) {
+    log(`  ${p.canonical}  ≠  ${p.legacy}`);
+    for (const d of p.differences) log(`    ${c.dim(d)}`);
+  }
+}
+
+// What this command does NOT rename, said once, so nobody takes a finished migrate for a finished
+// rename. Printed only while the old settings name is still on disk.
+function printNotRenamedHere(root) {
+  if (!exists(path.join(root, PROJECT_FILES.productConfigLegacy))) return;
+  log('');
+  log(c.bold('  hub → Product'));
+  log(`  ${PROJECT_FILES.productConfig} is the name read; ${PROJECT_FILES.productConfigLegacy} is still written beside it for check gates an older yadflow installed, and v5 deletes it`);
+  log(`  ${c.dim('not done here:')}`);
+  log(`    ${c.dim('the names installed into your repos (the yad-hub-checks workflow, the yad-hub-bridge skill) — `yad update` owns those')}`);
+  log(`    ${c.dim('your own CI settings and scripts that name .sdlc/hub.json, hub-prs.json or SDLC_HUB_CONFIG — they work until v5; change them to .sdlc/product.json, product-prs.json and SDLC_PRODUCT_CONFIG by hand')}`);
+}
+
 // ---- the command ---------------------------------------------------------------------------
 // `.sdlc/cli-version.json` is migrated as an ordinary row, like every other project file — it is in
 // PROJECT_FILES, so it is previewed, backed up and stamped along with the rest. Nothing here writes it
@@ -864,13 +963,29 @@ function printProductMove(p, { apply }) {
 // which means no backup, no row in the report, and a preview that under-reports what an apply does. It
 // would also be free to overwrite the one file the same run had just declared corrupt or newer than
 // this engine. What shape a file is in is recorded in that file, which is the whole point of rule 1.
-export async function runMigrate(root, { apply = false, json = false } = {}, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
+export async function runMigrate(root, { apply = false, json = false, keep = null } = {}, { migrations = MIGRATIONS, copy = fs.cpSync, choose = null } = {}) {
+  if (keep != null && !KEEP_CHOICES.includes(keep)) {
+    throw err('YAD-STATE-008', `--keep takes product or hub, not "${keep}"`, '`--keep product` keeps .sdlc/product.json (and each product-prs.json); `--keep hub` keeps the old names');
+  }
   if (!exists(path.join(root, PROJECT_FILES.version)) && !exists(productConfigPath(root))) {
     const message = 'no yad project here (.sdlc/ not initialised)';
     if (json) { emitJSON({ ok: false, error: message }); }
     else { fail(message); hand('run `yad setup` to start one'); }
     process.exitCode = 1;
     return { ok: false };
+  }
+
+  // E122: settled first, so the plan below reads the copy that was kept.
+  const drift = driftedPairs(root);
+  let kept = null;
+  let ignored = false;
+  const settledFiles = [];
+  if (drift.length && apply) {
+    if (!json) printDrift(drift);
+    kept = await chooseKeep(drift, { keep, json, choose });
+    // Before the backup is made, as below.
+    ignored = ensureBackupsIgnored(root);
+    settledFiles.push(...settleDrift(root, drift, kept));
   }
 
   const plan = planMigration(root, { migrations });
@@ -880,13 +995,12 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
   // An unreadable product-level ledger blocks like an unreadable file. The other refusals do not: the
   // project stays on the old spelling, which this release reads correctly, so nothing is broken.
   const productBlocked = plan.product?.action === 'unreadable';
-  const written = [];
+  const written = [...settledFiles];
 
-  let ignored = false;
   if (apply) {
     // Before the first backup exists, not after — otherwise a gate advance racing this run could stage
     // one. A no-op when the line is already there.
-    if (pending.length || move) ignored = ensureBackupsIgnored(root);
+    if (pending.length || move) ignored = ensureBackupsIgnored(root) || ignored;
     if (move) {
       // Reported through `fail`, never as a stack trace, and before any per-file write: a move that did
       // not happen leaves the project exactly as it was, so the rest of this run must not half-proceed.
@@ -906,7 +1020,9 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       // Back up first, always. Unlike the wiring copies in plan.mjs — which skip the backup when the
       // file's bytes are provably ours — a ledger has no provenance record, so there is nothing to
       // prove and the copy is unconditional.
-      fs.copyFileSync(file, backupPathFor(file));
+      // A file the drift repair above already backed up keeps THAT backup: it is the copy the person did
+      // not keep, and its only record. Its bytes now are the kept copy's, backed up under the other name.
+      if (!settledFiles.includes(row.file)) fs.copyFileSync(file, backupPathFor(file));
       // A mirrored row writes its partner too, so the partner needs a backup of its OWN pre-migration
       // bytes — taken here, before either write. Backing up only the row's file leaves the other name
       // rewritten with no way back, and on the NEXT shape bump its `.yad-orig` would be overwritten
@@ -914,7 +1030,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       const partnerRel = isMirroredPath(row.file) ? mirrorPartner(row.file) : null;
       if (partnerRel) {
         const partnerFile = path.join(root, partnerRel);
-        if (exists(partnerFile)) fs.copyFileSync(partnerFile, backupPathFor(partnerFile));
+        if (exists(partnerFile) && !settledFiles.includes(partnerRel)) fs.copyFileSync(partnerFile, backupPathFor(partnerFile));
       }
       // The SAME ctx the preview used. Passing it in one place and not the other is how a preview
       // promises one thing and an apply writes another — the single worst failure this command can
@@ -955,15 +1071,28 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       rows: plan.rows,
       // The product-level move (shape 8), or null when the project has no old-spelling product level.
       product: plan.product,
+      // E122: the pairs whose two names disagreed, and which copy was kept (null on a preview).
+      drift,
+      kept,
     });
   } else {
     log(c.bold(`\nyad migrate  ${c.dim(`shape ${plan.engine}`)}`));
     log(c.dim(`target: ${root}\n`));
     printRows(plan.rows);
     if (plan.product) printProductMove(plan.product, { apply });
+    if (drift.length) {
+      if (apply) ok(`kept the ${kept === 'product' ? 'new' : 'old'} name's copy of ${drift.length === 1 ? 'the pair' : `${drift.length} pairs`} — the other is backed up beside itself as <file>${BACKUP_SUFFIX}`);
+      else printDrift(drift);
+    }
+    printNotRenamedHere(root);
     log('');
+    if (drift.length && !apply) {
+      info('every other yad command refuses until one copy is chosen');
+      hand('run `yad migrate --apply` to choose which copy to keep (or `--apply --keep product` / `--keep hub`)');
+    }
     if (!pending.length && !move) {
-      ok(`nothing to do — this project is already on shape ${plan.engine}`);
+      if (!drift.length) ok(`nothing to do — this project is already on shape ${plan.engine}`);
+      else if (apply) ok(`nothing else to do — this project is already on shape ${plan.engine}`);
     } else if (apply) {
       if (move) ok(`the product level moved to ${move.to}/ as ${FOUNDATION_EPIC} — the original is kept whole at ${move.backup}/`);
       ok(`${written.length} file(s) updated — a copy of each is beside it as <file>${BACKUP_SUFFIX}`);
@@ -983,6 +1112,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       if (r.action === 'unreadable') hand(`${r.file} does not parse — restore it from git before migrating`);
     }
     if (blocked.length) warn('some files were left untouched — see above');
+    if (apply && written.length) hand('then run `yad update`, which refreshes the check gates installed in your repos');
   }
 
   if (blocked.length || productBlocked) process.exitCode = 1;

@@ -249,7 +249,7 @@ not "resolve to pass" — it ignores them). A reviewer's *genuine* concern is po
 marker and blocks normally, exactly as a `CHANGES_REQUESTED` or any unresolved human thread does.
 
 ## Platform-backed input (the verified ledger)
-When the Product has a platform (`.sdlc/hub.json`), reviewers can approve/comment
+When the Product has a platform (`.sdlc/product.json`), reviewers can approve/comment
 on a real PR/MR instead — and only there: with a platform, `yad gate approve` / `comment` / `advance`
 refuse. The sync reads that platform
 state with the local user's own `gh`/`glab` and writes the **same**

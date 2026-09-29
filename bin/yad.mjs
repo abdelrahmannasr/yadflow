@@ -43,11 +43,13 @@ ${c.bold('Setup & maintenance')}
                        'yad check --fix --push'; --allow-branch permits a non-default branch
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
-  yad migrate [--apply] [--json]   Move this project's state files onto the shape
+  yad migrate [--apply] [--keep product|hub] [--json]   Move this project's state files onto the shape
                        this yadflow expects. Prints what WOULD change and writes
                        nothing until --apply, which copies each file it rewrites to
                        <file>.yad-orig first. Safe to run twice — the second run
-                       reports there is nothing to do
+                       reports there is nothing to do. When .sdlc/product.json and
+                       .sdlc/hub.json (or an epic's product-prs.json and hub-prs.json)
+                       disagree, --apply asks which copy to keep; --keep answers it
   yad sync-status [epic]   Update artifact frontmatter status (draft/in-review/approved)
                        from .sdlc/state.json — all epics if omitted (--dry-run to preview)
   yad report [-m <text>]   File a bug in the yadflow repo with auto-scrubbed diagnostics
@@ -315,7 +317,7 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -547,6 +549,17 @@ async function main() {
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
   if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
+  // E122: the Product's settings (or an epic's PR ledger) under two names that say different things.
+  // Every command refuses rather than pick one — whichever it picked, somebody's edit would be silently
+  // ignored. Not `doctor` (it reports the drift), `migrate` (it ends it) or `report` (it files a bug
+  // about a broken flow, and reads nothing it could get wrong). `hook` returned above: it guards.
+  if (!['doctor', 'migrate', 'report'].includes(cmd)) {
+    // Both the folder the command runs on and, for a code-repo command, the Product it reads.
+    for (const root of new Set([o.dir || process.cwd(), o.product].filter(Boolean))) {
+      const drift = commands.productDriftError(root);
+      if (drift) throw drift;
+    }
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   // What the command returned: under --json, a command that did not answer itself answers with it.
@@ -599,7 +612,7 @@ async function main() {
       result = await commands.runDoctor(o.dir, { json: o.json });
       break;
     case 'migrate':
-      result = await commands.runMigrate(o.dir, { apply: o.apply, json: o.json });
+      result = await commands.runMigrate(o.dir, { apply: o.apply, json: o.json, keep: o.keep ?? null });
       break;
     case 'report':
       result = await commands.runReport(o.dir, { message: o.message });

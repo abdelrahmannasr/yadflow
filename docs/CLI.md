@@ -1458,6 +1458,24 @@ The reading comes from the same code `yad migrate` previews with, so the two can
 `--json`, each shape check carries a `shape` object with the engine's version and a per-file list, so
 CI can act on the detail rather than parsing the sentence.
 
+**Two names for one file (E122).** `hub` became Product, so the Product's settings file is
+`.sdlc/product.json` and each epic's PR record is `product-prs.json`. Until v5, yad writes the old names
+too (`.sdlc/hub.json`, `hub-prs.json`), with the same bytes, because check gates an older yadflow put in
+your repos open `.sdlc/hub.json` by that path.
+
+| | what happens |
+|---|---|
+| which name is read | the new one; the old one only when the new one does not exist |
+| both exist and agree | normal. `yad doctor` prints one line (`mirror:legacy-names`, ok) saying v5 deletes the old name |
+| both exist and **differ** | no copy is picked. Every command but `yad doctor`, `yad migrate` and `yad report` refuses with `YAD-STATE-008`; `yad doctor` fails it (`mirror:.sdlc/product.json`, or the epic's own check); the check gates print `FAIL [product-settings]`. The editor hook still guards a ledger edit when either copy says `verified` |
+| to end a difference | `yad migrate` lists which keys differ. `yad migrate --apply` asks which copy to keep; `--keep product` or `--keep hub` answers it (needed without a terminal, and under `--json`, where the refusal is `YAD-CLI-001`). The copy not kept is backed up as `<file>.yad-orig`. This works on any shape, even when nothing else needs migrating |
+| editing the settings by hand | edit `.sdlc/product.json`, then run `yad migrate --apply --keep product` |
+| the gates' environment variable | `SDLC_PRODUCT_CONFIG` names the settings file for a gate; the older `SDLC_HUB_CONFIG` still works. The gate reads `SDLC_PRODUCT_CONFIG`, then `SDLC_HUB_CONFIG`, then `.sdlc/product.json`, then `.sdlc/hub.json`. Both variables set, naming files that differ: the gate fails |
+
+`yad migrate` does not rename what is installed in your repos (the `yad-hub-checks` workflow, the
+`yad-hub-bridge` skill — `yad update` owns those), nor your own CI settings and scripts that name
+`.sdlc/hub.json` or `SDLC_HUB_CONFIG`: they keep working until v5; change them by hand.
+
 **Every other command warns first when the project is ahead.** If `.sdlc/cli-version.json` or the product
 config says a newer file shape than this yadflow knows, each command prints one warning on stderr before
 it runs — stdout and `--json` are unchanged — telling you to upgrade before relying on what it says.
@@ -1662,11 +1680,12 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-STATE-004` | an epic step cannot be skipped, deferred, put back, or unblocked in its current state | the step must be one the epic's own [lifecycle route](#lifecycle-profiles-the-route-an-epic-takes) marks optional — `ui-design` on `classic` and `analysis-first` — and needs a `--reason`; it can be skipped only up to authoring it (before its review opens / before the step after it starts — `stories`, on `classic`); `yad unskip` works until a step past that one starts (the stories review, on `classic`). `yad defer` and `yad undefer` follow exactly the same rules, and neither will change a step the other one set aside. A step that is `blocked` must be cleared with `yad unblock` before it can be skipped or deferred, and `yad unblock` refuses a step that is not blocked. A chain on **no** route has nothing optional: fix `step:off-route` first |
 | `YAD-STATE-005` | an authoring step is stranded behind its completed review gate | a pre-3.11 `gate sync` could advance a review step while leaving its author step `in_progress`, silently blocking every later step (and the parallel `test-cases` track). Run `yad gate repair <epic>` |
 | `YAD-STATE-006` | a Build ledger (`build-log`/`trust-log`) is locked by another yad process writing it | every read-modify-write on these ledgers (`--retro-ship`, `yad review reconcile`, `yad tidy up`) takes an exclusive lock, so two runs can never interleave and lose an entry. Wait for the other command and re-run; a lock left by a killed process is reclaimed automatically after 30s, or delete the `.lock` directory the message names |
+| `YAD-STATE-008` | a file kept under two names says different things under each: `.sdlc/product.json` and `.sdlc/hub.json`, or an epic's `product-prs.json` and `hub-prs.json` (E122) | until v5 yad writes both names with the same bytes; `product.json` is the one read, and `hub.json` is kept for check gates an older yadflow installed. When they differ no copy is picked for you, so every command but `yad doctor`, `yad migrate` and `yad report` refuses, and the gates FAIL. Run `yad migrate` to see which keys differ, then `yad migrate --apply` to choose the copy to keep (`--keep product` or `--keep hub` without a terminal or under `--json`); the other copy is backed up as `<file>.yad-orig`. Editing the settings by hand? Edit `.sdlc/product.json`, then run `yad migrate --apply --keep product` |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |
 | `YAD-CFG-002` | `design.json` names an unknown design tool | expected one of `config.yaml` `design.tools` (e.g. `figma`, `pencil`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-003` | `testing.json` names an unknown testing tool | expected one of `config.yaml` `testing.tools` (e.g. `playwright`, `cypress`, `pytest`, `maestro`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-004` | `learning.json` names an unknown learning tool | expected one of `config.yaml` `learning.tools` (e.g. `deeptutor`), or `none` — fix it or re-run `yad setup` |
-| `YAD-CFG-005` | `hub.json` sets a platform but is missing `git_url` (needed to scope auth + open PRs) | add `git_url` to `.sdlc/hub.json`, or re-run `yad setup` — it backfills it from the origin remote |
+| `YAD-CFG-005` | `hub.json` sets a platform but is missing `git_url` (needed to scope auth + open PRs) | add `git_url` to `.sdlc/product.json` (then `yad migrate --apply --keep product` copies it to `hub.json`), or re-run `yad setup` — it backfills it from the origin remote |
 | `YAD-CLI-001` | a `--json` run needed an answer only a prompt could give (E1) | a `--json` run never asks a question. Pass the answer as a flag (`yad --help` lists them), set `SDLC_NONINTERACTIVE=1` to take the defaults, or run without `--json` |
 
 Filing a bug? The fastest path is **`yad report`** — it files the issue for you in the yadflow repo

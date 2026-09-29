@@ -41,7 +41,7 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
     return true;
   }
   fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
-  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (set default_branch in .sdlc/hub.json if '${d}' is wrong)`);
+  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (set default_branch in .sdlc/product.json if '${d}' is wrong)`);
   process.exitCode = 1;
   return false;
 }

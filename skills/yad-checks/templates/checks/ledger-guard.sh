@@ -43,6 +43,30 @@
 # badge) WARNs and waives the signature half — the same stance verified-commits takes.
 set -euo pipefail
 
+# --- shared Product settings file (byte-identical across the gates; they are standalone by design, so
+# --- it is duplicated, not sourced) ---
+# The Product's settings live under two names until v5: `.sdlc/product.json`, read first from 4.0, and
+# `.sdlc/hub.json`, which an older yadflow wrote and its gates read. The environment may name the file
+# instead: SDLC_PRODUCT_CONFIG, or the older SDLC_HUB_CONFIG. Two names that say different things are
+# never settled by picking one — the CLI refuses the same way (YAD-STATE-008) — so the gate FAILS and
+# names both. Said on stderr and returned as a failure: this runs inside `$(...)`, where an `exit` would
+# only leave the subshell. `cmp -s` is byte for byte, like the CLI's own comparison.
+product_config() {
+  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ] && [ -n "${SDLC_HUB_CONFIG:-}" ] \
+    && [ "$SDLC_PRODUCT_CONFIG" != "$SDLC_HUB_CONFIG" ] && ! cmp -s "$SDLC_PRODUCT_CONFIG" "$SDLC_HUB_CONFIG"; then
+    echo "FAIL [product-settings]: SDLC_PRODUCT_CONFIG (${SDLC_PRODUCT_CONFIG}) and SDLC_HUB_CONFIG (${SDLC_HUB_CONFIG}) name files that say different things. Set only SDLC_PRODUCT_CONFIG." >&2
+    return 1
+  fi
+  if [ -n "${SDLC_PRODUCT_CONFIG:-}" ]; then printf '%s' "$SDLC_PRODUCT_CONFIG"; return 0; fi
+  if [ -n "${SDLC_HUB_CONFIG:-}" ]; then printf '%s' "$SDLC_HUB_CONFIG"; return 0; fi
+  if [ -f .sdlc/product.json ] && [ -f .sdlc/hub.json ] && ! cmp -s .sdlc/product.json .sdlc/hub.json; then
+    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. Run \`yad migrate\` in the Product to choose the copy to keep, and commit both." >&2
+    return 1
+  fi
+  if [ -f .sdlc/product.json ]; then printf '%s' .sdlc/product.json; else printf '%s' .sdlc/hub.json; fi
+}
+PRODUCT_CONFIG="$(product_config)" || exit 1
+
 # ---- bridge gate: only CI-owned ledgers are guarded -------------------------------------------
 # The predicate is BOTH a platform and the verified ledger flag, exactly as `isVerifiedLedger` (`cli/manifest.mjs`) and
 # `productActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
@@ -68,7 +92,7 @@ set -euo pipefail
 # Flattened ONCE into a variable and matched with here-strings, never `tr … | grep -q`: under the
 # `pipefail` set above, `grep -q` exits at the first match and can SIGPIPE `tr`, which would make a
 # MATCHING pipeline report failure. Reading from a here-string has no upstream process to kill.
-HUB="${SDLC_HUB_CONFIG:-.sdlc/hub.json}"
+HUB="$PRODUCT_CONFIG"
 HUB_FLAT="$(tr -d '\n' < "$HUB" 2>/dev/null || true)"
 HUB_ROOT="${HUB_FLAT#*\{}"
 HUB_ROOT="${HUB_ROOT%\}*}"
@@ -128,7 +152,7 @@ fi
 # command substitution in an assignment aborts the script.
 resolve_base() {
   # tr first: a key and its value may legally sit on separate lines, which a per-line match misses.
-  _cfg="$(tr -d '\n' < "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || _cfg=""
+  _cfg="$(tr -d '\n' < "$PRODUCT_CONFIG" 2>/dev/null | sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || _cfg=""
   _head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _head=""
   for _c in "origin/${_cfg}" "${_head}" origin/main; do
     case "$_c" in ''|origin/) continue ;; esac

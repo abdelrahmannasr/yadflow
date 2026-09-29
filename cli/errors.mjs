@@ -23,6 +23,7 @@ export const CODES = {
   'YAD-STATE-005': 'an authoring step is stranded behind its completed review gate',
   'YAD-STATE-006': 'a Build ledger is locked by another yad process that is writing it',
   'YAD-STATE-007': 'an epic cannot be seeded — the profile, the type or the existing ledger refuses it',
+  'YAD-STATE-008': 'a file kept under two names (product.json + hub.json, or product-prs.json + hub-prs.json) says different things under each',
   'YAD-CFG-001': 'hub.json names an unknown platform (expected github, gitlab, or null)',
   'YAD-CFG-002': 'design.json names an unknown design tool (expected one of config.yaml design.tools, or none)',
   'YAD-CFG-003': 'testing.json names an unknown testing tool (expected one of config.yaml testing.tools, or none)',

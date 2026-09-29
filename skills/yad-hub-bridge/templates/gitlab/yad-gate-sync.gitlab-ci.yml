@@ -90,7 +90,7 @@ yad-gate-sync:
       # >>> yad-pin
       # Which yadflow this job runs, most explicit source first:
       #   1. $YAD_VERSION            — the CI/CD variable, a human's deliberate override, verbatim
-      #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this Product
+      #   2. .sdlc/product.json      — "gate_sync_version" (.sdlc/hub.json when it is absent), the committed pin for this Product
       #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
       #   4. $YAD_MAJOR              — floating major, only when nothing above resolves
       # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so
@@ -111,9 +111,11 @@ yad-gate-sync:
         tr -d '\n' < "$1" 2>/dev/null | sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p"
       }
       yad_pin_valid() { printf '%s' "${1:-}" | grep -Eq "^${YAD_MAJOR}\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?\$"; }
+      # The Product settings under their new name first (E122); the old one until v5 deletes it.
+      YAD_PIN_FILE=.sdlc/product.json; [ -f "$YAD_PIN_FILE" ] || YAD_PIN_FILE=.sdlc/hub.json
       YAD_PKG="${YAD_VERSION:-}"
       if [ -z "$YAD_PKG" ]; then
-        for _cand in "$(yad_pin_read .sdlc/hub.json gate_sync_version)" "$(yad_pin_read .sdlc/cli-version.json version)"; do
+        for _cand in "$(yad_pin_read "$YAD_PIN_FILE" gate_sync_version)" "$(yad_pin_read .sdlc/cli-version.json version)"; do
           [ -n "$_cand" ] || continue
           if yad_pin_valid "$_cand"; then YAD_PKG="$_cand"; break; fi
           echo "yad-gate-sync: ignoring pin '${_cand}' — not an exact ${YAD_MAJOR}.x release." >&2

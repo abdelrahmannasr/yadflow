@@ -16,7 +16,7 @@ export { findProduct, hasProduct, workspaceProduct, registryEntryFor, WORKSPACE_
 export { reconcile } from '../cli/reconcile.mjs';
 export { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
 export { gateApprove, gateComment, gateAdvance } from '../cli/gate-local.mjs';
-export { isValidEpicId, seedableProfiles } from '../cli/epic-state.mjs';
+export { isValidEpicId, productDriftError, seedableProfiles } from '../cli/epic-state.mjs';
 export { runEpicNew, runFoundationNew, runFoundationStatus } from '../cli/epic.mjs';
 export { runSkillBind, runSkillList, runSkillUnbind } from '../cli/skill.mjs';
 export { runCommit } from '../cli/commit.mjs';

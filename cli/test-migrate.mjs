@@ -465,20 +465,27 @@ test('migrate 2 -> 3: the old settings name carries the same roster, both spelli
 });
 
 // Each of these is a bug that shipped in an earlier draft of this branch and was found by review.
-test('migrate: the authoritative file and its backup survive a DRIFTED pair', async () => {
-  // hub.json is the one that is read; product.json holds different content. Listing both names as
-  // separate rows made the product.json row write over hub.json before the hub.json row could copy
-  // it to .yad-orig — the content and its only backup, both gone.
-  const T = project({ files: {
+test('migrate: the copy kept and both originals survive a DRIFTED pair, whichever copy is kept', async () => {
+  // Listing both names as separate rows made one row write over the other name before that row could
+  // copy it to .yad-orig — the content and its only backup, both gone. Since E122 the person chooses
+  // the copy (`--keep`), the other is backed up first, and the shape step after it must not back the
+  // settled file up again: that would overwrite the only record of the copy that was not kept.
+  const drifted = () => project({ files: {
     '.sdlc/hub.json': JSON.stringify({ schemaVersion: 2, platform: 'github', roster: [{ login: 'a' }] }, null, 2) + '\n',
     '.sdlc/product.json': JSON.stringify({ schemaVersion: 2, platform: 'github', roster: [] }, null, 2) + '\n',
   } });
-  try {
-    await runMigrate(T, { apply: true });
-    assert.deepEqual(read(path.join(T, '.sdlc/hub.json')).roster, [{ login: 'a' }], 'the authoritative content survived');
-    assert.deepEqual(read(path.join(T, '.sdlc/hub.json.yad-orig')).roster, [{ login: 'a' }], 'and its backup is its OWN original');
-    assert.deepEqual(read(path.join(T, '.sdlc/product.json.yad-orig')).roster, [], 'the partner keeps its own original too');
-  } finally { cleanup(T); }
+  for (const [keep, kept, lost] of [['hub', [{ login: 'a' }], []], ['product', [], [{ login: 'a' }]]]) {
+    const T = drifted();
+    try {
+      await grabOut(() => runMigrate(T, { apply: true, keep }));
+      assert.deepEqual(read(path.join(T, '.sdlc/hub.json')).roster, kept, `${keep}: the kept content, under the old name`);
+      assert.deepEqual(read(path.join(T, '.sdlc/product.json')).roster, kept, `${keep}: and the new one`);
+      const [keptName, lostName] = keep === 'hub' ? ['hub', 'product'] : ['product', 'hub'];
+      assert.deepEqual(read(path.join(T, `.sdlc/${lostName}.json.yad-orig`)).roster, lost, `${keep}: the copy not kept is backed up as it was`);
+      assert.deepEqual(read(path.join(T, `.sdlc/${keptName}.json.yad-orig`)).roster, kept, `${keep}: the kept copy's backup is its own original`);
+      assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), `${keep}: the pair agrees again`);
+    } finally { cleanup(T); }
+  }
 });
 
 test('migrate: the preview names the partner even when it ALREADY exists', async () => {
@@ -1623,7 +1630,10 @@ test('migrate --apply rebuilds .sdlc/index.json on the default branch; the index
     assert.ok(!fs.existsSync(indexPath(T)), 'a branch never carries the index');
     // The default branch: rebuilt, and --json stdout stays one JSON document. (The branch's migration is
     // thrown away first, or it would follow the checkout and leave nothing to migrate on main.)
+    // `git clean` too: the branch's run created product.json, untracked, and left beside the restored
+    // hub.json it would disagree with (E122 refuses such a pair).
     git(T, 'checkout', '-q', '--', '.');
+    git(T, 'clean', '-fdq');
     git(T, 'checkout', '-q', 'main');
     const printed = await grabOut(() => runMigrate(T, { apply: true, json: true }));
     JSON.parse(printed);

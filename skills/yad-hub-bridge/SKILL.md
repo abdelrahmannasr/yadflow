@@ -17,7 +17,7 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 
 ## Conventions
 
-- `{project-root}` is the **Product**. The Product platform lives in `.sdlc/hub.json` — it holds no
+- `{project-root}` is the **Product**. The Product platform lives in `.sdlc/product.json` (written together with its older name `.sdlc/hub.json`, same bytes, until v5; read from `hub.json` only when `product.json` is absent) — it holds no
   list of people (`config.yaml` `product.config` (older projects: `hub.config`); schema in `../yad-connect-repos/references/hub-config.md`).
 - Per-step review-PR record: `epics/EP-<slug>/.sdlc/product-prs.json`, written together with its
   older name `hub-prs.json` (`config.yaml` `product.pr_ledger` (older projects: `hub.pr_ledger`)) — a
@@ -36,14 +36,14 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 
 ## Preconditions (the verified ledger runs only when all hold)
 
-`.sdlc/hub.json` exists with a non-null `platform`, `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true`), `config.yaml` `product.bridge: true`
+`.sdlc/product.json` (or, on an older Product, `.sdlc/hub.json`) exists with a non-null `platform`, `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true`), `config.yaml` `product.bridge: true`
 (older projects: `hub.bridge: true`), and `gh` (GitHub) / `glab` (GitLab) installed **and authenticated**. If any fails, report that the
 gate proceeds **local** (no error) and stop.
 
 ## On Activation
 
 ### Step 1 — Resolve platform + routing
-Read `.sdlc/hub.json` for the platform, `epics/<epic>/epic.md` for `repos` + `owner` (the artifact's
+Read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name) for the platform, `epics/<epic>/epic.md` for `repos` + `owner` (the artifact's
 author), and the matching `review+approve` step's `risk_tags` from `.sdlc/state.json`. Compute the
 **count** with `route` (below) — the same rule `yad-review-gate` enforces: `needed = base 1 + risk step`
 distinct approvers, where `contract` adds 2 and `auth`/`payments` add 1 (the highest tag, never the sum).
@@ -72,7 +72,7 @@ are a hint for whom to ask. There is no roster to turn them into people.
    reviewer suggestion: E68's suggestion reads a code change, so only `yad open-pr` (and `yad ship`) on a code repo prints it.)
 4. **Do not write the ledger.** CI is the sole writer and writes only at merge. During review nothing
    is recorded in the ledger — the platform PR/MR holds the review state (native approvals + threads).
-   At merge, CI records the `hub-prs.json` entry (in the shape below) and advances on the default
+   At merge, CI records the PR-ledger entry in the shape below (in `product-prs.json` and `hub-prs.json`) and advances on the default
    branch:
    ```json
    { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab",
@@ -115,14 +115,14 @@ a maintainer can force it with `yad gate ci --branch <review-branch> --pr <n> --
 default branch. (local mode keeps `yad gate sync` as the local writer.)
 
 1. Run `yad check --fix` (the wiring is manifest-driven, like `yad-checks`): with a platform +
-   enabled bridge in `.sdlc/hub.json` it installs
+   enabled bridge in `.sdlc/product.json` it installs
    - GitHub → `.github/workflows/yad-gate-sync.yml` (from `templates/github/yad-gate-sync.yml`)
    - GitLab → `.gitlab/ci/yad-gate-sync.yml` (from `templates/gitlab/yad-gate-sync.gitlab-ci.yml`)
    - plus the Product-side **verified-commits** gate (`checks/verified-commits.sh` + its workflow/fragment,
      owned by `yad-checks`) so review PRs accept only platform-Verified (signed) commits — there is no
      author allowlist
    - the wired job runs an **exact** version, resolved at run time from the repo: the `YAD_VERSION`
-     variable, else `hub.json` `gate_sync_version`, else the `.sdlc/cli-version.json` stamp, else the
+     variable, else `product.json` `gate_sync_version` (`hub.json` when it is absent), else the `.sdlc/cli-version.json` stamp, else the
      floating major the fragment ships with (`YAD_MAJOR`, `4` in this release) — a committed pin is used
      only when it is an exact release of that major, so `yad update` moves the fragment and the stamp
      to a new major together. It stopped floating on the major because that let a release change a scheduled job's

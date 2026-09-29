@@ -64,7 +64,7 @@ routing helper.
 ### Step 1 — Resolve the repo and detect the platform
 Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path`). Detect the platform: a GitHub
 remote or `.github/` → GitHub; a GitLab remote or `.gitlab/` → GitLab. If ambiguous, ask. For
-`repo: hub`, the target is `{project-root}` itself and the platform comes from `.sdlc/hub.json`.
+`repo: hub`, the target is `{project-root}` itself and the platform comes from `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name).
 
 ### Step 2 — `wire` (drop only the matching template)
 Copy from this skill's `templates/`:

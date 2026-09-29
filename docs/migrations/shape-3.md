@@ -34,21 +34,26 @@ So if the old name simply disappeared, there would be a window where your guard 
 gone, decides your records are unprotected, and stops blocking hand-edits. An upgrade would quietly
 switch off a safety check.
 
-That is why this takes three releases rather than one:
+That is why this is done in stages. The plan was three majors; **from 4.0 it is two** (E122 — 4.0 was
+only ever on the `@next` channel before this change, so no ordinary user lived with the in-between stage):
 
 | | what happens |
 |---|---|
-| **this release** | the new names appear and are kept up to date. The **old** names are still the ones read, so everything that already works keeps working |
-| the next major | the new names become the ones read, and `yad doctor` warns about the old ones |
-| the one after | the old names are deleted |
+| **3.x** (this guide's release) | the new names appear and are kept up to date. The **old** names are still the ones read |
+| **4.0** | the **new** names are the ones read. The old ones are still written beside them, for check gates an older yadflow installed in your repos, and `yad doctor` says v5 deletes them |
+| **5.0** | the old names are deleted |
+
+> **Corrected in 4.0.** This guide first said the old names stay the ones read until a later major. From
+> 4.0 the new names are read first, and two copies that say different things are refused rather than
+> one of them being picked — see "Two files with the same name" below.
 
 ## What `--apply` writes
 
 **A second copy of your settings, under the new name:**
 
 ```
-.sdlc/hub.json        <- still read; still updated on every save
-.sdlc/product.json    <- new; the same content, updated at the same time
+.sdlc/hub.json        <- read by 3.x; still updated on every save until 5.0
+.sdlc/product.json    <- new; the same content, updated at the same time; read from 4.0
 ```
 
 **Each epic's record of review PRs gains its second name too — but not during the migration.**
@@ -56,8 +61,8 @@ That file is a plain list, so it carries no shape and `yad migrate` leaves it al
 appears the next time a `yad gate` command actually changes it:
 
 ```
-epics/<id>/.sdlc/hub-prs.json       <- still read
-epics/<id>/.sdlc/product-prs.json   <- appears on the next gate write, not on migrate
+epics/<id>/.sdlc/hub-prs.json       <- read by 3.x
+epics/<id>/.sdlc/product-prs.json   <- appears on the next gate write, not on migrate; read from 4.0
 ```
 
 **And a second spelling for each reviewer's product-level role:**
@@ -77,14 +82,20 @@ Plus `"schemaVersion": 3` on every file the engine writes.
 No, and please do not delete one.
 
 Both copies are written together every time the engine saves. If they ever disagree, something
-outside the engine changed one of them, and `yad doctor` will tell you:
+outside the engine changed one of them.
+
+**From 4.0** no copy is picked for you: every command but `yad doctor`, `yad migrate` and `yad report`
+refuses with `YAD-STATE-008`, and the check gates fail. `yad doctor` says so:
 
 ```
-warn: .sdlc/product.json and .sdlc/hub.json do not match — .sdlc/hub.json is the one being read
+✗ .sdlc/product.json and .sdlc/hub.json say different things — every command refuses until one is chosen [YAD-STATE-008]
 ```
 
-**If you need to edit the settings by hand, edit `hub.json`** — that is the one being read this
-release. The next command that writes will copy it across.
+`yad migrate` shows which keys differ, and `yad migrate --apply` asks which copy to keep (or pass
+`--keep product` / `--keep hub`). The other copy is backed up beside itself as `<file>.yad-orig`.
+
+**If you need to edit the settings by hand, edit `product.json`**, then run
+`yad migrate --apply --keep product` to copy it across. (On 3.x the file read was `hub.json`.)
 
 ## After you run it
 
