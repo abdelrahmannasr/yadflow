@@ -2652,12 +2652,19 @@ test('risk-map stays advisory on two settings files that disagree, and reads the
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
   // `--level` answers in machine lines on stdout (read by risk-route.sh); the note goes to stderr there.
-  const lv = spawnSync('bash', [path.join(CHECKS, 'risk-map-check.sh'), '--level', 'main'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+  // No base named (GIT_ENV has no SDLC_BASE), so `resolve_base` runs and reads the settings file.
+  const lv = spawnSync('bash', [path.join(CHECKS, 'risk-map-check.sh'), '--level'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
   assert.equal(lv.status, 0, lv.stderr);
   assert.doesNotMatch(lv.stdout, /note \[risk-map\]|say different things/, `stdout is machine lines only: ${JSON.stringify(lv.stdout)}`);
   assert.ok(lv.stdout.trim(), 'and it still answers');
   assert.match(lv.stderr, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
   assert.doesNotMatch(lv.stderr, /No such file or directory/, 'no stray error from reading an empty file name');
+  // The common case: a code repo with no settings file at all. Every gate's `resolve_base` reads it; a
+  // missing file must say nothing (bash reports `< file` before a trailing `2>/dev/null` applies).
+  for (const n of ['product.json', 'hub.json']) fs.rmSync(path.join(T, '.sdlc', n));
+  const none = spawnSync('bash', [path.join(CHECKS, 'risk-map-check.sh'), '--level'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+  assert.equal(none.status, 0, none.stderr);
+  assert.doesNotMatch(none.stderr, /No such file or directory/, 'no stray error from a missing settings file');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

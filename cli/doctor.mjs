@@ -159,12 +159,12 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           } catch { /* an unreadable ledger is reported by its own check */ }
         }
         const when = !hub.platform
-          ? 'nothing reads it on a Product with no platform — delete the `roster` key'
+          ? `nothing reads it on a Product with no platform — delete the \`roster\` key from ${settingsEditHint(root)}`
           : waiting
             ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(hub) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key`
             : unplaced
               ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key once those reviews are closed`
-              : 'no older record needs it any more — delete the `roster` key';
+              : `no older record needs it any more — delete the \`roster\` key from ${settingsEditHint(root)}`;
         check(checks, 'people:roster-unused', 'project', 'warn',
           `${settingsRel} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
           when);
@@ -516,7 +516,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       const what = [listedAuthors ? `\`verified_authors\` in ${settingsRel}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
       check(checks, 'people:verified-authors-unused', 'project', 'warn',
         `${what} — the verified-commits gate no longer reads an author list; it checks signatures only`,
-        'delete them when convenient; write access to the repo decides who can author a commit');
+        `delete them when convenient${listedAuthors ? ` (\`verified_authors\` from ${settingsEditHint(root)})` : ''}; write access to the repo decides who can author a commit`);
     }
     // A wired `verified-commits.sh` from before E62 still ENFORCES the author list. On a verified ledger
     // `yad check --fix` refreshes it; on a local ledger the Product's CI files are not managed, so an older

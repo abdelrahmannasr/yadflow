@@ -27154,6 +27154,24 @@ test('E122: migrate settles nothing when one kept copy is broken, and never sett
     const choose = () => { fs.rmSync(path.join(T, '.sdlc/hub.json')); return 'product'; };
     await assert.rejects(() => runMigrate(T, { apply: true }, { choose }), (e) => e.code === 'YAD-STATE-008' && /\.sdlc\/hub\.json is gone since the difference was found — nothing was written/.test(e.message));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // A name edited while the question waited: not the pair the person chose for.
+  T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    const choose = () => { fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":null}\n'); return 'product'; };
+    await assert.rejects(() => runMigrate(T, { apply: true }, { choose }), (e) => e.code === 'YAD-STATE-008' && /changed since the difference was shown — nothing was written/.test(e.message));
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), '{"schemaVersion":10,"platform":null}\n', 'the edit is left alone');
+    assert.ok(!fs.existsSync(path.join(T, '.gitignore')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // A name that is a folder: refused before anything is written.
+  T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    fs.mkdirSync(path.join(T, '.sdlc/hub.json'));
+    await assert.rejects(() => runMigrate(T, { apply: true, keep: 'product' }), (e) => e.code === 'YAD-STATE-008' && /\.sdlc\/hub\.json is not a file — nothing was written/.test(e.message));
+    assert.ok(!fs.existsSync(path.join(T, '.gitignore')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('E122: a settings hint names the file that is read, and the migrate step only when both names exist', async () => {
@@ -27174,4 +27192,30 @@ test('E122: a settings hint names the file that is read, and the migrate step on
     fs.rmSync(path.join(T, '.sdlc/hub.json'));
     assert.equal(settingsEditHint(T), '.sdlc/product.json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: the default-branch guard names the settings file to edit — hub.json on a Product that has only it', async () => {
+  const { guardDefaultBranch } = await import('./hubcommit.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122g-'));
+  const code = process.exitCode;
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{}\n');
+    let r = await captureConsole(() => guardDefaultBranch('feat/x', 'main', { root: T, cmd: 'yad tidy up' }));
+    assert.equal(r.value, false);
+    assert.match(r.out, /if 'main' is wrong, set default_branch in \.sdlc\/hub\.json\)/);
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{}\n');
+    r = await captureConsole(() => guardDefaultBranch('feat/x', 'main', { root: T, cmd: 'yad tidy up' }));
+    assert.match(r.out, /set default_branch in \.sdlc\/product\.json, then `yad migrate --apply --keep product`\)/);
+  } finally { process.exitCode = code; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: every caller of the default-branch guard hands it the Product root', () => {
+  // Without `root` the hint falls back to the words-only version; nothing else would notice.
+  const callers = ['checkpoint.mjs', 'gate.mjs', 'repo-publish.mjs', 'tidy.mjs'];
+  for (const f of callers) {
+    const calls = fs.readFileSync(path.join(ROOT, 'cli', f), 'utf8').match(/guardDefaultBranch\([^)]*\)/g) || [];
+    assert.ok(calls.length, `${f} calls the guard`);
+    for (const c of calls) assert.match(c, /\broot\b/, `${f}: ${c}`);
+  }
 });

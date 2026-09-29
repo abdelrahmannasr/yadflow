@@ -604,7 +604,9 @@ none) into the record's `path`. To turn it on:
 
 1. From the Product, run `yad check --fix --push`: it writes `.sdlc/product-link.json` into each
    connected code repo and commits it to the default branch. Set the Product's `git_url` in its
-   `.sdlc/product.json` first (`yad setup` fills it from the `origin` remote).
+   `.sdlc/product.json` first (`yad setup` fills it from the `origin` remote). On a Product that has only
+   `.sdlc/hub.json`, set it there, and never create a `product.json` beside it by hand; when both exist,
+   run `yad migrate --apply --keep product` after the edit.
 2. Make a token that can **read** the Product repository — on GitHub a fine-grained personal access
    token or a GitHub App token with `contents: read` on that one repo (the workflow's own `GITHUB_TOKEN`
    cannot read another private repo); on GitLab a project or group access token with `read_repository`.

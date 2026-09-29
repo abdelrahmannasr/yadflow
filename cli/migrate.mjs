@@ -896,13 +896,19 @@ export function describeDrift(aPath, bPath) {
   return ['the two files hold different kinds of value'];
 }
 
+const bytesOrNull = (abs) => { try { return fs.readFileSync(abs); } catch { return null; } };
+
 // Every drifted pair under `root`, project-relative, with what differs.
 export function driftedPairs(root) {
   let dirs = [];
   try { dirs = epicIds(root).map(epicRel); } catch { /* the settings file is still checked */ }
-  return productDrift(root, dirs).map(({ canonical, legacy }) => ({
-    canonical, legacy, differences: describeDrift(path.join(root, canonical), path.join(root, legacy)),
-  }));
+  return productDrift(root, dirs).map(({ canonical, legacy }) => {
+    const pair = { canonical, legacy, differences: describeDrift(path.join(root, canonical), path.join(root, legacy)) };
+    // What each name held when the difference was shown — not part of the report (not enumerable), but
+    // `checkDrift` refuses a pair that has changed since, because it is not the pair the person chose for.
+    Object.defineProperty(pair, 'seen', { value: [canonical, legacy].map((rel) => bytesOrNull(path.join(root, rel))) });
+    return pair;
+  });
 }
 
 // Settle each pair on the copy `keep` names, in two steps: `checkDrift` first, which writes nothing and
@@ -914,7 +920,8 @@ export function driftedPairs(root) {
 //     so nothing from outside it can reach a committed file through it;
 //   - a kept copy that does not parse is refused: settling on it would leave two broken files, and every
 //     command refusing them for another reason;
-//   - a name that has gone since the difference was found (deleted while the question waited) is
+//   - a name that is not a plain readable file (a folder, a file yad cannot read) is refused;
+//   - a name that has gone, or changed, since the difference was found (while the question waited) is
 //     refused too: the pair is not the one the person chose for.
 function settlePlan(root, pairs, keep) {
   return pairs.map(({ canonical, legacy }) => {
@@ -924,7 +931,8 @@ function settlePlan(root, pairs, keep) {
 }
 
 function checkDrift(root, pairs, keep) {
-  for (const { from, to, src } of settlePlan(root, pairs, keep)) {
+  const plan = settlePlan(root, pairs, keep);
+  for (const [i, { from, to, src }] of plan.entries()) {
     for (const rel of [from, to]) {
       let st;
       try { st = fs.lstatSync(path.join(root, rel)); } catch (e) {
@@ -934,6 +942,13 @@ function checkDrift(root, pairs, keep) {
       if (st.isSymbolicLink()) {
         throw err('YAD-STATE-008', `${rel} is a symbolic link — yad does not settle a pair through one, and nothing was written`, 'replace it with the file itself (or delete it and keep the other name), then run `yad migrate --apply` again');
       }
+      if (!st.isFile()) throw err('YAD-STATE-008', `${rel} is not a file — nothing was written`, `make ${rel} a file again (restore it from git), then run \`yad migrate --apply\` again`);
+    }
+    const seen = pairs[i].seen;
+    const now = [pairs[i].canonical, pairs[i].legacy].map((rel) => bytesOrNull(path.join(root, rel)));
+    if (now.some((b) => b === null)) throw err('YAD-STATE-008', `${from} or ${to} cannot be read — nothing was written`, 'check the two files can be read, then run `yad migrate --apply` again');
+    if (seen && seen.some((b, j) => !b || !b.equals(now[j]))) {
+      throw err('YAD-STATE-008', `${pairs[i].canonical} or ${pairs[i].legacy} changed since the difference was shown — nothing was written`, 'run `yad migrate` again to see the pair as it is now');
     }
     try { JSON.parse(fs.readFileSync(src, 'utf8')); } catch {
       throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept — nothing was written`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);

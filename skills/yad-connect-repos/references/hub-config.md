@@ -65,7 +65,7 @@ reads it, to warn. The roster is read for one thing only: its `name` →
 (`../../yad-hub-bridge/references/login-roster.md` → "Recording the login on older records"). `yad doctor`
 warns `people:roster-unused` and `people:verified-authors-unused` so nobody edits them believing they decide
 something. Delete `verified_authors` when convenient; delete `roster` when `people:roster-unused` says it
-can go — no older record needs it any more, or only records it cannot place are left and their reviews are
+can go (edit the settings as the rule at the top of this page says) — no older record needs it any more, or only records it cannot place are left and their reviews are
 closed.
 
 ## Detection

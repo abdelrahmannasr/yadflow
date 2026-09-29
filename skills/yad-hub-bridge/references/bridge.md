@@ -218,7 +218,8 @@ so anything that is not an exact release of this major is skipped, loudly, in fa
 **A new major moves both files at once.** `yad update` rewrites the fragment from the release's template
 and re-stamps `.sdlc/cli-version.json` in the same run, so a Product that updates to 4.x gets a fragment
 with `YAD_MAJOR=4` and a `4.x` stamp together. A `gate_sync_version` pin in `product.json` from the old major
-is then SKIPPED (the job logs `ignoring pin … not an exact 4.x release`) — update it or remove it. A
+is then SKIPPED (the job logs `ignoring pin … not an exact 4.x release`) — update it or remove it (edit
+`product.json`, then `yad migrate --apply --keep product`; on a Product that has only `hub.json`, edit that). A
 fragment the team EDITED is kept by `yad update` while the stamp still moves, so an edited fragment on
 the old major would skip the new stamp; `yad update` names that case, and `--overwrite-local` replaces
 the fragment (saving the edit beside it). The
