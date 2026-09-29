@@ -24687,6 +24687,10 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     assert.deepEqual(local.value.pushed, { pushed: 'local', why: 'no remote named origin' });
     assert.match(local.out, /local only — no remote named origin/);
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    // No clean-up of its own after a push: a recent git (2.55 on the macOS runner) may start `gc`/maintenance in
+    // the background once a push lands, and a lock file it writes into the bare repo made the `rmSync` below fail
+    // with ENOTEMPTY (PR #297 CI). The retries cover any other short-lived writer.
+    for (const [k, v] of [['receive.autogc', 'false'], ['gc.auto', '0'], ['maintenance.auto', 'false']]) execFileSync('git', ['config', k, v], { cwd: remote });
     g('remote', 'add', 'origin', remote);
     const spawned = [];
     const spawner = (cmd, args, opts) => { spawned.push({ cmd, args, opts }); return { unref() {} }; };
@@ -24713,7 +24717,10 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     const manual = await captureRun(T, { noPush: false });
     assert.equal(manual.value.pushed.pushed, 'done', manual.out);
     assert.equal(execFileSync('git', ['rev-parse', 'yad/wip/ann-lee/EP-x'], { cwd: remote, encoding: 'utf8' }).trim(), g('rev-parse', 'yad/wip/ann-lee/EP-x'));
-  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(remote, { recursive: true, force: true }); }
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    fs.rmSync(remote, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
 });
 
 test('E43 people: capture branches, local and remote-tracking, are not counted as anyone committing', () => {
