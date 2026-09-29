@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyHubActions, renamedNameHits } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyHubActions, renamedNameHits, PRODUCT_PROFILE_GATES, rejectsProductProfile } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -1999,14 +1999,37 @@ export function renamedChecks(checks, root) {
   }
   for (const [file, hits] of byFile) {
     const listed = hits.map((h) => `line ${h.line} \`${h.old}\` → \`${h.new}\``).join(', ');
-    const theirs = hits.filter((h) => !h.rewritten);
+    const theirs = hits.filter((h) => !h.rewrittenBy);
+    // The include line is rewritten by yad — by a plain `yad update`, or, when the old fragment was edited,
+    // only by `--overwrite-local`. Until then the new fragment is not installed, so a hand edit of that line
+    // would include a file that is not there and fail every pipeline (review 1): say to leave it.
+    const late = hits.some((h) => h.rewrittenBy === 'overwrite-local');
+    const by = late ? '`yad update --overwrite-local`' : '`yad update`';
     const all = theirs.length === hits.length;
     const what = all ? (hits.length > 1 ? 'each' : 'it') : theirs.map((h) => `line ${h.line}`).join(', ');
     const hint = theirs.length === 0
-      ? '`yad update` rewrites it when it replaces the old fragment'
-      : `yad does not edit this file — change ${what} to ${!all && theirs.length > 1 ? 'their new names' : 'its new name'}${all ? '' : ' (`yad update` rewrites the include line itself)'}`;
+      ? `${by} rewrites it when it replaces the old fragment${late ? ' — leave it until then: the new fragment is not installed before that' : ''}`
+      : `yad does not edit this file — change ${what} to ${!all && theirs.length > 1 ? 'their new names' : 'its new name'}${all ? '' : ` (${by} rewrites the include line itself${late ? ' — leave that one until then' : ''})`}`;
     check(checks, `renamed-ref:${file}`, 'project', 'warn',
       `${file} names what 4.0 renamed: ${listed}`, hint);
+  }
+}
+
+// `profile:<gate>` (E123). A Product workflow passes `--profile product` to the pattern gates, and a gate the
+// team edited before 4.0 — which `yad update` keeps — accepts only `code|hub`, so every Product PR fails it.
+// A warning, like E123's other lines. Only when a workflow on disk passes that profile; an old workflow still
+// passing `hub` breaks nothing.
+export function productProfileChecks(checks, root) {
+  if (!exists(productConfigPath(root))) return;
+  const passing = PRODUCT_CHECK_WORKFLOWS.filter((rel) => {
+    try { return /--profile[ =]product\b/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
+  });
+  if (!passing.length) return;
+  for (const gate of PRODUCT_PROFILE_GATES) {
+    if (!rejectsProductProfile(path.join(root, gate))) continue;
+    check(checks, `profile:${gate}`, 'project', 'warn',
+      `${gate} does not accept \`--profile product\`, which ${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'} — every Product PR fails that check`,
+      `it was changed by hand, so \`yad update\` kept it: add \`product\` to its \`case "$PROFILE" in\` list (and \`[ "$PROFILE" = product ] && PROFILE=hub\` after it, as the shipped copy has), or replace it with \`yad update --overwrite-local\` (your copy is saved as ${path.basename(gate)}${BACKUP_SUFFIX})`);
   }
 }
 
@@ -2445,6 +2468,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   ownerChecks(checks, root);
   ownerGuardChecks(checks, root);
   renamedChecks(checks, root);
+  productProfileChecks(checks, root);
   phaseChecks(checks, root);
   laneChecks(checks, root);
   epicChecks(checks, root);

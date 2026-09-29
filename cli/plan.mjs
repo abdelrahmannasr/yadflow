@@ -534,7 +534,9 @@ function ownedByOldInstall(p, marker) {
 //   recorded, and the bytes are what yad wrote   → removed ('legacy')
 //   no record (installed before the record)      → removed, after a <file>.yad-orig copy ('legacy')
 //   recorded, and the bytes differ (edited)      → 'modified': left, with the rename not done; only
-//                                                  `--overwrite-local` removes it, after the same copy
+//                                                  `--overwrite-local` removes it, after the same copy.
+//                                                  Meanwhile the new name is not installed beside it
+//                                                  (`withoutKeptRenames`), or both would run
 // The copy is inert where it lands: GitHub runs only `.yml`/`.yaml` files, and nothing includes it.
 // When the old file goes, its line leaves the record, so the record lists only files that are there.
 function legacyFileActions(scope, baseRoot, fileMap, wiring) {
@@ -565,7 +567,9 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
       apply: () => {
         if (backup) fs.copyFileSync(oldPath, backup);
         fs.rmSync(oldPath, { force: true });
-        copyFile(asset(w.src), path.join(baseRoot, newDest), { exec: !!w.exec });
+        // Only into an empty path. A file already at the new name is the new name's own wired-file action's
+        // to judge — with its provenance and its backup — and may hold the team's edits (review 1).
+        if (!exists(path.join(baseRoot, newDest))) copyFile(asset(w.src), path.join(baseRoot, newDest), { exec: !!w.exec });
         const rootCi = path.join(baseRoot, '.gitlab-ci.yml');
         try {
           const txt = fs.readFileSync(rootCi, 'utf8');
@@ -623,13 +627,16 @@ function renamedNameFiles(root) {
     ...CODEOWNERS_DIRS.map((d) => (d ? `${d}/CODEOWNERS` : 'CODEOWNERS')),
   ];
 }
-// Every hit: { file, line, old, new, rewritten }. `rewritten` marks the include line of the root
-// .gitlab-ci.yml that `yad update` rewrites itself — true only while the old fragment is one it will replace.
+// Every hit: { file, line, old, new, rewrittenBy }. `rewrittenBy` marks a match inside the old fragment's path
+// on a line of the root .gitlab-ci.yml, which yad rewrites itself when it replaces that fragment: 'update'
+// for a fragment `yad update` replaces, 'overwrite-local' for an edited one it keeps until that flag; null
+// for every other hit, which is the team's to change.
 export function renamedNameHits(root) {
-  // The fragments `yad update` will replace and whose include it will rewrite: not an edited one it keeps.
-  let fragments = [];
+  const fragments = new Map();
   try {
-    fragments = legacyHubActions(root).filter((a) => a.status === 'legacy' && a.paths.includes('.gitlab-ci.yml')).map((a) => a.rename.from);
+    for (const a of legacyHubActions(root)) {
+      if (a.paths.includes('.gitlab-ci.yml') || a.status === 'modified') fragments.set(a.rename.from, a.status === 'modified' ? 'overwrite-local' : 'update');
+    }
   } catch { /* an unreadable provenance record: nothing is promised, so every hit reads as the team's to change */ }
   const hits = [];
   for (const file of renamedNameFiles(root)) {
@@ -641,12 +648,41 @@ export function renamedNameHits(root) {
     text.split(/\r?\n/).forEach((line, i) => {
       for (const m of line.matchAll(RENAMED_CI_RE)) {
         const next = RENAMED_CI_NAMES.find(([o]) => o === m[1])[1];
-        const rewritten = file === '.gitlab-ci.yml' && fragments.some((f) => line.includes(f));
-        hits.push({ file, line: i + 1, old: m[1], new: next, rewritten });
+        // Per match, not per line: only the fragment path itself is rewritten, not a job named beside it.
+        let rewrittenBy = null;
+        if (file === '.gitlab-ci.yml') {
+          for (const [f, by] of fragments) {
+            for (let at = line.indexOf(f); at !== -1 && !rewrittenBy; at = line.indexOf(f, at + 1)) {
+              if (m.index >= at && m.index < at + f.length) rewrittenBy = by;
+            }
+          }
+        }
+        hits.push({ file, line: i + 1, old: m[1], new: next, rewrittenBy });
       }
     });
   }
   return hits;
+}
+
+// The Product's pattern gates, whose workflow passes `--profile product` since E123. A copy the team edited
+// is kept by `yad update` — and one from before 4.0 accepts only `code|hub`, so it fails every Product PR
+// with "unknown --profile 'product'" (review 1). True when the gate's own `case "$PROFILE" in …)` list lacks
+// `product`; a copy with no such line is not judged.
+export const PRODUCT_PROFILE_GATES = Object.freeze(['checks/commit-message.sh', 'checks/pr-title.sh', 'checks/pr-template.sh']);
+export function rejectsProductProfile(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const list = text.match(/^\s*case\s+"\$PROFILE"\s+in\s+([^)]*)\)/m);
+  return !!list && !list[1].split('|').map((x) => x.trim()).includes('product');
+}
+
+// The new name of a renamed CI file is not installed while an edited old one is kept (`modified`): both
+// would run on GitHub — every gate twice, the stock one undoing whatever the team's edit loosened — and on
+// GitLab the new one would sit there included by nothing. `--overwrite-local` installs it with the rename.
+export function withoutKeptRenames(actions) {
+  const kept = new Set(actions.filter((a) => a.rename && a.status === 'modified').map((a) => path.join(a.root, a.rename.to)));
+  if (!kept.size) return actions;
+  return actions.filter((a) => !(a.managed && !exists(a.managed.dest) && kept.has(a.managed.dest)));
 }
 
 export function legacyRepoActions(root, repo) {

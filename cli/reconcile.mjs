@@ -14,7 +14,7 @@ import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPa
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyHubActions,
-  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, rejectsProductProfile,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
@@ -52,7 +52,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   //     and purge of skills removed in a later release ('removed': delete the lingering install) ---
   const actions = [
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
-    ...productActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
+    // E123: a renamed CI file the team edited is kept, and its new name is not installed beside it.
+    ...withoutKeptRenames([...productActions(root), ...legacyHubActions(root)]), ...hookActions(root, ideTargets),
     ...orphanHookActions(root, ideTargets),
     // E48: this clone's git pre-commit hook — the person's half of the ledger guard.
     ...gitHookActions(root), ...orphanGitHookActions(root),
@@ -72,7 +73,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       apply: () => undefined,
     });
   }
-  for (const repo of registry.repos) actions.push(...repoActions(root, repo), ...legacyRepoActions(root, repo));
+  for (const repo of registry.repos) actions.push(...withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]));
 
   // --- stale code-context (HEAD moved since last pack) ---
   const staleRepos = [];
@@ -113,8 +114,11 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // E123: the team's own files that name one of our renamed CI names — each with its file and line, the same
   // list `yad doctor` shows. yad never edits them; the include line it rewrites is said as what it is.
   for (const h of renamedNameHits(root)) {
-    if (h.rewritten) info(`${h.file}:${h.line} includes the old fragment — ${fix ? 'rewritten' : 'rewritten by `yad check --fix`/`yad update`'} to name ${h.new}`);
-    else warn(`${h.file}:${h.line} names \`${h.old}\`, renamed \`${h.new}\` in 4.0 — yad does not edit this file; change it by hand`);
+    if (h.rewrittenBy === 'update' || (h.rewrittenBy === 'overwrite-local' && overwriteLocal)) {
+      info(`${h.file}:${h.line} includes the old fragment — ${fix ? 'rewritten' : `rewritten by ${h.rewrittenBy === 'update' ? '`yad check --fix`/`yad update`' : '`yad update --overwrite-local`'}`} to name ${h.new}`);
+    } else if (h.rewrittenBy === 'overwrite-local') {
+      info(`${h.file}:${h.line} includes the edited old fragment — \`yad update --overwrite-local\` rewrites it when it replaces that fragment; leave it until then`);
+    } else warn(`${h.file}:${h.line} names \`${h.old}\`, renamed \`${h.new}\` in 4.0 — yad does not edit this file; change it by hand`);
   }
   // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
   const gitHookNote = gitHookAdvice(gitHookState(root));
@@ -177,7 +181,14 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A renamed file the team edited (E123): kept under its old name, so say that the rename is half done and
   // how to finish it. True whatever else this run does: the old file goes on running (GitHub) or being the
   // one the root .gitlab-ci.yml includes (GitLab) until --overwrite-local replaces it.
-  for (const m of modified.filter((a) => a.rename)) {
+  // An edited Product gate that rejects the profile the renamed workflow passes (E123): kept, and then every
+  // Product PR fails it. Said here because the generic line does not say why the next PR goes red.
+  for (const m of overwriteLocal ? [] : modified.filter((a) => a.managed && a.managed.root === root
+    && PRODUCT_PROFILE_GATES.includes(path.relative(root, a.managed.dest).split(path.sep).join('/')) && rejectsProductProfile(a.managed.dest))) {
+    warn(`${m.scope}/${m.item} was edited and is kept, but it does not accept \`--profile product\`, which yad-product-checks.yml passes — every Product PR fails that check`);
+    hand(`add \`product\` to its \`case "$PROFILE" in\` list (and \`[ "$PROFILE" = product ] && PROFILE=hub\` after it, as the shipped copy has), or replace it with \`yad update --overwrite-local\` (your copy is saved as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
+  }
+  for (const m of overwriteLocal ? [] : modified.filter((a) => a.rename)) {
     const { from, to } = m.rename;
     warn(`${m.scope}/${from} was renamed ${to} in this release, but it was edited, so it is kept — ${from.startsWith('.gitlab/') ? 'the root .gitlab-ci.yml goes on including it' : 'it goes on running'} under its old name`);
     hand(`\`yad update --overwrite-local\` replaces it with ${to} (your copy is saved as ${path.basename(from)}${BACKUP_SUFFIX}); then copy your edits into ${to}`);

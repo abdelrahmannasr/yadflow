@@ -1187,11 +1187,112 @@ test('E123 update: an edited old workflow is kept (modified) until --overwrite-l
     assert.match(out, /hub\/\.github\/workflows\/yad-hub-checks\.yml was renamed \.github\/workflows\/yad-product-checks\.yml in this release, but it was edited, so it is kept — it goes on running under its old name/);
     assert.match(out, /`yad update --overwrite-local` replaces it with \.github\/workflows\/yad-product-checks\.yml \(your copy is saved as yad-hub-checks\.yml\.yad-orig\); then copy your edits into/);
     assert.ok(Object.hasOwn(ledgerOf(T), oldHubChecks), 'nothing done, so the record keeps its line');
+    assert.ok(!fs.existsSync(path.join(T, newProductChecks)), 'and the new name is not installed beside it');
     await reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true });
     assert.ok(!fs.existsSync(path.join(T, oldHubChecks)), 'removed under --overwrite-local');
     assert.ok(fs.existsSync(path.join(T, newProductChecks)), 'and the new name installed');
     assert.equal(fs.readFileSync(path.join(T, `${oldHubChecks}.yad-orig`), 'utf8'), edited, 'after saving the edit');
     assert.ok(!Object.hasOwn(ledgerOf(T), oldHubChecks));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1: old and new both present — the rename never writes over an edited new file', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const mine = `${fs.readFileSync(path.join(T, newProductChecks), 'utf8')}# the team's step\n`;
+    fs.writeFileSync(path.join(T, newProductChecks), mine);
+    // The old name, unedited and recorded, beside it.
+    fs.writeFileSync(path.join(T, oldHubChecks), shippedHubChecks());
+    const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
+    rec.files[oldHubChecks] = contentShaOf(path.join(T, oldHubChecks));
+    fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
+    for (const opts of [{ scope: 'changed' }, { scope: 'all' }]) {
+      await reconcile(T, { fix: true, ...opts });
+      assert.equal(fs.readFileSync(path.join(T, newProductChecks), 'utf8'), mine, `the team's edit survives (${opts.scope})`);
+      assert.ok(!fs.existsSync(path.join(T, oldHubChecks)), 'the old name is still removed');
+    }
+    // --overwrite-local reaches it through its own action, with its own copy.
+    await reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true });
+    assert.equal(fs.readFileSync(path.join(T, `${newProductChecks}.yad-orig`), 'utf8'), mine);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1: an edited old workflow kept — its new name is not installed beside it, even by check --fix', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    fs.writeFileSync(path.join(T, oldHubChecks), `${shippedHubChecks()}# ours\n`);
+    const r = await reconcile(T, { fix: true, scope: 'all' });
+    assert.ok(!fs.existsSync(path.join(T, newProductChecks)), 'not installed: both would run every gate twice');
+    assert.ok(!r.items.some((i) => i.item === newProductChecks), 'and not reported as missing');
+    const { withoutKeptRenames } = await import('./plan.mjs');
+    const kept = { rename: { from: 'a.yml', to: 'b.yml' }, status: 'modified', root: T };
+    const newOne = { managed: { dest: path.join(T, 'b.yml') }, status: 'missing' };
+    assert.deepEqual(withoutKeptRenames([kept, newOne]), [kept]);
+    assert.equal(withoutKeptRenames([{ ...kept, status: 'legacy' }, newOne]).length, 2, 'a rename that happens installs normally');
+    fs.writeFileSync(path.join(T, 'b.yml'), 'x');
+    assert.equal(withoutKeptRenames([kept, newOne]).length, 2, 'a new file already there is judged by its own action');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1 (GitLab): an edited old fragment — the include line is left for --overwrite-local, and the text says so', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const oldFrag = '.gitlab/ci/yad-hub-checks.yml';
+    const newFrag = '.gitlab/ci/yad-product-checks.yml';
+    fs.rmSync(path.join(T, newFrag));
+    const edited = '# yad-managed-include: yad-checks\nyad-hub-commit-message: { script: [ours] }\n';
+    fs.writeFileSync(path.join(T, oldFrag), edited);
+    const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
+    delete rec.files[newFrag];
+    rec.files[oldFrag] = 'sha256:somethingelse';
+    fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
+    // A job named on the include line itself is the team's; only the path inside is yad's to rewrite.
+    fs.writeFileSync(path.join(T, '.gitlab-ci.yml'), `include:\n  - local: '${oldFrag}' # needs yad-hub-pr-title\n`);
+    const { collectDoctor } = await import('./doctor.mjs');
+    const ref = collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.gitlab-ci.yml');
+    assert.equal(ref.message, '.gitlab-ci.yml names what 4.0 renamed: line 2 `yad-hub-checks` → `yad-product-checks`, line 2 `yad-hub-pr-title` → `yad-product-pr-title`');
+    assert.equal(ref.hint, 'yad does not edit this file — change line 2 to its new name (`yad update --overwrite-local` rewrites the include line itself — leave that one until then)');
+    let { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'all' }));
+    assert.ok(!fs.existsSync(path.join(T, newFrag)), 'the new fragment waits for the rename');
+    assert.equal(fs.readFileSync(path.join(T, oldFrag), 'utf8'), edited);
+    assert.match(out, /\.gitlab-ci\.yml:2 includes the edited old fragment — `yad update --overwrite-local` rewrites it when it replaces that fragment; leave it until then/);
+    assert.match(out, /was edited, so it is kept — the root \.gitlab-ci\.yml goes on including it under its old name/);
+    ({ out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true })));
+    assert.doesNotMatch(out, /so it is kept/, 'not said on the run that replaces it');
+    assert.match(out, /\.gitlab-ci\.yml:2 includes the old fragment — rewritten to name yad-product-checks/);
+    assert.ok(fs.readFileSync(path.join(T, '.gitlab-ci.yml'), 'utf8').includes(`- local: '${newFrag}' # needs yad-hub-pr-title`));
+    assert.ok(fs.existsSync(path.join(T, newFrag)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1: an edited Product gate that rejects --profile product is named by update and doctor', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const gate = path.join(T, 'checks/pr-title.sh');
+    fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+    assert.match(out, /hub\/checks\/pr-title\.sh was edited and is kept, but it does not accept `--profile product`, which yad-product-checks\.yml passes — every Product PR fails that check/);
+    const { collectDoctor } = await import('./doctor.mjs');
+    const hit = collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:'));
+    assert.deepEqual(hit.map((x) => [x.id, x.status]), [['profile:checks/pr-title.sh', 'warn']]);
+    assert.match(hit[0].message, /^checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes/);
+    // With no workflow passing `product`, nothing breaks, and nothing is said.
+    fs.rmSync(path.join(T, newProductChecks));
+    assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0);
+    // Every shipped gate accepts it.
+    const { rejectsProductProfile } = await import('./plan.mjs');
+    for (const g of ['skills/yad-checks/templates/checks/commit-message.sh', 'skills/yad-pr-template/templates/checks/pr-title.sh', 'skills/yad-pr-template/templates/checks/pr-template.sh']) {
+      assert.equal(rejectsProductProfile(path.join(ROOT, g)), false, g);
+    }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
