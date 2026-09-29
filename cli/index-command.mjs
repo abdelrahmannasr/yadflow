@@ -13,7 +13,7 @@
 // It never commits: the index rides the commit that carries the change, like the ledger it summarizes.
 import { c, log, ok, info, warn, fail, hand, exists, emitJSON } from './lib.mjs';
 import path from 'node:path';
-import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
+import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION, settingsEditHint } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 import { buildIndex, writeIndex, indexFreshness, INDEX_FILE } from './product-index.mjs';
@@ -62,7 +62,7 @@ export async function runIndex(root, { json = false } = {}) {
   const defaultBranch = resolveDefaultBranch(git, hub);
   if (branch !== defaultBranch) {
     fail(`on '${branch}', not the default branch '${defaultBranch}' — ${INDEX_FILE} is written on the default branch only, so a branch never carries it`);
-    hand(`switch to '${defaultBranch}' and re-run (set default_branch in .sdlc/product.json if '${defaultBranch}' is wrong); \`yad index --json\` prints it here without writing`);
+    hand(`switch to '${defaultBranch}' and re-run (if '${defaultBranch}' is wrong, set default_branch in ${settingsEditHint(root)}); \`yad index --json\` prints it here without writing`);
     process.exitCode = 1;
     return;
   }

@@ -3,6 +3,7 @@
 // the default branch, so their `[skip ci]` commit never enters a PR's base..HEAD range (where it would
 // strand required checks and fail verified-commits). This module is the single home of that guard.
 import { warn, fail, hand, run, forTerminal } from './lib.mjs';
+import { SETTINGS_EDIT_HINT } from './manifest.mjs';
 
 export const productGit = (root) => (...args) => run('git', args, { cwd: root });
 
@@ -41,7 +42,7 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
     return true;
   }
   fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
-  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (set default_branch in .sdlc/product.json if '${d}' is wrong, then \`yad migrate --apply --keep product\`)`);
+  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (if '${d}' is wrong, set default_branch in ${SETTINGS_EDIT_HINT})`);
   process.exitCode = 1;
   return false;
 }

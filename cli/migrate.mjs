@@ -906,21 +906,33 @@ export function driftedPairs(root) {
 }
 
 // Settle each pair on the copy `keep` names. Returns the paths written (the losing names).
+//
+// Everything is checked before anything is written, so a refusal leaves every pair as it was:
+//   - a name that is a symbolic link is refused. The kept copy's bytes are copied into a committed file,
+//     and a link would copy whatever file it points at on this machine (E115 refuses links in the same
+//     spirit);
+//   - a kept copy that does not parse is refused: settling on it would leave two broken files, and every
+//     command refusing them for another reason.
 function settleDrift(root, pairs, keep) {
-  const written = [];
-  for (const { canonical, legacy } of pairs) {
+  const plan = pairs.map(({ canonical, legacy }) => {
     const [from, to] = keep === 'product' ? [canonical, legacy] : [legacy, canonical];
-    const src = path.join(root, from);
-    // A copy that does not parse is not one to keep: settling on it would leave two broken files and
-    // every command refusing them for another reason.
-    try { JSON.parse(fs.readFileSync(src, 'utf8')); } catch {
-      throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);
+    return { from, to, src: path.join(root, from), dst: path.join(root, to) };
+  });
+  for (const { from, to, src, dst } of plan) {
+    for (const [rel, abs] of [[from, src], [to, dst]]) {
+      if (fs.lstatSync(abs).isSymbolicLink()) {
+        throw err('YAD-STATE-008', `${rel} is a symbolic link — yad does not settle a pair through one`, `replace it with the file itself (or delete it and keep the other name), then run \`yad migrate --apply\` again`);
+      }
     }
-    const dst = path.join(root, to);
+    try { JSON.parse(fs.readFileSync(src, 'utf8')); } catch {
+      throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept — nothing was written`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);
+    }
+  }
+  const written = [];
+  for (const { to, src, dst } of plan) {
     writeFileAtomic(backupPathFor(dst), fs.readFileSync(dst));
     // The kept copy's exact bytes — the gates compare with `cmp -s` — written through a temporary file
-    // and a rename, so a crash never leaves a half file, and a link committed at `dst` is replaced, never
-    // written through.
+    // and a rename, so a crash never leaves a half file.
     writeFileAtomic(dst, fs.readFileSync(src));
     written.push(to);
   }

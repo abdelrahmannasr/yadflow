@@ -414,7 +414,7 @@ export const ERROR_CODES: ErrorCode[] = [
   {
     code: 'YAD-CFG-005',
     cause: 'hub.json sets a platform but is missing git_url (needed to scope the auth probe and open PRs).',
-    resolution: 'Add git_url to .sdlc/product.json (then yad migrate --apply --keep product copies it to hub.json), or re-run yad setup — it backfills it from the origin remote.',
+    resolution: 'Add git_url to .sdlc/product.json (.sdlc/hub.json on a Product that has only that name; when both exist, then run yad migrate --apply --keep product), or re-run yad setup — it backfills it from the origin remote.',
     severity: 'warn',
     visibleTo: BUILD,
   },

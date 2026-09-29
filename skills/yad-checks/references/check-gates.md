@@ -60,7 +60,9 @@ The gate **FAILs**, and names both, when the two disagree:
   `yad migrate --apply` in the Product (or `--apply --keep product` / `--keep hub`) to choose the copy
   to keep, and commit both. The CLI refuses the same case with `YAD-STATE-008`.
 
-This block is duplicated verbatim across the gates, like the base resolution above.
+The `product_config` function is duplicated verbatim across the gates, like the base resolution above.
+Every gate stops on its failure except **risk-map**, which is advisory: there a disagreement is a
+`note [risk-map]: …` line, neither file is read, and the gate still passes (§10).
 
 ## 1. spec-link (`templates/checks/spec-link.sh`)
 

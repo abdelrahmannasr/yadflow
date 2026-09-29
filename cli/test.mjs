@@ -20248,9 +20248,10 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
 // ---- E110: on GitLab, a project answer with no default branch keeps the access cause open ---------------
 // GitLab names a project's default only to a login that may read its code, so "GitLab named none" is also
 // what an unreadable repository looks like. Both causes are said, and the hint names an action for each.
-test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', () => {
+test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', async () => {
   const GL_NONE = "no default branch is set in yad's files, and GitLab named none (GitLab names it only to a login that can read the project's repository)";
-  const FILES = 'set `default_branch` in yad\'s files (.sdlc/repos.json, or .sdlc/product.json for the Product, then `yad migrate --apply --keep product`)';
+  const { SETTINGS_EDIT_HINT } = await import('./manifest.mjs');
+  const FILES = `set \`default_branch\` in yad's files (.sdlc/repos.json, or for the Product ${SETTINGS_EDIT_HINT})`;
   // The same two actions as E109's `no-repository`, word for word — a non-owner can ask for the repository
   // to be turned on, since more access cannot help while it is off (E110's review).
   const HIDDEN = '. GitLab also hides the default from a login that cannot read the repository: if you own the GitLab project and its repository is turned off, turn it on in the project\'s settings; otherwise ask a Maintainer or Owner of the project to give your login access to its repository, or to turn it on — then run `yad doctor` again';
@@ -27105,5 +27106,62 @@ test('E122: on a verified Product, settling an epic\'s PR-ledger pair says how t
     assert.match(all, /epics\/EP-x\/\.sdlc\/hub-prs\.json is CI-owned on this verified Product/);
     assert.match(all, /yad commit --manual --reason/);
     assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), 'utf8'), '[]\n', 'the repair is still made');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E122: migrate settles nothing when one kept copy is broken, and never settles through a symlink', async () => {
+  const { runMigrate } = await import('./migrate.mjs');
+  const make = () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122s-'));
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"schemaVersion":10,"platform":"gitlab"}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[]\n');
+    return T;
+  };
+  const snap = (T) => ['.sdlc/product.json', '.sdlc/hub.json'].map((f) => fs.readFileSync(path.join(T, f), 'utf8'));
+  // The PR pair's kept copy (hub-prs.json) does not parse: the settings pair, settled first, is not touched.
+  let T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[ nope\n');
+    const before = snap(T);
+    await assert.rejects(() => runMigrate(T, { apply: true, keep: 'hub' }), (e) => e.code === 'YAD-STATE-001' && /hub-prs\.json does not parse.*nothing was written/.test(e.message));
+    assert.deepEqual(snap(T), before, 'no pair half-settled');
+    assert.ok(!fs.existsSync(path.join(T, '.sdlc/product.json.yad-orig')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // A name that is a link: refused, whichever copy is kept, and the file it points at is never read into the Product.
+  T = make();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122o-'));
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    fs.writeFileSync(path.join(outside, 'secret.json'), '{"token":"s3cret"}\n');
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    fs.symlinkSync(path.join(outside, 'secret.json'), path.join(T, '.sdlc/hub.json'));
+    for (const keep of ['hub', 'product']) {
+      await assert.rejects(() => runMigrate(T, { apply: true, keep }), (e) => e.code === 'YAD-STATE-008' && /\.sdlc\/hub\.json is a symbolic link/.test(e.message), keep);
+    }
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), '{"schemaVersion":10,"platform":"gitlab"}\n');
+    assert.equal(fs.readFileSync(path.join(outside, 'secret.json'), 'utf8'), '{"token":"s3cret"}\n', 'the link target is untouched');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+});
+
+test('E122: a settings hint names the file that is read, and the migrate step only when both names exist', async () => {
+  const { settingsEditHint } = await import('./manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122h-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github"}\n');
+    // An older Product: edit hub.json, and nothing else — a product.json made by hand beside it would be
+    // copied over every other setting by `--keep product`.
+    assert.equal(settingsEditHint(T), '.sdlc/hub.json');
+    let r = await doctorOn(T);
+    assert.match(r.checks.find((c) => c.id === 'hub-git-url').hint, /^add git_url to \.sdlc\/hub\.json \(or re-run/);
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"platform":"github"}\n');
+    assert.equal(settingsEditHint(T), '.sdlc/product.json, then `yad migrate --apply --keep product`');
+    r = await doctorOn(T);
+    assert.match(r.checks.find((c) => c.id === 'hub-git-url').hint, /^add git_url to \.sdlc\/product\.json, then `yad migrate --apply --keep product`/);
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    assert.equal(settingsEditHint(T), '.sdlc/product.json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

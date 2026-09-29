@@ -312,6 +312,18 @@ export const preferring = (canonical, legacy) => (existsSync(canonical) || !exis
 export const productConfigPath = (root) =>
   preferring(path.join(root, PROJECT_FILES.productConfig), path.join(root, PROJECT_FILES.productConfigLegacy));
 
+// Where a person edits the Product settings, for a hint (E122): the file that is READ, and — only when
+// both names exist — the command that copies the edit over the other one. Naming product.json on a
+// Product that has only hub.json would have a person create a one-key product.json, and `--keep product`
+// would then copy it over every other setting.
+export const settingsEditHint = (root) => {
+  const rel = path.relative(root, productConfigPath(root)).split(path.sep).join('/');
+  const both = existsSync(path.join(root, PROJECT_FILES.productConfig)) && existsSync(path.join(root, PROJECT_FILES.productConfigLegacy));
+  return both ? `${rel}, then \`yad migrate --apply --keep product\`` : rel;
+};
+// The same, where no Product root is at hand.
+export const SETTINGS_EDIT_HINT = '.sdlc/product.json (.sdlc/hub.json on a Product that has only that name), then `yad migrate --apply --keep product` if both exist';
+
 // Both names present and saying different things. Byte for byte, like `yad doctor` and the gates
 // (`cmp -s`): the engine writes both from one string, so any difference at all came from outside it.
 // A copy that cannot be read counts as different — it is not the same file.

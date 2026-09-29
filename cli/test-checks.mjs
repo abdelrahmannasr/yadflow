@@ -2651,6 +2651,12 @@ test('risk-map stays advisory on two settings files that disagree, and reads the
   r = runGate(path.join(CHECKS, 'risk-map-check.sh'), path.join(T, 'src/deep'), []);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  // `--level` answers in machine lines on stdout (read by risk-route.sh); the note goes to stderr there.
+  const lv = spawnSync('bash', [path.join(CHECKS, 'risk-map-check.sh'), '--level', 'main'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+  assert.equal(lv.status, 0, lv.stderr);
+  assert.doesNotMatch(lv.stdout, /note \[risk-map\]|say different things/, `stdout is machine lines only: ${JSON.stringify(lv.stdout)}`);
+  assert.ok(lv.stdout.trim(), 'and it still answers');
+  assert.match(lv.stderr, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

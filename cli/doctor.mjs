@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
@@ -220,7 +220,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         if (!hostFromGitUrl(hub.git_url)) {
           check(checks, 'hub-git-url', 'project', 'warn',
             `${settingsRel} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
-            'add git_url to .sdlc/product.json, then `yad migrate --apply --keep product` (or re-run `yad setup`) — auth/PR checks need the Product host');
+            `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
@@ -233,8 +233,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // inside `gh auth login --hostname …` for the person to run.
         const host = plainHost(rawHost);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
-        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in .sdlc/product.json, then `yad migrate --apply --keep product` (or fix the origin remote) to name a plain host');
-        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to .sdlc/product.json, then `yad migrate --apply --keep product`, so the auth probe can target the right host');
+        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', `fix git_url in ${settingsEditHint(root)} (or fix the origin remote) to name a plain host`);
+        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', `add git_url to ${settingsEditHint(root)}, so the auth probe can target the right host`);
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
