@@ -92,22 +92,22 @@ PRODUCT_CONFIG="$(product_config)" || exit 1
 # Flattened ONCE into a variable and matched with here-strings, never `tr … | grep -q`: under the
 # `pipefail` set above, `grep -q` exits at the first match and can SIGPIPE `tr`, which would make a
 # MATCHING pipeline report failure. Reading from a here-string has no upstream process to kill.
-HUB="$PRODUCT_CONFIG"
-HUB_FLAT="$(tr -d '\n' < "$HUB" 2>/dev/null || true)"
-HUB_ROOT="${HUB_FLAT#*\{}"
-HUB_ROOT="${HUB_ROOT%\}*}"
+SETTINGS="$PRODUCT_CONFIG"
+SETTINGS_FLAT="$(tr -d '\n' < "$SETTINGS" 2>/dev/null || true)"
+SETTINGS_ROOT="${SETTINGS_FLAT#*\{}"
+SETTINGS_ROOT="${SETTINGS_ROOT%\}*}"
 while :; do
-  _stripped="$(sed -E 's/\{[^{}]*\}//g; s/\[[^][]*\]//g' <<< "$HUB_ROOT")"
-  [ "$_stripped" = "$HUB_ROOT" ] && break
-  HUB_ROOT="$_stripped"
+  _stripped="$(sed -E 's/\{[^{}]*\}//g; s/\[[^][]*\]//g' <<< "$SETTINGS_ROOT")"
+  [ "$_stripped" = "$SETTINGS_ROOT" ] && break
+  SETTINGS_ROOT="$_stripped"
 done
 # One line in, so `sed` emits at most one line out — no `head` needed (which would re-introduce the
 # SIGPIPE-under-pipefail problem this avoids).
-hub_str() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" <<< "$HUB_ROOT"; }
-hub_true() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*true" <<< "$HUB_ROOT"; }
-# Is the key present with a STRING value at all, empty included? `hub_str` cannot answer this: it
+setting_str() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" <<< "$SETTINGS_ROOT"; }
+setting_true() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*true" <<< "$SETTINGS_ROOT"; }
+# Is the key present with a STRING value at all, empty included? `setting_str` cannot answer this: it
 # returns nothing both for a missing key and for an empty one.
-hub_has_str() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*\"" <<< "$HUB_ROOT"; }
+setting_has_str() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*\"" <<< "$SETTINGS_ROOT"; }
 
 # READ ORDER, identical to `isVerifiedLedger` (cli/manifest.mjs) — the two must never disagree:
 #   1. `ledger`, if hub.json carries it — shape 2 and later. "verified" and nothing else.
@@ -128,13 +128,13 @@ hub_has_str() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*\"" <<< "$HUB_ROOT"; }
 # OPPOSITE answers — the guard rejecting human writes while the CLI kept the local path open, which
 # is the no-writer deadlock of #186 reached from a third direction.
 verified=no
-if hub_has_str ledger; then
-  if [ "$(hub_str ledger)" = "verified" ]; then verified=yes; fi
-elif hub_true bridge_enabled || hub_true bridge; then
+if setting_has_str ledger; then
+  if [ "$(setting_str ledger)" = "verified" ]; then verified=yes; fi
+elif setting_true bridge_enabled || setting_true bridge; then
   verified=yes
 fi
 
-if [ ! -f "$HUB" ] || [ -z "$(hub_str platform)" ] || [ "$verified" != yes ]; then
+if [ ! -f "$SETTINGS" ] || [ -z "$(setting_str platform)" ] || [ "$verified" != yes ]; then
   echo "PASS [ledger-guard]: the ledger is locally owned (ledger: local) — nothing to guard."
   exit 0
 fi

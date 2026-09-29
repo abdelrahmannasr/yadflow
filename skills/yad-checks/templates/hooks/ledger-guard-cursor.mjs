@@ -31,7 +31,7 @@ const allow = () => { process.stdout.write(`${ALLOW}\n`); process.exit(0); };
 // script's OWN location, never from the harness's working directory or its project-root variable
 // (whose form on Windows, `C:\…` or `/c/…`, no harness documents). `realpathSync` so a script reached
 // through a symbolic link still finds its own Product.
-const HUB_ROOT = path.dirname(path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))));
+const PRODUCT_ROOT = path.dirname(path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))));
 const IS_WINDOWS = process.platform === 'win32';
 
 // A command found on PATH, or null. On Windows the npm launchers are `.cmd` files.
@@ -63,7 +63,7 @@ function resolveYad() {
     const [file, ...args] = override;
     return { file, args, shell: IS_WINDOWS && /\.(cmd|bat)$/i.test(file) };
   }
-  const local = path.join(HUB_ROOT, 'node_modules', 'yadflow', 'bin', 'yad.mjs');
+  const local = path.join(PRODUCT_ROOT, 'node_modules', 'yadflow', 'bin', 'yad.mjs');
   if (fs.existsSync(local)) return { file: process.execPath, args: [local], shell: false };
   const yad = onPath('yad');
   if (yad) {
@@ -92,7 +92,7 @@ function runYad(yad, args, options) {
 // anything at all the moment an install went sideways.
 const yad = resolveYad();
 if (!yad) {
-  process.stderr.write(`  • yad hook: no \`yad\` on PATH and none installed in ${HUB_ROOT} — allowing (install yadflow to re-arm the ledger guard)\n`);
+  process.stderr.write(`  • yad hook: no \`yad\` on PATH and none installed in ${PRODUCT_ROOT} — allowing (install yadflow to re-arm the ledger guard)\n`);
   allow();
 }
 
