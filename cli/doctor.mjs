@@ -161,9 +161,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const when = !hub.platform
           ? `nothing reads it on a Product with no platform — delete the \`roster\` key from ${settingsEditHint(root)}`
           : waiting
-            ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(hub) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key`
+            ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(hub) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key from ${settingsEditHint(root)}`
             : unplaced
-              ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key once those reviews are closed`
+              ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key from ${settingsEditHint(root)} once those reviews are closed`
               : `no older record needs it any more — delete the \`roster\` key from ${settingsEditHint(root)}`;
         check(checks, 'people:roster-unused', 'project', 'warn',
           `${settingsRel} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,

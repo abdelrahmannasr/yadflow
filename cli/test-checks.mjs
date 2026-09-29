@@ -2668,6 +2668,15 @@ test('risk-map stays advisory on two settings files that disagree, and reads the
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('ledger-guard: no settings file at all passes quietly — no stray "No such file" on stderr (E122)', () => {
+  const T = scaffoldRepo();
+  const r = spawnSync('bash', [LEDGER_GUARD, 'main'], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /PASS \[ledger-guard\]/);
+  assert.doesNotMatch(r.stderr, /No such file or directory/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('ledger-guard reads the new settings name first, and guards on a Product that has only it (E122)', () => {
   // Verified under product.json alone: guarded. The same under hub.json alone: still guarded (older Products).
   for (const name of ['product.json', 'hub.json']) {

@@ -93,7 +93,7 @@ PRODUCT_CONFIG="$(product_config)" || exit 1
 # `pipefail` set above, `grep -q` exits at the first match and can SIGPIPE `tr`, which would make a
 # MATCHING pipeline report failure. Reading from a here-string has no upstream process to kill.
 SETTINGS="$PRODUCT_CONFIG"
-SETTINGS_FLAT="$(tr -d '\n' < "$SETTINGS" 2>/dev/null || true)"
+SETTINGS_FLAT="$({ tr -d '\n' < "$SETTINGS"; } 2>/dev/null || true)"
 SETTINGS_ROOT="${SETTINGS_FLAT#*\{}"
 SETTINGS_ROOT="${SETTINGS_ROOT%\}*}"
 while :; do
