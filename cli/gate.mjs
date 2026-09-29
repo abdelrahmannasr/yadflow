@@ -1439,7 +1439,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, loadProduct(root).hub);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair' })) return did(true);
+  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair', root })) return did(true);
 
   const spec = path.relative(root, ledger.files.state);
   if (!git('add', '--', spec).ok) { fail(`git add failed for ${spec}`); process.exitCode = 1; return did(true); }

@@ -14,7 +14,8 @@ yadflow installed read `hub.json` by path). If both exist and their bytes differ
 `yad doctor`, `yad migrate` and `yad report` refuses with `YAD-STATE-008`, and the CI gates FAIL;
 `yad migrate --apply` (or `--apply --keep product` / `--keep hub`) chooses the copy to keep. To edit a
 setting by hand, edit `product.json`, then run `yad migrate --apply --keep product` (it copies it over
-`hub.json`).
+`hub.json`). A Product that has only `hub.json` has not been migrated: edit `hub.json`, and never create a
+`product.json` beside it by hand — `--keep product` would copy that one file over every other setting.
 
 (`config.yaml` `product.config` (older projects: `hub.config`).) Created/updated by `yad-connect-repos action: detect-hub`.
 

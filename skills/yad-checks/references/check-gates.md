@@ -797,7 +797,7 @@ logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`; the scripts in `cli/test-h
 
 **Scope — identical to the CI gate, on purpose**, down to the details that decide the hard cases:
 
-- Guarded: `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` and `epics/*/reviews/*.md`.
+- Guarded: `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` and `epics/*/reviews/*.md`.
   Exempt: `contract-lock.json` (artifact-side), `change.json`, every artifact.
 - **Depth matches the gate's globs.** Its arms are bash `case` patterns, and a bash `*` spans `/`, so
   `epics/EP-a/nested/.sdlc/state.json` is guarded there — and here. Being stricter locally would let

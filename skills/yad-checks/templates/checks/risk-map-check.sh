@@ -122,7 +122,9 @@ product_config() {
 if ! PRODUCT_CONFIG="$(product_config 2>/dev/null)"; then
   _drift="note [risk-map]: .sdlc/product.json and .sdlc/hub.json say different things (or SDLC_PRODUCT_CONFIG and SDLC_HUB_CONFIG do) — neither is read; run \`yad migrate\` in the Product."
   if [ "$LEVEL_ONLY" = 1 ]; then echo "$_drift" >&2; else echo "$_drift"; fi
-  PRODUCT_CONFIG=""
+  # An empty file, not an empty name: `resolve_base` reads it with `< "$PRODUCT_CONFIG"`, and bash says
+  # "No such file or directory" for an empty name before any `2>/dev/null` can hide it.
+  PRODUCT_CONFIG=/dev/null
 fi
 
 BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"

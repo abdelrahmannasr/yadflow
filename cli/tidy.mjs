@@ -49,7 +49,7 @@ export async function runTidy(root, opts = {}) {
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, hub);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad tidy up' })) return;
+  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad tidy up', root })) return;
 
   if (opts.epic && !isValidEpicId(opts.epic)) { fail(`invalid epic id '${opts.epic}'`); process.exitCode = 1; return; }
   if (opts.epic && !exists(epicRoot(root, opts.epic))) { fail(`no such epic '${opts.epic}'`); process.exitCode = 1; return; }

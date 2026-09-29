@@ -20251,6 +20251,8 @@ test('E109 GitLab branch 404: the body names the cause; anything else keeps the 
 test('E110 no default branch on GitLab: both causes open, one action each; GitHub unchanged', async () => {
   const GL_NONE = "no default branch is set in yad's files, and GitLab named none (GitLab names it only to a login that can read the project's repository)";
   const { SETTINGS_EDIT_HINT } = await import('./manifest.mjs');
+  // Pinned as words too: this test builds its expectation from the constant, so the constant itself is checked here.
+  assert.equal(SETTINGS_EDIT_HINT, '.sdlc/product.json (.sdlc/hub.json on a Product that has only that name), then `yad migrate --apply --keep product` if both exist');
   const FILES = `set \`default_branch\` in yad's files (.sdlc/repos.json, or for the Product ${SETTINGS_EDIT_HINT})`;
   // The same two actions as E109's `no-repository`, word for word — a non-owner can ask for the repository
   // to be turned on, since more access cannot help while it is off (E110's review).
@@ -27129,6 +27131,7 @@ test('E122: migrate settles nothing when one kept copy is broken, and never sett
     await assert.rejects(() => runMigrate(T, { apply: true, keep: 'hub' }), (e) => e.code === 'YAD-STATE-001' && /hub-prs\.json does not parse.*nothing was written/.test(e.message));
     assert.deepEqual(snap(T), before, 'no pair half-settled');
     assert.ok(!fs.existsSync(path.join(T, '.sdlc/product.json.yad-orig')));
+    assert.ok(!fs.existsSync(path.join(T, '.gitignore')), 'nor .gitignore: a refusal changes nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // A name that is a link: refused, whichever copy is kept, and the file it points at is never read into the Product.
   T = make();
@@ -27144,6 +27147,13 @@ test('E122: migrate settles nothing when one kept copy is broken, and never sett
     assert.equal(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), '{"schemaVersion":10,"platform":"gitlab"}\n');
     assert.equal(fs.readFileSync(path.join(outside, 'secret.json'), 'utf8'), '{"token":"s3cret"}\n', 'the link target is untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+  // A name deleted while the question waited: refused as a changed pair, not a raw ENOENT.
+  T = make();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+    const choose = () => { fs.rmSync(path.join(T, '.sdlc/hub.json')); return 'product'; };
+    await assert.rejects(() => runMigrate(T, { apply: true }, { choose }), (e) => e.code === 'YAD-STATE-008' && /\.sdlc\/hub\.json is gone since the difference was found — nothing was written/.test(e.message));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('E122: a settings hint names the file that is read, and the migrate step only when both names exist', async () => {

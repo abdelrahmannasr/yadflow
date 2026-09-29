@@ -204,7 +204,7 @@ and fall back to the major the fragment ships with — `YAD_MAJOR` in its `yad-p
 | # | Source | Set it in |
 |---|---|---|
 | 1 | `YAD_VERSION` — used **verbatim**, the operator's override | GitHub: Settings → Secrets and variables → Actions → **Variables**. GitLab: Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
-| 2 | `.sdlc/product.json` → `gate_sync_version` (`.sdlc/hub.json` when `product.json` is absent) — this Product's committed pin | edit `product.json`, run `yad migrate --apply --keep product` (it copies it over `hub.json`; two that differ are refused, YAD-STATE-008), commit both |
+| 2 | `.sdlc/product.json` → `gate_sync_version` (`.sdlc/hub.json` when `product.json` is absent) — this Product's committed pin | edit `product.json`, run `yad migrate --apply --keep product` (it copies it over `hub.json`; two that differ are refused, YAD-STATE-008), commit both. A Product that has only `hub.json`: edit that, and never create a `product.json` beside it by hand |
 | 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the Product | `yad update` re-stamps it |
 | 4 | `$YAD_MAJOR` — floating major, only when nothing above resolves. While only prereleases of that major exist (`4.0.0-next.N`) npm cannot resolve a bare major, so the job says so on stderr first; a Product wired by that release always has a stamp that resolves | — |
 

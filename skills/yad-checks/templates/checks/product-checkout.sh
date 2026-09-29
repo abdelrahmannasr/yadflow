@@ -84,7 +84,7 @@ if [ -z "${YAD_PRODUCT_TOKEN:-}" ]; then
 fi
 if [ -z "$url" ]; then
   echo "note [product-checkout]: ${rec} on ${BASE} names no git_url — the Product is not checked out."
-  echo "  Set the Product's git_url in its .sdlc/product.json, then run \`yad check --fix --push\` from the Product."
+  echo "  Set the Product's git_url in its .sdlc/product.json (.sdlc/hub.json on a Product that has only that name; when both exist, then run \`yad migrate --apply --keep product\`), then run \`yad check --fix --push\` from the Product."
   exit 0
 fi
 # Inside the repo, and not the repo itself: CI can only place a checkout in the workspace, and the gates

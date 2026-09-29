@@ -95,7 +95,9 @@ refuses with `YAD-STATE-008`, and the check gates fail. `yad doctor` says so:
 `--keep product` / `--keep hub`). The other copy is backed up beside itself as `<file>.yad-orig`.
 
 **If you need to edit the settings by hand, edit `product.json`**, then run
-`yad migrate --apply --keep product` to copy it across. (On 3.x the file read was `hub.json`.)
+`yad migrate --apply --keep product` to copy it across. (On 3.x the file read was `hub.json`. A Product
+that has only `hub.json` has not run this migration yet: edit `hub.json`, and never create a
+`product.json` beside it by hand.)
 
 ## After you run it
 

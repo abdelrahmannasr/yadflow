@@ -329,7 +329,7 @@ export const SETTINGS_EDIT_HINT = '.sdlc/product.json (.sdlc/hub.json on a Produ
 // A copy that cannot be read counts as different — it is not the same file.
 export const mirrorDrift = (canonical, legacy) => {
   if (!existsSync(canonical) || !existsSync(legacy)) return false;
-  try { return readFileSync(canonical, 'utf8') !== readFileSync(legacy, 'utf8'); } catch { return true; }
+  try { return !readFileSync(canonical).equals(readFileSync(legacy)); } catch { return true; }
 };
 
 // The drifted pairs under a Product root, project-relative: the settings file and every epic's PR

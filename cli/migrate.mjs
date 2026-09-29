@@ -905,31 +905,46 @@ export function driftedPairs(root) {
   }));
 }
 
-// Settle each pair on the copy `keep` names. Returns the paths written (the losing names).
-//
-// Everything is checked before anything is written, so a refusal leaves every pair as it was:
+// Settle each pair on the copy `keep` names, in two steps: `checkDrift` first, which writes nothing and
+// refuses if any pair cannot be settled, so a refusal leaves every pair — and `.gitignore` — as it was;
+// then `settleDrift`, which writes.
 //   - a name that is a symbolic link is refused. The kept copy's bytes are copied into a committed file,
 //     and a link would copy whatever file it points at on this machine (E115 refuses links in the same
-//     spirit);
+//     spirit). The file itself is checked, not the folders above it: a linked `.sdlc/` holds both names,
+//     so nothing from outside it can reach a committed file through it;
 //   - a kept copy that does not parse is refused: settling on it would leave two broken files, and every
-//     command refusing them for another reason.
-function settleDrift(root, pairs, keep) {
-  const plan = pairs.map(({ canonical, legacy }) => {
+//     command refusing them for another reason;
+//   - a name that has gone since the difference was found (deleted while the question waited) is
+//     refused too: the pair is not the one the person chose for.
+function settlePlan(root, pairs, keep) {
+  return pairs.map(({ canonical, legacy }) => {
     const [from, to] = keep === 'product' ? [canonical, legacy] : [legacy, canonical];
     return { from, to, src: path.join(root, from), dst: path.join(root, to) };
   });
-  for (const { from, to, src, dst } of plan) {
-    for (const [rel, abs] of [[from, src], [to, dst]]) {
-      if (fs.lstatSync(abs).isSymbolicLink()) {
-        throw err('YAD-STATE-008', `${rel} is a symbolic link — yad does not settle a pair through one`, `replace it with the file itself (or delete it and keep the other name), then run \`yad migrate --apply\` again`);
+}
+
+function checkDrift(root, pairs, keep) {
+  for (const { from, to, src } of settlePlan(root, pairs, keep)) {
+    for (const rel of [from, to]) {
+      let st;
+      try { st = fs.lstatSync(path.join(root, rel)); } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        throw err('YAD-STATE-008', `${rel} is gone since the difference was found — nothing was written`, 'run `yad migrate` again to see the pair as it is now');
+      }
+      if (st.isSymbolicLink()) {
+        throw err('YAD-STATE-008', `${rel} is a symbolic link — yad does not settle a pair through one, and nothing was written`, 'replace it with the file itself (or delete it and keep the other name), then run `yad migrate --apply` again');
       }
     }
     try { JSON.parse(fs.readFileSync(src, 'utf8')); } catch {
       throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept — nothing was written`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);
     }
   }
+}
+
+// Returns the paths written (the losing names). Only after `checkDrift` has passed.
+function settleDrift(root, pairs, keep) {
   const written = [];
-  for (const { to, src, dst } of plan) {
+  for (const { to, src, dst } of settlePlan(root, pairs, keep)) {
     writeFileAtomic(backupPathFor(dst), fs.readFileSync(dst));
     // The kept copy's exact bytes — the gates compare with `cmp -s` — written through a temporary file
     // and a rename, so a crash never leaves a half file.
@@ -1000,7 +1015,8 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
   if (drift.length && apply) {
     if (!json) printDrift(drift);
     kept = await chooseKeep(drift, { keep, json, choose });
-    // Before the backup is made, as below.
+    checkDrift(root, drift, kept);
+    // Before the backup is made, as below — and after every check, so a refusal changes nothing.
     ignored = ensureBackupsIgnored(root);
     settledFiles.push(...settleDrift(root, drift, kept));
   }

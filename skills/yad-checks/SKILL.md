@@ -85,7 +85,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     `isVerifiedLedger` (`cli/manifest.mjs`) applies, so the gate and the CLI can never disagree about who owns the
     ledger (#186). A no-op otherwise, when humans legitimately own it. On review PRs it FAILs any
     commit that touches the
-    CI-owned gate ledger (`.sdlc/{state,approvals,comments,hub-prs}.json`, `reviews/*.md`) unless it
+    CI-owned gate ledger (`.sdlc/{state,approvals,comments,product-prs,hub-prs}.json`, `reviews/*.md`) unless it
     is a **verified gate-bot commit** — bot-authored AND platform-Verified, since author text alone is
     spoofable. `.sdlc/contract-lock.json` is artifact-side and exempt. So is a **new epic's seed**:
     no CI path can create a ledger (`gate ci` only *advances* an existing chain, at merge, on the
@@ -224,7 +224,7 @@ file-editing tool call and refuses the write up front, naming the command that o
 - **Targets with no such hook are named, not skipped.** `.agents`, `.gemini`, `.zencoder` and
   `.opencode` get the script and no wiring, and `yad doctor` says which of a project's targets are
   guarded by CI alone. Silence about an unguarded target reads as a guarded one.
-- **Same scope as the CI gate**, deliberately: guarded are `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`
+- **Same scope as the CI gate**, deliberately: guarded are `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json`
   and `epics/*/reviews/*.md` (at the gate's own glob depth, which spans `/`); exempt are
   `contract-lock.json`, `change.json`, and every artifact. A **new** epic's ledger is exempt too —
   creation, not mutation (#162), decided by listing the epics the **base ref** carries (an

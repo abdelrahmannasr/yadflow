@@ -2657,6 +2657,7 @@ test('risk-map stays advisory on two settings files that disagree, and reads the
   assert.doesNotMatch(lv.stdout, /note \[risk-map\]|say different things/, `stdout is machine lines only: ${JSON.stringify(lv.stdout)}`);
   assert.ok(lv.stdout.trim(), 'and it still answers');
   assert.match(lv.stderr, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  assert.doesNotMatch(lv.stderr, /No such file or directory/, 'no stray error from reading an empty file name');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
