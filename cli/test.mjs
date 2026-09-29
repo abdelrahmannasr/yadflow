@@ -1280,7 +1280,7 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
     const gate = path.join(T, 'checks/pr-title.sh');
     fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
     const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
-    assert.match(out, /hub\/checks\/pr-title\.sh was edited and is kept, but it does not accept `--profile product`, which yad-product-checks\.yml passes — every Product PR fails that check/);
+    assert.match(out, /hub\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes — every Product PR fails that check — it was edited, so it is kept/);
     const { collectDoctor } = await import('./doctor.mjs');
     const hit = collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:'));
     assert.deepEqual(hit.map((x) => [x.id, x.status]), [['profile:checks/pr-title.sh', 'warn']]);
@@ -1289,10 +1289,54 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
     fs.rmSync(path.join(T, newProductChecks));
     assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0);
     // Every shipped gate accepts it.
-    const { rejectsProductProfile } = await import('./plan.mjs');
+    const { productProfileGap } = await import('./plan.mjs');
     for (const g of ['skills/yad-checks/templates/checks/commit-message.sh', 'skills/yad-pr-template/templates/checks/pr-title.sh', 'skills/yad-pr-template/templates/checks/pr-template.sh']) {
-      assert.equal(rejectsProductProfile(path.join(ROOT, g)), false, g);
+      assert.equal(productProfileGap(path.join(ROOT, g)), null, g);
     }
+    // `product` in the list but never turned into `hub`: it passes the list and skips every Product rule.
+    const shipped = fs.readFileSync(path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-title.sh'), 'utf8');
+    fs.writeFileSync(gate, shipped.replace('[ "$PROFILE" = product ] && PROFILE=hub', ''));
+    assert.equal(productProfileGap(gate), 'unmapped');
+    await reconcile(T, { fix: true }); // puts the new workflow back
+    const unmapped = collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh');
+    assert.match(unmapped.message, /^checks\/pr-title\.sh accepts `--profile product` but never turns it into `hub`, which \.github\/workflows\/yad-product-checks\.yml passes — so it skips the Product's rules and passes what it should stop$/);
+    // commit-message.sh has no `= hub` branch, so a missing mapping there changes nothing.
+    const cm = path.join(T, 'checks/commit-message.sh');
+    fs.writeFileSync(cm, fs.readFileSync(cm, 'utf8').replace('[ "$PROFILE" = product ] && PROFILE=hub', ''));
+    assert.equal(productProfileGap(cm), null);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 2: an edited gate beside a kept old workflow that passes hub — nothing breaks, nothing is said', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    fs.writeFileSync(path.join(T, oldHubChecks), `${shippedHubChecks()}# ours\n`);
+    const gate = path.join(T, 'checks/pr-title.sh');
+    fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'all' }));
+    assert.doesNotMatch(out, /--profile product/, 'the kept workflow passes hub, which the gate accepts');
+    const { collectDoctor } = await import('./doctor.mjs');
+    assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0, 'doctor agrees');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 2: the new name --overwrite-local installs is recorded, so edits copied into it survive the next update', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    fs.writeFileSync(path.join(T, oldHubChecks), `${shippedHubChecks()}# ours\n`);
+    await reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true });
+    assert.ok(Object.hasOwn(ledgerOf(T), newProductChecks), 'recorded as yad wrote it');
+    const mine = `${fs.readFileSync(path.join(T, newProductChecks), 'utf8')}# ours\n`;
+    fs.writeFileSync(path.join(T, newProductChecks), mine);
+    const r = await reconcile(T, { fix: true, scope: 'changed' });
+    assert.equal(fs.readFileSync(path.join(T, newProductChecks), 'utf8'), mine, 'the copied-in edit is kept');
+    assert.ok(r.items.some((i) => i.item === newProductChecks && i.status === 'modified'));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

@@ -564,6 +564,10 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
       paths: [oldDest, newDest, ...(rewritesRootCi ? ['.gitlab-ci.yml'] : []), ...(recorded ? [MANAGED_LEDGER] : [])],
       backup,
       rename: { from: oldDest, to: newDest },
+      // The new file it installs, so `recordManagedWrites` records it when it is the template. Without this a
+      // rename done by `--overwrite-local` (the new name's own action is left out then, `withoutKeptRenames`)
+      // left the new file unrecorded, and the next update replaced the edits a person copied into it (review 2).
+      managed: { src: asset(w.src), dest: path.join(baseRoot, newDest), root: baseRoot },
       apply: () => {
         if (backup) fs.copyFileSync(oldPath, backup);
         fs.rmSync(oldPath, { force: true });
@@ -666,15 +670,35 @@ export function renamedNameHits(root) {
 
 // The Product's pattern gates, whose workflow passes `--profile product` since E123. A copy the team edited
 // is kept by `yad update` — and one from before 4.0 accepts only `code|hub`, so it fails every Product PR
-// with "unknown --profile 'product'" (review 1). True when the gate's own `case "$PROFILE" in …)` list lacks
-// `product`; a copy with no such line is not judged.
+// with "unknown --profile 'product'" (review 1). 'rejects' when the gate's own `case "$PROFILE" in …)` list lacks
+// `product`; 'unmapped' when it has it, but the gate branches on `= hub` with no line turning `product` into
+// `hub` — then `product` passes the list and silently skips every Product rule (review 2); null otherwise,
+// and for a copy with no such list, which is not judged.
 export const PRODUCT_PROFILE_GATES = Object.freeze(['checks/commit-message.sh', 'checks/pr-title.sh', 'checks/pr-template.sh']);
-export function rejectsProductProfile(file) {
+export function productProfileGap(file) {
   let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
   const list = text.match(/^\s*case\s+"\$PROFILE"\s+in\s+([^)]*)\)/m);
-  return !!list && !list[1].split('|').map((x) => x.trim()).includes('product');
+  if (!list) return null;
+  if (!list[1].split('|').map((x) => x.trim()).includes('product')) return 'rejects';
+  const mapped = /\[\s*"\$PROFILE"\s*=\s*product\s*\]\s*&&\s*PROFILE=hub\b/.test(text);
+  return /"\$PROFILE"\s*=\s*hub\b/.test(text) && !mapped ? 'unmapped' : null;
 }
+// What each gap does to a Product PR, and the one fix for both — shared by `yad doctor` and `yad update`.
+export const productProfileEffect = (gap, gate, passing) => (gap === 'rejects'
+  ? `${gate} does not accept \`--profile product\`, which ${passing} — every Product PR fails that check`
+  : `${gate} accepts \`--profile product\` but never turns it into \`hub\`, which ${passing} — so it skips the Product's rules and passes what it should stop`);
+export const PRODUCT_PROFILE_FIX = 'add `product` to its `case "$PROFILE" in` list and `[ "$PROFILE" = product ] && PROFILE=hub` after it, as the shipped copy has — or replace it with `yad update --overwrite-local`';
+
+// The Product's checks workflows, under the new name and the old (E123): an edited old one is kept, and runs.
+export const PRODUCT_CHECK_WORKFLOWS = Object.freeze([
+  '.github/workflows/yad-product-checks.yml', '.gitlab/ci/yad-product-checks.yml',
+  '.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml',
+]);
+// Those of them on disk that pass `--profile product` to the gates.
+export const workflowsPassingProduct = (root) => PRODUCT_CHECK_WORKFLOWS.filter((rel) => {
+  try { return /--profile[ =]product\b/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
+});
 
 // The new name of a renamed CI file is not installed while an edited old one is kept (`modified`): both
 // would run on GitHub — every gate twice, the stock one undoing whatever the team's edit loosened — and on
@@ -682,7 +706,7 @@ export function rejectsProductProfile(file) {
 export function withoutKeptRenames(actions) {
   const kept = new Set(actions.filter((a) => a.rename && a.status === 'modified').map((a) => path.join(a.root, a.rename.to)));
   if (!kept.size) return actions;
-  return actions.filter((a) => !(a.managed && !exists(a.managed.dest) && kept.has(a.managed.dest)));
+  return actions.filter((a) => a.rename || !(a.managed && !exists(a.managed.dest) && kept.has(a.managed.dest)));
 }
 
 export function legacyRepoActions(root, repo) {

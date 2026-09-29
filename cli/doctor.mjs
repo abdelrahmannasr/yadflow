@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyHubActions, renamedNameHits, PRODUCT_PROFILE_GATES, rejectsProductProfile } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyHubActions, renamedNameHits, PRODUCT_PROFILE_GATES, PRODUCT_CHECK_WORKFLOWS, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -1955,10 +1955,6 @@ export function productPathBlindGate(file) {
 // `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
 // workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
 // The old names too (E123): an edited `yad-hub-checks.yml` is kept by `yad update`, and still runs.
-export const PRODUCT_CHECK_WORKFLOWS = [
-  '.github/workflows/yad-product-checks.yml', '.gitlab/ci/yad-product-checks.yml',
-  '.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml',
-];
 export function ownerGuardChecks(checks, root) {
   const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
   // The exemption's own pattern, not any mention of the folder: a comment is not a rule.
@@ -2021,15 +2017,14 @@ export function renamedChecks(checks, root) {
 // passing `hub` breaks nothing.
 export function productProfileChecks(checks, root) {
   if (!exists(productConfigPath(root))) return;
-  const passing = PRODUCT_CHECK_WORKFLOWS.filter((rel) => {
-    try { return /--profile[ =]product\b/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
-  });
+  const passing = workflowsPassingProduct(root);
   if (!passing.length) return;
   for (const gate of PRODUCT_PROFILE_GATES) {
-    if (!rejectsProductProfile(path.join(root, gate))) continue;
+    const gap = productProfileGap(path.join(root, gate));
+    if (!gap) continue;
     check(checks, `profile:${gate}`, 'project', 'warn',
-      `${gate} does not accept \`--profile product\`, which ${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'} — every Product PR fails that check`,
-      `it was changed by hand, so \`yad update\` kept it: add \`product\` to its \`case "$PROFILE" in\` list (and \`[ "$PROFILE" = product ] && PROFILE=hub\` after it, as the shipped copy has), or replace it with \`yad update --overwrite-local\` (your copy is saved as ${path.basename(gate)}${BACKUP_SUFFIX})`);
+      productProfileEffect(gap, gate, `${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'}`),
+      `it was changed by hand, so \`yad update\` kept it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${path.basename(gate)}${BACKUP_SUFFIX})`);
   }
 }
 

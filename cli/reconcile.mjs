@@ -14,7 +14,7 @@ import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPa
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyHubActions,
-  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, rejectsProductProfile,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
@@ -171,7 +171,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       return found ? Number(found[1]) : null;
     } catch { return null; }
   };
-  for (const m of modified.filter((a) => a.managed && /yad-gate-sync\.ya?ml$/.test(a.item))) {
+  for (const m of modified.filter((a) => a.managed && !a.rename && /yad-gate-sync\.ya?ml$/.test(a.item))) {
     const kept = pinMajorOf(m.managed.dest);
     const ships = pinMajorOf(m.managed.src);
     if (kept === null || ships === null || kept === ships) continue;
@@ -181,12 +181,21 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A renamed file the team edited (E123): kept under its old name, so say that the rename is half done and
   // how to finish it. True whatever else this run does: the old file goes on running (GitHub) or being the
   // one the root .gitlab-ci.yml includes (GitLab) until --overwrite-local replaces it.
-  // An edited Product gate that rejects the profile the renamed workflow passes (E123): kept, and then every
-  // Product PR fails it. Said here because the generic line does not say why the next PR goes red.
-  for (const m of overwriteLocal ? [] : modified.filter((a) => a.managed && a.managed.root === root
-    && PRODUCT_PROFILE_GATES.includes(path.relative(root, a.managed.dest).split(path.sep).join('/')) && rejectsProductProfile(a.managed.dest))) {
-    warn(`${m.scope}/${m.item} was edited and is kept, but it does not accept \`--profile product\`, which yad-product-checks.yml passes — every Product PR fails that check`);
-    hand(`add \`product\` to its \`case "$PROFILE" in\` list (and \`[ "$PROFILE" = product ] && PROFILE=hub\` after it, as the shipped copy has), or replace it with \`yad update --overwrite-local\` (your copy is saved as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
+  // An edited Product gate that does not handle the profile the Product's checks workflow passes (E123): kept,
+  // and then it fails every Product PR, or passes what it should stop. Said only when a workflow passing
+  // `product` is on disk or this run installs one — the same test `yad doctor` makes (review 2).
+  const productRel = (p) => path.relative(root, p).split(path.sep).join('/');
+  const installsProduct = actions.filter((a) => a.managed && a.managed.root === root
+    && /(^|\/)yad-product-checks\.yml$/.test(productRel(a.managed.dest))
+    && a.status !== 'ok' && a.status !== 'modified' && (scope === 'all' || a.status !== 'missing'))
+    .map((a) => productRel(a.managed.dest));
+  const passing = [...new Set([...workflowsPassingProduct(root), ...installsProduct])];
+  for (const m of overwriteLocal || !passing.length ? [] : modified.filter((a) => a.managed && a.managed.root === root && !a.rename
+    && PRODUCT_PROFILE_GATES.includes(productRel(a.managed.dest)))) {
+    const gap = productProfileGap(m.managed.dest);
+    if (!gap) continue;
+    warn(`${m.scope}/${productProfileEffect(gap, m.item, `${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'}`)} — it was edited, so it is kept`);
+    hand(`${PRODUCT_PROFILE_FIX} (your copy is saved as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
   }
   for (const m of overwriteLocal ? [] : modified.filter((a) => a.rename)) {
     const { from, to } = m.rename;
