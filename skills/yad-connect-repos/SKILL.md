@@ -50,6 +50,9 @@ repo itself — a draft of that repo's risk map (Step 3b), which the team commit
   directly in `$HOME` — with the Product at `~/product` the workspace becomes `~` and every home-dir
   sibling turns into a registrable repo. The workspace directory itself (`..`) is never registrable.
 - `git_url` — optional remote (SSH or HTTPS; GitHub or GitLab). Used when the repo is not yet on disk.
+  `yad join` and `yad repo clone` clone only a network address (`https://`, `http://`, `ssh://`,
+  `git://`, `user@host:path`, or an ssh alias `host:path`); a local path is refused unless
+  `YAD_ALLOW_LOCAL_REMOTES=1` is set, and then only a folder that exists outside the workspace.
 
 yadflow keeps **no list of people** (E62): no roster, no roles, no repo owners, no commit emails. Do not
 ask for them and do not write them.
@@ -61,7 +64,11 @@ Determine where the code is:
 - If `path` is given and is a git repo (`.git` present) → use it in place.
 - A teammate joining an existing Product gets every registered repo cloned at its recorded `path` by
   `yad join <url>` (E79) — no need to clone them one by one here.
-- Else if `git_url` is given → **clone it as the local user** into a working location
+- A repo that is **already registered** but missing on this machine (a teammate registered it after you
+  joined) → run **`yad repo clone [<name>]`** (E81). It clones at the recorded `path`, with the same
+  checks as `join`, and never touches a repo that is already there. `yad repo list` and `yad doctor`
+  name such a repo as not cloned. Clone by hand only a repo that is **not registered yet**.
+- Else if `git_url` is given (a repo not registered yet) → **clone it as the local user** into a working location
   (`{code_repos_root}/<repo>/` by `config.yaml` `build.code_repos_root`, or a path the user names):
   ```
   git clone <git_url> <dest>

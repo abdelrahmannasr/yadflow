@@ -5,7 +5,7 @@
 // `--json` emits the checks for CI / bug reports.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
@@ -14,7 +14,8 @@ import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as ca
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
-import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
+import { judgeRepo, runnable, shown as forTerminal } from './workspace.mjs';
+import { cliFor, hostFromGitUrl, ambiguousLegacyNames, plainHost } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
@@ -24,6 +25,15 @@ import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 import { readOwners } from './owners.mjs';
+
+// A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
+// entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
+// and never one reached through a link inside a repo's tree (`yad repo sync` and `refresh` skip it too).
+// The repos check reports every other entry.
+const isCheckout = (root, repo) => runnable(judgeRepo(root, repo));
+// The same for a registry `default_branch` inside a git command to copy: a valid branch name can hold
+// `;`, `|`, `$(` or start a path part with `-` (E81 review 11), so only a plain one is printed.
+const branchArg = (b) => (typeof b === 'string' && /^\w[\w./-]*$/.test(b) && !b.includes('..') ? b : '<default-branch>');
 
 const MIN_NODE = 18;
 
@@ -120,7 +130,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     }
     if (hubBroken) { /* reported above */ }
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
-    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
+    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${forTerminal(hub.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
       // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
@@ -164,7 +174,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const unclear = [...ambiguousLegacyNames(hub).keys()];
         if (unclear.length) {
           check(checks, 'people:roster-ambiguous', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
+            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.map(forTerminal).join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
             'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
         }
       }
@@ -191,7 +201,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         const acting = isSolo(hub) ? 'solo' : 'team';
         if (hub.mode !== acting) {
           check(checks, 'mode:disagree', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} says mode: ${JSON.stringify(hub.mode)}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
+            `${PROJECT_FILES.hubConfig} says mode: ${JSON.stringify(forTerminal(hub.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
             ['solo', 'team'].includes(hub.mode)
               ? `\`yad mode ${acting}\` keeps what the gates do now; \`yad mode ${hub.mode === 'solo' ? 'solo --reason "<why>"' : 'team'}\` makes the gates follow \`mode\``
               : `\`yad mode ${acting}\` writes a mode the gates recognise`);
@@ -214,9 +224,13 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // instance fails, so an unrelated stale login (e.g. a dead gitlab.com token) would falsely
         // flag a working self-hosted Product — so we SKIP the probe entirely when no host resolves
         // rather than run the flaky unscoped form.
-        const host = hostFromGitUrl(hub.git_url)
+        const rawHost = hostFromGitUrl(hub.git_url)
           || hostFromGitUrl(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
+        // Never asked about or repeated unless it is a plain host name (E81 review 14): it is printed
+        // inside `gh auth login --hostname …` for the person to run.
+        const host = plainHost(rawHost);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
+        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', 'fix git_url in hub.json (or the origin remote) to name a plain host');
         else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to hub.json so the auth probe can target the right host');
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
@@ -442,33 +456,49 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   if (regBroken) { /* reported above */ }
   else if (!Array.isArray(registry?.repos)) check(checks, 'repos', 'project', 'fail', `${PROJECT_FILES.reposRegistry} has the wrong shape [YAD-STATE-002]`, 'expected a `repos` array');
   else {
-    for (const repo of registry.repos) {
+    // An entry that is not an object (`null`, `5`) is named, never dereferenced (E81).
+    const repoEntries = registry.repos.filter((r) => isPlainObject(r));
+    const odd = registry.repos.length - repoEntries.length;
+    if (odd) check(checks, 'repos:not-an-entry', 'project', 'fail', `${odd} entr${odd > 1 ? 'ies' : 'y'} in ${PROJECT_FILES.reposRegistry} ${odd > 1 ? 'are' : 'is'} not an object [YAD-STATE-002]`, 'fix or remove it in repos.json');
+    for (const repo of repoEntries) {
       // A missing/empty path must NOT fall back to the project root (which is itself a git repo and
       // would read as "healthy") — an entry with no path is malformed.
-      if (!repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${repo.name || '(unnamed)'}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
+      if (typeof repo.path !== 'string' || !repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${forTerminal(repo.name || '(unnamed)')}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
       const repoRoot = path.resolve(root, repo.path);
+      // Judged before git runs (E81) — the same judgement `yad repo clone` makes, so the hint names that
+      // command only for a repo it would clone, and git never runs in a folder with no `.git` (a
+      // committed folder shaped like a bare repo would have git read its `config`).
+      const judged = judgeRepo(root, repo);
+      const { name: nm, path: pth } = judged;   // shown in the terminal: control characters made spaces
+      const cloneHint = judged.state === 'missing' ? 'run `yad repo clone` to clone it here' : null;
       // A registered repo may be a SIBLING of the Product (`../backend`, the standard multi-repo layout).
       // Such a checkout is legitimately absent wherever only the Product is checked out — Product CI, a fresh
       // clone — so its absence is a warn, not corruption. A missing path INSIDE the project root is
       // still a hard fail: nothing but damage explains it.
       if (!exists(repoRoot)) {
-        if (underProjectRoot(root, repoRoot) || !isRegistrableSibling(root, repo.path)) check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo');
-        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the Product)`, 'expected when only the Product is checked out; clone it alongside the Product to work on it here');
+        if (underProjectRoot(root, repoRoot) || !isRegistrableSibling(root, repo.path)) check(checks, `repo:${repo.name}`, 'project', 'fail', `${nm}: path ${pth} does not exist [YAD-STATE-003]`, cloneHint || 'fix the path in repos.json or re-connect the repo');
+        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: ${pth} is not present in this checkout (sibling repo, outside the Product)`, cloneHint ? `expected when only the Product is checked out; ${cloneHint}` : `expected when only the Product is checked out; \`yad repo clone\` will not clone it (${judged.reason}) — clone it alongside the Product by hand to work on it here`);
         continue;
       }
-      const head = gitHead(repoRoot);
-      if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: ${repo.path} is not a git repository (or has no commits) [YAD-STATE-003]`, 'init/clone the repo, then re-connect it'); continue; }
-      if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + repo.name + '` once it has code');
-      else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + repo.name + '`');
-      else check(checks, `repo:${repo.name}`, 'project', 'ok', `${repo.name}: git repo, context fresh`);
+      // There, but refused (outside the workspace, through `.git` or a link, or a folder with no `.git`):
+      // said with the reason, and git is not run in it.
+      if (judged.state === 'refused') { check(checks, `repo:${repo.name}`, 'project', 'fail', `${nm}: ${pth} — ${judged.reason} [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo'); continue; }
+      // Reached through a link inside a repo's tree (a link the Product commits): `yad repo sync` and
+      // `refresh` skip it, and so do doctor's other checks — said, not read.
+      if (judged.linked) { check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: ${pth} is reached through a link inside a repo's tree, so the checkout is not where the path says — yad skips it`, 'register the checkout at its own path'); continue; }
+      const head = judged.state === 'present' || judged.state === 'product' ? gitHead(repoRoot) : null;
+      if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${nm}: ${pth} is not a git repository (or has no commits) [YAD-STATE-003]`, cloneHint || 'init/clone the repo, then re-connect it'); continue; }
+      if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + asArg(repo.name) + '` once it has code');
+      else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${nm}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + asArg(repo.name) + '`');
+      else check(checks, `repo:${repo.name}`, 'project', 'ok', `${nm}: git repo, context fresh`);
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
     // Per-repo owners went with the roster (E62). Named only where a repo actually lists someone: every
     // repo an older setup connected carries an EMPTY `domain_owner`, which says nothing.
-    const owned = registry.repos.filter((r) => (Array.isArray(r.domain_owners) && r.domain_owners.length) || (typeof r.domain_owner === 'string' && r.domain_owner));
+    const owned = repoEntries.filter((r) => (Array.isArray(r.domain_owners) && r.domain_owners.length) || (typeof r.domain_owner === 'string' && r.domain_owner));
     if (owned.length) {
       check(checks, 'people:domain-owners-unused', 'project', 'warn',
-        `${PROJECT_FILES.reposRegistry} names domain owners that nothing reads any more: ${owned.map((r) => r.name).join(', ')}`,
+        `${PROJECT_FILES.reposRegistry} names domain owners that nothing reads any more: ${owned.map((r) => forTerminal(r.name)).join(', ')}`,
         'delete `domain_owner` / `domain_owners` when convenient; request reviewers on the PR itself');
     }
     // The verified-commits author allowlist went with the roster too (E62): the gate checks signatures
@@ -476,7 +506,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // list in hub.json and every generated file — so nobody maintains a list that no longer protects.
     const allowFiles = [
       { where: 'the Product', file: path.join(root, '.sdlc', 'verified-authors') },
-      ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
+      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
     ].filter((x) => exists(x.file)).map((x) => x.where);
     const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
     if (allowFiles.length || listedAuthors) {
@@ -490,7 +520,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // copy stays and keeps failing commits from unlisted authors (E62 upgrade simulation). Named, not fixed.
     const oldGates = [
       { where: 'the Product', file: path.join(root, 'checks', 'verified-commits.sh') },
-      ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
+      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
     ].filter((x) => exists(x.file) && /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(fs.readFileSync(x.file, 'utf8'))).map((x) => x.where);
     if (oldGates.length) {
       check(checks, 'people:allowlist-gate-stale', 'project', 'warn',
@@ -501,7 +531,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // slice out of specs/<story>/contracts/ (or a file out of src/<feature>/) passes the gate. `yad check
     // --fix` refreshes a wired contract-check nobody changed; one changed by hand is kept, and
     // backfill-check is never wired at all — every copy is placed by hand. Named, not fixed.
-    const gateRoots = [{ where: 'the Product', root }, ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, root: path.resolve(root, r.path) }))];
+    const gateRoots = [{ where: 'the Product', root }, ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), root: path.resolve(root, r.path) }))];
     const renameBlind = gateRoots
       .flatMap((x) => RENAME_BLIND_GATES.map((rel) => ({ ...x, rel })))
       .filter((x) => renameBlindGate(path.join(x.root, x.rel)))
@@ -570,8 +600,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // hint would install its whole wiring.
     const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
     const rootTop = top(root);
-    const unlinked = registry.repos.filter((r) => r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
-      .filter(({ dir }) => exists(dir) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
+    const unlinked = repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
+      .filter(({ r, dir }) => isCheckout(root, r) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
       .filter(({ dir }) => { const t = top(dir); return t && t !== rootTop; })
       .map(({ r, dir }) => {
         const branch = r.default_branch || 'main';
@@ -631,7 +661,11 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         if (!there) return { name: r.name, branch, offBranch, diskBad, trackedHere, why: shown.ok ? 'unreadable' : 'missing' };
         return { name: r.name, branch, offBranch, why: 'stale' };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      // Everything below prints these (E81 review 11): the registry's name and branch, and the clone's own
+      // branch names, made safe once here — names for prose, the branch for the git commands to copy.
+      .map((u) => ({ ...u, name: forTerminal(u.name), branch: branchArg(u.branch),
+        ...(u.onBranch ? { onBranch: forTerminal(u.onBranch) } : {}), ...(u.offBranch ? { offBranch: forTerminal(u.offBranch) } : {}) }));
     const named = (why) => unlinked.filter((u) => u.why === why).map((u) => u.name);
     const missing = named('missing');
     const unreadable = named('unreadable');
@@ -721,9 +755,9 @@ export function ciTagsChecks(checks, root, hub, registry) {
       { scope: 'hub', file: '.gitlab/ci/yad-hub-checks.yml', path: path.join(root, '.gitlab/ci/yad-hub-checks.yml') },
     );
   }
-  for (const repo of registry?.repos || []) {
-    if (repo.platform !== 'gitlab' || !repo.path) continue;
-    fragments.push({ scope: repo.name, file: '.gitlab/ci/yad-checks.yml', path: path.join(path.resolve(root, repo.path), '.gitlab/ci/yad-checks.yml') });
+  for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
+    if (!isPlainObject(repo) || repo.platform !== 'gitlab' || !repo.path) continue;
+    fragments.push({ scope: forTerminal(repo.name), file: '.gitlab/ci/yad-checks.yml', path: path.join(path.resolve(root, repo.path), '.gitlab/ci/yad-checks.yml') });
   }
   for (const f of fragments) {
     if (untagged(f.path)) {
@@ -2151,27 +2185,30 @@ export function riskMapChecks(checks, root) {
   for (const repo of repos) {
     if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
     const repoRoot = path.resolve(root, repo.path);
-    if (!exists(repoRoot) || !gitHead(repoRoot)) continue;
+    if (!isCheckout(root, repo) || !gitHead(repoRoot)) continue;
     const r = checkRepo(repoRoot);
     if (!r.git) continue;
     const id = `risk-map:${repo.name}`;
+    // Printed (E81 review 11): the name in prose through `shown`, and in a command to copy only as a plain word.
+    const nm = forTerminal(repo.name);
+    const arg = asArg(repo.name);
     if (!r.map) {
-      check(checks, id, 'risk-map', 'ok', `${repo.name}: no ${RISK_MAP_FILE} yet — no directory has a risk level (\`yad risk-map draft ${repo.name}\` starts one)`);
+      check(checks, id, 'risk-map', 'ok', `${nm}: no ${RISK_MAP_FILE} yet — no directory has a risk level (\`yad risk-map draft ${arg}\` starts one)`);
       continue;
     }
-    if (!r.findings.length) { check(checks, id, 'risk-map', 'ok', `${repo.name}: every directory has a confirmed level`); continue; }
+    if (!r.findings.length) { check(checks, id, 'risk-map', 'ok', `${nm}: every directory has a confirmed level`); continue; }
     const groups = [];
     for (const f of r.findings) {
       let g = groups.find((x) => x.code === f.code);
       if (!g) { g = { code: f.code, targets: [] }; groups.push(g); }
-      if (f.target) g.targets.push(f.target);
+      if (f.target) g.targets.push(forTerminal(f.target));   // a folder name from the repo's own tree (E81 review 13)
     }
     const said = groups.map((g) => {
       const shown = g.targets.slice(0, 3).join(', ') + (g.targets.length > 3 ? ` +${g.targets.length - 3} more` : '');
       return `${g.code}${shown ? ` (${shown})` : ''}`;
     }).join('; ');
-    check(checks, id, 'risk-map', 'warn', `${repo.name}: ${RISK_MAP_FILE} is out of date — ${said}`,
-      `\`yad risk-map check ${repo.name}\` lists each one; fix the map in ${repo.name} through a PR (advisory — it blocks nothing)`,
+    check(checks, id, 'risk-map', 'warn', `${nm}: ${RISK_MAP_FILE} is out of date — ${said}`,
+      `\`yad risk-map check ${arg}\` lists each one; fix the map in ${nm} through a PR (advisory — it blocks nothing)`,
       { findings: r.findings });
   }
 }
@@ -2187,15 +2224,16 @@ export function codeownersChecks(checks, root) {
   for (const repo of repos) {
     if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
     const repoRoot = path.resolve(root, repo.path);
-    if (!exists(repoRoot) || !gitHead(repoRoot)) continue;
+    if (!isCheckout(root, repo) || !gitHead(repoRoot)) continue;
     const r = checkCodeowners(repoRoot, { platform: repo.platform || null });
     if (!r.git) continue;
     const id = `codeowners:${repo.name}`;
-    const more = `\`yad codeowners check ${repo.name}\``;
-    if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${repo.name}: CODEOWNERS could not be checked — ${r.unknown}`, more); continue; }
-    if (r.none) { check(checks, id, 'codeowners', 'ok', `${repo.name}: no CODEOWNERS — nothing to check`); continue; }
+    const nm = forTerminal(repo.name);   // printed as in riskMapChecks (E81 review 11)
+    const more = `\`yad codeowners check ${asArg(repo.name)}\``;
+    if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS could not be checked — ${forTerminal(r.unknown)}`, more); continue; }
+    if (r.none) { check(checks, id, 'codeowners', 'ok', `${nm}: no CODEOWNERS — nothing to check`); continue; }
     const findings = codeownersFindings(r);
-    if (!findings.length) { check(checks, id, 'codeowners', 'ok', `${repo.name}: every ${r.path} line yad can read matches a file`); continue; }
+    if (!findings.length) { check(checks, id, 'codeowners', 'ok', `${nm}: every ${r.path} line yad can read matches a file`); continue; }
     const lines = (code) => findings.filter((f) => f.code === code).map((f) => f.line);
     const listed = (ns) => ns.slice(0, 3).join(', ') + (ns.length > 3 ? ` +${ns.length - 3} more` : '');
     const said = [];
@@ -2205,8 +2243,8 @@ export function codeownersChecks(checks, root) {
     if (dead.length) said.push(`in ${r.path}, ${dead.length === 1 ? '1 line matches' : `${dead.length} lines match`} no file (line${dead.length === 1 ? '' : 's'} ${listed(dead)})`);
     const unread = lines('not-read');
     if (unread.length) said.push(`in ${r.path}, ${unread.length === 1 ? '1 line' : `${unread.length} lines`} yad could not read (line${unread.length === 1 ? '' : 's'} ${listed(unread)})`);
-    check(checks, id, 'codeowners', 'warn', `${repo.name}: CODEOWNERS may be out of date — ${said.join('; ')}`,
-      `${more} lists each one; fix it in ${repo.name} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`,
+    check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS may be out of date — ${said.join('; ')}`,
+      `${more} lists each one; fix it in ${nm} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`,
       { findings });
   }
 }
@@ -2243,10 +2281,10 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
   for (const [i, repo] of repos.entries()) {
     if (!repo || typeof repo.name !== 'string' || !repo.name) continue;
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
-    const onDisk = repoRoot && exists(repoRoot) && gitHead(repoRoot);
+    const onDisk = repoRoot && isCheckout(root, repo) && gitHead(repoRoot);
     // A name with an `@` is hidden in the id too; its place in repos.json keeps the id one word. Nothing
     // validates a repo's name, so a repo literally named `#1` could take the same id — it only labels a line.
-    emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, repo.name, {
+    emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, forTerminal(repo.name), {
       platform: repo.platform || null,
       gitUrl: (typeof repo.git_url === 'string' && repo.git_url) || (onDisk ? origin(repoRoot) : null),
       branch: typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null,
@@ -2310,7 +2348,7 @@ export function indexChecks(checks, root) {
     const head = git('rev-parse', '--abbrev-ref', 'HEAD');
     const main = resolveDefaultBranch(git, hubNow);
     if (head.ok && head.stdout && head.stdout !== main) {
-      check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'is not what this yadflow builds from the work items on this branch'} — expected on '${head.stdout}': it is written on '${main}' only, once this work merges`);
+      check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'is not what this yadflow builds from the work items on this branch'} — expected on '${head.stdout}': it is written on '${forTerminal(main)}' only, once this work merges`);
       return;
     }
   }

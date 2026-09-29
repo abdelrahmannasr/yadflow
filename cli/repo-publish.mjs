@@ -16,23 +16,27 @@
 //      commit never enters a PR's base..HEAD range where it would strand required checks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
+import { c, ok, info, fail, hand, exists, pushWithRebase, forTerminal } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
+import { codeContextPathOk } from './workspace.mjs';
 
 // Collapse any whitespace/newline runs to a single space — keeps a hostile `git user.name` or a stray
 // path from breaking the one-line subject or injecting a fake trailer line.
 const oneLine = (s = '') => String(s).replace(/\s+/g, ' ').trim();
 
 // The tracked code-map for a repo: the registered path, else the conventional location.
-const codeMapOf = (repo) => repo.codeMap || path.posix.join('.sdlc/code-context', repo.name, 'code-map.md');
+// A registry entry with no `name` (or a name that is not text) and no path of its own has no place
+// here: null, which `codeContextPathOk` refuses — never a throw halfway through a publish (E81 review 2).
+const inContext = (repo, file) => (typeof repo?.name === 'string' && repo.name ? path.posix.join('.sdlc/code-context', repo.name, file) : null);
+export const codeMapOf = (repo) => repo.codeMap || inContext(repo, 'code-map.md');
 
 // The repomix pack for a repo: the registered path, else the conventional location.
-const packOf = (repo) => repo.contextPack || path.posix.join('.sdlc/code-context', repo.name, 'pack.md');
+export const packOf = (repo) => repo.contextPack || inContext(repo, 'pack.md');
 
 // PURE — the repo-relative pathspecs to stage: the registry plus each registered repo's code-map that
 // exists on disk. When `name` is given (a scoped `yad repo refresh <name> --push`), only that repo's
@@ -41,9 +45,11 @@ const packOf = (repo) => repo.contextPack || path.posix.join('.sdlc/code-context
 export function codeMapPathspecs(root, registry = { repos: [] }, name = null) {
   const out = [];
   for (const repo of registry.repos || []) {
-    if (name && repo.name !== name) continue;
+    if (!repo || typeof repo !== 'object' || (name && repo.name !== name)) continue;
     const rel = codeMapOf(repo);
-    if (fs.existsSync(path.join(root, rel))) out.push(rel);
+    // Shared registry text chooses this path, and it is committed and pushed: only under
+    // .sdlc/code-context/ in the Product, never through `..`, `.git` or a link (E81).
+    if (codeContextPathOk(root, rel) && fs.existsSync(path.join(root, rel))) out.push(rel);
   }
   // The registry always rides along — `yad repo refresh` stamps syncedHead/lastSyncedAt into it.
   if (fs.existsSync(path.join(root, PROJECT_FILES.reposRegistry))) out.push(PROJECT_FILES.reposRegistry);
@@ -57,9 +63,9 @@ export function codeMapPathspecs(root, registry = { repos: [] }, name = null) {
 export function packPathspecs(root, registry = { repos: [] }, name = null) {
   const out = [];
   for (const repo of registry.repos || []) {
-    if (name && repo.name !== name) continue;
+    if (!repo || typeof repo !== 'object' || (name && repo.name !== name)) continue;
     const rel = packOf(repo);
-    if (fs.existsSync(path.join(root, rel))) out.push(rel);
+    if (codeContextPathOk(root, rel) && fs.existsSync(path.join(root, rel))) out.push(rel);
   }
   return out;
 }
@@ -236,7 +242,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   } finally {
     for (const h of held) if (!fs.existsSync(h.abs)) fs.writeFileSync(h.abs, h.buf);
   }
-  ok(`published ${fileset.length} file(s): ${c.dim(label)}`);
+  ok(`published ${fileset.length} file(s): ${c.dim(forTerminal(label))}`);   // a registry name can be in it (E81 review 15)
 
   if (!push) return { message, committed: true, pushed: false };
   return { message, committed: true, pushed: pushHead() };

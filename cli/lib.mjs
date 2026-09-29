@@ -1,5 +1,5 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { err } from './errors.mjs';
 import { MIRRORED_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
@@ -24,6 +24,18 @@ export const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // holds the one object and nothing else — a progress line printed before the answer would otherwise
 // make the whole output unparseable. Each `warn` is also collected into `warnings`, as plain text.
 // A command never calls JSON.stringify toward stdout itself; a test greps for it.
+// Text read from a shared file (a repo name, a path) is shown in the terminal: every control character
+// (C0, DEL and C1 — U+0080–U+009F, which some terminals obey too) becomes a space, so a registry entry cannot move the cursor or recolour what follows.
+// So do the line and paragraph separators and the bidi controls, which can make a line read in another
+// order than it holds (E81 review 9).
+const INVISIBLE = new Set([0x2028, 0x2029, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x061c]);
+export const forTerminal = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) || INVISIBLE.has(n) ? ' ' : ch; }).join('');
+
+// A registry name inside a command the person is invited to copy: as it is only when it is one plain
+// word that starts with a letter or digit (never an option like `--push`), else `<name>` — the shared
+// file could hold `api; curl …|sh` (E81 reviews 9–10; here since review 15, for doctor and people.mjs).
+export const asArg = (name) => (typeof name === 'string' && /^\w[\w.-]*$/.test(name) ? name : '<name>');
+
 export const JSON_VERSION = 1;
 export const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
 let jsonRun = null;
@@ -302,12 +314,21 @@ export function writeJSON(p, obj) {
     if (fs.readFileSync(p, 'utf8') === data) return;
   } catch { /* missing or unreadable — fall through and write it */ }
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  const tmp = `${p}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, data);
+  // A name nobody can guess, created exclusively (`wx`): a Product can commit `repos.json.<pid>.tmp` as a
+  // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link
+  // points (`~/.zshenv`; E81 review 17). `wx` refuses any entry already there, links included.
+  const tmp = `${p}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+  try { fs.writeFileSync(tmp, data, { flag: 'wx' }); }
+  catch (e) {
+    // A half-written file of our own (a full disk) is removed; an entry that was already there (EEXIST)
+    // is not ours to delete.
+    if (e.code !== 'EEXIST') { try { fs.rmSync(tmp, { force: true }); } catch { /* keep the write's own error */ } }
+    throw e;
+  }
   try {
     fs.renameSync(tmp, p);
   } catch (e) {
-    fs.rmSync(tmp, { force: true });
+    try { fs.rmSync(tmp, { force: true }); } catch { /* keep the rename's own error */ }
     throw e;
   }
 }

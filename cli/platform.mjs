@@ -22,6 +22,12 @@ export function cliFor(platform) {
 // Bare host from a git remote URL, for hostname-scoped CLI auth checks. Handles both the
 // `https://[user@]host[:port]/...` and the scp-like `git@host:group/repo.git` forms. Returns
 // null when nothing parses (caller falls back to an unscoped check).
+// A host yad may use in a CLI call or print — inside `gh auth login --hostname <host>`, say — or null. The
+// host comes from shared files (hub.json, repos.json) or a clone's remote, and `hostFromGitUrl` passes
+// `$(curl …|sh)` or an escape through, so a host must be a plain host name or a bracketed IPv6 address.
+// ONE test for every caller (E81 reviews 13–14: the second copy was missed once).
+export const plainHost = (h) => (typeof h === 'string' && /^(?:\w[\w-]*(?:\.[\w-]+)*|\[[0-9a-f:.]+\])$/i.test(h) ? h : null);
+
 export function hostFromGitUrl(url = '') {
   if (typeof url !== 'string' || !url.trim()) return null;
   const u = url.trim();

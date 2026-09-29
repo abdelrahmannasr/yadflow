@@ -26,7 +26,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict } from './lib.mjs';
+import { fileURLToPath } from 'node:url';
+import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
 import { moduleActions, gitHookActions } from './plan.mjs';
@@ -49,9 +50,9 @@ export const PRODUCT_DIR = 'product';
 const FOLDER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const validFolderName = (name) => typeof name === 'string' && FOLDER_RE.test(name);
 
-// Text read from a shared file (a repo name, a path) is shown in the terminal: every control character
-// (C0, DEL and C1 — U+0080–U+009F, which some terminals obey too) becomes a space, so a registry entry cannot move the cursor or recolour what follows.
-export const shown = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) ? ' ' : ch; }).join('');
+// Text read from a shared file is shown in the terminal through `shown` — `forTerminal` in lib.mjs, one
+// cleaner for every module that prints registry text (E81 review 12).
+export const shown = forTerminal;
 
 // A folder as the person's shell reaches it: relative to where they ran yad (which `--dir` may not
 // be), quoted when it holds a space.
@@ -95,21 +96,201 @@ export function gitInit(dir, branch = 'main') {
   return run('git', ['symbolic-ref', 'HEAD', `refs/heads/${branch}`], { cwd: dir }).ok;
 }
 
-function gitClone(url, target, env) {
-  const r = spawnSync('git', ['clone', '-q', '--', url, target], { encoding: 'utf8', env, windowsHide: true });
-  return { ok: r.status === 0, error: (r.stderr || r.error?.message || '').trim().split('\n').pop() || `git clone exited ${r.status}` };
+// How a clone may reach its source. `join`'s Product URL is the person's own, typed by them: git's own
+// rules. A REGISTERED repo's URL was chosen by the shared registry, so git is told which transports it
+// may use, by `GIT_ALLOW_PROTOCOL` (git 2.6.1+) — which git obeys over every `protocol.*.allow` setting,
+// so a value the person's environment carries cannot widen it (E81 review 5) — and by
+// `protocol.file.allow` as a second word. A network URL gets the network transports only, never the
+// file one: git reads `evil.com:x` as a LOCAL folder when one by that name exists (E81 reviews 3–4). A
+// local source (the YAD_ALLOW_LOCAL_REMOTES door) gets the file transport only.
+const TRANSPORTS = { network: 'https:http:ssh:git', local: 'file' };
+function gitClone(url, target, env, { kind = null } = {}) {
+  const allow = TRANSPORTS[kind];
+  const args = allow ? ['-c', `protocol.file.allow=${kind === 'local' ? 'always' : 'never'}`] : [];
+  const r = spawnSync('git', [...args, 'clone', '-q', '--', url, target], { encoding: 'utf8', env: allow ? { ...env, GIT_ALLOW_PROTOCOL: allow } : env, windowsHide: true });
+  let error = (r.stderr || r.error?.message || '').trim().split('\n').pop() || `git clone exited ${r.status}`;
+  if (kind === 'network' && /transport '.*' not allowed/.test(error)) error += ' — a registered repo is cloned over the network only (an `insteadOf` rule of yours may point it at a local folder)';
+  return { ok: r.status === 0, error };
 }
+
+// A registered repo's `git_url` is shared text, handed to `git clone`. Only a network address is cloned:
+// `https://`, `http://`, `ssh://`, `git://`, or scp-style `user@host:path` / `host:path` (an ssh alias
+// too). A plain path, `file://` or any `<helper>::` URL is refused — a local path can name a folder the
+// Product itself commits (E81 review 3). The pattern is the first gate; the transports `gitClone` allows
+// are the second.
+//
+// A team whose remotes really are on a disk sets YAD_ALLOW_LOCAL_REMOTES=1: then a local path or
+// `file://` URL is cloned when it names a FOLDER THAT EXISTS outside the workspace. It is resolved on
+// disk (links followed, `file:///C:/x` read as Windows does, `%` refused because git decodes it), and git
+// is handed that resolved path — never the typed text, which git could read another way (it tries
+// `<path>.git` when `<path>` is not there; E81 review 5). Compared without case where the disk ignores it.
+// The host keeps to letters, digits, `.`, `_` and `-` (an IPv6 host in brackets), and the user and
+// password to those plus `~` and `+`, in every form git hands to ssh: an ssh config whose `ProxyCommand`
+// or `Match exec` uses `%h` or `%r` on an OpenSSH before 9.6 puts them in a shell command
+// (CVE-2023-51385; E81 reviews 6–7). No `%` there: git decodes `%24%28` to `$(` before ssh sees it.
+// Only `http(s)://`, which goes to curl and never to ssh, may carry `%` in its user and password (a
+// login that is an email address, `me%40corp.com@`).
+// Each starts with a letter or digit — never `-`, which ssh would read as an option (git refuses it too).
+const HOST = String.raw`(?:\w[\w-]*(?:\.[\w-]+)*|\[[0-9a-f:.]+\])`;
+const USER = String.raw`\w[\w.~+-]*`;
+const HTTP_USER = String.raw`[\w%][\w.~%+-]*`;
+const NETWORK_URL_RE = new RegExp(String.raw`^(?![^/]*::)(?:https?:\/\/(?:${HTTP_USER}(?::${HTTP_USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|(?:ssh|git|git\+ssh|ssh\+git):\/\/(?:${USER}(?::${USER}?)?@)?${HOST}(?::\d*)?(?:\/|$)|${USER}@${HOST}:(?!\/\/)|\w[\w-]+(?:\.[\w-]+)*:(?!\/\/))`, 'i');
+// A control character anywhere in the URL, typed or %-encoded (`%0d`, `%1b`), is refused. git decodes
+// the user, password and path of a `scheme://` URL and writes them to the person's credential helper one
+// `key=value` per line: a carriage return there makes a helper that ends lines on it (Git Credential
+// Manager does) read `host=github.com` and hand that token to the URL's own host (CVE-2024-52006); an
+// escape in the user repaints the terminal in git's password prompt (CVE-2024-50349). git before 2.48.1
+// guards against neither (E81 review 8). The C1 controls (U+0080–U+009F — U+009B starts a terminal
+// escape), the line and paragraph separators and the bidi controls are refused raw or as their UTF-8
+// %-escapes too (`%c2%9b`, `%e2%80%ae`; E81 review 9). `%40` and every other printable escape pass.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]|%(?:[01][0-9a-f]|7f|c2%[89][0-9a-f]|d8%9c|e2%80%(?:a[89a-e]|8[ef])|e2%81%a[6-9])/i;
+export const localRemotesAllowed = (env = process.env) => env.YAD_ALLOW_LOCAL_REMOTES === '1';
+const folded = (p) => (process.platform === 'darwin' || process.platform === 'win32' ? p.toLowerCase() : p);
+const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+// { kind: 'network', url } — the URL as recorded; { kind: 'local', url } — the resolved folder; or null.
+export function cloneSource(productRoot, url, env = process.env) {
+  if (CONTROL_RE.test(url)) return null;
+  if (NETWORK_URL_RE.test(url)) return { kind: 'network', url };
+  if (!localRemotesAllowed(env) || url.includes('%') || url.includes('::')) return null;
+  let p = url;
+  if (/^file:/i.test(url)) { try { p = fileURLToPath(url); } catch { return null; } }
+  if (!path.isAbsolute(p)) return null;
+  let real;
+  try { real = fs.realpathSync.native(p); if (!fs.statSync(real).isDirectory()) return null; } catch { return null; }
+  const root = path.resolve(productRoot);
+  let workspace = path.dirname(root) === root ? root : path.dirname(root);
+  try { workspace = fs.realpathSync.native(workspace); } catch { /* as resolved */ }
+  return under(folded(real), folded(workspace)) ? null : { kind: 'local', url: real };
+}
+
+// A judged entry git may run in: a checkout that is there (or the Product itself), and not reached through
+// a link inside a repo's tree (E81). Doctor's checks and `sync`'s stale count use it; the `list`,
+// `refresh` and `sync` loops branch on the same states themselves, to say which one applies.
+export const runnable = (j) => (j.state === 'present' || j.state === 'product') && !j.linked;
+
 // A clone that needs a password must not sit waiting at a prompt nobody will answer.
 const cloneEnv = () => (process.env.SDLC_NONINTERACTIVE ? { ...process.env, GIT_TERMINAL_PROMPT: '0' } : process.env);
 
-// THE CLONE STEP — shared with E81 (detect and fetch missing repos). For each repo the Product's
-// registry lists, put a clone at its `path` (relative to the Product) when none is there.
+// WHERE A REGISTRY ENTRY STANDS ON THIS MACHINE, judged before any git runs (E81). Shared by every
+// command that acts on the registered repos — the clone step (`yad join`, `yad repo clone`), `yad repo
+// list`, `yad repo sync` and `yad doctor` — so one never says "run X" for an entry X then refuses.
 //
-// The registry is SHARED content — anyone who can push to the Product wrote it — so every entry is
-// judged before git runs: a path outside the workspace is refused (the same bound setup keeps), the
-// Product itself (`.`, a monorepo) is not cloned, and the URL is passed after `--` so it can never be
-// read as a git option. A failure is recorded and the next repo is tried: one bad entry never stops
-// the rest (the roadmap: "partial clone failures never fail the whole join").
+// The registry is SHARED content — anyone who can push to the Product wrote it — so a path outside the
+// workspace is refused (the same bound setup keeps), a path through a `.git` folder or a link is refused,
+// and a folder that exists but holds no `.git` is refused too: a Product can commit a folder shaped like
+// a BARE git repo (`HEAD`, `config`, `objects/`), and git run there reads that `config`, whose
+// `core.fsmonitor` runs a command. The Product itself (`.`, a monorepo) is its own state.
+//
+// Returns { name, path, target, state, reason?, inside?, linked?, url?, urlKind? } — `url` and `urlKind`
+// ('network' | 'local') only for 'missing': what the clone step hands git. State is one of:
+//   'product'   the Product itself; never cloned
+//   'present'   a git checkout is there (`.git` at the path), or the path is a folder inside one (`inside`
+//               names the checkout). `linked` is set when a folder on the way, deeper than the workspace
+//               folder itself, is a link — see `inRepoLink`
+//   'missing'   nothing there yet, and the clone step can make it
+//   'refused'   not there, or not a checkout, and the clone step will not make it; `reason` says why
+export function judgeRepo(productRoot, repo) {
+  if (!repo || typeof repo !== 'object' || Array.isArray(repo)) return { name: '(not an entry)', path: '', state: 'refused', reason: 'this entry in repos.json is not an object' };
+  const name = shown(repo?.name || '(unnamed)');
+  const rpath = typeof repo?.path === 'string' ? repo.path : '';
+  const entry = { name, path: shown(rpath) };
+  if (!rpath) return { ...entry, state: 'refused', reason: 'no path recorded' };
+  const target = path.resolve(productRoot, rpath);
+  const at = { ...entry, target };
+  if (target === path.resolve(productRoot)) return { ...at, state: 'product', reason: 'the Product itself' };
+  if (throughGitDir(productRoot, rpath)) return { ...at, state: 'refused', reason: 'it runs through a .git folder — git\'s own storage, never a code repo' };
+  if (!insideWorkspace(productRoot, rpath)) return { ...at, state: 'refused', reason: 'outside the workspace (the Product folder\'s parent)' };
+  if (exists(path.join(target, '.git'))) return { ...at, state: 'present', ...(inRepoLink(productRoot, target) ? { linked: true } : {}) };
+  // A folder inside a checkout (the monorepo layout: `apps/web` in the Product's own repo) has no `.git`
+  // of its own, and git finds the checkout by walking up. It is present when no link deeper than the
+  // workspace folder is on the way (so the walk git makes is the one read here — a link of the person's
+  // own directly in the workspace folder is followed, as for a checkout) and no folder on the way could
+  // be taken for a bare repo, where git would stop and read that folder's `config`.
+  const top = exists(target) && !inRepoLink(productRoot, target) ? enclosingCheckout(productRoot, target) : null;
+  if (top) {
+    if (headOnWay(target, top)) return { ...at, state: 'refused', reason: 'a folder on its way holds an entry named HEAD, so git could take it for a bare repo and read its config' };
+    return { ...at, state: 'present', inside: top };
+  }
+  if (throughLink(productRoot, target)) return { ...at, state: 'refused', reason: 'a folder on its path is a link, so where the clone lands is not what the path says' };
+  if (exists(target) && !isEmptyDir(target)) return { ...at, state: 'refused', reason: 'the folder exists and is not a git repo — move it aside and re-run' };
+  const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
+  if (!url) return { ...at, state: 'refused', reason: 'no git_url recorded — clone it by hand' };
+  if (url.startsWith('-')) return { ...at, state: 'refused', reason: 'the recorded git_url starts with "-"' };
+  const src = cloneSource(productRoot, url);
+  if (!src) return { ...at, state: 'refused', reason: 'the recorded git_url is not a network address (https://, http://, ssh://, git://, user@host:path or host:path) — clone it by hand, or set YAD_ALLOW_LOCAL_REMOTES=1 for a local folder outside the workspace' };
+  return { ...at, state: 'missing', url: src.url, urlKind: src.kind };
+}
+
+// The nearest folder above `target`, below the workspace folder, that holds `.git`: the checkout git
+// finds from `target`. Null when there is none.
+function enclosingCheckout(productRoot, target) {
+  const root = path.resolve(productRoot);
+  const workspace = path.dirname(root) === root ? root : path.dirname(root);
+  for (let cur = path.dirname(target); cur.startsWith(workspace + path.sep); cur = path.dirname(cur)) {
+    if (exists(path.join(cur, '.git'))) return cur;
+  }
+  return null;
+}
+
+// Git takes a folder for a bare repo only when it holds `HEAD` — then `objects/` and `refs/` may come
+// from anywhere (a `commondir` file points elsewhere), and `HEAD` may be a link that points nowhere
+// (E81 review 2 made git run a command both ways). So the one sound test is the part git always needs:
+// ANY entry named `HEAD`, of any kind, read with `lstat` so a dangling link counts. The file system
+// matches the name as git's own lookup does (without case on macOS and Windows). From `target` up to,
+// not including, the checkout `top`.
+const hasHead = (dir) => { try { fs.lstatSync(path.join(dir, 'HEAD')); return true; } catch { return false; } };
+function headOnWay(target, top) {
+  for (let cur = target; cur !== top && cur.startsWith(top + path.sep); cur = path.dirname(cur)) {
+    if (hasHead(cur)) return true;
+  }
+  return false;
+}
+
+// Where `yad repo refresh` writes a repo's pack and where `--push` stages its code-map: from the SHARED
+// registry (`contextPack`, `codeMap`, or a default built from the repo's `name`). Allowed only under
+// `.sdlc/code-context/` in the Product, with no `..`, no `.git` part and no link on the way — else a
+// registry entry chooses a file outside the Product to write, or one inside it to commit and push.
+export const CODE_CONTEXT_DIR = '.sdlc/code-context';
+export function codeContextPathOk(productRoot, rel) {
+  if (typeof rel !== 'string' || !rel || path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) return false;
+  const norm = path.posix.normalize(rel.replace(/\\/g, '/'));
+  if (!norm.startsWith(`${CODE_CONTEXT_DIR}/`)) return false;
+  const parts = norm.split('/');
+  if (parts.some((p) => p === '..' || /^\.git$/i.test(p.split(':')[0].replace(/[. ]+$/, '')) || /^git~\d+$/i.test(p))) return false;
+  let cur = path.resolve(productRoot);
+  for (const part of parts) {
+    cur = path.join(cur, part);
+    let st;
+    try { st = fs.lstatSync(cur); } catch { return true; }
+    if (st.isSymbolicLink()) return false;
+  }
+  return true;
+}
+
+// A link on the way to a PRESENT repo that lies inside some repo's tree — deeper than the workspace
+// folder's own children. The workspace folder is the person's: `ws/backend -> /src/backend` is their own
+// layout, and a clone there is theirs. A link any deeper was written by whoever writes that repo — the
+// Product's `evil -> ../../..` — so `yad repo sync` will not run git through it.
+function inRepoLink(productRoot, target) {
+  const root = path.resolve(productRoot);
+  const workspace = path.dirname(root) === root ? root : path.dirname(root);
+  const parts = path.relative(workspace, target).split(path.sep).filter(Boolean);
+  let cur = workspace;
+  for (const [i, part] of parts.entries()) {
+    cur = path.join(cur, part);
+    let st;
+    try { st = fs.lstatSync(cur); } catch { return false; }
+    if (i > 0 && st.isSymbolicLink()) return true;
+  }
+  return false;
+}
+
+// THE CLONE STEP — `yad join` and `yad repo clone` (E81). For each repo the registry lists that
+// `judgeRepo` finds missing, put a clone at its `path` (relative to the Product). The URL is passed after
+// `--` so it can never be read as a git option. A failure is recorded and the next repo is tried: one bad
+// entry never stops the rest (the roadmap: "partial clone failures never fail the whole join"). A present
+// repo is only ever skipped — nothing here runs git in it.
 //
 // Returns { cloned, present, failed }, each a list of { name, path, reason? }.
 export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env = cloneEnv() } = {}) {
@@ -117,33 +298,46 @@ export function cloneMissingRepos(productRoot, registry, { clone = gitClone, env
   // A `repos` that is not a list (`{}`, `5`) is a broken shared file: nothing to clone, and the caller
   // says so — the per-machine steps still run.
   for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
-    const name = shown(repo?.name || '(unnamed)');
-    const rpath = typeof repo?.path === 'string' ? repo.path : '';
-    const entry = { name, path: shown(rpath) };
-    if (!rpath) { out.failed.push({ ...entry, reason: 'no path recorded' }); continue; }
-    const target = path.resolve(productRoot, rpath);
-    if (target === path.resolve(productRoot)) { out.present.push({ ...entry, reason: 'the Product itself' }); continue; }
-    if (throughGitDir(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'it runs through a .git folder — git\'s own storage, never a code repo; not cloned' }); continue; }
-    if (!insideWorkspace(productRoot, rpath)) { out.failed.push({ ...entry, reason: 'outside the workspace (the Product folder\'s parent) — not cloned' }); continue; }
-    // Already there: nothing is written, so where a link of this machine's own points does not matter.
-    // "Present" is only ever a skip — anything that later fetches or pulls in a present repo (E81) must
-    // run `throughLink` and `insideWorkspace` on it first.
-    if (exists(path.join(target, '.git'))) { out.present.push(entry); continue; }
-    if (throughLink(productRoot, target)) { out.failed.push({ ...entry, reason: 'a folder on its path is a link, so where the clone lands is not what the path says — not cloned' }); continue; }
-    if (exists(target) && !isEmptyDir(target)) { out.failed.push({ ...entry, reason: 'the folder exists and is not a git repo — move it aside and re-run' }); continue; }
-    const url = typeof repo.git_url === 'string' ? repo.git_url.trim() : '';
-    if (!url) { out.failed.push({ ...entry, reason: 'no git_url recorded — clone it by hand' }); continue; }
-    if (url.startsWith('-')) { out.failed.push({ ...entry, reason: 'the recorded git_url starts with "-"' }); continue; }
+    const j = judgeRepo(productRoot, repo);
+    const entry = { name: j.name, path: j.path };
+    if (j.state === 'product') { out.present.push({ ...entry, reason: j.reason }); continue; }
+    if (j.state === 'present') { out.present.push(entry); continue; }
+    if (j.state === 'refused') { out.failed.push({ ...entry, reason: j.reason }); continue; }
     // A path through a file (`.sdlc/hub.json/x`) or a dangling link fails here — for this entry only.
     let r;
     try {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      r = clone(url, target, env);
+      fs.mkdirSync(path.dirname(j.target), { recursive: true });
+      // The transports by what the URL passed as (E81 reviews 4–5): see `gitClone`.
+      r = clone(j.url, j.target, env, { kind: j.urlKind });
     } catch (e) { r = { ok: false, error: `cannot make its folder (${e.code || e.message})` }; }
     if (r.ok) out.cloned.push(entry);
     else out.failed.push({ ...entry, reason: shown(r.error) });
   }
   return out;
+}
+
+// What the clone step did, said the same way by `join` and `repo clone`.
+export function reportClones(repos) {
+  for (const r of repos.cloned) ok(`cloned ${r.name} → ${r.path}`);
+  for (const r of repos.present) info(`${r.name}: ${r.reason || 'already there'}`);
+  for (const r of repos.failed) warn(`${r.name} (${r.path}): ${r.reason}`);
+}
+
+// The Product's registry, read strictly (E81, from join): a file that does not parse (a merge-conflict
+// marker left in it) must be SAID, not read as "no repos". Returns { registry, problem } — `problem` is
+// the sentence to show, with the file's absolute path (a home folder name, spaces and all) taken out;
+// `registry` is then `{ repos: [] }`. A file that parses and holds no list (`null`, `[]`, `5`) is a
+// problem too.
+export function readRegistry(productRoot) {
+  const regFile = path.join(productRoot, PROJECT_FILES.reposRegistry);
+  let registry;
+  try { registry = readJSONStrict(regFile, { repos: [] }); }
+  catch (e) {
+    const why = (e.message || '').replace(`corrupt JSON in ${regFile}: `, '').split(regFile).join(PROJECT_FILES.reposRegistry);
+    return { registry: { repos: [] }, problem: `${PROJECT_FILES.reposRegistry} in the Product cannot be read (${shown(why)})` };
+  }
+  if (!Array.isArray(registry?.repos)) return { registry: { repos: [] }, problem: `${PROJECT_FILES.reposRegistry} has no list of repos` };
+  return { registry, problem: null };
 }
 
 // The lines that put the Product on a platform — printed, never run.
@@ -274,23 +468,10 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   }
   if (!exists(productConfigPath(product))) return refuse(`${path.join(wsName, PRODUCT_DIR)}/ has no .sdlc/hub.json — that repo is not a yad Product`);
 
-  // Strict: a registry that does not parse (a merge-conflict marker left in it) must be SAID, not read as
-  // "no repos" — the joiner would get the Product alone with no hint the list was lost.
-  let registry;
-  const regFile = path.join(product, PROJECT_FILES.reposRegistry);
-  try { registry = readJSONStrict(regFile, { repos: [] }); }
-  catch (e) {
-    // The reason without the absolute path (a home folder name, spaces and all) — the file is named once.
-    const why = (e.message || '').replace(`corrupt JSON in ${regFile}: `, '').split(regFile).join(PROJECT_FILES.reposRegistry);
-    warn(`${PROJECT_FILES.reposRegistry} in the Product cannot be read (${shown(why)}) — nothing to clone; fix it in the Product and re-run`);
-    registry = { repos: [] };
-  }
-  // `null`, `[]`, `5` parse, and hold no list: said too.
-  if (!Array.isArray(registry?.repos)) warn(`${PROJECT_FILES.reposRegistry} has no list of repos — nothing to clone; fix it in the Product and re-run`);
+  const { registry, problem } = readRegistry(product);
+  if (problem) warn(`${problem} — nothing to clone; fix it in the Product and re-run`);
   const repos = cloneMissingRepos(product, registry);
-  for (const r of repos.cloned) ok(`cloned ${r.name} → ${r.path}`);
-  for (const r of repos.present) info(`${r.name}: ${r.reason || 'already there'}`);
-  for (const r of repos.failed) warn(`${r.name} (${r.path}): ${r.reason}`);
+  reportClones(repos);
 
   // The per-machine steps.
   const ideTargets = await selectIdeTargets(product, opts.ideTargets);

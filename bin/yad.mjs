@@ -243,7 +243,12 @@ ${c.bold('Build helpers')}
                                                           pair-review walkthrough (yad-pair-review)
   yad review nudge --repo <r> --pr <n>                    Friendly @-mention on a bare code-PR approve
   yad review reconcile --epic <id> --repo <r> --pr <n>    Bridge: stamp engagement onto the build-log ship
-  yad repo list                        Show connected repos (fresh / stale)
+  yad repo list                        Show connected repos (fresh / stale / not cloned here)
+  yad repo clone [name]                Clone every registered repo missing on this machine, at its
+                                       recorded path (the clone step of \`yad join\`). Never touches a
+                                       repo already there; exits 1 when one could not be cloned
+  yad repo sync [name]                 Switch each connected repo to its default branch and
+                                       fast-forward it from origin; dirty repos are skipped
   yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
                        refreshed code-maps + registry as a chore(hub): sync code-context … [skip ci]
                        audit commit and pushes it to the Product default branch (--allow-branch to override)
@@ -400,7 +405,7 @@ const ACTIONS = {
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
   tidy: { known: ['up'] },
   history: { known: ['list', 'show', 'search'], default: 'list' },
-  repo: { known: ['list', 'refresh', 'sync'], default: 'list' },
+  repo: { known: ['list', 'refresh', 'sync', 'clone'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
   docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
