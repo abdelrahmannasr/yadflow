@@ -734,36 +734,63 @@ export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_W
   ...renamedNameFiles(root).filter((rel) => /\.ya?ml$/.test(rel))])].filter((rel) => {
   try { return /--profile(?:=|[ \t]+)(["']?)product\1(?![\w.-])/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
 });
-// The Product gates that would mishandle `--profile product` (E124 reviews 2–3): refuse it ('rejects'), or take it and
-// skip the Product's rules ('unmapped'). Each with whether `yad update` keeps it — `kept`, an edited copy, from the
-// provenance record — or replaces it. On a run that fixes, a gate this run replaces is left out: after the run it
-// is the shipped copy, which handles `product`.
+// The Product gates that would mishandle `--profile product` (E124 reviews 2–4): refuse it ('rejects'), or take it
+// and skip the Product's rules ('unmapped'). Each gate's state decides what to do first, and is read from the
+// provenance record through `productActions` — never guessed from the file:
+//   state          what it is                                            before a run      on update   --overwrite-local
+//   'outdated'     yad's own copy, older than this release               run yad update    replaced    replaced
+//   'unrecorded'   no record (a pre-3.16 install): update backs it up    run yad update    replaced    replaced
+//   'kept'         edited since yad wrote it: update keeps it            fix it            fix it      replaced
+//   'unmanaged'    yad has no action for it (not verified, or the        fix it by hand    same        same
+//                  record cannot be read) — read from the file on disk
+// On a run that fixes, a gate that run replaces is left out: after it, the gate is the shipped copy.
 export function productGateBlockers(root, { fix = false, overwriteLocal = false } = {}) {
   let actions = [];
-  try { actions = productActions(root); } catch { /* an unreadable provenance record is named by its own check */ }
+  try { actions = productActions(root); } catch { /* an unreadable record: every gate reads as 'unmanaged' */ }
+  const byGate = new Map(actions.filter((a) => a.managed)
+    .map((a) => [path.relative(root, a.managed.dest).split(path.sep).join('/'), a]));
   const out = [];
-  for (const a of actions) {
-    if (!a.managed) continue;
-    const gate = path.relative(root, a.managed.dest).split(path.sep).join('/');
-    if (!PRODUCT_PROFILE_GATES.includes(gate)) continue;
-    const gap = productProfileGap(a.managed.dest);
+  for (const gate of PRODUCT_PROFILE_GATES) {
+    const gap = productProfileGap(path.join(root, gate));
     if (!gap) continue;
-    const kept = a.status === 'modified' && !(fix && overwriteLocal);
-    if (!kept && fix) continue;
-    out.push({ gate, gap, kept });
+    const a = byGate.get(gate);
+    let state;
+    if (!a) state = 'unmanaged';
+    else if (a.status === 'modified') state = fix && overwriteLocal ? null : 'kept';
+    else state = fix ? null : (a.backup ? 'unrecorded' : 'outdated');
+    if (state) out.push({ gate, gap, state });
   }
   return out;
 }
+const gapWords = (b) => `${b.gate} (it ${b.gap === 'rejects' ? 'refuses `--profile product`, so every Product PR would fail it' : 'takes `--profile product` but then skips the Product\'s rules'})`;
+const saved = (b) => `${b.gate}${BACKUP_SUFFIX}`;
+// What to do about ONE gate — `yad doctor`'s `profile:<gate>` hint.
+export function gateProfileFix(b) {
+  if (b.state === 'outdated') return 'run `yad update`: it replaces this copy, which yad wrote, with the shipped one';
+  if (b.state === 'unrecorded') return `run \`yad update\`: it replaces it with the shipped one and saves yours as ${saved(b)}`;
+  if (b.state === 'kept') return `it was changed by hand, so \`yad update\` keeps it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${saved(b)})`;
+  return `fix it by hand — yad does not manage the checks on this Product, so no \`yad update\` replaces it: ${PRODUCT_PROFILE_FIX.split(' — ')[0]}`;
+}
 // What to do before a team changes its `--profile hub` to `product`, or '' when nothing stands in the way —
-// one sentence for `yad doctor` and `yad check`/`update` alike.
+// one sentence for `yad doctor` and `yad check`/`update` alike, naming EVERY gate in the way, each group with
+// its own step (review 4: naming only the edited one let a stale one fail every PR).
 export function oldProfileAdvice(blockers) {
   if (!blockers.length) return '';
-  const what = (b) => `${b.gate} ${b.gap === 'rejects' ? 'refuses `--profile product`, so every Product PR would fail it' : 'takes `--profile product` but then skips the Product\'s rules'}`;
-  const kept = blockers.filter((b) => b.kept);
-  if (kept.length) {
-    return `but first fix the check${kept.length > 1 ? 's' : ''} it runs: ${kept.map(what).join('; ')} — ${kept.length > 1 ? 'they were' : 'it was'} edited, so \`yad update\` keeps ${kept.length > 1 ? 'them' : 'it'}: ${PRODUCT_PROFILE_FIX}`;
+  const parts = [];
+  const replace = blockers.filter((b) => b.state === 'outdated' || b.state === 'unrecorded');
+  if (replace.length) {
+    const backed = replace.filter((b) => b.state === 'unrecorded');
+    parts.push(`run \`yad update\`, which replaces ${replace.map(gapWords).join('; and ')}${backed.length ? ` (saving your ${backed.length > 1 ? 'copies' : 'copy'} as ${backed.map(saved).join(', ')})` : ''}`);
   }
-  return `but first run \`yad update\`, which replaces the old check${blockers.length > 1 ? 's' : ''}: ${blockers.map(what).join('; ')}`;
+  const kept = blockers.filter((b) => b.state === 'kept');
+  if (kept.length) {
+    parts.push(`fix ${kept.map(gapWords).join('; and ')} — ${kept.length > 1 ? 'they were' : 'it was'} edited, so \`yad update\` keeps ${kept.length > 1 ? 'them' : 'it'}: ${PRODUCT_PROFILE_FIX}`);
+  }
+  const own = blockers.filter((b) => b.state === 'unmanaged');
+  if (own.length) {
+    parts.push(`fix ${own.map(gapWords).join('; and ')} by hand — yad does not manage the checks on this Product`);
+  }
+  return `but first ${parts.join('; and ')}`;
 }
 
 // The new name of a renamed CI file is not installed while an edited old one is kept (`modified`): both

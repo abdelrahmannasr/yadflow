@@ -27737,16 +27737,17 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
 
     // (1) Edited, and refuses `product`: kept by `yad update`, so fix it first.
     fs.writeFileSync(gate, shipped.replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
-    assert.match(refOf().hint, /; but first fix the check it runs: checks\/pr-title\.sh refuses `--profile product`, so every Product PR would fail it — it was edited, so `yad update` keeps it: /);
+    assert.match(refOf().hint, /; but first fix checks\/pr-title\.sh \(it refuses `--profile product`, so every Product PR would fail it\) — it was edited, so `yad update` keeps it: /);
     let out = (await captureConsole(() => reconcile(T, { fix: true }))).out;
-    assert.match(out, /ours\.yml:5 passes `--profile hub`, renamed `--profile product` in 4\.0 — change it by hand, but first fix the check it runs: checks\/pr-title\.sh refuses/);
+    assert.match(out, /ours\.yml:5 passes `--profile hub`, renamed `--profile product` in 4\.0 — change it by hand, but first fix checks\/pr-title\.sh \(it refuses/);
     // --overwrite-local replaces it in that same run, so the run says nothing about it.
     out = (await captureConsole(() => reconcile(T, { fix: true, overwriteLocal: true }))).out;
     assert.match(out, /ours\.yml:5 names `--profile hub`, renamed `--profile product` in 4\.0 — yad does not edit this file; change it by hand/);
 
     // (2) Edited, and takes `product` but skips the Product's rules (unmapped): the same advice, its own words.
     fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('[ "$PROFILE" = hub ] && PROFILE=product', '').replace('if [ "$PROFILE" = product ]; then', 'if [ "$PROFILE" = hub ]; then'));
-    assert.match(refOf().hint, /but first fix the check it runs: checks\/pr-title\.sh takes `--profile product` but then skips the Product's rules — it was edited/);
+    assert.match(refOf().hint, /but first fix checks\/pr-title\.sh \(it takes `--profile product` but then skips the Product's rules\) — it was edited/);
+    assert.match(collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.github/workflows/ours.yml').hint, /it was edited/);
 
     // (3) Not edited, only out of date (a 3.x gate yad wrote): `yad update` replaces it, so that comes first —
     // and the update run itself says nothing about it, since after that run the gate is the shipped one.
@@ -27754,7 +27755,7 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
     const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
     rec.files['checks/pr-title.sh'] = contentShaOf(gate);
     fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
-    assert.match(refOf().hint, /; but first run `yad update`, which replaces the old check: checks\/pr-title\.sh refuses `--profile product`/);
+    assert.match(refOf().hint, /; but first run `yad update`, which replaces checks\/pr-title\.sh \(it refuses `--profile product`/);
     assert.doesNotMatch(refOf().hint, /edited/);
     out = (await captureConsole(() => reconcile(T, {}))).out;
     assert.match(out, /ours\.yml:5 passes `--profile hub`.*but first run `yad update`/);
@@ -27762,12 +27763,35 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
     assert.match(out, /ours\.yml:5 names `--profile hub`, renamed `--profile product` in 4\.0 — yad does not edit this file/);
     assert.equal(fs.readFileSync(gate, 'utf8'), shipped, 'and that run did replace it');
 
-    // Once the team changes it, `profile:` reads their own file too, and says what an edited gate breaks.
-    fs.writeFileSync(gate, shipped.replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    // (4) Every gate in a different state at once (review 4): each is named, each group with its own step —
+    // naming only the edited one let a stale one fail every PR after the team followed the advice.
+    const tpl = path.join(T, 'checks/pr-template.sh');
+    const cm = path.join(T, 'checks/commit-message.sh');
+    const refuse = (p) => fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    refuse(gate); // edited: after the last run the record says yad wrote the shipped copy
+    refuse(cm);
+    const rec2 = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
+    rec2.files['checks/commit-message.sh'] = contentShaOf(cm); // out of date: yad's own older copy
+    refuse(tpl);
+    delete rec2.files['checks/pr-template.sh']; // no record: a pre-3.16 install
+    fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec2));
+    const mixed = refOf().hint;
+    assert.match(mixed, /but first run `yad update`, which replaces checks\/commit-message\.sh \(it refuses [^)]*\); and checks\/pr-template\.sh \(it refuses [^)]*\) \(saving your copy as checks\/pr-template\.sh\.yad-orig\); and fix checks\/pr-title\.sh \(it refuses [^)]*\) — it was edited/, mixed);
+    // The same gates, one `profile:` line each, once the team passes `product`: each with its own step.
     fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile hub "$T"', '--profile product "$T"'));
-    const prof = collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh');
-    assert.ok(prof && prof.status === 'warn', 'profile: fires on a team workflow passing product');
-    assert.match(prof.message, /\.github\/workflows\/ours\.yml/);
+    const profOf = (g) => collectDoctor(T).checks.find((x) => x.id === `profile:checks/${g}`);
+    assert.match(profOf('pr-title.sh').message, /\.github\/workflows\/ours\.yml/, 'profile: reads the team\'s own file');
+    assert.match(profOf('pr-title.sh').hint, /^it was changed by hand, so `yad update` keeps it: /);
+    assert.match(profOf('commit-message.sh').hint, /^run `yad update`: it replaces this copy, which yad wrote/);
+    assert.match(profOf('pr-template.sh').hint, /^run `yad update`: it replaces it with the shipped one and saves yours as checks\/pr-template\.sh\.yad-orig/);
+
+    // (5) A Product not in verified mode: yad manages no checks there, so the file on disk is read (review 4).
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github' }));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+    fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile product "$T"', '--profile hub "$T"'));
+    assert.match(refOf().hint, /but first fix checks\/commit-message\.sh \(it refuses [^)]*\); and checks\/pr-title\.sh \(it refuses [^)]*\); and checks\/pr-template\.sh \(it refuses [^)]*\) by hand — yad does not manage the checks on this Product$/);
+    fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile hub "$T"', '--profile product "$T"'));
+    assert.match(profOf('pr-title.sh').hint, /^fix it by hand — yad does not manage the checks on this Product/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

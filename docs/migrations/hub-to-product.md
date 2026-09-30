@@ -134,10 +134,13 @@ value passed through a variable is not seen, so search for those yourself.
 | Your `checks/*.sh` | What happens once your workflow passes `product` | Do this first |
 |---|---|---|
 | not edited, from before 4.0 | it refuses `product`: every Product PR fails | run `yad update`, which replaces it |
+| installed before yad kept a record of its files (3.16), edited or not | the same | run `yad update`: it replaces it and saves your copy as `<file>.yad-orig` |
 | edited, and it accepts only `code\|hub` | it refuses `product`: every Product PR fails | fix it, or replace it with `yad update --overwrite-local` |
 | edited, lists `product` but does not turn it into the old value | it takes `product` and skips the Product's rules | the same |
+| on a Product that is not in verified mode (yad does not manage its checks) | either of the above | fix it by hand: no `yad update` replaces it |
 
-`yad doctor` tells you which case you are in (in the `renamed-ref:` hint, and `profile:<gate>`).
+`yad doctor` tells you which case each check is in, and names every check in the way (in the `renamed-ref:` hint,
+and in `profile:<gate>`).
 
 ## 9. Tools that read `--json`
 

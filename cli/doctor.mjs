@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_PROFILE_GATES, PRODUCT_CHECK_WORKFLOWS, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -2025,12 +2025,11 @@ export function productProfileChecks(checks, root) {
   if (!exists(productConfigPath(root))) return;
   const passing = workflowsPassingProduct(root);
   if (!passing.length) return;
-  for (const gate of PRODUCT_PROFILE_GATES) {
-    const gap = productProfileGap(path.join(root, gate));
-    if (!gap) continue;
-    check(checks, `profile:${gate}`, 'project', 'warn',
-      productProfileEffect(gap, gate, `${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'}`),
-      `it was changed by hand, so \`yad update\` kept it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${path.basename(gate)}${BACKUP_SUFFIX})`);
+  // What to do depends on the gate's state in the provenance record, as in `renamed-ref:` (E124 review 4).
+  for (const b of productGateBlockers(root)) {
+    check(checks, `profile:${b.gate}`, 'project', 'warn',
+      productProfileEffect(b.gap, b.gate, `${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'}`),
+      gateProfileFix(b));
   }
 }
 
