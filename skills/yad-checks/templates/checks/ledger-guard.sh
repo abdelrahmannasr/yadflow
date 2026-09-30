@@ -32,7 +32,8 @@
 # rejected. Known gap: the Verified badge proves only that the COMMITTER signed with their own key, not
 # that the bot did, so a contributor who signs can still write the bot's name as the author. The
 # GitHub workflow therefore gives this job no token: the badge lookup fails and every bot-attributed
-# ledger commit is refused (see references/check-gates.md).
+# ledger commit is refused. On GitLab the project token reaches this job, so the gap is still open there
+# (see references/check-gates.md).
 #
 # Scope: enforced ONLY when the ledger is verified — hub.json carries BOTH a `platform` and either
 # `ledger: "verified"` or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or the

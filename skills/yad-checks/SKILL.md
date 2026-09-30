@@ -88,7 +88,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     CI-owned gate ledger (`.sdlc/{state,approvals,comments,product-prs,hub-prs}.json`, `reviews/*.md`) unless it
     is a **verified gate-bot commit** — bot-authored AND platform-Verified. (Known gap: the Verified
     badge proves only that the committer signed, not that the bot did, so the GitHub job is given no
-    token and refuses every such commit; see `references/check-gates.md`.) `.sdlc/contract-lock.json` is artifact-side and exempt. So is a **new epic's seed**:
+    token and refuses every such commit; on GitLab the gap is still open. See `references/check-gates.md`.) `.sdlc/contract-lock.json` is artifact-side and exempt. So is a **new epic's seed**:
     no CI path can create a ledger (`gate ci` only *advances* an existing chain, at merge, on the
     default branch), so an epic whose `.sdlc/state.json` is absent from the base ref may be created by
     a human on its first review PR/MR — **creation, not mutation** (#162). Once the ledger is on the
