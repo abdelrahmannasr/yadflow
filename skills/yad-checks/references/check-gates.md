@@ -589,8 +589,8 @@ The gates run identically under either CI; the config just invokes the scripts w
   an installed copy that `.sdlc/managed.json` records, `yad check` then reports that file as
   `modified`, and `yad update` keeps your copy rather than overwriting it — so that file stops
   receiving template changes. (`--overwrite-local` replaces it after saving `<file>.yad-orig`; a copy
-  with no record reads as `outdated` and is replaced the same way.) To stay on the template, leave
-  the pins to yadflow releases.
+  with no record reads as `outdated`, and a plain `yad update` replaces it, saving `<file>.yad-orig`
+  first.) To stay on the template, leave the pins to yadflow releases.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
   passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`
@@ -680,8 +680,14 @@ The Product is itself a repo on a platform (recorded in `.sdlc/product.json` by
 merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "thinking" repo (it has no
 `specs/` or `package.json` build). **What yadflow wires today** (`PRODUCT_WIRING`): `commit-message`,
 `pr-title`, `pr-template` and `ledger-guard` in `yad-product-checks`, `verified-commits` in its own workflow,
-and the `yad-update-guard`. The three below are **not shipped** — they are scripts a team writes itself if
-it wants them:
+and the `yad-update-guard`. On GitHub the `ledger-guard` job is given **no** `GH_TOKEN` on purpose: its
+bot exemption checks the author text and the Verified badge, and the badge proves only that the
+*committer* signed, so any contributor who signs could claim the bot's name. Without a token the badge
+lookup fails and every bot-attributed commit in a PR is refused — safe, because the gate-sync bot pushes
+only to the default branch, never to a PR. (On GitLab a project CI/CD variable reaches every job, so
+the `GITLAB_TOKEN` / `SDLC_API_TOKEN` that verified-commits needs reaches ledger-guard too, and the gap is
+open there.) The three below are **not shipped** — they are scripts a team
+writes itself if it wants them:
 - **owner-set** — every `epic.md` (and forward artifact) under `epics/EP-*/` carries an `owner`.
 - **contract-locked** — where an epic has a `contract.md`, its surface hash matches
   `.sdlc/contract-lock.json` (reuse the recipe in

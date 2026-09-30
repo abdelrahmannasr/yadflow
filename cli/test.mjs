@@ -12061,9 +12061,10 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
   // so this is what makes a bump there fail until the templates and pagesWorkflow get the same pin.
   const pins = new Map();
   for (const [name, text] of files) {
-    const top = text.match(/^permissions:(.*)\n((?:[ \t]+.*\n)*)/m);
+    // The block runs to the next line that starts at column 0 (a blank line inside it does not end it).
+    const top = text.match(/^permissions:(.*)(\n(?:[ \t].*|)(?=\n))*/m);
     assert.ok(top, `${name}: top-level permissions`);
-    assert.doesNotMatch(top[1] + top[2], /write/, `${name}: the top-level token is read-only; a job asks for write itself`);
+    assert.doesNotMatch(top[0].replace(/#.*$/gm, ''), /write/, `${name}: the top-level token is read-only; a job asks for write itself`);
     for (const [, ref] of text.matchAll(/^\s*(?:-\s+)?uses:\s*(\S+.*)$/gm)) {
       if (ref.startsWith('./')) continue;
       const m = ref.match(/^([\w.-]+\/[\w./-]+)@([0-9a-f]{40}) # v(\d+)(\.\d+)*$/);
@@ -12072,9 +12073,18 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
       if (!pins.has(key)) pins.set(key, [m[2], name]);
       assert.equal(m[2], pins.get(key)[0], `${name}: ${key} has the same pin as ${pins.get(key)[1]}`);
     }
-    // A gate that calls `gh api` needs GH_TOKEN in its job, or gh refuses to run in Actions at all.
-    for (const job of text.split(/^(?= {2}[\w-]+:\n)/m).slice(1)) {
-      if (/checks\/(verified-commits|ledger-guard)\.sh/.test(job)) assert.match(job, /GH_TOKEN: \$\{\{ github\.token \}\}/, `${name}: ${job.split(':')[0].trim()} passes GH_TOKEN`);
+    // Each job, from the `jobs:` block only; a key line may carry quotes or a trailing comment.
+    const jobsAt = text.search(/^jobs:/m);
+    const jobs = jobsAt < 0 ? [] : text.slice(jobsAt).split(/^(?= {2}["']?[\w-]+["']?:)/m).slice(1);
+    for (const job of jobs) {
+      const id = job.split(':')[0].trim();
+      // verified-commits calls `gh api` for the Verified badge, and gh refuses to run in Actions without GH_TOKEN.
+      if (/checks\/verified-commits\.sh/.test(job)) assert.match(job, /GH_TOKEN: \$\{\{ github\.token \}\}/, `${name}: ${id} passes GH_TOKEN`);
+      // ledger-guard must NOT get one yet. Its bot exemption trusts the author text plus the Verified
+      // badge, but the badge proves only that the committer signed — any contributor who signs can
+      // write "yad-gate-sync" as the author. With no token the badge lookup fails, and every
+      // bot-attributed commit is refused, which is the safe answer until that check is fixed.
+      if (/checks\/ledger-guard\.sh/.test(job)) assert.doesNotMatch(job, /GH_TOKEN/, `${name}: ${id} must not pass GH_TOKEN (see the comment above)`);
     }
   }
 });

@@ -33,7 +33,8 @@ for confirmed issues. Credit is given in the advisory and the changelog unless y
   workflow sets a top-level `permissions:` block that is read-only, and a job that must write asks
   for it itself. A test fails the build if either rule is broken, and also if one action at one major
   has two different pins. Dependabot bumps only this repo's own workflows, so that last rule makes
-  its bump fail until the installed templates get the same pin in the same change.
+  its bump fail until every file on that same major — such as the installed Pages workflow — gets the
+  same pin in the same change.
 
 ## Scope notes for researchers
 
