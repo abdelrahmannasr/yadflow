@@ -39,7 +39,9 @@ at a local `dist/` — build-only, no publish, exactly as before.
 - `scope` — `product` (default) | `<repo-name>` | `dedicated`. Where the Pages site is published from (the
   Product repo, one connected code repo, or a dedicated docs repo). `hub` is the old name for `product`:
   a `docs.json` written before 4.0 says `"scope": "hub"`, and it means the same thing — read it as
-  `product`, and write `product` the next time you write the file.
+  `product`, and write `product` the next time you write the file. A connected code repo that is itself named
+  `product` is recorded by its registry `path` (for example `repos/product`), never its name, so it is not read
+  as the Product.
 - `public` — `true` (default) | `false`. Whether the published site is public.
 - `base_path` — optional explicit override of the Vite `base` (otherwise resolved, Step 2).
 
@@ -64,7 +66,8 @@ tokens**; everything in the registry is a plain reference. Do **not** install a 
 ### Step 2 — Decide the publish scope + resolve the base path
 Resolve `scope` → `publishRepo`:
 - `product` (default; `hub` in an older `docs.json`) → publish from the Product repo (read its name from `product.json` `git_url`).
-- `<repo-name>` → publish from that connected code repo (must exist in `.sdlc/repos.json`).
+- `<repo-name>` → publish from that connected code repo (must exist in `.sdlc/repos.json`). A value with a `/` in
+  it is that repo's registry `path` (the form a repo named `product` is recorded in).
 - `dedicated` → a dedicated docs repo the user names (recorded as `publishRepo`).
 
 Resolve `basePath` (the Vite `base`) per the table in `references/docs-registry.md`:

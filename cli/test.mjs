@@ -27638,7 +27638,9 @@ test('E124: a code repo named product is told apart from the Product (items, com
     repos.repos[0].platform = 'gitlab';
     fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(repos));
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true }));
-    const { value } = await captureConsole(() => reconcile(T, {}));
+    const { value, out } = await captureConsole(() => reconcile(T, {}));
+    // Printed, the repo is shown with its path, so its items do not sit under the Product's heading (review 2).
+    assert.match(out, /product \(the code repo at demo\/backend\)/, out);
     const theirs = value.items.filter((i) => !i.product);
     assert.ok(theirs.length && theirs.every((i) => i.scope === 'product'), 'the repo\'s items: scope product, product false');
     assert.ok(value.items.some((i) => i.scope === 'product' && i.product), 'and the Product\'s own: product true');
@@ -27662,30 +27664,80 @@ test('E124: a code repo named product is told apart from the Product (items, com
     assert.deepEqual([r1.label, r1.product], ['product', false]);
     const r2 = (await captureConsole(() => commitAndPush({ root: alone, paths: [], items: [] }, { productRoot: alone }))).value;
     assert.deepEqual([r2.label, r2.product], ['product', true]);
+
+    // The push hint, the line the folder test was made for: a failed push in a repo named product names that
+    // repo, never `.` (review 2). The remote does not exist, so the push fails after the commit lands.
+    git(outside, 'init', '-q', '-b', 'main');
+    git(outside, 'config', 'user.email', 'a@b.c'); git(outside, 'config', 'user.name', 'x');
+    fs.writeFileSync(path.join(outside, 'seed'), 's'); git(outside, 'add', 'seed'); git(outside, 'commit', '-q', '-m', 'seed');
+    git(outside, 'remote', 'add', 'origin', path.join(alone, 'no-such-remote.git'));
+    fs.writeFileSync(path.join(outside, 'a.txt'), 'x');
+    const exit = process.exitCode;
+    const pushed = await captureConsole(() => commitAndPush({ root: outside, paths: ['a.txt'], items: ['product/a.txt'] }, { productRoot: T, push: true, defaultBranch: 'main' }));
+    process.exitCode = exit;
+    assert.deepEqual([pushed.value.committed, pushed.value.pushed, pushed.value.product], [true, false, false]);
+    assert.match(pushed.out, /resolve it in product, then push/);
+    assert.doesNotMatch(pushed.out, /resolve it in \., then push/);
     fs.rmSync(alone, { recursive: true, force: true });
+
+    // A repo with no name is still a repo's, not the Product's (review 2): the key is set from where the action
+    // came from, never from the name.
+    repos.repos[0].name = '';
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(repos));
+    const unnamed = (await captureConsole(() => reconcile(T, {}))).value.items.filter((i) => i.scope === '');
+    assert.ok(unnamed.length && unnamed.every((i) => i.product === false), JSON.stringify(unnamed));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-// E124 review 1: a team's own workflow still passing `--profile hub` is named, whatever shape the gate has.
-test('E124: renamed-ref names a team workflow that passes --profile hub, in either spelling', async () => {
+// E124 review 1: a team's own CI line still passing `--profile hub` is named, whatever shape the gate has. Review 2:
+// every literal spelling, CI files only, and — when an edited gate refuses `product` — the hint says to fix that first.
+test('E124: renamed-ref names a team workflow that passes --profile hub, in every literal spelling', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-oldprofile-'));
   try {
     fs.mkdirSync(path.join(T, '.sdlc'));
     fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github' }));
     fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true });
-    fs.writeFileSync(path.join(T, '.github/workflows/ours.yml'),
-      'on: pull_request\njobs:\n  t:\n    steps:\n      - run: bash checks/pr-title.sh --profile hub "$T"\n      - run: bash checks/pr-template.sh --profile=hub body.md\n      - run: bash x.sh --profile hubble\n');
-    // yad's own file is never read here: its first line says so.
+    const ours = path.join(T, '.github/workflows/ours.yml');
+    fs.writeFileSync(ours, [
+      'on: pull_request', 'jobs:', '  t:', '    steps:',
+      '      - run: bash checks/pr-title.sh --profile hub "$T"',
+      '      - run: bash checks/pr-template.sh --profile=hub body.md',
+      '      - run: bash checks/pr-title.sh --profile "hub" "$T"',
+      "      - run: bash checks/pr-title.sh --profile  'hub' \"$T\"",
+      '      - run: bash x.sh --profile hubble',
+      '      - run: bash x.sh --profile hub.x',
+      '      - run: bash x.sh --profile hub-x',
+      '',
+    ].join('\n'));
+    // yad's own file is never read here: its first line says so. A README quoting the command is prose.
     fs.writeFileSync(path.join(T, '.github/workflows/yad-product-checks.yml'), '# yad-managed: yad-checks\n  - run: bash checks/pr-title.sh --profile hub\n');
+    fs.writeFileSync(path.join(T, 'README.md'), 'Run `bash checks/pr-title.sh --profile hub` locally.\n');
     const { renamedNameHits } = await import('./plan.mjs');
     assert.deepEqual(renamedNameHits(T).map((h) => [h.file, h.line, h.old, h.new]), [
       ['.github/workflows/ours.yml', 5, '--profile hub', '--profile product'],
       ['.github/workflows/ours.yml', 6, '--profile=hub', '--profile=product'],
+      ['.github/workflows/ours.yml', 7, '--profile "hub"', '--profile "product"'],
+      ['.github/workflows/ours.yml', 8, "--profile  'hub'", "--profile  'product'"],
     ]);
     const { collectDoctor } = await import('./doctor.mjs');
-    const ref = collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.github/workflows/ours.yml');
+    const refOf = () => collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.github/workflows/ours.yml');
+    let ref = refOf();
     assert.equal(ref.status, 'warn');
     assert.match(ref.message, /line 5 `--profile hub` → `--profile product`, line 6 `--profile=hub` → `--profile=product`/);
+    assert.doesNotMatch(ref.hint, /first make/, 'no gate refuses product: nothing to do first');
+
+    // An edited gate from before 4.0 that refuses `product`: changing the workflow now would fail every PR.
+    fs.mkdirSync(path.join(T, 'checks'));
+    fs.writeFileSync(path.join(T, 'checks/pr-title.sh'), 'case "$PROFILE" in code|hub) ;; *) exit 1 ;; esac\n');
+    ref = refOf();
+    assert.match(ref.hint, /but first make the Product's pattern checks accept `--profile product` — one of them was edited and refuses it/);
+    const { out } = await captureConsole(() => reconcile(T, {}));
+    assert.match(out, /ours\.yml:5 passes `--profile hub`, renamed `--profile product` in 4\.0 — change it by hand, but first make the Product's pattern checks accept `--profile product`/);
+    // And once the team changes it anyway, `profile:` reads their own file too, and says what breaks.
+    fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile hub "$T"', '--profile product "$T"'));
+    const prof = collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh');
+    assert.ok(prof && prof.status === 'warn', 'profile: fires on a team workflow passing product');
+    assert.match(prof.message, /\.github\/workflows\/ours\.yml passes/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

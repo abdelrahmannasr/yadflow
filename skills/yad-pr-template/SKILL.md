@@ -63,7 +63,8 @@ routing helper.
 ## On Activation
 
 ### Step 1 — Resolve the repo and detect the platform
-Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path`). Detect the platform: a GitHub
+Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path`). A `repo` value with a `/` in it is a registry `path`, not a name: match it against each entry's `path`
+(so a code repo named `product` is reached as, for example, `repos/product`). Detect the platform: a GitHub
 remote or `.github/` → GitHub; a GitLab remote or `.gitlab/` → GitLab. If ambiguous, ask. For
 `repo: product`, the target is `{project-root}` itself and the platform comes from `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name).
 

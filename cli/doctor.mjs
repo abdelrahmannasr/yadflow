@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_PROFILE_GATES, PRODUCT_CHECK_WORKFLOWS, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_PROFILE_GATES, PRODUCT_CHECK_WORKFLOWS, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateRejects } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -1991,6 +1991,7 @@ export function renamedChecks(checks, root) {
         : 'run `yad update` — it installs the new name and removes the old one');
   }
   const byFile = new Map();
+  const rejects = productGateRejects(root);
   for (const h of renamedNameHits(root)) {
     if (!byFile.has(h.file)) byFile.set(h.file, []);
     byFile.get(h.file).push(h);
@@ -2007,7 +2008,9 @@ export function renamedChecks(checks, root) {
     const what = all ? (hits.length > 1 ? 'each' : 'it') : theirs.map((h) => `line ${h.line}`).join(', ');
     const hint = theirs.length === 0
       ? `${by} rewrites it when it replaces the old fragment${late ? ' — leave it until then: the new fragment is not installed before that' : ''}`
-      : `yad does not edit this file — change ${what} to ${!all && theirs.length > 1 ? 'their new names' : 'its new name'}${all ? '' : ` (${by} rewrites the include line itself${late ? ' — leave that one until then' : ''})`}`;
+      : `yad does not edit this file — change ${what} to ${!all && theirs.length > 1 ? 'their new names' : 'its new name'}${all ? '' : ` (${by} rewrites the include line itself${late ? ' — leave that one until then' : ''})`}${
+        // E124 review 2: changing `--profile hub` to `product` while an edited gate refuses `product` fails every PR.
+        hits.some((h) => h.profile) && rejects ? `; but first make the Product's pattern checks accept \`--profile product\` — one of them was edited and refuses it (${PRODUCT_PROFILE_FIX}), so changing a \`--profile hub\` line now fails every Product PR` : ''}`;
     check(checks, `renamed-ref:${file}`, 'project', 'warn',
       `${file} names what 4.0 renamed: ${listed}`, hint);
   }

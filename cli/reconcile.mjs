@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, readJSON, writeJSON, exists,
+  c, log, ok, info, warn, hand, readJSON, writeJSON, exists, forTerminal,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -14,7 +14,7 @@ import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPa
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
-  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateRejects,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
@@ -25,6 +25,9 @@ const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow
 // The --json answer's list (E1): every managed item, as the report groups it — never the apply step.
 // `product` says whose item it is: false for a connected repo's, true for the Product's own (E124 review 1).
 // The scope alone cannot say it — a repo may be named `product`, the Product's own scope.
+// A repo named `product` shares the Product's scope; in printed text it is shown with its path (E124 review 2).
+const repoShown = (repo) => `product (the code repo at ${forTerminal(repo.path)})`;
+const shown = (a) => a.shownScope ?? a.scope;
 const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
 export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false } = {}) {
@@ -77,7 +80,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   }
   for (const repo of registry.repos) {
     const own = withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]);
-    for (const a of own) a.fromRepo = repo.name; // set on the action itself: later steps compare actions by identity
+    // Set on the action itself: later steps compare actions by identity. `true`, not the name, which may be empty.
+    for (const a of own) { a.fromRepo = true; if (repo.name === 'product') a.shownScope = repoShown(repo); }
     actions.push(...own);
   }
 
@@ -93,7 +97,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       // later, not here, so only the pack is claimed.
       actions.push({
         scope: repo.name,
-        fromRepo: repo.name, // about the repo, though its file is under the Product
+        fromRepo: true, // about the repo, though its file is under the Product
+        ...(repo.name === 'product' ? { shownScope: repoShown(repo) } : {}),
         item: 'code-context',
         status: 'stale',
         root,
@@ -106,8 +111,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // --- report, grouped by scope ---
   const byScope = new Map();
   for (const a of actions) {
-    if (!byScope.has(a.scope)) byScope.set(a.scope, []);
-    byScope.get(a.scope).push(a);
+    if (!byScope.has(shown(a))) byScope.set(shown(a), []);
+    byScope.get(shown(a)).push(a);
   }
   const counts = { missing: 0, new: 0, outdated: 0, modified: 0, stale: 0, legacy: 0, removed: 0, ok: 0 };
   for (const [scopeName, items] of byScope) {
@@ -120,11 +125,14 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   for (const g of gaps) warn(g);
   // E123: the team's own files that name one of our renamed CI names — each with its file and line, the same
   // list `yad doctor` shows. yad never edits them; the include line it rewrites is said as what it is.
+  const rejects = productGateRejects(root);
   for (const h of renamedNameHits(root)) {
     if (h.rewrittenBy === 'update' || (h.rewrittenBy === 'overwrite-local' && overwriteLocal)) {
       info(`${h.file}:${h.line} includes the old fragment — ${fix ? 'rewritten' : `rewritten by ${h.rewrittenBy === 'update' ? '`yad check --fix`/`yad update`' : '`yad update --overwrite-local`'}`} to name ${h.new}`);
     } else if (h.rewrittenBy === 'overwrite-local') {
       info(`${h.file}:${h.line} includes the edited old fragment — \`yad update --overwrite-local\` rewrites it when it replaces that fragment; leave it until then`);
+    } else if (h.profile && rejects) {
+      warn(`${h.file}:${h.line} passes \`${h.old}\`, renamed \`${h.new}\` in 4.0 — change it by hand, but first make the Product's pattern checks accept \`--profile product\`: one of them was edited and refuses it, so changing this line now fails every Product PR (${PRODUCT_PROFILE_FIX})`);
     } else warn(`${h.file}:${h.line} names \`${h.old}\`, renamed \`${h.new}\` in 4.0 — yad does not edit this file; change it by hand`);
   }
   // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
@@ -162,8 +170,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   for (const m of modified) {
     // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
     warn(m.item === PRODUCT_LINK
-      ? `${m.scope}/${m.item} is not a JSON object — left alone (--overwrite-local saves it and writes a new one)`
-      : `${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
+      ? `${shown(m)}/${m.item} is not a JSON object — left alone (--overwrite-local saves it and writes a new one)`
+      : `${shown(m)}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
   }
   // A gate-sync fragment is kept like any other edited file — but it also decides which yadflow CI runs.
   // It trusts a committed version only from its own major (`YAD_MAJOR`), and the version stamp is
@@ -182,7 +190,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const kept = pinMajorOf(m.managed.dest);
     const ships = pinMajorOf(m.managed.src);
     if (kept === null || ships === null || kept === ships) continue;
-    warn(`${m.scope}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
+    warn(`${shown(m)}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
     hand(`re-apply your edit on top of the new fragment, or replace it with \`yad update --overwrite-local\` (your copy is saved beside it as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
   }
   // A renamed file the team edited (E123): kept under its old name, so say that the rename is half done and
@@ -242,7 +250,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     appliedActions.push(a);
     // A backup means the replaced content was not provably ours (a pre-ledger install, or an edit
     // --overwrite-local was told to discard). Never report that as an ordinary template adoption.
-    info(`${a.status} → fixed: ${a.scope}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
+    info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
   }
   if (force) {
     // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —

@@ -606,12 +606,14 @@ export const RENAMED_CI_NAMES = Object.freeze([
   ['yad-hub-ledger-guard', 'yad-product-ledger-guard'],
   ['yad-hub-verified-commits', 'yad-product-verified-commits'],
   ['.yad_hub_mr_only', '.yad_product_mr_only'],
-  // The profile value a team's own workflow may pass (E124 review 1). The gates still accept `--profile hub` until
-  // v5, but a gate edited after 4.0 without the line that would turn `hub` into `product` lets `--profile hub`
-  // skip the Product's rules (the cell `productProfileGap` does not judge) — so the workflow is named instead.
-  ['--profile hub', '--profile product'],
-  ['--profile=hub', '--profile=product'],
 ]);
+// The profile value a team's own CI file may pass (E124 review 1). The gates still accept `--profile hub` until
+// v5, but a gate edited after 4.0 without the line that would turn `hub` into `product` lets `--profile hub`
+// skip the Product's rules (the cell `productProfileGap` does not judge) — so the CI line is named instead.
+// Its own pattern: `=` or any run of spaces, the value bare or quoted, and nothing after it that could be part
+// of a longer word (`--profile hubble`, `--profile hub.x`). Only the literal is seen: a value passed through a
+// variable (`--profile "$P"`) is not. Only in CI files — a README that quotes the command is prose.
+const OLD_PROFILE_RE = /(?<![\w-])--profile(?:=|[ \t]+)(["']?)hub\1(?![\w.-])/g;
 const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Bounded on both sides by anything that cannot be part of a name, so `yad-hub-checks-extra` is not a hit.
 const RENAMED_CI_RE = new RegExp(`(?<![\\w.-])(${RENAMED_CI_NAMES.map(([o]) => escapeRe(o)).join('|')})(?![\\w-])`, 'g');
@@ -654,7 +656,13 @@ export function renamedNameHits(root) {
       if (!fs.lstatSync(path.join(root, file)).isFile()) continue;
       text = fs.readFileSync(path.join(root, file), 'utf8');
     } catch { continue; }
+    const ci = /\.ya?ml$/.test(file);
     text.split(/\r?\n/).forEach((line, i) => {
+      if (ci) {
+        for (const m of line.matchAll(OLD_PROFILE_RE)) {
+          hits.push({ file, line: i + 1, old: m[0], new: m[0].replace(/hub(["']?)$/, 'product$1'), rewrittenBy: null, profile: true });
+        }
+      }
       for (const m of line.matchAll(RENAMED_CI_RE)) {
         const next = RENAMED_CI_NAMES.find(([o]) => o === m[1])[1];
         // Per match, not per line: only the fragment path itself is rewritten, not a job named beside it.
@@ -688,9 +696,9 @@ export function renamedNameHits(root) {
 //   list without `product` (before 4.0)            'rejects'          ok
 //   branches on `= product`, maps hub -> product   ok (shipped)       ok (shipped)
 //   branches on `= product`, no mapping            ok                 skips the Product rules — see below
-// The last cell is not judged here, from the gate: it is closed from the workflow side instead. A team's own
-// workflow that passes `--profile hub` is a `renamed-ref:` hit (RENAMED_CI_NAMES), and yad's own old
-// workflow is a `renamed:` one — so every workflow that could reach that cell is named, whatever the gate's shape.
+// The last cell is not judged here, from the gate: it is closed from the workflow side instead. A team's own CI
+// line that passes `--profile hub` literally is a `renamed-ref:` hit (OLD_PROFILE_RE), and yad's own old
+// workflow is a `renamed:` one. A value passed through a variable is not seen.
 export const PRODUCT_PROFILE_GATES = Object.freeze(['checks/commit-message.sh', 'checks/pr-title.sh', 'checks/pr-template.sh']);
 export function productProfileGap(file) {
   let text;
@@ -720,9 +728,15 @@ export const PRODUCT_CHECK_WORKFLOWS = Object.freeze([
   '.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml',
 ]);
 // Those of them on disk that pass `--profile product` to the gates.
-export const workflowsPassingProduct = (root) => PRODUCT_CHECK_WORKFLOWS.filter((rel) => {
-  try { return /--profile[ =]product\b/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
+// yad's own workflows, and the team's own CI files (E124 review 2): a team that follows `renamed-ref:` and changes
+// its `--profile hub` to `product` must then hear from `profile:` if an edited gate still rejects it.
+export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_WORKFLOWS,
+  ...renamedNameFiles(root).filter((rel) => /\.ya?ml$/.test(rel))])].filter((rel) => {
+  try { return /--profile(?:=|[ \t]+)(["']?)product\1(?![\w.-])/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
 });
+// Whether an edited Product gate would refuse `--profile product` today — then changing a workflow's
+// `--profile hub` to `product` fails every Product PR until the gate is fixed (E124 review 2).
+export const productGateRejects = (root) => PRODUCT_PROFILE_GATES.some((g) => productProfileGap(path.join(root, g)) === 'rejects');
 
 // The new name of a renamed CI file is not installed while an edited old one is kept (`modified`): both
 // would run on GitHub — every gate twice, the stock one undoing whatever the team's edit loosened — and on

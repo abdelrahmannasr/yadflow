@@ -136,7 +136,8 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 ## On Activation
 
 ### Step 1 — Resolve the code repo
-Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path` in `.sdlc/repos.json`); confirm
+Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path` in `.sdlc/repos.json`). A `repo` value with a `/` in it is a registry `path`, not a name: match it against each entry's `path`
+(so a code repo named `product` is reached as, for example, `repos/product`). Confirm
 it is its own git repo. Operate inside it with absolute paths. For `repo: product`, the target is
 `{project-root}` itself and the platform comes from `.sdlc/product.json` (`.sdlc/hub.json` on an older Product) — see "Wiring the Product" in
 `references/check-gates.md`.

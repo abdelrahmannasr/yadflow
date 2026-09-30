@@ -25,7 +25,7 @@ Holds **no credentials** — every field is a plain reference. Auth is always th
 | Field | Meaning |
 |-------|---------|
 | `target` | The publish adapter. `none` = deliberate build-only (no publish, no error). |
-| `scope` | Where the Pages site publishes from: the `product` repo, one connected `<repo-name>`, or a `dedicated` docs repo. A file written before 4.0 says `hub`, the old name for `product`; read it the same way. |
+| `scope` | Where the Pages site publishes from: the `product` repo, one connected `<repo-name>`, or a `dedicated` docs repo. A file written before 4.0 says `hub`, the old name for `product`; read it the same way. A code repo that is itself named `product` is recorded by its registry `path` (for example `repos/product`), so it is not read as the Product. |
 | `publishRepo` | The concrete repo name resolved from `scope`. `null` when `target: "none"`. |
 | `basePath` | The Vite `base` substituted into each generated site (resolution table below). Normalized to a leading + trailing `/`. |
 | `public` | Whether the published site is public. |

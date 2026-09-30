@@ -124,9 +124,15 @@ to say it is running on the Product.
 |---|---|
 | `bash checks/pr-title.sh --profile hub …` | `bash checks/pr-title.sh --profile product …` |
 
-The workflows yadflow installs pass `product` since 4.0. The checks still accept `hub`, but change yours now:
+The workflows yadflow installs pass `product` since 4.0. The checks still accept `hub`, but change yours:
 a check edited after 4.0 may no longer turn `hub` into `product`, and would then skip the Product's rules.
-`yad doctor` names every line that still passes it (`renamed-ref:<file>`).
+`yad doctor` names each line of your CI files that passes `--profile hub` literally (`renamed-ref:<file>`); a
+value passed through a variable is not seen, so search for those yourself.
+
+**First** make sure the checks accept `product`. A `checks/*.sh` you edited before 4.0 may accept only
+`code|hub`; then every Product PR fails once your workflow passes `product`. `yad doctor` says so
+(`profile:<gate>`, and in the `renamed-ref:` hint), and `yad update --overwrite-local` replaces the check with
+the shipped one.
 
 ## 9. Tools that read `--json`
 
