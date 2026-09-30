@@ -86,6 +86,11 @@ const CODEX_CONFIG_PLACES = [
   { scope: 'user', file: '.codex/config.toml' },
 ];
 
+// The two reasons a JSON file is a problem. "Could not be read" covers a file that does not parse and one
+// too big to read — the same answer for the same cause, whichever file it is.
+const NOT_JSON = 'could not be read as a JSON object';
+const NOT_SERVERS = '`mcpServers` is not an object';
+
 const CLAUDE_USER_CONFIG = '.claude.json';
 const CLAUDE_PLUGINS = '.claude/plugins/installed_plugins.json';
 const CLAUDE_USER_SETTINGS = '.claude/settings.json';
@@ -182,8 +187,9 @@ export function skillMeta(text) {
 // with a trailing comment is otherwise read AS the value (the frontmatter trap this project has hit).
 function scalar(v) {
   const t = v.trim();
-  const q = t.match(/^(["'])(.*)\1\s*(#.*)?$/);
-  if (q) return q[2];
+  // The closing quote is the FIRST one after the opening (a `\"` escape aside), so `"a" # was "b"` is `a`.
+  const q = t.match(/^"((?:[^"\\]|\\.)*)"\s*(#.*)?$/) || t.match(/^'([^']*)'\s*(#.*)?$/);
+  if (q) return q[1];
   return t.replace(/(^|\s)#.*$/, '').trim();
 }
 
@@ -202,7 +208,13 @@ function tomlTokens(text) {
   const src = String(text).replace(/^\uFEFF/, '');
   const out = [];
   let i = 0;
-  const decode = (raw) => { try { return JSON.parse(`"${raw}"`); } catch { return raw; } };
+  // A basic string's escapes, as TOML defines them (JSON has no `\U` or `\e`). An escape TOML does not
+  // define is kept as written.
+  const ESC = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', e: '\x1b', '"': '"', '\\': '\\' };
+  const decode = (raw) => raw.replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g, (all, e) => {
+    if (e.length > 1) { const cp = parseInt(e.slice(1), 16); return cp <= 0x10ffff ? String.fromCodePoint(cp) : all; }
+    return Object.hasOwn(ESC, e) ? ESC[e] : all;
+  });
   while (i < src.length) {
     const ch = src[i];
     if (ch === '\n') { out.push({ t: 'nl' }); i++; continue; }
@@ -407,7 +419,11 @@ function baseOf(scope, root, home) { return scope === 'user' ? home : root; }
 export function detectInstalled(root, { home = os.homedir() } = {}) {
   const items = [];
   const problems = [];
-  const problem = (scope, rel, why) => problems.push({ where: shownPath(scope, rel), problem: why });
+  // One line per file and reason: run in the home folder, a file is both the folder's and the user's.
+  const problem = (scope, rel, why) => {
+    const where = shownPath(scope, rel);
+    if (!problems.some((p) => p.where === where && p.problem === why)) problems.push({ where, problem: why });
+  };
   // The home folder may BE the project (someone runs it in ~): the user places then repeat the project
   // places, and every item would be listed twice. The project scope wins and those user places are
   // skipped. `~/.claude.json` and the plugin list have no project twin, so they are read either way.
@@ -422,9 +438,9 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
   for (const place of scopes(MCP_JSON_PLACES)) {
     const doc = jsonOf(path.join(baseOf(place.scope, root, home), place.file), { comments: !!place.comments });
     if (doc === undefined) continue;
-    if (!isPlainObject(doc)) { problem(place.scope, place.file, 'does not parse as a JSON object'); continue; }
+    if (!isPlainObject(doc)) { problem(place.scope, place.file, NOT_JSON); continue; }
     if (doc.mcpServers === undefined) continue;
-    if (!isPlainObject(doc.mcpServers)) { problem(place.scope, place.file, '`mcpServers` is not an object'); continue; }
+    if (!isPlainObject(doc.mcpServers)) { problem(place.scope, place.file, NOT_SERVERS); continue; }
     items.push(...mcpItems(doc.mcpServers, { scope: place.scope, where: shownPath(place.scope, place.file), agents: place.agents }));
   }
 
@@ -432,7 +448,7 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
   // local-scope servers under `projects[<absolute path>]`.
   if (home) {
     const doc = jsonOf(path.join(home, CLAUDE_USER_CONFIG));
-    if (doc === null || (doc !== undefined && !isPlainObject(doc))) problem('user', CLAUDE_USER_CONFIG, 'does not parse as a JSON object');
+    if (doc === null || (doc !== undefined && !isPlainObject(doc))) problem('user', CLAUDE_USER_CONFIG, NOT_JSON);
     else if (doc) {
       if (isPlainObject(doc.mcpServers)) items.push(...mcpItems(doc.mcpServers, { scope: 'user', where: shownPath('user', CLAUDE_USER_CONFIG), agents: ['Claude Code'] }));
       // Keyed by the folder's absolute path as Claude Code wrote it: the exact spelling first, then any key
@@ -471,9 +487,16 @@ function claudePlugins(root, home, problem) {
   if (doc === undefined) return items;
   if (!isPlainObject(doc) || !isPlainObject(doc.plugins)) { problem('user', CLAUDE_PLUGINS, 'does not parse as the installed-plugins list'); return items; }
   // On or off, as Claude Code decides it: `.claude/settings.local.json` over `.claude/settings.json` in the
-  // folder, over `~/.claude/settings.json`. null when none of the three says.
-  const enabledIn = [path.join(root, '.claude/settings.local.json'), path.join(root, '.claude/settings.json'), path.join(home, CLAUDE_USER_SETTINGS)]
-    .map((f) => jsonOf(f)).map((d) => (isPlainObject(d?.enabledPlugins) ? d.enabledPlugins : null));
+  // folder, over `~/.claude/settings.json`. null when none of the three says. A file that is there and
+  // cannot be read is a problem: the answer then falls through to the next file, and that must be visible.
+  // Run in the home folder, the folder's `.claude/settings.json` IS the home one: read it once.
+  const inHome = path.resolve(root) === path.resolve(home) || samePath(root, home);
+  const enabledIn = [['project', '.claude/settings.local.json'], ['project', '.claude/settings.json'], ...(inHome ? [] : [['user', CLAUDE_USER_SETTINGS]])]
+    .map(([scope, rel]) => {
+      const d = jsonOf(path.join(scope === 'user' ? home : root, rel));
+      if (d === null || (d !== undefined && !isPlainObject(d))) problem(scope, rel, NOT_JSON);
+      return isPlainObject(d?.enabledPlugins) ? d.enabledPlugins : null;
+    });
   const enabledOf = (id) => {
     for (const m of enabledIn) if (m && Object.hasOwn(m, id) && typeof m[id] === 'boolean') return m[id];
     return null;
@@ -509,7 +532,7 @@ function claudePlugins(root, home, problem) {
 function pluginMcp(at, id, scope, problem) {
   const found = [];
   const add = (servers, rel) => found.push(...mcpItems(servers, { scope, where: `${id}: ${rel}`, agents: ['Claude Code'], plugin: id }));
-  const bad = (rel) => problem('user', `.claude/plugins (${id}: ${rel})`, 'does not parse as a JSON object');
+  const bad = (rel, why = NOT_JSON) => problem('user', `.claude/plugins (${id}: ${rel})`, why);
   const fromFile = (rel) => {
     const full = path.resolve(at, rel);
     // The plugin's own files only. `path.relative` across two Windows drives is an absolute path with no
@@ -519,8 +542,13 @@ function pluginMcp(at, id, scope, problem) {
     const doc = jsonOf(full);
     if (doc === undefined) return;
     if (!isPlainObject(doc)) { bad(r.split(path.sep).join('/')); return; }
-    // `.mcp.json` wraps the servers in `mcpServers`; a file plugin.json points at may list them bare.
-    add(isPlainObject(doc.mcpServers) ? doc.mcpServers : doc, r.split(path.sep).join('/'));
+    // `.mcp.json` wraps the servers in `mcpServers`; a file plugin.json points at may list them bare. A
+    // `mcpServers` that is not an object is a problem, as it is in `.cursor/mcp.json` — reading the whole
+    // file as the list instead would name its other keys (`$schema`, `mcpServers`) as servers.
+    const shown = r.split(path.sep).join('/');
+    if (!Object.hasOwn(doc, 'mcpServers')) add(doc, shown);
+    else if (isPlainObject(doc.mcpServers)) add(doc.mcpServers, shown);
+    else bad(shown, NOT_SERVERS);
   };
   const manifest = jsonOf(path.join(at, '.claude-plugin', 'plugin.json'));
   if (manifest === null || (manifest !== undefined && !isPlainObject(manifest))) bad('.claude-plugin/plugin.json');

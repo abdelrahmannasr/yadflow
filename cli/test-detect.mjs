@@ -125,6 +125,8 @@ function fixture() {
   put(path.join(plug('p5'), 'a.json'), JSON.stringify({ mcpServers: { 'p5-a': server } }));
   put(path.join(plug('p5'), '..x.json'), JSON.stringify({ 'p5-dots': server }));
   put(path.join(plug('p6'), '.claude-plugin/plugin.json'), '{ not json');
+  // A `mcpServers` that is not an object is a problem, not a reason to list the file's other keys.
+  put(path.join(plug('p7'), '.mcp.json'), JSON.stringify({ $schema: 's', mcpServers: [] }));
   put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
     version: 2,
     plugins: {
@@ -134,6 +136,7 @@ function fixture() {
       'p4@m': [{ scope: 'user', installPath: plug('p4') }],
       'p5@m': [{ scope: 'project', projectPath: proj, installPath: plug('p5') }],
       'p6@m': [{ scope: 'user', installPath: plug('p6') }],
+      'p7@m': [{ scope: 'user', installPath: plug('p7') }],
       'gone@m': [{ scope: 'user', installPath: path.join(T, 'missing') }],
     },
   }));
@@ -148,7 +151,10 @@ test('E50: every place is read, and each item says where it came from and which 
   const { T, proj, home } = fixture();
   try {
     const { items, problems } = detectInstalled(proj, { home });
-    assert.deepEqual(problems, [{ where: '~/.claude/plugins (p6@m: .claude-plugin/plugin.json)', problem: 'does not parse as a JSON object' }]);
+    assert.deepEqual(problems, [
+      { where: '~/.claude/plugins (p6@m: .claude-plugin/plugin.json)', problem: 'could not be read as a JSON object' },
+      { where: '~/.claude/plugins (p7@m: .mcp.json)', problem: '`mcpServers` is not an object' },
+    ]);
 
     const alpha = find(items, 'skill', 'alpha');
     assert.deepEqual(alpha.map((i) => [i.scope, i.where, i.version]), [['project', '.claude/skills/alpha', '1.2.0'], ['user', '~/.claude/skills/alpha', null]]);
@@ -185,7 +191,7 @@ test('E50: every place is read, and each item says where it came from and which 
     assert.deepEqual(plugins, [
       ['tool@market', 'user', null, undefined],
       ['gone@m', 'user', null, null], ['p1@m', 'user', '1.0.0', true], ['p2@m', 'user', '2.0.0', false], ['p4@m', 'user', null, true],
-      ['p5@m', 'project', null, null], ['p6@m', 'user', null, null],
+      ['p5@m', 'project', null, null], ['p6@m', 'user', null, null], ['p7@m', 'user', null, null],
     ], 'another folder\'s plugin (p3) is left out; `local` is the user\'s; the folder\'s settings win, local first');
     assert.equal(find(items, 'plugin', 'p1@m')[0].commit, 'abc123');
     const p1skill = find(items, 'skill', 'p1-skill')[0];
@@ -226,10 +232,31 @@ test('E50: a file that is there but unreadable is a problem, named by place and 
     put(path.join(home, '.claude.json'), '[1, 2]');
     put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: [] }));
     put(path.join(home, '.gemini/settings.json'), 'null');
+    // A comment is allowed in Gemini's settings only: in Cursor's file it stops Cursor loading it.
+    put(path.join(home, '.cursor/mcp.json'), '// mine\n{ "mcpServers": { "x": {} } }');
     const { items, problems } = detectInstalled(proj, { home });
     assert.deepEqual(items, []);
-    assert.deepEqual(problems.map((p) => p.where).sort(), ['.cursor/mcp.json', '.mcp.json', '~/.claude.json', '~/.claude/plugins/installed_plugins.json', '~/.gemini/settings.json']);
+    assert.deepEqual(problems.map((p) => p.where).sort(), ['.cursor/mcp.json', '.mcp.json', '~/.claude.json', '~/.claude/plugins/installed_plugins.json', '~/.cursor/mcp.json', '~/.gemini/settings.json']);
     assert.ok(!JSON.stringify(problems).includes(SECRET));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E50: a settings file that cannot be read is a problem, and the answer falls through to the next', () => {
+  const T = tmp();
+  const proj = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  try {
+    put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: { 'a@m': [{ scope: 'user' }] } }));
+    put(path.join(proj, '.claude/settings.local.json'), '{ broken');
+    put(path.join(proj, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'a@m': false } }));
+    put(path.join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'a@m': true } }));
+    const { items, problems } = detectInstalled(proj, { home });
+    assert.equal(find(items, 'plugin', 'a@m')[0].enabled, false);
+    assert.deepEqual(problems, [{ where: '.claude/settings.local.json', problem: 'could not be read as a JSON object' }]);
+    // Run in the home folder, a file that is both the folder's and the user's is reported once.
+    put(path.join(home, '.claude/settings.json'), '{ broken');
+    const same = detectInstalled(home, { home });
+    assert.equal(same.problems.filter((p) => p.problem.startsWith('could not be read')).length, 1, JSON.stringify(same.problems));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -293,8 +320,10 @@ test('E50: the frontmatter, TOML name and TOML table readers', () => {
   assert.deepEqual(tomlTableNames('[a]\nx = [\n  ["mcp_servers"],\n]\nafter = 1\n[mcp_servers.y]\n', 'mcp_servers'), ['y'], 'a nested array line is not a header, so `after` stays in [a]');
   assert.deepEqual(tomlTableNames('mcp_servers = { docs = { command = "x" }, "q.x" = {} }\n', 'mcp_servers'), ['docs', 'q.x'], 'a top-level inline table');
   assert.deepEqual(tomlTableNames(String.raw`[mcp_servers."a\"b"]`, 'mcp_servers'), ['a"b'], 'escapes in a quoted key are decoded');
+  assert.deepEqual(tomlTableNames(String.raw`[mcp_servers."x\U0001F600A\q"]`, 'mcp_servers'), [`x${String.fromCodePoint(0x1f600)}A\\q`], 'TOML escapes, JSON has no \\U; an unknown one is kept');
   assert.equal(tomlAgentName('name = """multi"""'), null, 'a multi-line string is never read');
   assert.deepEqual(skillMeta('---\nname: foo # a comment\nversion: "1 # kept"\n---\n'), { name: 'foo', version: '1 # kept' });
+  assert.deepEqual(skillMeta(`---\nname: "a" # was "b"\nversion: 'x' # 'y'\n---\n`), { name: 'a', version: 'x' }, 'the value ends at its own closing quote');
   assert.deepEqual(skillMeta('---\nmetadata:\n  a:\n    version: 9\n  version: 2\n---\n'), { version: '2' }, 'a deeper version is not metadata.version');
   assert.deepEqual(JSON.parse(stripJsonComments(String.raw`{"u":"http://x//y", // c
  "b":/* z */1, "q":"a\"//"}`)), { u: 'http://x//y', b: 1, q: 'a"//' });
@@ -309,6 +338,13 @@ test('E50: the same SKILL.md hashes the same with LF and CRLF line ends', () => 
     assert.equal(h('a'), h('b'));
     assert.equal(h('a'), sha(path.join(T, 'a/.claude/skills/s/SKILL.md')), 'a file with no CR hashes as its bytes');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E50: `yad detect` skips the newer-version check — no network, no cache file', () => {
+  // A source pin, because a run from this checkout cannot show it: the check already stays quiet when the
+  // package folder holds `.git`, so dropping `detect` from the skip list would pass every run here.
+  const src = fs.readFileSync(YAD, 'utf8');
+  assert.match(src, /if \(!\['hook', 'detect'\]\.includes\(parseArgs\(process\.argv\.slice\(2\)\)\._\[0\]\)\) \{\s*const \{ maybeNotifyUpdate \}/);
 });
 
 // The command as a person runs it: HOME (and USERPROFILE, which Windows reads) point at a fixture.
@@ -350,6 +386,15 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
     skill(path.join(proj, '.claude/skills'), 'esc', 'name: "evil\u001b[2Jname"\n');
     const esc = yad(['detect'], { cwd: proj, home });
     assert.ok(!esc.stdout.includes('\u001b'), 'no control character reaches the terminal');
+
+    // A Product whose two settings files disagree: every Product command refuses it (E122); `yad detect`
+    // reads none of them, so it still answers.
+    put(path.join(proj, '.sdlc/cli-version.json'), '{"version":"4.0.0"}\n');
+    put(path.join(proj, '.sdlc/product.json'), '{"schemaVersion":10,"platform":null}\n');
+    put(path.join(proj, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    const drift = yad(['detect', '--json'], { cwd: proj, home });
+    assert.equal(drift.status, 0, drift.stdout + drift.stderr);
+    assert.equal(JSON.parse(drift.stdout).ok, true);
 
     const bad = yad(['detect', 'skills'], { cwd: proj, home });
     assert.equal(bad.status, 1);
