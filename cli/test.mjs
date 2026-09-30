@@ -27792,6 +27792,7 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
     const recText = fs.readFileSync(recFile, 'utf8');
     fs.writeFileSync(recFile, '{bad');
     assert.match(profOf('pr-title.sh').hint, /^restore \.sdlc\/managed\.json from git — it does not read/);
+    assert.match(profOf('pr-title.sh').hint, /\(and `yad update` refuses until then\)/, 'an unreadable record: update refuses, and the hint says so');
     fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile product "$T"', '--profile hub "$T"'));
     assert.match(refOf().hint, /but first restore \.sdlc\/managed\.json from git \(it does not read, so yad cannot tell which of checks\/commit-message\.sh [^;]*; and checks\/pr-title\.sh [^;]*; and checks\/pr-template\.sh [^)]*\) are its own\), then run `yad update`/);
     assert.doesNotMatch(refOf().hint, /does not manage/);
