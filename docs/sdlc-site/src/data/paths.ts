@@ -13,6 +13,23 @@ import type { FlowPath, FlowStep } from "./types";
 
 const setupSteps: FlowStep[] = [
   {
+    id: "front-doors",
+    title: "Start or Join a Workspace",
+    description:
+      "Three front doors, each running setup for you. A workspace is the folder holding product/ and the code repos side by side. `yad new <name>` (greenfield) makes <name>/product/, runs git init and setup there, and creates no remote — it prints the gh/glab line to run yourself. `yad init` (brownfield) makes or reuses product/ in the folder that already holds your repos, runs setup and offers each repo found. `yad join <url>` (a teammate) clones the Product and every repo it registers, then does only per-machine steps: git-ignored skill copies and the git pre-commit hook. It never commits or pushes. All three write .yad-workspace.json, which holds the Product's path so yad finds the Product from any repo beside it.",
+    actor: "system",
+    status: "installed",
+    stepState: ".yad-workspace.json (the Product path)",
+    trigger: "yad new <name> | yad init | yad join <url>",
+    handler: "yad new / yad init / yad join",
+    activeComponents: ["product", "code-repos", "platform"],
+    messages: [
+      { id: "fd-1", from: "platform", to: "product", label: "new: git init · join: clone the Product", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "fd-2", from: "platform", to: "code-repos", label: "join: clone every registered repo", type: "job", color: "#b7950b", delay: 900, duration: 800 },
+    ],
+    sideEffects: { jobs: ".yad-workspace.json in the workspace folder · join: skill copies + git pre-commit hook (per machine, never committed)" },
+  },
+  {
     id: "install",
     title: "Install the Module",
     description:
@@ -60,6 +77,22 @@ const setupSteps: FlowStep[] = [
       { id: "sr-1", from: "repos-json", to: "code-repos", label: "switch to default_branch + fast-forward", type: "job", color: "#b7950b", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: "working tree only — never writes repos.json", notifications: "a pulled repo's pack goes stale → run yad repo refresh" },
+  },
+  {
+    id: "repo-clone",
+    title: "Clone Missing Repos",
+    description:
+      "`yad repo clone [name]` clones every repo the Product registers that is missing on this machine, at its recorded path — the same clone step `yad join` runs. It never touches a repo already there, and exits 1 when one could not be cloned. `yad repo list` and `yad doctor` report a registered repo that is not cloned here.",
+    actor: "system",
+    status: "synced",
+    stepState: "each registered repo at its recorded path",
+    trigger: "yad repo clone [name]",
+    handler: "yad repo clone",
+    activeComponents: ["repos-json", "code-repos"],
+    messages: [
+      { id: "rcl-1", from: "repos-json", to: "code-repos", label: "clone what is missing here", type: "job", color: "#b7950b", delay: 0, duration: 800 },
+    ],
+    sideEffects: { jobs: "local clones only — nothing committed" },
   },
   {
     id: "connect-design",
@@ -310,6 +343,40 @@ const frontSteps: FlowStep[] = [
   },
   gateStep("test-cases", "test-cases.md", "1 approver, who should not be the author (base)", "#1e8449"),
   {
+    id: "drafts",
+    title: "Drafts: Capture → Claims → Fold",
+    description:
+      "While a Shape step is being written: `yad capture` snapshots every changed Shape artifact onto your private yad/wip/<git-name>/<epic> branch — never your checkout — and pushes it; a post-edit hook runs it after each agent edit. `yad claims [<epic>]` reads everyone's capture branches and shows who else is editing which artifact — advice, not a lock; a claim ends 4 hours after the last save or once the file is merged. `yad fold <epic> <step>` ends the authoring step with one clean commit of that step's artifacts, docs(<epic>): author <step>; the drafts stay on yad/wip/…, and with a local ledger the epic's ledger rides along.",
+    actor: "system",
+    status: "draft",
+    stepState: "yad/wip/<git-name>/<epic> branches",
+    trigger: "yad capture · yad claims · yad fold <epic> <step>",
+    handler: "yad capture / yad claims / yad fold (+ the post-edit hook)",
+    activeComponents: ["product", "platform"],
+    messages: [
+      { id: "dr-1", from: "product", to: "platform", label: "capture: push draft to yad/wip/…", type: "write", color: "#2471a3", delay: 0, duration: 700 },
+      { id: "dr-2", from: "platform", to: "product", label: "claims: who else is editing", type: "notification", color: "#566573", delay: 800, duration: 700 },
+      { id: "dr-3", from: "product", to: "state-json", label: "fold: one commit per authoring step", type: "event", color: "#1e8449", delay: 1600, duration: 700 },
+    ],
+    sideEffects: { jobs: "private draft branches · one docs(<epic>) commit per authoring step", notifications: "an edit-time warning when someone else holds a live claim" },
+  },
+  {
+    id: "step-owners",
+    title: "Step Owners (advice)",
+    description:
+      "`yad assign <epic> <step> [--to <name>]` gives one authoring step to one person (you, or their git name), written to the epic's .sdlc/owners/<step>.json. `yad unassign` removes it (someone else's needs --force) and `yad owners [<epic>]` lists every assignment and whether it is live. Warn-only, not a lock: the capture hook warns anyone else who edits the step's files.",
+    actor: "pm",
+    status: "draft",
+    stepState: ".sdlc/owners/<step>.json",
+    trigger: "yad assign · yad unassign · yad owners",
+    handler: "yad assign / yad unassign / yad owners",
+    activeComponents: ["product", "state-json"],
+    messages: [
+      { id: "ow-1", from: "pm", to: "product", label: "assign a step owner", type: "write", color: "#2471a3", delay: 0, duration: 700 },
+    ],
+    sideEffects: { jobs: ".sdlc/owners/<step>.json (git name; warn-only)" },
+  },
+  {
     id: "review-companion",
     title: "Review Companion (rides every gate)",
     description:
@@ -499,7 +566,7 @@ const automationSteps: FlowStep[] = [
     description:
       "`yad dial <epic> <story> --repo <repo> <step> --to auto` sets a Build lane step; `yad dial <step> --to auto` sets a Shape author step for the project (recorded only, for now). It shows the run record as advice and refuses only a review gate. Nothing to earn (E34).",
     actor: "engineer",
-    status: "earned",
+    status: "team-set",
     stepState: "build-state/<story-id>.json · .sdlc/automation.json",
     trigger: "yad dial",
     handler: "yad dial (yad-run set-dial runs it)",
@@ -623,7 +690,7 @@ const changeSteps: FlowStep[] = [
     description:
       "A read-only sweep across threads — drift (a bound artifact whose hash moved), orphans (a thread with a missing parent), and open hotfix debt. Advisory like yad-docs-sync; the CI gates (lineage-check / epic-open / reconcile-debt) are what actually block.",
     actor: "system",
-    status: "earned",
+    status: "advisory",
     stepState: "reconcile-debt.json",
     trigger: "yad-reconcile / yad reconcile",
     handler: "yad-reconcile",
@@ -643,7 +710,7 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: install the 38 skills, then connect code repos (and sync them to their default branch), design / testing / learning / docs tools, and detect the Product platform.",
+      "One-time setup: start or join a workspace (yad new / init / join), install the 38 skills, then connect code repos (clone any missing with yad repo clone, and sync them to their default branch), design / testing / learning / docs tools, and detect the Product platform.",
     category: "setup",
     steps: setupSteps,
   },
@@ -663,7 +730,7 @@ export const PATHS: FlowPath[] = [
     icon: "edit_note",
     color: "#2471a3",
     description:
-      "Author the thinking once per epic: analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate, with the optional review companion on top.",
+      "Author the thinking once per epic: analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate. While a step is written, drafts are captured to private branches, claims show who else is editing, and fold makes one clean commit; a step can have an owner (advice only). The optional review companion rides on top.",
     category: "front",
     steps: frontSteps,
   },

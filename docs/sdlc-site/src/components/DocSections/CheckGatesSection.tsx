@@ -8,7 +8,16 @@ const GATE_GROUPS = [
     items: [
       { control: 'spec-link — every change links a real story/spec via its Task: trailer' },
       { control: 'contract-check — a contract-surface diff without Contract-Change + a re-locked contract FAILS and routes back to the architecture gate' },
+      { control: 'risk-map — warns where the repo\'s .sdlc/risk-map (a risk level per directory, no names) has gone stale, and reports the approver count read from the base branch\'s map. Advisory: it always exits 0 and never blocks a merge' },
       { control: 'build-test-lint — the repo builds, tests pass, and the linter is clean' },
+    ],
+  },
+  {
+    layer: 'Feature-thread gates',
+    items: [
+      { control: 'lineage-check — the change links a real threaded epic' },
+      { control: 'epic-open — a sealed epic (all stories shipped) refuses new behaviour, so the change needs a change-epic' },
+      { control: 'reconcile-debt — a thread with open hotfix debt is frozen for new changes until the debt is paid' },
     ],
   },
   {
@@ -30,8 +39,9 @@ const GATE_GROUPS = [
   {
     layer: 'Where they run',
     items: [
-      { control: '.github/workflows/yad-checks.yml (GitHub) and .gitlab-ci.yml (GitLab)' },
-      { control: 'On both code repos AND the Product (the Product validates its artifact-review conventions)' },
+      { control: 'Code repos: .github/workflows/yad-checks.yml (GitHub) or the yad-checks include in .gitlab-ci.yml (GitLab)' },
+      { control: 'The Product: .github/workflows/yad-product-checks.yml (or its GitLab include) — commit-message, pr-title, pr-template and ledger-guard (only CI may change the gate ledger), to check its artifact-review conventions' },
+      { control: 'verified-commits runs on every code repo (a job in yad-checks.yml) and on the Product (its own yad-verified-commits.yml)' },
       { control: 'They fail closed on a bad base ref — never silently pass' },
     ],
   },

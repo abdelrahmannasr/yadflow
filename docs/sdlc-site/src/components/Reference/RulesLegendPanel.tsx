@@ -18,7 +18,7 @@ const STEP_ADVANCE_RULES = [
   { status: 'Setup & connectors', canCancel: 'Not gated', color: '#b7950b', dotColor: '#b7950b' },
   { status: 'Shape steps (epic … stories)', canCancel: 'Reviews human · author dial recorded', color: '#566573', dotColor: '#566573' },
   { status: 'Build steps (spec … checks)', canCancel: 'Switchable (yad dial)', color: '#1e8449', dotColor: '#1e8449' },
-  { status: 'Engineer review & merge', canCancel: 'Human (locked)', color: '#ca6f1e', dotColor: '#ca6f1e' },
+  { status: 'Engineer review & merge', canCancel: 'Always human', color: '#ca6f1e', dotColor: '#ca6f1e' },
 ];
 
 const MESSAGE_LEGEND = [

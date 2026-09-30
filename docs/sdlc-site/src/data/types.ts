@@ -62,7 +62,7 @@ export interface FlowStep {
   description: string;
   actor: ActorType;
   // Reused as the SDLC step status, e.g. "draft" / "in-review" / "approved" /
-  // "ready-for-build" / "merged" / "earned".
+  // "ready-for-build" / "merged" / "team-set" / "advisory".
   status: string;
   // Reused as the .sdlc currentStep / artifact label for the step.
   stepState: string;
