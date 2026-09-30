@@ -239,8 +239,8 @@ second person; the real gate on a release is the check job.
 
    **Not a pull request.** The `chore(release)` commit is authored by `semantic-release-bot` and is
    unsigned, and `yad-verified-commits` runs on every PR into any branch — so a sync-back PR is red by
-   construction and could only be merged with an admin override. Pushing directly is the honest route,
-   and it is the same bypass the release job itself already uses.
+   construction and could only be merged with an admin override. Pushing directly is the honest route.
+   It works for an admin because `main`'s protection does not enforce its review rule on admins.
 
    If you do open one anyway, **merge it with a merge commit**. A squash or rebase rewrites that commit
    into a new SHA, `release` stops being an ancestor of `main`, and the next release's fast-forward
@@ -359,7 +359,7 @@ The npm package page shows a green **Provenance** badge linking back to the `rel
   without an attestation.
 - **PR won't merge ("review required"):** `main` is branch-protected with a required review. Approve the
   PR, or admin-merge: `gh pr merge <n> --squash --admin`. This gate is separate from the release job's
-  own `chore(release)` commit, which bypasses protection via `RELEASE_TOKEN` (step D).
+  own `chore(release)` commit, which needs no bypass under today's rules (step D).
 - **Release fails at the commit-back / `git push` step ("protected branch" / 403):** a rule on the
   publishing branch now refuses the push — today's rules (step E) only block deletion and force pushes,
   so check whether someone added one. If the rule should stay, `RELEASE_TOKEN` must exist, be unexpired,

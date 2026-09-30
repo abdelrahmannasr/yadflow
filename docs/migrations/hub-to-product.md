@@ -9,7 +9,7 @@ yadflow renames everything it owns by itself:
 | What renames it | What it renames |
 |---|---|
 | `yad migrate` | The settings file: `.sdlc/hub.json` → `.sdlc/product.json`. The old name is still written beside the new one, with the same bytes, until v5 deletes it. |
-| the next `yad gate` write | Each epic's review PR list: `hub-prs.json` → `product-prs.json`. `yad migrate` does not touch this list — it is a plain list with no shape. The new name appears the next time a `yad gate` command (or the CI gate job) writes that epic's records, and the old name is still written beside it until v5. Until then 4.0 reads `hub-prs.json`. |
+| the next `yad gate` write | Each epic's review PR list: `hub-prs.json` → `product-prs.json`. `yad migrate` does not rename this list — it is a plain list with no shape. The new name appears the next time a `yad gate` command (or the CI gate job) writes that epic's records, and the old name is still written beside it until v5. Until then 4.0 reads `hub-prs.json`. |
 | `yad update` | The files it installed in your repos: the `yad-hub-checks.yml` workflow → `yad-product-checks.yml`, the `yad-hub-bridge` skill → `yad-product-bridge`, the GitLab `yad-hub-*` jobs → `yad-product-*`, and the `- local:` include line for that workflow in your root `.gitlab-ci.yml`. |
 
 This page lists the rest: the places **you** wrote an old name, in files yadflow does not own and never

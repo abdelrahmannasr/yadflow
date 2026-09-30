@@ -86,7 +86,8 @@ Each author step writes its artifact, sets itself `done`, moves `currentStep` to
 **stops at the gate**. Run every gate with **`yad-review-gate`**, or drive it with the **`yad gate`**
 CLI. When the Product is on a platform, the review rides the per-step PR/MR and **the merge is what
 advances** the step, once approvals are satisfied and all comment threads are resolved. With no
-platform, `yad gate comment|approve|advance … --by <name>` records the review on your machine.
+platform, `yad gate comment` / `yad gate approve … --by <name>` record the review on your machine, and
+`yad gate advance` moves the step on once the rule is met.
 Details: **"The one gate"** below.
 
 While you write, your drafts are saved for you: a hook runs `yad capture` after each agent edit and

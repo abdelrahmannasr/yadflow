@@ -141,7 +141,7 @@ In one pass it produces:
 Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — the step state and the approvals — so the
 audit trail starts the moment you begin real work. The contract lock (`.sdlc/contract-lock.json`, the
 hash of the shared contract surface) is written later, by `yad-architecture`. The one exception is a
-change-epic that carries its parent's architecture: `yad epic new --inherits architecture,contract`
+change-epic that carries its parent's architecture: `yad epic new <slug> --type change --parent EP-<parent> --inherits architecture,contract`
 (run for you by `yad-change`) writes a small **pointer-lock** that points at the parent's lock. `yad epic new <slug>` does the same seeding
 from the CLI when you would rather lay the track before the writing starts.
 

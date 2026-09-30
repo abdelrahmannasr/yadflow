@@ -190,7 +190,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   **pre-commit** hook (`.git/hooks/pre-commit`, per clone) that refuses a commit of a CI-owned ledger
   file (E48). On every Product, in both ledger modes, it also installs the **capture** post-edit hook
   (`hooks/yad-capture.mjs`), which snapshots each changed Shape draft to the person's private
-  `yad/wip/<name>/<epic>` branch (E43).
+  `yad/wip/<name>/<epic>` branch (E43). `"capture": false` in the Product settings turns it off.
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
   an Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2.
   A `high` directory on the base branch's risk map adds 1 too, the larger step winning (E66).

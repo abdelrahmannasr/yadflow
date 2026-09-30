@@ -39,7 +39,7 @@ are no fix releases for an older major.
 
   | Secret | Used by | When you need it |
   |--------|---------|------------------|
-  | `SDLC_GATE_TOKEN` | the Product's `yad-gate-sync` workflow (verified ledger mode) | when the Product's default branch is protected, so CI can push the ledger commit; on GitLab also for the scheduled sweep |
+  | `SDLC_GATE_TOKEN` | the Product's `yad-gate-sync` workflow (verified ledger mode) | GitHub: when the Product's default branch is protected, so CI can push the ledger commit. GitLab: always — the job token can neither read approvals nor push |
   | `YAD_PRODUCT_TOKEN` | the `product-checkout` step in a code repo's checks | when the code repo's CI should check the Product out (where `.sdlc/product-link.json` says) to run the Product-aware gates |
   | `GITLAB_TOKEN` or `SDLC_API_TOKEN` | the `verified-commits` gate on GitLab | GitLab only: its signature API cannot be read with the built-in job token |
 
