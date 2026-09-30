@@ -8,7 +8,7 @@ of which ever blocks the gate. The gate's predicate (approvals + resolved thread
 Built by the CLI helper `pairSessionBody({ summary, scorecard, verdict, humanSignoff, aiSignoff })` in
 `cli/companion.mjs`. It carries **both** markers:
 
-- `<!-- yad:pair -->` — so this is countable as a *paired review* in the `yad status` 🏆 roll-up.
+- `<!-- yad:pair -->` — so this is countable as a *paired review* in the `yad-status` skill's 🏆 roll-up.
 - `<!-- yad:noblock -->` — so the thread is excluded from the gate's blocking check and persists as
   permanent history (a deliberate, unresolved trail), exactly like the companion's card/chat threads.
 
@@ -71,7 +71,7 @@ Field notes:
 Also render the tutorial artifact `epics/EP-<slug>/learning/<member>--review-<pr>.md` (front-matter:
 `member`, `concept`, `stage`, `tool`, `requestedAt`) — the review method as applied to *this* PR plus the
 engineer's specific gaps and how to close them. Both files are **local-only, gitignored, never committed
-or pushed, and never written into a code repo** — they are a private personal skills log. `yad status`
+or pushed, and never written into a code repo** — they are a private personal skills log. The `yad-status` skill
 rolls them up by stage (e.g. "engineer-review: 3").
 
 ## Optional: stamp the build-log (Build)

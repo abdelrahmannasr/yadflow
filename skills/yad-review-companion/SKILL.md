@@ -32,7 +32,7 @@ The CLI never calls an LLM — **you** (this skill) generate the text and post i
    questions and flagged concerns become the review record. If you **cannot** answer from the material,
    say so — that gap is itself a finding (post it as a genuine, blocking comment).
 4. **🏆 Social (E)** — a verified-engagement mark on a real companion review, a friendly public
-   @-mention nudge on a bare approve, and light read-only gamification surfaced by `yad status`.
+   @-mention nudge on a bare approve, and light read-only gamification surfaced by the `yad-status` skill.
 
 ## Markers (the contract with the gate — all live in PLATFORM data, never a ledger file)
 
@@ -54,7 +54,7 @@ Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `actio
    `requireEngagement`, and `step.gateRule` — the step's full approver count (`base`, `riskStep`,
    `needed`, `risk`) — with `step.cap`, an object `{ active, limit, to, capped }` (E72): `to` is the count
    capped by the active people, `capped` is true when the cap lowered it, and the field is `null` when
-   the people could not be counted, which is worth naming in the trailer on a high-risk step and never a blocker. Build: `yad review chat --repo <r>` (see `yad-engineer-review`) provides the
+   the people could not be counted, which is worth naming in the trailer on a high-risk step and never a blocker. Build: `yad review context --repo <r> --pr <n>` (see `yad-engineer-review`) provides the
    diff + code-map grounding. Read the named files yourself — never invent content.
 2. **Trailer.** Generate ≤6 lines (what / risk / read-time), grounded only in the bundle. Post it:
    `yad gate trailer <epic> <artifact> --body "<text>" [--pr <n>]` (idempotent; re-run after edits).

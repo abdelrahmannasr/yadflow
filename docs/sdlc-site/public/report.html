@@ -246,7 +246,8 @@
       <strong>Shape = decide (the “brain”).</strong><br>
       Runs <em>once per epic</em>, in the <strong>Product</strong>. Here the team agrees on the epic,
       the architecture, the locked contract, the UI design, and the stories.
-      <em>Always human-approved — these steps can never auto-advance.</em>
+      <em>Every Shape review is always human-approved. An author step’s dial can be set to <code>auto</code>,
+      but that is only recorded for now — nothing moves a Shape step on its own.</em>
     </div>
     <div class="card">
       <strong>Build = build.</strong><br>
@@ -276,8 +277,11 @@
   <code>automation</code> (<code>human</code>=<code>human_approve</code>, <code>auto</code>=<code>machine_advance</code>).
   <code>yad migrate</code> adds the new names to an existing project.</p>
   <p>Keeping the dials separate lets you say &ldquo;an agent does the drafting, but a person must approve&rdquo; &mdash; the exact
-  setting for the design steps. Every step starts at <code>advance: human</code>. The Shape steps and the final
-  engineer review are <strong>locked there permanently</strong>.</p>
+  setting for the design steps. Every step starts at <code>advance: human</code>, and the team changes a dial
+  with <code>yad dial</code>. Only two kinds of step are <strong>always human</strong>: every review gate and the final
+  engineer review. A Shape <em>author</em> step’s dial can be set to <code>auto</code> for the whole project (kept in
+  <code>.sdlc/automation.json</code>), but nothing acts on it yet. A Build step on <code>auto</code> is moved on by the
+  <code>yad-run</code> skill after a clean run.</p>
 </section>
 
 <!-- ======================================================= -->
@@ -291,14 +295,16 @@
       <span><span class="key k-artifact"></span><strong>artifact</strong> — an author step writes a file and stops</span>
       <span><span class="key k-gate"></span><strong>gate</strong> — a human review that must pass</span>
       <span><span class="key k-earns"></span><strong>can run on auto</strong> — the team may set it to advance on its own (<code>yad dial</code>)</span>
-      <span><span class="key k-locked"></span><strong>locked</strong> — permanently human</span>
+      <span><span class="key k-locked"></span><strong>always human</strong> — the engineer review; no dial can automate it (review gates are always human too)</span>
       <span><span class="key k-sentinel"></span><strong>milestone</strong></span>
     </div>
 
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 38 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Pick a front door</strong><small><code>yad new &lt;name&gt;</code> (new product) · <code>yad init</code> (repos you already have) · <code>yad join &lt;url&gt;</code> (a teammate joining) — each leaves a <code>.yad-workspace.json</code>, so <code>yad</code> finds the Product from any repo it registers</small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node plain"><strong>Install the module</strong><small><code>new</code> and <code>init</code> run <code>yad setup</code> (a profile interview: solo or team, greenfield or brownfield, monorepo or separate repos) — it copies the 38 skills into your agent dirs. <code>join</code> only clones and adds per-machine files.</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> (CI gates, PR template)</small></div>
         <div class="arrow-v">▼</div>
@@ -310,26 +316,28 @@
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Connect a learning tool</strong><small><code>yad-connect-learning</code> → <code>learning.json</code> (DeepTutor-first, pluggable) so the learning layer can tutor in context <em>(optional — degrades to harness-native)</em></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node plain"><strong>Optional: Product on a platform</strong><small>detect GitHub/GitLab, so reviews run on real PRs/MRs (no people are stored — repository access decides who can review)</small></div>
+        <div class="node plain"><strong>Optional: Product on a platform</strong><small>detect GitHub/GitLab, so reviews run on real PRs/MRs (no people are stored — repository access decides who can review). With a platform the <strong>ledger mode</strong> is <code>verified</code> (CI writes the review records at merge); with none it is <code>local</code> (your machine writes them)</small></div>
       </div>
     </div>
 
     <div class="flow-v"><div class="arrow-v">▼</div></div>
 
     <div class="lane">
-      <div class="lane-title">A⁰ · Front-zero — project discovery (optional · once per project)</div>
+      <div class="lane-title">A⁰ · Foundation — the Product level (optional · once per product)</div>
       <div class="flow-v">
-        <div class="node artifact"><strong>yad-discovery</strong> <em>(optional)</em><small>market · competitor · feasibility · requirements → <code>roadmap.md</code> (the feature menu) · seeds <code>EP-discovery</code></small></div>
+        <div class="node artifact"><strong>yad-discovery</strong> <em>(optional)</em><small><code>yad foundation new</code> seeds <code>foundation/</code> (id <code>EP-foundation</code>); the skill writes its sections — purpose · scope · MVP · <code>roadmap.md</code> (the feature menu) · stack · repos (+ optional market and risks)</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node gate">gate · discovery review<small>terminates at <code>discovery-done</code> · no Build</small></div>
+        <div class="node gate">gate · Foundation review<small>ends at <code>foundation-done</code> · no Build · its approval is reported, not enforced (<code>yad next</code> warns when epics go ahead of it)</small></div>
       </div>
     </div>
 
     <div class="flow-v"><div class="arrow-v">▼</div></div>
 
     <div class="lane">
-      <div class="lane-title">A · Shape — Product · human-gated · once per epic</div>
+      <div class="lane-title">A · Shape — Product · human-gated · once per epic · up to 6 reviews</div>
       <div class="flow-v">
+        <div class="node plain"><strong>yad epic new &lt;slug&gt;</strong><small>seeds the epic’s step chain from a profile: <code>classic</code> or <code>analysis-first</code> (shown below — the optional analysis step first, then the <code>classic</code> chain); the short <code>chore</code> and <code>spike</code> lanes keep only epic and stories (a spike adds analysis first) and have no architecture gate, so they may not move the contract</small></div>
+        <div class="arrow-v">▼</div>
         <div class="node artifact"><strong>yad-analysis</strong> <em>(optional)</em><small>pressure-test the idea with the analyst → <code>analysis.md</code></small></div>
         <div class="arrow-v">▼</div>
         <div class="node gate">gate · analysis review</div>
@@ -353,6 +361,8 @@
         <div class="node sentinel"><strong>ready-for-build</strong><small>the gating Shape is done — building can start (and <code>yad-test-cases</code> opens in parallel)</small></div>
         <div class="arrow-v">▼</div>
         <div class="node artifact"><strong>yad-test-cases</strong> <em>(parallel · non-blocking)</em><small>opens when the stories gate passes and runs <strong>alongside Build</strong> — with the test architect → <code>test-cases.md</code> + the automation tests in the connected testing tool (<code>test-links.json</code>) → its own base-count review. Never blocks <code>ready-for-build</code>.</small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node plain"><strong>While authoring any step</strong><small><code>yad capture</code> saves drafts to your private <code>yad/wip/&lt;git-name&gt;/&lt;epic&gt;</code> branch (a hook does it after each agent edit) · <code>yad claims</code> shows who else is editing · <code>yad assign</code> names a step owner (a warning, not a lock) · <code>yad fold &lt;epic&gt; &lt;step&gt;</code> ends the step with one clean commit · <code>yad skip</code> / <code>yad defer</code> set an optional step aside with a reason</small></div>
       </div>
     </div>
 
@@ -365,7 +375,7 @@
         <div class="arrow-v">▼</div>
         <div class="node"><strong>yad-implement</strong><small>1 atomic task = 1 branch = 1 commit (small diff, ≤3 files) — <em>can run on auto</em></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node"><strong>yad-checks</strong><small>CI gates: spec-link · contract-check · build/test/lint · verified-commits · lineage-check · epic-open · reconcile-debt — <em>can run on auto</em></small></div>
+        <div class="node"><strong>yad-checks</strong><small>11 CI jobs: spec-link · contract-check · risk-map (advisory) · build/test/lint · lineage-check · epic-open · reconcile-debt · commit-message · pr-title · pr-template · verified-commits — <em>can run on auto</em></small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Open PR/MR</strong><small>from the wired template; no reviewers are requested — risk routing prints the approval count and the touched domains</small></div>
         <div class="arrow-v">▼</div>
@@ -380,9 +390,11 @@
     <div class="flow-v"><div class="arrow-v">▼</div></div>
 
     <div class="lane">
-      <div class="lane-title">C · Automation — earned &amp; reversible (optional)</div>
+      <div class="lane-title">C · Automation — set by the team &amp; reversible (optional)</div>
       <div class="flow-v">
-        <div class="node"><strong>yad-run</strong><small>drives Build on each step’s automation dial, recording every run in <code>trust-log.json</code></small></div>
+        <div class="node plain"><strong>yad dial</strong><small>the team sets a Build step to <code>advance: auto</code> (or back to <code>human</code>); it shows the step’s run record as advice, never as a rule</small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node"><strong>yad-run</strong><small>drives Build on each step’s automation dial, recording every run in <code>trust-log.json</code> (the run record)</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Kill switch</strong><small><code>yad kill --reason</code> → everything back to <code>advance: human</code> instantly, recorded</small></div>
       </div>
@@ -407,7 +419,13 @@
 
   <h3>Where every file lives</h3>
   <p>One rule: <strong>shared thinking lives in the Product; building lives in each code repo; a link connects them.</strong></p>
-  <pre><code>product/
+  <pre><code>workspace/                 the folder holding product/ and the code repos side by side
+  .yad-workspace.json      the Product's path, so yad finds it from any registered repo
+
+product/
+  .sdlc/                   product.json (older name hub.json, kept until v5) · repos.json
+                           automation.json (dials + kill switch) · index.json (one line per work item)
+  foundation/              (optional) the Foundation: purpose, scope, MVP, roadmap.md …
   epics/EP-&lt;slug&gt;/
     analysis.md          (optional) the discovery brief
     epic.md              the feature, agreed
@@ -417,11 +435,13 @@
     stories/             one file per story (EP-&lt;slug&gt;-S01.md …)
     test-cases.md        the test cases (+ the automation tests when a testing tool is connected)
     reviews/             reviewer comments, per artifact
-    .sdlc/               state.json · approvals.json · contract-lock.json
+    .sdlc/               state.json · approvals.json · comments.json · product-prs.json · contract-lock.json
                          design-links.json · test-links.json · build-state/ · trust-log.json · build-log.json
+                         owners/&lt;step&gt;.json (who owns an authoring step)
 
 each code repo/
   specs/&lt;story-id&gt;/      spec, plan, tasks (+ link.md back to the story)
+  .sdlc/                 product-link.json (where the Product is) · risk-map (a risk level per folder)
   + the real code, branches and PRs</code></pre>
 </section>
 
@@ -429,9 +449,14 @@ each code repo/
 <section id="gate">
   <h2>3. The review gate — the same loop, everywhere</h2>
   <p>Every review in the workflow is the <em>same</em> loop, run by <code>yad-review-gate</code>.
-  Commenting never advances anything. Only an explicit <code>advance</code> (local mode) or the
-  merge of an approved, fully-resolved review PR (platform mode) moves the step forward — and only
-  when the approval rule is met.</p>
+  Commenting never advances anything. What moves the step forward depends on where the Product lives —
+  and it moves only when the approval rule is met:</p>
+  <table>
+    <tr><th>Setup</th><th>Who records the review</th><th>What advances the step</th></tr>
+    <tr><td><strong>No platform</strong></td><td>You, with <code>yad gate comment|approve &lt;epic&gt; &lt;artifact&gt; --by &lt;name&gt;</code>. An approval is bound to the artifact’s content, so an edit revokes it.</td><td><code>yad gate advance &lt;epic&gt; &lt;artifact&gt;</code> — it passes only when the approvals hold.</td></tr>
+    <tr><td><strong>Platform, <code>local</code> ledger mode</strong></td><td>Reviewers approve and comment on the review PR/MR; <code>yad gate sync</code> copies that into the files on your machine.</td><td>Merging the approved, fully-resolved review PR/MR, then <code>yad gate sync</code>.</td></tr>
+    <tr><td><strong>Platform, <code>verified</code> ledger mode</strong> (the default with a platform)</td><td>Reviewers approve and comment on the review PR/MR. <strong>CI is the only writer</strong> of the review files; <code>yad gate sync</code> is advisory.</td><td>Merging the review PR/MR — CI then runs <code>yad gate ci --merged</code> on the default branch.</td></tr>
+  </table>
 
   <div class="diagram">
     <div class="flow-h">
@@ -454,12 +479,12 @@ each code repo/
   <p>yadflow keeps <strong>no list of people</strong> and there are no roles. Anyone with access to the repository can approve, and the platform records who did (their login). Every review uses the same <strong>count</strong> rule: base 1 + the step's risk step.</p>
   <table>
     <tr><th>Review</th><th>Rule</th><th>How many must approve</th></tr>
-    <tr><td>Every review</td><td><strong>Base</strong><br><em>enforced</em></td><td>At least <strong>1 distinct approver who is not the author</strong> (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), every comment thread resolved, and the review PR/MR merged.</td></tr>
-    <tr><td>Every review</td><td><strong>Risk step</strong><br><em>advisory</em><br><small>a later yadflow change will enforce it together with <code>yad gate lower --reason</code>, a recorded way out of a gate a team cannot meet</small></td><td>Added to the base from the step's risk tags: +2 on a <code>contract</code> tag, +1 on <code>auth</code>/<code>payments</code> — the highest tag and never the sum. It counts distinct people, not roles. The <strong>capacity cap</strong> limits the count to the number of <strong>active people less one</strong> (never below 1) — one seat is left for the author: a contract gate asks 3, and with 2 active people the capped ask is 1. The count is printed wherever a gate reports itself, with the shortfall (for example <code>count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short</code>), but <strong>only the base blocks</strong>. The cap is reported, not enforced: the count of people can read high (a git name and a platform login are two people until proven one), so a two-person team can read as four and an enforced gate would lock it out. A later yadflow change will enforce the capped count together with <code>yad gate lower --reason</code>, the way out, once the count is accurate. Until then, under a team gate that has not passed, <code>yad gate status</code> and <code>yad gate sync</code> print a warning line when the count of people suggests the gate may not pass: <code>! may not be met:</code> about the one approval enforced today, or <code>! if the risk step were enforced:</code> about what enforcing more would do. It holds nothing. When the active people cannot be counted, no cap is shown. A team gate that passes on its counted approvals while the cap lowered its ask records <code>capped</code> on its closing record (not in solo mode, and not on a skipped or inherited step).</td></tr>
+    <tr><td>Every review</td><td><strong>Base</strong><br><em>enforced</em></td><td>At least <strong>1 distinct approver who is not the author</strong> (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), every comment thread resolved, and the review PR/MR merged (with no platform: <code>yad gate advance</code> instead of the merge).</td></tr>
+    <tr><td>Every review</td><td><strong>Risk step</strong><br><em>advisory</em><br><small>enforcing it is parked (roadmap row E108)</small></td><td>Added to the base from the step's risk tags: +2 on a <code>contract</code> tag, +1 on <code>auth</code>/<code>payments</code> — the highest tag and never the sum. It counts distinct people, not roles. The <strong>capacity cap</strong> limits the count to the number of <strong>active people less one</strong> (never below 1) — one seat is left for the author: a contract gate asks 3, and with 2 active people the capped ask is 1. The count is printed wherever a gate reports itself, with the shortfall (for example <code>count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short</code>), but <strong>only the base blocks</strong>. The cap is reported, not enforced: the count of people can read high (a git name and a platform login are two people until proven one), so a two-person team can read as four and an enforced gate would lock it out. Enforcing the capped count is parked (roadmap row E108). Until then, under a team gate that has not passed, <code>yad gate status</code> and <code>yad gate sync</code> print a warning line when the count of people suggests the gate may not pass: <code>! may not be met:</code> about the one approval enforced today, or <code>! if the risk step were enforced:</code> about what enforcing more would do. It holds nothing. When the active people cannot be counted, no cap is shown. A team gate that passes on its counted approvals while the cap lowered its ask records <code>capped</code> on its closing record (not in solo mode, and not on a skipped or inherited step).</td></tr>
     <tr><td>Analysis / Epic / UI / Test cases</td><td><strong>Count</strong></td><td>1 approver (no risk tag)</td></tr>
     <tr><td>Architecture + contract</td><td><strong>Count</strong></td><td>3 approvers = base 1 + contract risk 2, shown capped at the active people less one (base enforced). The contract surface is hash-locked; changing it invalidates approvals.</td></tr>
     <tr><td>Stories</td><td><strong>Count</strong></td><td>An ordinary count gate: 1 approver. The repos any story touches label the review PR (<code>domain:&lt;repo&gt;</code>) as a hint for whom to ask; they add no approvals.</td></tr>
-    <tr><td>Any review, solo mode</td><td><strong>Solo</strong></td><td>Approvals waived — the merge plus resolved threads advance the step.</td></tr>
+    <tr><td>Any review, solo mode</td><td><strong>Solo</strong></td><td>Approvals waived — the merge plus resolved threads advance the step. The team switches with <code>yad mode solo --reason &lt;why&gt;</code> or <code>yad mode team</code>; who, when and why are recorded.</td></tr>
     <tr><td>Engineer review at ship</td><td><strong>Locked</strong></td><td>a human engineer — always, <em>never</em> automated</td></tr>
   </table>
 
@@ -491,17 +516,23 @@ each code repo/
   <div class="term"><strong>Product (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the Product.</div>
   <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 38 skills live and where you pull updates from. No real product work happens inside it.</div>
-  <div class="term"><strong>Shape (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the Product: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside Build. Permanently human-approved.</div>
+  <div class="term"><strong>Shape (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the Product: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside Build. Every Shape review is always human-approved.</div>
   <div class="term"><strong>Build / Build (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. The team may set these mechanical steps to run on their own.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
   <div class="term"><strong>Driver dial</strong><span class="badge b-core">core</span><br>A per-step setting for who does the work: <code>human</code> (no AI), <code>pair</code> (a person and an agent together), or <code>agent</code> (the agent drafts, the person directs). Older name in the files: <code>assistance</code> &mdash; <code>none</code>, <code>review</code>, <code>heavy</code>.</div>
-  <div class="term"><strong>Advance dial</strong><span class="badge b-core">core</span><br>A per-step setting for who moves the step forward: <code>human</code> (default &mdash; a person records the approval) or <code>auto</code> (the orchestrator moves on by itself). Older name in the files: <code>automation</code> &mdash; <code>human_approve</code>, <code>machine_advance</code>. Shape steps and the engineer review can never be set to <code>advance: auto</code>.</div>
-  <div class="term"><strong>End-first automation</strong><span class="badge b-core">core</span><br>The rule for <em>which</em> steps get automated first: start from the safe end (checks, implement — a mistake there is one revert, caught by gates) and move toward the valuable end (design decisions), which is never automated at all.</div>
+  <div class="term"><strong>Advance dial</strong><span class="badge b-core">core</span><br>A per-step setting for who moves the step forward: <code>human</code> (default &mdash; a person records the approval) or <code>auto</code> (the orchestrator moves on by itself). Older name in the files: <code>automation</code> &mdash; <code>human_approve</code>, <code>machine_advance</code>. A review gate and the engineer review can never be set to <code>advance: auto</code>. A Shape author step can be, but that is only recorded (in <code>.sdlc/automation.json</code>) — nothing acts on it yet.</div>
+  <div class="term"><strong>End-first automation</strong><span class="badge b-core">core</span><br>The rule for <em>which</em> steps get automated first: start from the safe end (checks, implement — a mistake there is one revert, caught by gates) and move toward the valuable end (design decisions). The review gates at that end are never automated at all. The team decides when to move a dial, reading the step’s run record as advice.</div>
   <div class="term"><strong>Epic</strong><span class="badge b-core">core</span><br>One feature, described well: the problem, the goal, the scope. The unit Shape works on. Gets a stable ID like <code>EP-checkout</code>.</div>
   <div class="term"><strong>Story (user story)</strong><span class="badge b-core">core</span><br>A slice of an epic small enough to build and review on its own. Each story is <em>repo-tagged</em> — it lists which code repos must implement it (e.g. <code>repos: [backend, mobile]</code>). ID: <code>EP-&lt;slug&gt;-S01</code>.</div>
   <div class="term"><strong>Atomic task</strong><span class="badge b-core">core</span><br>The smallest unit of building: one task = one branch = one commit = one PR, with a small diff (≤3 files) that stays inside the files the task declared. ID: <code>EP-&lt;slug&gt;-S01-T03</code>.</div>
   <div class="term"><strong>Handoff rule</strong><span class="badge b-core">core</span><br>Where files live: everything up to and including the locked contract lives in the Product; everything from the spec onward lives in each code repo. The handover point is exactly where Spec Kit begins.</div>
   <div class="term"><strong>Code-aware (the brain reads the code)</strong><span class="badge b-core">core</span><br>When code repos are connected, each Shape author step first loads their cached code-maps — so the epic references what already exists, the architecture cross-checks the contract against real endpoints before locking it, the UI reuses existing components, and stories anchor to real modules.</div>
+  <div class="term"><strong>Workspace (<code>.yad-workspace.json</code>)</strong><span class="badge b-core">core</span><br>The folder that holds the Product (<code>product/</code>) and the code repos side by side. <code>yad new</code>, <code>yad init</code> and <code>yad join</code> leave a small <code>.yad-workspace.json</code> in it that holds the Product’s path, so a Product command run from inside a registered code repo still finds the Product.</div>
+  <div class="term"><strong>Front doors (<code>yad new</code> / <code>init</code> / <code>join</code>)</strong><span class="badge b-core">core</span><br>The three ways in. <code>yad new &lt;name&gt;</code> makes a new product (<code>&lt;name&gt;/product/</code>) and runs setup; it creates no remote and prints the <code>gh</code>/<code>glab</code> line for you to run. <code>yad init</code> is for repos you already have. <code>yad join &lt;url&gt;</code> is for a teammate: it clones the Product and every repo it registers, then adds only per-machine files (git-ignored skill copies and the git pre-commit hook) — it never commits or pushes. <code>yad repo clone</code> later fetches any registered repo still missing on your machine.</div>
+  <div class="term"><strong>Foundation</strong><span class="badge b-core">core</span><br>The optional Product level, run once per product before any epic. <code>yad foundation new</code> seeds it in <code>foundation/</code> (id <code>EP-foundation</code>); the <code>yad-discovery</code> skill writes its sections (purpose, scope, MVP, <code>roadmap.md</code>, stack, repos, and optionally market and risks). It has one review and no Build, and ends at <code>foundation-done</code>. <code>yad foundation status</code> reads which roadmap features have started. An older product’s <code>epics/EP-discovery/</code> is converted by <code>yad migrate</code>.</div>
+  <div class="term"><strong>Lifecycle profile</strong><span class="badge b-core">core</span><br>The step chain an epic is seeded with by <code>yad epic new --profile</code>: <code>classic</code> (the 10-step chain, epic first), <code>analysis-first</code> (12 steps, analysis first), <code>chore</code> (epic and stories only, for upkeep) or <code>spike</code> (a chore with analysis in front, for an investigation). The two short lanes have no architecture gate, so they may not move the contract.</div>
+  <div class="term"><strong>Solo / team mode (<code>yad mode</code>)</strong><span class="badge b-core">core</span><br>Who must approve. <strong>Solo</strong> waives approvals on every review gate — the merge still decides. <strong>Team</strong> counts them. <code>yad mode solo --reason &lt;why&gt;</code> and <code>yad mode team</code> switch it and record who, when and why; setup asks it first.</div>
+  <div class="term"><strong>Skip / defer / unblock</strong><span class="badge b-core">core</span><br>Ways to set an optional step aside, each with a recorded reason. <code>yad skip &lt;epic&gt; &lt;step&gt; --reason</code> marks it not needed (for example the UI step of a backend-only epic). <code>yad defer … --reason [--debt]</code> sets it aside to do later; its review is still owed, and <code>--debt</code> makes <code>yad next</code> and <code>yad doctor</code> remind you. <code>yad skip &lt;epic&gt; &lt;story&gt; --repo &lt;name&gt;</code> skips a whole Build lane a story does not need. <code>yad unblock</code> clears a recorded blocker. Each has an undo (<code>unskip</code>, <code>undefer</code>).</div>
 
   <h3>Files &amp; artifacts</h3>
   <div class="term"><strong>Artifact</strong><span class="badge b-file">files</span><br>The file an author step produces (e.g. <code>epic.md</code>, <code>contract.md</code>). An author step writes its artifact, marks itself done, and stops at its review gate.</div>
@@ -517,7 +548,7 @@ each code repo/
   <div class="term"><strong><code>state.json</code></strong><span class="badge b-file">files</span><br>The epic’s state machine on disk: every step, its two dials, its status, and <code>currentStep</code> (where the epic is right now).</div>
   <div class="term"><strong><code>approvals.json</code></strong><span class="badge b-file">files</span><br>Who approved which review, recorded under the approver’s platform login (no role, no domain). The gate reads this to decide whether the rule is met.</div>
   <div class="term"><strong><code>repos.json</code></strong><span class="badge b-file">files</span><br>The project-wide registry of connected code repos (path/URL, platform, freshness sha). It stores no people.</div>
-  <div class="term"><strong><code>schemaVersion</code></strong><span class="badge b-file">files</span><br>The shape a state file is in, stamped as the first key of every JSON object <code>yad</code> writes under <code>.sdlc/</code>. It lets a later release recognise a file written by an older one and upgrade it instead of guessing. A file without it counts as version 1, so older projects keep working untouched; the four list files (<code>approvals.json</code>, <code>comments.json</code>, <code>hub-prs.json</code>, <code>reconcile-debt.json</code>) never carry it because a JSON list cannot hold a key. Not the same as <code>cli-version.json</code>, which records the CLI release rather than the file's shape.</div>
+  <div class="term"><strong><code>schemaVersion</code></strong><span class="badge b-file">files</span><br>The shape a state file is in, stamped as the first key of every JSON object <code>yad</code> writes under <code>.sdlc/</code>. It lets a later release recognise a file written by an older one and upgrade it instead of guessing. A file without it counts as version 1, so older projects keep working untouched; the list files (<code>approvals.json</code>, <code>comments.json</code>, <code>product-prs.json</code> and its older copy <code>hub-prs.json</code>, <code>reconcile-debt.json</code>) never carry it because a JSON list cannot hold a key. Not the same as <code>cli-version.json</code>, which records the CLI release rather than the file's shape.</div>
   <div class="term"><strong><code>product.json</code></strong><span class="badge b-file">files</span><br>The Product’s platform record (GitHub or GitLab), used to run Shape reviews on real PRs/MRs. It stores no people. Also written under its older name, <code>hub.json</code>, until v5.</div>
   <div class="term"><strong>Roster (removed)</strong><span class="badge b-role">roles</span><br>An older list of people and roles in the Product settings (<code>product.json</code>). yadflow no longer keeps one: repository access is the list, the platform records who approved, and <code>yad roster</code> only prints a notice that it was removed. A <code>roster</code> in <code>hub.json</code>, <code>domain_owner(s)</code> in <code>repos.json</code>, or a <code>.sdlc/verified-authors</code> file that an older release wrote is <strong>left on disk and decides nothing</strong> (the roster's name → login pairs are used only to record each person's login on older approvals; <code>yad doctor</code> says when no older record needs them) — <code>yad doctor</code> warns <code>people:roster-unused</code>, <code>people:domain-owners-unused</code> or <code>people:verified-authors-unused</code> so nobody believes it still decides anything.</div>
   <div class="term"><strong>Code-map</strong><span class="badge b-file">files</span><br>A lightweight, AI-readable summary of a connected code repo — its existing endpoints, events, data models and modules — cached under <code>.sdlc/code-context/</code> so the Shape steps don’t contradict code that already exists.</div>
@@ -528,18 +559,21 @@ each code repo/
   <div class="term"><strong><code>build-state/&lt;story&gt;.json</code></strong><span class="badge b-auto">automation</span><br>Per story: the Build steps with their automation dials and statuses, per repo. What <code>yad-run</code> reads to know whether to advance or stop.</div>
   <div class="term"><strong><code>ready-for-build</code></strong><span class="badge b-core">core</span><br>The milestone state an epic reaches when all Shape gates have passed. From here, stories can enter Build.</div>
   <div class="term"><strong><code>in-build</code> / <code>shipped</code></strong><span class="badge b-build">build</span><br>A story’s lifecycle status during and after Build: <code>in-build</code> once its first task merges, <code>shipped</code> when the story is fully delivered.</div>
+  <div class="term"><strong><code>index.json</code> / <code>yad history</code></strong><span class="badge b-file">files</span><br><code>.sdlc/index.json</code> is the Product’s one-file front door: one summary line per work item, rebuilt from each item’s own files by <code>yad index</code> (on the default branch only; on a <code>verified</code> Product, CI writes it). <code>yad history</code> lists every work item newest first, <code>yad history show &lt;id&gt;</code> shows every step with its closing record and approvals, and <code>yad history search &lt;text&gt;</code> finds items — all built live, writing nothing.</div>
 
   <h3>Gates &amp; review</h3>
   <div class="term"><strong>Review gate (<code>yad-review-gate</code>)</strong><span class="badge b-gate">gates</span><br>The one reusable team review loop used by every Shape review: <code>open → comment → approve → advance</code>. Commenting never advances; <code>advance</code> moves forward only when the approval rule is met — otherwise it says exactly what is still missing.</div>
   <div class="term"><strong>Base</strong><span class="badge b-gate">gates</span><br>The part of the approval count that is always enforced — and, for now, the only part: at least <strong>1 distinct approver who is not the author</strong>. Every team review needs it, together with resolved threads and a merged review PR.</div>
   <div class="term"><strong>Approver count</strong><span class="badge b-gate">gates</span><br>How many <strong>distinct people</strong> a step asks to approve: base 1 plus its risk step (+2 for <code>contract</code>, +1 for <code>auth</code>/<code>payments</code>). It names no person and no role. Only the <strong>base is enforced</strong>; the risk step is <strong>advisory</strong> — reported as a shortfall (“1 short”) against the count capped at the <strong>active people less one</strong> (never below 1). The gate rule label is <code>count</code>.</div>
-  <div class="term"><strong>Risk step</strong><span class="badge b-gate">gates</span><br>What a step's risk tags add to the base: <strong>+2</strong> for <code>contract</code>, <strong>+1</strong> for <code>auth</code> or <code>payments</code> — the largest step, never the sum. So the architecture + contract review asks for 3 approvers. Advisory. A later yadflow change will enforce it, capped by the active people, together with <code>yad gate lower --reason</code>. (This replaces the older “escalated” and “per-repo” rules, which added named reviewers per repo; the stories review is now an ordinary count gate.)</div>
+  <div class="term"><strong>Risk step</strong><span class="badge b-gate">gates</span><br>What a step's risk tags add to the base: <strong>+2</strong> for <code>contract</code>, <strong>+1</strong> for <code>auth</code> or <code>payments</code> — the largest step, never the sum. So the architecture + contract review asks for 3 approvers. Advisory: enforcing it is parked (roadmap row E108). (This replaces the older “escalated” and “per-repo” rules, which added named reviewers per repo; the stories review is now an ordinary count gate.)</div>
   <div class="term"><strong>Artifact owner</strong><span class="badge b-role">roles</span><br>The person named in an artifact’s <code>owner:</code> frontmatter, who addresses comments. It is not a gate role: approvals come from anyone with access who is not the author.</div>
   <div class="term"><strong>Reviewer</strong><span class="badge b-role">roles</span><br>Anyone with access to the repo who reads, challenges and comments on an artifact, and records an approval when satisfied. The approval is recorded under their platform login.</div>
-  <div class="term"><strong>local gate</strong><span class="badge b-gate">gates</span><br>The gate run purely on files (no platform): reviewers comment in <code>reviews/…--comments.md</code>, approvals land in <code>approvals.json</code>, and an explicit <code>advance</code> moves the step. The mode everything degrades to when there is no GitHub/GitLab or no CLI.</div>
-  <div class="term"><strong>PR-driven gate</strong><span class="badge b-gate">gates</span><br>When the Product is on a platform: each artifact’s review rides a real PR/MR. Reviewers approve/comment there; <code>yad gate sync</code> maps that state into the file ledger, and the step auto-advances <em>on merge</em> once the rule is met and every comment thread is resolved. The merge click is the human approval act.</div>
+  <div class="term"><strong>No-platform gate</strong><span class="badge b-gate">gates</span><br>The gate run purely on files, when the Product has no GitHub/GitLab: <code>yad gate comment &lt;epic&gt; &lt;artifact&gt; --by &lt;name&gt;</code> records who commented, <code>yad gate approve … --by &lt;name&gt;</code> records an approval bound to the artifact’s content (an edit revokes it), and <code>yad gate advance &lt;epic&gt; &lt;artifact&gt;</code> passes the gate when its approvals hold. With a platform these three commands refuse — the PR/MR carries the review.</div>
+  <div class="term"><strong>Ledger mode (<code>local</code> / <code>verified</code>)</strong><span class="badge b-gate">gates</span><br>Who writes the review files (the ledger), set by <code>ledger</code> in <code>product.json</code>. <code>local</code> — your machine writes them (no platform, or a platform with no gate-sync CI). <code>verified</code> — the default with a platform: <strong>CI is the only writer</strong>, at merge, and a person’s hand edit is refused by the ledger guard.</div>
+  <div class="term"><strong>PR-driven gate</strong><span class="badge b-gate">gates</span><br>When the Product is on a platform: each artifact’s review rides a real PR/MR. Reviewers approve/comment there, and the step advances <em>on merge</em> once the rule is met and every comment thread is resolved. On a <code>local</code> ledger, <code>yad gate sync</code> maps the PR state into the file ledger; on a <code>verified</code> one CI does it at merge (<code>yad gate ci --merged</code>) and <code>yad gate sync</code> is advisory. The merge click is the human approval act.</div>
   <div class="term"><strong>Product bridge (<code>yad-product-bridge</code>)</strong><span class="badge b-gate">gates</span><br>The machinery that connects the file ledger to platform PRs/MRs: opens the review PR per artifact, labels it (<code>domain:&lt;repo&gt;</code> for touched repos) without requesting reviewers, and provides the read-only <code>gh</code>/<code>glab</code> recipes for syncing approvals and comments back.</div>
-  <div class="term"><strong>Merge-time gate sync</strong><span class="badge b-gate">gates</span><br>A CI workflow on the Product that runs <code>yad gate ci</code> on merge — <strong>CI is the sole writer of the ledger</strong>, and writes only at merge, on the default branch. During review CI writes nothing: the platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review branch — so an in-flight approval is never dismissed and required checks never strand. On the human merge it re-reads approvals, advances the step, and flips the artifact status on the default branch. The sweep that catches a missed merge keeps re-visiting each merged review for a week — that costs a read, not a commit, because the ledgers are written in a canonical order and an unchanged record re-serializes to an identical file (#163). A <code>ledger-guard</code> check keeps humans out of the gate files — with one carve-out: a brand-new epic's <strong>seed</strong>, which no CI path can write, so it rides the epic's first review PR/MR (creation, not mutation). CI never approves and never merges; the human keeps the merge click, then <code>git pull</code>s.</div>
+  <div class="term"><strong>Merge-time gate sync</strong><span class="badge b-gate">gates</span><br>A CI workflow on the Product that runs <code>yad gate ci</code> on merge. In <code>verified</code> ledger mode <strong>CI is the sole writer of the ledger</strong>, and writes only at merge, on the default branch. During review CI writes nothing: the platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review branch — so an in-flight approval is never dismissed and required checks never strand. On the human merge it re-reads approvals, advances the step, and flips the artifact status on the default branch. The sweep that catches a missed merge keeps re-visiting each merged review for a week — that costs a read, not a commit, because the ledgers are written in a canonical order and an unchanged record re-serializes to an identical file (#163). A <code>ledger-guard</code> check keeps humans out of the gate files — with one carve-out: a brand-new epic's <strong>seed</strong>, which no CI path can write, so it rides the epic's first review PR/MR (creation, not mutation). CI never approves and never merges; the human keeps the merge click, then <code>git pull</code>s.</div>
+  <div class="term"><strong>Ledger guard (three layers)</strong><span class="badge b-gate">gates</span><br>On a <code>verified</code> Product, three things keep hand edits out of the CI-owned review files: a harness hook that refuses an agent’s edit, a git pre-commit hook in each clone (installed by <code>yad check --fix</code> and <code>yad join</code>) that refuses a person’s commit, and the <code>ledger-guard</code> CI job on the PR. The one door past the local hook is <code>yad commit --manual --reason &lt;why&gt;</code>, which records a <code>Ledger-Override</code> trailer — the CI job still judges the commit and quotes the reason. Which branch rules to turn on is in <code>docs/branch-protection.md</code>.</div>
   <div class="term"><strong>Approval revocation (re-hash)</strong><span class="badge b-gate">gates</span><br>If a reviewed artifact actually changes after approval, the recorded approvals are revoked automatically (the artifact is re-hashed) — reviewers get a fresh pass at the new content.</div>
   <div class="term"><strong>Risk tags / risk routing</strong><span class="badge b-gate">gates</span><br>Labels (<code>contract</code>, <code>auth</code>, <code>payments</code>) and the PR template’s Impact &amp; Risk block that decide how many must approve. High risk adds 1 and a touched contract surface adds 2 (<code>risk-route.sh</code> prints the count, e.g. <code>ROUTE: 3 approvers = base 1 + contract risk 2</code>, and lists the touched domains as a hint for whom to ask).</div>
   <div class="term"><strong>Impact &amp; Risk block</strong><span class="badge b-gate">gates</span><br>A section in the wired PR/MR template where the author declares the risk level and touched surfaces — the input the risk routing reads.</div>
@@ -564,6 +598,13 @@ each code repo/
   <div class="term"><strong>Backfill (<code>yad-backfill</code>)</strong><span class="badge b-build">build</span><br>For existing/legacy code: pack <em>one</em> feature with Repomix, have AI draft a spec of <em>what exists</em> (“describe, don’t invent”), mark it DRAFT/unverified, and require human approval before it counts. New work on that feature is blocked until its spec is approved — gated per touched feature, never the whole repo.</div>
   <div class="term"><strong>Draft / unverified spec</strong><span class="badge b-build">build</span><br>A backfilled spec before a human has approved it. It describes existing behaviour but doesn’t yet count as real for gating purposes.</div>
   <div class="term"><strong>Do-not-touch zones</strong><span class="badge b-build">build</span><br>Parts of an existing codebase marked off-limits to AI changes — part of the setup when adopting the workflow on a brownfield project.</div>
+  <div class="term"><strong>Risk map (<code>.sdlc/risk-map</code>)</strong><span class="badge b-build">build</span><br>A file in a code repo that gives a risk level per folder (no names). The <code>risk-map</code> CI job reads it to report the approver count and warns when it has gone stale; <code>yad risk-map check</code> and <code>yad risk-map draft</code> look after it. Advisory — it never blocks a merge.</div>
+
+  <h3>Drafting together (Shape authoring)</h3>
+  <div class="term"><strong>Capture (<code>yad capture</code>)</strong><span class="badge b-core">core</span><br>Saves every changed Shape artifact onto your own private branch, <code>yad/wip/&lt;git-name&gt;/&lt;epic&gt;</code>, and pushes it — never touching your checkout. A harness hook runs it after each agent edit, so drafts are never lost.</div>
+  <div class="term"><strong>Claims (<code>yad claims</code>)</strong><span class="badge b-core">core</span><br>Shows who else is editing which artifact, read from everyone’s capture branches. Advice, not a lock: a claim ends 4 hours after the last save, or once the file is merged.</div>
+  <div class="term"><strong>Fold (<code>yad fold &lt;epic&gt; &lt;step&gt;</code>)</strong><span class="badge b-core">core</span><br>Ends an authoring step: commits that step’s artifacts as one clean commit (<code>docs(&lt;epic&gt;): author &lt;step&gt;</code>). The drafts stay on the <code>yad/wip/…</code> branch. On a <code>local</code> ledger the epic’s ledger rides along in the same commit.</div>
+  <div class="term"><strong>Step owner (<code>yad assign</code> / <code>unassign</code> / <code>owners</code>)</strong><span class="badge b-role">roles</span><br>Names one person (by git name) as the owner of an authoring step, in <code>.sdlc/owners/&lt;step&gt;.json</code>. Advice, not a lock: the capture hook warns anyone else who edits that step’s files. <code>yad owners</code> lists every assignment.</div>
 
   <h3>Automation &amp; trust</h3>
   <div class="term"><strong>Orchestrator (<code>yad-run</code>)</strong><span class="badge b-auto">automation</span><br>The engine that drives a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: on <code>advance: auto</code> it advances alone; on <code>advance: human</code> it stops; on any failure, scope overrun, or contract-surface touch it <strong>halts and pulls in a human</strong>. It always stops at the engineer review.</div>
@@ -586,7 +627,7 @@ each code repo/
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
   <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 38 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
-  <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>ship</code>, <code>repo</code>, <code>report</code>).</div>
+  <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>ship</code>, <code>repo</code>, <code>report</code>). Every command but <code>yad hook</code> takes <code>--json</code>: one JSON object on stdout, for agents and CI.</div>
 
   <h3>People &amp; AI roles</h3>
   <div class="term"><strong>analyst</strong><span class="badge b-role">roles</span><br>The AI role for research, brainstorming and shaping the raw idea — drives the optional analysis step.</div>
@@ -594,7 +635,7 @@ each code repo/
   <div class="term"><strong>architect</strong><span class="badge b-role">roles</span><br>The technical AI role — authors the architecture and the contract.</div>
   <div class="term"><strong>ux-designer</strong><span class="badge b-role">roles</span><br>The UI/UX AI role — drives the UI design step (with Impeccable when installed).</div>
   <div class="term"><strong>dev</strong><span class="badge b-role">roles</span><br>The developer AI role — writes the code for one atomic task in the implement step.</div>
-  <div class="term"><strong>test architect</strong><span class="badge b-role">roles</span><br>The AI role that sets up and runs tests at the check gates.</div>
+  <div class="term"><strong>test architect</strong><span class="badge b-role">roles</span><br>The AI role that authors the risk-based test cases (<code>yad-test-cases</code>) and, when a testing tool is connected, the automation tests.</div>
 
   <h3>IDs &amp; naming (immutable once assigned)</h3>
   <table>
@@ -625,7 +666,7 @@ each code repo/
   </div>
   <div class="diagram">
     <div class="flow-v">
-      <div class="node plain"><strong>Setup</strong><small>install skills · create the Product repo · create empty code repos · wire each repo (CI gates + PR template) · <s>connect-repos</s> <em>skipped — nothing to map yet</em></small></div>
+      <div class="node plain"><strong>Setup</strong><small><code>yad new &lt;name&gt;</code> (makes the Product repo + runs setup, installing the skills) · create empty code repos · wire each repo (CI gates + PR template) · <s>connect-repos</s> <em>skipped — nothing to map yet</em></small></div>
       <div class="arrow-v">▼</div>
       <div class="node artifact"><strong>Shape</strong><small>(analysis) → epic → architecture + contract → UI (<code>craft</code> → <code>extract</code>) → stories — all human-gated; then test cases runs in parallel with Build</small></div>
       <div class="arrow-v">▼</div>
@@ -648,7 +689,7 @@ each code repo/
   </div>
   <div class="diagram">
     <div class="flow-v">
-      <div class="node plain"><strong>Setup</strong><small>install skills · wire each repo · <strong>connect every repo</strong> → cached Repomix pack + code-map · mark do-not-touch zones · enable spec-link</small></div>
+      <div class="node plain"><strong>Setup</strong><small><code>yad init</code> in the folder holding the repos (makes the Product + runs setup) · wire each repo · <strong>connect every repo</strong> → cached Repomix pack + code-map · mark do-not-touch zones · enable spec-link</small></div>
       <div class="arrow-v">▼</div>
       <div class="node artifact"><strong>Shape — code-aware</strong><small>each author step loads the code-maps: the epic references existing behaviour, the architecture cross-checks the contract against real endpoints <em>before</em> locking it, UI reuses existing components (<code>document → extract → craft</code>), stories anchor to real modules</small></div>
       <div class="arrow-v">▼</div>
@@ -664,12 +705,12 @@ each code repo/
     Trust must be built before AI touches anything important.</p>
     <p><strong>Setup differences:</strong> same wiring as Type 2, but <strong>start AI on safe tasks only</strong>
     — tests, docs, refactors — with every dial at <code>advance: human</code>. Run the <strong>backfill step
-    before any new feature touches old code</strong>. Let automation be earned slowly through the trust log,
-    exactly as the end-first rule prescribes.</p>
+    before any new feature touches old code</strong>. Switch automation on slowly: read each step’s run record
+    (from the trust log) and move one dial at a time with <code>yad dial</code>, exactly as the end-first rule prescribes.</p>
   </div>
   <div class="diagram">
     <div class="flow-v">
-      <div class="node plain"><strong>Setup</strong><small>install skills · wire + connect repos · everything at <code>advance: human</code> · AI assistance limited to safe tasks (tests, docs, refactors)</small></div>
+      <div class="node plain"><strong>Setup</strong><small><code>yad init</code> · wire + connect repos · everything at <code>advance: human</code> · AI assistance limited to safe tasks (tests, docs, refactors)</small></div>
       <div class="arrow-v">▼</div>
       <div class="node gate"><strong>Backfill first</strong><small>before new features touch old code, produce human-verified specs for the features they touch</small></div>
       <div class="arrow-v">▼</div>
@@ -721,7 +762,7 @@ each code repo/
     <tr><td>Spec-link check</td><td>On from day one</td><td><strong>Add it</strong> + mark do-not-touch zones</td><td>Add with the rest of the wiring</td></tr>
     <tr><td>Impeccable order (UI)</td><td><code>craft</code> → <code>extract</code></td><td><code>document</code> → <code>extract</code> → <code>craft</code></td><td><code>document</code> → <code>extract</code> → <code>craft</code></td></tr>
     <tr><td>AI scope at start</td><td>Full (specs from the start)</td><td>Full, minus do-not-touch zones</td><td><strong>Safe tasks only</strong> (tests, docs, refactors)</td></tr>
-    <tr><td>Automation pace</td><td colspan="3">Identical for all: every dial starts <code>advance: human</code>; Build steps earn <code>advance: auto</code> via the trust log; Shape steps + engineer review locked human forever.</td></tr>
+    <tr><td>Automation pace</td><td colspan="3">Identical for all: every dial starts <code>advance: human</code>; the team sets a Build step to <code>advance: auto</code> with <code>yad dial</code>, reading its run record as advice; every review gate and the engineer review stay human always; <code>yad kill</code> undoes it all in one move.</td></tr>
   </table>
 </section>
 
@@ -743,7 +784,7 @@ each code repo/
     <tr><td><a href="#sk-connect-learning"><code>yad-connect-learning</code></a></td><td>Setup</td><td>Connect a learning tool (DeepTutor-first) for the learning layer.</td></tr>
     <tr><td><a href="#sk-connect-docs"><code>yad-connect-docs</code></a></td><td>Setup</td><td>Connect a docs publishing target (GitHub/GitLab Pages, or build-only).</td></tr>
     <tr><td><a href="#sk-learn"><code>yad-learn</code></a></td><td>Anytime</td><td>Learn a concept in the context of the work in front of you.</td></tr>
-    <tr><td><a href="#sk-discovery"><code>yad-discovery</code></a></td><td>Front-zero</td><td><em>(Optional)</em> once-per-project discovery — market / feasibility / requirements → <code>roadmap.md</code>; seeds <code>EP-discovery</code>.</td></tr>
+    <tr><td><a href="#sk-discovery"><code>yad-discovery</code></a></td><td>Foundation</td><td><em>(Optional)</em> once per product — write the Foundation in <code>foundation/</code> (purpose, scope, MVP, <code>roadmap.md</code>, …).</td></tr>
     <tr><td><a href="#sk-analysis"><code>yad-analysis</code></a></td><td>Front</td><td><em>(Optional)</em> pressure-test an idea into <code>analysis.md</code>.</td></tr>
     <tr><td><a href="#sk-epic"><code>yad-epic</code></a></td><td>Front</td><td>Start a feature: write <code>epic.md</code>, assign the ID.</td></tr>
     <tr><td><a href="#sk-arch"><code>yad-architecture</code></a></td><td>Front</td><td>Author <code>architecture.md</code> + the locked <code>contract.md</code>.</td></tr>
@@ -847,11 +888,13 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
   <h3>Shape — author the thinking (in the Product)</h3>
 
   <div class="skillcard" id="sk-discovery">
-    <h4><code>yad-discovery</code> <em>(optional · front-zero)</em></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> A once-per-project discovery phase that runs <em>before</em> any epic: with the analyst, it pressure-tests the product itself — market, competitors, current state, feasibility, requirements — and writes <code>roadmap.md</code>, the feature menu each <code>yad-epic</code> reads. Greenfield and brownfield; modelled as the reserved epic-zero <code>EP-discovery</code>, it terminates at <code>discovery-done</code> (there is no Build).</div>
-    <div class="row"><span class="lbl lbl-how">How</span> In the Product, describe the product:</div>
-<pre><code>run yad-discovery — idea: "an online shop where customers place and track orders"</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> At project kick-off, to frame the whole product before the first epic. <strong>Skip it freely</strong> — <code>roadmap.md</code> is reference-only and never auto-seeds epics.</div>
+    <h4><code>yad-discovery</code> <em>(optional · the Foundation)</em></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Writes the <strong>Foundation</strong> — the Product level, run once per product <em>before</em> any epic. With the analyst and pm lenses it frames the product and writes one file per section into <code>foundation/</code>: purpose, scope (what it is <em>and</em> is not), MVP, <code>roadmap.md</code> (the feature menu each <code>yad-epic</code> reads), stack, repos, and optionally market and risks. Greenfield and brownfield (brownfield reads the connected code). Its id is <code>EP-foundation</code>; its one review ends at <code>foundation-done</code> (there is no Build). That approval is reported, not enforced: <code>yad next</code> says when epics go ahead of it. The skill keeps its old name; an older product’s <code>epics/EP-discovery/</code> is converted by <code>yad migrate</code>.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> In the Product, seed it, then describe the product:</div>
+<pre><code>yad foundation new
+run yad-discovery — idea: "an online shop where customers place and track orders"
+yad foundation status      # which roadmap features have started (read-only)</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> At project kick-off, to frame the whole product before the first epic. <strong>Skip it freely</strong> — a team that already knows what to build can start at <code>yad-epic</code>.</div>
   </div>
 
   <div class="skillcard" id="sk-analysis">
@@ -912,15 +955,20 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
 yad-review-gate … action: comment    # record a reviewer's notes (never advances)
 yad-review-gate … action: approve    # record an approval (platform login)
 yad-review-gate … action: sync       # pull approvals/comments from the Product review PR
-yad-review-gate … action: advance    # move on — only if the rule is met, else it says what is missing</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> After every author step — the artifact is written and waiting. Use <code>open → comment → approve → advance</code> for the local gate; add <code>sync</code> when the Product is on a platform and reviewers worked on the PR.</div>
+yad-review-gate … action: advance    # move on — only if the rule is met, else it says what is missing
+
+# with no platform, comment / approve / advance are these commands:
+yad gate comment EP-checkout epic.md --by sara
+yad gate approve EP-checkout epic.md --by omar
+yad gate advance EP-checkout epic.md</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> After every author step — the artifact is written and waiting. With no platform use <code>open → comment → approve → advance</code>. With a platform, reviewers work on the review PR/MR and the merge advances the step: on a <code>local</code> ledger add <code>sync</code>; on a <code>verified</code> ledger CI records it all at merge, and the skill writes nothing to the ledger itself.</div>
   </div>
 
   <div class="skillcard" id="sk-bridge">
     <h4><code>yad-product-bridge</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> the verified ledger between the file ledger and real PRs/MRs on the Product: opens a review PR per artifact and labels it (it requests no reviewers), and provides the read-only <code>gh</code>/<code>glab</code> recipes that pull platform approvals and comments back into the files. The file ledger always stays the source of truth.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The bridge between the file ledger and real PRs/MRs on the Product: opens a review PR per artifact and labels it (it requests no reviewers), and provides the read-only <code>gh</code>/<code>glab</code> recipes that pull platform approvals and comments back into the files. The file ledger always stays the source of truth.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Mostly invoked <em>for</em> you by the gate (its <code>open</code>/<code>sync</code>). You call it directly once, to wire the event-driven sync CI:</div>
-<pre><code>yad-product-bridge action: wire    # Product CI runs `yad gate ci` on every approve / request-changes / merge</code></pre>
+<pre><code>yad-product-bridge action: wire    # Product CI runs `yad gate ci` when a review PR/MR merges (+ a 15-minute catch-up sweep)</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Once during setup (step “wire the Product”), if you want Shape reviews to ride real PRs/MRs. No platform or no <code>gh</code>/<code>glab</code>? Everything degrades to the local gate with no error — you never <em>need</em> this skill.</div>
   </div>
 
@@ -940,7 +988,7 @@ run yad-review-companion — repo: backend pr: 42                          # a B
 <pre><code>yad-pair-review repo: backend pr: 42 action: walkthrough          # a Build code PR
 yad-pair-review epic: EP-checkout artifact: epic.md               # a Shape review (walkthrough is the default)
 yad-pair-review … action: rubric                                   # just print the review method</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> For a risky change you want to understand properly, or to learn how to review.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> For a risky change you want to understand properly, or to learn how to review. It is a skill, not a <code>yad</code> command; its CLI side is <code>yad gate walkthrough</code> (Shape) and <code>yad review walkthrough</code> (code PRs), which print the ordered stops.</div>
   </div>
 
   <h3>Build — turn stories into shipped code (in a code repo)</h3>
@@ -966,7 +1014,7 @@ yad open-pr --repo backend</code></pre>
 
   <div class="skillcard" id="sk-checks">
     <h4><code>yad-checks</code> — Build Step C</h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The production-safety CI gates: <strong>spec-link</strong> (every non-maintenance commit links a real story/spec, checked per commit; <code>ci/chore/build/test</code> commits are exempt), <strong>contract-check</strong> (a contract-surface diff without a re-locked contract FAILS), <strong>build/test/lint</strong>, <strong>verified-commits</strong> (every commit platform-signed; no author allowlist), and the <strong>pattern gates</strong> — <strong>commit-message</strong> (Conventional subject + trailer order), <strong>pr-title</strong>, and <strong>pr-template</strong> (the PR/MR body uses the template). The pattern gates are profile-aware (<code>code</code>|<code>product</code>), so they run on code repos <em>and</em> the Product. <code>wire</code> installs them into the repo’s CI (merging with any existing CI, never clobbering); <code>run</code> executes them right now, locally.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The production-safety CI gates: <strong>spec-link</strong> (every non-maintenance commit links a real story/spec, checked per commit; <code>ci/chore/build/test</code> commits are exempt), <strong>contract-check</strong> (a contract-surface diff without a re-locked contract FAILS), <strong>build/test/lint</strong>, <strong>verified-commits</strong> (every commit platform-signed; no author allowlist), and the <strong>pattern gates</strong> — <strong>commit-message</strong> (Conventional subject + trailer order), <strong>pr-title</strong>, and <strong>pr-template</strong> (the PR/MR body uses the template). A code repo gets <strong>11 jobs</strong>: those seven plus <strong>risk-map</strong> (advisory — reports the approver count from <code>.sdlc/risk-map</code>) and the three feature-thread gates <strong>lineage-check</strong>, <strong>epic-open</strong> and <strong>reconcile-debt</strong>. The pattern gates are profile-aware (<code>code</code>|<code>product</code>), so they run on code repos <em>and</em> the Product, where they sit beside the <strong>ledger-guard</strong> job. <code>wire</code> installs them into the repo’s CI (merging with any existing CI, never clobbering); <code>run</code> executes them right now, locally.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-checks repo: backend action: wire   # once, during setup
 yad-checks repo: backend action: run    # before opening each PR
@@ -981,7 +1029,7 @@ yad-checks repo: product action: wire       # Product-flavored gates</code></pre
 <pre><code>yad-pr-template repo: backend action: wire    # once, during setup
 yad-pr-template repo: backend action: route   # how many must approve, and which domains to ask?
 yad-pr-template repo: product action: wire        # the Product's Shape review template</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> <code>wire</code> once per repo (and the Product) at setup; <code>route</code> whenever you’ve opened a PR and want the required reviewer list.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> <code>wire</code> once per repo (and the Product) at setup; <code>route</code> whenever you’ve opened a PR and want to know how many must approve and which domains to ask.</div>
   </div>
 
   <div class="skillcard" id="sk-commit">
@@ -1044,11 +1092,12 @@ yad unkill                       # each step follows its own dial again</code></
 
   <div class="skillcard" id="sk-status">
     <h4><code>yad-status</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> dashboard in text: the epic’s full step chain, every step’s two dials and status, the contract lock, which approvals the active gate is still waiting on, each Build step’s trust record, the kill-switch state — and across epics, the fleet roll-up. It changes nothing.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> dashboard in text: the epic’s full step chain, every step’s two dials and status, the contract lock, which approvals the active gate is still waiting on, each Build step’s run record (advice only), the kill-switch state — and across epics, the fleet roll-up. It changes nothing.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>yad-status                          # everything, across epics (fleet view)
-yad-status EP-checkout     # one epic in detail</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Any time, freely — it’s the “where are we and what’s blocking?” command. The best first move whenever you’re unsure what to do next.</div>
+<pre><code>run yad-status                    # everything, across epics (fleet view)
+run yad-status — epic: EP-checkout   # one epic in detail
+yad next                          # the CLI's own answer: the one next action to take</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Any time, freely — it’s the “where are we and what’s blocking?” skill (there is no <code>yad status</code> command; <code>yad next</code> and <code>yad history show</code> are the CLI views). The best first move whenever you’re unsure what to do next.</div>
   </div>
 
   <div class="skillcard" id="sk-report">
@@ -1136,40 +1185,67 @@ yad-docs-sync action: wire         # commit the CI workflow that runs the check 
 
 <!-- ======================================================= -->
 <section id="cli">
-  <h2>7. All CLI commands — what each does, how to use it, and when</h2>
+  <h2>7. The CLI commands — what each does, how to use it, and when</h2>
   <p>The <code>yad</code> CLI is the <em>deterministic</em> half of the system — the skills think,
   the CLI does the predictable file-and-platform work. It’s published to npm as
-  <code>yadflow</code>; run it from your <strong>Product</strong> repo with
-  <code>npx</code> — no clone needed, nothing to install globally.</p>
+  <code>yadflow</code>. For the first run, <code>npx yadflow …</code> needs no install; after that, install it
+  with <code>npm install -g yadflow</code> and run <code>yad</code>. Run it from the <strong>Product</strong> — or from
+  any code repo the Product registers: <code>.yad-workspace.json</code> lets it find the Product, and it says so on stderr.
+  This section covers the main commands; <code>yad --help</code> and <code>docs/CLI.md</code> list every one.</p>
+
+  <h3>Start a workspace (the front doors)</h3>
+
+  <div class="skillcard" id="cmd-front-doors">
+    <h4><code>yad new &lt;name&gt;</code> &nbsp;/&nbsp; <code>yad init</code> &nbsp;/&nbsp; <code>yad join &lt;url&gt;</code> &nbsp;/&nbsp; <code>yad repo clone</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The three ways into a workspace — the folder holding <code>product/</code> and the code repos side by side. <code>new</code> makes <code>&lt;name&gt;/product/</code>, runs <code>git init</code> and the setup wizard inside it; it creates no remote and prints the <code>gh</code>/<code>glab</code> line to run yourself. <code>init</code> is for repos you already have: run it in the folder holding them; it makes <code>product/</code> (or uses the one there), runs setup, and offers each repo it finds. <code>join</code> clones the Product and every repo it registers (a failed repo clone is reported, never fatal), then does only per-machine steps: git-ignored skill copies and the git pre-commit hook. It never commits, pushes, or changes a shared file. All three leave a <code>.yad-workspace.json</code>. <code>yad repo clone</code> is <code>join</code>’s clone step on its own: it fetches any registered repo missing on this machine.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>npx yadflow new acme       # a new product
+npx yadflow init           # repos you already have (run in the folder holding them)
+npx yadflow join &lt;url&gt;     # a teammate joining the team
+yad repo clone             # later: fetch a newly registered repo</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Once per person: the team lead runs <code>new</code> or <code>init</code>; everyone else runs <code>join</code>.</div>
+  </div>
 
   <h3>Install &amp; keep in sync</h3>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 38 skills into the IDE dirs you pick, detect the Product’s platform (no reviewers, roles or commit emails are collected), connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard (<code>yad new</code> and <code>yad init</code> run it for you). It starts with a <strong>profile interview</strong> — solo or team (and how many), greenfield or brownfield, monorepo or separate repos, and whether to set up the optional tools now — then: preflight (git/node check), install all 38 skills into the agent dirs you pick, detect the Product’s platform and record the ledger mode (<code>verified</code> with a platform, <code>local</code> without; no reviewers, roles or commit emails are collected), connect a design, testing and learning tool (or defer all three), connect your code repos, wire each one and the Product (CI gates, PR template, gate sync), and optionally write the AI-review config.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-repo&gt;
-npx yadflow setup</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Exactly once per project, by the team lead, from inside the (possibly empty) Product repo. It never re-asks for answers you already gave.</div>
+npx yadflow setup
+npx yadflow setup --team 4 --brownfield --separate   # flags pre-answer the interview</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Once per project, by the team lead, from inside the (possibly empty) Product repo — or through <code>yad new</code> / <code>yad init</code>. Teammates run <code>yad join</code> instead. It never re-asks for answers you already gave.</div>
   </div>
 
   <div class="skillcard">
     <h4><code>… check</code> &nbsp;/&nbsp; <code>… check --fix</code> &nbsp;/&nbsp; <code>… update</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The health check and repair tools. <code>check</code> is read-only: it reports what is <strong>missing</strong> (never installed), <strong>outdated/drifted</strong> (the workflow shipped a newer version), or <strong>stale</strong> (a repo’s cached code picture is behind its code). <code>check --fix</code> reconciles all of it — filling gaps and applying updates while touching nothing that is already correct. <code>update</code> applies drift only (an alias for <code>check --fix --scope=changed</code>).</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The health check and repair tools. <code>check</code> is read-only: it reports what is <strong>missing</strong> (never installed), <strong>drifted</strong> (the workflow shipped a newer version), <strong>modified</strong> (a managed file you edited — yad can prove it from the sha it recorded), <strong>stale</strong> (a repo’s cached code picture is behind its code), or <strong>legacy</strong> (an old name or file to replace). <code>check --fix</code> reconciles all of it — filling gaps and applying updates while touching nothing that is already correct, and leaving a <em>modified</em> file alone unless you pass <code>--overwrite-local</code>. <code>update</code> applies drift only (an alias for <code>check --fix --scope=changed</code>); <code>--push</code> also commits and pushes each repo’s changes to its default branch.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>npx yadflow check        # just tell me — read-only
-npx yadflow check --fix  # and fix it
-npx yadflow update       # apply updates only</code></pre>
+<pre><code>yad check        # just tell me — read-only
+yad check --fix  # and fix it
+yad update       # apply updates only
+yad update --push   # … and commit + push them in the Product and every repo</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After any workflow update (a new version on npm), or whenever something seems off. Safe to run any time — <code>check</code> changes nothing.</div>
   </div>
 
   <div class="skillcard">
     <h4><code>… migrate</code> &nbsp;/&nbsp; <code>… migrate --apply</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> Moves this project’s <strong>state files</strong> onto the shape this release expects. Every JSON object <code>yad</code> writes carries a <code>schemaVersion</code>; when a release changes what those files look like, this is the one command that walks an existing project forward. It <strong>previews by default</strong> — printing a table of what would change and writing nothing — and <code>--apply</code> copies each file it rewrites to <code>&lt;file&gt;.yad-orig</code> before touching it. Safe to run twice: the second run says there is nothing to do. A file newer than your CLI, or one that does not parse, is reported and left alone.</div>
-    <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>npx yadflow migrate          # show me what would change
-npx yadflow migrate --apply  # do it, backing up first</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> After upgrading to a release whose notes mention a file-shape change. Never automatic — an upgrade only happens when you ask for it.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> Moves this project’s <strong>state files</strong> onto the shape this release expects. Every JSON object <code>yad</code> writes carries a <code>schemaVersion</code>; when a release changes what those files look like, this is the one command that walks an existing project forward. It <strong>previews by default</strong> — printing a table of what would change and writing nothing — and <code>--apply</code> copies each file it rewrites to <code>&lt;file&gt;.yad-orig</code> before touching it. Safe to run twice: the second run says there is nothing to do. A file newer than your CLI, or one that does not parse, is reported and left alone. When <code>.sdlc/product.json</code> and its older copy <code>.sdlc/hub.json</code> disagree, <code>--apply</code> asks which to keep, and <code>--keep product|hub</code> answers it.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> The full upgrade, run in the Product:</div>
+<pre><code>npm install -g yadflow   # 1. install the latest release
+yad migrate              # 2. show me what would change (writes nothing)
+yad migrate --apply      # 3. do it, backing up first
+yad update               # 4. re-sync skills, gate scripts and CI files
+yad doctor               # 5. confirm everything is healthy</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> After upgrading to a release whose notes mention a file-shape change. Never automatic — an upgrade only happens when you ask for it. Coming from 3.x? Read <code>docs/migrations/upgrading-to-4.md</code> first.</div>
+  </div>
+
+  <div class="skillcard" id="cmd-doctor">
+    <h4><code>yad doctor</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The environment and state health check: tools and their login, config files, repo paths, every epic’s ledger, and what the platform’s branch protection requires. It exits 1 on any failure, so CI can use it. Read-only.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> <code>yad doctor</code> &nbsp;·&nbsp; <code>yad doctor --json</code></div>
+    <div class="row"><span class="lbl lbl-when">When</span> After an upgrade, after <code>yad join</code>, or whenever something seems off.</div>
   </div>
 
   <div class="skillcard">
@@ -1183,10 +1259,10 @@ npx yadflow migrate --apply  # do it, backing up first</code></pre>
 
   <div class="skillcard">
     <h4><code>yad gate open &lt;epic&gt; &lt;artifact&gt;</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> Opens the review PR/MR on the Product for one authored artifact (epic, architecture, UI, stories…), labels it (<code>domain:&lt;repo&gt;</code> for touched repos) without requesting reviewers, prints <code>no reviewers were requested — ask them on the PR itself</code>, and marks the step <code>in_review</code>.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> Opens the review PR/MR on the Product for one authored artifact (epic, architecture, UI, stories…), labels it (<code>domain:&lt;repo&gt;</code> for touched repos) without requesting reviewers, prints <code>no reviewers were requested — ask them on the PR itself</code>, and marks the step <code>in_review</code> (on a <code>verified</code> ledger it writes nothing — CI records the whole transition at merge). The <code>review/&lt;epic&gt;/&lt;artifact&gt;</code> branch must already be on origin; <code>yad open-pr</code> from that branch pushes it first and then does this.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad gate open EP-checkout epic.md</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Right after an author step finishes, when the Product is on a platform. (No platform? Use the <code>yad-review-gate</code> skill local instead.)</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Right after an author step finishes. With no platform it opens no PR and just marks the step <code>in_review</code>; then use <code>yad gate comment|approve|advance</code> (below).</div>
   </div>
 
   <div class="skillcard">
@@ -1195,7 +1271,17 @@ npx yadflow migrate --apply  # do it, backing up first</code></pre>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad gate sync EP-checkout            # all open reviews of the epic
 yad gate sync EP-checkout epic.md    # just this one</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> After reviewers acted on the platform. <strong>Usually you don’t run it at all</strong> — with the gate-sync CI wired, every approval / change request / merge triggers it automatically; this stays valid as the manual fallback.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> After reviewers acted on the platform, on a <code>local</code> ledger. On a <code>verified</code> ledger it is <strong>advisory</strong> — it shows the state but CI writes the ledger at merge; to recover a missed merge there, use <code>yad gate ci</code>.</div>
+  </div>
+
+  <div class="skillcard" id="cmd-gate-local">
+    <h4><code>yad gate comment</code> &nbsp;/&nbsp; <code>yad gate approve</code> &nbsp;/&nbsp; <code>yad gate advance</code> &nbsp;(no platform only)</h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The review loop for a Product with no GitHub/GitLab. <code>comment</code> records who commented, and how often, this round. <code>approve</code> records an approval bound to the artifact’s content — an edit revokes it; it reports the verdict and never advances. <code>advance</code> passes the gate when its approvals hold, and otherwise says what is missing. With a platform all three refuse: the PR/MR carries the review.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>yad gate comment EP-checkout epic.md --by sara
+yad gate approve EP-checkout epic.md --by omar
+yad gate advance EP-checkout epic.md</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> After <code>yad gate open</code>, on a Product with no platform.</div>
   </div>
 
   <div class="skillcard">
@@ -1214,7 +1300,7 @@ yad gate sync EP-checkout epic.md    # just this one</code></pre>
 
   <div class="skillcard">
     <h4><code>yad gate ci [--branch &lt;head&gt;] [--pr &lt;n&gt;] [--merged]</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The entry point the Product’s <em>CI</em> calls — <strong>CI is the sole writer of the ledger</strong>, and writes only at merge, on the default branch. Pre-merge it is <strong>read-only</strong> (nothing is pushed — the platform PR/MR holds the review state). On <code>--merged</code> CI re-reads approvals fresh from the platform, advances the step + flips the artifact <code>status:</code> to <code>approved</code> <strong>on the default branch</strong>. The wired jobs always name a branch — they discover merged reviews through the platform API and call <code>--branch … --pr … --merged</code> per review. With no <code>--branch</code> it falls back to a local sweep of the review PRs already recorded in the ledger whose step is not yet <code>done</code> (no platform discovery of its own). CI never approves and never merges — the merge click stays human. <strong>Idempotent down to the bytes:</strong> the ledgers are written in a canonical order, so re-syncing an already-<code>done</code> step — what the 15-minute sweep does for a week after every merge — produces a byte-identical file and commits nothing (before the #163 fix the re-sync re-appended each step’s approvals at the tail, so a sweep rotated <code>approvals.json</code> and committed the reorder on every pass: an unbounded commit loop, issue #163).</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The entry point the Product’s <em>CI</em> calls. On a <code>verified</code> ledger <strong>CI is the sole writer of the ledger</strong>, and writes only at merge, on the default branch. Pre-merge it is <strong>read-only</strong> (nothing is pushed — the platform PR/MR holds the review state). On <code>--merged</code> CI re-reads approvals fresh from the platform, advances the step + flips the artifact <code>status:</code> to <code>approved</code> <strong>on the default branch</strong>. The wired jobs always name a branch — they discover merged reviews through the platform API and call <code>--branch … --pr … --merged</code> per review. With no <code>--branch</code> it falls back to a local sweep of the review PRs already recorded in the ledger whose step is not yet <code>done</code> (no platform discovery of its own). CI never approves and never merges — the merge click stays human. <strong>Idempotent down to the bytes:</strong> the ledgers are written in a canonical order, so re-syncing an already-<code>done</code> step — what the 15-minute sweep does for a week after every merge — produces a byte-identical file and commits nothing (before the #163 fix the re-sync re-appended each step’s approvals at the tail, so a sweep rotated <code>approvals.json</code> and committed the reorder on every pass: an unbounded commit loop, issue #163).</div>
     <div class="row"><span class="lbl lbl-how">How</span> You don’t run it by hand — the wired workflow (<code>yad-gate-sync.yml</code>) calls it: a single merge job (with <code>--merged</code>) on the default branch; there is no pre-merge job that touches the review branch.</div>
     <div class="row"><span class="lbl lbl-when">When</span> Automatically, once the Product bridge is wired. Good to know it exists when reading the Product’s CI logs.</div>
   </div>
@@ -1228,7 +1314,7 @@ yad gate sync EP-checkout epic.md    # just this one</code></pre>
 <pre><code>yad commit --type feat -m "create order endpoint" --ai claude
 yad commit --type fix  -m "handle empty shipping note" --contract-change   # only if the locked surface moved
 yad commit --type feat -m "…" --dry-run                             # preview without committing</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Every commit during <code>yad-implement</code>. Flags: <code>--type</code>, <code>-m/--message</code>, <code>--task</code>, <code>--ai claude|copilot|cursor|coderabbit|none</code>, <code>--contract-change</code>, <code>--dry-run</code>, <code>--force</code> (bypass the atomic guard — use sparingly).</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Every commit during <code>yad-implement</code>. Flags: <code>--type</code>, <code>-m/--message</code>, <code>--task</code>, <code>--ai claude|copilot|cursor|coderabbit|none</code>, <code>--contract-change</code>, <code>--dry-run</code>, <code>--force</code> (bypass the atomic guard — use sparingly), <code>--manual --reason &lt;why&gt;</code> (on a <code>verified</code> Product, commit past the local ledger hook; the reason is recorded as a <code>Ledger-Override</code> trailer and the <code>ledger-guard</code> CI job still judges the commit).</div>
   </div>
 
   <div class="skillcard">
@@ -1243,11 +1329,32 @@ yad open-pr --repo backend --base release/1.4     # deliberate non-default base 
     <div class="row"><span class="lbl lbl-when">When</span> After the task is committed and <code>yad-checks action: run</code> is green — one PR per atomic task.</div>
   </div>
 
+  <h3>Drafts, owners and folding (Shape authoring)</h3>
+  <table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><code>yad capture [--no-push]</code></td><td>Saves every changed Shape artifact onto your private <code>yad/wip/&lt;git-name&gt;/&lt;epic&gt;</code> branches and pushes them — never your checkout. A harness hook runs it after each agent edit.</td></tr>
+    <tr><td><code>yad claims [&lt;epic&gt;]</code></td><td>Who else is editing which artifact, read from everyone’s capture branches. Advice, not a lock; a claim ends 4 hours after the last save or once the file is merged.</td></tr>
+    <tr><td><code>yad assign &lt;epic&gt; &lt;step&gt; [--to &lt;name&gt;]</code> · <code>yad unassign</code> · <code>yad owners [&lt;epic&gt;]</code></td><td>Name the owner of an authoring step (you, or a git name), remove it, or list every assignment. Advice, not a lock: the capture hook warns anyone else who edits its files.</td></tr>
+    <tr><td><code>yad fold &lt;epic&gt; &lt;step&gt;</code></td><td>Ends an authoring step: commits its artifacts as one commit, <code>docs(&lt;epic&gt;): author &lt;step&gt;</code>. On a <code>local</code> ledger the epic’s ledger rides along.</td></tr>
+  </table>
+
+  <h3>Where am I, what next, and the dials</h3>
+  <table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><code>yad next [&lt;epic&gt;] [--all]</code></td><td>The one next action to take — for the project, one epic, or every active epic.</td></tr>
+    <tr><td><code>yad epic new &lt;slug&gt; [--profile classic|analysis-first|chore|spike]</code></td><td>Seeds a new epic’s step chain and empty ledgers. <code>--parent &lt;epic&gt; --inherits …</code> seeds a change threaded to its parent; <code>--stub</code> seeds a brownfield anchor.</td></tr>
+    <tr><td><code>yad foundation new</code> · <code>yad foundation status</code></td><td>Seed the Product-level Foundation once; later, see which roadmap features have started.</td></tr>
+    <tr><td><code>yad skip</code> · <code>yad defer [--debt]</code> · <code>yad unskip</code> · <code>yad undefer</code> · <code>yad unblock</code></td><td>Set an optional step (or a whole Build lane) aside with a recorded reason, put it back, or clear a recorded blocker.</td></tr>
+    <tr><td><code>yad mode solo --reason &lt;why&gt;</code> · <code>yad mode team</code></td><td>Waive approvals on every review gate (solo) or count them (team); records who, when and why.</td></tr>
+    <tr><td><code>yad dial …</code> · <code>yad kill --reason &lt;why&gt;</code> · <code>yad unkill</code></td><td>Set a step’s advance dial (the run record is shown as advice); hold every step at <code>advance: human</code> in one move, and release it.</td></tr>
+    <tr><td><code>yad history [list|show &lt;id&gt;|search &lt;text&gt;]</code> · <code>yad index</code></td><td>Every work item newest first, one item in full, or a text search — built live, writing nothing. <code>yad index</code> rebuilds <code>.sdlc/index.json</code> on the default branch.</td></tr>
+  </table>
+
   <h3>Connected-repo freshness</h3>
 
   <div class="skillcard">
     <h4><code>yad repo list</code> &nbsp;/&nbsp; <code>yad repo refresh [name]</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> <code>list</code> shows every connected code repo as <strong>fresh</strong> (the cached code-map still matches the code) or <strong>stale</strong> (the repo has moved since it was packed). <code>refresh</code> deliberately re-packs a stale one. Staleness is a <em>human decision</em> — skills warn and point here; they never silently re-pack.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> <code>list</code> shows every connected code repo as <strong>fresh</strong> (the cached code-map still matches the code) or <strong>stale</strong> (the repo has moved since it was packed), or <strong>not cloned here</strong> (run <code>yad repo clone</code>). <code>refresh</code> deliberately re-packs a stale one. Staleness is a <em>human decision</em> — skills warn and point here; they never silently re-pack.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad repo list
 yad repo refresh backend</code></pre>
@@ -1270,7 +1377,8 @@ yad usage --format json --all              # machine-readable, to stdout</code><
   <h3>Global flags</h3>
   <table>
     <tr><th>Flag</th><th>Meaning</th></tr>
-    <tr><td><code>--dir &lt;path&gt;</code></td><td>Target a project other than the current directory.</td></tr>
+    <tr><td><code>--dir &lt;path&gt;</code></td><td>Target a project other than the current directory. Without it, a Product command finds the Product from where you are (inside it, or inside a repo it registers).</td></tr>
+    <tr><td><code>--json</code></td><td>Every command but <code>yad hook</code>: print one JSON object on stdout, every other line on stderr.</td></tr>
     <tr><td><code>--force</code></td><td>Re-copy unchanged files during install, or bypass the commit atomic guard.</td></tr>
   </table>
 
@@ -1288,8 +1396,8 @@ yad usage --format json --all              # machine-readable, to stdout</code><
   <p class="lead">
     Yadflow sits in the <strong>spec-driven / AI-governed development</strong> market. The honest
     headline first: as of mid-2026, <strong>no single tool on the market offers the exact same package</strong>
-    — a team-gated, file-driven SDLC with a hash-locked multi-repo contract and evidence-based (“earned”)
-    automation. But many tools cover <em>slices</em> of it, several with far bigger communities, and one
+    — a team-gated, file-driven SDLC with a hash-locked multi-repo contract and per-step automation the
+    team switches on itself, with a one-move kill switch. But many tools cover <em>slices</em> of it, several with far bigger communities, and one
     (AWS AI-DLC) shares almost the same philosophy. This section maps them honestly.
     <em>(Market facts checked via web research on 2026-06-12; sources at the end.)</em>
   </p>
@@ -1303,7 +1411,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
     <tr><td><strong>2 · Team review gates</strong></td><td>Named humans must approve each step; an approval count that rises with risk.</td><td>AI-DLC (rituals, not records) · enterprise platforms (policies). Rare elsewhere — most tools are <em>solo</em>.</td></tr>
     <tr><td><strong>3 · Multi-repo contract</strong></td><td>One locked cross-repo surface that CI enforces.</td><td><strong>Essentially nobody.</strong> The clearest differentiator.</td></tr>
     <tr><td><strong>4 · Brownfield support</strong></td><td>Spec what already exists before changing it.</td><td>OpenSpec (delta specs) · Kiro (steering files) · Repomix-style packers.</td></tr>
-    <tr><td><strong>5 · Earned, reversible automation</strong></td><td>Automation unlocked by recorded evidence; kill switch.</td><td><strong>Essentially nobody</strong> — others are either always-manual or always-auto.</td></tr>
+    <tr><td><strong>5 · Team-set, reversible automation</strong></td><td>A per-step dial the team sets, with each step’s run record shown as advice; a one-move kill switch.</td><td><strong>Essentially nobody</strong> — others are either always-manual or always-auto.</td></tr>
   </table>
 
   <h3>Positioning map</h3>
@@ -1350,17 +1458,17 @@ yad usage --format json --all              # machine-readable, to stdout</code><
   <h3>The competitors, one by one</h3>
 
   <div class="skillcard">
-    <h4>BMAD-METHOD <span class="badge b-tool">the base — and the nearest “sibling”</span></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The open-source (MIT) framework Yadflow is <em>built on</em>: 12+ AI agent personas (analyst, pm, architect, dev…) orchestrated across the full lifecycle. One of the most popular frameworks in the space (~46,700+ GitHub stars; this repo verified and targets v6.8.0 stable). Free.</div>
-    <div class="row"><span class="lbl lbl-how">Overlap</span> The whole Shape shape — agents authoring epics, architecture, stories in order — comes from BMAD. Anyone could adopt raw BMAD and get the same authoring experience.</div>
-    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> BMAD is fundamentally a <strong>solo tool</strong>: one person drives it, gates are AI-checked quality gates, not <em>named-human</em> approvals. It has no multi-repo contract, no approval ledger, no PR/MR review bridge, no trust log, no kill switch. That delta — “BMAD as a <em>team</em> tool” — is precisely what this repo exists to add.</div>
+    <h4>BMAD-METHOD <span class="badge b-tool">the nearest “sibling” — and where Yadflow started</span></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> An open-source (MIT) framework of 12+ AI agent personas (analyst, pm, architect, dev…) orchestrated across the full lifecycle. One of the most popular frameworks in the space (~46,700+ GitHub stars, v6.8.0 stable at the time of research). Free. Yadflow was first packaged as a BMAD module; since 4.0 (roadmap row E3) it no longer depends on BMAD, and a team may still bind a BMAD skill to a step with <code>yad skill bind</code>.</div>
+    <div class="row"><span class="lbl lbl-how">Overlap</span> The same Shape order — agents authoring epics, architecture, stories in turn. Anyone could adopt raw BMAD and get a similar solo authoring experience.</div>
+    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> BMAD is fundamentally a <strong>solo tool</strong>: one person drives it, gates are AI-checked quality gates, not <em>named-human</em> approvals. It has no multi-repo contract, no approval ledger, no PR/MR review bridge, no run record, no kill switch. That delta — a <em>team</em> tool for the same lifecycle — is precisely what this repo exists to add.</div>
   </div>
 
   <div class="skillcard">
     <h4>AWS AI-DLC (aidlc-workflows) <span class="badge b-gate">closest in philosophy</span></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Amazon’s open-source <em>methodology</em> for AI-driven development: adaptive workflow “steering rules” for coding agents. Epics become <strong>Units of Work</strong>, sprints become <strong>Bolts</strong> (hours/days), and every phase transition needs <strong>explicit human approval</strong> — 10–26 verification points per bolt, with team rituals (“Mob Elaboration”, “Mob Construction”) where the team validates AI proposals in real time.</div>
     <div class="row"><span class="lbl lbl-how">Overlap</span> The deepest philosophical overlap on the market: AI does the heavy lifting, humans hold every gate, AI may never advance on its own. If you pitch Yadflow to an AWS-native team, AI-DLC is the comparison they’ll raise.</div>
-    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> AI-DLC’s gates are <strong>rituals, not records</strong> — synchronous meetings rather than a durable file ledger with named approvals and an approval count that rises with risk. It has no per-step automation dial (everything stays manual; nothing is <em>earned</em>), no multi-repo locked contract, no CI enforcement of spec-links, and no brownfield backfill mechanism. It tells you <em>how to behave</em>; Yadflow gives you <em>machinery that enforces it</em>.</div>
+    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> AI-DLC’s gates are <strong>rituals, not records</strong> — synchronous meetings rather than a durable file ledger with named approvals and an approval count that rises with risk. It has no per-step automation dial (everything stays manual), no multi-repo locked contract, no CI enforcement of spec-links, and no brownfield backfill mechanism. It tells you <em>how to behave</em>; Yadflow gives you <em>machinery that enforces it</em>.</div>
   </div>
 
   <div class="skillcard">
@@ -1402,7 +1510,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
     <h4>Agent OS &amp; Taskmaster AI <span class="badge b-tool">workflow plumbing</span></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Agent OS (Builder Methods) standardizes multi-agent workflows and coding standards across different AI tools; Taskmaster AI decomposes a PRD into an executable task graph for agents.</div>
     <div class="row"><span class="lbl lbl-how">Overlap</span> Both formalize “plan → tasks → execute” like Build, and Agent OS shares the works-in-any-IDE stance.</div>
-    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> Both are solo orchestration layers: no human gates, no approvals, no contract, no trust evidence. They answer “how do my agents stay organized?”, not “how does my <em>team</em> stay in control?”.</div>
+    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> Both are solo orchestration layers: no human gates, no approvals, no contract, no run record. They answer “how do my agents stay organized?”, not “how does my <em>team</em> stay in control?”.</div>
   </div>
 
   <div class="skillcard">
@@ -1445,8 +1553,8 @@ yad usage --format json --all              # machine-readable, to stdout</code><
     <ul style="margin:8px 0 0">
       <li><strong>Ecosystem &amp; trust-by-numbers:</strong> Spec Kit (~93k stars), GSD (~61k), BMAD (~46.7k) have communities, tutorials and hiring familiarity; this repo is effectively a single-maintainer npm package.</li>
       <li><strong>Product polish:</strong> Kiro is a real IDE with a UI; this workflow is markdown, JSON and CLI output. Teams that buy with their eyes will pick Kiro.</li>
-      <li><strong>Ceremony cost:</strong> GSD and OpenSpec prove many teams want <em>less</em> process. For a 1–2 person project, this workflow’s five gates are overhead, not safety — its own docs effectively say so.</li>
-      <li><strong>Foundation risk:</strong> it inherits BMAD’s youth (v6, parts in alpha — flagged in the repo’s own cautions) and depends on its file conventions surviving upstream changes.</li>
+      <li><strong>Ceremony cost:</strong> GSD and OpenSpec prove many teams want <em>less</em> process. For a 1–2 person project, this workflow’s six Shape reviews are overhead, not safety — its own docs effectively say so. Solo mode, the short <code>chore</code>/<code>spike</code> lanes and <code>yad skip</code> soften this, but do not remove it.</li>
+      <li><strong>Dependency risk:</strong> the Build half leans on outside tools (Spec Kit, Repomix, CodeRabbit, the design and testing tools). Each is optional and degrades gracefully, but their conventions can change upstream.</li>
       <li><strong>No dashboards/analytics:</strong> deliberately (Phase 5 is trigger-gated), but enterprise buyers comparing against Cosmos-class platforms will count it as a gap.</li>
     </ul>
   </div>
@@ -1458,7 +1566,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
     <tr><td>Solo dev, big brownfield codebase</td><td><strong>OpenSpec</strong></td><td>Delta specs are the lightest safe way to change existing code alone.</td></tr>
     <tr><td>Want a polished commercial IDE, AWS shop</td><td><strong>Kiro</strong></td><td>Best UX; specs + hooks out of the box; budget required.</td></tr>
     <tr><td>One developer driving a full lifecycle with AI roles</td><td><strong>BMAD-METHOD</strong></td><td>The full agent crew without the team machinery.</td></tr>
-    <tr><td><strong>A real team (2+ engineers), multiple repos, production stakes, who must <em>prove</em> who approved what</strong></td><td><strong>Yadflow</strong></td><td>The only file-driven tool with named-human gates, a hash-locked cross-repo contract enforced in CI, PR-native reviews on GitHub <em>and</em> GitLab, and automation that must earn trust and can be killed in one move.</td></tr>
+    <tr><td><strong>A real team (2+ engineers), multiple repos, production stakes, who must <em>prove</em> who approved what</strong></td><td><strong>Yadflow</strong></td><td>The only file-driven tool with named-human gates, a hash-locked cross-repo contract enforced in CI, PR-native reviews on GitHub <em>and</em> GitLab, and automation the team switches on per step and can kill in one move.</td></tr>
     <tr><td>Enterprise wanting a managed platform + dashboards</td><td>Augment Cosmos / Azure+GitHub agentic SDLC</td><td>Control-plane governance at platform price — the opposite trade to “plain files in git”.</td></tr>
   </table>
 
@@ -1466,7 +1574,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
     <strong>Bottom line.</strong> The market is crowded at “help one developer spec and build” and nearly
     empty at “help a <em>team</em> stay provably in control across <em>several repos</em>”. Yadflow’s
     three structural moats — the <strong>locked contract with CI enforcement</strong>, the
-    <strong>named-approval file ledger riding real PRs/MRs</strong>, and <strong>earned-with-evidence
+    <strong>named-approval file ledger riding real PRs/MRs</strong>, and <strong>team-set per-step
     automation + kill switch</strong> — have no direct equivalent in any tool surveyed. Its real
     competition is not a feature gap but adoption gravity: the pull of lighter tools (GSD), bigger
     communities (Spec Kit), and shinier products (Kiro).
@@ -1491,7 +1599,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
   </p>
 
   <footer>
-    Generated 2026-06-12 from the project’s own docs: <code>README.md</code>, <code>TEAM-GUIDE.md</code>,
+    Generated 2026-06-12 and reviewed against yadflow 4.0 on 2026-09-30 (market facts are still as of 2026-06-12), from the project’s own docs: <code>README.md</code>, <code>TEAM-GUIDE.md</code>,
     and <code>docs/sdlc-workflow-plan.md</code> (incl. §8 “The three project types”).
     A worked end-to-end example lives in <code>epics/EP-checkout/</code>.
     Renamed <strong>Yadflow</strong> at v2.0.0 — npm package previously <code>@abdelrahmannasr/sdlc-workflow</code>

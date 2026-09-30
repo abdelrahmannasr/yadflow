@@ -1,17 +1,21 @@
 # File shape 2 — `ledger: verified | local`
 
-**What moved:** `.sdlc/hub.json` gains a `ledger` field. Nothing else changes. Every other file the
+**What moved:** `.sdlc/hub.json`, the Product settings file, gains a `ledger` field. (From
+[shape 3](shape-3.md) on, the same file is also written as `.sdlc/product.json`.) Nothing else changes. Every other file the
 engine writes simply records the new shape number.
 
 **Who this affects:** every project. The change is small, and running it is safe.
+
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
 
 ---
 
 ## The short version
 
 ```bash
-npx yadflow@next migrate           # preview — writes nothing
-npx yadflow@next migrate --apply   # rewrites, backing up every file it touches
+npx yadflow migrate           # preview — writes nothing
+npx yadflow migrate --apply   # rewrites, backing up every file it touches
 ```
 
 Run the preview first. It prints one line per file and does not touch your project.
@@ -61,7 +65,7 @@ Both keys are read, the new one wins, and the old one is removed in a later majo
 either side reads it.
 
 **Your setting does not change.** The value written is computed from what the engine already decided
-about your hub, not copied from the flag. So a hub with `bridge_enabled: true` but no `platform` —
+about your Product, not copied from the flag. So a Product with `bridge_enabled: true` but no `platform` —
 which has always behaved as *local*, because there is no Verified badge to read without a platform —
 migrates to `ledger: "local"`, which is what it was already doing.
 
@@ -74,12 +78,12 @@ yad doctor
 The shape section should say your project and the engine are both on shape 2. Then check the one
 thing that matters:
 
-- **On a verified hub:** open a review PR as usual. The gate should still refuse a local ledger
+- **On a verified Product:** open a review PR as usual. The gate should still refuse a local ledger
   write and still advance on merge.
-- **On a local hub:** `yad gate open` should still write the ledger on your machine.
+- **On a local Product:** `yad gate open` should still write the ledger on your machine.
 
 If `yad doctor` reports files still behind, run `yad migrate` again and read the rows — a file that
-CI owns on a verified hub is skipped on purpose and is stamped by the next gate sync.
+CI owns on a verified Product is skipped on purpose and is stamped by the next gate sync.
 
 ## One output field changed name
 
@@ -95,9 +99,11 @@ back:
 find .sdlc epics -name '*.yad-orig' | while read -r f; do mv "$f" "${f%.yad-orig}"; done
 ```
 
-**Do not downgrade the CLI to a 3.x release without restoring those backups first.** An older engine
-reads `schemaVersion: 2` as a shape from the future and will refuse to touch the file, which is the
-safe behaviour but leaves you unable to run anything until the files are restored.
+**Do not downgrade the CLI to 3.18.1 or older without restoring those backups first.** An older
+engine's `yad migrate` reads `schemaVersion: 2` as a shape from the future and refuses to touch the
+file, and its `yad doctor` fails on it. Every other command still runs, but it reads only the fields it
+knows. A 4.0 migration also takes your files past this shape to shape 10 in the same run, and from
+shape 7 on an older engine misreads values that changed in place (see [shape 7](shape-7.md)).
 
 ## Reporting a problem
 

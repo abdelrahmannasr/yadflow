@@ -1,6 +1,6 @@
 ---
 name: yad-pair-review
-description: 'The guided, two-way, teaching pair-review walkthrough for the SDLC review gates — the AI-driven companion face. The human opens a PR/MR with an AI session and the AI walks them through the change ONE STOP AT A TIME (highest-risk first), giving comprehensive context per change, then asking the human a Socratic question about it; the human answers and asks back, and both keep going until BOTH declare satisfied. The session doubles as a learning session: it demonstrates a transferable review method, scores the engineer against it, and records their review-skill growth in the local-only yad-learn ledger (rolled up by yad status). Works on the Build code PR/MR (yad review) and the Shape artifact-review PR/MR (yad gate). Soft and additive — it NEVER blocks a merge or gate; it rides the existing engagement signal and surfaces genuine concerns as normal blocking comments. Use when the user says "pair review this", "walk me through the PR/MR", "review with me", "co-review", or "teach me to review".'
+description: 'The guided, two-way, teaching pair-review walkthrough for the SDLC review gates — the AI-driven companion face. The human opens a PR/MR with an AI session and the AI walks them through the change ONE STOP AT A TIME (highest-risk first), giving comprehensive context per change, then asking the human a Socratic question about it; the human answers and asks back, and both keep going until BOTH declare satisfied. The session doubles as a learning session: it demonstrates a transferable review method, scores the engineer against it, and records their review-skill growth in the local-only yad-learn ledger (rolled up by the yad-status skill). Works on the Build code PR/MR (yad review) and the Shape artifact-review PR/MR (yad gate). Soft and additive — it NEVER blocks a merge or gate; it rides the existing engagement signal and surfaces genuine concerns as normal blocking comments. Use when the user says "pair review this", "walk me through the PR/MR", "review with me", "co-review", or "teach me to review".'
 ---
 
 # SDLC — Pair Review (the guided, two-way, teaching walkthrough)
@@ -99,7 +99,7 @@ addresses them) — nothing advances on a half-finished session.
 
 ### Step 5 — Record the session (twice) — see `references/session-state.md`
 1. **Session comment (PR/MR history).** Post one comment built by the CLI helper `pairSessionBody`
-   (carries `<!-- yad:pair -->` so `yad status` can count paired reviews, and `<!-- yad:noblock -->` so it
+   (carries `<!-- yad:pair -->` so the `yad-status` skill can count paired reviews, and `<!-- yad:noblock -->` so it
    never holds the gate): the transcript summary, the **review-skill scorecard**, your AI verdict, and
    both sign-offs. Post it with the platform CLI (`gh pr comment` / `glab mr note`).
 2. **Learning record (local-only).** Append a `yad-learn` record for the `member`: `concept` =
@@ -108,8 +108,8 @@ addresses them) — nothing advances on a half-finished session.
    comprehension), `comprehension` = the scorecard roll-up, `tutorial` = a rendered
    `learning/<member>--review-<pr>.md` capturing the method as applied to this PR + the engineer's gaps.
    **First ensure the Product `.gitignore` covers the learning paths** (reuse yad-learn's guard), then write —
-   these are personal, gitignored, **never committed or pushed**. The growth rolls up under `yad status`
-   "My skills".
+   these are personal, gitignored, **never committed or pushed**. The growth rolls up under the `yad-status`
+   skill's "My skills".
 
 ## Hard rules
 

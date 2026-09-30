@@ -82,7 +82,7 @@ export const ROLES: RoleConfig[] = [
     shortLabel: 'Reviewer',
     icon: 'rate_review',
     color: '#ca6f1e',
-    description: 'Comments and approves at every gate — anyone with access to the repo. A gate needs 1 approver, who should not be the author; contract/auth/payments raise the full count, which is advisory. A later yadflow change will enforce it together with yad gate lower --reason, a recorded way out of a gate a team cannot meet.',
+    description: 'Comments and approves at every gate — anyone with access to the repo. A gate needs 1 approver, who should not be the author; contract/auth/payments raise the full count, which is advisory. Enforcing the full count is parked (roadmap E108).',
     sectionIds: ['review-gate', 'gated-flow', 'contract-lock', 'glossary'],
     relevantPathIds: [3, 4],
   },

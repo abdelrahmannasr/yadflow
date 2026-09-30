@@ -6,17 +6,22 @@ whole project. Before 4.0 yadflow called it the **hub**. In 4.0 every name that 
 
 yadflow renames everything it owns by itself:
 
-| Command | What it renames |
+| What renames it | What it renames |
 |---|---|
-| `yad migrate` | The settings file: `.sdlc/hub.json` → `.sdlc/product.json`, and each epic's `hub-prs.json` → `product-prs.json`. The old names are still written beside the new ones, with the same bytes, until v5 deletes them. |
+| `yad migrate` | The settings file: `.sdlc/hub.json` → `.sdlc/product.json`. The old name is still written beside the new one, with the same bytes, until v5 deletes it. |
+| the next `yad gate` write | Each epic's review PR list: `hub-prs.json` → `product-prs.json`. `yad migrate` does not rename this list — it is a plain list with no shape. The new name appears the next time a `yad gate` command (or the CI gate job) writes that epic's records, and the old name is still written beside it until v5. Until then 4.0 reads `hub-prs.json`. |
 | `yad update` | The files it installed in your repos: the `yad-hub-checks.yml` workflow → `yad-product-checks.yml`, the `yad-hub-bridge` skill → `yad-product-bridge`, the GitLab `yad-hub-*` jobs → `yad-product-*`, and the `- local:` include line for that workflow in your root `.gitlab-ci.yml`. |
 
 This page lists the rest: the places **you** wrote an old name, in files yadflow does not own and never
 edits. Each one keeps working until v5 unless this page says otherwise.
 
+This rename is one part of the 4.0 upgrade. For every other breaking change since 3.x, and the whole
+order to run things in, see [Upgrading from 3.x to 4.0](upgrading-to-4.md).
+
 ## The order to run things in
 
-1. `yad migrate`, then `yad migrate --apply` — renames the settings files.
+1. `yad migrate`, then `yad migrate --apply` — writes the settings file under its new name. (Each
+   epic's `product-prs.json` follows on the next gate write.)
 2. `yad update` — renames the files yadflow installed in each repo.
 3. `yad doctor` — lists what is left. Its `renamed-ref:<file>` lines name each line of your own files
    that still names an old CI name.

@@ -3,6 +3,9 @@
 **What a "shape" is:** the layout of the files yadflow writes into your project. Every one of them
 carries a `"schemaVersion"` number saying which layout it uses. A file with no number counts as 1.
 
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
+
 **What a fingerprint is:** an **artifact** is a document a team reviews, such as `epic.md` or a story.
 When a reviewer approves one, yadflow records a hash of it — a short code computed from the file's
 content — in the approval's `artifactHash` field, in `.sdlc/approvals.json`. If the artifact changes
@@ -95,7 +98,7 @@ An older yadflow fingerprints the whole file. It reads **every new approval on a
   counted.
 
 A release that has the newer-shape warning prints it before most commands (every command except `hook`,
-`doctor`, `migrate`, `setup` and `report`). It does this once `.sdlc/cli-version.json` or the product
+`doctor`, `migrate`, `setup`, `report`, `new`, `init` and `join`). It does this once `.sdlc/cli-version.json` or the product
 config says shape 9. A 3.x release has no such warning.
 
 **Upgrade everyone on the project together.**
@@ -115,12 +118,12 @@ Safe to run twice.
 
 **Verified ledger** — a project where CI is the only writer of the approval files:
 
-1. Run `yad migrate --apply`, and commit the result. This stamps `.sdlc/hub.json` and
-   `.sdlc/cli-version.json` with shape 9. It leaves each epic's `state.json` alone, because CI owns it.
+1. Run `yad migrate --apply`, and commit the result. This stamps `.sdlc/product.json` (and
+   `.sdlc/hub.json`, still written beside it) and `.sdlc/cli-version.json` with shape 9. It leaves each epic's `state.json` alone, because CI owns it.
 2. CI brings each epic's `state.json` to shape 9 the next time it writes it. There is nothing to do for
    that.
 3. Make sure the gate workflow runs this release. The workflow picks its yadflow version in this order:
-   the `YAD_VERSION` variable, then `gate_sync_version` in `.sdlc/hub.json`, then the version in
+   the `YAD_VERSION` variable, then `gate_sync_version` in `.sdlc/product.json` (`.sdlc/hub.json` when that is absent), then the version in
    `.sdlc/cli-version.json`. **It accepts a pin from those two files only when it is an exact release of
    the workflow's own major version** — the `YAD_MAJOR` line in the workflow file.
    - `yad update` rewrites the workflow and re-stamps `.sdlc/cli-version.json` in the same run, so both

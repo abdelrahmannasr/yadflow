@@ -18,10 +18,12 @@ the one the engine reads: `driver` beside `assistance` (`human`/`pair`/`agent` =
 and `advance` beside `automation` (`human`/`auto` = `human_approve`/`machine_advance`). Run `yad migrate`
 to add the new names to an existing project — see `migrations/shape-4.md`.
 
-Defaults: every step starts `advance: human`. The four **front** authoring steps (epic, architecture,
-UI, stories) and their reviews are **locked** — they may not be set to `advance: auto` in this
-version. A Shape step advances only on a **human act** — recording an approval and `advance`, or
-merging the approved, fully-resolved review PR — never on a machine.
+Defaults: every step starts `advance: human`. Nothing is earned: the team sets the dial with
+`yad dial`. A Shape **review** gate is always `advance: human`, and so is the engineer review. A Shape
+**author** step (epic, architecture, UI, stories) may be set to `advance: auto`, but that choice is only
+recorded in `.sdlc/automation.json` — nothing acts on it yet (see below). So in practice a Shape step
+advances only on a **human act** — recording an approval and `advance`, or merging the approved,
+fully-resolved review PR — never on a machine.
 
 As of **Phase 4a** the `advance` dial is no longer inert: the orchestrator `yad-run` reads it and,
 for the **Build** steps, advances on its own when a step is set to `advance: auto` — the team sets it with
@@ -44,7 +46,9 @@ own yet, so that choice is recorded, not acted on.
 
 1. **Install the module:** `npx yadflow setup` (re-sync later with `… check --fix`).
 2. **Have your code repo(s).** They are **separate git repos** (one `.git` each). For the demo they
-   live under `demo-repos/<repo>/` — regenerate from `demo-repos/README.md`.
+   live under `demo-repos/<repo>/` — regenerate from `demo-repos/README.md`. On a machine where a
+   registered repo is missing (a teammate added it after you joined), `yad repo clone` clones every
+   missing one at its recorded path; `yad repo list` marks them **not cloned**.
 3. **Optional tools** (the workflow degrades gracefully and records it if any are absent): **Spec Kit**
    (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix`, used by
    `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review), **DeepTutor**
@@ -79,10 +83,18 @@ own yet, so that choice is recorded, not acted on.
 ## A — Shape (human-authored, once per epic)
 
 Each author step writes its artifact, sets itself `done`, moves `currentStep` to its review, and
-**stops at the gate**. Run every gate with **`yad-review-gate`** — or, when the Product is on a platform,
-drive it deterministically with the **`yad gate`** CLI (`open → sync → … → merge`): the review rides
-the per-step PR/MR and the step **auto-advances on merge** once approvals are satisfied and all comment
-threads are resolved. Details: **"Run all of Shape by hand"** below.
+**stops at the gate**. Run every gate with **`yad-review-gate`**, or drive it with the **`yad gate`**
+CLI. When the Product is on a platform, the review rides the per-step PR/MR and **the merge is what
+advances** the step, once approvals are satisfied and all comment threads are resolved. With no
+platform, `yad gate comment` / `yad gate approve … --by <name>` record the review on your machine, and
+`yad gate advance` moves the step on once the rule is met.
+Details: **"The one gate"** below.
+
+While you write, your drafts are saved for you: a hook runs `yad capture` after each agent edit and
+commits the changed files to your private `yad/wip/<your git name>/<epic>` branch, without touching your
+checkout. `yad claims` shows who else is editing which file. At the end of each author step the skill
+runs `yad fold <epic> <step>`, which makes one clean commit, `docs(<epic>): author <step>`, with only
+that step's files.
 
 0. *(optional, once per product)* `yad foundation new` then `yad-discovery` → the **Foundation** in
    `foundation/` (`purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md`, plus
@@ -92,30 +104,36 @@ threads are resolved. Details: **"Run all of Shape by hand"** below.
    in turn); its `roadmap.md`
    then frames each epic below (read once it is approved; `yad foundation status` shows which features are started, read from the
    epic ledgers — the roadmap's Status column is not edited by hand).
-6. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (1 approver).
-7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (1 approver; the `contract` tag makes the reported count 3).
-8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (1 approver).
-9. `yad-stories` → repo-tagged `stories/EP-<slug>-S0N.md` → review (1 approver; the PR is labelled with each touched repo).
+1. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (1 approver).
+2. `yad-architecture` → `architecture.md` + locked `contract.md` → review (1 approver; the `contract` tag makes the reported count 3).
+3. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (1 approver). **Optional:** an epic with no screens
+   marks it N/A with `yad skip <epic> ui-design --reason "<why>"` (`yad unskip` puts it back). An epic
+   whose screens come later sets it aside with `yad defer <epic> ui-design --reason "<why>"`; add
+   `--debt` when the step is owed back, and `yad next` reminds you until it is paid (`yad undefer`
+   picks it up again). A step someone marked `blocked` by hand is cleared with
+   `yad unblock <epic> <step>`. On a verified Product these verbs refuse once the epic's ledger is on
+   the default branch, because CI owns `state.json` there.
+4. `yad-stories` → repo-tagged `stories/EP-<slug>-S0N.md` → review (1 approver; the PR is labelled with each touched repo).
    → `state.json` reaches `currentStep: ready-for-build` — **Build can start now.**
-10. `yad-test-cases` → `test-cases.md` (+ automation tests when a testing tool is connected) → review (1 approver).
-    **Parallel, non-blocking:** opens when the stories gate passes and runs alongside Build; its
-    review never moves `currentStep` off `ready-for-build`.
+5. `yad-test-cases` → `test-cases.md` (+ automation tests when a testing tool is connected) → review (1 approver).
+   **Parallel, non-blocking:** opens when the stories gate passes and runs alongside Build; its
+   review never moves `currentStep` off `ready-for-build`.
 
 ## B — Build (per story, per repo)
 
 From a `ready-for-build` story, for **each** repo the story is tagged with. Details: **"Run the full
 Build by hand"** below.
 
-10. `yad-spec story:<id> repo:<repo>` → writes `specs/<story-id>/` (spec/plan/tasks + `link.md`).
-11. `yad-implement story:<id> repo:<repo> task:<T0N>` → one atomic task = one branch = one commit
-    (repeat per task). Commit by convention with **`yad commit --type <t> -m <subject> [--ai <tool>]`**
-    (Task/Contract-Change/Co-Authored-By trailers, atomic-file guard).
-12. `yad-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint, verified-commits
-    (a platform-Verified signature on every commit), and commit-message must pass. (The
-    `pr-title` / `pr-template` gates need the PR title + body, so they run in CI once the PR exists —
-    step 13.)
-13. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or do
-    12+13 in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**). The PR is based on the
+6. `yad-spec story:<id> repo:<repo>` → writes `specs/<story-id>/` (spec/plan/tasks + `link.md`).
+7. `yad-implement story:<id> repo:<repo> task:<T0N>` → one atomic task = one branch = one commit
+   (repeat per task). Commit by convention with **`yad commit --type <t> -m <subject> [--ai <tool>]`**
+   (Task/Contract-Change/Co-Authored-By trailers, atomic-file guard).
+8. `yad-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint, verified-commits
+   (a platform-Verified signature on every commit), and commit-message must pass. (The
+   `pr-title` / `pr-template` gates need the PR title + body, so they run in CI once the PR exists —
+   step 9.)
+9. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or commit
+    and open the PR in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**). The PR is based on the
     repo's **own default branch**, resolved the same way the gates resolve their trunk (the registry's
     `default_branch`, else the platform's own default, else `origin/HEAD`, else `main`) — `--base`
     overrides it, and a base that is not the platform default warns **without blocking — the PR still
@@ -126,26 +144,26 @@ Build by hand"** below.
     `yad open-pr` also prints a reviewer suggestion (E68): who has committed in the folders the change
     touches in the last 30 days, and what CODEOWNERS on the base branch lists. It is a hint, never a
     request, and it never calls anyone an owner.
-14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
+10. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
     record in `build-log.json`, update story status to `in-build`/`shipped`). The machine-written
     ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed by **`yad checkpoint --push`**
     — a `chore(product)` audit-trail commit Build runs for you, so no one hand-commits this state.
     The `trust-log`/`build-log` entries are written as per-entry **shard files** (so parallel stories of one
     epic never conflict on them); once the story ships, **`yad tidy up [<epic>] [--push]`** folds its
     finished shards back into the single ledger file (the manual "pack it up", like `git gc`).
-    - **Multi-repo:** repeat 10–14 in each repo, all from the **one** locked contract.
+    - **Multi-repo:** repeat 6–10 in each repo, all from the **one** locked contract.
     - **Existing code:** `yad-backfill` first, to produce a human-verified spec for a built feature.
 
 ## C — Automation (optional, switched on by the team)
 
-15. Set a Build step to run on its own: `yad dial <epic> <story> --repo <repo> <step> --to auto`. It prints
+11. Set a Build step to run on its own: `yad dial <epic> <story> --repo <repo> <step> --to auto`. It prints
     the step's run record in that repo as advice (runs, % approved unchanged) and never refuses on it. The
     engineer review is a gate, so it is refused. `--to human` puts a step back.
-16. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it advances past a step set to
+12. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it advances past a step set to
     auto after a clean run and stops for a human otherwise, always halting at the engineer review. Each iteration
     it runs `yad checkpoint --push` to commit the new `trust-log/` shard + `build-state/` it just wrote (a
     `chore(product)` commit, default branch only) — so the shared run record stays current with no human commit.
-17. **Kill switch any time:** `yad kill --reason "<why>"` (everything → manual, recorded in
+13. **Kill switch any time:** `yad kill --reason "<why>"` (everything → manual, recorded in
     `.sdlc/automation.json`) / `yad unkill`.
     Details: **"Run Build on the dial"** below.
 
@@ -168,6 +186,10 @@ Build by hand"** below.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.
+- **`yad history`** — what the Product has done, read live from each work item's files and writing
+  nothing: `list` (every work item, newest first), `show <id>` (its steps and approvals), `search <text>`.
+- **`yad index`** — rebuilds `.sdlc/index.json`, one summary per work item, so a reader opens one file
+  instead of walking every epic folder.
 - **`yad usage`** — read-only team-member adoption & behavior report for an EM/team-lead:
   per-member *authored / commented / approved / shipped* with factual workflow-hygiene flags, derived
   from git + the ledgers and written to a path you choose (`--out`, `--since/--until` or `--all`,
@@ -187,9 +209,9 @@ can also edit the files directly — that's the point.
 Each authoring step is the same shape: an author skill produces an artifact, sets its step `done`,
 moves `currentStep` to the matching review, and **stops at the gate**. Then **`yad-review-gate`**
 (one gate, reused for all five reviews) takes `open → comment → approve → advance`. When the Product is on a
-platform, the **`yad gate`** CLI runs that gate over a real PR/MR — `open` raises the review PR, `sync`
-pulls approvals + comment threads into the ledger, and the step **auto-advances when the approved,
-fully-resolved PR is merged** (the merge is the human approval act).
+platform, the **`yad gate`** CLI runs that gate over a real PR/MR — `open` raises the review PR, and the
+step advances when the approved, fully-resolved PR is **merged** (the merge is the human approval act).
+Who then writes the ledger depends on the ledger mode — see **"The one gate"** below.
 
 **Code-aware (when repos are connected).** If you ran `yad-connect-repos` in setup, each author step
 first loads the connected repos' **code-maps** (from `.sdlc/code-context/<repo>/`) so it considers what
@@ -203,36 +225,51 @@ side-effect). With no repos connected the steps proceed exactly as before (green
 ### Author steps
 
 1. **`yad-epic`** (state 1) → `epic.md`; assigns the stable `EP-<slug>` ID; seeds
-   `.sdlc/state.json` (all `advance: human`, Shape steps locked) + empty `.sdlc/approvals.json`.
+   `.sdlc/state.json` (every step `advance: human`) + empty `.sdlc/approvals.json`.
    Or lay the track first with **`yad epic new <slug>`**, which writes that same chain from a
    lifecycle profile and leaves `epic.md` to the skill.
 2. **`yad-architecture`** (state 3) → `architecture.md` + the locked `contract.md`; writes the
    contract-surface SHA-256 to `.sdlc/contract-lock.json`.
 3. **`yad-ui`** (state 5) → `ui-design.md` + `DESIGN.md` (drives Impeccable
-   `document|extract|craft` slash-commands when installed; otherwise authors directly).
+   `document|extract|craft` slash-commands when installed; otherwise authors directly). Optional:
+   `yad skip` / `yad defer` it as in step 3 of the overview above.
 4. **`yad-stories`** (state 7) → one file per story `stories/EP-<slug>-S0N.md`, each tagged
    with the `repos` it implements.
+
+Each author step ends with `yad fold <epic> <step>` — one commit holding only that step's files. With
+`ledger: verified`, fold never commits on the default branch: the artifacts reach it through the review
+PR. Your drafts along the way stay on your `yad/wip/…` capture branch.
 
 ### The one gate (every review)
 
 Every review is the same loop — author writes, reviewers comment (which never advances), approvals
-accumulate, and the step moves forward only when the rule is met. **local** ends in an explicit
+accumulate, and the step moves forward only when the rule is met. **No platform** ends in an explicit
 `advance`; **PR-driven** (Product on a platform) ends when the approved, fully-resolved review PR is
 **merged**:
 
 <!-- Source: docs/diagrams/review-loop.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
 ![Review gate loop — author, open, comment, approve, advance](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/review-loop.svg)
 
-**local** — invoke **`yad-review-gate`** with `open` (present the artifact; reviewers comment in
-`reviews/<artifact>--<date>--comments.md`), `approve` (the reviewer's platform login → `.sdlc/approvals.json`), and
-`advance` (moves **only if** the rule is satisfied, else it names the missing approval).
+**No platform** — invoke **`yad-review-gate`** with `open` (present the artifact; reviewers comment in
+`reviews/<artifact>--<date>--comments.md`), `approve`, and `advance`. The same three verbs are CLI
+commands (E112):
+- `yad gate comment <epic> <artifact> --by <name>` — record who commented, and how many comments.
+- `yad gate approve <epic> <artifact> --by <name>` — record one approval in `.sdlc/approvals.json`,
+  bound to the artifact's current content.
+- `yad gate advance <epic> <artifact>` — move forward **only if** the rule is satisfied, else it names
+  the missing approval.
 
 **PR-driven** — when the Product is on a platform, the **`yad gate`** CLI runs the same gate over a PR/MR:
-- `yad gate open <epic> <artifact>` — raise the review PR/MR; mark the step `in_review`. The
-  `review/<epic>/<artifact>` branch must already be pushed (or use `yad open-pr` from it, which pushes first).
-- `yad gate sync <epic> [artifact]` — pull approvals + comment threads into the **same** ledger (your
-  own `gh`/`glab`, no stored tokens) and **auto-advance on merge** once the rule is met and every thread
-  is resolved. Approvals are **revoked when the reviewed artifact changes** (re-hash), so reviewers get
+- `yad gate open <epic> <artifact>` — raise the review PR/MR; mark the step `in_review` (in verified
+  mode CI owns the ledger, so it only opens the PR). The `review/<epic>/<artifact>` branch must already
+  be pushed (or use `yad open-pr` from it, which pushes first).
+- **The merge advances the step**, once the rule is met and every thread is resolved. Who writes that
+  into the ledger depends on the `ledger` setting in `.sdlc/product.json`:
+  - `ledger: local` — run `yad gate sync <epic> [artifact]` after the merge. It pulls approvals +
+    comment threads into the **same** ledger (your own `gh`/`glab`, no stored tokens) and advances the step.
+  - `ledger: verified` — the Product's CI runs `yad gate ci --merged` at the merge and commits the
+    ledger. `yad gate sync` is advisory here: it shows the state and writes nothing.
+- Approvals are **revoked when the reviewed artifact changes** (re-hash), so reviewers get
   a fresh pass. A change to the frontmatter `status:` line alone is not an edit. Unresolved comments hold the step `in_review`.
 - `yad gate comments <epic>` fetches the open threads to address; `yad gate status <epic>` shows
   approvals (counting only the non-stale ones). The file ledger stays the source of truth; with no
@@ -247,12 +284,14 @@ it (E72). "Active" means committed or approved lately, counted live from the rec
 a window that scales with how fast the team merges. The `− 1` leaves one seat for the author. The cap is
 reported, not enforced: the count of people can read high (a git name and a platform login count as two
 people until proven one), so a two-person team can read as four and an enforced gate could lock them
-out. A later yadflow change turns the capped count on together with `yad gate lower --reason`, a
-recorded way out of a gate a team cannot meet, once the count is accurate. Until then, under a team
+out. Enforcing the capped count waits until the count is accurate; that work is parked (roadmap row
+E108). Until then, under a team
 gate that has not passed, `yad gate status` and `yad gate sync` print a warning line when the count of
 people suggests the gate may not pass: `! may not be met:` about the one approval enforced today, or
 `! if the risk step were enforced:` about what enforcing more would do. It holds nothing. When a source
 cannot be read, the count says `NOT COUNTED` rather than showing a small number, and no cap is shown.
+**Working alone?** `yad mode solo --reason "<why>"` waives the approval on every review gate — the
+merge still decides — and records who switched it, when and why; `yad mode team` counts approvals again.
 In solo mode, `yad gate status` prints `! solo mode is on, but …` instead when the count shows more
 than one person may work on the Product. It only suggests `yad mode team`; nothing switches (E74).
 A team gate that passed on its counted approvals (not solo, not a skip or inherited shortcut) while the cap lowered its ask records `capped: { needed, to, active }` on its

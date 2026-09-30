@@ -697,7 +697,7 @@ whether to advance on its own. Two new files under `.sdlc/` do this.
 > one `chore(product): sync Build state — <epic>/<story> by @<login>` audit-trail commit, on the
 > default branch, staging **only** these three ledgers by an explicit allowlist (never a Shape
 > gate file — `state/approvals/comments/product-prs/hub-prs.json`, `reviews/*.md` — so `ledger-guard` never trips).
-> Teammates don't review these machine writes; the commit exists so CI, `yad status`, and other
+> Teammates don't review these machine writes; the commit exists so CI, the `yad-status` skill, and other
 > machines always see current trust evidence.
 
 ## `build-state/<story-id>.json`

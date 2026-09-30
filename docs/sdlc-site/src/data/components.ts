@@ -31,7 +31,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#2471a3",
     position: { x: 28, y: 14 },
     description:
-      "Per-epic state machine: currentStep, each step's driver/advance dials (older names: assistance/automation), and shape_steps_locked.",
+      "Per-epic state machine: currentStep, each step's status and its driver/advance dials (older names: assistance/automation).",
   },
   {
     id: "approvals-json",
@@ -148,7 +148,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#b7950b",
     position: { x: 88, y: 67 },
     description:
-      "Every Build run's verdict — the run record yad dial shows beside a step\'s dial, as advice. Committed by `yad checkpoint` (chore(product), default branch, allowlist-scoped).",
+      "Every Build run's verdict — the run record yad dial shows beside a step's dial, as advice. Committed by `yad checkpoint` (chore(product), default branch, allowlist-scoped).",
   },
   // Phase 6 — the feature-thread ledgers (post-lock change management).
   {
