@@ -18,6 +18,8 @@
 // repos that do not exist under a fixture. Those are facts about the machine, not about the project,
 // so freezing them would make this test fail on a new laptop instead of on a real regression. The
 // `epics` and `threads` sections are pure file reads and are byte-identical with or without `gh`.
+// Before anything else: no background git clean-up racing a test's removal of its repository.
+import './fixtures/git-quiet.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

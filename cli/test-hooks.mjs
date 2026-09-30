@@ -1,6 +1,8 @@
 // The harness hook scripts (`skills/yad-checks/templates/hooks/*.mjs`) and the Windows-facing parts of
 // the CLI (E113). Every test here runs on Linux, macOS AND Windows: this is the file the Windows CI job
 // runs, so nothing in it may reach for bash, a POSIX path, or an execute bit.
+// Before anything else: no background git clean-up racing a test's removal of its repository.
+import './fixtures/git-quiet.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

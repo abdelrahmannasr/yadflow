@@ -41,3 +41,12 @@ regenerable, so only the small `code-map.md` files come along.
 `EP-checkout` carries a legacy eight-step chain with no `test-cases` step. `EP-checkout-queue-filter`
 is a threaded defect on the newer ten-step chain, with inherited steps and a pointer contract-lock.
 Freezing both means the golden covers the old shape and the current one at the same time.
+
+## `git-quiet.mjs` — no background git clean-up during tests
+
+Not a fixture of project data: a few lines every `cli/test*.mjs` file imports first. They turn off git's
+automatic clean-up (`maintenance.auto`, `receive.autogc`, `gc.auto`) for every git the suite runs, through
+`GIT_CONFIG_PARAMETERS`. A recent git may run that clean-up in the background after a commit, a fetch or
+a push, and a test deleting its temporary repository at that moment fails with "directory not empty"
+(PR #297's macOS job). It lives here because `cli/fixtures/` is already kept out of the published package.
+`test/e2e/run.sh` sets the same variable.

@@ -1,4 +1,6 @@
 // Dependency-free tests for the yad CLI. Run: node --test cli/test.mjs
+// Before anything else: no background git clean-up racing a test's removal of its repository.
+import './fixtures/git-quiet.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -24687,10 +24689,9 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     assert.deepEqual(local.value.pushed, { pushed: 'local', why: 'no remote named origin' });
     assert.match(local.out, /local only — no remote named origin/);
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
-    // No clean-up of its own after a push: a recent git (2.55 on the macOS runner) may start `gc`/maintenance in
-    // the background once a push lands, and a lock file it writes into the bare repo made the `rmSync` below fail
-    // with ENOTEMPTY (PR #297 CI). The retries cover any other short-lived writer.
-    for (const [k, v] of [['receive.autogc', 'false'], ['gc.auto', '0'], ['maintenance.auto', 'false']]) execFileSync('git', ['config', k, v], { cwd: remote });
+    // git's background clean-up is off for the whole suite (cli/fixtures/git-quiet.mjs): a lock file it wrote
+    // into this bare repo made the `rmSync` below fail with ENOTEMPTY (PR #297 CI). The retries cover any other
+    // short-lived writer.
     g('remote', 'add', 'origin', remote);
     const spawned = [];
     const spawner = (cmd, args, opts) => { spawned.push({ cmd, args, opts }); return { unref() {} }; };
@@ -24721,6 +24722,19 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     fs.rmSync(T, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     fs.rmSync(remote, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
+});
+
+test('the suite runs every git with its background clean-up off (cli/fixtures/git-quiet.mjs)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-git-quiet-'));
+  try {
+    git(T, 'init', '-q');
+    // Both ways the suite starts git: its own helper (GIT_ENV) and in-process CLI code (process.env) — and a
+    // command's own `-c` does not push the setting out.
+    for (const env of [GIT_ENV, process.env]) {
+      const get = (k) => execFileSync('git', ['-c', 'x.y=1', 'config', '--get', k], { cwd: T, env, encoding: 'utf8' }).trim();
+      assert.deepEqual(['maintenance.auto', 'receive.autogc', 'gc.auto'].map(get), ['false', 'false', '0']);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('E43 people: capture branches, local and remote-tracking, are not counted as anyone committing', () => {

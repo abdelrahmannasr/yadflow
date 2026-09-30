@@ -4,6 +4,8 @@
 // does it, everything it rewrites is copied first, and running it twice is not running it twice. These
 // tests pin each half of that, including a FAKE 1 → 2 migration so the machinery is exercised against a
 // real shape change while the shipped list still only contains the 1 → 1 baseline.
+// Before anything else: no background git clean-up racing a test's removal of its repository.
+import './fixtures/git-quiet.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
