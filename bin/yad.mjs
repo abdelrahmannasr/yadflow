@@ -192,12 +192,16 @@ ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject> [--manual --reason <why>]
                                        Commit by convention (trailers, atomic guard); --manual is
                                        the door past the Product's ledger hook, reason recorded
-  yad open-pr [--repo <name>]          Open a task PR/MR against the repo's DEFAULT branch (never a
+  yad open-pr [--repo <name>] [--title <text>]
+                                       Open a task PR/MR against the repo's DEFAULT branch (never a
                                        hardcoded main; --base overrides) — stage-aware on the Product: a
                                        review/EP-* branch opens the Shape artifact-review PR
                                        (delegates to gate open), any other Product branch uses the
-                                       code-task template
-  yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
+                                       code-task template. --title sets the PR/MR title (default: -m,
+                                       else the last commit's subject)
+  yad ship --type <t> -m <subject> [--title <text>]
+                                       Commit AND open the task PR/MR in one step (stage-aware).
+                                       --title sets the PR/MR title (default: the commit subject)
   yad checkpoint [--push]              Commit the machine-written Build state on the Product
                                        (trust-log/build-log/build-state) — plus any story
                                        status: flip (→ in-build/shipped) backed by a build-log
@@ -292,6 +296,7 @@ ${c.bold('Options')}
                         on the pull request still judges the commit, and quotes the reason
   --risk <level>        open-pr: low|medium|high (default low)
   --repo <name>         open-pr: target a registered repo by name
+  --title <text>        open-pr/ship: the PR/MR title (ignored on a review/EP-* branch)
   --base <branch>       open-pr: override the PR/MR base — default is the repo's own default
                         branch (repos.json default_branch, else product.json default_branch for a PR
                         on the Product itself, else the platform, else origin/HEAD, else main); a

@@ -522,8 +522,9 @@ export const wiringFor = (platform) => [
 ];
 
 // Product wiring: CI installed on the PRODUCT itself (dest is the project root — the Product IS the
-// root). Installed only when hub.json has a platform and the ledger is verified. Carries the
-// event-driven gate sync (approvals/change requests/the merge trigger `yad gate ci`) and the
+// root). Installed only when the Product settings (product.json) name a platform and the ledger is
+// verified. Carries the merge-time gate sync (a review PR's merge, and a 15-minute schedule that catches
+// a merge the event missed, run `yad gate ci --merged`; nothing fires on an approval) and the
 // verified-commits gate (no commit without a platform-Verified signature reaches merge on the Product).
 export const PRODUCT_WIRING = {
   common: [
