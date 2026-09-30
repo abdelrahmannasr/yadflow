@@ -296,7 +296,7 @@ ${c.bold('Options')}
                         on the pull request still judges the commit, and quotes the reason
   --risk <level>        open-pr: low|medium|high (default low)
   --repo <name>         open-pr: target a registered repo by name
-  --title <text>        open-pr/ship: the PR/MR title (ignored on a review/EP-* branch)
+  --title <text>        open-pr/ship: the PR/MR title (ignored on the Product's review/EP-* branch)
   --base <branch>       open-pr: override the PR/MR base — default is the repo's own default
                         branch (repos.json default_branch, else product.json default_branch for a PR
                         on the Product itself, else the platform, else origin/HEAD, else main); a
