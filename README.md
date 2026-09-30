@@ -202,7 +202,7 @@ Yadflow gives you explicit checks, and each one says who acts:
 | Record | How it is checked | Who refreshes it | Enforced? |
 | --- | --- | --- | --- |
 | Approvals | Tied to the file's exact contents | A person approves again | Yes. An outdated approval does not count at the gate. |
-| Shared contract | A lock file holds its hash | The architecture skill locks it again | Yes. A CI check always requires a contract change to be declared, and checks the lock when it can reach the Product. A repository's first spec fails if it cannot. |
+| Shared contract | A lock file holds its hash | The architecture skill locks it again | Yes. A CI check always requires a contract change to be declared, and checks the lock when it can reach the Product. |
 | Code snapshots of each repository | Out of date once the repository moves on | `yad repo refresh`, then the `yad-connect-repos` skill for the code map | No. `yad doctor` and `yad repo list` warn. |
 | Product index (`.sdlc/index.json`) | A hash of its inputs | `yad` commands, or CI at merge | No. `yad doctor` warns. |
 | Documentation sites | `yad docs sync` (check only by default) | The `yad-docs` skills | No |
