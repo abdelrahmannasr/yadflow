@@ -35,6 +35,7 @@ export { runRepo } from '../cli/repo.mjs';
 export { runRiskMap } from '../cli/riskmap-command.mjs';
 export { runCodeowners } from '../cli/codeowners-command.mjs';
 export { runDocs } from '../cli/docs.mjs';
+export { runDetect } from '../cli/detect.mjs';
 export { runDoctor } from '../cli/doctor.mjs';
 export { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';
 export { runNext } from '../cli/next.mjs';

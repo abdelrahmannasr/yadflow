@@ -26030,7 +26030,7 @@ test('test files that print ok()/info() lines keep them off the runner stream (t
   // A line whose third byte is not ASCII, landing right after a runner message, loses the rest of the file
   // on Node 18–22. The guard is duplicated in each file that prints such lines; pin every copy.
   const guard = "console[k] = (...a) => (process.stdout.write === write ? console.error(...a) : orig(...a));";
-  for (const f of ['cli/test.mjs', 'cli/test-migrate.mjs', 'cli/test-hooks.mjs']) {
+  for (const f of ['cli/test.mjs', 'cli/test-migrate.mjs', 'cli/test-hooks.mjs', 'cli/test-detect.mjs']) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const at = src.indexOf(guard);
     assert.ok(at >= 0 && at < src.search(/^test\(/m), `${f}: the guard runs before the first test`);
