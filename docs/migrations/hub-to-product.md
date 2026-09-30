@@ -129,10 +129,15 @@ a check edited after 4.0 may no longer turn `hub` into `product`, and would then
 `yad doctor` names each line of your CI files that passes `--profile hub` literally (`renamed-ref:<file>`); a
 value passed through a variable is not seen, so search for those yourself.
 
-**First** make sure the checks accept `product`. A `checks/*.sh` you edited before 4.0 may accept only
-`code|hub`; then every Product PR fails once your workflow passes `product`. `yad doctor` says so
-(`profile:<gate>`, and in the `renamed-ref:` hint), and `yad update --overwrite-local` replaces the check with
-the shipped one.
+**First** make sure the checks handle `product`:
+
+| Your `checks/*.sh` | What happens once your workflow passes `product` | Do this first |
+|---|---|---|
+| not edited, from before 4.0 | it refuses `product`: every Product PR fails | run `yad update`, which replaces it |
+| edited, and it accepts only `code\|hub` | it refuses `product`: every Product PR fails | fix it, or replace it with `yad update --overwrite-local` |
+| edited, lists `product` but does not turn it into the old value | it takes `product` and skips the Product's rules | the same |
+
+`yad doctor` tells you which case you are in (in the `renamed-ref:` hint, and `profile:<gate>`).
 
 ## 9. Tools that read `--json`
 

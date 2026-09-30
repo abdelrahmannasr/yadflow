@@ -14,7 +14,7 @@ import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPa
 import {
   moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
-  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateRejects,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
@@ -125,14 +125,15 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   for (const g of gaps) warn(g);
   // E123: the team's own files that name one of our renamed CI names — each with its file and line, the same
   // list `yad doctor` shows. yad never edits them; the include line it rewrites is said as what it is.
-  const rejects = productGateRejects(root);
+  // After this run: a gate it replaces handles `product`; one it keeps (edited) may not (E124 review 3).
+  const profileFirst = oldProfileAdvice(productGateBlockers(root, { fix, overwriteLocal }));
   for (const h of renamedNameHits(root)) {
     if (h.rewrittenBy === 'update' || (h.rewrittenBy === 'overwrite-local' && overwriteLocal)) {
       info(`${h.file}:${h.line} includes the old fragment — ${fix ? 'rewritten' : `rewritten by ${h.rewrittenBy === 'update' ? '`yad check --fix`/`yad update`' : '`yad update --overwrite-local`'}`} to name ${h.new}`);
     } else if (h.rewrittenBy === 'overwrite-local') {
       info(`${h.file}:${h.line} includes the edited old fragment — \`yad update --overwrite-local\` rewrites it when it replaces that fragment; leave it until then`);
-    } else if (h.profile && rejects) {
-      warn(`${h.file}:${h.line} passes \`${h.old}\`, renamed \`${h.new}\` in 4.0 — change it by hand, but first make the Product's pattern checks accept \`--profile product\`: one of them was edited and refuses it, so changing this line now fails every Product PR (${PRODUCT_PROFILE_FIX})`);
+    } else if (h.profile && profileFirst) {
+      warn(`${h.file}:${h.line} passes \`${h.old}\`, renamed \`${h.new}\` in 4.0 — change it by hand, ${profileFirst}`);
     } else warn(`${h.file}:${h.line} names \`${h.old}\`, renamed \`${h.new}\` in 4.0 — yad does not edit this file; change it by hand`);
   }
   // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
@@ -214,7 +215,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   }
   for (const m of overwriteLocal ? [] : modified.filter((a) => a.rename)) {
     const { from, to } = m.rename;
-    warn(`${m.scope}/${from} was renamed ${to} in this release, but it was edited, so it is kept — ${from.startsWith('.gitlab/') ? 'the root .gitlab-ci.yml goes on including it' : 'it goes on running'} under its old name`);
+    warn(`${shown(m)}/${from} was renamed ${to} in this release, but it was edited, so it is kept — ${from.startsWith('.gitlab/') ? 'the root .gitlab-ci.yml goes on including it' : 'it goes on running'} under its old name`);
     hand(`\`yad update --overwrite-local\` replaces it with ${to} (your copy is saved as ${path.basename(from)}${BACKUP_SUFFIX}); then copy your edits into ${to}`);
   }
   if (modified.length && !overwriteLocal) {

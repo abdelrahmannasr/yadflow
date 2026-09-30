@@ -734,9 +734,37 @@ export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_W
   ...renamedNameFiles(root).filter((rel) => /\.ya?ml$/.test(rel))])].filter((rel) => {
   try { return /--profile(?:=|[ \t]+)(["']?)product\1(?![\w.-])/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
 });
-// Whether an edited Product gate would refuse `--profile product` today — then changing a workflow's
-// `--profile hub` to `product` fails every Product PR until the gate is fixed (E124 review 2).
-export const productGateRejects = (root) => PRODUCT_PROFILE_GATES.some((g) => productProfileGap(path.join(root, g)) === 'rejects');
+// The Product gates that would mishandle `--profile product` (E124 reviews 2–3): refuse it ('rejects'), or take it and
+// skip the Product's rules ('unmapped'). Each with whether `yad update` keeps it — `kept`, an edited copy, from the
+// provenance record — or replaces it. On a run that fixes, a gate this run replaces is left out: after the run it
+// is the shipped copy, which handles `product`.
+export function productGateBlockers(root, { fix = false, overwriteLocal = false } = {}) {
+  let actions = [];
+  try { actions = productActions(root); } catch { /* an unreadable provenance record is named by its own check */ }
+  const out = [];
+  for (const a of actions) {
+    if (!a.managed) continue;
+    const gate = path.relative(root, a.managed.dest).split(path.sep).join('/');
+    if (!PRODUCT_PROFILE_GATES.includes(gate)) continue;
+    const gap = productProfileGap(a.managed.dest);
+    if (!gap) continue;
+    const kept = a.status === 'modified' && !(fix && overwriteLocal);
+    if (!kept && fix) continue;
+    out.push({ gate, gap, kept });
+  }
+  return out;
+}
+// What to do before a team changes its `--profile hub` to `product`, or '' when nothing stands in the way —
+// one sentence for `yad doctor` and `yad check`/`update` alike.
+export function oldProfileAdvice(blockers) {
+  if (!blockers.length) return '';
+  const what = (b) => `${b.gate} ${b.gap === 'rejects' ? 'refuses `--profile product`, so every Product PR would fail it' : 'takes `--profile product` but then skips the Product\'s rules'}`;
+  const kept = blockers.filter((b) => b.kept);
+  if (kept.length) {
+    return `but first fix the check${kept.length > 1 ? 's' : ''} it runs: ${kept.map(what).join('; ')} — ${kept.length > 1 ? 'they were' : 'it was'} edited, so \`yad update\` keeps ${kept.length > 1 ? 'them' : 'it'}: ${PRODUCT_PROFILE_FIX}`;
+  }
+  return `but first run \`yad update\`, which replaces the old check${blockers.length > 1 ? 's' : ''}: ${blockers.map(what).join('; ')}`;
+}
 
 // The new name of a renamed CI file is not installed while an edited old one is kept (`modified`): both
 // would run on GitHub — every gate twice, the stock one undoing whatever the team's edit loosened — and on
