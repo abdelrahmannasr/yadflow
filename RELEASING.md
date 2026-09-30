@@ -306,11 +306,21 @@ git push origin origin/main:next       # 1. a fresh pre-release of main's HEAD
                                        # 2. prove that version on real projects
 git fetch origin
 git push origin origin/next:main       # 3. bring its release commit back to main
-                                       #    (merge nothing else to main until step 4)
-git push origin origin/main:release    # 4. promote: publishes <major>.0.0 to yadflow@latest
+                                       # 4. merge ONE docs-only PR to main (see below)
 git fetch origin
-git push origin origin/release:main    # 5. bring the stable release commit back to main
+git push origin origin/main:release    # 5. promote: publishes <major>.0.0 to yadflow@latest
+git fetch origin
+git push origin origin/release:main    # 6. bring the stable release commit back to main
 ```
+
+**Why step 4 exists — the `[skip ci]` trap.** After step 3, `main`'s newest commit is the pre-release's
+`chore(release): … [skip ci]` commit. GitHub starts **no** push workflow when the newest pushed commit's
+message holds `[skip ci]`, and `release.yml` has no manual trigger. So pushing that commit to `release`
+moves the branch and publishes nothing — no run appears at all (this happened on the first try at
+4.0.0). Step 4 puts an ordinary merge commit on top. Keep that PR to docs only (for example the release
+notes for the major): anything else merged between steps 1 and 5 ships in the stable version without
+having been tried on `next`. If the release push has already happened with no run, the fix is the
+same — merge the docs PR, then push `main` to `release` again; it is a plain fast-forward.
 
 **Then point `next` at the stable version.** semantic-release moves `latest` to the new version, but it
 leaves the `next` dist-tag (npm's name for a channel) on the last pre-release. That is **older** than
