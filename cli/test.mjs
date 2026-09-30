@@ -27609,3 +27609,35 @@ test('E122: every caller of the default-branch guard hands it the Product root',
     for (const c of calls) assert.match(c, /\broot\b/, `${f}: ${c}`);
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// hub-keep:start keep-list-tests
+// E124: every `hub` that survives the hub -> Product rename is kept by a named rule
+// (scripts/hub-keep-list.mjs). A new one fails here until it is renamed or given a rule with its reason.
+const hubKeep = await import('../scripts/hub-keep-list.mjs');
+
+test('E124: every hub in the repo is kept by a named rule', () => {
+  const misses = hubKeep.scan(ROOT).filter((h) => !h.rule);
+  assert.deepEqual(misses.map((h) => `${h.file}:${h.line}: ${h.text.trim().slice(0, 120)}`), []);
+});
+
+test('E124: the keep rules are as narrow as their reasons', () => {
+  const rules = (file, text) => hubKeep.classifyFile(file, text).map((h) => h.rule);
+  // `github` is not a hit, in any case — but a `hub` beside it on the same line still is.
+  assert.deepEqual(rules('a.md', 'GitHub and GITHUB_TOKEN'), []);
+  assert.deepEqual(rules('a.md', 'GitHub hosts the hub'), [null]);
+  // A kept name keeps only its own characters, not a second `hub` on its line.
+  assert.deepEqual(rules('a.md', 'read .sdlc/hub.json from the hub'), ['old-file-name', null]);
+  assert.deepEqual(rules('a.md', '`--keep hub` and `--profile hub`'), ['keep-flag', 'old-profile-name']);
+  // A kept region needs a rule named in REGION_RULES, and an end.
+  assert.deepEqual(rules('a.md', '<!-- hub-keep:start moved-names -->\n`hub` was\n<!-- hub-keep:end -->\nthe hub'),
+    ['region-marker', 'moved-names', 'region-marker', null]);
+  assert.throws(() => rules('a.md', '<!-- hub-keep:start no-such-rule -->\n<!-- hub-keep:end -->'), /unknown kept region 'no-such-rule'/);
+  assert.throws(() => rules('a.md', '# hub-keep:start moved-names\nhub'), /never closed/);
+  // A string that quotes a marker is not one.
+  assert.deepEqual(rules('a.md', 'x(\'hub-keep:start moved-names\')\nthe hub'), ['region-marker', null]);
+  // A whole-file rule covers only its file.
+  assert.deepEqual(rules('CHANGELOG.md', 'the hub'), ['history']);
+  assert.deepEqual(rules('docs/CHANGELOG.md', 'the hub'), [null]);
+});
+// hub-keep:end
