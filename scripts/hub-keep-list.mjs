@@ -35,7 +35,7 @@ export const FILE_RULES = [
   { rule: 'migration-guide', why: 'the hub → Product guide names every old name, with a before and after', test: (f) => f === 'docs/migrations/hub-to-product.md' },
   { rule: 'v3-fixture', why: 'a frozen v3 project — the golden test feeds it in unchanged', test: (f) => f.startsWith('cli/fixtures/golden-v3/') },
   { rule: 'v3-fixture', why: 'the ledger guard as 3.18.1 shipped it — tests run the old gate against new files', test: (f) => f === 'cli/fixtures/ledger-guard-v3.18.1.sh' },
-  { rule: 'installed-copy', why: "this repo's own installed gate, replaced by the next `yad update` here (E123 memory: not hand-edited)", test: (f) => f === '.github/workflows/yad-gate-sync.yml' },
+  { rule: 'installed-copy', why: "this repo's own installed gate, replaced by the next `yad update` here; until then it carries a hand-applied permission and action-pin fix, not the template's other changes", test: (f) => f === '.github/workflows/yad-gate-sync.yml' },
   { rule: 'not-a-word', why: 'a lockfile hash — base64 that happens to spell hub', test: (f) => f.endsWith('package-lock.json') },
   { rule: 'keep-list', why: 'this script, which must spell every form it keeps', test: (f) => f === 'scripts/hub-keep-list.mjs' },
 ];

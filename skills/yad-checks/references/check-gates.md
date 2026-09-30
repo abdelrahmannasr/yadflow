@@ -586,9 +586,11 @@ The gates run identically under either CI; the config just invokes the scripts w
   the version after it in a comment (`actions/checkout@<sha> # v4.4.0`). A tag such as `@v4` can be
   moved to other code; a SHA cannot. Each workflow also sets a top-level `permissions:` block that is
   read-only, so no job gets write access unless it asks for it. If your own Dependabot bumps a SHA in
-  an installed copy, `yad check` then reports that file as `modified`, and `yad update` keeps your copy
-  rather than overwriting it (`--overwrite-local` would replace it) — so that file stops receiving
-  template changes. To stay on the template, leave the pins to yadflow releases.
+  an installed copy that `.sdlc/managed.json` records, `yad check` then reports that file as
+  `modified`, and `yad update` keeps your copy rather than overwriting it — so that file stops
+  receiving template changes. (`--overwrite-local` replaces it after saving `<file>.yad-orig`; a copy
+  with no record reads as `outdated` and is replaced the same way.) To stay on the template, leave
+  the pins to yadflow releases.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
   passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`

@@ -39,7 +39,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history + tags: the shape-guide check compares this tree's SCHEMA_VERSION against the
           # one in the last release tag, and cannot see tags in a shallow clone.
@@ -74,7 +74,7 @@ jobs:
       id-token: write        # npm Trusted Publishing (OIDC) — the actual publish credential
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # Persist the release PAT so @semantic-release/git can push the

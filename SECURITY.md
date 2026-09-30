@@ -31,8 +31,9 @@ for confirmed issues. Credit is given in the advisory and the changelog unless y
 - **Pinned CI.** Every GitHub Action, in this repo's workflows and in the workflows yadflow installs
   into yours, is pinned to a commit SHA with its version in a comment (`@<sha> # v7.0.1`). Every
   workflow sets a top-level `permissions:` block that is read-only, and a job that must write asks
-  for it itself. A test fails the build if either rule is broken. Dependabot keeps this repo's own
-  workflows current; the installed templates are bumped by hand in a yadflow release.
+  for it itself. A test fails the build if either rule is broken, and also if one action at one major
+  has two different pins. Dependabot bumps only this repo's own workflows, so that last rule makes
+  its bump fail until the installed templates get the same pin in the same change.
 
 ## Scope notes for researchers
 

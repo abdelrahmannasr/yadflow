@@ -42,7 +42,7 @@ test('folderPathspec: a folder name never becomes glob syntax, and matches only 
   }), RUNS);
 });
 
-test('parseReviewBranch: any branch name gives null or a safe EP id, and round-trips', () => {
+test('parseReviewBranch: any branch name gives null or an epic id of safe characters, and round-trips', () => {
   fc.assert(fc.property(fc.oneof(nasty, nasty.map((s) => `review/EP-${s}`), nasty.map((s) => `review/${s}`)), (branch) => {
     const r = parseReviewBranch(branch);
     if (r === null) return;

@@ -12057,11 +12057,24 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
     .map((f) => [`${d}/${f}`, fs.readFileSync(path.join(ROOT, d, f), 'utf8')]));
   files.push(['pagesWorkflow(github)', pagesWorkflow('github')]);
   assert.ok(files.length >= 10, 'found the workflows');
+  // One action at one major is pinned to one SHA everywhere. Dependabot bumps only .github/workflows,
+  // so this is what makes a bump there fail until the templates and pagesWorkflow get the same pin.
+  const pins = new Map();
   for (const [name, text] of files) {
-    assert.match(text, /^permissions:/m, `${name}: top-level permissions`);
+    const top = text.match(/^permissions:(.*)\n((?:[ \t]+.*\n)*)/m);
+    assert.ok(top, `${name}: top-level permissions`);
+    assert.doesNotMatch(top[1] + top[2], /write/, `${name}: the top-level token is read-only; a job asks for write itself`);
     for (const [, ref] of text.matchAll(/^\s*(?:-\s+)?uses:\s*(\S+.*)$/gm)) {
       if (ref.startsWith('./')) continue;
-      assert.match(ref, /^[\w.-]+\/[\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*$/, `${name}: ${ref} is pinned by hash with a version comment`);
+      const m = ref.match(/^([\w.-]+\/[\w./-]+)@([0-9a-f]{40}) # v(\d+)(\.\d+)*$/);
+      assert.ok(m, `${name}: ${ref} is pinned by hash with a version comment`);
+      const key = `${m[1]}@v${m[3]}`;
+      if (!pins.has(key)) pins.set(key, [m[2], name]);
+      assert.equal(m[2], pins.get(key)[0], `${name}: ${key} has the same pin as ${pins.get(key)[1]}`);
+    }
+    // A gate that calls `gh api` needs GH_TOKEN in its job, or gh refuses to run in Actions at all.
+    for (const job of text.split(/^(?= {2}[\w-]+:\n)/m).slice(1)) {
+      if (/checks\/(verified-commits|ledger-guard)\.sh/.test(job)) assert.match(job, /GH_TOKEN: \$\{\{ github\.token \}\}/, `${name}: ${job.split(':')[0].trim()} passes GH_TOKEN`);
     }
   }
 });
