@@ -35,8 +35,8 @@ export function manifestPath(root, { epic, overview } = {}) {
 
 // ---- pure: platform/target + base path ----------------------------------------------------------
 // hub.json platform -> the default Pages target (github-pages | gitlab-pages | none/build-only).
-export function deployTargetFromHub(hub = {}) {
-  const platform = hub?.platform || detectPlatform(hub?.git_url || '');
+export function deployTargetFromProduct(productConfig = {}) {
+  const platform = productConfig?.platform || detectPlatform(productConfig?.git_url || '');
   if (platform === 'github') return 'github-pages';
   if (platform === 'gitlab') return 'gitlab-pages';
   return 'none';

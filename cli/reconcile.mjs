@@ -9,11 +9,11 @@ import {
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
-import { preflightGuardReadiness } from './hubcommit.mjs';
+import { preflightGuardReadiness } from './productcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions,
-  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyHubActions,
+  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
@@ -53,7 +53,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const actions = [
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     // E123: a renamed CI file the team edited is kept, and its new name is not installed beside it.
-    ...withoutKeptRenames([...productActions(root), ...legacyHubActions(root)]), ...hookActions(root, ideTargets),
+    ...withoutKeptRenames([...productActions(root), ...legacyProductActions(root)]), ...hookActions(root, ideTargets),
     ...orphanHookActions(root, ideTargets),
     // E48: this clone's git pre-commit hook — the person's half of the ledger guard.
     ...gitHookActions(root), ...orphanGitHookActions(root),
@@ -275,9 +275,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   let commits = [];
   if (push) {
     preflightGuardReadiness(root);
-    const hub = readJSON(productConfigPath(root), {});
-    const defByRoot = new Map([[root, hub?.default_branch]]);
-    const platformByRoot = new Map([[root, hub?.platform]]);
+    const productConfig = readJSON(productConfigPath(root), {});
+    const defByRoot = new Map([[root, productConfig?.default_branch]]);
+    const platformByRoot = new Map([[root, productConfig?.platform]]);
     for (const repo of registry.repos) {
       const repoRoot = path.resolve(root, repo.path);
       defByRoot.set(repoRoot, repo.default_branch);

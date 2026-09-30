@@ -263,10 +263,10 @@ export const gateRuleEnforced = (rule, cap = null) => {
 //
 // It sat in cli/gate.mjs until E71, which needs it in the active-people reader that gate.mjs prints —
 // a cycle. It is pure and data-only, so it belongs here beside `gateRuleFor`; gate.mjs re-exports it.
-export function legacyLogins(hub) {
+export function legacyLogins(productConfig) {
   const out = new Map();
   const clash = new Set();
-  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
+  for (const e of Array.isArray(productConfig?.roster) ? productConfig.roster : []) {
     if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
     if (out.has(e.name) && out.get(e.name) !== e.login) clash.add(e.name);
     out.set(e.name, e.login);

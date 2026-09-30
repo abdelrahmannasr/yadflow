@@ -337,10 +337,10 @@ test('migrate 1 -> 2: `ledger` records what the Product was already doing, for e
     ['flag true but NO platform', { bridge_enabled: true }, 'local'],
     ['platform null + flag true', { platform: null, bridge_enabled: true }, 'local'],
   ];
-  for (const [name, hub, expected] of cases) {
-    const T = project({ files: { '.sdlc/hub.json': JSON.stringify(hub, null, 2) + '\n' } });
+  for (const [name, productConfig, expected] of cases) {
+    const T = project({ files: { '.sdlc/hub.json': JSON.stringify(productConfig, null, 2) + '\n' } });
     try {
-      const before = isVerifiedLedger(hub);
+      const before = isVerifiedLedger(productConfig);
       await runMigrate(T, { apply: true });
       const after = read(path.join(T, '.sdlc/hub.json'));
       assert.equal(after.ledger, expected, name);
@@ -348,8 +348,8 @@ test('migrate 1 -> 2: `ledger` records what the Product was already doing, for e
       assert.equal(isVerifiedLedger(after), before, `${name}: migrating changed what the engine DOES`);
       // Add before you remove (rule 3): the old key survives, because a ledger-guard that has not
       // been refreshed by `yad update` yet is still reading it.
-      if ('bridge_enabled' in hub) assert.equal(after.bridge_enabled, hub.bridge_enabled, `${name}: old key kept`);
-      if ('bridge' in hub) assert.equal(after.bridge, hub.bridge, `${name}: legacy key kept`);
+      if ('bridge_enabled' in productConfig) assert.equal(after.bridge_enabled, productConfig.bridge_enabled, `${name}: old key kept`);
+      if ('bridge' in productConfig) assert.equal(after.bridge, productConfig.bridge, `${name}: legacy key kept`);
     } finally { cleanup(T); }
   }
 });
@@ -413,10 +413,10 @@ test('migrate 2 -> 3: the settings file gains its new name and KEEPS the old one
   try {
     const res = await runMigrate(T, { apply: true });
     const product = path.join(T, '.sdlc/product.json');
-    const hub = path.join(T, '.sdlc/hub.json');
+    const legacy = path.join(T, '.sdlc/hub.json');
     assert.ok(fs.existsSync(product), 'the new name exists');
-    assert.ok(fs.existsSync(hub), 'and the old one is still there — removing it would disarm an un-refreshed ledger-guard');
-    assert.equal(fs.readFileSync(product, 'utf8'), fs.readFileSync(hub, 'utf8'), 'byte-identical, not merely similar');
+    assert.ok(fs.existsSync(legacy), 'and the old one is still there — removing it would disarm an un-refreshed ledger-guard');
+    assert.equal(fs.readFileSync(product, 'utf8'), fs.readFileSync(legacy, 'utf8'), 'byte-identical, not merely similar');
     assert.equal(read(product).schemaVersion, ENGINE_SHAPE);
     assert.ok(res.written.includes('.sdlc/product.json'), 'and the report names the file it created');
   } finally { cleanup(T); }

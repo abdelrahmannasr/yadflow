@@ -375,10 +375,10 @@ export const productDrift = (root, epicDirs = []) => {
 // SAME order in bash because the check gates are standalone by design; that copy is the only one,
 // its header says so, and cli/test-checks.mjs runs a table of hub.json variants through both and
 // asserts they agree on every row. Three keys is three ways for two readers to drift.
-export const isVerifiedLedger = (hub) => {
-  if (!hub?.platform) return false;
-  if (typeof hub.ledger === 'string') return hub.ledger === 'verified';
-  return hub.bridge_enabled === true || hub.bridge === true;
+export const isVerifiedLedger = (productConfig) => {
+  if (!productConfig?.platform) return false;
+  if (typeof productConfig.ledger === 'string') return productConfig.ledger === 'verified';
+  return productConfig.bridge_enabled === true || productConfig.bridge === true;
 };
 
 // ---- the two dials (E28) ------------------------------------------------------------------------

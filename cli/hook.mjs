@@ -163,7 +163,7 @@ export function payloadPaths(payload) {
 // at the workspace has no `hub.json` under its root, and a session-rooted lookup would find nothing
 // and silently allow a mutation inside `project/product/epics/…` — the multi-repo, parallel-agent
 // setup this hook was reported from.
-export function hubRootFor(abs) {
+export function productRootFor(abs) {
   let dir = path.dirname(path.resolve(abs));
   for (;;) {
     if (fs.existsSync(productConfigPath(dir))) return dir;
@@ -215,8 +215,8 @@ const fold = (s) => s.toLowerCase();
 // and `git fetch` never fast-forwards it, so probing `main` would report an epic whose review PR has
 // already merged as absent from the base and wave a real mutation straight through. That is the
 // stale-clone case, and it is the common one, not an edge.
-export function resolveHookBase(productRoot, hub, runner = run) {
-  const cfg = hub?.default_branch || '';
+export function resolveHookBase(productRoot, productConfig, runner = run) {
+  const cfg = productConfig?.default_branch || '';
   const head = runner('git', ['-C', productRoot, 'symbolic-ref', '--short', '--quiet', 'refs/remotes/origin/HEAD']);
   for (const base of [cfg ? `origin/${cfg}` : '', head.ok ? head.stdout : '', 'origin/main']) {
     if (!base || base === 'origin/') continue;
@@ -244,8 +244,8 @@ export function resolveHookBase(productRoot, hub, runner = run) {
 // null means the base could not be read at all — "unknown", which ALLOWS. The working tree cannot
 // stand in for the base ref: a seed writes `state.json` first, so using that as proof would deny
 // every remaining file of the same seed.
-export function seededSlugs(productRoot, hub, runner = run) {
-  const base = resolveHookBase(productRoot, hub, runner);
+export function seededSlugs(productRoot, productConfig, runner = run) {
+  const base = resolveHookBase(productRoot, productConfig, runner);
   if (!base) return null;
   const tree = runner('git', [
     '-C', productRoot, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', '-z', base, '--', 'epics', FOUNDATION_DIR,
@@ -286,9 +286,9 @@ const PERSON_DOOR = [
 export function guardConfig(productRoot) {
   const product = path.join(productRoot, PROJECT_FILES.productConfig);
   const legacy = path.join(productRoot, PROJECT_FILES.productConfigLegacy);
-  if (!mirrorDrift(product, legacy)) return { hub: readJSON(productConfigPath(productRoot), null), drift: false };
+  if (!mirrorDrift(product, legacy)) return { productConfig: readJSON(productConfigPath(productRoot), null), drift: false };
   const both = [readJSON(product, null), readJSON(legacy, null)];
-  return { hub: both.find(isVerifiedLedger) ?? both[0], drift: true };
+  return { productConfig: both.find(isVerifiedLedger) ?? both[0], drift: true };
 }
 
 const driftLine = (productRoot) =>
@@ -352,20 +352,20 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run, pa
   const base = baseDirFor(env, runner, payloadCwd);
   // One `ls-tree` per Product, not one per candidate path: a MultiEdit carries many paths and this runs
   // inside the agent's tool loop.
-  const seededByHub = new Map();
+  const seededByProduct = new Map();
   const hits = [];
   for (const candidate of paths) {
     const abs = path.resolve(base, windowsPath(candidate));
-    const productRoot = hubRootFor(abs);
+    const productRoot = productRootFor(abs);
     if (!productRoot) continue;
-    const { hub, drift } = guardConfig(productRoot);
-    if (!isVerifiedLedger(hub)) continue;
+    const { productConfig, drift } = guardConfig(productRoot);
+    if (!isVerifiedLedger(productConfig)) continue;
     const rel = path.relative(productRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
     if (!hit) continue;
     if (hit.kind !== 'index') {
-      if (!seededByHub.has(productRoot)) seededByHub.set(productRoot, seededSlugs(productRoot, hub, runner));
-      const seeded = seededByHub.get(productRoot);
+      if (!seededByProduct.has(productRoot)) seededByProduct.set(productRoot, seededSlugs(productRoot, productConfig, runner));
+      const seeded = seededByProduct.get(productRoot);
       if (seeded === null) continue;                      // base unreadable — unknown allows
       if (!seeded.has(fold(hit.epic))) continue;          // creation, not mutation (#162)
     }

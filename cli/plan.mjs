@@ -638,7 +638,7 @@ function renamedNameFiles(root) {
 export function renamedNameHits(root) {
   const fragments = new Map();
   try {
-    for (const a of legacyHubActions(root)) {
+    for (const a of legacyProductActions(root)) {
       if (a.paths.includes('.gitlab-ci.yml') || a.status === 'modified') fragments.set(a.rename.from, a.status === 'modified' ? 'overwrite-local' : 'update');
     }
   } catch { /* an unreadable provenance record: nothing is promised, so every hit reads as the team's to change */ }
@@ -717,11 +717,11 @@ export function legacyRepoActions(root, repo) {
   return legacyFileActions(repo.name, path.resolve(root, repo.path), LEGACY_REPO_FILES[repo.platform], wiringFor(repo.platform));
 }
 
-export function legacyHubActions(root) {
-  const hub = readJSON(productConfigPath(root));
-  if (!isVerifiedLedger(hub)) return [];
-  const wiring = [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[hub.platform] || [])];
-  return legacyFileActions('hub', root, LEGACY_PRODUCT_FILES[hub.platform], wiring);
+export function legacyProductActions(root) {
+  const productConfig = readJSON(productConfigPath(root));
+  if (!isVerifiedLedger(productConfig)) return [];
+  const wiring = [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[productConfig.platform] || [])];
+  return legacyFileActions('hub', root, LEGACY_PRODUCT_FILES[productConfig.platform], wiring);
 }
 
 // Per-repo wiring (gate scripts, CI, PR template).
@@ -789,7 +789,7 @@ function productLinkAction(root, repo, repoRoot) {
   const top = gitTop(repoRoot);
   if (!top || top === gitTop(root)) return null;
   const dest = path.join(repoRoot, PRODUCT_LINK);
-  const hub = readJSON(productConfigPath(root), {}) || {};
+  const productConfig = readJSON(productConfigPath(root), {}) || {};
   let current;
   try { current = readJSONStrict(dest, null); } catch { current = undefined; }
   const base = {
@@ -799,11 +799,11 @@ function productLinkAction(root, repo, repoRoot) {
     paths: [PRODUCT_LINK],
   };
   const want = {
-    git_url: publicGitUrl(hub.git_url),
+    git_url: publicGitUrl(productConfig.git_url),
     path: isPlainObject(current) && typeof current.path === 'string' && current.path ? current.path : PRODUCT_LINK_DEFAULT_PATH,
     // Unknown stays null (review 1): a guessed `main` failed every clone of a Product whose trunk is
     // `master`; with none, checks/product-checkout.sh clones the remote's own default branch.
-    default_branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : null,
+    default_branch: typeof productConfig.default_branch === 'string' && productConfig.default_branch ? productConfig.default_branch : null,
   };
   // A record that does not parse, or is not an object, is someone's: reported and never overwritten by
   // a plain update; `--overwrite-local` saves it beside itself first, like any managed file.
@@ -836,13 +836,13 @@ function productLinkAction(root, repo, repoRoot) {
 // Product wiring (gate-sync + verified-commits CI on the Product itself). Only when the Product has a
 // platform and the verified ledger is explicitly enabled — a local Product stays local, with no error.
 export function productActions(root) {
-  const hub = readJSON(productConfigPath(root));
+  const productConfig = readJSON(productConfigPath(root));
   // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented hub-config schema); older setup versions
   // wrote `bridge` — `isVerifiedLedger` accepts an explicit true in either spelling, and is the one
   // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
-  if (!isVerifiedLedger(hub)) return [];
+  if (!isVerifiedLedger(productConfig)) return [];
   const ledger = readManagedLedger(root);
-  return [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[hub.platform] || [])].map((w) =>
+  return [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[productConfig.platform] || [])].map((w) =>
     wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
 }
@@ -1107,8 +1107,8 @@ function hookSettingsAction(root, adapter) {
 // the entry that invokes it. Verified-only exactly like `productActions` — with a local ledger it is
 // locally owned, the hand-edit the authoring skills describe is CORRECT, and a guard would be wrong.
 export function hookActions(root, ideTargets = ideTargetsFor(root)) {
-  const hub = readJSON(productConfigPath(root));
-  if (!isVerifiedLedger(hub)) return [];
+  const productConfig = readJSON(productConfigPath(root));
+  if (!isVerifiedLedger(productConfig)) return [];
   const ledger = readManagedLedger(root);
   const actions = HOOK_WIRING.map((w) =>
     wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
@@ -1145,8 +1145,8 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
 // Verified-only, like `hookActions`, and for the same reason: with a local ledger none of this was
 // installed in the first place.
 export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
-  const hub = readJSON(productConfigPath(root));
-  if (!isVerifiedLedger(hub)) return [];
+  const productConfig = readJSON(productConfigPath(root));
+  if (!isVerifiedLedger(productConfig)) return [];
   const kept = new Set(safeIdeTargetsFor(root, ideTargets));
   const stillNeeded = new Set(
     [...kept].flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest)),
@@ -1467,15 +1467,15 @@ const GUARD_SCRIPTS = new Set(['hooks/ledger-guard.sh', 'hooks/ledger-guard-curs
 // It never promises what `yad check --fix` will do: both callers are reached only for entries that run has
 // NOT taken out (another event, `settings.local.json`, a file changed since the plan), so the reader acts.
 export function entryAdvice(root, scriptRel) {
-  const hub = readJSON(productConfigPath(root), null);
+  const productConfig = readJSON(productConfigPath(root), null);
   // Capture off: no Node capture script is installed, so there is nothing to point at (review 8).
   if (!GUARD_SCRIPTS.has(scriptRel) && !captureWanted(root)) {
     return 'remove each entry that runs it — capture is off here (`"capture": false` in the Product config), so no capture hook should run';
   }
-  if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(hub)) {
+  if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(productConfig)) {
     return 'point each entry that runs it at the `node hooks/….mjs` command yad now writes, or remove it if that harness should no longer run the hook';
   }
-  return hub === null
+  return productConfig === null
     ? 'the Product config does not read, so yad cannot tell whether a ledger guard belongs here — fix the config, or remove each entry that runs it'
     : 'remove each entry that runs it — this Product has no ledger guard (its ledger is not verified), so `yad check --fix` leaves those entries alone';
 }

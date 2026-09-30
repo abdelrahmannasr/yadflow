@@ -513,20 +513,20 @@ test('E113 review 7: the advice for a stuck old entry, every branch in full — 
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-advice-'));
   try {
     fs.mkdirSync(path.join(T, '.sdlc'));
-    const hub = (v) => fs.writeFileSync(path.join(T, '.sdlc/hub.json'), typeof v === 'string' ? v : JSON.stringify(v));
+    const productConfig = (v) => fs.writeFileSync(path.join(T, '.sdlc/hub.json'), typeof v === 'string' ? v : JSON.stringify(v));
     const repoint = 'point each entry that runs it at the `node hooks/….mjs` command yad now writes, or remove it if that harness should no longer run the hook';
-    hub({ ledger: 'verified', platform: 'github' });
+    productConfig({ ledger: 'verified', platform: 'github' });
     for (const s of ['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh', 'hooks/yad-capture.sh']) assert.equal(entryAdvice(T, s), repoint, s);
-    hub({ ledger: 'local', platform: 'github' });
+    productConfig({ ledger: 'local', platform: 'github' });
     assert.equal(entryAdvice(T, 'hooks/yad-capture.sh'), repoint, 'capture is installed with a local ledger');
     for (const s of ['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']) {
       assert.equal(entryAdvice(T, s), 'remove each entry that runs it — this Product has no ledger guard (its ledger is not verified), so `yad check --fix` leaves those entries alone');
     }
-    hub({ ledger: 'local', platform: 'github', capture: false });
+    productConfig({ ledger: 'local', platform: 'github', capture: false });
     assert.equal(entryAdvice(T, 'hooks/yad-capture.sh'), 'remove each entry that runs it — capture is off here (`"capture": false` in the Product config), so no capture hook should run');
-    hub({ ledger: 'verified', platform: 'github', capture: false });
+    productConfig({ ledger: 'verified', platform: 'github', capture: false });
     assert.equal(entryAdvice(T, 'hooks/ledger-guard.sh'), repoint, 'capture off does not touch the guard');
-    hub('{ not json');
+    productConfig('{ not json');
     assert.equal(entryAdvice(T, 'hooks/ledger-guard.sh'), 'the Product config does not read, so yad cannot tell whether a ledger guard belongs here — fix the config, or remove each entry that runs it');
     assert.equal(entryAdvice(T, 'hooks/yad-capture.sh'), repoint);
   } finally { cleanup(T); }

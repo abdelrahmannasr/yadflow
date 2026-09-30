@@ -29,7 +29,7 @@ export const MODES = ['solo', 'team'];
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 // The mode the gates act on today. Read from `solo` (and the older `review_gate.solo`), never from `mode`.
-export const modeOf = (hub) => (isSolo(hub) ? 'solo' : 'team');
+export const modeOf = (productConfig) => (isSolo(productConfig) ? 'solo' : 'team');
 
 // PURE. The fields a write of mode `to` puts on the Product config, given what is there now. Shared by this
 // command and `yad setup`, so the two writers can never spell the switch differently (staged-rename trap 1).
@@ -37,8 +37,8 @@ export const modeOf = (hub) => (isSolo(hub) ? 'solo' : 'team');
 //   review_gate   `review_gate.solo: true` also switches solo on, so switching to team turns it off too;
 //                 otherwise the old flag would keep the gates waived under a file that says `team`.
 //   mode_set      only when the mode the gates act on actually changes: who, when, why, and from what.
-export function modeFields(hub, to, { by = null, date = null, reason = null } = {}) {
-  const cur = isObj(hub) ? hub : {};
+export function modeFields(productConfig, to, { by = null, date = null, reason = null } = {}) {
+  const cur = isObj(productConfig) ? productConfig : {};
   const from = modeOf(cur);
   const fields = { solo: to === 'solo', mode: to };
   if (to === 'team' && isObj(cur.review_gate) && cur.review_gate.solo === true) {
@@ -52,11 +52,11 @@ export function modeFields(hub, to, { by = null, date = null, reason = null } = 
 //   changed: false          the file already says it both ways — nothing to write.
 //   flipped: true           the gates act differently from the next sync; `mode_set` records it.
 //   flipped: false, changed the gates act the same, and the new name is added beside the old one.
-export function planMode(hub, { to, reason = null, by = null, date = null } = {}) {
+export function planMode(productConfig, { to, reason = null, by = null, date = null } = {}) {
   if (!MODES.includes(to)) {
     return { ok: false, message: `unknown mode: ${to ?? '(none)'}`, hint: 'usage: yad mode [solo --reason "<why>" | team [--reason "<why>"]]' };
   }
-  const cur = isObj(hub) ? hub : {};
+  const cur = isObj(productConfig) ? productConfig : {};
   const from = modeOf(cur);
   const why = typeof reason === 'string' ? reason.trim() : '';
   if (from !== to && to === 'solo' && !why) {
@@ -69,7 +69,7 @@ export function planMode(hub, { to, reason = null, by = null, date = null } = {}
   const fields = modeFields(cur, to, { by, date, reason: why || null });
   const next = { ...cur, ...fields };
   const changed = Object.keys(fields).some((k) => JSON.stringify(cur[k]) !== JSON.stringify(fields[k]));
-  return { ok: true, from, to, flipped: from !== to, changed, hub: next };
+  return { ok: true, from, to, flipped: from !== to, changed, productConfig: next };
 }
 
 // Every review gate that is open right now, across the feature epics and the Foundation. These are the ones
@@ -113,22 +113,22 @@ export async function runMode(root, { to = null, reason = null, json = false, to
   const bail = makeBail(json);
   const file = productConfigPath(root);
   const rel = path.relative(root, file).split(path.sep).join('/');
-  let hub;
+  let productConfig;
   try {
-    hub = readJSONStrict(file, null);
+    productConfig = readJSONStrict(file, null);
   } catch {
     return bail(`${rel} does not parse — nothing is written over it`, 'fix the JSON or restore it from git, then run this again');
   }
-  if (hub !== null && !isObj(hub)) return bail(`${rel} has the wrong shape — nothing is written over it`, 'expected a JSON object; fix it or re-run `yad setup`');
+  if (productConfig !== null && !isObj(productConfig)) return bail(`${rel} has the wrong shape — nothing is written over it`, 'expected a JSON object; fix it or re-run `yad setup`');
 
   if (to === null) {
-    const mode = modeOf(hub);
-    const name = isObj(hub) && hub.mode !== undefined ? hub.mode : null;
-    const set = isObj(hub) && isObj(hub.mode_set) ? hub.mode_set : null;
-    const hint = soloTeamHint(root, hub, { solo: mode === 'solo', headCount, today });
+    const mode = modeOf(productConfig);
+    const name = isObj(productConfig) && productConfig.mode !== undefined ? productConfig.mode : null;
+    const set = isObj(productConfig) && isObj(productConfig.mode_set) ? productConfig.mode_set : null;
+    const hint = soloTeamHint(root, productConfig, { solo: mode === 'solo', headCount, today });
     if (json) return emitJSON({ ok: true, mode, name, agrees: name === null || name === mode, set, suggest: hint });
     ok(`mode: ${mode} — ${MEANING[mode]}`);
-    if (!hub) info('no Product config yet — team mode is the default; `yad setup` records it');
+    if (!productConfig) info('no Product config yet — team mode is the default; `yad setup` records it');
     if (set) info(setLine(set));
     if (name !== null && name !== mode) warn(`the file also says mode: ${JSON.stringify(name)}, but the old \`solo\` flag is the one read — run \`yad mode ${mode}\` to make them agree`);
     printTeamHint(hint, { unknown: true });
@@ -137,26 +137,26 @@ export async function runMode(root, { to = null, reason = null, json = false, to
 
   // The word is checked first, so a typo on a fresh directory is named as a typo, not as a missing setup.
   if (!MODES.includes(to)) return bail(`unknown mode: ${to}`, 'usage: yad mode [solo --reason "<why>" | team [--reason "<why>"]]');
-  if (!hub) return bail(`no Product config at ${rel}`, 'run `yad setup` first — it records the mode with everything else');
-  const plan = planMode(hub, { to, reason, by: recordActor(root), date: today });
+  if (!productConfig) return bail(`no Product config at ${rel}`, 'run `yad setup` first — it records the mode with everything else');
+  const plan = planMode(productConfig, { to, reason, by: recordActor(root), date: today });
   if (!plan.ok) return bail(plan.message, plan.hint);
-  if (plan.changed) writeProductConfig(root, plan.hub);
+  if (plan.changed) writeProductConfig(root, plan.productConfig);
   // On a verified Product CI writes the ledger only at a merge, so an open review is never `in_review` in
   // state.json — the platform's open PRs are the list. Say so, rather than print nothing and read as "none".
-  const verified = isVerifiedLedger(hub);
+  const verified = isVerifiedLedger(productConfig);
   const open = plan.flipped && !verified ? openReviews(root) : [];
   if (json) {
-    return emitJSON({ ok: true, mode: to, changed: plan.changed, flipped: plan.flipped, set: plan.flipped ? plan.hub.mode_set : null, openReviews: open, openReviewsKnown: !verified });
+    return emitJSON({ ok: true, mode: to, changed: plan.changed, flipped: plan.flipped, set: plan.flipped ? plan.productConfig.mode_set : null, openReviews: open, openReviewsKnown: !verified });
   }
   if (!plan.changed) return ok(`already ${to} — nothing changed`);
   if (!plan.flipped) {
     // Reached two ways: `mode` was absent (a Product set up before E10), or a hand edit left it saying the
     // other mode — which is where `mode:disagree` sends people. Say which one happened.
-    const what = hub.mode === undefined ? 'the new name `mode` was added beside `solo`' : '`mode` now matches `solo`';
+    const what = productConfig.mode === undefined ? 'the new name `mode` was added beside `solo`' : '`mode` now matches `solo`';
     ok(`already ${to} — ${what}; the gates act exactly as before`);
   } else {
     ok(`mode: ${to} — ${MEANING[to]}`);
-    if (plan.hub.mode_set.reason) info(`reason: ${plan.hub.mode_set.reason}`);
+    if (plan.productConfig.mode_set.reason) info(`reason: ${plan.productConfig.mode_set.reason}`);
     if (verified) {
       info(`this Product's ledger is verified, so its open reviews live on the platform, not in state.json — every open review PR/MR follows the ${to} rule from its next CI run`);
     } else if (open.length) {

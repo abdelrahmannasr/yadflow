@@ -98,9 +98,9 @@ export async function collectGolden(root) {
   // The gate predicate, wired the way gateSync wires it (cli/gate.mjs). `threadsResolved` and
   // `merged` are the platform's answers, which a frozen fixture has no way to know; both are set
   // true so the snapshot isolates the part the predicate actually decides — the approval rule.
-  const { hub } = loadProduct(root);
-  const solo = isSolo(hub);
-  const reqEng = requireEngagement(hub);
+  const { productConfig } = loadProduct(root);
+  const solo = isSolo(productConfig);
+  const reqEng = requireEngagement(productConfig);
   const gates = [];
   const epicsDir = path.join(root, 'epics');
   for (const epic of fs.readdirSync(epicsDir).sort()) {

@@ -718,8 +718,8 @@ export function projectJsonFiles(root) {
 // ANY reason (a hand re-indent, say), and `ci-owned`/`ahead`/`list` short-circuit before the byte
 // comparison happens at all.
 export function planMigration(root, { migrations = MIGRATIONS } = {}) {
-  const hub = readJSON(productConfigPath(root), null);
-  const verified = isVerifiedLedger(hub);
+  const productConfig = readJSON(productConfigPath(root), null);
+  const verified = isVerifiedLedger(productConfig);
   // On a verified Product the ledger guard refuses a human commit to these, so rewriting them locally
   // would produce a change that cannot be committed. Of the four the guard names, only state.json is
   // an object; the rest are arrays and would be skipped anyway.

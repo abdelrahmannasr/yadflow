@@ -32,7 +32,7 @@ import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
 import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
-import { resolveDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
+import { resolveDefaultBranch, preflightGuardReadiness } from './productcommit.mjs';
 
 // The authoring steps a fold can close: every catalogue step of kind `author` that writes a Shape artifact.
 // The Build steps (spec, tasks, implement, checks) write code in another repo and have no artifact here.
@@ -125,8 +125,8 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   if (!fs.existsSync(productConfigPath(root))) return refuse('not a Product (no .sdlc/hub.json or product.json here)', 'run it from the Product root, or pass --dir');
   if (!fs.existsSync(epicRoot(root, epic))) return refuse(`no ${epicRel(epic)}/ in this Product`);
 
-  const hub = readJSON(productConfigPath(root), {}) || {};
-  const verified = isVerifiedLedger(hub);
+  const productConfig = readJSON(productConfigPath(root), {}) || {};
+  const verified = isVerifiedLedger(productConfig);
   const branchR = git(['symbolic-ref', '--short', '-q', 'HEAD']);
   const branch = branchR.ok ? branchR.out.trim() : null;
   if (verified && !branch) {
@@ -140,7 +140,7 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
     .find((f) => { const r = git(['rev-parse', '--git-path', f]); return r.ok && fs.existsSync(path.resolve(root, r.out.trim())); });
   if (busy) return refuse(`a ${IN_PROGRESS[busy]} is in progress — finish or abort it first, then run yad fold again`);
   if (verified) {
-    const def = resolveDefaultBranch((...a) => { const r = git(a); return { ok: r.ok, stdout: r.out.trim() }; }, hub);
+    const def = resolveDefaultBranch((...a) => { const r = git(a); return { ok: r.ok, stdout: r.out.trim() }; }, productConfig);
     if (branch === def) {
       return refuse(`on the default branch '${def}' — with a verified ledger, artifacts reach it only through the review PR`,
         `switch to the step's authoring branch first (git switch -c ${step}/${epic}), then run yad fold again`);

@@ -10,7 +10,7 @@ import {
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
-  legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions, withoutKeptRenames,
+  legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { modeFields, modeOf } from './mode.mjs';
@@ -111,7 +111,7 @@ export function throughGitDir(root, rpath) {
 // on the keep path. That includes a `roster` or `verified_authors` an older release wrote (E62): the
 // wizard no longer collects or reads either, and it never deletes them — `yad doctor` names them as
 // unused instead.
-export function buildReconfiguredHub(cur, fields) {
+export function buildReconfiguredProductConfig(cur, fields) {
   return { ...(cur || {}), ...fields };
 }
 
@@ -273,8 +273,8 @@ function applyActions(actions, { force = false } = {}) {
 // otherwise we prompt with a default. Pure of side effects — it only reads. Returns
 // { solo, team_size, codebase, repo_layout, configureTools }.
 export async function resolveProfile(root, opts = {}) {
-  const hub = readJSON(productConfigPath(root), null);
-  const prev = (hub && hub.profile) || {};
+  const productConfig = readJSON(productConfigPath(root), null);
+  const prev = (productConfig && productConfig.profile) || {};
 
   // 1. Solo or team (+ size). --solo / --team <n> win; else carry hub.solo forward; else ask.
   let solo, team_size;
@@ -282,12 +282,12 @@ export async function resolveProfile(root, opts = {}) {
   else if (opts.team != null) { team_size = Math.max(1, parseInt(opts.team, 10) || 1); solo = team_size <= 1; }
   // Either spelling carries forward: the older `review_gate.solo: true` also waives the gates, and asking again
   // would default a configured team Product to solo and switch approvals off with nobody choosing it (E10).
-  else if (typeof hub?.solo === 'boolean' || hub?.review_gate?.solo === true) { solo = modeOf(hub) === 'solo'; team_size = prev.team_size ?? (solo ? 1 : 2); }
+  else if (typeof productConfig?.solo === 'boolean' || productConfig?.review_gate?.solo === true) { solo = modeOf(productConfig) === 'solo'; team_size = prev.team_size ?? (solo ? 1 : 2); }
   else {
     // No mode recorded. The default used to come from the roster's size; it now comes from the team size
     // setup recorded, and a Product that exists with neither defaults to TEAM (E62). Solo waives every
     // approval, so it must be a choice, never what a scripted re-run of an old Product falls into.
-    const known = prev.team_size ?? (hub ? 2 : 1);
+    const known = prev.team_size ?? (productConfig ? 2 : 1);
     solo = !(await ask('Solo or team?', known > 1 ? 'team' : 'solo')).toLowerCase().startsWith('t');
     team_size = solo ? 1 : Math.max(2, parseInt(await ask('  how many team members?', String(Math.max(2, known))), 10) || 2);
   }
@@ -435,7 +435,7 @@ export async function runSetup(root, opts = {}) {
     // the reader falls back to when `ledger` is absent, so nothing is lost by waiting: `yad migrate`
     // adds the key, and the setting it computes is the one these booleans just recorded.
     const onNewShape = (cur.schemaVersion ?? 1) >= 2 || !Object.keys(cur).length;
-    const next = buildReconfiguredHub(cur, {
+    const next = buildReconfiguredProductConfig(cur, {
       platform: enabled ? platform : null, git_url,
       ...(onNewShape ? { ledger: enabled ? 'verified' : 'local' } : {}),
       bridge_enabled: enabled, bridge: enabled,
@@ -619,14 +619,14 @@ export async function runSetup(root, opts = {}) {
     applyActions(repoLegacy, { force: true });
   }
   // the Product: event-driven gate-sync CI, so platform approvals/merges drive `yad gate ci`
-  const hubLegacy = legacyHubActions(root);
-  const hubWiring = withoutKeptRenames([...productActions(root), ...hubLegacy]).filter((a) => !hubLegacy.includes(a));
-  if (hubWiring.length) {
+  const productLegacy = legacyProductActions(root);
+  const productWiring = withoutKeptRenames([...productActions(root), ...productLegacy]).filter((a) => !productLegacy.includes(a));
+  if (productWiring.length) {
     log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
-    applyActions(hubWiring, { force: true });
-    wired.push(...hubWiring);
+    applyActions(productWiring, { force: true });
+    wired.push(...productWiring);
   }
-  applyActions(hubLegacy, { force: true });
+  applyActions(productLegacy, { force: true });
   // the Product, locally: the harness ledger guard, so an agent is refused the CI-owned ledger write at
   // the moment it tries it rather than by a failed pipeline later (#171). Verified-only like the CI
   // above — with no bridge the ledger is locally owned and the guard would be wrong.

@@ -24,7 +24,7 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 The `<base>` argument is **optional**. The order is: the **argument**, else `SDLC_BASE`, else the
 **configured** `default_branch` (from the Product settings file — see the next section), else the remote's
 **published default branch** (`git symbolic-ref refs/remotes/origin/HEAD`), else `origin/main` —
-the same order the CLI resolves (`cli/hubcommit.mjs`, `cli/repo.mjs`), so a gate never diffs a
+the same order the CLI resolves (`cli/productcommit.mjs`, `cli/repo.mjs`), so a gate never diffs a
 different range than the `yad` commands run beside it. Each candidate must actually **resolve**
 before it is used, so a *dangling* `origin/HEAD` (trunk renamed, the old remote-tracking ref pruned)
 falls through instead of failing the gate on a fully-fetched repo. CI always passes the base

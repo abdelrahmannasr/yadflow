@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyHubActions, renamedNameHits, PRODUCT_PROFILE_GATES, PRODUCT_CHECK_WORKFLOWS, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_PROFILE_GATES, PRODUCT_CHECK_WORKFLOWS, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -23,7 +23,7 @@ import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses } from './protection.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
-import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { readOwners } from './owners.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
@@ -39,7 +39,7 @@ const MIN_NODE = 18;
 
 // Solo mode (a lone developer): approval waived, merge + resolved threads still gate. Persisted in
 // hub.json. Mirrors gate.mjs / next.mjs.
-const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
+const isSolo = (productConfig) => !!(productConfig && (productConfig.solo === true || productConfig.review_gate?.solo === true));
 // Is an already-resolved path nested under the project root? Repo paths are contained to the WORKSPACE
 // (the root's parent, see setup.insideWorkspace), so a registered sibling resolves outside the root —
 // which is what distinguishes "absent because it lives elsewhere" from "absent because it is broken".
@@ -120,27 +120,27 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   else check(checks, 'cli-version', 'project', 'ok', `version stamp matches (v${VERSION})`);
 
   // hub.json: parse + shape
-  let hub = null;
+  let productConfig = null;
   if (!exists(productPath)) {
     check(checks, 'hub', 'project', 'warn', `${settingsRel} absent — local gate`, 'run `yad setup` to configure a platform');
   } else {
-    let hubBroken = false;
+    let productConfigBroken = false;
     try {
-      hub = readJSONStrict(productPath, null);
+      productConfig = readJSONStrict(productPath, null);
     } catch (e) {
-      hubBroken = true;
+      productConfigBroken = true;
       check(checks, 'hub', 'project', 'fail', `${settingsRel} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
     }
-    if (hubBroken) { /* reported above */ }
-    else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${settingsRel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
-    else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${settingsRel}: unknown platform '${forTerminal(hub.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
+    if (productConfigBroken) { /* reported above */ }
+    else if (typeof productConfig !== 'object' || Array.isArray(productConfig) || productConfig === null) check(checks, 'hub', 'project', 'fail', `${settingsRel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    else if (![null, undefined, 'github', 'gitlab'].includes(productConfig.platform)) check(checks, 'hub', 'project', 'fail', `${settingsRel}: unknown platform '${forTerminal(productConfig.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
-      check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
+      check(checks, 'hub', 'project', 'ok', `hub: ${productConfig.platform || 'local'}`);
       // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
       // name → login pairs only let the first sync recognise older approvals (`legacyLogins`) — so say so
       // — a team that still edits it would otherwise believe it decides something. An empty list (what a
       // solo setup used to write) says nothing about people and is left quiet.
-      const r = hub.roster;
+      const r = productConfig.roster;
       const listed = Array.isArray(r) ? r.length > 0 : (r && typeof r === 'object' ? Object.keys(r).length > 0 : !!r);
       if (listed) {
         // When it can go (E64): once every older record it can place names the login. Counted with the same
@@ -148,8 +148,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         let waiting = 0;
         let unplaced = 0;
         const waitingIn = [];
-        const aliases = legacyLogins(hub);
-        const clashed = ambiguousLegacyNames(hub);
+        const aliases = legacyLogins(productConfig);
+        const clashed = ambiguousLegacyNames(productConfig);
         for (const e of epicIds(root)) {
           try {
             const led = loadLedger(epicRoot(root, e));
@@ -158,10 +158,10 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
             unplaced += st.unplaced;
           } catch { /* an unreadable ledger is reported by its own check */ }
         }
-        const when = !hub.platform
+        const when = !productConfig.platform
           ? `nothing reads it on a Product with no platform — delete the \`roster\` key from ${settingsEditHint(root)}`
           : waiting
-            ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(hub) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key from ${settingsEditHint(root)}`
+            ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(productConfig) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key from ${settingsEditHint(root)}`
             : unplaced
               ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key from ${settingsEditHint(root)} once those reviews are closed`
               : `no older record needs it any more — delete the \`roster\` key from ${settingsEditHint(root)}`;
@@ -174,21 +174,21 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // that entry, and an unlisted login was written `unverified` — so it is not warned about.) The hint
         // does NOT say "rename it": renaming one entry hands every older record under the name to whoever
         // keeps it, which can put someone's approval of old content on a person who never gave it.
-        const unclear = [...ambiguousLegacyNames(hub).keys()];
+        const unclear = [...ambiguousLegacyNames(productConfig).keys()];
         if (unclear.length) {
           check(checks, 'people:roster-ambiguous', 'project', 'warn',
             `${settingsRel} roster name(s) ${unclear.map(forTerminal).join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
             'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
         }
       }
-      if (isSolo(hub)) {
+      if (isSolo(productConfig)) {
         check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
         // E74: suggest team mode when the count shows more than one person may work here. Counted ONLY
         // in solo mode, because the count walks the git history of every connected repo; team mode
         // pays nothing. A suggestion, never a switch — so a warning, never a failure. An unknown count
         // is a warning too (the user's choice, 2026-09-22): doctor is where a count that cannot be read
         // is fixed, and a ✓ beside "could not be counted" would read as healthy.
-        const hint = soloTeamHint(root, hub, { solo: true, headCount });
+        const hint = soloTeamHint(root, productConfig, { solo: true, headCount });
         if (hint.line && hint.known) {
           check(checks, 'mode:suggest-team', 'project', 'warn', hint.line,
             `run \`${TEAM_CMD}\` if more than one person works here; if it is only you (for example two accounts, two spellings of your name, a robot committing or auto-approving, or your own approval on a local ledger), leave solo mode on`);
@@ -200,26 +200,26 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       // E10 writes `mode: solo|team` beside `solo`, and `solo` is still the one read. A hand edit can leave
       // the two saying different things; name that, and say which one the gates follow. Silent on a file
       // with no `mode`, which is every Product set up before E10 (the frozen golden one included).
-      if (hub.mode !== undefined) {
-        const acting = isSolo(hub) ? 'solo' : 'team';
-        if (hub.mode !== acting) {
+      if (productConfig.mode !== undefined) {
+        const acting = isSolo(productConfig) ? 'solo' : 'team';
+        if (productConfig.mode !== acting) {
           check(checks, 'mode:disagree', 'project', 'warn',
-            `${settingsRel} says mode: ${JSON.stringify(forTerminal(hub.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
-            ['solo', 'team'].includes(hub.mode)
-              ? `\`yad mode ${acting}\` keeps what the gates do now; \`yad mode ${hub.mode === 'solo' ? 'solo --reason "<why>"' : 'team'}\` makes the gates follow \`mode\``
+            `${settingsRel} says mode: ${JSON.stringify(forTerminal(productConfig.mode))}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
+            ['solo', 'team'].includes(productConfig.mode)
+              ? `\`yad mode ${acting}\` keeps what the gates do now; \`yad mode ${productConfig.mode === 'solo' ? 'solo --reason "<why>"' : 'team'}\` makes the gates follow \`mode\``
               : `\`yad mode ${acting}\` writes a mode the gates recognise`);
         }
       }
       // platform CLI + auth (best-effort; auth probing is the user's own session)
-      const cli = cliFor(hub.platform);
+      const cli = cliFor(productConfig.platform);
       if (cli) {
         // git_url is required whenever a platform is set — doctor needs it to scope the auth probe
         // and the verified ledger/PR flow needs it to open PRs. Warn on its absence directly (not on the
         // resolved host), so it fires even when an origin remote can substitute: the field itself
         // is required regardless.
-        if (!hostFromGitUrl(hub.git_url)) {
+        if (!hostFromGitUrl(productConfig.git_url)) {
           check(checks, 'hub-git-url', 'project', 'warn',
-            `${settingsRel} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
+            `${settingsRel} sets platform '${productConfig.platform}' but has no git_url [YAD-CFG-005]`,
             `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
@@ -227,7 +227,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // instance fails, so an unrelated stale login (e.g. a dead gitlab.com token) would falsely
         // flag a working self-hosted Product — so we SKIP the probe entirely when no host resolves
         // rather than run the flaky unscoped form.
-        const rawHost = hostFromGitUrl(hub.git_url)
+        const rawHost = hostFromGitUrl(productConfig.git_url)
           || hostFromGitUrl(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
         // Never asked about or repeated unless it is a plain host name (E81 review 14): it is printed
         // inside `gh auth login --hostname …` for the person to run.
@@ -241,7 +241,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           // GitLab API reachability: the gate reads MR state via `glab api …` (approvals, discussions).
           // A present+authenticated glab whose token lacks api scope would still break readPrGitLab, so
           // probe a cheap api call (warn-only) to surface it before a sync silently holds the gate.
-          if (hub.platform === 'gitlab') {
+          if (productConfig.platform === 'gitlab') {
             // Scope the probe to the Product's own host (like the auth check above) so a multi-instance
             // setup doesn't hit the wrong GitLab. `host` is guaranteed truthy here (we skip the whole
             // auth branch when it cannot be resolved), so the probe is always host-scoped.
@@ -261,8 +261,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // an agent's hand-edit is always rejected later by `ledger-guard`, so the local hook that refuses it
   // up front should be installed. With a local ledger nothing guards it, and the hand-edit the
   // authoring skills describe is correct — nothing to report, so the check is silent rather than `ok`.
-  const hubForHooks = readJSON(productPath, null);
-  if (isVerifiedLedger(hubForHooks)) {
+  const productConfigForHooks = readJSON(productPath, null);
+  if (isVerifiedLedger(productConfigForHooks)) {
     const unwired = [];
     const broken = [];
     // PRESENT. The entry runs it as `node <file>` (E113), so no execute bit is involved.
@@ -511,7 +511,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       { where: 'the Product', file: path.join(root, '.sdlc', 'verified-authors') },
       ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
     ].filter((x) => exists(x.file)).map((x) => x.where);
-    const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
+    const listedAuthors = productConfig && typeof productConfig === 'object' && Array.isArray(productConfig.verified_authors) && productConfig.verified_authors.length > 0;
     if (allowFiles.length || listedAuthors) {
       const what = [listedAuthors ? `\`verified_authors\` in ${settingsRel}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
       check(checks, 'people:verified-authors-unused', 'project', 'warn',
@@ -734,8 +734,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     }
   }
 
-  ciTagsChecks(checks, root, hub, registry);
-  return { hub, registry };
+  ciTagsChecks(checks, root, productConfig, registry);
+  return { productConfig, registry };
 }
 
 // GitLab CI runner tags: the wired fragments run docker-image jobs. On instances whose runners are
@@ -743,7 +743,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
 // forever — silently blocking the gates (issue #50). A current fragment carries
 // `tags: [$YAD_RUNNER_TAGS]`; warn on any wired GitLab fragment that sets an `image:` but has no
 // `tags:` (an old install, or one hand-reverted by a sync). Pure local read — no API calls.
-export function ciTagsChecks(checks, root, hub, registry) {
+export function ciTagsChecks(checks, root, productConfig, registry) {
   const untagged = (p) => {
     try {
       const txt = fs.readFileSync(p, 'utf8');
@@ -751,7 +751,7 @@ export function ciTagsChecks(checks, root, hub, registry) {
     } catch { return false; } // absent fragment is not this check's concern
   };
   const fragments = [];
-  if (hub?.platform === 'gitlab' && isVerifiedLedger(hub)) {
+  if (productConfig?.platform === 'gitlab' && isVerifiedLedger(productConfig)) {
     fragments.push(
       { scope: 'hub', file: '.gitlab/ci/yad-gate-sync.yml', path: path.join(root, '.gitlab/ci/yad-gate-sync.yml') },
       { scope: 'hub', file: '.gitlab/ci/yad-verified-commits.yml', path: path.join(root, '.gitlab/ci/yad-verified-commits.yml') },
@@ -994,7 +994,7 @@ export function epicChecks(checks, root) {
 //                      ledger — so it is reported as fine, because a warning nobody can clear teaches
 //                      people to stop reading warnings.
 export function foundationChecks(checks, root) {
-  const hub = readJSON(productConfigPath(root), null);
+  const productConfig = readJSON(productConfigPath(root), null);
   const hasFoundation = exists(path.join(epicRoot(root, FOUNDATION_EPIC), '.sdlc', 'state.json'));
   const hasLegacy = exists(path.join(epicRoot(root, DISCOVERY_EPIC), '.sdlc', 'state.json'));
   if (hasFoundation && hasLegacy) {
@@ -1002,7 +1002,7 @@ export function foundationChecks(checks, root) {
       `two product levels: ${FOUNDATION_DIR}/ and epics/${DISCOVERY_EPIC}/ — a product has one Foundation`,
       `decide which one is real. \`yad next\` uses ${FOUNDATION_DIR}/; to keep the old one instead, move ${FOUNDATION_DIR}/ aside and run \`yad migrate --apply\``);
   } else if (hasLegacy) {
-    if (isVerifiedLedger(hub)) {
+    if (isVerifiedLedger(productConfig)) {
       // CI moves it (cli/gate.mjs `convertProductLevel`), but only once the committed checks know the
       // Foundation — so the stale case is the one with something for a person to do.
       const stale = staleFoundationGuards(root);
@@ -1025,7 +1025,7 @@ export function foundationChecks(checks, root) {
       `epics/${FOUNDATION_EPIC}/ exists, but that id's folder is ${FOUNDATION_DIR}/ — nothing ever reads this one`,
       `move anything real into ${FOUNDATION_DIR}/, then delete epics/${FOUNDATION_EPIC}/`);
   }
-  foundationGuardChecks(checks, root, hub);
+  foundationGuardChecks(checks, root, productConfig);
   if (hasFoundation) foundationSectionChecks(checks, root);
 }
 
@@ -1057,9 +1057,9 @@ export function foundationSectionChecks(checks, root) {
       : 'write the section before the review is approved — the yad-discovery skill says what each section needs');
 }
 
-function foundationGuardChecks(checks, root, hub) {
+function foundationGuardChecks(checks, root, productConfig) {
   if (!exists(path.join(root, FOUNDATION_DIR, '.sdlc'))) return;
-  if (!isVerifiedLedger(hub)) return;
+  if (!isVerifiedLedger(productConfig)) return;
   const stale = staleFoundationGuards(root);
   if (!stale.length) return;
   check(checks, 'foundation:guard', 'project', 'warn',
@@ -1979,7 +1979,7 @@ export function renamedChecks(checks, root) {
   if (!exists(productConfigPath(root))) return;
   let installed = [];
   // An unreadable provenance record or IDE target is named by its own check; this one then says nothing.
-  try { installed = [...legacyModuleActions(root), ...legacyHubActions(root)]; } catch { /* named elsewhere */ }
+  try { installed = [...legacyModuleActions(root), ...legacyProductActions(root)]; } catch { /* named elsewhere */ }
   for (const a of installed) {
     const { from, to } = a.rename;
     check(checks, `renamed:${from}`, 'project', 'warn',
@@ -2331,8 +2331,8 @@ export function codeownersChecks(checks, root) {
 // the branch gates merge into; with none, the platform's own default is read and the line says so.
 export function protectionChecks(checks, root, { runner, env } = {}) {
   const productPath = productConfigPath(root);
-  const hub = readJSON(productPath, null);
-  const solo = isSolo(hub);
+  const productConfig = readJSON(productPath, null);
+  const solo = isSolo(productConfig);
   // One login check per host for this run, and never longer: a login can change between runs.
   const opts = { ...(runner ? { runner } : {}), ...(env ? { env } : {}), authCache: new Map() };
   const origin = (cwd) => run('git', ['remote', 'get-url', 'origin'], { cwd }).stdout || null;
@@ -2341,12 +2341,12 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     const line = protectionLine(r, { name, solo });
     check(checks, id, 'protection', line.status, line.message, line.hint || '', { protection: protectionJSON(r), alwaysHint: true });
   };
-  if (isPlainObject(hub)) {
+  if (isPlainObject(productConfig)) {
     // `protection` alone, never `protection:hub`: a connected repo may be named `hub`.
     emit('protection', 'Product hub', {
-      platform: hub.platform || null,
-      gitUrl: hub.git_url || origin(root),
-      branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : null,
+      platform: productConfig.platform || null,
+      gitUrl: productConfig.git_url || origin(root),
+      branch: typeof productConfig.default_branch === 'string' && productConfig.default_branch ? productConfig.default_branch : null,
     });
   }
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
@@ -2404,8 +2404,8 @@ export function indexChecks(checks, root) {
   if (!exists(productConfigPath(root))) return;
   const fresh = indexFreshness(root);
   if (fresh.state === 'none') return; // no work items and no index: nothing to be behind
-  const hubNow = readJSON(productConfigPath(root), null);
-  const verified = isVerifiedLedger(hubNow);
+  const productConfigNow = readJSON(productConfigPath(root), null);
+  const verified = isVerifiedLedger(productConfigNow);
   const hint = verified
     ? 'CI rebuilds it when it records the next merged review; on a verified Product a local write could not be committed'
     : 'run `yad index` on the default branch, then commit it';
@@ -2419,7 +2419,7 @@ export function indexChecks(checks, root) {
   if (fresh.state !== 'unreadable' && exists(path.join(root, '.git'))) {
     const git = productGit(root);
     const head = git('rev-parse', '--abbrev-ref', 'HEAD');
-    const main = resolveDefaultBranch(git, hubNow);
+    const main = resolveDefaultBranch(git, productConfigNow);
     if (head.ok && head.stdout && head.stdout !== main) {
       check(checks, 'index', 'index', 'ok', `${INDEX_FILE} ${fresh.state === 'missing' ? 'is not built yet' : 'is not what this yadflow builds from the work items on this branch'} — expected on '${head.stdout}': it is written on '${forTerminal(main)}' only, once this work merges`);
       return;

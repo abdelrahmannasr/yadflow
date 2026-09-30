@@ -368,19 +368,19 @@ export async function runNew(cwd, name, opts = {}) {
   noteWorkspaceFile(product);
 
   // Setup asked for the default branch; the repo has no commit yet, so HEAD can still follow the answer.
-  const hub = readJSON(productConfigPath(product), {}) || {};
-  const branch = hub.default_branch || 'main';
+  const productConfig = readJSON(productConfigPath(product), {}) || {};
+  const branch = productConfig.default_branch || 'main';
   if (branch !== 'main' && !run('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd: product }).ok) {
     run('git', ['symbolic-ref', 'HEAD', `refs/heads/${branch}`], { cwd: product });
   }
-  const steps = remoteSteps({ name, platform: hub.platform, branch });
+  const steps = remoteSteps({ name, platform: productConfig.platform, branch });
   log('');
   log(c.bold('Put the Product on your platform') + c.dim(' (yad creates nothing outside this machine — run these yourself):'));
   log(`  cd ${fromShell(product)}`);
   for (const s of steps) log(`  ${s}`);
   hand('teammates then join with: `yad join <the Product\'s clone URL>`');
   hand(`then, from here: cd ${fromShell(product)} && yad next`);
-  return { workspace, product, platform: hub.platform ?? null, branch, remoteSteps: steps, setup };
+  return { workspace, product, platform: productConfig.platform ?? null, branch, remoteSteps: steps, setup };
 }
 
 // ---- yad init ------------------------------------------------------------------------------------

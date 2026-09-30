@@ -103,9 +103,9 @@ export function actorName(cwd, platform, opts = {}) {
 // logins that share it. An older record under such a
 // name could be either person, so it is never matched by name — only as `upsertBridge` matches a record
 // no name can place (an exact submission time, or an open step's one-to-one).
-export function ambiguousLegacyNames(hub) {
+export function ambiguousLegacyNames(productConfig) {
   const logins = new Map();
-  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
+  for (const e of Array.isArray(productConfig?.roster) ? productConfig.roster : []) {
     if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
     if (!logins.has(e.name)) logins.set(e.name, new Set());
     logins.get(e.name).add(e.login);
@@ -405,7 +405,7 @@ export function platformDefaultBranch(platform, { cwd, runner = run } = {}) {
 //   2 registry    — the repo's `default_branch` in .sdlc/repos.json
 //   3 hub         — hub.json's `default_branch`, for a PR against the Product itself
 //   4 platform    — what the remote says (see platformDefaultBranch)
-//   5 origin-head — local `refs/remotes/origin/HEAD`, the same read repo.mjs/hubcommit.mjs use.
+//   5 origin-head — local `refs/remotes/origin/HEAD`, the same read repo.mjs/productcommit.mjs use.
 //                   Deliberately NOT `ls-remote`: see branchExists above for why a network probe on
 //                   this path is a hang hazard.
 //   6 fallback    — 'main'
@@ -421,7 +421,7 @@ export function platformDefaultBranch(platform, { cwd, runner = run } = {}) {
 // and an early rung winning, `platformDefault` is null because it was never asked, not because the
 // platform had no answer.
 export function resolveBaseBranch(platform, {
-  cwd, explicit = null, meta = null, hub = null, runner = run, probe = true,
+  cwd, explicit = null, meta = null, productConfig = null, runner = run, probe = true,
 } = {}) {
   let platformDefault = null;
   let asked = false;
@@ -440,7 +440,7 @@ export function resolveBaseBranch(platform, {
   const chain = [
     ['flag', explicit],
     ['registry', meta?.default_branch],
-    ['hub', hub?.default_branch],
+    ['hub', productConfig?.default_branch],
     ['platform', askPlatform],
     ['origin-head', originHead],
   ];

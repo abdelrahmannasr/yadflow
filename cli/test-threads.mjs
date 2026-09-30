@@ -38,7 +38,7 @@ async function grab(fn) {
 }
 
 // Minimal Product builder: write an epic with lineage frontmatter (+ optional stories/lock/debt).
-function hub() {
+function productConfig() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-thread-'));
   fs.mkdirSync(path.join(T, 'epics'), { recursive: true });
   return T;
@@ -61,7 +61,7 @@ function writeEpic(T, id, fm, { stories = null, lockHash = null, debt = null } =
 }
 
 test('resolveThread: linear chain resolves genesis-first with the genesis root', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
   writeEpic(T, 'EP-chg', { kind: 'change', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic', 'architecture'] });
   writeEpic(T, 'EP-fix', { kind: 'defect', parent: 'EP-chg', thread: 'EP-gen', inherits: ['epic'] });
@@ -75,7 +75,7 @@ test('resolveThread: linear chain resolves genesis-first with the genesis root',
 });
 
 test('resolveThread: a missing parent and a thread-cache mismatch are flagged broken', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-orphan', { kind: 'change', parent: 'EP-ghost', thread: 'EP-ghost' });
   assert.match(resolveThread(T, 'EP-orphan').broken, /missing parent epic EP-ghost/);
 
@@ -85,7 +85,7 @@ test('resolveThread: a missing parent and a thread-cache mismatch are flagged br
 });
 
 test('resolveThread: a non-genesis epic with NO thread cache is flagged broken (fail-closed)', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
   writeEpic(T, 'EP-nocache', { kind: 'change', parent: 'EP-gen' }); // parent set, thread cache absent
   const r = resolveThread(T, 'EP-nocache');
@@ -94,7 +94,7 @@ test('resolveThread: a non-genesis epic with NO thread cache is flagged broken (
 });
 
 test('threadEpics: same-depth siblings (a branch) order deterministically by id, not readdir', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
   // Two change-epics both threaded directly off genesis — same depth (a fork).
   writeEpic(T, 'EP-bbb', { kind: 'change', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic'] });
@@ -104,14 +104,14 @@ test('threadEpics: same-depth siblings (a branch) order deterministically by id,
 });
 
 test('resolveThread: a cycle is detected, not looped forever', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-a', { kind: 'change', parent: 'EP-b', thread: 'EP-a' });
   writeEpic(T, 'EP-b', { kind: 'change', parent: 'EP-a', thread: 'EP-a' });
   assert.match(resolveThread(T, 'EP-a').broken, /cycle/);
 });
 
 test('resolveCurrentArtifacts: a defect-epic owns only what it re-authored; genesis owns the rest', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
   // defect-fix: inherits epic/architecture/contract/ui-design, re-authors stories + test-cases.
   writeEpic(T, 'EP-fix', {
@@ -129,7 +129,7 @@ test('resolveCurrentArtifacts: a defect-epic owns only what it re-authored; gene
 });
 
 test('resolveCurrentArtifacts: an epic never owns an artifact its ROUTE has no step for (E40)', () => {
-  const T = hub();
+  const T = productConfig();
   const dir = writeEpic(T, 'EP-chore', { kind: 'chore', thread: 'EP-chore' });
   // A short lane: no architecture, ui-design or test-cases step, and no `inherits:` either — it has no
   // parent to inherit from. `inherits` alone would therefore read "did not inherit it, so authored it"
@@ -180,7 +180,7 @@ test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an un
   // A skipped `ui-design` is IN the chain, pre-marked done with a recorded reason — this epic's own
   // decision about an artifact that is genuinely its to decide. That is the opposite of a step the
   // route never had, and collapsing the two would erase the distinction E35 exists to draw.
-  const T = hub();
+  const T = productConfig();
   const dir = writeEpic(T, 'EP-skip', { kind: 'feature', thread: 'EP-skip' });
   fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
     epicId: 'EP-skip', profile: 'classic', currentStep: 'stories',
@@ -193,7 +193,7 @@ test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an un
   // And an epic whose ledger cannot be read keeps every base it had before this rule. A file that will
   // not parse is not evidence that the epic owns nothing — `yad doctor` reports it (rule 3), and this
   // map must not quietly start dropping provenance because of it.
-  const T2 = hub();
+  const T2 = productConfig();
   const d2 = writeEpic(T2, 'EP-broken', { kind: 'feature', thread: 'EP-broken' });
   fs.writeFileSync(path.join(d2, '.sdlc/state.json'), '{ not json');
   const broken = resolveCurrentArtifacts(T2, 'EP-broken');
@@ -201,14 +201,14 @@ test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an un
   assert.deepEqual(broken['test-cases'], ['EP-broken']);
 
   // Same for an epic with no `state.json` at all, which is every pre-ledger fixture in the wild.
-  const T3 = hub();
+  const T3 = productConfig();
   writeEpic(T3, 'EP-bare', { kind: 'feature', thread: 'EP-bare' });
   assert.equal(resolveCurrentArtifacts(T3, 'EP-bare').architecture, 'EP-bare');
 
   // AND THE CASE THE FIRST VERSION OF THIS RULE GOT WRONG. A truncated `classic` chain — seeded
   // before later steps existed, which is the shape of this repo's own e2e fixtures — keeps every base.
   // Losing an owner is exactly as wrong as inventing one, and `yad-change` reads this map either way.
-  const T4 = hub();
+  const T4 = productConfig();
   const d4 = writeEpic(T4, 'EP-old', { kind: 'feature', thread: 'EP-old' });
   fs.writeFileSync(path.join(d4, '.sdlc/state.json'), JSON.stringify({
     epicId: 'EP-old', profile: 'classic', currentStep: 'stories',
@@ -221,7 +221,7 @@ test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an un
 });
 
 test('resolveCurrentStories: composes the story set — inherited parent stories survive a defect-fix', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' }, { stories: ['shipped', 'shipped', 'shipped'] });
   // genesis story files are EP-gen-S01..S03 (writeEpic names them by epic id).
   // defect re-authors stories but contributes only its OWN regression story; inherits the rest.
@@ -236,7 +236,7 @@ test('resolveCurrentStories: composes the story set — inherited parent stories
 });
 
 test('resolveCurrentStories: `supersedes` retires a parent story id', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' }, { stories: ['shipped', 'shipped'] });
   writeEpic(T, 'EP-chg', { kind: 'change', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic', 'architecture', 'contract', 'ui-design'], supersedes: ['EP-gen-S02'] }, { stories: ['draft'] });
   const stories = resolveCurrentStories(T, 'EP-gen');
@@ -246,7 +246,7 @@ test('resolveCurrentStories: `supersedes` retires a parent story id', () => {
 });
 
 test('resolveCurrentArtifacts: a later contract-surface change shadows architecture+contract', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
   writeEpic(T, 'EP-fix', { kind: 'defect', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic', 'architecture', 'contract', 'ui-design'] });
   // contract-surface change re-authors architecture + contract (omits them from inherits).
@@ -275,7 +275,7 @@ test('gatePredicate: an inherited step is satisfied without re-review; a drifted
 });
 
 test('sealedEpic + openDebtOnThread + threadSummary reflect ship + debt state', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' }, { stories: ['shipped', 'shipped'] });
   assert.equal(sealedEpic(T, 'EP-gen'), true);                 // all stories shipped -> sealed
   writeEpic(T, 'EP-open', { kind: 'feature', thread: 'EP-open' }, { stories: ['shipped', 'draft'] });
@@ -298,7 +298,7 @@ test('sealedEpic + openDebtOnThread + threadSummary reflect ship + debt state', 
 // ── Brownfield stub genesis epics (yad-stub) ─────────────────────────────────
 
 test('isStubEpic: detects a stub genesis by the stub:backfill-pending marker; a normal epic is not', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-stub', { kind: 'feature', thread: 'EP-stub', verified: false, stub: 'backfill-pending' });
   writeEpic(T, 'EP-real', { kind: 'feature', thread: 'EP-real' });
   assert.equal(isStubEpic(T, 'EP-stub'), true);
@@ -307,7 +307,7 @@ test('isStubEpic: detects a stub genesis by the stub:backfill-pending marker; a 
 });
 
 test('a defect threads off a stub genesis: it resolves the thread and the rollup lists it', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-stub', { kind: 'feature', thread: 'EP-stub', verified: false, stub: 'backfill-pending' });
   // A defect off the stub inherits only `epic` (the stub brief); no architecture/contract exist yet.
   writeEpic(T, 'EP-bug', { kind: 'defect', parent: 'EP-stub', thread: 'EP-stub', inherits: ['epic'] });
@@ -357,7 +357,7 @@ test('nextAction: a stub epic routes to backfill-pending (not to authoring the e
 test('promote (light) clears BOTH sources: nextAction stops calling it a stub and isStubEpic agrees', () => {
   // The regression guard for the promote desync bug: light promote clears epic.md `stub:` AND rewrites
   // state.json (drop kind:stub, currentStep -> backfill-done). Both readers must then agree "not a stub".
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-promoted', { kind: 'feature', thread: 'EP-promoted', verified: true }); // stub: cleared
   assert.equal(isStubEpic(T, 'EP-promoted'), false);                    // frontmatter reader
   // A half-promoted epic left on the sentinel would misreport — assert the promoted state does NOT:
@@ -410,7 +410,7 @@ test('typeNoun renders the human noun per work-item type and falls back to Epic'
 });
 
 test('runThread renders each node with its kind noun, not the generic word "epic"', async () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
   writeEpic(T, 'EP-fix', { kind: 'defect', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic'] });
   const out = await grab(() => runThread(T, { epic: 'EP-gen' }));
@@ -419,7 +419,7 @@ test('runThread renders each node with its kind noun, not the generic word "epic
 });
 
 test('epicLineage defaults an un-migrated genesis epic to type:feature', () => {
-  const T = hub();
+  const T = productConfig();
   // No kind/type/parent/thread frontmatter at all.
   const dir = path.join(T, 'epics', 'EP-legacy');
   fs.mkdirSync(dir, { recursive: true });
@@ -465,7 +465,7 @@ test('isGenesisType: feature and chore may stand alone, the other three may not'
 test('a parentless chore resolves as its own thread root', () => {
   // The walk in resolveThread stops on "no parent", not on the type — so this already worked. The
   // test pins it, because the alternative (stopping on `feature`) would strand every chore.
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-bump-deps', { kind: 'chore', status: 'draft', repos: ['backend'] });
   const lin = epicLineage(T, 'EP-bump-deps');
   assert.equal(lin.type, 'chore');
@@ -477,7 +477,7 @@ test('a parentless chore resolves as its own thread root', () => {
 });
 
 test('epicLineage reads `type:` when an epic.md carries only the new name', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-new', { type: 'defect', parent: 'EP-old', thread: 'EP-old', repos: ['backend'] });
   writeEpic(T, 'EP-old', { type: 'feature', repos: ['backend'] });
   assert.equal(epicLineage(T, 'EP-new').type, 'defect');
@@ -525,7 +525,7 @@ for (const [skillFile, expected] of [
   }],
 ]) {
   test(`${skillFile}: the epic.md template it tells people to copy reads back correctly`, () => {
-    const T = hub();
+    const T = productConfig();
     if (expected.parent) writeEpic(T, expected.parent, { kind: 'feature', thread: expected.parent });
     const dir = path.join(T, 'epics', 'EP-demo');
     fs.mkdirSync(dir, { recursive: true });
@@ -589,7 +589,7 @@ test('themeKey folds the ways one theme gets typed, and keeps different themes a
 });
 
 test('epicLineage carries the theme, and null when there is none', () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-a', { kind: 'feature', thread: 'EP-a', theme: 'checkout-revamp' });
   writeEpic(T, 'EP-b', { kind: 'feature', thread: 'EP-b' });
   writeEpic(T, 'EP-c', { kind: 'feature', thread: 'EP-c', theme: ['x', 'y'] });
@@ -603,7 +603,7 @@ test('epicLineage carries the theme, and null when there is none', () => {
 });
 
 test('yad thread --json carries the theme; the printed tree shows it only when set', async () => {
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-cart', { kind: 'feature', thread: 'EP-cart', theme: 'checkout-revamp' });
   writeEpic(T, 'EP-cart-fix', { kind: 'defect', parent: 'EP-cart', thread: 'EP-cart', theme: 'checkout-revamp' });
   writeEpic(T, 'EP-plain', { kind: 'feature', thread: 'EP-plain' });
@@ -623,7 +623,7 @@ test('yad thread --json carries the theme; the printed tree shows it only when s
 test('yad thread with no epic lists each thread under its theme', async () => {
   // This list is where a person looks to see which threads belong together, so it is where the tag
   // does the most work. The theme shown is the GENESIS epic's — the thread's own heading.
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-cart', { kind: 'feature', thread: 'EP-cart', theme: 'checkout-revamp' });
   writeEpic(T, 'EP-cart-fix', { kind: 'defect', parent: 'EP-cart', thread: 'EP-cart', theme: 'checkout-revamp' });
   writeEpic(T, 'EP-plain', { kind: 'feature', thread: 'EP-plain' });
@@ -937,7 +937,7 @@ test('a thread node carries the phase the EPIC is in, the same answer yad next p
   // `yad thread --json` is not frozen by the golden test, so it gains the new word directly. Null is
   // a real answer here, not a gap: `ready-for-build` is a currentStep sentinel, not a step, and
   // placing it in a phase would be inventing one.
-  const T = hub();
+  const T = productConfig();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
   const dir = path.join(T, 'epics', 'EP-gen', '.sdlc');
   fs.mkdirSync(dir, { recursive: true });
@@ -1346,7 +1346,7 @@ test('epicRoot is the one place that knows the Foundation lives outside epics/',
 });
 
 test('epicIds lists the Foundation only once its ledger folder exists, and never a stray copy under epics/', () => {
-  const T = hub();
+  const T = productConfig();
   try {
     writeEpic(T, 'EP-cart', { kind: 'feature' });
     // An unrelated `foundation/` folder — a docs section, say — is somebody else's files, not a ledger.
@@ -1484,7 +1484,7 @@ const setSteps = (dir, edit) => {
 test('yad epic new --parent: a defect carries what it inherits by reference, and the contract by pointer (E42)', async () => {
   const { loadLedger } = await import('./epic-state.mjs');
   const { epicChecks } = await import('./doctor.mjs');
-  const T = hub();
+  const T = productConfig();
   const P = approvedEpic(T, 'EP-checkout');
   const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-checkout', inherits: 'epic,architecture,contract,ui-design' });
   try {
@@ -1541,7 +1541,7 @@ test('yad epic new --parent: a defect carries what it inherits by reference, and
 });
 
 test('yad epic new --parent: a change that re-authors the epic carries only the contract', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   const { out, failed } = await seedOn(T, { slug: 'beh', type: 'change', parent: 'EP-checkout', inherits: 'architecture contract', json: true });
   try {
@@ -1561,7 +1561,7 @@ test('yad epic new --parent: a change that re-authors the epic carries only the 
 });
 
 test('yad epic new --parent: nothing carried is a full chain on the parent\'s route, with no lock', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   const { out, failed } = await seedOn(T, { slug: 'grow', type: 'change', parent: 'EP-checkout' });
   try {
@@ -1577,7 +1577,7 @@ test('yad epic new --parent: nothing carried is a full chain on the parent\'s ro
 });
 
 test('yad epic new --parent: analysis rides with the epic it was written for', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-big', { profile: 'analysis-first' });
   const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-big', inherits: ['epic'] });
   try {
@@ -1591,7 +1591,7 @@ test('yad epic new --parent: analysis rides with the epic it was written for', a
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 
   // The person typed `epic`, not `analysis`, so a refusal about the brief says why it is being checked.
-  const T2 = hub();
+  const T2 = productConfig();
   setSteps(approvedEpic(T2, 'EP-big', { profile: 'analysis-first' }), (s) => { if (s.id === 'analysis-review') s.status = 'in_review'; });
   try {
     const { out, failed } = await seedOn(T2, { slug: 'fix', type: 'defect', parent: 'EP-big', inherits: 'epic' });
@@ -1601,7 +1601,7 @@ test('yad epic new --parent: analysis rides with the epic it was written for', a
 });
 
 test('yad epic new --parent: the owner is found along the PARENT\'s line, not anywhere in the thread', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-g');
   // A middle change that re-authored the epic and carried the contract from the genesis.
   writeEpic(T, 'EP-mid', { kind: 'change', type: 'change', parent: 'EP-g', thread: 'EP-g', inherits: ['architecture', 'contract'] });
@@ -1625,7 +1625,7 @@ test('yad epic new --parent: the owner is found along the PARENT\'s line, not an
 });
 
 test('yad epic new --parent: a short-lane parent gives a short child, with nothing to point a lock at', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-bump', { profile: 'chore', fm: { kind: 'chore', type: 'chore' }, lock: false });
   try {
     for (const inherits of ['ui-design', 'architecture,contract']) {
@@ -1644,7 +1644,7 @@ test('yad epic new --parent: a short-lane parent gives a short child, with nothi
 });
 
 test('yad epic new --parent: off a brownfield anchor, bases carry no hash and no lock is written', async () => {
-  const T = hub();
+  const T = productConfig();
   const dir = writeEpic(T, 'EP-legacy', { kind: 'feature', type: 'feature', thread: 'EP-legacy', stub: 'backfill-pending', verified: false });
   fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify(seedState({ epic: 'EP-legacy', profile: 'classic', type: 'feature', today: '2026-01-01', stub: true })));
   const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-legacy', inherits: 'epic,architecture,contract,ui-design', json: true });
@@ -1672,7 +1672,7 @@ test('yad epic new --parent: only work written AND approved upstream is carried 
     ['claims inherited', (s) => { s.inherited = true; s.inheritedFrom = 'EP-elsewhere'; }, /ledger carries ui-design from EP-elsewhere, but its epic\.md does not list ui-design/],
   ];
   for (const [name, edit, message] of cases) {
-    const T = hub();
+    const T = productConfig();
     const P = approvedEpic(T, 'EP-checkout');
     setSteps(P, (s) => { if (s.id.startsWith('ui-design')) edit(s); });
     try {
@@ -1692,7 +1692,7 @@ test('yad epic new --parent: rule 5 — a carried contract must be a real, curre
     ['approved but missing', (P) => fs.rmSync(path.join(P, 'ui-design.md')), /approved ui-design, but ui-design\.md is not there/],
   ];
   for (const [name, edit, message] of cases) {
-    const T = hub();
+    const T = productConfig();
     edit(approvedEpic(T, 'EP-checkout'));
     try {
       const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-checkout', inherits: 'architecture,contract,ui-design' });
@@ -1703,7 +1703,7 @@ test('yad epic new --parent: rule 5 — a carried contract must be a real, curre
   }
 
   // And a lock already sitting in the new epic is somebody's record: refused before anything is written.
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   const stray = path.join(T, 'epics/EP-fix/.sdlc/contract-lock.json');
   fs.mkdirSync(path.dirname(stray), { recursive: true });
@@ -1718,7 +1718,7 @@ test('yad epic new --parent: rule 5 — a carried contract must be a real, curre
 });
 
 test('yad epic new --parent: the header wins over no flag, and a contradicting flag is refused', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   approvedEpic(T, 'EP-other');
   writeEpic(T, 'EP-fix', { kind: 'defect', type: 'defect', parent: 'EP-checkout', thread: 'EP-checkout', inherits: ['epic', 'ui-design'] });
@@ -1744,7 +1744,7 @@ test('yad epic new --parent: the header wins over no flag, and a contradicting f
 
   // A thread cache that disagrees with the parent's line is refused; a header with no inherits is told
   // to add them, because `yad thread` reads the header.
-  const T2 = hub();
+  const T2 = productConfig();
   approvedEpic(T2, 'EP-checkout');
   writeEpic(T2, 'EP-bad', { kind: 'defect', type: 'defect', parent: 'EP-checkout', thread: 'EP-wrong' });
   writeEpic(T2, 'EP-bare', { kind: 'defect', type: 'defect', parent: 'EP-checkout', thread: 'EP-checkout' });
@@ -1759,7 +1759,7 @@ test('yad epic new --parent: the header wins over no flag, and a contradicting f
 });
 
 test('yad epic new --parent: what may be inherited, and from what, is refused before anything is written', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   const foundation = path.join(T, 'foundation', '.sdlc');
   fs.mkdirSync(foundation, { recursive: true });
@@ -1793,7 +1793,7 @@ test('yad epic new --parent: what may be inherited, and from what, is refused be
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 
   // A parent whose lineage is broken is fixed first.
-  const T2 = hub();
+  const T2 = productConfig();
   approvedEpic(T2, 'EP-mid', { fm: { kind: 'change', type: 'change', parent: 'EP-gone', thread: 'EP-gone' } });
   try {
     const r = await seedOn(T2, { slug: 'r', type: 'defect', parent: 'EP-mid' });
@@ -1806,7 +1806,7 @@ test('triage.md\'s worked example is what `yad epic new --parent` really writes 
   // The example is prose a reviewer trusts. Once the engine writes the chain, nothing else would notice
   // the two drifting apart — a field renamed, a status changed, a key moved.
   const example = templateSeed('yad-change/references/triage.md');
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-genesis');
   const { out, failed } = await seedOn(T, { slug: 'slug', type: 'defect', parent: 'EP-genesis', inherits: 'epic,architecture,contract,ui-design' });
   try {
@@ -1829,7 +1829,7 @@ test('yad epic new --parent: architecture and contract owned by two epics are re
   // An epic between here and the genesis lists only `contract` in its `inherits:`, so the owner map
   // names it for architecture and the genesis for the contract. Carrying both would bind the steps to one
   // surface and point the lock at another — and which one depended on the order the list was typed in.
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-g');
   const mid = approvedEpic(T, 'EP-mid', { fm: { kind: 'change', type: 'change', parent: 'EP-g', thread: 'EP-g', inherits: ['contract'] } });
   fs.writeFileSync(path.join(mid, 'contract.md'), SURFACE.replace('GET', 'POST'));
@@ -1845,7 +1845,7 @@ test('yad epic new --parent: architecture and contract owned by two epics are re
 });
 
 test('yad epic new --parent: an `inherits:` the other readers parse differently is refused', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   // No brackets: this command would read two bases, `epicLineage` — and so `yad thread` — reads one
   // base called "epic, ui-design".
@@ -1863,7 +1863,7 @@ test('yad epic new --parent: an `inherits:` the other readers parse differently 
 });
 
 test('yad epic new --parent: an approvals.json with records in it is never overwritten', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   const file = path.join(T, 'epics/EP-fix/.sdlc/approvals.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -1885,7 +1885,7 @@ test('yad epic new --parent: an approvals.json with records in it is never overw
 });
 
 test('yad epic new --parent: a header that exists must carry the parent and the thread', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   writeEpic(T, 'EP-np', { kind: 'defect', type: 'defect', thread: 'EP-checkout' });
   writeEpic(T, 'EP-nt', { kind: 'defect', type: 'defect', parent: 'EP-checkout' });
@@ -1915,7 +1915,7 @@ test('yad epic new --parent: the refusals nothing else reached — an unreadable
     }, 'EP-p', /EP-g owns ui-design, but its state\.json is missing or cannot be read/],
   ];
   for (const [name, build, parent, message] of cases) {
-    const T = hub();
+    const T = productConfig();
     build(T);
     try {
       const { out, failed } = await seedOn(T, { slug: 'leaf', type: 'defect', parent, inherits: 'ui-design' });
@@ -1927,7 +1927,7 @@ test('yad epic new --parent: the refusals nothing else reached — an unreadable
 });
 
 test('yad epic new --parent: a --json refusal is one parseable object', async () => {
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   try {
     const { out, failed } = await seedOn(T, { slug: 'r', type: 'defect', parent: 'EP-checkout', inherits: 'stories', json: true });
@@ -1941,7 +1941,7 @@ test('yad epic new --parent: a --json refusal is one parseable object', async ()
 
 test('yad epic new --parent: a carried step AFTER an authored one is walked past as the chain advances', async () => {
   const { advanceState } = await import('./epic-state.mjs');
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   const { out, failed } = await seedOn(T, { slug: 'ui', type: 'change', parent: 'EP-checkout', inherits: 'ui-design' });
   try {
@@ -1960,7 +1960,7 @@ test('yad epic new --parent: a carried step AFTER an authored one is walked past
 test('yad epic new --parent --inherits through the real command line, and a stray word is refused', async () => {
   const { execFileSync } = await import('node:child_process');
   const bin = new URL('../bin/yad.mjs', import.meta.url).pathname;
-  const T = hub();
+  const T = productConfig();
   approvedEpic(T, 'EP-checkout');
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc', 'hub.json'), '{}'); // a Product: `epic new` writes nowhere else (E80)

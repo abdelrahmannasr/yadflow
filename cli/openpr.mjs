@@ -46,9 +46,9 @@ function resolveRepo(root, { repo, dir, product }) {
 // carries .sdlc/hub.json. path.resolve normalises `--dir .` / trailing slashes.
 export function detectStage(root, repoRoot, head, meta) {
   if (meta) return 'code-repo';
-  const isHub = path.resolve(repoRoot) === path.resolve(root)
+  const isProduct = path.resolve(repoRoot) === path.resolve(root)
     && exists(productConfigPath(root));
-  if (!isHub) return 'code-repo';
+  if (!isProduct) return 'code-repo';
   return /^review\/EP-[a-z0-9-]+\//.test(head || '') ? 'hub-shape' : 'hub-tooling';
 }
 
@@ -280,13 +280,13 @@ export async function runOpenPr(root, opts = {}) {
   // must never leak in. Resolved AFTER the hub-shape hand-off above, which delegates its own base to
   // `yad gate open`: resolving before it would spend a platform round-trip and print a base that the
   // delegated path then ignores.
-  const hub = readJSON(productConfigPath(root), {});
+  const productConfig = readJSON(productConfigPath(root), {});
 
   // Resolve the base rather than assume it (#168). Hardcoding 'main' mis-based every PR on a repo
   // whose trunk is something else — and CodeRabbit decides auto-review eligibility from the base at
   // PR-OPEN time, so those PRs silently got no AI first pass at all.
   const { base: baseBranch, source: baseSource, platformDefault } = resolveBaseBranch(platform, {
-    cwd: repoRoot, explicit: opts.base, meta, hub: stage === 'code-repo' ? null : hub, runner: opts.runner,
+    cwd: repoRoot, explicit: opts.base, meta, productConfig: stage === 'code-repo' ? null : productConfig, runner: opts.runner,
   });
   if (branch === baseBranch) { fail(`on ${baseBranch} — switch to your task branch first`); process.exitCode = 1; return; }
   info(`base ${baseBranch} ${c.dim(`(from ${baseSource})`)}`);

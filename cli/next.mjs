@@ -19,7 +19,7 @@ import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, e
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
-const soloOf = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
+const soloOf = (productConfig) => !!(productConfig && (productConfig.solo === true || productConfig.review_gate?.solo === true));
 function isSolo(root) {
   return soloOf(readJSON(productConfigPath(root), null));
 }
@@ -354,22 +354,22 @@ function generalNext(root, { all, headCount = null } = {}) {
     return;
   }
   // The Product config, read ONCE for this view.
-  const hub = readJSON(productConfigPath(root), null);
-  const solo = soloOf(hub);
+  const productConfig = readJSON(productConfigPath(root), null);
+  const solo = soloOf(productConfig);
   // E74: in solo mode, suggest `yad mode team` when the count shows more than one person may work here.
   // Printed first, so it is not lost under a long list of epics. An unknown count is not said here —
   // `yad doctor` and `yad mode` say it (the user's choice, 2026-09-22). `headCount` is for tests.
-  printTeamHint(soloTeamHint(root, hub, { solo, headCount }));
+  printTeamHint(soloTeamHint(root, productConfig, { solo, headCount }));
   // `profile` here is the SETUP profile `yad setup` records (codebase / repo_layout / team_size), not the
   // lifecycle profile an epic walks (`LIFECYCLE_PROFILES`, E5): two things share the word.
-  const brownfield = hub?.profile?.codebase === 'brownfield';
+  const brownfield = productConfig?.profile?.codebase === 'brownfield';
   // The PRODUCT level (the Foundation, or a ledger still in its old `discovery` spelling) is not a
   // feature epic — split it out so it is surfaced on its own line and never mixed into the roll-up.
   const allEpics = listEpics(root);
   // One read of `.sdlc/skills.json` for the whole roll-up, not one per epic.
   const bindings = loadSkillBindings(root);
   const automation = loadAutomation(root);
-  const verified = isVerifiedLedger(hub);
+  const verified = isVerifiedLedger(productConfig);
   // The Foundation wins when both exist. Two product levels is a fault `yad doctor` fails on; until it
   // is fixed the new spelling is the one worth acting on, and the old one is named so it is not lost.
   const productIds = PRODUCT_EPICS.filter((id) => allEpics.includes(id));

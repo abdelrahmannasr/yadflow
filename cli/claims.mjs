@@ -29,15 +29,15 @@ import fs from 'node:fs';
 import { ok, info, warn, fail, hand, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { capturedEpic, gitIn, isOwnerPath, pushEnv, wipName, WIP_PREFIX, fetchAllArgs } from './capture.mjs';
-import { resolveDefaultBranch } from './hubcommit.mjs';
+import { resolveDefaultBranch } from './productcommit.mjs';
 
 export const CLAIM_HOURS = 4;
 const CLAIM_MS = CLAIM_HOURS * 60 * 60 * 1000;
 
 // The default branch as a ref this clone holds — origin's copy first, then a local branch — or null.
 function defaultRef(root, git) {
-  const hub = readJSON(productConfigPath(root), {}) || {};
-  const def = resolveDefaultBranch((...a) => { const r = git(a); return { ok: r.ok, stdout: r.out.trim() }; }, hub);
+  const productConfig = readJSON(productConfigPath(root), {}) || {};
+  const def = resolveDefaultBranch((...a) => { const r = git(a); return { ok: r.ok, stdout: r.out.trim() }; }, productConfig);
   for (const ref of [`refs/remotes/origin/${def}`, `refs/heads/${def}`]) if (git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]).ok) return { ref, name: def };
   return { ref: null, name: def };
 }

@@ -43,12 +43,12 @@ export function reviewerName(v) {
 function localGate(root, { epic, artifact, verb }) {
   const usage = `yad gate ${verb} <epic> <artifact>${verb === 'advance' ? '' : ' --by <name>'}`;
   if (!artifact) { fail(`usage: ${usage}`); process.exitCode = 1; return null; }
-  const { hub } = loadProduct(root);
+  const { productConfig } = loadProduct(root);
   // One check covers both refusals: a verified ledger needs a platform (`isVerifiedLedger`), so any
   // platform at all means the approvals live on the PR/MR, not here.
-  if (hub?.platform) {
-    fail(`\`yad gate ${verb}\` is for a Product with no platform — this one reviews on ${printable(String(hub.platform)) ?? 'a platform'}, so nothing is written`);
-    if (isVerifiedLedger(hub)) hand('CI owns this ledger: approvals, comments and the advance land from the review PR/MR when it merges (`yad gate ci`)');
+  if (productConfig?.platform) {
+    fail(`\`yad gate ${verb}\` is for a Product with no platform — this one reviews on ${printable(String(productConfig.platform)) ?? 'a platform'}, so nothing is written`);
+    if (isVerifiedLedger(productConfig)) hand('CI owns this ledger: approvals, comments and the advance land from the review PR/MR when it merges (`yad gate ci`)');
     else hand(`review on the PR/MR, then run \`yad gate sync ${epic} ${artifact}\` — it reads the approvals and advances the step when the PR merges`);
     process.exitCode = 1;
     return null;
@@ -58,7 +58,7 @@ function localGate(root, { epic, artifact, verb }) {
   if (!ledger.state) { fail(`no epic state at ${epicRel(epic)}/.sdlc/state.json`); process.exitCode = 1; return null; }
   const step = findReviewStep(ledger.state, artifact);
   if (!step) { fail(`${epic} has no review step for ${artifact}`); process.exitCode = 1; return null; }
-  return { hub, epicDir, ledger, step, solo: isSolo(hub), reqEng: requireEngagement(hub) };
+  return { productConfig, epicDir, ledger, step, solo: isSolo(productConfig), reqEng: requireEngagement(productConfig) };
 }
 
 // A gate is recorded against only while it is OPEN. A step not reached yet has no review to approve:
@@ -98,8 +98,8 @@ const peopleOnStep = (g) => [
 
 // The one count every verb reports, read once per command (E71) — or handed in by a test, which must not
 // walk git from inside a fixture.
-function countPeople(root, hub, today, headCount) {
-  return headCount || activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) });
+function countPeople(root, productConfig, today, headCount) {
+  return headCount || activePeople(root, { today: today || undefined, aliases: legacyLogins(productConfig) });
 }
 
 function judge(g, epicDir, people) {
@@ -180,12 +180,12 @@ export async function gateApprove(root, { epic, artifact, by, engagement = null,
     // approvers, commenters, what is still required): writing the short `gate sync` list here would erase
     // it on every approval of the day (E112 review).
     writeJSON(ledger.files.approvals, g.ledger.approvals);
-    refreshIndexAfterWrite(root, g.hub);
+    refreshIndexAfterWrite(root, g.productConfig);
   }
   if (same) info(`${name} had already approved this content of ${step.artifact} — nothing changed`);
   else ok(`${name} approved ${step.artifact} (${step.id})${was ? ' — their earlier approval is replaced' : ''}`);
 
-  const people = countPeople(root, g.hub, today, headCount);
+  const people = countPeople(root, g.productConfig, today, headCount);
   log(`  ${c.dim(activeSum(people))}`);
   note(c.dim(activeBasis(people)));
   const pred = judge(g, epicDir, people);
@@ -247,7 +247,7 @@ export async function gateComment(root, { epic, artifact, by, count = null, newR
   ledger.comments = canonicalComments([...ledger.comments.filter((cm) => !mine(cm)), record]);
   if (!same) {
     writeJSON(ledger.files.comments, ledger.comments);
-    refreshIndexAfterWrite(root, g.hub);
+    refreshIndexAfterWrite(root, g.productConfig);
   }
   if (same) info(`${name}'s round ${round} on ${step.artifact} already says ${n} comment(s) — nothing changed`);
   else ok(`${name}: ${n} comment(s) on ${step.artifact}, round ${round}${was ? ` (was ${was.count})` : ''}`);
@@ -270,7 +270,7 @@ export async function gateAdvance(root, { epic, artifact, today, headCount = nul
     return;
   }
   if (refuseUnopened(g, { epic, artifact, verb: 'advance' })) return;
-  const people = countPeople(root, g.hub, today, headCount);
+  const people = countPeople(root, g.productConfig, today, headCount);
   log(`  ${c.dim(activeSum(people))}`);
   note(c.dim(activeBasis(people)));
   const pred = judge(g, epicDir, people);
@@ -290,7 +290,7 @@ export async function gateAdvance(root, { epic, artifact, today, headCount = nul
     capped: pred.rule === 'count' && pred.cap?.capped ? { needed: pred.gateRule.needed, to: pred.cap.to, active: pred.cap.active } : null,
   });
   writeState(ledger.files.state, state);
-  refreshIndexAfterWrite(root, g.hub);
+  refreshIndexAfterWrite(root, g.productConfig);
   ok(`gate PASSED — ${step.id} → done; next: ${state.currentStep}`);
   return { epic, advanced: true, currentStep: state.currentStep ?? null, gate };
 }

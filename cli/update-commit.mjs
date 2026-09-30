@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } from './lib.mjs';
 import { VERSION } from './manifest.mjs';
-import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 
 // Collapse whitespace/newline runs to a single space — keeps a stray path or hostile value from
 // breaking the one-line subject or injecting a fake trailer line.
