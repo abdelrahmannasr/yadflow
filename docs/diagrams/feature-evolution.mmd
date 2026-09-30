@@ -1,0 +1,28 @@
+%% Intro diagram 2 — how one feature's record evolves (the README's checkout example).
+%% EP-checkout and its fix EP-checkout-queue-filter are real epics in epics/. The queue-sort change is
+%% the one the README demo adds (docs/media/feature-change.tape). Both later epics are children of the
+%% feature. Rules drawn here (cli/epic-state.mjs resolveCurrentArtifacts): a later epic that re-writes
+%% an artifact replaces it; an inherited artifact stays; stories add up, and `supersedes` retires a
+%% parent story. Regenerate with `npm run diagrams`.
+flowchart TD
+    classDef knowledge fill:#fcf3cf,stroke:#b7950b,color:#000
+    classDef work fill:#d6eaf8,stroke:#2471a3,color:#000
+    classDef retired fill:#eaecee,stroke:#566573,color:#000,stroke-dasharray:5 3
+
+    f["1 · Checkout feature<br/>epic, architecture,<br/>contract, UI, stories"]:::work
+    d["2 · Fix: add the missing<br/>queue test<br/>new story, new tests"]:::work
+    c["3 · Change: sort the queue<br/>new epic text<br/>replaces one story"]:::work
+
+    keep["Still applies<br/>architecture · contract · UI<br/>other stories"]:::knowledge
+    gone["Replaced or retired<br/>old epic text<br/>old queue story"]:::retired
+    now[("Current picture<br/>for the next task")]:::knowledge
+
+    f -->|fix builds on it| d
+    f -->|change builds on it| c
+    f -.->|still applies| keep
+    c -.->|replaces| gone
+    keep --> now
+    d -->|story and tests add up| now
+    c -->|latest epic text| now
+
+    linkStyle default stroke:#8a8a8a,stroke-width:2px
