@@ -1,387 +1,289 @@
-# Yadflow — keep AI-generated code from shipping ungoverned
+# Yadflow — shared project memory and workflows for teams building with AI
 
 [![npm version](https://img.shields.io/npm/v/yadflow?logo=npm)](https://www.npmjs.com/package/yadflow)
 [![CI](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml/badge.svg)](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml)
 [![node](https://img.shields.io/node/v/yadflow?logo=node.js)](https://github.com/abdelrahmannasr/yadflow/blob/main/package.json)
-[![report](https://img.shields.io/badge/docs-Yadflow%20report-2471a3)](https://abdelrahmannasr.github.io/yadflow/)
 
-**A governance layer for AI-assisted software engineering — a gated development lifecycle where
-AI builds and a human clears every gate.**
-*AI builds. The hand decides.* (*yad* — **يد**, Arabic for "hand".) On npm and GitHub as `yadflow`.
+Coordinate work, automate repetitive delivery tasks, and keep the decisions behind your software.
+Yadflow connects plans, architecture, code and reviews in a versioned project record. Your team and
+your AI assistants can use that record across sessions and across repositories, with human approval
+where it matters.
 
-> **Not another coding assistant — the governance layer around the one you already use.**
-> Yadflow doesn't write your code; it governs how AI-written code ships. Keep Cursor, GitHub Copilot,
-> Claude Code, Continue — or hand-written commits. The zero-dependency `yad` CLI and the CI gates
-> review the work **no matter who or what produced it.** The workflow skills run today in
-> **Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder and opencode** — see
-> [which agent reads which directory](#which-ai-agents-are-supported).
+*Less coordination work. More shared understanding.*
 
-## The problem
+**[Quickstart](#quickstart)** · **[See it work](#see-it-work)** · **[Documentation](#documentation)**
 
-AI writes code faster than any team can review it. Left ungoverned, that speed turns into risk:
-unreviewed AI-generated changes merge straight into the codebase, architectural decisions get made
-by autocomplete, and the trail of *why* a change was made disappears. The faster the team ships with
-AI, the harder it gets to keep control of quality, architecture, and accountability.
+**What you install.** Yadflow is not another coding assistant. It works with the one you already use.
 
-## What Yadflow is
+- **The `yad` command-line tool.** It is written in Node and has no dependencies. It sets up a
+  project, tells you the next action, runs reviews, and reads the project history.
+- **38 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
+  such as "write the architecture". The skills run in Claude Code, Codex CLI, Cursor, Gemini CLI,
+  GitHub Copilot, Zencoder and opencode.
+- **Plain files in git.** Every plan, decision, approval and link lives as a readable file in a
+  repository. There is no database and no server.
+- **Checks in your code repositories.** These run on GitHub Actions or GitLab CI. One check, for
+  example, makes each change name the task it belongs to.
 
-Yadflow puts a **human gate on every step** of the lifecycle. Each step does its work, writes its
-output to a plain file, and **waits** — it never advances until a human clears its gate (by approving,
-or in solo mode, switched with `yad mode`, by merging your own PR) — or, for a Build step the team set to `auto`, on its own after a clean run.
-Reviews ride real PR/MRs; all state lives in files you
-can read, diff, and edit — no database, nothing hidden. The result is a paper trail for every decision
-and a hard wall between "AI proposed" and "we shipped it."
+The name: *yad* (**يد**) is Arabic for "hand". The hand is the person who decides.
 
-It installs with one command (`npx yadflow setup`) and works across one Product + many code repos,
-solo or team.
+## See it work
 
-## How the workflow looks
+The running example is a small shop. It has a **checkout feature**: customers pay in the mobile app,
+and merchants see a queue of pending orders. Two later pieces of work build on it:
 
-<!-- Source: docs/diagrams/sdlc-overview.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
-![Yadflow SDLC overview — setup, human-gated Shape, per-story Build, automation you switch on](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
+1. **A fix.** Tests never proved that the queue leaves out fulfilled orders, so a fix adds that test.
+2. **A change.** Merchants want the queue sorted by pickup time.
 
-**Legend:** 🟨 **artifact** (a step writes a file and stops) · 🟧 **gate** (a human review that must
-pass) · 🟦 **can run on auto** (a Build step the team may set to advance on its own, with `yad dial`) ·
-⬜ **locked** (the engineer review — always a person).
+The checkout feature and the fix are real records in this repository's [`epics/`](epics) folder.
+The recording below adds the change. It runs real `yad` commands on a new local project, in team
+mode, with made-up people. The one pre-written file is the change's plan, which your AI assistant would
+normally write. That step is labelled on screen.
+
+![Terminal recording: yad history lists the checkout feature and its fix. yad thread shows which version of each document applies. yad epic new starts a linked change that keeps the feature's architecture, contract and UI. yad assign and yad next show the owner and the next action. yad gate refuses to move on before anyone approves; a teammate approves, and the review passes. yad history search and yad thread then show the updated record.](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/feature-change.gif)
+
+*Recorded from the yadflow source with vhs. To re-record it, see
+[`docs/media/feature-change.tape`](docs/media/feature-change.tape).*
+
+## What it helps with
+
+| Benefit | What gives it to you today |
+| --- | --- |
+| **Reusable project context** | Plans, architecture, the shared contract (the agreed interface between repositories, such as API endpoints), stories and reviews are files in one repository. Skills read them before they write. `yad history` lists and searches past work. |
+| **Clear ownership and handoffs** | `yad next` prints the single next action for each piece of work, with its owner. `yad assign` gives a step to one person. `yad claims` shows who is editing which file right now. Owners and claims are advice, not locks. |
+| **Less repetitive delivery work** | Skills draft each document and stop for review. `yad ship` makes the commit and opens the pull request with the template filled in, and suggests reviewers. On Claude Code and Cursor, a hook (a small script the assistant runs after each edit) saves every draft for you. Setup wires the checks into each repository. |
+| **Traceable decisions** | Each approval is tied to the exact contents of the file. If the file changes, the approval no longer counts. Later changes link to the work they change, and `yad thread` shows the whole chain. |
+| **Reviews you control** | Every planning step waits for a person to approve it. Reviews happen in real pull requests (GitHub) or merge requests (GitLab), or locally with no platform. The Review Companion sums up a change and answers questions about it. |
+
+## How it fits together
+
+Three words come up everywhere:
+
+- **Product repository.** One git repository that holds the project record: plans, decisions,
+  approvals and history. It usually has no product code in it.
+- **Code repository.** A repository where the code lives, such as `backend` or `mobile`. Yadflow adds
+  checks to it and links each change back to the plan.
+- **Feature thread.** A feature plus every later change and fix that builds on it, linked by a
+  `parent` field.
+
+Work moves in two parts. **Shape** plans the work in the Product repository. Its steps are the epic,
+the architecture, the UI design, the stories and the test cases. An **epic** is one feature or
+change, and a **story** is one piece of it for one or more repositories. Each planning step stops
+until a person approves it. **Build** makes each story real in each code repository. The steps
+are: spec, implement, checks, ship, and a human code review.
+
+<!-- Source: docs/diagrams/work-and-memory.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
+<img src="https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/work-and-memory.svg" width="340" alt="A loop. The project record feeds people and AI assistants, who plan a change. A human review approves it or asks for changes. The approved change is built in the code repositories, then checked and code-reviewed. The merged outcome is recorded, and the next task starts from the updated record.">
+
+*How work and the record feed each other. Not every arrow is automatic: people approve, merge and ask
+their assistant for the next step.*
+
+The complete map of every step, check and gate is in the
+[full workflow diagram](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg).
+It is large, so open it full size.
 
 ## Quickstart
 
-Pick the way in that fits. A **workspace** is the folder that holds the Product (`product/`) and
-your code repos side by side:
+**You need:**
+
+- Node.js 18 or newer
+- git
+- an AI assistant from the list above
+
+The GitHub CLI (`gh`) or GitLab CLI (`glab`) is optional. Without either one, reviews run locally.
+
+**1. Install the command and create a project.** Run this in a terminal, in a folder that is not
+inside a git repository:
 
 ```bash
-npx yadflow new acme     # 1a. new product: makes acme/product/, then runs the guided setup
-npx yadflow init         # 1b. repos you already have: run in the folder that holds them
-npx yadflow join <url>   # 1c. joining a team: clones the Product and every repo it registers
-npx yadflow setup        #     or run the guided setup inside an existing Product repo
+npm install -g yadflow@latest   # installs the yad command
+yad new acme                    # creates acme/product/ and runs the guided setup
 ```
 
-`new` creates nothing outside your machine — it prints the `gh`/`glab` line that puts the Product
-online. `join` never commits or pushes; it only adds per-machine files. All three leave a small
-`.yad-workspace.json` in the workspace, so `yad` finds the Product from any repo it registers.
+Setup asks a few questions: solo or team, one repository or several, GitHub, GitLab or no platform,
+and which assistant folders to install the skills into. Then it creates these:
 
-Then, in your AI IDE, drive the lifecycle by invoking skills by name:
+- `acme/product/` — the Product repository, with the skills and the `.sdlc/` settings
+- `acme/.yad-workspace.json` — this lets `yad` find the Product from inside any code repository the
+  Product lists
+
+It creates nothing online. At the end it prints the commands that put the Product on GitHub or GitLab,
+for you to run when you are ready.
+
+![yad new acme — creates acme/product/ and runs the guided setup, then prints the commands that put the Product online](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/setup-wizard.gif)
+
+**2. Ask for the next action.** Run this in the terminal:
+
+```bash
+cd acme/product
+yad next        # prints the single next thing to do; run it any time
+```
+
+**3. Start your first feature.** Open `acme/product` in your AI assistant and type this instruction
+to it (not into the terminal):
 
 ```text
-run yad-epic             # 2. author + gate the "thinking": epic → architecture → UI → stories
-run yad-spec   …         # 3. Build: spec → implement → checks → ship (per story, per repo)
+Run the yad-epic skill: customers can check out their cart in the mobile app,
+and merchants see a queue of pending orders.
 ```
 
-Every step stops at a gate until a human approves. New here? **Walk it lesson-by-lesson in the
-[guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/)**, or read the
-[team guide](TEAM-GUIDE.md).
+**What success looks like:** the assistant writes `epics/EP-<name>/epic.md`, opens its review, and
+stops. `yad next` then says the epic review is waiting. How the review passes depends on the platform:
 
-Running `yad` tells you when a new release is out. To upgrade, run these in the Product:
+- **With GitHub or GitLab:** a teammate approves the review pull request and it merges. Then run the
+  `yad gate sync` command that `yad next` prints, unless your CI does it for you.
+- **With no platform:** a teammate runs `yad gate approve EP-<name> epic.md --by <their name>`, then
+  anyone runs `yad gate advance EP-<name> epic.md`.
 
-```bash
-npm install -g yadflow   # 1. install the latest release
-yad migrate              # 2. preview: which state files this release would rewrite (writes nothing)
-yad migrate --apply      # 3. rewrite them, keeping a <file>.yad-orig copy of each
-yad update               # 4. re-sync this project's skills, gate scripts and CI files
-yad doctor               # 5. confirm everything is healthy
-```
+In solo mode no approval is needed. Merging your own pull request (then the same `yad gate sync`,
+unless CI runs it), or `yad gate advance` with no platform, is the human decision. After that, `yad next` names the next step.
 
-`yad migrate` moves your state files onto the file shape the new release expects. On a minor or patch
-release it usually has nothing to do. Coming from 3.x? Read
-[upgrading to 4.0](docs/migrations/upgrading-to-4.md) first. See also
-[staying up to date](docs/CLI.md#staying-up-to-date).
-An update rewrites the files yad manages (gate scripts, CI, PR/MR templates) — but not one **you**
-edited: yad records the sha of every file it writes, so an edit to one is reported as `modified` and
-left alone. A file it has no record of (an install predating that record) is still replaced, but only
-after saving a `.yad-orig` backup
-([managed files](docs/CLI.md#managed-files-what-yad-owns-and-what-you-edited)).
+**Other ways in:**
 
-## What `npx yadflow setup` installs
-
-![yad new acme — makes acme/product/, runs the guided setup wizard (install the yad-* skills, record the Product, wire the gates, stamp the .sdlc config), then prints the commands that put the Product on GitHub or GitLab](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/setup-wizard.gif)
-
-The recording shows `yad new acme`, which runs this wizard inside the new `acme/product/`
-([how to re-record it](https://github.com/abdelrahmannasr/yadflow/blob/main/docs/media/setup-wizard.tape)). The wizard is idempotent and profile-driven (solo/team, greenfield/brownfield, monorepo/separate).
-In one pass it produces:
-
-- **The `yad` CLI** — zero-dependency Node, run via `npx` or a global install. The main groups:
-
-  | Group | Commands |
-  | --- | --- |
-  | Start a workspace | `new`, `init`, `join`, `setup` |
-  | Drive the lifecycle | `next`, `epic new`, `foundation`, `gate`, `skip` / `defer` / `unblock`, `mode`, `dial`, `kill` |
-  | Drafts and owners | `capture`, `claims`, `fold`, `assign` / `unassign` / `owners` |
-  | Build | `commit`, `open-pr`, `ship`, `review`, `checkpoint`, `tidy up` |
-  | Code repos | `repo` (`list`, `clone`, `refresh`, `sync`), `risk-map`, `codeowners` |
-  | Feature threads | `thread`, `reconcile` |
-  | Read the record | `history`, `index`, `usage`, `docs` |
-  | Keep healthy | `doctor`, `check`, `update`, `migrate`, `report` |
-
-  Every command, with its flags: [docs/CLI.md](docs/CLI.md#commands).
-- **38 workflow skills** installed into your AI assistant — Claude Code, Codex CLI, Cursor,
-  Gemini CLI, GitHub Copilot, Zencoder and opencode. See
-  [which agent reads which directory](#which-ai-agents-are-supported).
-- **`.sdlc/` config** — the Product, connected repos, and tool connections
-  (design, testing, learning), all as plain JSON you can read and diff.
-- **CI gates**, wired into every connected repo and the Product as **GitHub Actions or GitLab CI** —
-  spec-link, contract-check, verified-commits, build/test/lint, the feature-thread gates, the advisory
-  risk-map check (warns when a code repo's `.sdlc/risk-map` — a risk level per directory, no names — is
-  stale, says how many approvers a PR asks for — one more when it touches a `high` directory — and names
-  who has worked in that directory in the last 30 days), and the push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
-  `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
-  under `checks/`.
-- **An agent guardrail** on a verified Product — `hooks/ledger-guard.mjs`, a harness hook that refuses an
-  agent the CI-owned gate-ledger write at the moment it tries it and names the command that owns the
-  transition, instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic
-  (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority. The same
-  rule guards a person's `git commit` through a `pre-commit` hook `yad check --fix` installs in each clone
-  (E48); it never overwrites a hook of your own. What to turn on in GitHub or GitLab so the CI checks
-  actually hold a merge: [Branch protection](docs/branch-protection.md).
-- **Background capture** on every Product, in both ledger modes (E43) — `hooks/yad-capture.mjs`, a
-  harness hook that runs `yad capture` after each agent edit. It snapshots every changed Shape artifact
-  onto your private `yad/wip/<you>/<epic>` branches, so a draft is never lost and nobody types a git
-  command. See [Background capture](#background-capture) below.
-- **PR/MR templates** and an opt-in CodeRabbit config.
-
-Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — the step state and the approvals — so the
-audit trail starts the moment you begin real work. The contract lock (`.sdlc/contract-lock.json`, the
-hash of the shared contract surface) is written later, by `yad-architecture`. The one exception is a
-change-epic that carries its parent's architecture: `yad epic new <slug> --type change --parent EP-<parent> --inherits architecture,contract`
-(run for you by `yad-change`) writes a small **pointer-lock** that points at the parent's lock. `yad epic new <slug>` does the same seeding
-from the CLI when you would rather lay the track before the writing starts.
-
-Before any epic, you can also frame the whole product once: `yad foundation new` seeds the
-**Foundation** — the Product level, in `foundation/` — and the `yad-discovery` skill writes its
-sections (purpose, scope, MVP, roadmap, stack, repos). It is optional, and each epic reads its approved
-roadmap.
-
-## Which AI agents are supported
-
-An **agent skill** is a folder holding a `SKILL.md` file — instructions the agent loads when the task
-matches. `SKILL.md` is now a format several agents read, and `.agents/skills/` is the directory
-several of them agreed to look in. So one install can serve more than one agent.
-
-`yad setup` asks which directories to install into. Pick by the agent you use:
-
-| Directory | Agents that read it |
-| --- | --- |
-| `.claude/` | Claude Code. Cursor also reads it for compatibility. |
-| `.agents/` | Codex CLI, Gemini CLI, Cursor, GitHub Copilot |
-| `.cursor/` | Cursor — its own directory. Not needed if you install `.agents/`. |
-| `.gemini/` | Gemini CLI — its own directory. Not needed if you install `.agents/`. |
-| `.zencoder/` | Zencoder |
-| `.opencode/` | opencode — installed as flat `commands/<skill>.md` files, not folders |
-
-A fresh setup offers **`.claude,.agents`**, which together cover every agent in the table. A project that already
-has an INSTALL in one of them — a `skills/` folder, or an armed hook entry — is offered that one
-instead; a `.cursor/` holding only Cursor rules is not an install, and is offered the default. Checked against each agent's
-own documentation on 2026-09-16; `yad doctor` prints the same table's verdict for your project.
-
-### Background capture
-
-`yad capture` saves your work in progress without touching your checkout (E43). It takes every changed
-file under `epics/` and `foundation/` — except the ledger (any `.sdlc/` folder and `reviews/`; the four
-files a person or a skill writes there, `contract-lock.json`, `change.json`, `design-links.json` and
-`test-links.json`, are included) — and commits it onto
-a private branch per epic, `yad/wip/<your git name>/<epic>`. It uses git's low-level commands in a
-throwaway index, so your branch, your staged changes and your files stay exactly as they were, and no
-git hook runs.
-
-| What | How |
-| --- | --- |
-| When | After every agent edit, by a hook yad wires in both ledger modes: Claude Code `PostToolUse` in `.claude/settings.json`, Cursor `afterFileEdit` in `.cursor/hooks.json`. Any other agent or editor: run `yad capture` yourself. Each capture takes every changed artifact, so your own editor's edits ride along |
-| Push | A capture commits at once, locally. The hook pushes your capture branches (and fetches everyone else's, for claims) in the background at most once every 5 minutes, with no password prompt and a short timeout, so an edit never waits on the network. `yad capture` by hand pushes straight away. With no remote, or offline, the captures stay local and nothing fails |
-| CI | yadflow's own push workflow skips `yad/wip/**`. `yad doctor` names any of **your** workflows a push to `yad/wip/*` would start (no branch filter, `branches: ["**"]`, or a `branches-ignore` that does not name it), so you can add `branches-ignore: ["yad/wip/**"]` |
-| Off | `"capture": false` in the Product config (`yad check --fix` then removes the hook), or `YAD_CAPTURE=0` for one shell |
-
-The capture commits are unsigned on purpose — a signing prompt inside a hook would hang the agent — and
-each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines. They are drafts: the commit your history
-keeps is the fold, below. The push is never forced: if you capture the same epic on two machines, the second push is refused rather than overwriting the first, and a `yad capture` you run by hand says so and names the branch (delete one copy with `git branch -D` to continue the other) — the hook's background push cannot report it. **To remove a capture branch for good** — say a secret was captured — delete it on origin first, then on every machine that has it run `git branch -D yad/wip/<you>/<epic>` **and** `git branch -dr origin/yad/wip/<you>/<epic>` (the second deletes that machine's saved copy of origin's branch; it says so if there is none): a machine that still holds either one rebuilds the branch and pushes it back. On a fresh clone, a capture continues the branch already on origin. Two people with the same git name share branches. The people count that caps review gates
-(E71) does not count capture commits.
-
-### Who else is editing a file (claims)
-
-`yad claims` lists who else is editing which artifact right now (E46). It is **advice, not a lock**:
-nothing stops anyone, because with no server a real lock is impossible. There is nothing to record by
-hand — a claim is read from the capture branches: someone's `yad/wip/<name>/<epic>` branch holds a
-saved change to that file that is not on the default branch yet.
-
-| What | How |
-| --- | --- |
-| A claim | A file of the epic that differs between the capture branch's last save and the commit that save was built on — the person's own edits, never what a pull brought in |
-| Ends | 4 hours after that branch's last save, or at once when the file on the default branch matches the saved one (the work was merged) |
-| `yad claims [<epic>]` | Fetches everyone's capture branches first (short timeout, no prompts), then lists each claim: file, person, last save. `--no-fetch` reads what is already here; `--json` too |
-| At edit time | When an edit changes a file someone else has a claim on, the capture hook says so. Under Claude Code the agent reads it (and you see it); under Cursor it is a line on stderr. It never blocks, never waits on the network, and names the same person and file at most once an hour |
-| Fresh enough | The hook's background push (at most every 5 minutes) also fetches everyone's capture branches in the background |
-
-**Limits.** Someone with capture off, or offline, is invisible. A claim can be up to about 5 minutes
-late. Two people with the same git name share capture branches, so they never see each other. Times
-are the saver's own clock, shown in UTC.
-
-### Who owns a step (assign)
-
-`yad assign` gives one authoring step to one person (E47) — for example "Bob writes the
-architecture". It is stronger advice than a claim, because it is decided in advance, but it is still
-**advice, not a lock**: it never blocks an edit, never holds a review gate and never stops a fold.
-
-| What | How |
-| --- | --- |
-| `yad assign <epic> <step> [--to <name>]` | Assigns the step to you, or to the person whose **git name** you give (the name they commit with). Only authoring steps that write an artifact (`epic`, `architecture`, `stories`, …); review steps are not assigned, because the platform and the gate count decide who approves. If someone else already owns the step it is refused and names them; `--force` replaces them |
-| `yad unassign <epic> <step>` | Removes the assignment. Your own freely; someone else's needs `--force` |
-| `yad owners [<epic>]` | Lists every assignment, whether it is live, and any owner file that cannot be read. `--json` too |
-| Where it is kept | One small file per step: `epics/<epic>/.sdlc/owners/<step>.json` (`foundation/.sdlc/owners/` for the Foundation). It is not a ledger file, so you can write it in both ledger modes. `yad assign` does not commit it, and `yad fold` never takes it (an assignment is not authoring): commit it on its own — on a `verified` Product, in a PR of its own (the Product checks let a PR that changes only owner files through, since E47; run `yad update` so your copies of the checks and of the product-checks workflow have that rule; `yad doctor` warns `owners:rename-blind` if a hand-edited workflow was kept) — so the team sees it when they pull. It is captured to your `yad/wip/…` branch like any artifact, but it is not counted as a claim |
-| Live | While the step's work is open: the step is not finished, or its review has not passed yet. After that the file stays as a record; re-opening the step makes it live again. There is no time limit |
-| Shown | `yad next` prints `owner: <name>` under the step (and under its review) while it is live |
-| At edit time | When your edit changes a file of a step someone else owns, the capture hook says so — to the agent under Claude Code, on stderr under Cursor — at most once an hour per step. One note carries both this and any claim warning |
-
-**Limits.** The name is the git name, made branch-safe the way capture branch names are — so it matches
-the capture hook without asking GitHub or GitLab. Two people with the same git name look like one owner.
-A git name with no Latin letters is branch-safe only through the person's email, so someone else can
-assign it only once that person has a capture branch here (`--to` finds it by the git name the branch was
-saved under). With capture off, there is no edit-time warning.
-
-### Folding a step into one commit
-
-`yad fold <epic> <step>` ends an authoring step (E44). It makes the one commit the record keeps,
-`docs(<epic>): author <step>` — for example `docs(EP-checkout): author architecture`. The authoring
-skills run it at the end of their step; you can run it yourself too.
-
-| What | How |
-| --- | --- |
-| Files | Only that step's files: the ones its review covers (architecture is `architecture.md`, `contract.md` and `.sdlc/contract-lock.json`; stories is everything under `stories/`), plus what the step's skill writes beside them (`DESIGN.md` and `.sdlc/design-links.json` for the UI step, `.sdlc/test-links.json` for test cases). Other changed files of the epic are named and left on disk, so a half-written draft of another step never lands in this commit |
-| The ledger | Follows `ledger` mode. `local`: the epic's changed ledger files go in the same commit — one step, one commit. `verified`: CI writes the ledger at merge, so the fold leaves those files for CI — except while the epic is brand new (no `.sdlc/state.json` in HEAD yet): then its new ledger files are its seed, which is the case `ledger-guard` allows and the only way a seed reaches the default branch. Once the epic is seeded, even a NEW ledger file (a `reviews/*.md` written by hand) is left for CI, because the guard would reject it |
-| The seed | While the epic is brand new, the first fold also takes the new person-written `.sdlc/` files beside the ledger — a change-epic's `change.json` and its pointer `contract-lock.json` — in both modes |
-| The commit | A normal `git commit`, so it is signed if your git signs (with `ledger: verified` it warns when signing is off: the review PR's signature check would fail), and your commit hooks run. Only the step's files are committed; anything else you staged stays staged. It ends with `Yad-Epic`, `Yad-Step` and `Yad-Folded` lines — the last is the tip of your capture branch, the drafts this commit folds (`none` with capture off) |
-| Where | With `ledger: verified`, never on the default branch — artifacts reach it only through the review PR. With `ledger: local`, anywhere |
-| The drafts | Your `yad/wip/<you>/<epic>` branch is left as it is: the draft history stays for the later rework measurement (E95), and nothing has to be deleted on other machines. The next capture has nothing new to save |
-
-A step with no changed files has nothing to fold, and says so. `yad open-pr` on a review branch warns
-when that step's files have changes no fold has committed — they are not in the review.
-
-### The local ledger guard, per agent
-
-In **verified mode** — where CI owns the gate ledger — yadflow installs a local guardrail that stops
-an agent hand-editing the gate files, at the moment of the edit rather than twenty minutes later in a
-failed pipeline. It needs a hook that can run *before* a write and refuse it. Two agents have one:
-
-| Agent | Wired into | Event |
+| You have | Run | Then |
 | --- | --- | --- |
-| Claude Code | `.claude/settings.json` | `PreToolUse` |
-| Cursor | `.cursor/hooks.json` | `preToolUse` |
+| Existing repositories | `yad init`, in the folder that holds them | Run the `yad-backfill` skill first. It records what already exists. |
+| One existing repository with all the code | `yad setup --brownfield --monorepo`, inside it | The same: run `yad-backfill` first. |
+| A team that already uses Yadflow | `yad join <Product clone URL>` | It clones the Product and every repository it lists. It sets up only this machine and never commits. |
 
-Cursor answers this kind of hook in JSON rather than by exit code, and treats an empty answer as a
-refusal — so a `.cursor` project also gets a small adapter script, `hooks/ledger-guard-cursor.mjs`,
-which always replies properly. Without it the guard would have blocked every file write instead of
-just the gate files.
+**Small changes.** Not every change needs the full route:
 
-Every other directory gets the script (`hooks/ledger-guard.mjs`) and no wiring — they have no such
-hook, so those agents are guarded by CI alone. `yad doctor` says so by name rather than staying
-silent. The Cursor wiring follows Cursor's published hook protocol and has not yet been exercised
-against a live Cursor session.
+- `yad epic new <id> --profile chore` gives a short route with just the epic and the stories. This
+  route cannot change the shared contract.
+- Commits of type `chore`, `ci`, `build` or `test` (the start of the commit title, for example
+  `chore:` or `chore(deps):`) do not need a task link.
+- `yad skip` and `yad defer` pass over optional steps, such as the UI design.
 
-## Your first five minutes
+**Already using Yadflow?** Follow [staying up to date](docs/CLI.md#staying-up-to-date). Coming from
+3.x, read [upgrading to 4.0](docs/migrations/upgrading-to-4.md) first.
 
-<!-- IMAGE: docs/media/artifact-waiting.png — "A generated epic waits at its gate — nothing advances until a human approves." -->
+## How the project record evolves
 
-```text
-setup → AI drafts an artifact → ⛔ gate waits → you approve → next step → ⛔ gate waits → …
-```
+When shipped work needs to change, you do not edit the old plan. You start a **linked change**. The
+`yad-change` skill sorts the change into one of four kinds:
 
-1. **Get a workspace** — `npx yadflow new <name>` for a new product, `npx yadflow init` for repos you
-   already have, or `npx yadflow join <url>` to join a team (see [Quickstart](#quickstart)). The
-   wizard installs the skills, connects your repos, and wires the gates.
-2. **Run `yad-epic`** in your assistant — it drafts the epic, then **stops** and writes it to a file.
-3. **A gate waits.** Nothing advances until you review it.
-4. **You approve** — by merging the review PR/MR, or, with no GitHub or GitLab, with
-   `yad gate approve` and `yad gate advance`.
-5. **The workflow continues** to the next step, which stops again.
+- a defect fix
+- a behavior change
+- a contract change
+- a new capability
 
-Every step is the same contract: *AI proposes → a human decides → the trail is recorded.*
+The kind decides which documents must be written again. The skill then starts a new epic with
+`yad epic new --type change --parent <epic> --inherits <documents>`. Documents it inherits are not
+copied. They point back to the parent's approved files.
 
-## How it works (in five points)
+<!-- Source: docs/diagrams/feature-evolution.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
+<img src="https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/feature-evolution.svg" width="720" alt="The checkout feature has two children: a fix that adds a missing queue test, and a change that sorts the queue. The feature's architecture, contract, UI and other stories still apply. The change replaces the epic text and retires one old queue story. The current picture for the next task combines what still applies, the fix's story and tests, and the change's epic text.">
 
-- **Shape = decide.** Once per epic, in the Product: epic, architecture + a locked contract,
-  UI, stories, test cases. Always human-gated — nothing auto-advances.
-- **Build = make it real.** Once per story per code repo: spec → implement → checks → ship.
-- **Every step stops at a gate.** A human moves it forward (local, or by merging a review PR/MR).
-  <!-- IMAGE: docs/media/pr-gate.png — "The review gate rides a real PR/MR: approve to advance, comment to block." -->
-- **Automation is opt-in.** The team switches a Build step to auto with `yad dial`, which shows that
-  step's run record as advice — and `yad kill` holds everything at manual in one command. A review
-  gate — the engineer review and every Shape review — is never automatic.
-- **Everything is files.** State, approvals, the contract lock, the build log — all plain files under
-  `epics/EP-<slug>/`. No database. The audit trail *is* the repo.
+*The checkout thread. The fix is a real record in `epics/`; the change is the one the demo adds.*
 
-## Why not just use Cursor?
+`yad thread <epic>` prints the **current truth**: which epic each document comes from today.
 
-Because Yadflow lives in a different layer. Cursor, Claude Code, Copilot, Continue, Roo, and Cline
-*generate* code. Yadflow *governs* what happens to it — review, architectural control, and an audit
-trail — so you get AI speed without losing control of quality or accountability. They're
-complementary: bring your favorite, and Yadflow wraps the engineering process around it.
+- **A document written again** (the epic, architecture, contract or UI design) comes from the epic
+  furthest down the thread (the longest chain of parents back to the original feature) that does not
+  inherit it and whose route has the step that writes it. A skipped step still counts. When two
+  epics are equally far down, the one whose ID sorts last wins. Dates play no part.
+- **Stories and test cases add up** across the thread.
+- **Retired stories drop out.** A change can retire a parent story with `supersedes`.
 
-|               | Your AI assistant        | **Yadflow**                                          |
-|---------------|--------------------------|------------------------------------------------------|
-| **Layer**     | Writes the code          | Governs how it ships                                 |
-| **Output**    | Diffs, completions       | Gated artifacts + a file-based audit trail           |
-| **Answers**   | "Write this for me"      | "Should this merge — and who approved it?"           |
-| **Review**    | You eyeball the diff     | Human-gated PR/MR, contract lock, switchable automation |
-| **Fit**       | Bring your own           | Wraps around all of them                             |
+Two rules keep this honest:
 
-## Review, made a pairing — and a lesson
+- **The view includes drafts.** `yad thread` names the epic that will rewrite a document as soon as
+  that epic's `epic.md` is written, even as a draft, before the document itself is written or
+  reviewed.
+- **Only approved work can be inherited.** A new epic can inherit a step only after that step and its
+  review are finished.
 
-Reviewing AI-generated code is where governance lives or dies, so Yadflow makes the honest review the
-*easiest* path. The **Review Companion** turns any PR/MR into a 60-second trailer, swipe-through cards,
-and a grounded chat. **Pair Review** (the `yad-pair-review` skill; its CLI side is `yad gate walkthrough` for a Shape
-review and `yad review walkthrough` for a code PR) goes further: the AI walks you through the
-change one risk-ordered stop at a time, explains each, then asks you about it — until both sides are
-satisfied.
+When every story of an epic has shipped, the epic is **sealed**. New behavior then needs a new linked
+epic. A CI check enforces this when it can reach the Product repository.
 
-It doubles as a lesson: it teaches a transferable review method, scores you against it, and records
-your review-skill growth in a **private, local-only** learning log (the `yad-status` skill rolls it up). It's
-**soft and additive** — it never blocks a merge on its own, yet any genuine concern it surfaces blocks
-like a normal review comment.
+**Keeping the record fresh.** Nothing refreshes in the background, except the draft-saving hook.
+Yadflow gives you explicit checks, and each one says who acts:
 
-## Who it's for
+| Record | How it is checked | Who refreshes it | Enforced? |
+| --- | --- | --- | --- |
+| Approvals | Tied to the file's exact contents | A person approves again | Yes. An outdated approval does not count at the gate. |
+| Shared contract | A lock file holds its hash | The architecture skill locks it again | Yes. A CI check always requires a contract change to be declared, and checks the lock when it can reach the Product. |
+| Code snapshots of each repository | Out of date once the repository moves on | `yad repo refresh`, then the `yad-connect-repos` skill for the code map | No. `yad doctor` and `yad repo list` warn. |
+| Product index (`.sdlc/index.json`) | A hash of its inputs | `yad` commands, or CI at merge | No. `yad doctor` warns. |
+| Documentation sites | `yad docs sync` (check only by default) | The `yad-docs` skills | No |
+| Drafts in progress | — | A hook saves each edit (Claude Code, Cursor). Elsewhere, run `yad capture`. | No |
 
-Tech leads and engineering managers who want their team to move fast with AI-assisted development
-**without** giving up review, architectural control, or an audit trail — the governance layer around
-AI-assisted software engineering, not another code generator.
+**What it does not do:**
 
-And because the audit trail *is* the repo, **`yad usage`** turns it into a per-member adoption &
-behavior report (HTML/JSON/MD): who authored, reviewed, approved, and shipped, with factual
-workflow-hygiene flags — derived read-only, so an EM can see how the team actually uses the flow.
+- It does not record your chats with the assistant.
+- It does not guarantee that a person or an AI reads the record correctly.
+- It does not track deployments. An approved plan says what was agreed. The build log says what
+  shipped.
+
+## Reviews and human control
+
+*AI builds. The hand decides.*
+
+The record is worth trusting because people approve what goes into it.
+
+- **Planning steps.** Each one stops at a review gate. It moves on only when the approvals arrive,
+  review comments are resolved, and the pull request merges. With no platform, `yad gate advance`
+  checks the same approval rule. The local gate records the name typed with `--by` and cannot check
+  who typed it, so a team that needs proof of who approved should review on GitHub or GitLab.
+- **Required approvals.** The base count is enforced. Extra approvers for risky areas (the contract,
+  auth, payments) are advice.
+- **Build steps.** A team can switch a Build step to advance on its own with `yad dial`. `yad kill`
+  switches every step back to manual in one command. The engineer code review is always a person.
+- **Checks on every change.** Each change must name its task (spec-link). A contract change must be
+  declared and locked again (contract-check). Commits must carry a signature that GitHub or GitLab
+  marks as verified (verified-commits; it is skipped, with a warning, when there is no platform).
+  To make these checks block a merge, see [branch protection](docs/branch-protection.md).
+- **Pair review.** The `yad-pair-review` skill walks you through a change one risky part at a time.
+  It asks you questions and keeps a private log of how your reviewing improves. It never blocks a
+  merge by itself.
+
+## Compatibility and limitations
+
+| Area | Support |
+| --- | --- |
+| Operating systems | Linux and macOS are fully tested in CI. On Windows, the agent hooks run natively, and the rest of the tool is not yet fully tested. See [platform support](docs/CLI.md#platform-support). |
+| Node.js | 18 or newer |
+| AI assistants | Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder, opencode. See [which agent reads which folder](docs/CLI.md#which-ai-agents-are-supported). |
+| Hooks | The draft-saving hook runs in Claude Code and Cursor only. The hook that stops an agent editing CI-owned files is added only when CI owns the approval record, and also runs only in those two. The Cursor wiring follows Cursor's published hook format but has not yet been tried in a live Cursor session. Other assistants rely on the CI checks. |
+| Git platforms | GitHub and GitLab for review pull requests and CI. With no platform, reviews run locally with `yad gate`. |
+
+## Available now and planned
+
+**Available now:**
+
+- workspace setup
+- the Shape and Build steps with review gates
+- linked changes and `yad thread`
+- `yad history`, `yad next` and `yad usage`
+- draft saving, claims and owners
+- the CI checks
+- the Review Companion
+
+**Planned, not built yet** (see the [roadmap](docs/roadmap-idea-1.md)):
+
+- a context brief for each task: E24, E82, E89 and E90
+- a cross-repository map with its own staleness tracking: E83
+- a release and deployment phase: E32
+- a single handoff view, an explicit `superseded` status, one combined freshness report, and a
+  browsable example project: E126 to E129
 
 ## Documentation
 
-- **[Guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/)** — learn by doing, setup → first shipped feature.
-- **[Terminology & workflow report](https://abdelrahmannasr.github.io/yadflow/)** — every term, artifact, gate, and skill on one illustrated page.
-- **[TEAM-GUIDE.md](TEAM-GUIDE.md)** — the short, plain-language version for a developer team.
-- **[docs/CLI.md](docs/CLI.md)** — the full `yad` command reference, the PR-driven gate, and `yad doctor` codes.
-- **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 38 agent skills.
-- **[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)** — the by-hand, end-to-end path through every phase.
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[RESEARCH-NOTES.md](RESEARCH-NOTES.md)** · **[RELEASING.md](RELEASING.md)**
-- **[SECURITY.md](SECURITY.md)** — how to report a vulnerability, which versions get fixes, and the supply-chain stance. **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — the community standards for taking part.
-
----
-
-**Platform support.** Linux and macOS are first-class (CI runs the test suite, bash gates, and the
-end-to-end harness on both). **On Windows, the agent hooks run natively, without WSL** (E113), and the
-CLI code they reach has been fixed for Windows — CI runs the hook scripts and those CLI tests on Windows.
-The rest of the CLI is not yet tested there. Requires **Node.js ≥ 18**.
-
-| On Windows | What to know |
-| --- | --- |
-| Agent hooks | Each hook is a Node script (`hooks/*.mjs`) that the agent runs as `node <script>`, so nothing needs bash or an execute bit. `node` must be on the PATH your agent runs with — if it is not, the hooks silently do not run |
-| Claude Code | Runs hook commands in **Git Bash** (part of Git for Windows). Without Git Bash it falls back to PowerShell, and the hooks do not run there. `yad doctor` warns when it cannot find Git Bash |
-| Cursor | Runs hook commands through PowerShell. The entry is `node hooks/<script>.mjs`, which PowerShell runs as it is |
-| Line endings | Set `git config core.autocrlf input` in the Product clone. With `true` (the Git for Windows default) git checks files out with CRLF line endings. yad's own managed files still compare equal, but an approval is bound to an artifact's exact bytes, so reviews approved elsewhere read as stale. `yad doctor` warns about this on Windows |
-| Check gates | Still bash scripts (`checks/*.sh`). They run on your CI runner, not on your machine |
-| Not yet tested on Windows | The full test suite and the end-to-end harness run on Linux and macOS only. A machine with no Git Bash is not covered for Claude Code |
-
-**Upgrading from a release before E113.** The hooks used to be bash scripts (`hooks/*.sh`). `yad check
---fix` (or `yad update`) rewrites each hook entry to the Node command and deletes the old script — but
-only a copy yad's own record (`.sdlc/managed.json`) proves it wrote and nobody changed. A script you
-edited, or one your own hook entry still runs, is kept. The old script is also kept until the rewritten
-settings file is **committed**: yad never commits that file for you, and a teammate who pulls must not get
-an entry that runs a deleted script. So the order is: `yad check --fix`, commit `.claude/settings.json` and
-`.cursor/hooks.json`, then `yad check --fix` again to remove the old scripts. Everyone on the team should
-upgrade together: an older yadflow does not know the new entries, and its `check --fix` puts the old
-script and entry back beside them.
-
-**Releases** are a human decision. Merging to `main` never publishes; a person fast-forwards the
-`release` branch, and [semantic-release](https://semantic-release.gitbook.io/) publishes from there
-(Conventional Commits → npm, with provenance). See [RELEASING.md](RELEASING.md).
+- **Learn:** the [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/) (setup to
+  your first shipped feature) · the [team guide](TEAM-GUIDE.md) · the
+  [terminology and workflow report](https://abdelrahmannasr.github.io/yadflow/)
+- **Reference:**
+  - [every `yad` command](docs/CLI.md#commands)
+  - [working together: capture, claims, owners, fold](docs/CLI.md#working-together-capture-claims-owners-and-fold)
+  - [troubleshooting and error codes](docs/CLI.md#troubleshooting-yad-doctor--error-codes)
+  - [all 38 skills](docs/SKILLS.md)
+  - [the by-hand walkthrough](docs/WALKTHROUGH.md)
+- **Upgrade:** [staying up to date](docs/CLI.md#staying-up-to-date) ·
+  [upgrading to 4.0](docs/migrations/upgrading-to-4.md)
+- **Project:**
+  - [CONTRIBUTING.md](CONTRIBUTING.md)
+  - [SECURITY.md](SECURITY.md)
+  - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+  - [RELEASING.md](RELEASING.md): a person decides every release, and merging to `main` never
+    publishes
+  - [RESEARCH-NOTES.md](RESEARCH-NOTES.md)

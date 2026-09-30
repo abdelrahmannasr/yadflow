@@ -33,8 +33,9 @@ export function HomePage() {
               Learn Yadflow,<br />one gated step at a time.
             </h1>
             <p className="text-lg max-w-2xl mb-8 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-              A hands-on walk from an empty repo to your first shipped feature — the gated SDLC where
-              AI builds and a human approves every step. {TOTAL_LESSONS} short lessons, nine modules.
+              A hands-on walk from an empty repo to your first shipped feature. Build a shared project
+              record your team and AI assistants can use, with a person approving every planning step.{' '}
+              {TOTAL_LESSONS} short lessons, nine modules.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <button

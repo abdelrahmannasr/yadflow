@@ -4,8 +4,8 @@ Conventions for commits, branches, PR/MR titles, and the stable IDs that tie an 
 tasks, and shipped code. These are what the gates and checks rely on — a diff that follows them is
 traceable back to its task, story, and contract; one that doesn't will fail a gate.
 
-New to the workflow? Start with [`TEAM-GUIDE.md`](TEAM-GUIDE.md); the full reference is
-[`README.md`](README.md). Publishing the `yad` CLI to npm is documented in
+New to the workflow? Start with [`README.md`](README.md) (the introduction) and
+[`TEAM-GUIDE.md`](TEAM-GUIDE.md); the full command reference is [`docs/CLI.md`](docs/CLI.md). Publishing the `yad` CLI to npm is documented in
 [`RELEASING.md`](RELEASING.md). All participation is governed by our
 [Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately per
 [`SECURITY.md`](SECURITY.md).

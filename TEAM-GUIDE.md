@@ -1,10 +1,21 @@
 # Yadflow Team Guide — how to use the workflow with 1 Product + 3 code repos
 
-**Yadflow** (*yahd-flow* — from **يد**, Arabic for "hand"): the AI-driven SDLC where a human hand
-moves every gate. On npm as `yadflow`.
+**Yadflow** (*yahd-flow* — from **يد**, Arabic for "hand"): shared project memory and workflows for
+teams building with AI. On npm as `yadflow`.
 
-This is the short, plain-language version of `README.md`, written for a developer team. If you only read
-one page before starting, read this one. For depth, see [`docs/CLI.md`](docs/CLI.md) (commands),
+What it gives a team, in short:
+
+- **One shared record.** Plans, decisions, contracts and reviews live as files in one repository,
+  and both people and AI assistants read them.
+- **Clear handoffs.** `yad next` names the next action and its owner. `yad claims` shows who is
+  editing what. Review conversations happen on real pull requests or merge requests.
+- **Less busywork.** Skills draft each document. `yad ship` commits and opens the pull request.
+  Drafts are saved for you (on Claude Code and Cursor).
+- **A person decides.** Every planning step waits for human approval. *AI builds. The hand decides.*
+  Yadflow is not a chat tool: the conversation stays in your pull requests and your usual channels.
+
+This is the plain-language guide for a developer team. The [`README.md`](README.md) is the short
+introduction. If you only read one page before starting, read this one. For depth, see [`docs/CLI.md`](docs/CLI.md) (commands),
 [`docs/SKILLS.md`](docs/SKILLS.md) (every skill), and [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)
 (the by-hand, end-to-end path) — or learn by doing in the
 [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/).

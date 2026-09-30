@@ -319,7 +319,7 @@ export async function runCapture(root, { hook = false, noPush = false, now = Dat
     // secret captured by mistake, say) is not continued from a stale copy (E43 review 3). This prune clears
     // every stale copy on the hand path; a LOCAL branch is still pushed back, and the hook, which never
     // fetches, still reads a copy another fetch left. Removing one for good means `git branch -D` and
-    // `git branch -dr origin/…` on every machine too (README). The same
+    // `git branch -dr origin/…` on every machine too (docs/CLI.md, Background capture). The same
     // low-speed limit as the push, so a stalled HTTPS connection gives up instead of holding the capture.
     spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--prune', '--no-tags', 'origin', `+refs/heads/${WIP_PREFIX}/${name}/*:refs/remotes/origin/${WIP_PREFIX}/${name}/*`],
       { cwd: root, stdio: 'ignore', timeout: 30_000, env: { ...env, ...pushEnv(env) } });
