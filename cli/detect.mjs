@@ -158,10 +158,11 @@ const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 // A name or version comes from a file anyone could have written: no control character reaches the
 // terminal, where one could move the cursor or recolour what follows, and no character that reorders or
-// breaks a line (the bidirectional overrides and isolates, the line and paragraph separators). `--json`
-// escapes the control characters already.
+// breaks a line (the bidirectional marks, overrides and isolates, the line and paragraph separators), and
+// no zero-width character (a name made only of them would print as nothing). This is for the TERMINAL:
+// `--json` escapes only U+0000–001F and hands the rest to a program unchanged.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 const clean = (v) => String(v).replace(UNSAFE, '?');
 
 // ---- the three file formats -------------------------------------------------------------------------
@@ -556,15 +557,17 @@ function pluginMcp(at, id, scope, problem) {
   const found = [];
   const add = (servers, rel) => found.push(...mcpItems(servers, { scope, where: `${id}: ${rel}`, agents: ['Claude Code'], plugin: id }));
   const bad = (rel, why = NOT_JSON) => problem('user', `.claude/plugins (${id}: ${rel})`, why);
-  const fromFile = (rel) => {
+  // `optional`: the default `.mcp.json` a plugin need not have. A file the plugin NAMES must be there.
+  const fromFile = (rel, { optional = false } = {}) => {
     const full = path.resolve(at, rel);
     // The plugin's own files only. `path.relative` across two Windows drives is an absolute path with no
     // `..` in it, so that is refused too; a name that merely starts with `..` (`..x.json`) is not.
     const r = path.relative(at, full);
     // Named by the manifest, never by the path it gave: that path may be absolute and name the machine.
-    if (!r || r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) { bad('.claude-plugin/plugin.json', 'names an MCP file outside the plugin'); return; }
+    if (!r) { bad('.claude-plugin/plugin.json', 'names the plugin folder, not an MCP file'); return; }
+    if (r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) { bad('.claude-plugin/plugin.json', 'names an MCP file outside the plugin'); return; }
     const doc = jsonOf(full);
-    if (doc === undefined) { if (rel !== '.mcp.json') bad('.claude-plugin/plugin.json', 'names an MCP file that is not there'); return; }
+    if (doc === undefined) { if (!optional) bad('.claude-plugin/plugin.json', 'names an MCP file that is not there'); return; }
     if (!isPlainObject(doc)) { bad(r.split(path.sep).join('/')); return; }
     // `.mcp.json` wraps the servers in `mcpServers`; a file plugin.json points at may list them bare. A
     // `mcpServers` that is not an object is a problem, as it is in `.cursor/mcp.json` — reading the whole
@@ -584,7 +587,7 @@ function pluginMcp(at, id, scope, problem) {
     else if (typeof d === 'string') fromFile(d);
     else bad('.claude-plugin/plugin.json', NOT_SERVERS);
   };
-  if (declared === undefined) fromFile('.mcp.json');
+  if (declared === undefined) fromFile('.mcp.json', { optional: true });
   else if (Array.isArray(declared)) declared.forEach(one);
   else one(declared);
   return found;

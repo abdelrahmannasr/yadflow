@@ -304,15 +304,23 @@ test('E50: a plugin MCP path that leaves the plugin, or names nothing, is a prob
     put(out, JSON.stringify({ mcpServers: { leaked: {} } }));
     put(path.join(home, 'a/.claude-plugin/plugin.json'), JSON.stringify({ mcpServers: out }));
     put(path.join(home, 'b/.claude-plugin/plugin.json'), JSON.stringify({ mcpServers: 'missing.json' }));
+    // Naming `.mcp.json` itself is naming a file: it must be there, unlike the unnamed default.
+    put(path.join(home, 'c/.claude-plugin/plugin.json'), JSON.stringify({ mcpServers: '.mcp.json' }));
+    put(path.join(home, 'd/.claude-plugin/plugin.json'), JSON.stringify({ mcpServers: '.' }));
+    put(path.join(home, 'e/.claude-plugin/plugin.json'), JSON.stringify({ name: 'e' }));
     put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: {
       'a@m': [{ scope: 'user', installPath: path.join(home, 'a') }], 'b@m': [{ scope: 'user', installPath: path.join(home, 'b') }],
+      'c@m': [{ scope: 'user', installPath: path.join(home, 'c') }], 'd@m': [{ scope: 'user', installPath: path.join(home, 'd') }],
+      'e@m': [{ scope: 'user', installPath: path.join(home, 'e') }],
     } }));
     const { items, problems } = detectInstalled(path.join(T, 'none'), { home });
     assert.equal(items.filter((i) => i.kind === 'mcp').length, 0);
     assert.deepEqual(problems, [
       { where: '~/.claude/plugins (a@m: .claude-plugin/plugin.json)', problem: 'names an MCP file outside the plugin' },
       { where: '~/.claude/plugins (b@m: .claude-plugin/plugin.json)', problem: 'names an MCP file that is not there' },
-    ]);
+      { where: '~/.claude/plugins (c@m: .claude-plugin/plugin.json)', problem: 'names an MCP file that is not there' },
+      { where: '~/.claude/plugins (d@m: .claude-plugin/plugin.json)', problem: 'names the plugin folder, not an MCP file' },
+    ], 'e has neither mcpServers nor .mcp.json: nothing to report');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -381,6 +389,7 @@ test('E50: the frontmatter, TOML name and TOML table readers', () => {
   assert.deepEqual(skillMeta('---\nname: foo # a comment\nversion: "1 # kept"\n---\n'), { name: 'foo', version: '1 # kept' });
   assert.deepEqual(skillMeta(`---\nname: "a" # was "b"\nversion: 'x' # 'y'\n---\n`), { name: 'a', version: 'x' }, 'the value ends at its own closing quote');
   assert.deepEqual(skillMeta('---\nname: "\\u0000\\u202e"\nversion: " "\n---\n'), {}, 'a value of only invisible characters is no value');
+  assert.deepEqual(skillMeta('---\nname: "\\u200b"\nversion: "\\u061c\\u2060\\ufeff"\n---\n'), {}, 'zero-width and format characters are invisible too');
   assert.deepEqual(skillMeta(String.raw`---
 name: 'it''s'
 version: "1\"2"
