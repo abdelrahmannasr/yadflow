@@ -27839,7 +27839,7 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-// E124 follow-up: when the two settings names disagree, every command but doctor and migrate refuses (E122), so
+// E124 follow-up: when the two settings names disagree, every command but doctor, migrate and report refuses (E122), so
 // the gate advice must not send anyone to `yad update` or a hand fix first — only `yad migrate` ends it.
 test('E124: with the settings under two names disagreeing, the gate advice says yad migrate first', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-drift-'));

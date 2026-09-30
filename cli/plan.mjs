@@ -748,7 +748,7 @@ export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_W
 //                  every command but doctor/migrate/report refuses until
 //                  one copy is kept — so nothing else can be the first step
 //   'unmanaged'    yad has no action for it (Product not verified)       fix it by hand    same        same
-// 'unreadable' and 'unmanaged' are read from the file on disk; 'drift' needs no gate read at all.
+// 'unreadable' and 'unmanaged' are read from the file on disk; 'drift' reads no provenance record.
 // On a run that fixes, a gate that run replaces is left out: after it, the gate is the shipped copy.
 // `drift`: `productDriftPairs(root)` (cli/epic-state.mjs; plan.mjs lists no epics) — the pairs every command refuses
 // on. Only `yad doctor` passes it: `yad check`/`update` never run under drift, the dispatcher refuses them first.
