@@ -2,17 +2,21 @@
 
 **What moved:** the product's settings file gains a second name, and each reviewer's product-level
 role gains a second spelling. **Nothing is renamed away.** Every old name still exists and is still
-the one the engine reads.
+written. From 4.0 the engine reads the **new** name first, and the old one only when the new one is
+absent.
 
 **Who this affects:** every project. Running it is safe, and running it twice changes nothing.
+
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
 
 ---
 
 ## The short version
 
 ```bash
-npx yadflow@next migrate           # preview — writes nothing
-npx yadflow@next migrate --apply   # rewrites, backing up every file it touches
+npx yadflow migrate           # preview — writes nothing
+npx yadflow migrate --apply   # rewrites, backing up every file it touches
 ```
 
 Run the preview first. It prints one line per file and does not touch your project.
@@ -34,13 +38,14 @@ So if the old name simply disappeared, there would be a window where your guard 
 gone, decides your records are unprotected, and stops blocking hand-edits. An upgrade would quietly
 switch off a safety check.
 
-That is why this is done in stages. The plan was three majors; **from 4.0 it is two** (E122 — 4.0 was
-only ever on the `@next` channel before this change, so no ordinary user lived with the in-between stage):
+That is why this is done in stages. The plan was three majors; **from 4.0 it is two** (E122). The
+in-between stage — new names written, old names read — only ever reached the `@next` pre-release
+channel. No 3.x release on `latest` wrote this shape (3.18.1 is on shape 1), so no ordinary user lived
+with it:
 
 | | what happens |
 |---|---|
-| **3.x** (this guide's release) | the new names appear and are kept up to date. The **old** names are still the ones read |
-| **4.0** | the **new** names are the ones read. The old ones are still written beside them, for check gates an older yadflow installed in your repos, and `yad doctor` says v5 deletes them |
+| **4.0** (this guide's release) | the new names appear beside the old ones, and the **new** names are the ones read. The old ones are still written beside them, for check gates an older yadflow installed in your repos, and `yad doctor` says v5 deletes them |
 | **5.0** | the old names are deleted |
 
 > **Corrected in 4.0.** This guide first said the old names stay the ones read until a later major. From
@@ -75,6 +80,10 @@ epics/<id>/.sdlc/product-prs.json   <- appears on the next gate write, not on mi
   }
 ```
 
+This step still runs so that every project migrates the same way, but the roster no longer decides
+anything: E62 removed it, and one approver now holds a team gate. `yad doctor` names a leftover roster
+as unused (`people:roster-unused`) and never deletes it.
+
 Plus `"schemaVersion": 3` on every file the engine writes.
 
 ## Two files with the same name — is that a mistake?
@@ -108,7 +117,7 @@ yad doctor
 You should see your project and the engine both on shape 3, and no warnings about files not matching.
 Then check the two things that matter:
 
-- **Reviewers still resolve.** `yad roster list` should show the same people with the same roles.
+- **Both names are there.** `.sdlc/product.json` exists beside `.sdlc/hub.json`, with the same bytes.
 - **The guard still guards.** On a verified product, an attempt to hand-edit a record should still be
   refused.
 
@@ -122,8 +131,11 @@ find .sdlc epics -name '*.yad-orig' | while read -r f; do mv "$f" "${f%.yad-orig
 ```
 
 **Do not downgrade the CLI to an older release without restoring those backups first.** An older
-engine reads `schemaVersion: 3` as a shape from the future and refuses to touch the file — safe, but
-it leaves you stuck until the files are restored.
+engine's `yad migrate` reads `schemaVersion: 3` as a shape from the future and refuses to touch the
+file, and its `yad doctor` fails on it. Every other command still runs, but it reads only the fields it
+knows — a 3.x engine reads `hub.json` and never sees `product.json`. A 4.0 migration also takes your
+files past this shape to shape 10 in the same run, and from shape 7 on an older engine misreads values
+that changed in place (see [shape 7](shape-7.md)).
 
 ## Reporting a problem
 

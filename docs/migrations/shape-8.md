@@ -3,6 +3,9 @@
 **What a "shape" is:** the layout of the files yadflow writes into your project. Every one of them
 carries a `"schemaVersion"` number saying which layout it uses. A file with no number counts as 1.
 
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
+
 Shape 8 gives the **Product level** — the part of a project that runs once, before any feature epic — a
 proper home. It is now called the **Foundation**. It lives in its own folder, `foundation/`, at the top
 of your project, under the fixed id `EP-foundation`.
@@ -115,7 +118,7 @@ It waits, and moves nothing, when:
 | no review has merged since the workflow runs this release | it moves with the next merged review |
 | a person ran `yad gate ci` by hand on a checkout with uncommitted changes under `epics/EP-discovery/` or `foundation/`, or not on the default branch | commit or discard them, and run it on the default branch — CI's own checkout is never affected |
 | `foundation/.sdlc/` already exists, a file would collide, or a ledger file does not parse | the same fixes as for a local ledger, above |
-| the gate workflow still runs a yadflow older than this release | run `yad update` and commit the result: it rewrites the workflow and re-stamps `.sdlc/cli-version.json` together. A `gate_sync_version` in `.sdlc/hub.json` is read first, and one from 3.x is skipped by the new workflow — update it or remove it. Or set the `YAD_VERSION` variable |
+| the gate workflow still runs a yadflow older than this release | run `yad update` and commit the result: it rewrites the workflow and re-stamps `.sdlc/cli-version.json` together. A `gate_sync_version` in `.sdlc/product.json` (`.sdlc/hub.json` when that is absent) is read first, and one from 3.x is skipped by the new workflow — update it or remove it. Or set the `YAD_VERSION` variable |
 
 Until it moves, nothing is broken. This release reads the old spelling everywhere: `yad next`,
 `yad gate`, `yad doctor` and CI all treat `EP-discovery` as the product level, and its review still ends
