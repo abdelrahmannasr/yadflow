@@ -1,3 +1,172 @@
+# [4.0.0-next.4](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.0-next.3...v4.0.0-next.4) (2026-09-30)
+
+
+* feat!: print Product, not hub, in output, --json and commit subjects (E124) ([b982530](https://github.com/abdelrahmannasr/yadflow/commit/b982530402dde171575407e82e72b8a2c405639a))
+* feat!: read product.json first, and refuse two names that disagree (E122) ([2252296](https://github.com/abdelrahmannasr/yadflow/commit/22522969823c8a3525fa255c62a7a08c444b7450))
+* feat!: rename the installed hub names to product, and name what is left (E123) ([91c62b6](https://github.com/abdelrahmannasr/yadflow/commit/91c62b6467d220a13b88970fd16b7bd42d740ffc))
+
+
+### Bug Fixes
+
+* a broken shared registry never stops a join, and the .git check reads names as Windows does (E79 review 4) ([160ec83](https://github.com/abdelrahmannasr/yadflow/commit/160ec83512df1f6f50245f0f0f2714e7c3588230))
+* a copyable hint never prints a registry name that starts with - (E81 review 10) ([8caa29d](https://github.com/abdelrahmannasr/yadflow/commit/8caa29d752d843f0ec16c1a79a030e532076cb73))
+* a monorepo subfolder is present, refresh keeps to code-context, null entries are named (E81 review 1) ([f899a0d](https://github.com/abdelrahmannasr/yadflow/commit/f899a0dcb37f4f71851802c700ba02f9d2ed39c4))
+* a workspace file sends only the Product's own registered repos to it, and stops the walk when it is not used (E80 review 1) ([2a01287](https://github.com/abdelrahmannasr/yadflow/commit/2a01287bb7fc30f4d2dc604273691ba20aec97e7))
+* a worktree or nested repo inside a registered repo is its own checkout, never swapped for the repo's (E80 review 3) ([de05ebd](https://github.com/abdelrahmannasr/yadflow/commit/de05ebd33b5a21fe0c0d689fd9190ab99f4293c7))
+* allow % in a URL's user and password for https only (E81 review 7) ([b1f05e4](https://github.com/abdelrahmannasr/yadflow/commit/b1f05e42453da655b0644032503fc4b6bec59db2))
+* allow the file transport per URL, not per run (E81 review 4) ([fd88947](https://github.com/abdelrahmannasr/yadflow/commit/fd889479c6c99b3dbd6ac20ad0cfbdf592ec641d))
+* an unreadable record is its own gate state, and the advice reads as steps (E124 review 5) ([8608e8e](https://github.com/abdelrahmannasr/yadflow/commit/8608e8ea6994607f3da8fef65b355823da257738))
+* **checks:** a kept Product is read only when product-repo reaches nothing (E117) ([434f0c0](https://github.com/abdelrahmannasr/yadflow/commit/434f0c03d0ade65ec90f375e95cc129b59f97571))
+* **checks:** a link.md's epic must be its story's own (E118) ([4f09325](https://github.com/abdelrahmannasr/yadflow/commit/4f09325f6e168db74ccc222ba0d8fc7feea30381))
+* **checks:** a Product path starting with - is still walked twice (E117) ([a823dd5](https://github.com/abdelrahmannasr/yadflow/commit/a823dd56e8c13a7d94fb6874a21539fa286d97ec))
+* **checks:** backfill-check folds every character a Mac folds into ASCII (E116) ([e913baa](https://github.com/abdelrahmannasr/yadflow/commit/e913baaf6c68e171e2e06f139c6b25bac9732b79))
+* **checks:** backfill-check folds the Kelvin sign into k (E116) ([c5152c3](https://github.com/abdelrahmannasr/yadflow/commit/c5152c350ab1dd89e6906eac9433316be5ecf261))
+* **checks:** backfill-check lists go through the stream, not the environment (E116) ([f2366f0](https://github.com/abdelrahmannasr/yadflow/commit/f2366f0c1433a05bae614956b66326223f2e51ab))
+* **checks:** backfill-check pairs raw records, frees twins, checks links when specs are hidden (E116) ([6544926](https://github.com/abdelrahmannasr/yadflow/commit/654492634f9f65dbe702701ddaf8af038ba2beae))
+* **checks:** backfill-check reads each spec by its object id (E116) ([6e44ae5](https://github.com/abdelrahmannasr/yadflow/commit/6e44ae576d547333bc1a256a1a3e473f8ddc5e1f))
+* **checks:** backfill-check reads every spelling of the verified key (E116) ([81588e6](https://github.com/abdelrahmannasr/yadflow/commit/81588e62d71c60174fe678a8756d1a0806388554))
+* **checks:** backfill-check reads the last verified: key, as YAML does (E116) ([36cb5cd](https://github.com/abdelrahmannasr/yadflow/commit/36cb5cda6a817b6a4d3504052058fa26c6eefb9d))
+* **checks:** backfill-check reads the spec from the base and refuses links (E116) ([b63f5ac](https://github.com/abdelrahmannasr/yadflow/commit/b63f5ac706cd6155b5db63ffaf258dcd11d4269d))
+* **checks:** close the gaps review 1 found in the Product and epic reads (E117, E118) ([a8d8178](https://github.com/abdelrahmannasr/yadflow/commit/a8d81780c35a651e30e51e5dcc0e30252ac50205))
+* **checks:** close the gaps review 2 found in the Product reads (E117, E118) ([dcc5ea5](https://github.com/abdelrahmannasr/yadflow/commit/dcc5ea5667be4c52676656aef5723813edce4857))
+* **checks:** close the gaps review 3 found in the Product reads (E117) ([fbb0768](https://github.com/abdelrahmannasr/yadflow/commit/fbb076848e5c1ba7f67ad34ff5d7b5b7d5d094e7))
+* **checks:** compare the git folder as a folder, not a spelling (E117) ([2a824a8](https://github.com/abdelrahmannasr/yadflow/commit/2a824a83b4f8eb0129b1275ec8b45832d5f22d87))
+* **checks:** contract-check fails a first spec whose product-repo reaches nothing (E119) ([a4738fc](https://github.com/abdelrahmannasr/yadflow/commit/a4738fce11d4b2e87ef6d03bcea865d22feb52dc))
+* **checks:** contract-check folds every character a Mac folds into ASCII (E121) ([8422e70](https://github.com/abdelrahmannasr/yadflow/commit/8422e70e192f15c26053a94ccbf2ecb8c658d720))
+* **checks:** read every NUL list with a newline in a name as ? (E121) ([2659211](https://github.com/abdelrahmannasr/yadflow/commit/2659211c94a28d52c7a25a956d8c75bab1dd61ec))
+* **checks:** refuse a Product path inside the repo's own .git (E117) ([b726032](https://github.com/abdelrahmannasr/yadflow/commit/b7260323e1aebab247ad6367ea2bd1c6a6d4756d))
+* **checks:** the first-spec FAIL fires only when the Product is not reached (E119) ([322ffe3](https://github.com/abdelrahmannasr/yadflow/commit/322ffe39fd2654aae5022898db3d3f71bd1d4f11))
+* **checks:** the PR no longer chooses where the Product is read from (E117) ([68db03b](https://github.com/abdelrahmannasr/yadflow/commit/68db03b61269346a9c540f7fa39d4b37648f627b))
+* **checks:** walk the Product path again from where it really lands (E117) ([1b0726d](https://github.com/abdelrahmannasr/yadflow/commit/1b0726d04a83544beef2bdfd3aac32f395d373bd))
+* **ci:** Pages write scopes move to the job; one pin per action major (review 1) ([92a51fe](https://github.com/abdelrahmannasr/yadflow/commit/92a51febd1146c7f90528855d67cfa8d1be81255))
+* **ci:** pin every workflow action by commit SHA and make the default token read-only ([43254bb](https://github.com/abdelrahmannasr/yadflow/commit/43254bba2c5606831ba7328896326c83c3dd4a3e))
+* clean every printed path, one wording for the quote, and the door works from a Product subfolder (E49 review 2) ([85ea6a4](https://github.com/abdelrahmannasr/yadflow/commit/85ea6a4f5e99942aba7dd28fdd05605319cc241c))
+* clone a registered repo only from a network address (E81 review 3) ([1582784](https://github.com/abdelrahmannasr/yadflow/commit/15827845f14329d1d592a01d68b8f3a9b122e19c))
+* close the last one-key product.json hints, and refuse before touching .gitignore (E122 review 3) ([2b10f5b](https://github.com/abdelrahmannasr/yadflow/commit/2b10f5bd7568c5121adf72d5ab1f6e832c1029f9))
+* **docs:** raise the docs shell version to 0.0.2 for the brace-expansion bump ([74498a5](https://github.com/abdelrahmannasr/yadflow/commit/74498a545b96923b5096b7adf06631e96ae7e616))
+* **doctor:** ask for --overwrite-local only when a plain --fix would not do (E120 review 8) ([5950b89](https://github.com/abdelrahmannasr/yadflow/commit/5950b89def883390bafc0c3922ce4ad65d2f3131))
+* **doctor:** decide the record's ahead/behind state by git, in one table (E120 review 5) ([1739cc5](https://github.com/abdelrahmannasr/yadflow/commit/1739cc5afff34d638376215c6da90d58aaf191bb))
+* **doctor:** judge an off-branch clone's record as it will be after the switch (E120 review 9) ([39025bd](https://github.com/abdelrahmannasr/yadflow/commit/39025bd09c92870aacdcacca38cb3906c29da502))
+* **doctor:** name `gate repair --push` for a stranded step on a verified Product (E48 review 3) ([29f0340](https://github.com/abdelrahmannasr/yadflow/commit/29f0340be0d0bef0f5e3d40a18d0da645e352b80))
+* **doctor:** name a product-link record committed but never pushed (E120 review 3) ([4db532a](https://github.com/abdelrahmannasr/yadflow/commit/4db532a2712670e63f6caba85aeffd108ee63030))
+* **doctor:** no silence over a broken record, and hints that work off the default branch (E120 review 6) ([97c714b](https://github.com/abdelrahmannasr/yadflow/commit/97c714b66429f3a9731fd0d853ab20fcaaff75f4))
+* **doctor:** one clear step per repo in the product-link hint (E120 review 7) ([c117c3d](https://github.com/abdelrahmannasr/yadflow/commit/c117c3d2aa737df27c2a3167e2001dd8454654aa))
+* **doctor:** tell unpushed, on another branch and behind apart (E120 review 4) ([9356748](https://github.com/abdelrahmannasr/yadflow/commit/935674881340e9c47aaba04b77196b343368cd64))
+* drop the exact registry path from the warning, and clean C1 control characters too (E79 review 7) ([c70911c](https://github.com/abdelrahmannasr/yadflow/commit/c70911c5e199b2433325e3a4996b3fe240be42ad))
+* **e120:** a record is ok only when committed as it stands (review 2) ([f2fc7de](https://github.com/abdelrahmannasr/yadflow/commit/f2fc7dec1435d009ead6966c831d4aa409871306))
+* **e120:** a record right on disk reads ok, and --push still commits it (CI) ([a5cd7f5](https://github.com/abdelrahmannasr/yadflow/commit/a5cd7f541283a6715cc012bd57194f0684e2cdc8))
+* **e120:** commit the record for sure, keep secrets out, keep local runs checking ([e96ed5d](https://github.com/abdelrahmannasr/yadflow/commit/e96ed5dc8b87938097fb35270d4b677c456377e3))
+* every doctor command to copy takes registry text as one plain word (E81 review 11) ([e2d147a](https://github.com/abdelrahmannasr/yadflow/commit/e2d147addb163f5397b054f1e84b506b1732668c))
+* **hook:** fail open under sh -e, follow no GIT_DIR, and name the repair that commits (E48 review 1) ([2991086](https://github.com/abdelrahmannasr/yadflow/commit/29910861d1c76763f765b2483ea412e8eba5d899))
+* **hooks:** advice for a stuck old entry that is true in every case (E113 review 7) ([6d7fff1](https://github.com/abdelrahmannasr/yadflow/commit/6d7fff14a4a3d5bd1cb99b5bd0484cd292a0f109))
+* **hooks:** give a local-ledger guard entry advice that works at apply too (E113 review 6) ([d26b241](https://github.com/abdelrahmannasr/yadflow/commit/d26b241af186961a40ca50dac289e3d6e230e1f8))
+* **hooks:** judge an old hook script against the files as this run leaves them (E113 review 2) ([9a5df22](https://github.com/abdelrahmannasr/yadflow/commit/9a5df224c6e7322a6aebcc9a78b57afee1a2f59a))
+* **hooks:** keep an old hook script until its new entry is committed (E113 review 1) ([c4fb5b3](https://github.com/abdelrahmannasr/yadflow/commit/c4fb5b37e3171604be7376e793cebd0eb194f14b))
+* **hooks:** name what keeps an old hook script, and read HEAD once (E113 review 3) ([f1b95fc](https://github.com/abdelrahmannasr/yadflow/commit/f1b95fc2f135c5f4572d9e21b32e614a1ef77565))
+* **hooks:** one sentence of advice for a stuck old hook entry, at plan and apply (E113 review 5) ([ab22b93](https://github.com/abdelrahmannasr/yadflow/commit/ab22b9348b659130fc1237786a4d6766919a580f))
+* **hooks:** tell a capture-off Product to remove a stuck capture entry (E113 review 8) ([353053a](https://github.com/abdelrahmannasr/yadflow/commit/353053a017c5a0dad46c881abead93d65a9a704b))
+* **hooks:** tell a local-ledger Product to remove a stuck guard entry (E113 review 4) ([0e1eaa5](https://github.com/abdelrahmannasr/yadflow/commit/0e1eaa5009f8cd06c39832faa9642ece7881e17b))
+* **hook:** the agent's refusal gets the same fixes, and doctor names a hook git skips (E48 review 2) ([9551b1a](https://github.com/abdelrahmannasr/yadflow/commit/9551b1a4166bd4174a6a35f6655bbf5e805d3b90))
+* join stays inside the workspace on disk, one bad entry fails alone, and init never takes over a code repo (E79 review 1) ([56f14ae](https://github.com/abdelrahmannasr/yadflow/commit/56f14ae7f90f4eddd6618bcf6a6f7e23947e850e))
+* keep every URL form's host and user to safe characters (E81 review 6) ([61370c2](https://github.com/abdelrahmannasr/yadflow/commit/61370c28a911f4d39223a6eee2df6affc27415d7))
+* keep the rename's own error when writeJSON's cleanup fails (E81 review 20) ([d5b860f](https://github.com/abdelrahmannasr/yadflow/commit/d5b860f66fce3e0c99739327e8662af49ba2fed7))
+* keep writeJSON's own error when the temp cleanup fails (E81 review 19) ([b8d7640](https://github.com/abdelrahmannasr/yadflow/commit/b8d7640abc5b6fde91ef0c45a05e976c134912b4))
+* ledger-guard reads a missing settings file quietly, and the roster hints name the file (E122 review 5) ([d00a117](https://github.com/abdelrahmannasr/yadflow/commit/d00a117d6cd535255b44b0ec3e61a38aa1774169))
+* name a repos.json that does not parse instead of joining with no repos (E79 review 5) ([4a952e2](https://github.com/abdelrahmannasr/yadflow/commit/4a952e2dd80ea36b33aaa37c051da1f702980585))
+* name the file in the last settings hints, refuse a pair that changed, and silence a missing settings file (E122 review 4) ([5aed634](https://github.com/abdelrahmannasr/yadflow/commit/5aed63409178e36954240e37ee11e53b1ab95e04))
+* name the Product from the workspace folder instead of offering a second one, and match paths as the disk stores them (E80 review 2) ([71369b3](https://github.com/abdelrahmannasr/yadflow/commit/71369b3565d273ad6a2f6eb3bd3caa8f685e75f5))
+* name the settings file a person should edit, and settle all pairs or none (E122 review 2) ([ccb8de4](https://github.com/abdelrahmannasr/yadflow/commit/ccb8de49a48397c14446faebf8c3d7ef1222abd5))
+* name the settings file actually read, and keep risk-map advisory (E122 review 1) ([ab4fddc](https://github.com/abdelrahmannasr/yadflow/commit/ab4fddc495433cff0d013742f02086bea94b00a9))
+* name the settings file on disk, and restore the old-name fallback (E124 review 1) ([cf24871](https://github.com/abdelrahmannasr/yadflow/commit/cf248716935eaebc9961ae8e9f8d8b27a123a9d0))
+* never build a login command from a host that is not a plain host name (E81 review 13) ([0a09dc1](https://github.com/abdelrahmannasr/yadflow/commit/0a09dc11e047e483ea046720a9e505078e815ae5))
+* never clone or register a repo path through a .git folder, and say what --dir is for each workspace verb (E79 review 2) ([6be43a2](https://github.com/abdelrahmannasr/yadflow/commit/6be43a274b392c405454d1a09d4f49143257d100))
+* never write over an edited new name, keep one workflow running, and name a gate that rejects product (E123 review 1) ([d7dc72b](https://github.com/abdelrahmannasr/yadflow/commit/d7dc72bf0857ceda09db081be1b95647a20334c2))
+* one plainHost test for every login command doctor prints (E81 review 14) ([8a25d94](https://github.com/abdelrahmannasr/yadflow/commit/8a25d947353538ce7b0ffe0f399d08082e791bab))
+* one samePath for a git path against a Node path, and survive a missing .git/hooks (E48 review 5) ([156ec1e](https://github.com/abdelrahmannasr/yadflow/commit/156ec1e4d9d19e5cd22e454432b1eece6fac6ced))
+* one terminal cleaner for every module that prints registry text (E81 review 12) ([805a4fd](https://github.com/abdelrahmannasr/yadflow/commit/805a4fd200c2465f9a491f44e81b60ed50605946))
+* only the ledger door runs from a subfolder, and the sha — not an indent — keeps :: off a line (E49 review 3) ([9878423](https://github.com/abdelrahmannasr/yadflow/commit/987842384792905cbc15db429d5d3e3da76033e4))
+* read any spelling of the profile mapping and branch, and never a comment (E123 review 3) ([67c3a55](https://github.com/abdelrahmannasr/yadflow/commit/67c3a559ae95dae1abae8f4561d5e04b073eca02))
+* record the new name a kept rename installs, and say a profile gap only when it bites (E123 review 2) ([9c99014](https://github.com/abdelrahmannasr/yadflow/commit/9c990145a68596dddfa4c2534afae18f3615efda))
+* refresh never writes through a .gitignore the Product commits as a link (E81 review 16) ([5d9a982](https://github.com/abdelrahmannasr/yadflow/commit/5d9a9822d73376c5f83a6fe880dd52adf075e67a))
+* refresh stops at a linked .sdlc, --push included (E81 review 18) ([e79d64c](https://github.com/abdelrahmannasr/yadflow/commit/e79d64c503d3d96e8f1005b1560d4e815ecf2820))
+* refuse a clone target with a link on its way, so a committed link cannot reach .git (E79 review 3) ([667d696](https://github.com/abdelrahmannasr/yadflow/commit/667d6964e9ceed75ce0ea1fb82b03d6cf7c324ea))
+* refuse a control character anywhere in a registered git_url (E81 review 8) ([6edf593](https://github.com/abdelrahmannasr/yadflow/commit/6edf5937a094a827faf02454fa2f54803b0f2cd4))
+* refuse any folder holding HEAD on the way to a registered subfolder (E81 review 2) ([0471334](https://github.com/abdelrahmannasr/yadflow/commit/04713341b8b3ea5ee55d59da82b9f818d6bfe2df))
+* refuse encoded C1 and bidi characters; clean the last raw registry text (E81 review 9) ([7f7721b](https://github.com/abdelrahmannasr/yadflow/commit/7f7721b636fc19ed4736c6962ae3cd67726c3007))
+* **release:** install an exact npm version, not npm@latest ([0bf8981](https://github.com/abdelrahmannasr/yadflow/commit/0bf89817da64f43f91fc281d42f76883c0f1a1ef))
+* **setup:** compare hook folders by their long name on Windows (E48) ([8f1ac56](https://github.com/abdelrahmannasr/yadflow/commit/8f1ac5617cf50b89ca8626e5d15ec645b2ff64a5))
+* **setup:** read a core.hooksPath typed in another case as the default folder where the disk ignores case (E48 review 6) ([997f77d](https://github.com/abdelrahmannasr/yadflow/commit/997f77d39d76c49a7e5b63845c867484fb180437))
+* **skills:** yad-connect-repos frontmatter parses; two descriptions fit 1024 ([d6eaf55](https://github.com/abdelrahmannasr/yadflow/commit/d6eaf558d8296dbedacab3c70f9075d497222d56))
+* the --profile hub advice names every gate in the way, in every state (E124 review 4) ([5d125ec](https://github.com/abdelrahmannasr/yadflow/commit/5d125ece69967c3c76d923da2c05decd1c500140))
+* the --profile hub advice reads each gate's real state (E124 review 3) ([f00c51e](https://github.com/abdelrahmannasr/yadflow/commit/f00c51e7a4ec54bb6c126797478088c06365d746))
+* the --profile hub advice waits for a gate that refuses product, and a repo named product is shown by its path (E124 review 2) ([80518c5](https://github.com/abdelrahmannasr/yadflow/commit/80518c5cbd3af2209882167bb381731190d2336a))
+* the clone sets GIT_ALLOW_PROTOCOL; a local source must exist (E81 review 5) ([7963220](https://github.com/abdelrahmannasr/yadflow/commit/796322023a6bc90b541f66b3c383e34b1957c791))
+* the drift advice names yad migrate --apply, and one drift lookup serves all (review 1) ([f158fa1](https://github.com/abdelrahmannasr/yadflow/commit/f158fa1f8311a71e5346dbd51ee6627a231b3dae))
+* the ledger override claims only what it can see, and no control character reaches the CI log (E49 review 1) ([da7a6d9](https://github.com/abdelrahmannasr/yadflow/commit/da7a6d96cf762e7d23f5f4ae3c44c5c2e9dc195d))
+* the solo people count judges each registered path before git runs (E81 review 15) ([993698a](https://github.com/abdelrahmannasr/yadflow/commit/993698a17f2496985da6b8c6160c2e9eeba83449))
+* the unreadable-registry warning gives the real reason, and a null registry is named too (E79 review 6) ([9f426eb](https://github.com/abdelrahmannasr/yadflow/commit/9f426eb3697e473bde80468e0be5946de4041404))
+* the unreadable-settings cell says only what is true (E124 review 6) ([5d43189](https://github.com/abdelrahmannasr/yadflow/commit/5d431894e377065ca1d26316973fd6cfabc7d3c9))
+* when a file's two names disagree, the gate advice says yad migrate first (E124 follow-up) ([75d2184](https://github.com/abdelrahmannasr/yadflow/commit/75d2184480acc0d285d7718533ab9bf9d65cf723))
+* writeJSON's temp file is random and exclusive (E81 review 17) ([b5cbcd9](https://github.com/abdelrahmannasr/yadflow/commit/b5cbcd935a81534b5f749eeba13c36711fb7a471))
+
+
+### Documentation
+
+* the guides, sites and diagram say Product, and a guide to the hand changes (E124) ([883cd6f](https://github.com/abdelrahmannasr/yadflow/commit/883cd6f56378dc58bbbd1a9ebdba0048a1e35c9a))
+
+
+### Features
+
+* .yad-workspace.json — yad finds the Product from any repo in the workspace (E80) ([27a7579](https://github.com/abdelrahmannasr/yadflow/commit/27a75793c558d597840d01c9f7986e25e7a5c42a))
+* **checks:** check the Product out in CI where the record says (E120) ([b288326](https://github.com/abdelrahmannasr/yadflow/commit/b288326da2a72c3475d0cfafd2f8bc9540d0670d))
+* **checks:** read where the Product lives from .sdlc/product-link.json on the base (E120) ([6b9e7b1](https://github.com/abdelrahmannasr/yadflow/commit/6b9e7b1f293183b89fda9d1aa9b748bcd62bb7f6))
+* **commit:** yad commit --manual --reason, the door past the ledger hook (E49) ([5b4081a](https://github.com/abdelrahmannasr/yadflow/commit/5b4081a5bea4423c90b41a5ad676e0c5987bf0d9))
+* **doctor:** warn checks:backfill-blind for an older backfill-check (E116) ([bfb82cf](https://github.com/abdelrahmannasr/yadflow/commit/bfb82cf2e0d956165c179a92a0e09fb46e8e97f9))
+* **hook:** refuse a hand commit to the CI-owned ledger with a git pre-commit hook (E48) ([e2258b1](https://github.com/abdelrahmannasr/yadflow/commit/e2258b14f9c35af5057e109713c6407fae50b068))
+* **hooks:** run the agent hooks as Node scripts, so Windows works without WSL (E113) ([887ceea](https://github.com/abdelrahmannasr/yadflow/commit/887ceeadabdb4f20482c3f3a5d29963c5fe74cc8))
+* **repos:** write each code repo's product-link record, and warn when it is missing (E120) ([54f1fe3](https://github.com/abdelrahmannasr/yadflow/commit/54f1fe382d884aa2e72bb56c26197dd3e8e3c5c0))
+* tell a repo named product apart, and name --profile hub in the team's workflows (E124 review 1) ([98fc15d](https://github.com/abdelrahmannasr/yadflow/commit/98fc15d345354c0df83ceae7d7aa4db5765c02b2))
+* yad new, yad init and yad join — the three ways into a workspace (E79) ([dcccf67](https://github.com/abdelrahmannasr/yadflow/commit/dcccf670ffb4cb376aba6af26e602140328c00ea))
+* yad repo clone fetches registered repos missing on this machine (E81) ([8a20504](https://github.com/abdelrahmannasr/yadflow/commit/8a20504f816ec556e55ec5db41b8f4350973e283))
+
+
+### BREAKING CHANGES
+
+* after `yad update` renames the installed CI names, a
+team's own files that name the old ones must be changed by hand — GitLab
+`needs:` / `dependencies:` / `extends:` / `!reference` naming a
+`yad-hub-*` job, GitHub `workflow_run:` triggers naming `yad-hub-checks`,
+status badges, CODEOWNERS lines, and scripts that read `--json` names or
+`SDLC_HUB_CONFIG` / `.sdlc/hub.json`. Every case, with a before and
+after: docs/migrations/hub-to-product.md.
+* `--json` names that said `hub` now say `product`, and
+`jsonVersion` is 2. `yad doctor` check ids `hub`, `hub-git-url` and
+`ci-tags:hub` are `product`, `product-git-url` and `ci-tags:product`;
+`yad open-pr` answers `baseSource: "product"` and `stage:
+"product-shape" | "product-tooling"`; `yad check` / `yad update` answer
+`items[].scope: "product"` and `commits[].label: "product"`; and
+`yad history show` answers `productConfigWhy` where it answered
+`hubWhy`. The audit commits are `chore(product): …`. See the
+"What moved in jsonVersion 2" table in docs/CLI.md.
+* `yad update` renames the Product's
+.github/workflows/yad-hub-checks.yml and .gitlab/ci/yad-hub-checks.yml to
+yad-product-checks.yml, the GitLab jobs yad-hub-* to yad-product-*, and
+the yad-hub-bridge skill to yad-product-bridge. GitHub job names (the
+required checks) do not change. Your own CI that names an old name — a
+GitLab needs:/dependencies:/extends:/!reference, a GitHub workflow_run:
+trigger on yad-hub-checks, a status badge, a CODEOWNERS line — must be
+changed by hand; `yad doctor` lists each by file and line (renamed-ref:).
+* yadflow 4 reads .sdlc/product.json (and each epic's
+product-prs.json) first; .sdlc/hub.json and hub-prs.json are read only when the
+new name is absent, are still written until 5.0, and are deleted in 5.0. This
+corrects docs/migrations/shape-3.md and the 4.0.0-next.1 notes, which said the
+old names stay the ones read for another major. When both names exist and say
+different things, every command refuses (YAD-STATE-008) and the gates fail;
+run `yad migrate` to see the difference and `yad migrate --apply` (or
+`--apply --keep product|hub`) to choose. Edit settings by hand in
+.sdlc/product.json, then run `yad migrate --apply --keep product`. Gates now
+honour SDLC_PRODUCT_CONFIG before SDLC_HUB_CONFIG.
+
 # [4.0.0-next.3](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.0-next.2...v4.0.0-next.3) (2026-09-26)
 
 
