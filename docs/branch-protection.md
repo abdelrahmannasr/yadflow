@@ -90,7 +90,7 @@ Store it as the repository secret `SDLC_GATE_TOKEN`, and add one `token:` line t
 jobs). If the step already has a `with:` block, add the line inside it:
 
 ```yaml
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.SDLC_GATE_TOKEN }}
 ```

@@ -12,12 +12,16 @@ on:
     types: [opened, synchronize, reopened, edited]
     branches: ["**"]
 
+# Read-only by default: no gate here writes to the repo. A job that needs more asks for it itself.
+permissions:
+  contents: read
+
 jobs:
   spec-link:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/spec-link.sh "origin/${{ github.base_ref }}"
 
@@ -25,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it this prints a note and the gate defers, as before.
@@ -40,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/risk-map-check.sh "origin/${{ github.base_ref }}"
 
@@ -54,11 +58,11 @@ jobs:
       NX_HEAD: ${{ github.event.pull_request.head.sha }}
       COREPACK_HOME: ${{ github.workspace }}/.corepack-cache # pinned-manager downloads, cached below
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.YAD_NODE_VERSION }}
       # Dependency cache for either manager: npm's ~/.npm, pnpm's content-addressable store, and the
@@ -67,7 +71,7 @@ jobs:
       # package.json, since a packageManager bump changes no lockfile. setup-node's own `cache:` must
       # name the manager up front (and needs pnpm on PATH before it runs), which package.json only
       # decides later — so cache the directories directly.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.npm
@@ -86,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it this prints a note and the gate defers, as before.
@@ -98,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it this prints a note and the gate defers, as before.
@@ -110,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it this prints a note and the gate defers, as before.
@@ -124,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/commit-message.sh --profile code "origin/${{ github.base_ref }}"
 
@@ -134,7 +138,7 @@ jobs:
     env:
       PR_TITLE: ${{ github.event.pull_request.title }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: bash checks/pr-title.sh --profile code "$PR_TITLE"
 
   pr-template:
@@ -142,7 +146,7 @@ jobs:
     env:
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: |
           body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
           bash checks/pr-template.sh --profile code "$body"
@@ -157,6 +161,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }} # read-only: gh api commits/<sha> for the Verified badge
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/verified-commits.sh "origin/${{ github.base_ref }}"

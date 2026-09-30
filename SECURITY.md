@@ -28,8 +28,11 @@ for confirmed issues. Credit is given in the advisory and the changelog unless y
   and URLs only.
 - **Secret-scanned code packs.** Repomix packs of connected repos use its default Secretlint
   scanning; packs stay inside your repo (`.sdlc/code-context/`) and are never uploaded by yadflow.
-- **Pinned CI.** All GitHub Actions are pinned to commit SHAs and kept current by Dependabot;
-  workflows run with least-privilege `permissions:` blocks.
+- **Pinned CI.** Every GitHub Action, in this repo's workflows and in the workflows yadflow installs
+  into yours, is pinned to a commit SHA with its version in a comment (`@<sha> # v7.0.1`). Every
+  workflow sets a top-level `permissions:` block that is read-only, and a job that must write asks
+  for it itself. A test fails the build if either rule is broken. Dependabot keeps this repo's own
+  workflows current; the installed templates are bumped by hand in a yadflow release.
 
 ## Scope notes for researchers
 

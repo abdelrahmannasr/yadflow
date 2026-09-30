@@ -582,6 +582,13 @@ The gates run identically under either CI; the config just invokes the scripts w
   Dependencies are cached with `actions/cache` (npm's `~/.npm`, pnpm's store, and the Corepack home
   holding the pinned manager, keyed on the lockfiles and package.json) rather than setup-node's
   npm-only `cache:`, which must name the manager before package.json has been read.
+- **Pinned actions, read-only token.** Every `uses:` in the GitHub templates names a commit SHA, with
+  the version after it in a comment (`actions/checkout@<sha> # v4.4.0`). A tag such as `@v4` can be
+  moved to other code; a SHA cannot. Each workflow also sets a top-level `permissions:` block that is
+  read-only, so no job gets write access unless it asks for it. If your own Dependabot bumps a SHA in
+  an installed copy, `yad check` then reports that file as `modified`, and `yad update` keeps your copy
+  rather than overwriting it (`--overwrite-local` would replace it) — so that file stops receiving
+  template changes. To stay on the template, leave the pins to yadflow releases.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
   passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`
