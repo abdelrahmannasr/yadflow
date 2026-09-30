@@ -9,7 +9,7 @@ why.
 and it refuses one only when a rule on the branch says so. With no rules, anyone who can write to the
 repo can merge anything, and yad can only record what happened.
 
-`yad doctor` reads what is set today. Its `protection` section has one line for the Product hub and
+`yad doctor` reads what is set today. Its `protection` section has one line for the Product and
 one per connected code repo. See [the `protection` section in CLI.md](CLI.md#the-protection-section--does-the-platform-require-an-approval-e70)
 for what each line means. A line that says **not known** is not "fine" and not "unprotected": yad could
 not read the answer, and the line says why.
@@ -30,8 +30,8 @@ that someone can merge past.
 
 Protect the branch yad's files name as `default_branch`:
 
-- the Product hub: `default_branch` in `.sdlc/product.json` (`.sdlc/hub.json` on an older Product);
-- each code repo: its `default_branch` in the hub's `.sdlc/repos.json`.
+- the Product: `default_branch` in `.sdlc/product.json` (`.sdlc/hub.json` on an older Product);
+- each code repo: its `default_branch` in the Product's `.sdlc/repos.json`.
 
 That is the branch every review merges into and every check runs against. If yad's files name none,
 yad reads the platform's own default branch, and `yad doctor` says so.
@@ -59,8 +59,8 @@ them from the list it offers.
 
 | Repo | Workflow file | Checks |
 |---|---|---|
-| Product hub | `.github/workflows/yad-product-checks.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard` |
-| Product hub, when the file is there | `.github/workflows/yad-verified-commits.yml` | `verified-commits` |
+| Product | `.github/workflows/yad-product-checks.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard` |
+| Product, when the file is there | `.github/workflows/yad-verified-commits.yml` | `verified-commits` |
 | Each code repo | `.github/workflows/yad-checks.yml` | `spec-link`, `contract-check`, `risk-map`, `build-test-lint`, `lineage-check`, `epic-open`, `reconcile-debt`, `commit-message`, `pr-title`, `pr-template`, `verified-commits` |
 
 Some of these jobs skip themselves on a bare title or description edit. GitHub counts a skipped job as
@@ -114,7 +114,7 @@ retries every 15 minutes and fails the same way until the token is there.
 | Merge request approval rules (Settings → Merge requests) | 1 or more approvals for a team, 0 in solo mode | **Premium and Ultimate only.** On GitLab Free an approval never blocks a merge |
 | Remove all approvals when commits are added to the source branch | on | Safe with yad, for the same reason as on GitHub |
 
-The checks run as jobs in the merge request pipeline: on the hub `yad-product-commit-message`,
+The checks run as jobs in the merge request pipeline: on the Product `yad-product-commit-message`,
 `yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard` and, when that file is there,
 `yad-product-verified-commits`; in a code repo `yad-spec-link`, `yad-contract-check`, `yad-risk-map`,
 `yad-build-test-lint`, `yad-lineage-check`, `yad-epic-open`, `yad-reconcile-debt`,

@@ -8,20 +8,20 @@ import { AnimatedMessage } from './AnimatedMessage';
 import { Icon } from '../shared/Icon';
 
 const ALL_CONNECTIONS = [
-  ['product-hub', 'state-json'],
-  ['product-hub', 'approvals-json'],
-  ['product-hub', 'contract-lock'],
-  ['product-hub', 'repos-json'],
+  ['product', 'state-json'],
+  ['product', 'approvals-json'],
+  ['product', 'contract-lock'],
+  ['product', 'repos-json'],
   ['repos-json', 'code-repos'],
-  ['product-hub', 'design-json'],
-  ['product-hub', 'testing-json'],
-  ['product-hub', 'learning-json'],
-  ['product-hub', 'docs-json'],
+  ['product', 'design-json'],
+  ['product', 'testing-json'],
+  ['product', 'learning-json'],
+  ['product', 'docs-json'],
   ['design-json', 'design-tool'],
   ['testing-json', 'testing-tool'],
   ['learning-json', 'learning-tool'],
-  ['product-hub', 'platform'],
-  ['product-hub', 'trust-log'],
+  ['product', 'platform'],
+  ['product', 'trust-log'],
 ];
 
 export const FlowCanvas: React.FC = () => {
@@ -81,12 +81,12 @@ export const FlowCanvas: React.FC = () => {
 
   const messages = currentStep?.messages || [];
 
-  // The loop-back arc: trust-log → product-hub, swept below the pipeline to read
+  // The loop-back arc: trust-log → product, swept below the pipeline to read
   // as "the pipeline repeats per epic" (the SDLC is a repeated cycle, not one pass).
   const loopBack = useMemo(() => {
     if (dims.width === 0) return null;
     const a = COMPONENTS.find((c) => c.id === 'trust-log');
-    const b = COMPONENTS.find((c) => c.id === 'product-hub');
+    const b = COMPONENTS.find((c) => c.id === 'product');
     if (!a || !b) return null;
     const x1 = (a.position.x / 100) * dims.width;
     const y1 = (a.position.y / 100) * dims.height;

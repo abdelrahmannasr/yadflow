@@ -14,8 +14,8 @@ flowchart LR
       cdes["yad-connect-design<br/>design.json · Figma-first, pluggable"]
       ctest["yad-connect-testing<br/>testing.json · Playwright-first, pluggable"]
       clearn["yad-connect-learning<br/>learning.json · DeepTutor-first, pluggable"]
-      phub["optional: Product on a platform<br/>detect-hub · no people stored"]
-      inst --> wire --> conn --> sync --> cdes --> ctest --> clearn --> phub
+      prod["optional: Product on a platform<br/>detect-product · no people stored"]
+      inst --> wire --> conn --> sync --> cdes --> ctest --> clearn --> prod
     end
 
     subgraph FRONT["A · Shape — Product · human-gated"]
@@ -57,7 +57,7 @@ flowchart LR
     subgraph AUTO["C · Automation — switched on & reversible"]
       direction TB
       run["yad-run<br/>reads the dial (yad dial) + trust-log.json"]:::earns
-      cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state<br/>chore(hub) · default branch · allowlist-scoped"]:::artifact
+      cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state<br/>chore(product) · default branch · allowlist-scoped"]:::artifact
       tdy["yad tidy up --push<br/>fold a shipped story's trust-log · build-log shards<br/>into the folded ledger (loose objects → git gc)"]:::artifact
       kill["yad kill → everything advance: human"]
       run --> cpt --> tdy
@@ -79,8 +79,8 @@ flowchart LR
       cepic -. drift / open debt .-> rec
     end
 
-    phub --> disc
-    phub --> an
+    prod --> disc
+    prod --> an
     dd -. roadmap frames each epic .-> ep
     rfb --> sp
     merged -. story pipeline repeats · next story .-> sp

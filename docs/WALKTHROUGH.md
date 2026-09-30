@@ -61,15 +61,15 @@ own yet, so that choice is recorded, not acted on.
    **human decision**: `yad repo list` shows fresh/stale, `yad repo refresh [name]` re-packs a moved repo
    (skills flag staleness and point here — they never silently re-pack). Greenfield → skip it. Once the
    AI has regenerated the code-map, `yad repo refresh [name] --push` publishes the refreshed code-maps +
-   registry to the Product's default branch as one `chore(hub): sync code-context … [skip ci]` audit commit.
+   registry to the Product's default branch as one `chore(product): sync code-context … [skip ci]` audit commit.
 6. **(Optional) Connect tools** so the matching steps do real work (each degrades gracefully and is
    recorded if absent): `yad-connect-design action: connect` (Figma-first → `design.json`, lets
    `yad-ui` materialize screens), `yad-connect-testing action: connect` (Playwright-first →
    `testing.json`, lets `yad-test-cases` implement automation), `yad-connect-learning action: connect`
    (DeepTutor-first → `learning.json`, powers the cross-cutting learning layer).
 7. **(Optional) Put the Product on a platform** so the Shape review runs through real PRs:
-   `yad-connect-repos action: detect-hub`, then `yad-pr-template repo:hub action: wire` /
-   `yad-checks repo:hub action: wire`. There are no reviewers to register: anyone with access to the
+   `yad-connect-repos action: detect-product`, then `yad-pr-template repo:product action: wire` /
+   `yad-checks repo:product action: wire`. There are no reviewers to register: anyone with access to the
    Product repo can approve, and each approval is recorded under their platform login. With no Product
    platform the Shape gate runs local.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
@@ -129,7 +129,7 @@ Build by hand"** below.
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
     record in `build-log.json`, update story status to `in-build`/`shipped`). The machine-written
     ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed by **`yad checkpoint --push`**
-    — a `chore(hub)` audit-trail commit Build runs for you, so no one hand-commits this state.
+    — a `chore(product)` audit-trail commit Build runs for you, so no one hand-commits this state.
     The `trust-log`/`build-log` entries are written as per-entry **shard files** (so parallel stories of one
     epic never conflict on them); once the story ships, **`yad tidy up [<epic>] [--push]`** folds its
     finished shards back into the single ledger file (the manual "pack it up", like `git gc`).
@@ -144,7 +144,7 @@ Build by hand"** below.
 16. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it advances past a step set to
     auto after a clean run and stops for a human otherwise, always halting at the engineer review. Each iteration
     it runs `yad checkpoint --push` to commit the new `trust-log/` shard + `build-state/` it just wrote (a
-    `chore(hub)` commit, default branch only) — so the shared run record stays current with no human commit.
+    `chore(product)` commit, default branch only) — so the shared run record stays current with no human commit.
 17. **Kill switch any time:** `yad kill --reason "<why>"` (everything → manual, recorded in
     `.sdlc/automation.json`) / `yad unkill`.
     Details: **"Run Build on the dial"** below.
@@ -322,7 +322,7 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    **spec-link** (links a real story/spec), **contract-check** (a contract-surface change without
    `Contract-Change` + a re-locked contract FAILS, routing back to the architecture gate),
    **build/test/lint**, **verified-commits**, and the **pattern gates** **commit-message** / **pr-title**
-   / **pr-template** (profile-aware `code`|`hub`, so they also run on the Product). They fail closed
+   / **pr-template** (profile-aware `code`|`product`, so they also run on the Product). They fail closed
    on a bad base ref.
 4. **PR/MR template + risk routing** — `yad-pr-template` drops the platform-matched template with an
    Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2
