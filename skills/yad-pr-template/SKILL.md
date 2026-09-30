@@ -54,7 +54,8 @@ routing helper.
 
 ## Inputs
 
-- `repo`   — the code repo to add the template to (one of an epic's repos), or `product` for the Product (`hub`, the old name, still works).
+- `repo`   — the code repo to add the template to (one of an epic's repos), or `product` for the Product (`hub`, the old name, still works). A code repo that is itself named
+  `product`: give its registered path instead (for example `repos/product`), so it is not taken for the Product.
 - `action` — `wire` (commit the matching template + helper) | `route` (print the approver count from a
   PR body). Default `wire`.
 - `body`   — for `route`: a file holding the PR/MR description to evaluate.

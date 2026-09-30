@@ -97,6 +97,9 @@ function stageAllowlist(git, root, paths) {
 export function commitAndPush(group, { push = false, allowBranch = false, productRoot, defaultBranch } = {}) {
   const { root, paths, items } = group;
   const label = repoLabel(productRoot ?? root, root);
+  // Whether this is the Product itself, from the folder — never from the label, which a repo named `product`
+  // shares (E124 review 1).
+  const isProduct = root === (productRoot ?? root);
   const git = productGit(root);
 
   // `root` must be the TOP of its OWN git repo — not merely "inside a work tree". A registered repo
@@ -110,7 +113,7 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
   const sameRepo = top.ok && samePath(top.stdout, root);
   if (!sameRepo) {
     warn(`${label}: not its own git repo (missing/renamed clone?) — skipped (changes left in the working tree)`);
-    return { label, committed: false, pushed: false, skipped: true, error: false };
+    return { label, product: isProduct, committed: false, pushed: false, skipped: true, error: false };
   }
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const target = defaultBranch || resolveDefaultBranch(git);
@@ -120,13 +123,13 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
       warn(`${label}: on '${branch}', not default '${target}' — --allow-branch: commit/push go to origin/${branch}`);
     } else {
       warn(`${label}: on '${branch}', not the default branch '${target}' — skipped (switch to '${target}' or pass --allow-branch)`);
-      return { label, committed: false, pushed: false, skipped: true, error: false };
+      return { label, product: isProduct, committed: false, pushed: false, skipped: true, error: false };
     }
   }
 
   const { staged, addError } = stageAllowlist(git, root, paths);
   if (addError) warn(`${label}: git add reported "${addError}" — staging may be incomplete`);
-  if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return { label, committed: false, pushed: false, skipped: false, error: false }; }
+  if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return { label, product: isProduct, committed: false, pushed: false, skipped: false, error: false }; }
 
   // Pushing HEAD lands any local commits ahead of the remote too. Warn before we add ours so the
   // operator sees unpublished WIP about to ride the update push (never silently publish it).
@@ -142,18 +145,18 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
     git('reset', '-q', '--', ...staged); // don't leave our allowlist staged for an unrelated commit to sweep up
     fail(`${label}: git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
-    return { label, committed: false, pushed: false, skipped: false, error: true };
+    return { label, product: isProduct, committed: false, pushed: false, skipped: false, error: true };
   }
   ok(`${label}: committed ${staged.length} file(s)`);
 
-  if (!push) return { label, committed: true, pushed: false, skipped: false, error: false };
-  if (pushWithRebase(root, branch).ok) { ok(`${label}: pushed to origin/${branch}`); return { label, committed: true, pushed: true, skipped: false, error: false }; }
+  if (!push) return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: false };
+  if (pushWithRebase(root, branch).ok) { ok(`${label}: pushed to origin/${branch}`); return { label, product: isProduct, committed: true, pushed: true, skipped: false, error: false }; }
   // The commit already landed locally — a re-run of `yad update --push` would see no drift and skip
   // this repo, so point the operator at the direct push of the commit that already exists.
   fail(`${label}: could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
-  hand(`resolve it in ${label === 'product' ? '.' : label}, then push the existing commit with \`git push origin ${branch}\``);
+  hand(`resolve it in ${isProduct ? '.' : label}, then push the existing commit with \`git push origin ${branch}\``);
   process.exitCode = 1;
-  return { label, committed: true, pushed: false, skipped: false, error: true };
+  return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: true };
 }
 
 // Orchestrate the per-repo commit/push over the grouped applied actions, bookended by the announce

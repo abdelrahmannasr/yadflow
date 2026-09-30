@@ -762,13 +762,15 @@ export function ciTagsChecks(checks, root, productConfig, registry) {
   }
   for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
     if (!isPlainObject(repo) || repo.platform !== 'gitlab' || !repo.path) continue;
-    fragments.push({ scope: forTerminal(repo.name), file: '.gitlab/ci/yad-checks.yml', path: path.join(path.resolve(root, repo.path), '.gitlab/ci/yad-checks.yml') });
+    fragments.push({ scope: forTerminal(repo.name), repo: true, file: '.gitlab/ci/yad-checks.yml', path: path.join(path.resolve(root, repo.path), '.gitlab/ci/yad-checks.yml') });
   }
   for (const f of fragments) {
     if (untagged(f.path)) {
       check(checks, `ci-tags:${f.scope}`, 'project', 'warn',
         `${f.scope}: ${f.file} runs a docker job with no \`tags:\` [YAD-CI-001]`,
-        'tag-locked runners (run_untagged: false) will strand it at `pending` — run `yad update`, then set the `YAD_RUNNER_TAGS` CI/CD variable');
+        'tag-locked runners (run_untagged: false) will strand it at `pending` — run `yad update`, then set the `YAD_RUNNER_TAGS` CI/CD variable',
+        // The id cannot tell the Product from a repo named `product`; this key can (E124 review 1).
+        { product: f.scope === 'product' && !f.repo });
     }
   }
 }

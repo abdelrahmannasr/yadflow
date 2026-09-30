@@ -27628,6 +27628,67 @@ test('E124: the no-platform warning of gate sync and gate ci names the settings 
   }
 });
 
+// E124 review 1: a code repo may be named `product`, the Product's own scope and label. The scope, the label
+// and the check id then say the same thing for both; the `product` key, and the folder, tell them apart.
+test('E124: a code repo named product is told apart from the Product (items, commits, ci-tags)', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+    repos.repos[0].name = 'product';
+    repos.repos[0].platform = 'gitlab';
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(repos));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true }));
+    const { value } = await captureConsole(() => reconcile(T, {}));
+    const theirs = value.items.filter((i) => !i.product);
+    assert.ok(theirs.length && theirs.every((i) => i.scope === 'product'), 'the repo\'s items: scope product, product false');
+    assert.ok(value.items.some((i) => i.scope === 'product' && i.product), 'and the Product\'s own: product true');
+    assert.ok(value.items.every((i) => typeof i.product === 'boolean'));
+
+    // ci-tags: one id for both, the key tells them apart.
+    await captureConsole(() => reconcile(T, { fix: true }));
+    const untag = (f) => fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(/^\s*tags: \[\$YAD_RUNNER_TAGS\]\n/m, ''));
+    untag(path.join(backend, '.gitlab/ci/yad-checks.yml'));
+    untag(path.join(T, '.gitlab/ci/yad-gate-sync.yml'));
+    const { collectDoctor } = await import('./doctor.mjs');
+    const tags = collectDoctor(T).checks.filter((x) => x.id === 'ci-tags:product');
+    assert.deepEqual(tags.map((x) => x.product).sort(), [false, true]);
+
+    // A commit result says whose it is from the folder, not the label.
+    const { commitAndPush } = await import('./update-commit.mjs');
+    const alone = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-notrepo-'));
+    const outside = path.join(alone, 'product'); // a sibling repo whose folder is named product
+    fs.mkdirSync(outside);
+    const r1 = (await captureConsole(() => commitAndPush({ root: outside, paths: [], items: [] }, { productRoot: T }))).value;
+    assert.deepEqual([r1.label, r1.product], ['product', false]);
+    const r2 = (await captureConsole(() => commitAndPush({ root: alone, paths: [], items: [] }, { productRoot: alone }))).value;
+    assert.deepEqual([r2.label, r2.product], ['product', true]);
+    fs.rmSync(alone, { recursive: true, force: true });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// E124 review 1: a team's own workflow still passing `--profile hub` is named, whatever shape the gate has.
+test('E124: renamed-ref names a team workflow that passes --profile hub, in either spelling', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-oldprofile-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github' }));
+    fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.github/workflows/ours.yml'),
+      'on: pull_request\njobs:\n  t:\n    steps:\n      - run: bash checks/pr-title.sh --profile hub "$T"\n      - run: bash checks/pr-template.sh --profile=hub body.md\n      - run: bash x.sh --profile hubble\n');
+    // yad's own file is never read here: its first line says so.
+    fs.writeFileSync(path.join(T, '.github/workflows/yad-product-checks.yml'), '# yad-managed: yad-checks\n  - run: bash checks/pr-title.sh --profile hub\n');
+    const { renamedNameHits } = await import('./plan.mjs');
+    assert.deepEqual(renamedNameHits(T).map((h) => [h.file, h.line, h.old, h.new]), [
+      ['.github/workflows/ours.yml', 5, '--profile hub', '--profile product'],
+      ['.github/workflows/ours.yml', 6, '--profile=hub', '--profile=product'],
+    ]);
+    const { collectDoctor } = await import('./doctor.mjs');
+    const ref = collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.github/workflows/ours.yml');
+    assert.equal(ref.status, 'warn');
+    assert.match(ref.message, /line 5 `--profile hub` → `--profile product`, line 6 `--profile=hub` → `--profile=product`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // ---------------------------------------------------------------------------------------------
 // hub-keep:start keep-list-tests
 // E124: every `hub` that survives the hub -> Product rename is kept by a named rule

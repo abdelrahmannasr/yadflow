@@ -124,7 +124,9 @@ to say it is running on the Product.
 |---|---|
 | `bash checks/pr-title.sh --profile hub …` | `bash checks/pr-title.sh --profile product …` |
 
-The workflows yadflow installs pass `product` since 4.0. The checks still accept `hub`.
+The workflows yadflow installs pass `product` since 4.0. The checks still accept `hub`, but change yours now:
+a check edited after 4.0 may no longer turn `hub` into `product`, and would then skip the Product's rules.
+`yad doctor` names every line that still passes it (`renamed-ref:<file>`).
 
 ## 9. Tools that read `--json`
 
@@ -141,6 +143,11 @@ number, `jsonVersion`, which moved from 1 to 2 because these values were renamed
 | `yad history show` | a key | `hubWhy` | `productConfigWhy` |
 
 A tool that checks `jsonVersion` before it reads will see the 2 and can stop instead of misreading.
+
+If one of your code repos is itself named `product`, its entries share the value `product` with the Product's
+own. Each `items[]` and `commits[]` entry, and each `ci-tags:*` check, carries a `product` key (`true` or
+`false`) that tells them apart — read that key rather than the name. When you ask a skill to work on that
+repo, give its path (for example `repo: repos/product`), not its name.
 
 ## 10. Tools that read the printed text or the git log
 

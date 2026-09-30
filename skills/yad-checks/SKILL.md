@@ -128,7 +128,8 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 
 ## Inputs
 
-- `repo`  — the code repo to wire/run gates for (one of an epic's repos), or `product` to wire the Product itself (`hub`, the old name, still works).
+- `repo`  — the code repo to wire/run gates for (one of an epic's repos), or `product` to wire the Product itself (`hub`, the old name, still works). A code repo that is itself named
+  `product`: give its registered path instead (for example `repos/product`), so it is not taken for the Product.
 - `action` — `wire` (install the gates into the repo) | `run` (run the three gates now). Default `run`.
 - `base`  — for `run`: the base ref to diff against (the PR/MR target; default the repo's default branch).
 

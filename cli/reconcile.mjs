@@ -23,7 +23,9 @@ import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
 // The --json answer's list (E1): every managed item, as the report groups it — never the apply step.
-const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status }));
+// `product` says whose item it is: false for a connected repo's, true for the Product's own (E124 review 1).
+// The scope alone cannot say it — a repo may be named `product`, the Product's own scope.
+const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
 export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
@@ -73,7 +75,11 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       apply: () => undefined,
     });
   }
-  for (const repo of registry.repos) actions.push(...withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]));
+  for (const repo of registry.repos) {
+    const own = withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]);
+    for (const a of own) a.fromRepo = repo.name; // set on the action itself: later steps compare actions by identity
+    actions.push(...own);
+  }
 
   // --- stale code-context (HEAD moved since last pack) ---
   const staleRepos = [];
@@ -87,6 +93,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       // later, not here, so only the pack is claimed.
       actions.push({
         scope: repo.name,
+        fromRepo: repo.name, // about the repo, though its file is under the Product
         item: 'code-context',
         status: 'stale',
         root,

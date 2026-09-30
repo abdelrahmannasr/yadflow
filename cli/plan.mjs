@@ -606,6 +606,11 @@ export const RENAMED_CI_NAMES = Object.freeze([
   ['yad-hub-ledger-guard', 'yad-product-ledger-guard'],
   ['yad-hub-verified-commits', 'yad-product-verified-commits'],
   ['.yad_hub_mr_only', '.yad_product_mr_only'],
+  // The profile value a team's own workflow may pass (E124 review 1). The gates still accept `--profile hub` until
+  // v5, but a gate edited after 4.0 without the line that would turn `hub` into `product` lets `--profile hub`
+  // skip the Product's rules (the cell `productProfileGap` does not judge) — so the workflow is named instead.
+  ['--profile hub', '--profile product'],
+  ['--profile=hub', '--profile=product'],
 ]);
 const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Bounded on both sides by anything that cannot be part of a name, so `yad-hub-checks-extra` is not a hit.
@@ -682,10 +687,10 @@ export function renamedNameHits(root) {
 //   branches on `= hub`, no mapping                'unmapped'         ok
 //   list without `product` (before 4.0)            'rejects'          ok
 //   branches on `= product`, maps hub -> product   ok (shipped)       ok (shipped)
-//   branches on `= product`, no mapping            ok                 skips the Product rules — NOT checked
-// The last cell is left out on purpose: that copy is one a team edits after E124 ships AND strips of its
-// mapping line, beside an old workflow that `renamed:` already names. It cannot exist before 4.0 is on
-// `latest`; the E123 cells exist on every 3.x install today.
+//   branches on `= product`, no mapping            ok                 skips the Product rules — see below
+// The last cell is not judged here, from the gate: it is closed from the workflow side instead. A team's own
+// workflow that passes `--profile hub` is a `renamed-ref:` hit (RENAMED_CI_NAMES), and yad's own old
+// workflow is a `renamed:` one — so every workflow that could reach that cell is named, whatever the gate's shape.
 export const PRODUCT_PROFILE_GATES = Object.freeze(['checks/commit-message.sh', 'checks/pr-title.sh', 'checks/pr-template.sh']);
 export function productProfileGap(file) {
   let text;
