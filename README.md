@@ -179,8 +179,9 @@ copied. They point back to the parent's approved files.
 `yad thread <epic>` prints the **current truth**: which epic each document comes from today.
 
 - **A document written again** (the epic, architecture, contract or UI design) comes from the epic
-  furthest down the thread (the most steps away from the original feature) that writes it itself.
-  When two epics are equally far down, the one whose ID sorts last wins. Dates play no part.
+  furthest down the thread (the longest chain of parents back to the original feature) that does not
+  inherit it and whose route has the step that writes it. A skipped step still counts. When two
+  epics are equally far down, the one whose ID sorts last wins. Dates play no part.
 - **Stories and test cases add up** across the thread.
 - **Retired stories drop out.** A change can retire a parent story with `supersedes`.
 
@@ -201,7 +202,7 @@ Yadflow gives you explicit checks, and each one says who acts:
 | Record | How it is checked | Who refreshes it | Enforced? |
 | --- | --- | --- | --- |
 | Approvals | Tied to the file's exact contents | A person approves again | Yes. An outdated approval does not count at the gate. |
-| Shared contract | A lock file holds its hash | The architecture skill locks it again | Yes. A CI check always requires a contract change to be declared, and checks the lock when it can reach the Product. |
+| Shared contract | A lock file holds its hash | The architecture skill locks it again | Yes. A CI check always requires a contract change to be declared, and checks the lock when it can reach the Product. A repository's first spec fails if it cannot. |
 | Code snapshots of each repository | Out of date once the repository moves on | `yad repo refresh`, then the `yad-connect-repos` skill for the code map | No. `yad doctor` and `yad repo list` warn. |
 | Product index (`.sdlc/index.json`) | A hash of its inputs | `yad` commands, or CI at merge | No. `yad doctor` warns. |
 | Documentation sites | `yad docs sync` (check only by default) | The `yad-docs` skills | No |
