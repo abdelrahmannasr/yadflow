@@ -12062,7 +12062,7 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
   const pins = new Map();
   for (const [name, text] of files) {
     // The block runs to the next line that starts at column 0 (a blank line inside it does not end it).
-    const top = text.match(/^permissions:(.*)(\n(?:[ \t].*|)(?=\n))*/m);
+    const top = text.match(/^permissions:(.*)(\n(?:[ \t].*|)(?=\n|$))*/m);
     assert.ok(top, `${name}: top-level permissions`);
     assert.doesNotMatch(top[0].replace(/#.*$/gm, ''), /write/, `${name}: the top-level token is read-only; a job asks for write itself`);
     for (const [, ref] of text.matchAll(/^\s*(?:-\s+)?uses:\s*(\S+.*)$/gm)) {
@@ -12084,7 +12084,11 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
       // badge, but the badge proves only that the committer signed — any contributor who signs can
       // write "yad-gate-sync" as the author. With no token the badge lookup fails, and every
       // bot-attributed commit is refused, which is the safe answer until that check is fixed.
-      if (/checks\/ledger-guard\.sh/.test(job)) assert.doesNotMatch(job, /GH_TOKEN/, `${name}: ${id} must not pass GH_TOKEN (see the comment above)`);
+      // gh reads GITHUB_TOKEN too, and a workflow-level `env:` reaches every job.
+      if (/checks\/ledger-guard\.sh/.test(job)) {
+        assert.doesNotMatch(job, /\b(GH|GITHUB)_TOKEN\b/, `${name}: ${id} must not pass a gh token (see the comment above)`);
+        assert.doesNotMatch(text.slice(0, jobsAt), /\b(GH|GITHUB)_TOKEN\b/, `${name}: no workflow-level gh token reaches ${id}`);
+      }
     }
   }
 });

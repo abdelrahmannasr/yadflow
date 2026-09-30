@@ -683,8 +683,10 @@ merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "
 and the `yad-update-guard`. On GitHub the `ledger-guard` job is given **no** `GH_TOKEN` on purpose: its
 bot exemption checks the author text and the Verified badge, and the badge proves only that the
 *committer* signed, so any contributor who signs could claim the bot's name. Without a token the badge
-lookup fails and every bot-attributed commit in a PR is refused — safe, because the gate-sync bot pushes
-only to the default branch, never to a PR. (On GitLab a project CI/CD variable reaches every job, so
+lookup fails and every bot-attributed commit that changes a ledger file is refused — safe, because the
+gate-sync bot pushes only to the review PR's base (normally the default branch), never to a PR. This
+holds on GitHub-hosted runners; a self-hosted runner with a stored `gh auth login` would answer the
+lookup anyway. (On GitLab a project CI/CD variable reaches every job, so
 the `GITLAB_TOKEN` / `SDLC_API_TOKEN` that verified-commits needs reaches ledger-guard too, and the gap is
 open there.) The three below are **not shipped** — they are scripts a team
 writes itself if it wants them:
