@@ -3,6 +3,9 @@
 **What a "shape" is:** the layout of the files yadflow writes into your project. Every one of them
 carries a `"schemaVersion"` number saying which layout it uses. A file with no number counts as 1.
 
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
+
 Shape 4 renames the two settings every step carries. Nothing about how your project behaves changes.
 
 ## What changed
@@ -34,6 +37,14 @@ instructions that say `assistance` and `automation`, and an older copy of the CL
 names. Move the setting out from under them and a step silently loses its dial, with nothing to say
 why.
 
+> **Changed later (E34).** For a **Shape** author step — the steps that write the epic, the
+> architecture, the UI design, the stories and so on — the advance dial that counts is no longer the
+> one in `state.json`. It lives in one project file, `.sdlc/automation.json`, set with
+> `yad dial <step> --to auto|human`, and a Shape `auto` is recorded there but not acted on yet.
+> `yad doctor` warns about a Shape step that says `auto` in `state.json`, where nothing reads it
+> (`dials:shape-auto-unread`). The two names on this page still decide the dial of a **Build** lane
+> step, in `build-state/<story>.json`, and there the old name is still the one read.
+
 ## What to do
 
 ```
@@ -46,8 +57,8 @@ Safe to run twice. A step that already has the new name is left exactly as it is
 ## Three things worth knowing
 
 **A review step is never given `advance: auto`.** A review gate can never move itself forward — that
-is the one rule in yadflow that never bends. If a step is a review (`type: "review+approve"`, or
-`locked: true`) and somehow carried `machine_advance`, the migration writes `advance: human` instead
+is the one rule in yadflow that never bends. If a step is a review (`type: "review+approve"`, a step the engine
+knows as a review, or an unknown step marked `locked: true`) and somehow carried `machine_advance`, the migration writes `advance: human` instead
 and leaves the old value where it is, so `yad doctor` reports the mismatch rather than hiding it.
 
 To be exact about what the code does: it never WRITES that value, and `yad doctor` fails on one it

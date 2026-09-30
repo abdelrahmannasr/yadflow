@@ -48,7 +48,7 @@ export const MODULES: Module[] = [
         summary: 'Gates, files, and the human hand on every step.',
         body: [
           { kind: 'p', text: 'Yadflow (from **يد**, Arabic for "hand") puts a human gate on every step of the lifecycle. Each step does its work, writes its output to a plain file, and then **waits**.' },
-          { kind: 'p', text: 'A step never advances until a human approves it — or, later, until a step has *earned* the right to advance on its own. That is the whole idea.' },
+          { kind: 'p', text: 'A step never advances until a human approves it. The team may choose to let some Build steps advance on their own, but every review gate stays with a person. That is the whole idea.' },
           { kind: 'list', items: [
             'Every step writes an **artifact** (a file) and stops.',
             'A **gate** is a human review that the artifact must pass.',
@@ -142,14 +142,14 @@ export const MODULES: Module[] = [
         title: 'The lifecycle at a glance',
         duration: '4 min',
         level: 'beginner',
-        summary: 'Setup → Shape → Build → (earned) automation.',
+        summary: 'Setup → Shape → Build → (optional) automation.',
         body: [
           { kind: 'p', text: 'Setup is one-time. Then, for each feature (epic), you run Shape in the Product; once stories are approved the epic is `ready-for-build` and Build runs per story per repo.' },
           { kind: 'steps', items: [
             'Setup (once): install skills, connect repos, wire CI gates.',
             'Shape (per epic): epic → architecture → UI → stories → test cases. Every artifact is gated.',
             'Build (per story per repo): spec → implement → checks → ship.',
-            'Automation (optional, earned): let safe Build steps auto-advance once they prove themselves.',
+            'Automation (optional): the team can switch a Build step to advance on its own. Review gates always stay with a person.',
           ] },
           { kind: 'callout', tone: 'info', text: 'Lost? `yad-status` is a read-only view of where any epic is and what is blocking it. Start there.' },
         ],
@@ -179,14 +179,19 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'From your Product repo (an empty git repo is fine — the first epic creates its own files), run the guided wizard. It opens with a short profile interview — solo or team? greenfield or brownfield? monorepo or separate repos? — and branches the rest so you only answer what your situation needs.' },
           { kind: 'p', text: 'It installs the skills into your IDE skill directories, and detects your Product platform (GitHub/GitLab) from the remote. It does not ask for reviewers, roles or commit emails: yadflow keeps no list of people. Anyone with access to the repo can review, and the platform records who approved.' },
+          { kind: 'p', text: 'There are three front doors, and each one runs this same setup for you. A **workspace** is the folder that holds `product/` and your code repos side by side. `yad new <name>` starts a new project (greenfield): it makes `<name>/product/`, runs `git init` there and runs setup inside it. It creates no remote; it prints the `gh`/`glab` command for you to run. `yad init` is for a folder that already holds your repos (brownfield): it makes `product/` (or uses the one there), runs setup, and offers each repo it finds. `yad join <url>` is for a teammate: it clones the Product and every repo it registers, then does only the per-machine steps — git-ignored skill copies and the git pre-commit hook. It never commits or pushes.' },
+          { kind: 'p', text: 'All three write `.yad-workspace.json` in the workspace folder. It holds the path to the Product, so `yad` finds the Product from any repo beside it. If a registered repo is missing on your machine later, `yad repo clone` fetches it to its recorded path.' },
           { kind: 'callout', tone: 'info', text: 'Re-run `npx yadflow check --fix` after any workflow update — it reports what is missing / drifted / stale and reconciles only what changed. It never re-asks for what you already answered.' },
         ],
         commands: [
+          { cmd: 'yad new <name>', note: 'greenfield: make <name>/product/ and run setup' },
+          { cmd: 'yad init', note: 'brownfield: make product/ beside your repos and run setup' },
+          { cmd: 'yad join <url>', note: 'teammate: clone the Product + its repos, per-machine setup only' },
           { cmd: 'cd <product-repo>' },
           { cmd: 'npx yadflow setup', note: 'guided profile interview + install' },
           { cmd: 'npx yadflow check --fix', note: 'reconcile after any update' },
         ],
-        produces: ['.sdlc/product.json', '.sdlc/hub.json', '.sdlc/cli-version.json', 'skills installed in .claude/ (and other IDE dirs)'],
+        produces: ['.sdlc/product.json (older installs: .sdlc/hub.json)', '.sdlc/cli-version.json', '.yad-workspace.json (in the workspace folder, from new/init/join)', 'skills installed in .claude/ (and other IDE dirs)'],
         quiz: [
           {
             q: 'What does the setup wizard open with?',
@@ -271,7 +276,7 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'Shape the idea, write epic.md, get a stable EP-<slug> ID.',
         body: [
-          { kind: 'p', text: 'Run `yad-epic` in the Product. With the analyst and pm lenses it shapes the idea and writes `epic.md`. It assigns the stable `EP-<slug>` ID and seeds the epic\'s state (`.sdlc/state.json`, all human-approve, Shape steps locked).' },
+          { kind: 'p', text: 'Run `yad-epic` in the Product. With the analyst and pm lenses it shapes the idea and writes `epic.md`. It assigns the stable `EP-<slug>` ID and seeds the epic\'s state (`.sdlc/state.json`, every step starting at `advance: human`).' },
           { kind: 'p', text: 'When the step finishes it sets itself `done`, moves `currentStep` to the epic review, and **stops at the gate**. You clear the gate before moving on (next module).' },
           { kind: 'p', text: 'To put several epics under one heading, give them the same `theme:` in `epic.md` — one word or short phrase, such as `theme: checkout-revamp`. It is optional, there is no list to pick from, and there is no level above the Epic: grouping is a label. Write **one** tag (a list is read as no theme), and spell an existing theme exactly as the other epics do — two spellings group as two, which `yad doctor` reports.' },
           { kind: 'p', text: 'You can also have the engine lay the track first: `yad epic new <slug>` writes the epic\'s step chain and its empty ledgers, then you run `yad-epic` to author `epic.md` against it. The chain comes from a **profile** — the named route an epic takes. `classic` is the 10-step chain and the default; `--profile analysis-first` is the 12-step one, which puts the analysis before the epic. There are two short lanes as well: `--profile chore` is four steps for upkeep somebody has already decided on, and `--profile spike` puts the analysis in front of those for a timeboxed question. Neither short lane has an architecture gate, so neither may change the shared contract. The command writes no `epic.md`, no branch and no commit, and it refuses an epic that already has a chain.' },
@@ -305,7 +310,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Run `yad-architecture` with the architect lens. It authors `architecture.md` and the **locked** `contract.md` — the shared cross-repo surface (endpoints, events, data-models) that every code repo must honor.' },
           { kind: 'p', text: 'It then hash-locks the contract surface into `.sdlc/contract-lock.json`. From here on, any code change that touches that surface must declare it and re-lock — otherwise CI fails and routes back to this gate.' },
-          { kind: 'callout', tone: 'key', text: 'The architecture review carries the **contract** risk tag, so its count asks for 3 approvers (base 1 + contract risk 2). Only the base — 1 approver, who should not be the author — holds the gate. A later yadflow change will enforce the rest together with `yad gate lower --reason`, a recorded way out of a gate a team cannot meet. Until then the rest is printed as a shortfall against the capped count and never blocks. The engine also shows the count capped at the number of active people less one: with 2 active people the capped ask is 1, with 3 it is 2, with 4 or more all 3. Changing the locked surface invalidates existing approvals.' },
+          { kind: 'callout', tone: 'key', text: 'The architecture review carries the **contract** risk tag, so its count asks for 3 approvers (base 1 + contract risk 2). Only the base — 1 approver, who should not be the author — holds the gate. Enforcing the rest is parked (roadmap E108). For now the rest is printed as a shortfall against the capped count and never blocks. The engine also shows the count capped at the number of active people less one: with 2 active people the capped ask is 1, with 3 it is 2, with 4 or more all 3. Changing the locked surface invalidates existing approvals.' },
         ],
         commands: [{ cmd: 'run yad-architecture' }],
         produces: ['epics/EP-<slug>/architecture.md', 'epics/EP-<slug>/contract.md (locked)', '.sdlc/contract-lock.json'],
@@ -430,14 +435,17 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'The same gate over a real PR/MR when the Product is on a platform.',
         body: [
-          { kind: 'p', text: 'With no Product platform, the gate runs **local**: comments and approvals are recorded as files and you end with an explicit `advance`.' },
-          { kind: 'p', text: 'When the Product is on GitHub/GitLab, the `yad gate` CLI runs the same gate over a real PR/MR. `open` raises the review PR; `sync` pulls approvals and comment threads into the file ledger; the step **auto-advances when the approved, fully-resolved PR is merged** — the merge click is the human approval act.' },
+          { kind: 'p', text: 'With no Product platform, the gate runs **local**: comments and approvals are recorded as files and you end with an explicit `advance`. Three commands do it: `yad gate comment <epic> <artifact> --by <name>` records who commented, `yad gate approve <epic> <artifact> --by <name>` records an approval (bound to the artifact\'s content, so an edit revokes it; it never advances), and `yad gate advance <epic> <artifact>` passes the gate when its approvals hold.' },
+          { kind: 'p', text: 'When the Product is on GitHub/GitLab, the `yad gate` CLI runs the same gate over a real PR/MR. `open` raises the review PR; `sync` pulls approvals and comment threads into the file ledger; the step **advances when the approved, fully-resolved PR is merged** — the merge click is the human approval act. In the `local` ledger mode, `yad gate sync` records the advance. In the `verified` ledger mode CI does it (`yad gate ci --merged`), and `gate sync` is advice only.' },
           { kind: 'callout', tone: 'info', text: 'The file ledger always stays the source of truth. The platform is just a nicer surface for the same predicate.' },
         ],
         commands: [
           { cmd: 'yad gate open <epic> <artifact>', note: 'raise the review PR/MR' },
           { cmd: 'yad gate sync <epic>', note: 'pull approvals + threads into the ledger' },
           { cmd: 'yad gate status <epic>', note: 'show recorded approvals' },
+          { cmd: 'yad gate comment <epic> <artifact> --by <name>', note: 'no platform: record who commented' },
+          { cmd: 'yad gate approve <epic> <artifact> --by <name>', note: 'no platform: record an approval' },
+          { cmd: 'yad gate advance <epic> <artifact>', note: 'no platform: pass the gate when approvals hold' },
         ],
       },
       {
@@ -455,7 +463,7 @@ export const MODULES: Module[] = [
             '**Epic, UI, stories, test-cases** — the base count: 1 approver. Stories touching several repos add no approvals.',
             '**Engineer review at ship** — a human engineer, always, never automated.',
           ] },
-          { kind: 'p', text: 'The full count is **base 1 + risk step**, and it counts people rather than roles. Only the base holds a gate. The **capacity cap** limits the count to the number of active people less one (never below 1) — one seat is left for the author — and `yad gate sync` prints it: the count of people on its own line (`active people: 2 in the last 90 days — caps each gate\'s count at 1 approver (one seat is left for the author); reported, only the base is enforced`) and the count with its shortfall, for example `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`. The cap is reported, not enforced, because the count of people can read high: a git name and a platform login count as two people until proven one, so a two-person team can read as four. A later yadflow change will enforce the capped count together with `yad gate lower --reason`, a way out of a gate that cannot be met, once the count is accurate. Until then, under a team gate that has not passed, `yad gate status` and `yad gate sync` print a warning line when the count of people suggests the gate may not pass: `! may not be met:` about the one approval enforced today, or `! if the risk step were enforced:` about what enforcing more would do. It holds nothing. Solo mode still waives approvals: the merge plus resolved threads advance the step. In solo mode, `yad mode`, `yad gate status`, `yad next` and `yad doctor` print `! solo mode is on, but …` when the count of people shows more than one person may work on the Product. It only suggests `yad mode team`; nothing switches by itself.' },
+          { kind: 'p', text: 'The full count is **base 1 + risk step**, and it counts people rather than roles. Only the base holds a gate. The **capacity cap** limits the count to the number of active people less one (never below 1) — one seat is left for the author — and `yad gate sync` prints it: the count of people on its own line (`active people: 2 in the last 90 days — caps each gate\'s count at 1 approver (one seat is left for the author); reported, only the base is enforced`) and the count with its shortfall, for example `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`. The cap is reported, not enforced, because the count of people can read high: a git name and a platform login count as two people until proven one, so a two-person team can read as four. Enforcing the capped count is parked (roadmap E108); it waits until the count is accurate. For now, under a team gate that has not passed, `yad gate status` and `yad gate sync` print a warning line when the count of people suggests the gate may not pass: `! may not be met:` about the one approval enforced today, or `! if the risk step were enforced:` about what enforcing more would do. It holds nothing. Solo mode still waives approvals: the merge plus resolved threads advance the step. In solo mode, `yad mode`, `yad gate status`, `yad next` and `yad doctor` print `! solo mode is on, but …` when the count of people shows more than one person may work on the Product. It only suggests `yad mode team`; nothing switches by itself.' },
         ],
         quiz: [
           {
@@ -640,7 +648,7 @@ export const MODULES: Module[] = [
           { kind: 'p', text: 'Then you author and gate only the re-authored artifacts, and build + ship the change-epic\'s story the normal way. A defect\'s regression test is the durable memory of the bug.' },
         ],
         commands: [{ cmd: 'yad-change parent:<epic> title:"…" type:<change|defect|hotfix>' }],
-        produces: ['a new threaded EP-<slug> with inherited steps pre-approved', 'change.json (+ reconcile-debt.json for hotfixes)'],
+        produces: ['a new threaded EP-<slug> with inherited steps marked `satisfied`', 'change.json (+ reconcile-debt.json for hotfixes)'],
       },
       {
         id: 'change-hotfix',
@@ -677,8 +685,8 @@ export const MODULES: Module[] = [
   {
     id: 'automation',
     number: 8,
-    title: 'Automation, earned',
-    blurb: 'The two dials, earning machine-advance, the kill switch.',
+    title: 'Automation, set by the team',
+    blurb: 'The two dials, setting a step to auto, the kill switch.',
     icon: 'tune',
     level: 'advanced',
     lessons: [
@@ -694,19 +702,19 @@ export const MODULES: Module[] = [
             '**driver** — human | pair | agent — who does the work. (Older name: `assistance` — none | review | heavy. Both are written; the old one is still the one read.)',
             '**advance** — human | auto — who moves the step forward. (Older name: `automation` — human_approve | machine_advance.)',
           ] },
-          { kind: 'p', text: 'Every step starts at `advance: human`. The Shape authoring steps and their reviews are **locked** — they may never be set to `advance: auto`. The engineer review is locked too.' },
+          { kind: 'p', text: 'Every step starts at `advance: human`. The team sets the dial with `yad dial`. A **review gate** is always a person: each Shape review and the engineer review can never be set to `advance: auto`. A Shape **authoring** step can be set to auto for the whole project — it is recorded in `.sdlc/automation.json` but not acted on yet.' },
         ],
         quiz: [
           {
             q: 'What does the automation dial control?',
             options: [
               'How much the AI helps write the artifact',
-              'Who advances the step — a human, or the machine once earned',
+              'Who advances the step — a human, or the machine when the team sets it to auto',
               'The CI runner size',
               'The font of the docs site',
             ],
             answer: 1,
-            explain: 'driver = who does the work; advance = who moves it forward. Shape steps and the engineer review stay `advance: human`.',
+            explain: 'driver = who does the work; advance = who moves it forward. Every review gate — each Shape review and the engineer review — stays `advance: human`.',
           },
         ],
       },
@@ -784,6 +792,10 @@ export const MODULES: Module[] = [
             '`yad doctor` — environment + state health check; attach `--json` to a bug report. It also says whether each repo\'s branch requires an approval on GitHub or GitLab — or that it is not known, and why.',
             '`yad skill list` — which skill runs which step. `yad skill bind <step> <skill>` records your own choice in `.sdlc/skills.json`; pass several and they run as a chain, each costing another model run.',
             '`npx yadflow check --fix` — reconcile the install after any update.',
+            '`yad history` — every work item, newest first; `yad history show <id>` gives one item\'s steps and approvals, and `yad history search <text>` finds one.',
+            '`yad mode` — shows who must approve; `yad mode solo --reason <why>` waives approvals (the merge still decides) and `yad mode team` counts them again.',
+            '`yad capture` — snapshots your Shape drafts to your private `yad/wip/<you>/<epic>` branch (a hook runs it after each agent edit). `yad claims` shows who else is editing which file. `yad fold <epic> <step>` ends an authoring step with one clean commit.',
+            '`yad join <url>` — set up a teammate\'s machine from the Product\'s URL; `yad repo clone` fetches a registered repo that is missing locally.',
           ] },
           { kind: 'callout', tone: 'info', text: 'Go deeper: the full command reference is in docs/CLI.md, the skill catalogue in docs/SKILLS.md, and the by-hand end-to-end path in docs/WALKTHROUGH.md. The terminology report explains every term on one illustrated page.' },
         ],
@@ -793,6 +805,10 @@ export const MODULES: Module[] = [
           { cmd: 'yad doctor', note: 'health check' },
           { cmd: 'yad migrate', note: 'preview the file-shape upgrade (--apply to do it)' },
           { cmd: 'yad skill list', note: 'which skill runs which step (bind/unbind to change it)' },
+          { cmd: 'yad history', note: 'every work item, newest first' },
+          { cmd: 'yad mode', note: 'solo or team: who must approve' },
+          { cmd: 'yad capture · yad claims · yad fold <epic> <step>', note: 'draft snapshots, who is editing, one clean commit' },
+          { cmd: 'yad join <url>', note: 'set up a teammate\'s machine' },
         ],
       },
     ],

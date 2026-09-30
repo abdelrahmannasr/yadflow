@@ -54,9 +54,8 @@ roles — there are no roles, and yadflow keeps no list of people:
   (`short`); never block on it. Why: the count of people errs high in the normal case. A commit is
   counted by its git name, an approval by its platform login, and yadflow never joins the two without
   exact evidence — so a two-person team can read as four. At four the cap lowers nothing, and an enforced
-  contract gate would ask three approvals of a team with one person who is not the author. A later yadflow
-  change turns the capped count on together with `yad gate lower --reason`, the way out, once the count
-  is accurate.
+  contract gate would ask three approvals of a team with one person who is not the author. Enforcing the
+  capped count is parked (roadmap E108) until the count is accurate.
 - **Relay a warning line.** Under a team gate that has not passed, `yad gate status` and `yad gate sync`
   print `! may not be met: …` (today's one required approval may have nobody but the author to give
   it) or `! if the risk step were enforced: …` (a what-if about the extra approvals) when the count of
@@ -323,8 +322,8 @@ write path.
 ### Hard rules (build plan §1, §5)
 - **The merge click is the human approval act.** A Shape step advances only when a human merges the
   approved, fully-resolved review PR — or, on a Product with no platform, when a person runs
-  `yad gate advance` — there is no machine-driven advance. A step `locked: true` may not
-  be switched to `advance: auto`; refuse such a request.
+  `yad gate advance` — there is no machine-driven advance. A review gate is never `advance: auto`
+  (`yad dial` refuses it); refuse such a request.
 - **Approvals are revoked when the reviewed artifact changes.** `sync` re-hashes the artifact (the locked
   contract surface for architecture; every other file without its frontmatter `status:` line, which the
   gate and Build rewrite after review) and drops any approval bound to a stale hash, so a reviewer must

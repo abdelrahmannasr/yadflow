@@ -11,11 +11,24 @@ const TERM_GROUPS = [
     ],
   },
   {
+    phase: 'Step states',
+    steps: [
+      'todo — not started. (Before shape 7 this was written as `blocked` with no record; that is still read as todo.)',
+      'in_progress — being worked on.',
+      'in_review — the step\'s review gate is open.',
+      'done — completed here.',
+      'skipped — the team chose not to do this optional step (`yad skip`, with a reason recorded).',
+      'deferred — set aside to do later (`yad defer`); the chain goes on and its review is still owed.',
+      'satisfied — done elsewhere, for example a step a change-epic inherits from its parent.',
+      'blocked — cannot proceed, not by the team\'s choice; carries a record of what it waits on. `yad unblock` clears it.',
+    ],
+  },
+  {
     phase: 'Gates & roles',
     steps: [
       'Review gate — the reusable team approval: 1 approver, who should not be the author (the base), all threads resolved, and the review PR/MR merged. Anyone with access to the repo can approve; yadflow keeps no list of people.',
-      'Approval count — how many distinct people a step asks to approve: base 1 + risk step, capped at the active people less one (never below 1). Only the base is enforced; the gate prints the rest as a shortfall against the capped count. A later yadflow change will enforce the capped count together with yad gate lower --reason, a recorded way out of a gate a team cannot meet.',
-      'Risk step — what a step\'s risk tags add to the count: contract +2, auth or payments +1, the highest tag and never the sum. Advisory. A later yadflow change will enforce it, capped by the active people, together with a way out (yad gate lower --reason).',
+      'Approval count — how many distinct people a step asks to approve: base 1 + risk step, capped at the active people less one (never below 1). Only the base is enforced; the gate prints the rest as a shortfall against the capped count. Enforcing the capped count is parked (roadmap E108).',
+      'Risk step — what a step\'s risk tags add to the count: contract +2, auth or payments +1, the highest tag and never the sum. Advisory. Enforcing it, capped by the active people, is parked (roadmap E108).',
       'Active people — how many people committed or approved lately, counted live from the approval and ship records plus git authorship, never from a stored list. The window scales with how fast the team merges. Printed once per epic on `yad gate status` and `yad gate sync`, and beside the ask in a generated review PR. It caps each gate\'s count at the active people less one — one seat is left for the author — and the cap is reported, not enforced. An unreadable source reads as "NOT COUNTED" on `yad gate status` and `yad gate sync` ("not counted" in the review PR), never as a small number, and then no cap is shown.',
       'Engineer review — the human merge gate; advisory AI first-pass, never the authority. Permanently human.',
       'Lens — the role a step is authored through (analyst, pm, architect, ux, dev, tester, reviewer, engineer).',
@@ -33,7 +46,7 @@ const TERM_GROUPS = [
 ];
 
 const KEY_FILES = [
-  { label: 'state.json', query: 'currentStep + each step\'s driver/advance dials (older names: assistance/automation) + shape_steps_locked' },
+  { label: 'state.json', query: 'currentStep + each step\'s driver/advance dials (older names: assistance/automation) + each step\'s status (todo, in_progress, in_review, done, skipped, deferred, satisfied, blocked)' },
   { label: 'approvals.json', query: 'recorded approvals, hash-bound to the reviewed artifact' },
   { label: 'contract-lock.json', query: 'the SHA-256 of the CONTRACT-SURFACE block in contract.md' },
   { label: 'trust-log.json', query: 'every Build run\'s verdict — the run record yad dial shows as advice' },

@@ -119,7 +119,7 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
 build-state change in 4), run `yad checkpoint --push` from `{project-root}`. It commits *only* the
 `trust-log/` shards + `build-state/<story>.json` (never a Shape gate file) as one `chore(product): …`
 audit-trail commit, and only ever on the default branch. It is a safe no-op when nothing changed, so
-call it every iteration — teammates don't review these machine writes, but CI and `yad status` on
+call it every iteration — teammates don't review these machine writes, but CI and the `yad-status` skill on
 other machines must see current trust evidence. Never run it off the default branch (it will refuse):
 an unpushed or branch-stranded trust log leaves the run record `yad dial` shows out of date.
 

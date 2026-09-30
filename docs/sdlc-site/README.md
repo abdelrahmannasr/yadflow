@@ -1,73 +1,59 @@
-# React + TypeScript + Vite
+# yadflow SDLC overview site
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This folder is the **SDLC overview site**: an interactive web page that shows the whole yadflow
+lifecycle. It walks through each phase — Setup, Foundation, Shape, Build, Automation and Change
+Management — step by step, with the files each step writes and the commands that drive it. It also
+has reference pages: the review gate, the check gates, the CLI commands, error codes and a glossary.
 
-Currently, two official plugins are available:
+It is a single-page app (one HTML page that changes its content in the browser) built with React,
+TypeScript and Vite (a build tool that bundles the code for the browser).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Where the content lives
 
-## React Compiler
+| What | Where |
+| --- | --- |
+| The phases and their steps | `src/data/paths.ts` |
+| The boxes on the canvas (files, tools, repos) | `src/data/components.ts` |
+| Reference tables (check gates, CLI commands, error codes) | `src/data/referenceData.ts` |
+| The long-form sections (review gate, glossary, …) | `src/components/DocSections/` |
+| The hand-written main documentation page | `public/report.html` |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The `yad-docs-overview` skill writes this content from the project's pipeline definition
+(`skills/sdlc/config.yaml`, `skills/sdlc/module-help.csv` and `docs/diagrams/sdlc-overview.mmd`).
+After the first run it updates the files in place. Edits by hand go in the same pull request as the
+change they describe.
 
-## Expanding the ESLint configuration
+## Run it locally
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+You need Node.js and npm.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd docs/sdlc-site
+npm ci           # install the exact versions in package-lock.json
+npm run dev      # start a local server with live reload
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Other scripts in `package.json`:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+| Script | What it does |
+| --- | --- |
+| `npm run build` | Type-checks the code (`tsc -b`), then builds the site into `dist/` |
+| `npm run preview` | Serves the built `dist/` folder, to check the build |
+| `npm run lint` | Runs ESLint over the code |
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+The site is built to be served under `/yadflow/app/` (the `base` in `vite.config.ts`).
+
+## How it is built and published
+
+The `yad docs` commands build and deploy it (`--overview` picks this site):
+
+- `yad docs build --overview` runs `npm ci` (or `npm install` when there is no lockfile) and then
+  `npm run build` here.
+- `yad docs deploy --overview` builds it and reports the Pages deploy.
+- `yad docs list` and `yad docs sync --check` say whether the site is stale — that is, whether the
+  pipeline files above changed since the last build.
+
+The Pages workflow (`.github/workflows/yad-docs.yml`, installed by `yad docs sync --wire`) runs
+`npm ci && npm run build` in this folder. It puts `public/report.html` at the root of the published
+site (`<base>/`, the main documentation), this app under `<base>/app/`, and the tutorial site
+(`docs/tutorial-site`) under `<base>/tutorial/`.

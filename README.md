@@ -71,8 +71,20 @@ Every step stops at a gate until a human approves. New here? **Walk it lesson-by
 [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/)**, or read the
 [team guide](TEAM-GUIDE.md).
 
-Running `yad` tells you when a new release is out — upgrade with `npm install yadflow -g`, then
-`yad update` to re-sync this project's skills. See [staying up to date](docs/CLI.md#staying-up-to-date).
+Running `yad` tells you when a new release is out. To upgrade, run these in the Product:
+
+```bash
+npm install -g yadflow   # 1. install the latest release
+yad migrate              # 2. preview: which state files this release would rewrite (writes nothing)
+yad migrate --apply      # 3. rewrite them, keeping a <file>.yad-orig copy of each
+yad update               # 4. re-sync this project's skills, gate scripts and CI files
+yad doctor               # 5. confirm everything is healthy
+```
+
+`yad migrate` moves your state files onto the file shape the new release expects. On a minor or patch
+release it usually has nothing to do. Coming from 3.x? Read
+[upgrading to 4.0](docs/migrations/upgrading-to-4.md) first. See also
+[staying up to date](docs/CLI.md#staying-up-to-date).
 An update rewrites the files yad manages (gate scripts, CI, PR/MR templates) — but not one **you**
 edited: yad records the sha of every file it writes, so an edit to one is reported as `modified` and
 left alone. A file it has no record of (an install predating that record) is still replaced, but only
@@ -87,8 +99,20 @@ The recording shows `yad new acme`, which runs this wizard inside the new `acme/
 ([how to re-record it](https://github.com/abdelrahmannasr/yadflow/blob/main/docs/media/setup-wizard.tape)). The wizard is idempotent and profile-driven (solo/team, greenfield/brownfield, monorepo/separate).
 In one pass it produces:
 
-- **The `yad` CLI** — zero-dependency Node (`setup`, `gate`, `commit`, `open-pr`, `ship`, `repo`,
-  `thread`, `reconcile`, `usage`, `doctor`), run via `npx` or a global install.
+- **The `yad` CLI** — zero-dependency Node, run via `npx` or a global install. The main groups:
+
+  | Group | Commands |
+  | --- | --- |
+  | Start a workspace | `new`, `init`, `join`, `setup` |
+  | Drive the lifecycle | `next`, `epic new`, `foundation`, `gate`, `skip` / `defer` / `unblock`, `mode`, `dial`, `kill` |
+  | Drafts and owners | `capture`, `claims`, `fold`, `assign` / `unassign` / `owners` |
+  | Build | `commit`, `open-pr`, `ship`, `review`, `checkpoint`, `tidy up` |
+  | Code repos | `repo` (`list`, `clone`, `refresh`, `sync`), `risk-map`, `codeowners` |
+  | Feature threads | `thread`, `reconcile` |
+  | Read the record | `history`, `index`, `usage`, `docs` |
+  | Keep healthy | `doctor`, `check`, `update`, `migrate`, `report` |
+
+  Every command, with its flags: [docs/CLI.md](docs/CLI.md#commands).
 - **38 workflow skills** installed into your AI assistant — Claude Code, Codex CLI, Cursor,
   Gemini CLI, GitHub Copilot, Zencoder and opencode. See
   [which agent reads which directory](#which-ai-agents-are-supported).
@@ -114,8 +138,11 @@ In one pass it produces:
   command. See [Background capture](#background-capture) below.
 - **PR/MR templates** and an opt-in CodeRabbit config.
 
-Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — state, approvals, and the contract lock —
-so the audit trail starts the moment you begin real work. `yad epic new <slug>` does the same seeding
+Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — the step state and the approvals — so the
+audit trail starts the moment you begin real work. The contract lock (`.sdlc/contract-lock.json`, the
+hash of the shared contract surface) is written later, by `yad-architecture`. The one exception is a
+change-epic that carries its parent's architecture: `yad epic new <slug> --type change --parent EP-<parent> --inherits architecture,contract`
+(run for you by `yad-change`) writes a small **pointer-lock** that points at the parent's lock. `yad epic new <slug>` does the same seeding
 from the CLI when you would rather lay the track before the writing starts.
 
 Before any epic, you can also frame the whole product once: `yad foundation new` seeds the
@@ -255,10 +282,13 @@ against a live Cursor session.
 setup → AI drafts an artifact → ⛔ gate waits → you approve → next step → ⛔ gate waits → …
 ```
 
-1. **`npx yadflow setup`** — the wizard installs skills, connects your repo, and wires the gates.
+1. **Get a workspace** — `npx yadflow new <name>` for a new product, `npx yadflow init` for repos you
+   already have, or `npx yadflow join <url>` to join a team (see [Quickstart](#quickstart)). The
+   wizard installs the skills, connects your repos, and wires the gates.
 2. **Run `yad-epic`** in your assistant — it drafts the epic, then **stops** and writes it to a file.
 3. **A gate waits.** Nothing advances until you review it.
-4. **You approve** — local, or by merging the review PR/MR.
+4. **You approve** — by merging the review PR/MR, or, with no GitHub or GitLab, with
+   `yad gate approve` and `yad gate advance`.
 5. **The workflow continues** to the next step, which stops again.
 
 Every step is the same contract: *AI proposes → a human decides → the trail is recorded.*
@@ -295,12 +325,13 @@ complementary: bring your favorite, and Yadflow wraps the engineering process ar
 
 Reviewing AI-generated code is where governance lives or dies, so Yadflow makes the honest review the
 *easiest* path. The **Review Companion** turns any PR/MR into a 60-second trailer, swipe-through cards,
-and a grounded chat. **Pair Review** (`yad pair-review`) goes further: the AI walks you through the
+and a grounded chat. **Pair Review** (the `yad-pair-review` skill; its CLI side is `yad gate walkthrough` for a Shape
+review and `yad review walkthrough` for a code PR) goes further: the AI walks you through the
 change one risk-ordered stop at a time, explains each, then asks you about it — until both sides are
 satisfied.
 
 It doubles as a lesson: it teaches a transferable review method, scores you against it, and records
-your review-skill growth in a **private, local-only** learning log (`yad status` rolls it up). It's
+your review-skill growth in a **private, local-only** learning log (the `yad-status` skill rolls it up). It's
 **soft and additive** — it never blocks a merge on its own, yet any genuine concern it surfaces blocks
 like a normal review comment.
 

@@ -3,6 +3,9 @@
 **What a "shape" is:** the layout of the files yadflow writes into your project. Every one of them
 carries a `"schemaVersion"` number saying which layout it uses. A file with no number counts as 1.
 
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
+
 Shape 6 writes down something your project has always had and never said out loud: **which route each
 epic takes through the lifecycle**. Nothing about how your project behaves changes, and no epic's steps
 move.

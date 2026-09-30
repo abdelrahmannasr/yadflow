@@ -3,6 +3,9 @@
 **What a "shape" is:** the layout of the files yadflow writes into your project. Every one of them
 carries a `"schemaVersion"` number saying which layout it uses. A file with no number counts as 1.
 
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
+
 Shape 7 gives a step's `status` — the field that says where a step stands — a proper vocabulary. Seven
 words, each meaning one thing, with a place to record **why** whenever the word is not simply "done".
 

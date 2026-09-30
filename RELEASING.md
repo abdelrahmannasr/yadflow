@@ -19,7 +19,7 @@ Three branches take part:
 - **`release`** — publishes to `yadflow@latest`, what `npx yadflow` and a plain `npm install` give
   people. A person moves it with a fast-forward: `git push origin origin/main:release`.
 - **`next`** — publishes to `yadflow@next`, the **pre-release** channel
-  (`.releaserc.json` → `{ "name": "next", "prerelease": true }`). Versions land as `4.0.0-next.1` and
+  (`.releaserc.json` → `{ "name": "next", "prerelease": true }`). Versions land as, for example, `4.0.0-next.1` and
   reach only people who ask for them by name. `latest` is untouched.
 
 Both publishing branches run the same release check first.
@@ -29,7 +29,7 @@ to `main` starts it.
 
 The workflow has two jobs, and the second cannot start without the first:
 
-**1. `release check`** — `scripts/release-check.sh`. Six steps, each one a way an upgrade could hurt
+**1. `release check`** — `scripts/release-check.sh`. Seven steps, each one a way an upgrade could hurt
 somebody:
 
 | # | Step | What it protects against |
@@ -40,6 +40,7 @@ somebody:
 | 4 | a fresh install of the packed tarball, then `yad setup` | a `files` mistake, or a release that cannot create a project |
 | 5 | `yad doctor` on the project that install just created | a release whose own health check fails on its own output |
 | 6 | the migration guide, if the file shape moved | shipping a shape change with no page explaining it (rule 7) |
+| 7 | the gate-sync fragments ship the major this release publishes (`scripts/pin-major-check.sh`) | a CI fragment that `yad update` wires into every verified Product, still trusting the old major — it would reject every version stamp the new release writes and run the old engine against the new file shape, in CI, without a word |
 
 It checks out with `persist-credentials: false`: this job only reads, and the token that can bypass
 branch protection has no business being in scope while the test suite runs. Run it yourself any time
@@ -58,6 +59,32 @@ with `npm run release-check`.
    - commits the regenerated `CHANGELOG.md` + `package.json` + `package-lock.json` back to the branch
      it ran on — now **`release`**, not `main` (`@semantic-release/git` pushes `HEAD:<branch>`),
    - pushes the `vX.Y.Z` git tag and cuts a GitHub release with the notes.
+
+**The test suite runs a second time, inside the publish — after the tag is already pushed.**
+`package.json` has `"prepublishOnly": "npm test"`, kept on purpose as the last guard for a manual
+`npm publish` (step A), which no workflow gates. semantic-release runs its plugins in this order:
+
+1. `@semantic-release/changelog` writes `CHANGELOG.md`, and `@semantic-release/npm` writes the new
+   version into `package.json`;
+2. `@semantic-release/git` commits `chore(release): X.Y.Z` and pushes it to the branch;
+3. semantic-release pushes the `vX.Y.Z` tag;
+4. `@semantic-release/npm` runs `npm publish`, which runs `prepublishOnly`, which runs `npm test`.
+
+So at step 4 the suite runs in conditions the release check never had: `package.json` carries the new
+version (a pre-release suffix like `-next.1` on `next`), and the environment carries the publisher's git
+identity (`GIT_AUTHOR_*` / `GIT_COMMITTER_*` set to `semantic-release-bot`). **If a test fails there, the
+version is burned:** the tag and the release commit are already on GitHub, but npm got nothing, and npm
+never lets a version number be used twice. This has happened twice:
+
+| Version | Why the publish-time test failed | Fixed in |
+|---|---|---|
+| `3.19.0-next.1` | a test expected a plain `X.Y.Z` version and failed on the `-next.1` suffix | #213 |
+| `4.0.0-next.2` | four tests made git commits that picked up the bot's identity from the environment | #281 |
+
+**Recovery:** fix the cause on `main` through a normal PR, bring any release commit back to `main`, and
+push the publishing branch again. semantic-release sees the burned tag and cuts the **next** number
+(`4.0.0-next.3` after `4.0.0-next.2`). Never delete the burned tag or force-push the branch to reuse
+the number: the tag and the release commit are public history, and a skipped number costs nothing.
 
 Auth is the `id-token: write` permission in the workflow plus the npm trusted-publisher entry — there is
 no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs on every pull request into `main` and
@@ -85,9 +112,11 @@ to `main`.
 > pushing to `main`.
 >
 > `RELEASE_TOKEN` (step D) exists because the commit-back used to target protected `main`, which the
-> default `GITHUB_TOKEN` cannot push to. Now that the target is `release`, that bypass is only needed if
-> `release` is protected too — and it **should** be (see step E). The `[skip ci]` marker stops the
-> release commit from re-triggering the workflow.
+> default `GITHUB_TOKEN` cannot push to. Now that the target is `release` (or `next`), no bypass is
+> needed: the rules on those branches (step E) block only deletion and force pushes, and the commit-back
+> is an ordinary fast-forward push. The token is kept so the commit-back still works if those branches
+> ever get stricter rules. The `[skip ci]` marker stops the release commit from re-triggering the
+> workflow.
 
 `main` is protected with a required review, so **every PR into `main` needs an approval or an admin
 merge** (`gh pr merge --squash --admin`). That is unchanged by E105 and is separate from releasing.
@@ -130,19 +159,25 @@ GitHub release.) The source repo must also be **public** — npm provenance is r
 
 ### D. Release PAT for the commit-back (`RELEASE_TOKEN`)
 
-`@semantic-release/git` pushes the `chore(release)` commit to the release branch. Once that branch is
-protected (step E), the default `GITHUB_TOKEN` cannot push to it. Provision a bypass token:
+`@semantic-release/git` pushes the `chore(release)` commit to the publishing branch. Today the rules on
+`release` and `next` (step E) block only deletion and force pushes, so that fast-forward push needs no
+bypass. The token is kept only so the commit-back keeps working if those branches ever get a stricter
+rule. While it exists, the job also hands it to `@semantic-release/github`, which uses it for the GitHub
+release and to comment on released PRs and issues. Provision it like this:
 
 1. Create a **fine-grained PAT** (GitHub → Settings → Developer settings → Fine-grained tokens), scoped
    to the `yadflow` repo, with **Contents: Read and write**, **Pull requests: Read and write**, and
    **Issues: Read and write** (the last two let `@semantic-release/github` comment on released PRs/issues).
-   The token owner must be a user that **bypasses `main`'s branch protection** (a repo admin does).
+   The token owner should be a repo admin, so the token keeps working if a stricter rule is ever added.
 2. Add it as a repo secret: **Settings → Secrets and variables → Actions → New repository secret**, named
    **`RELEASE_TOKEN`**.
-3. Ensure the bypass lists for `main` **and `release`** include that user (Settings → Branches/Rules).
+3. The rulesets on `release` and `next` have **no bypass list**, and need none (step E). The one bypass
+   in this flow is a person's own: the sync-back push to `main` (step 4 of *Cutting a release*), which
+   only works for a repo admin, because `main` requires a review and does not enforce it on admins.
 
-Rotate the PAT before it expires; until `RELEASE_TOKEN` exists the release will fail at the commit-back
-step (the workflow falls back to `GITHUB_TOKEN`, which cannot bypass protection).
+Rotate the PAT before it expires. When `RELEASE_TOKEN` is missing, the workflow falls back to
+`GITHUB_TOKEN`. That can still push the fast-forward commit-back under today's rules, but it cannot bypass
+any stricter rule added later.
 
 ### E. Protect the publishing branches
 
@@ -151,7 +186,7 @@ Pushing a publishing branch **is** the act of shipping, so both are protected by
 
 | | |
 |---|---|
-| **Target** | `release` — **done**. `next` should get the same treatment before the first pre-release |
+| **Target** | `release` and `next` — **both done** (two rulesets, one per branch) |
 | **Rules** | *Restrict deletions* and *Block force pushes*. Nothing else |
 | **Bypass** | none |
 
@@ -186,6 +221,9 @@ second person; the real gate on a release is the check job.
    ```
    This is the release. It starts the workflow: the release check runs first, and semantic-release
    publishes only if every step passes.
+
+   **For a major** (a `BREAKING CHANGE:` footer since the last release), do not start here: follow
+   *Promoting a major to `latest`* below, which puts a fresh pre-release on `next` first.
 3. Watch the run under the repo's **Actions** tab.
 4. **After a successful publish, bring the release commit back to `main`.** semantic-release commits
    the regenerated `CHANGELOG.md` + `package.json` + `package-lock.json` to the branch it ran on, so
@@ -201,8 +239,8 @@ second person; the real gate on a release is the check job.
 
    **Not a pull request.** The `chore(release)` commit is authored by `semantic-release-bot` and is
    unsigned, and `yad-verified-commits` runs on every PR into any branch — so a sync-back PR is red by
-   construction and could only be merged with an admin override. Pushing directly is the honest route,
-   and it is the same bypass the release job itself already uses.
+   construction and could only be merged with an admin override. Pushing directly is the honest route.
+   It works for an admin because `main`'s protection does not enforce its review rule on admins.
 
    If you do open one anyway, **merge it with a merge commit**. A squash or rebase rewrites that commit
    into a new SHA, `release` stops being an ancestor of `main`, and the next release's fast-forward
@@ -217,42 +255,83 @@ release:
 npm run release-check
 ```
 
-## The `next` channel — shipping v4 without moving anyone onto it
+## The `next` channel — shipping a major without moving anyone onto it
 
 A major changes the shape of the files in people's projects. Nobody should be carried onto that by an
 ordinary `npm install`, and `yad migrate` should be proven on real projects before it is the only thing
-standing between a user and their ledger. So v4 goes to `next` first:
+standing between a user and their ledger. So a major goes to `next` first:
 
 ```bash
 git fetch origin
-git push origin origin/main:next     # publishes 4.0.0-next.N to yadflow@next
+git push origin origin/main:next     # publishes <major>.0.0-next.N to yadflow@next
 ```
 
-Anyone on 3.x keeps getting 3.x. People who want to try it opt in by name:
+While a major is on `next`, anyone on the current major keeps getting the current major. People who want
+to try the new one opt in by name:
 
 ```bash
 npm install yadflow@next -g
 ```
 
 **Each pre-release needs the same sync-back as a stable one.** semantic-release commits
-`chore(release): 4.0.0-next.N` to `next`, so it is immediately one commit ahead of `main` and the next
+`chore(release): <major>.0.0-next.N` to `next`, so it is immediately one commit ahead of `main` and the next
 `git push origin origin/main:next` is refused. Bring it back the same way as step 4 above:
 
 ```bash
 git push origin origin/next:main
 ```
 
-Do **not** force-push `next` instead. That orphans the commit the `v4.0.0-next.N` tag points at,
+Do **not** force-push `next` instead. That orphans the commit the `v<major>.0.0-next.N` tag points at,
 semantic-release then derives the same version again, and npm rejects the republish. Note that `main`'s
-`package.json` will read `4.0.0-next.N` between the first pre-release and promotion; that is correct,
-not drift.
+`package.json` will read `<major>.0.0-next.N` between the first pre-release and promotion; that is
+correct, not drift.
 
-When `yad migrate` has been exercised on enough real projects, promote it by fast-forwarding `release`
-in the normal way — semantic-release turns the last pre-release into the stable `4.0.0` and moves the
-`latest` tag then, and only then.
+### Promoting a major to `latest`
 
-Meanwhile the update banner does the other half. On a **major** jump it tells a 3.x user to preview the
-migration against their own project before upgrading (`cli/update-notice.mjs`). It names
+**What promotion publishes.** Fast-forwarding `release` publishes **`main`'s HEAD**, not the last
+pre-release. semantic-release on `release` works out the version and the changelog from every commit
+since the last stable release on that branch. So everything merged to `main` since the last pre-release
+ships in the stable version too, even though nobody tried it on `next`.
+
+**The rule:** cut a fresh `next` pre-release from `main` and prove it before fast-forwarding `release`.
+"Prove it" means what the section above asks of any pre-release: the release check passes, and
+`yad migrate` has been run on real projects with that exact version. Then promotion ships only what
+`next` shipped, plus the release commit.
+
+The order:
+
+```bash
+git fetch origin
+git push origin origin/main:next       # 1. a fresh pre-release of main's HEAD
+                                       # 2. prove that version on real projects
+git fetch origin
+git push origin origin/next:main       # 3. bring its release commit back to main
+                                       #    (merge nothing else to main until step 4)
+git push origin origin/main:release    # 4. promote: publishes <major>.0.0 to yadflow@latest
+git fetch origin
+git push origin origin/release:main    # 5. bring the stable release commit back to main
+```
+
+**Then point `next` at the stable version.** semantic-release moves `latest` to the new version, but it
+leaves the `next` dist-tag (npm's name for a channel) on the last pre-release. That is **older** than
+`latest`, and it lacks everything that went into the stable version after it. Anyone who still types
+`yadflow@next` would get the older build. So, once, with an npm login that can publish `yadflow`:
+
+```bash
+npm dist-tag add yadflow@<major>.0.0 next
+npm view yadflow dist-tags             # latest and next now name the same version
+```
+
+(This is a manual step because trusted publishing works only inside CI; a local `npm` needs its own
+login, and a 2FA code if the account uses one.)
+
+**What the `next` branch does afterwards: nothing, until the next major.** Leave it where it is. Push it
+again only when a new major needs a trial, the same way as above. Do not push it for ordinary
+`feat:`/`fix:` work: with no breaking change on `main`, semantic-release on `next` would publish a
+pre-release of a minor (such as `4.1.0-next.1`) to `yadflow@next`, which nobody asked for.
+
+**The update banner does the other half.** On a **major** jump it tells a user on the older major to
+preview the migration against their own project before upgrading (`cli/update-notice.mjs`). It names
 `npx yadflow@<new version> migrate` rather than the installed `yad migrate`, and the distinction
 matters: a migration list ships inside the engine that introduces it, so the copy already installed
 knows only its own steps and would report "nothing would change" for every project. `npx` runs the new
@@ -280,18 +359,22 @@ The npm package page shows a green **Provenance** badge linking back to the `rel
   without an attestation.
 - **PR won't merge ("review required"):** `main` is branch-protected with a required review. Approve the
   PR, or admin-merge: `gh pr merge <n> --squash --admin`. This gate is separate from the release job's
-  own `chore(release)` commit, which bypasses protection via `RELEASE_TOKEN` (step D).
-- **Release fails at the commit-back / `git push` step ("protected branch" / 403):** `RELEASE_TOKEN` is
-  missing, expired, or its owner isn't in `main`'s branch-protection bypass list. Re-check step D. The
-  job falls back to `GITHUB_TOKEN`, which cannot bypass the required-PR rule.
+  own `chore(release)` commit, which needs no bypass under today's rules (step D).
+- **Release fails at the commit-back / `git push` step ("protected branch" / 403):** a rule on the
+  publishing branch now refuses the push — today's rules (step E) only block deletion and force pushes,
+  so check whether someone added one. If the rule should stay, `RELEASE_TOKEN` must exist, be unexpired,
+  and belong to a user that rule lets through. Re-check steps D and E.
+- **The release job failed at the npm step, but the tag and the `chore(release)` commit exist:** the
+  publish-time test run failed, and that version is burned. See *The test suite runs a second time* under
+  *How it works*: fix the cause on `main`, and push the branch again for the next number.
 - **No release was cut after a merge to `main`:** expected — `main` never publishes. Only a
-  fast-forward of `release` does (once E106 wires the workflow to it).
+  fast-forward of `release` (or `next`) does.
 - **No release was cut from `release`:** the commits since the last tag were all non-releasing types
   (`docs:`, `chore:`, `ci:`, `test:`, `refactor:`). Only `feat`/`fix`/`perf`/`revert`/breaking trigger
   a version.
 - **`git push origin origin/main:release` is rejected as non-fast-forward:** `release` carries a
   `chore(release)` commit from the last publish that `main` does not have. Bring that commit back to
-  `main` first (a PR, or an admin push), then sync again. See the commit-back note under *How it works*.
+  `main` first with an admin push, as in step 4 of *Cutting a release* (not a PR), then sync again.
 - **Release job on `main` fails with `ERELEASEBRANCHES`:** the `release` branch is missing on origin.
   Recreate it at the last released commit: `git push origin <tag-commit>:refs/heads/release`.
 - **A `2FA` prompt blocks automated publish:** it shouldn't — OIDC trusted publishing satisfies the

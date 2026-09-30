@@ -88,7 +88,7 @@ audit-trail commit (`@<login>` when the platform login is known, else the git `u
 staging *only* those files by an explicit allowlist (never a Shape gate file — so `ledger-guard`
 never trips). It is idempotent (a no-op when nothing changed), so calling it after every transition —
 including a halt — is safe and keeps the shared trust evidence current for CI, teammates, and
-`yad status` on other machines. It refuses to run off the default branch (an unsigned `[skip ci]`
+the `yad-status` skill on other machines. It refuses to run off the default branch (an unsigned `[skip ci]`
 commit inside a future PR range would fail `verified-commits` and strand the PR).
 
 ## Effective dial (the kill switch and gates always win)

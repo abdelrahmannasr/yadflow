@@ -3,6 +3,9 @@
 **What a "shape" is:** the layout of the files yadflow writes into your project. Every one of them
 carries a `"schemaVersion"` number saying which layout it uses. A file with no number counts as 1.
 
+**Coming from 3.x?** Start at [Upgrading from 3.x to 4.0](upgrading-to-4.md). One `yad migrate --apply`
+takes a 3.18.1 project through every shape, this one included.
+
 **What a step is:** one piece of an epic's chain in `.sdlc/state.json`, such as `ui-design` (write the
 UI design) or `ui-design-review` (its review gate). **Deferring** a step — `yad defer` — sets an optional
 step aside to do later. The chain goes on past it, and its review is still owed.
@@ -77,6 +80,12 @@ number is what makes an older yadflow warn that the project is on a newer shape,
 ## What to do
 
 - **Local ledger:** run `yad migrate` to preview, then `yad migrate --apply`. Only the number moves.
-- **Verified ledger:** nothing to run. CI owns `state.json`, and its next gate write moves the number.
+- **Verified ledger** — a project where CI is the only writer of the approval files. The same three steps
+  as [shape 9](shape-9.md), "What to do":
+  1. Run `yad migrate --apply`, and commit the result. It stamps the files CI does not own — the
+     Product settings and `.sdlc/cli-version.json` among them — and leaves each epic's `state.json` alone.
+  2. CI brings each epic's `state.json` to shape 10 the next time it writes it. There is nothing to run
+     for that.
+  3. Make sure the gate workflow runs this release: run `yad update`, and commit the result.
 - Anyone else working on the project should upgrade yadflow too, before using `yad undefer` late or
   `yad defer --debt`.

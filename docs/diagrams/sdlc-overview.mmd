@@ -89,7 +89,7 @@ flowchart LR
     merged -. sealed epic · post-lock change .-> chg
     cepic -. re-author only the changed artifacts .-> ar
     cepic -. defect / behavioural change .-> st
-    run -. drives earned Build steps .-> im
+    run -. drives Build steps set to auto .-> im
     bridge["yad-product-bridge<br/>review PR/MR ↔ ledger (merge-time)"]:::gated
     bridge -. advances on merge .-> gEp
     status["yad-status<br/>read-only view over all of it"]
