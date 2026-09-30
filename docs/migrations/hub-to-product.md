@@ -136,6 +136,7 @@ value passed through a variable is not seen, so search for those yourself.
 | not edited, from before 4.0 | it refuses `product`: every Product PR fails | run `yad update`, which replaces it |
 | installed before yad kept a record of its files (3.16), edited or not | either of the above | run `yad update`: it replaces it and saves your copy as `<file>.yad-orig` |
 | any, while `.sdlc/managed.json` (yad's record of its files) or the Product settings do not read | yad cannot tell | restore that file from git, then run `yad update` and `yad doctor` again |
+| any, while `.sdlc/product.json` and `.sdlc/hub.json` (or an epic's `product-prs.json` and `hub-prs.json`) say different things | every command but `yad doctor`, `yad migrate` and `yad report` refuses | run `yad migrate` to see the difference, then `yad migrate --apply` to keep one copy, then `yad doctor` again |
 | edited, and it accepts only `code\|hub` | it refuses `product`: every Product PR fails | fix it, or replace it with `yad update --overwrite-local` |
 | edited, lists `product` but does not turn it into the old value | it takes `product` and skips the Product's rules | the same |
 | on a Product that is not in verified mode (yad does not manage its checks) | either of the above | fix it by hand: no `yad update` replaces it |

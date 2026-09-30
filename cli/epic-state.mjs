@@ -359,10 +359,15 @@ export const driftError = (pairs) => err(
 // The drift under a Product root, as the error to throw, or null. Listing `epics/` can fail on a broken
 // tree; that is left to the command, which reports it in its own words.
 export function productDriftError(root) {
+  const pairs = productDriftPairs(root);
+  return pairs.length ? driftError(pairs) : null;
+}
+// The drifted pairs themselves: the one lookup the refusal, `yad doctor` and `yad migrate` all use, so what
+// doctor names and what the commands refuse on cannot differ (E124 follow-up review).
+export function productDriftPairs(root) {
   let dirs = [];
   try { dirs = epicIds(root).map(epicRel); } catch { /* the settings file is still checked */ }
-  const pairs = productDrift(root, dirs);
-  return pairs.length ? driftError(pairs) : null;
+  return productDrift(root, dirs);
 }
 
 // The folders under `epics/` that hold a `.sdlc/` but that `epicIds` did not name: a name that is not a

@@ -744,10 +744,15 @@ export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_W
 //   'unreadable'   the settings do not read (or are not an object), or   restore the file, then run yad update
 //                  the provenance record does not: yad cannot tell (with
 //                  an unreadable record, update itself refuses until then)
+//   'drift'        a file under two names says different things (E122):  yad migrate --apply, then doctor
+//                  every command but doctor/migrate/report refuses until
+//                  one copy is kept — so nothing else can be the first step
 //   'unmanaged'    yad has no action for it (Product not verified)       fix it by hand    same        same
-// The last two are read from the file on disk.
+// 'unreadable' and 'unmanaged' are read from the file on disk; 'drift' reads no provenance record.
 // On a run that fixes, a gate that run replaces is left out: after it, the gate is the shipped copy.
-export function productGateBlockers(root, { fix = false, overwriteLocal = false } = {}) {
+// `drift`: `productDriftPairs(root)` (cli/epic-state.mjs; plan.mjs lists no epics) — the pairs every command refuses
+// on. Only `yad doctor` passes it: `yad check`/`update` never run under drift, the dispatcher refuses them first.
+export function productGateBlockers(root, { fix = false, overwriteLocal = false, drift = [] } = {}) {
   let actions = [];
   let unreadable = null; // the file that does not read, for 'unreadable' (review 5)
   const settings = productConfigPath(root);
@@ -755,7 +760,8 @@ export function productGateBlockers(root, { fix = false, overwriteLocal = false 
     // Not an object is as unreadable as not parsing: `yad doctor` fails both (review 6).
     if (exists(settings) && !isPlainObject(readJSONStrict(settings, null))) throw new Error('not an object');
   } catch { unreadable = path.relative(root, settings).split(path.sep).join('/'); }
-  if (!unreadable) {
+  const drifted = !unreadable && drift.length ? drift : null;
+  if (!unreadable && !drifted) {
     try { actions = productActions(root); } catch { unreadable = MANAGED_LEDGER; }
   }
   const byGate = new Map(actions.filter((a) => a.managed)
@@ -767,20 +773,24 @@ export function productGateBlockers(root, { fix = false, overwriteLocal = false 
     const a = byGate.get(gate);
     let state;
     if (unreadable) state = 'unreadable';
+    else if (drifted) state = 'drift';
     else if (!a) state = 'unmanaged';
     else if (a.status === 'modified') state = fix && overwriteLocal ? null : 'kept';
     else state = fix ? null : (a.backup ? 'unrecorded' : 'outdated');
-    if (state) out.push({ gate, gap, state, ...(unreadable ? { file: unreadable } : {}) });
+    if (state) out.push({ gate, gap, state, ...(unreadable ? { file: unreadable } : {}), ...(drifted ? { pairs: drifted } : {}) });
   }
   return out;
 }
 const gapWords = (b) => `${b.gate} (it ${b.gap === 'rejects' ? 'refuses `--profile product`, so every Product PR would fail it' : 'takes `--profile product` but then skips the Product\'s rules'})`;
+// The drifted pairs, said once: which files say different things (E122).
+const driftWords = (pairs) => `${pairs.map((p) => `${p.canonical} and ${p.legacy}`).join('; ')} say different things`;
 const saved = (b) => `${b.gate}${BACKUP_SUFFIX}`;
 // What to do about ONE gate — `yad doctor`'s `profile:<gate>` hint.
 export function gateProfileFix(b) {
   if (b.state === 'outdated') return 'run `yad update`: it replaces this copy, which yad wrote, with the shipped one';
   if (b.state === 'unrecorded') return `run \`yad update\`: it replaces it with the shipped one and saves yours as ${saved(b)}`;
   if (b.state === 'kept') return `it was changed by hand, so \`yad update\` keeps it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${saved(b)})`;
+  if (b.state === 'drift') return `${driftWords(b.pairs)}, so \`yad update\` refuses until one copy is kept: run \`yad migrate\` to see the difference, then \`yad migrate --apply\` to keep one, then \`yad doctor\` again — it says what this check needs`;
   if (b.state === 'unreadable') return `restore ${b.file} from git — it does not read, so yad cannot tell whether this copy is its own${b.file === MANAGED_LEDGER ? ' (and `yad update` refuses until then)' : ''} — then run \`yad update\` and \`yad doctor\` again`;
   return `fix it by hand — yad does not manage the checks on this Product, so no \`yad update\` replaces it: ${PRODUCT_PROFILE_FIX.split(' — ')[0]}`;
 }
@@ -790,6 +800,12 @@ export function gateProfileFix(b) {
 export function oldProfileAdvice(blockers) {
   if (!blockers.length) return '';
   const parts = [];
+  const split = blockers.filter((b) => b.state === 'drift');
+  if (split.length) {
+    const names = split.map((b) => b.gate);
+    const listed = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} need` : `${names[0]} needs`;
+    parts.push(`run \`yad migrate\` to see the difference, then \`yad migrate --apply\` to keep one copy — ${driftWords(split[0].pairs)}, so every yad command but \`yad doctor\`, \`yad migrate\` and \`yad report\` refuses until then — and \`yad doctor\` again: it says what ${listed}`);
+  }
   const lost = blockers.filter((b) => b.state === 'unreadable');
   if (lost.length) {
     parts.push(`restore ${lost[0].file} from git (it does not read, so yad cannot tell ${lost.length > 1 ? `which of ${lost.map(gapWords).join('; and ')} are` : `whether ${gapWords(lost[0])} is`} its own), then run \`yad update\` and \`yad doctor\` again`);

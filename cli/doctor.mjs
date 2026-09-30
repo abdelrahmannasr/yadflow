@@ -10,7 +10,7 @@ import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MOD
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
-import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -1991,7 +1991,8 @@ export function renamedChecks(checks, root) {
         : 'run `yad update` — it installs the new name and removes the old one');
   }
   const byFile = new Map();
-  const profileFirst = oldProfileAdvice(productGateBlockers(root));
+  // The same pairs every other command refuses on (`productDriftError`): then only `yad migrate` comes first.
+  const profileFirst = oldProfileAdvice(productGateBlockers(root, { drift: productDriftPairs(root) }));
   for (const h of renamedNameHits(root)) {
     if (!byFile.has(h.file)) byFile.set(h.file, []);
     byFile.get(h.file).push(h);
@@ -2026,7 +2027,7 @@ export function productProfileChecks(checks, root) {
   const passing = workflowsPassingProduct(root);
   if (!passing.length) return;
   // What to do depends on the gate's state in the provenance record, as in `renamed-ref:` (E124 review 4).
-  for (const b of productGateBlockers(root)) {
+  for (const b of productGateBlockers(root, { drift: productDriftPairs(root) })) {
     check(checks, `profile:${b.gate}`, 'project', 'warn',
       productProfileEffect(b.gap, b.gate, `${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'}`),
       gateProfileFix(b));

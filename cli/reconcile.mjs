@@ -126,6 +126,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // E123: the team's own files that name one of our renamed CI names — each with its file and line, the same
   // list `yad doctor` shows. yad never edits them; the include line it rewrites is said as what it is.
   // After this run: a gate it replaces handles `product`; one it keeps (edited) may not (E124 review 3).
+  // No `drift` here on purpose: under drift the dispatcher refuses `yad check`/`update` before this runs.
   const profileFirst = oldProfileAdvice(productGateBlockers(root, { fix, overwriteLocal }));
   for (const h of renamedNameHits(root)) {
     if (h.rewrittenBy === 'update' || (h.rewrittenBy === 'overwrite-local' && overwriteLocal)) {
