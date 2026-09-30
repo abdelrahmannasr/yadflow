@@ -10,7 +10,7 @@ What it gives a team, in short:
 - **Clear handoffs.** `yad next` names the next action and its owner. `yad claims` shows who is
   editing what. Review conversations happen on real pull requests or merge requests.
 - **Less busywork.** Skills draft each document. `yad ship` commits and opens the pull request.
-  Drafts are saved for you.
+  Drafts are saved for you (on Claude Code and Cursor).
 - **A person decides.** Every planning step waits for human approval. *AI builds. The hand decides.*
   Yadflow is not a chat tool: the conversation stays in your pull requests and your usual channels.
 

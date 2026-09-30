@@ -24,13 +24,13 @@ The commands, by what they are for:
 | Group | Commands |
 | --- | --- |
 | Start a workspace | `new`, `init`, `join`, `setup` |
-| Drive the lifecycle | `next`, `epic new`, `foundation`, `gate`, `skip` / `defer` / `unblock`, `mode`, `dial`, `kill` |
+| Drive the lifecycle | `next`, `epic new`, `foundation`, `gate`, `skip` / `defer` / `unblock`, `mode`, `dial`, `kill`, `skill` |
 | Drafts and owners | `capture`, `claims`, `fold`, `assign` / `unassign` / `owners` |
 | Build | `commit`, `open-pr`, `ship`, `review`, `checkpoint`, `tidy up` |
 | Code repos | `repo` (`list`, `clone`, `refresh`, `sync`), `risk-map`, `codeowners` |
 | Feature threads | `thread`, `reconcile` |
 | Read the record | `history`, `index`, `usage`, `docs` |
-| Keep healthy | `doctor`, `check`, `update`, `migrate`, `report` |
+| Keep healthy | `doctor`, `check`, `update`, `migrate`, `report`, `sync-status` |
 
 **Where a command runs (E80).** A **workspace** is the folder that holds the Product and the code repos
 side by side. It carries `.yad-workspace.json` — `{ "version": 1, "product": "product" }`, the Product

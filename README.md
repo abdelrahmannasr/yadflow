@@ -135,8 +135,8 @@ stops. `yad next` then says the epic review is waiting. How the review passes de
 - **With no platform:** a teammate runs `yad gate approve EP-<name> epic.md --by <their name>`, then
   anyone runs `yad gate advance EP-<name> epic.md`.
 
-In solo mode no approval is needed: merging your own pull request, or `yad gate advance`, is the
-human decision. After that, `yad next` names the next step.
+In solo mode no approval is needed. Merging your own pull request (then the same `yad gate sync`,
+unless CI runs it), or `yad gate advance` with no platform, is the human decision. After that, `yad next` names the next step.
 
 **Other ways in:**
 
@@ -150,7 +150,8 @@ human decision. After that, `yad next` names the next step.
 
 - `yad epic new <id> --profile chore` gives a short route with just the epic and the stories. This
   route cannot change the shared contract.
-- Commits whose title starts with `chore:`, `ci:`, `build:` or `test:` do not need a task link.
+- Commits of type `chore`, `ci`, `build` or `test` (the start of the commit title, for example
+  `chore:` or `chore(deps):`) do not need a task link.
 - `yad skip` and `yad defer` pass over optional steps, such as the UI design.
 
 **Already using Yadflow?** Follow [staying up to date](docs/CLI.md#staying-up-to-date). Coming from
@@ -177,16 +178,17 @@ copied. They point back to the parent's approved files.
 
 `yad thread <epic>` prints the **current truth**: which epic each document comes from today.
 
-- **A document written again** (the epic, architecture, contract or UI design) comes from the most
-  recent epic in the chain that does not inherit it. Between two sibling changes, the ID that sorts
-  last wins.
+- **A document written again** (the epic, architecture, contract or UI design) comes from the epic
+  furthest down the thread (the most steps away from the original feature) that writes it itself.
+  When two epics are equally far down, the one whose ID sorts last wins. Dates play no part.
 - **Stories and test cases add up** across the thread.
 - **Retired stories drop out.** A change can retire a parent story with `supersedes`.
 
 Two rules keep this honest:
 
 - **The view includes drafts.** `yad thread` names the epic that will rewrite a document as soon as
-  that epic exists, even before the file is written or its review passes.
+  that epic's `epic.md` is written, even as a draft, before the document itself is written or
+  reviewed.
 - **Only approved work can be inherited.** A new epic can inherit a step only after that step and its
   review are finished.
 
@@ -199,7 +201,7 @@ Yadflow gives you explicit checks, and each one says who acts:
 | Record | How it is checked | Who refreshes it | Enforced? |
 | --- | --- | --- | --- |
 | Approvals | Tied to the file's exact contents | A person approves again | Yes. An outdated approval does not count at the gate. |
-| Shared contract | A lock file holds its hash | The architecture skill locks it again | Yes, when CI can reach the Product. A CI check fails a change without a matching lock. |
+| Shared contract | A lock file holds its hash | The architecture skill locks it again | Yes. A CI check always requires a contract change to be declared, and checks the lock when it can reach the Product. |
 | Code snapshots of each repository | Out of date once the repository moves on | `yad repo refresh`, then the `yad-connect-repos` skill for the code map | No. `yad doctor` and `yad repo list` warn. |
 | Product index (`.sdlc/index.json`) | A hash of its inputs | `yad` commands, or CI at merge | No. `yad doctor` warns. |
 | Documentation sites | `yad docs sync` (check only by default) | The `yad-docs` skills | No |
@@ -227,8 +229,8 @@ The record is worth trusting because people approve what goes into it.
 - **Build steps.** A team can switch a Build step to advance on its own with `yad dial`. `yad kill`
   switches every step back to manual in one command. The engineer code review is always a person.
 - **Checks on every change.** Each change must name its task (spec-link). A contract change must be
-  declared and locked again (contract-check). Commits must carry a signature that GitHub or GitLab marks as verified (verified-commits; it is
-  skipped, with a warning, when there is no platform).
+  declared and locked again (contract-check). Commits must carry a signature that GitHub or GitLab
+  marks as verified (verified-commits; it is skipped, with a warning, when there is no platform).
   To make these checks block a merge, see [branch protection](docs/branch-protection.md).
 - **Pair review.** The `yad-pair-review` skill walks you through a change one risky part at a time.
   It asks you questions and keeps a private log of how your reviewing improves. It never blocks a
