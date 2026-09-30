@@ -12019,7 +12019,7 @@ test('docs shell: the template cannot change without a new shell version', (t) =
   const tracked = listed.split('\0').filter(Boolean).sort();
   const h = createHash('sha256');
   for (const f of tracked) h.update(`${f}:${createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}\n`);
-  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169' };
+  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7' };
   assert.equal('sha256:' + h.digest('hex'), PINNED[shellVersion()],
     `skills/yad-docs/templates/app changed, or its version did. Bump "version" in its package.json, then pin the new fingerprint here under that version.`);
 });
