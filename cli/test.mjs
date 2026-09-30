@@ -27839,6 +27839,43 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// E124 follow-up: when the two settings names disagree, every command but doctor and migrate refuses (E122), so
+// the gate advice must not send anyone to `yad update` or a hand fix first — only `yad migrate` ends it.
+test('E124: with the settings under two names disagreeing, the gate advice says yad migrate first', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-drift-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    const good = JSON.stringify({ platform: 'github', ledger: 'verified' });
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), good);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), good);
+    await captureConsole(() => reconcile(T, { fix: true }));
+    const gate = path.join(T, 'checks/pr-title.sh');
+    fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true });
+    const ours = path.join(T, '.github/workflows/ours.yml');
+    fs.writeFileSync(ours, 'on: pull_request\njobs:\n  t:\n    steps:\n      - run: bash checks/pr-title.sh --profile hub "$T"\n');
+    const { collectDoctor } = await import('./doctor.mjs');
+    const ref = () => collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.github/workflows/ours.yml').hint;
+    assert.match(ref(), /but first fix checks\/pr-title\.sh/, 'no drift: the edited gate is the first step');
+    for (const other of ['{bad', JSON.stringify({ platform: 'github', ledger: 'local' })]) {
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), other);
+      const h = ref();
+      assert.match(h, /; but first run `yad migrate` to choose one copy — \.sdlc\/product\.json and \.sdlc\/hub\.json say different things, so every yad command but `yad doctor` and `yad migrate` refuses until then — and `yad doctor` again: it says what checks\/pr-title\.sh needs$/, other);
+      assert.doesNotMatch(h, /run `yad update`|fix checks/, other);
+      fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replace('--profile hub "$T"', '--profile product "$T"'));
+      assert.match(collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh').hint,
+        /^\.sdlc\/product\.json and \.sdlc\/hub\.json say different things, so `yad update` refuses until one copy is chosen: run `yad migrate`/, other);
+      fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replace('--profile product "$T"', '--profile hub "$T"'));
+    }
+    // And the refusal is real: the command the other advice would name does not run.
+    assert.throws(() => { const { productDriftError } = epicStateForDrift; const e = productDriftError(T); if (e) throw e; }, (e) => e.code === 'YAD-STATE-008');
+    // A product.json that does not read is still 'unreadable' (restore it), not drift — that comes first.
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{bad');
+    assert.match(ref(), /but first restore \.sdlc\/product\.json from git/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+const epicStateForDrift = await import('./epic-state.mjs');
+
 // ---------------------------------------------------------------------------------------------
 // hub-keep:start keep-list-tests
 // E124: every `hub` that survives the hub -> Product rename is kept by a named rule

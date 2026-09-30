@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, productDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
@@ -1991,7 +1991,7 @@ export function renamedChecks(checks, root) {
         : 'run `yad update` — it installs the new name and removes the old one');
   }
   const byFile = new Map();
-  const profileFirst = oldProfileAdvice(productGateBlockers(root));
+  const profileFirst = oldProfileAdvice(productGateBlockers(root, { drift: driftedPairs(root) }));
   for (const h of renamedNameHits(root)) {
     if (!byFile.has(h.file)) byFile.set(h.file, []);
     byFile.get(h.file).push(h);
@@ -2021,12 +2021,20 @@ export function renamedChecks(checks, root) {
 // team edited before 4.0 — which `yad update` keeps — accepts only `code|hub`, so every Product PR fails it.
 // A warning, like E123's other lines. Only when a workflow on disk passes that profile; an old workflow still
 // passing `hub` breaks nothing.
+// The pairs under two names that disagree — exactly what makes every other command refuse (`productDriftError`),
+// so the gate advice can say that nothing but `yad migrate` comes first (E124 follow-up).
+function driftedPairs(root) {
+  let dirs = [];
+  try { dirs = epicIds(root).map(epicRel); } catch { /* the settings pair is still checked */ }
+  return productDrift(root, dirs);
+}
+
 export function productProfileChecks(checks, root) {
   if (!exists(productConfigPath(root))) return;
   const passing = workflowsPassingProduct(root);
   if (!passing.length) return;
   // What to do depends on the gate's state in the provenance record, as in `renamed-ref:` (E124 review 4).
-  for (const b of productGateBlockers(root)) {
+  for (const b of productGateBlockers(root, { drift: driftedPairs(root) })) {
     check(checks, `profile:${b.gate}`, 'project', 'warn',
       productProfileEffect(b.gap, b.gate, `${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'}`),
       gateProfileFix(b));
