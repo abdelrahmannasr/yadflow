@@ -19,6 +19,19 @@ no clone needed.
 
 ## Commands
 
+The commands, by what they are for:
+
+| Group | Commands |
+| --- | --- |
+| Start a workspace | `new`, `init`, `join`, `setup` |
+| Drive the lifecycle | `next`, `epic new`, `foundation`, `gate`, `skip` / `defer` / `unblock`, `mode`, `dial`, `kill` |
+| Drafts and owners | `capture`, `claims`, `fold`, `assign` / `unassign` / `owners` |
+| Build | `commit`, `open-pr`, `ship`, `review`, `checkpoint`, `tidy up` |
+| Code repos | `repo` (`list`, `clone`, `refresh`, `sync`), `risk-map`, `codeowners` |
+| Feature threads | `thread`, `reconcile` |
+| Read the record | `history`, `index`, `usage`, `docs` |
+| Keep healthy | `doctor`, `check`, `update`, `migrate`, `report` |
+
 **Where a command runs (E80).** A **workspace** is the folder that holds the Product and the code repos
 side by side. It carries `.yad-workspace.json` — `{ "version": 1, "product": "product" }`, the Product
 folder's name and nothing else (the repo list stays in the Product's `repos.json`). It is per machine:
@@ -766,6 +779,9 @@ Cursor answers this kind of hook in JSON rather than by exit code, and treats an
 refusal — so a `.cursor` project also gets a small adapter script, `hooks/ledger-guard-cursor.mjs`,
 which always replies properly. Without it the guard would have blocked every file write instead of
 just the gate files.
+
+The guard fails open: if it cannot decide, it allows the write, and the CI gate stays the authority.
+It is installed only on a Product whose ledger CI owns (`ledger: verified`).
 
 Every other directory gets the script (`hooks/ledger-guard.mjs`) and no wiring — they have no such
 hook, so those agents are guarded by CI alone. `yad doctor` says so by name rather than staying
@@ -1656,7 +1672,7 @@ The rest of the CLI is not yet tested there. Requires **Node.js ≥ 18**.
 
 ### Upgrading from a release before E113
 
- The hooks used to be bash scripts (`hooks/*.sh`). `yad check
+The hooks used to be bash scripts (`hooks/*.sh`). `yad check
 --fix` (or `yad update`) rewrites each hook entry to the Node command and deletes the old script — but
 only a copy yad's own record (`.sdlc/managed.json`) proves it wrote and nobody changed. A script you
 edited, or one your own hook entry still runs, is kept. The old script is also kept until the rewritten
