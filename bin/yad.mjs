@@ -948,7 +948,7 @@ main()
   })
   .catch(async (err) => {
     // Under --json every failure is still one object on stdout (E1) — a refusal from the parser, a
-    // thrown YadError, a bug. The `code` is the `YAD-` code README "Troubleshooting" is keyed on.
+    // thrown YadError, a bug. The `code` is the `YAD-` code the docs/CLI.md "Error codes" table is keyed on.
     // If the command had already answered, stdout holds its object, and the failure goes to stderr.
     if (inJSON() && !jsonEmitted()) {
       if (err?.parsedCmd !== undefined && runningCmd === null) beginJSON(commandName(err.parsedWords ?? []));
@@ -959,7 +959,7 @@ main()
     const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';
     log(c.red(`\nyad failed${code}: ${err?.message || err}`));
     if (err?.hint) log(c.yellow(`  → ${err.hint}`));
-    if (code) log(c.dim('  (see README "Troubleshooting" for this code, or run `yad doctor`)'));
+    if (code) log(c.dim('  (see the error codes in https://github.com/abdelrahmannasr/yadflow/blob/main/docs/CLI.md#error-codes, or run `yad doctor`)'));
     process.exitCode = 1;
     // Offer to report the failure — but only interactively (never in CI), and opt-out via
     // YAD_NO_REPORT. `report` failing on its own would land here, so never re-offer for it.

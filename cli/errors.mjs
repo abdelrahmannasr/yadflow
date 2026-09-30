@@ -1,5 +1,5 @@
 // Structured error codes for the `yad` CLI. A YadError carries a stable code (greppable,
-// documented in README "Troubleshooting") and a one-line recovery hint that the top-level
+// documented in docs/CLI.md "Error codes") and a one-line recovery hint that the top-level
 // catch in bin/yad.mjs prints after the message. Plain Errors still work everywhere; codes
 // are reserved for the failures users actually hit and need to act on.
 export class YadError extends Error {
@@ -11,7 +11,7 @@ export class YadError extends Error {
   }
 }
 
-// The catalog — single source for doctor, the top-level catch, and the README table.
+// The catalog — single source for doctor, the top-level catch, and the docs/CLI.md table.
 export const CODES = {
   'YAD-ENV-001': 'git is not installed or not on PATH',
   'YAD-ENV-002': 'the platform CLI (gh/glab) is missing or not authenticated',
