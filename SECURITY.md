@@ -47,17 +47,19 @@ are no fix releases for an older major.
   scanning; packs stay inside your repo (`.sdlc/code-context/`) and are never uploaded by yadflow.
 - **CI action pins.** A **pin** is the exact version of a GitHub Action a workflow runs. What is true
   today:
-  - This repo's own `ci.yml`, `release.yml` and `scorecard.yml` pin every action to a full commit
-    SHA. Dependabot watches `.github/workflows/` and proposes updates.
-  - This repo's copies of the shipped workflows (`yad-docs.yml`, `yad-gate-sync.yml`,
-    `yad-verified-commits.yml`) pin actions to a major-version tag (for example `actions/checkout@v7`),
-    not to a SHA.
-  - The workflow templates yadflow writes into **your** repos (`skills/*/templates/github/*.yml`) also
-    pin to major-version tags (`@v4`, `@v7`), not to SHAs. Dependabot in this repo does not watch them.
-    If your policy needs SHA pins, pin them in your copy — `yad update` then reports that file as
-    `modified` and leaves it alone.
-  - Workflows declare least-privilege `permissions:` blocks. The one exception is the shipped
-    `yad-product-checks.yml`, which has none and so gets your repository's default token permissions.
+  - Every action — in this repo's workflows and in the workflow templates yadflow writes into **your**
+    repos (`skills/*/templates/github/*.yml`, and the generated `yad-docs.yml`) — is pinned to a full
+    commit SHA, with its version in a comment (`@<sha> # v7.0.1`). A tag such as `@v7` can be moved to
+    other code; a SHA cannot.
+  - Every workflow sets a top-level `permissions:` block that is read-only. A job that must write asks
+    for it itself.
+  - Dependabot watches only this repo's `.github/workflows/`, not the templates. A test fails the build
+    if any rule above is broken, and also if one action at one major has two different pins — so a
+    Dependabot bump fails until every file on that major gets the same pin in the same change.
+  - If your own Dependabot bumps a pin in an installed copy of a `skills/*/templates/github` workflow,
+    `yad update` then reports that file as `modified` and leaves it alone, so it stops receiving
+    template changes. `yad-docs.yml` is different: `yad docs sync --wire` rewrites it whole, so a pin
+    you changed there goes back to the shipped one.
 
 ## Scope notes for researchers
 

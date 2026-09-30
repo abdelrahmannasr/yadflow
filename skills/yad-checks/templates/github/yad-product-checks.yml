@@ -14,6 +14,10 @@ on:
     types: [opened, synchronize, reopened, edited]
     branches: ["**"]
 
+# Read-only by default: no gate here writes to the repo. A job that needs more asks for it itself.
+permissions:
+  contents: read
+
 jobs:
   # commit-message + ledger-guard read the commit range, not the PR title/body — skip them on a bare
   # `edited` event (only pr-title/pr-template need to re-check a title/body fix).
@@ -21,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/commit-message.sh --profile product "origin/${{ github.base_ref }}"
 
@@ -35,7 +39,7 @@ jobs:
       PR_HEAD: ${{ github.event.pull_request.head.ref }}
       BASE_REF: ${{ github.base_ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: |
           changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
@@ -48,7 +52,7 @@ jobs:
       PR_HEAD: ${{ github.event.pull_request.head.ref }}
       BASE_REF: ${{ github.base_ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: |
           changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
@@ -62,6 +66,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/ledger-guard.sh "origin/${{ github.base_ref }}"

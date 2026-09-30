@@ -28,10 +28,12 @@
 #   seed rides the first review PR/MR; see the carve-out below. Mutation stays bot-only.
 #
 # A "bot commit" must be BOTH authored by the gate bot (name/email contains yad-gate-sync) AND
-# platform-VERIFIED — author/committer text alone is user-controlled and spoofable, so the platform
-# Verified signature (a key the contributor cannot forge under the bot identity) is what actually
-# distinguishes CI-generated commits. A spoofed-author commit that is not Verified is treated as a
-# human edit and rejected.
+# platform-VERIFIED. A spoofed-author commit that is not Verified is treated as a human edit and
+# rejected. Known gap: the Verified badge proves only that the COMMITTER signed with their own key, not
+# that the bot did, so a contributor who signs can still write the bot's name as the author. The
+# GitHub workflow therefore gives this job no token: the badge lookup fails and every bot-attributed
+# ledger commit is refused. On GitLab the project token reaches this job, so the gap is still open there
+# (see references/check-gates.md).
 #
 # Scope: enforced ONLY when the ledger is verified — hub.json carries BOTH a `platform` and either
 # `ledger: "verified"` or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or the

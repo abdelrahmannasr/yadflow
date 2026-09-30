@@ -288,8 +288,9 @@ which is exactly the intended revoke-on-change. Merge advances serialize on the 
 push retries with a rebase.
 
 **Tokens.**
-- GitHub: the ephemeral `github.token` with `contents: write` + `pull-requests: read` — nothing stored.
-  Only the merge job pushes, and only the default branch.
+- GitHub: the ephemeral `github.token` — nothing stored. The workflow default is `contents: read`; the
+  two jobs that push (merge and reconcile) each ask for `contents: write` + `pull-requests: read`, and
+  push only the default branch.
 - GitLab: a masked `SDLC_GATE_TOKEN` project access token (`read_api` + `write_repository`) — the one
   documented bend of the no-stored-tokens rule; `CI_JOB_TOKEN` can neither read the approvals API nor
   push. Used only for the merge-time default-branch push + the API reads.

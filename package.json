@@ -25,6 +25,7 @@
     "!cli/test-golden.mjs",
     "!cli/test-migrate.mjs",
     "!cli/test-hooks.mjs",
+    "!cli/test-fuzz.js",
     "!cli/fixtures",
     "skills/",
     "README.md",
@@ -41,10 +42,10 @@
   "scripts": {
     "yad": "node bin/yad.mjs",
     "lint": "eslint cli bin",
-    "test": "node --test cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs cli/test-hooks.mjs",
+    "test": "node --test cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs cli/test-hooks.mjs cli/test-fuzz.js",
     "test:e2e": "bash test/e2e/run.sh",
     "release-check": "bash scripts/release-check.sh",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude='cli/test*.mjs' --test-coverage-lines=70 --test-coverage-branches=70 cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs cli/test-hooks.mjs",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude='cli/test*.mjs' --test-coverage-exclude='cli/test*.js' --test-coverage-lines=70 --test-coverage-branches=70 cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs cli/test-hooks.mjs cli/test-fuzz.js",
     "diagrams": "npx -y @mermaid-js/mermaid-cli -i docs/diagrams/sdlc-overview.mmd -o docs/diagrams/sdlc-overview.svg -b transparent && npx -y @mermaid-js/mermaid-cli -i docs/diagrams/review-loop.mmd -o docs/diagrams/review-loop.svg -b transparent",
     "prepublishOnly": "npm test"
   },
@@ -70,6 +71,7 @@
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/git": "^11.0.1",
     "eslint": "^10.5.0",
+    "fast-check": "^4.10.2",
     "semantic-release": "^25.0.3"
   }
 }

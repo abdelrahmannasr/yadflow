@@ -90,7 +90,7 @@ Store it as the repository secret `SDLC_GATE_TOKEN`, and add one `token:` line t
 jobs). If the step already has a `with:` block, add the line inside it:
 
 ```yaml
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.SDLC_GATE_TOKEN }}
 ```
@@ -197,7 +197,9 @@ without it allows everything. Where it and the CI check can differ:
   it is an amend. Amending a commit that already changed the ledger passes; amending one to **undo**
   that change is refused, and the message says to run that amend with `YAD_HOOK_DISABLE=1`.
 - **The bot is matched by name.** CI also needs the platform's Verified signature, so a commit that only
-  claims the `yad-gate-sync` name passes here and fails there.
+  claims the `yad-gate-sync` name passes here and fails there. (A *signed* commit that claims the name is
+  a known gap: the badge proves only who committed. On GitHub CI refuses every such ledger commit; on
+  GitLab it does not yet. See `skills/yad-checks/references/check-gates.md`.)
 - **The base is your clone's `origin/*` refs**, which may be older than the pull request's base.
 - **A Product in a subfolder of its repo**: CI's check and workflows run from the repo's top, so the pull
   request may have no ledger check at all, while the hook still refuses.

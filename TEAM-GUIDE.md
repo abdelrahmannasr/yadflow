@@ -633,7 +633,8 @@ ledger (see the table in section 3, step d2):
 - `ledger: local` — your machine writes it. It works offline and needs no CI.
 - `ledger: verified` — only CI writes it, at the merge of a review PR/MR, with a signed commit. A guard
   stops anyone else: the `ledger-guard` check in CI, an agent hook (Claude Code and Cursor), and a git
-  pre-commit hook in each clone.
+  pre-commit hook in each clone. (One gap is still open on GitLab — see
+  [Branch protection](docs/branch-protection.md).)
 
 **When a ledger change must land anyway** (verified mode): `yad commit --manual --reason "<why>" --type
 <type> -m "<subject>"` commits past the local hook and records your reason in the commit as a

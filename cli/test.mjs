@@ -615,13 +615,13 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.match(github, /bash checks\/install-deps\.sh/);
   assert.doesNotMatch(github, /run:\s*npm ci/, 'GitHub must not override the consumer package manager');
   // Dependency caching survived the move off setup-node's npm-only `cache:` and now covers pnpm too.
-  const cacheStep = github.match(/uses: actions\/cache@v4\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
+  const cacheStep = github.match(/uses: actions\/cache@[0-9a-f]{40} # v4\.3\.0\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
   assert.match(cacheStep, /~\/\.npm/, 'npm cache dir');
   assert.match(cacheStep, /pnpm\/store/, 'pnpm store dir');
   assert.match(cacheStep, /\$\{\{ env\.COREPACK_HOME \}\}/, 'corepack home cached too');
   assert.match(github, /COREPACK_HOME:\s*\$\{\{ github\.workspace \}\}\/\.corepack-cache/, 'corepack home pinned to a cacheable path');
   assert.match(cacheStep, /hashFiles\('package-lock\.json', 'npm-shrinkwrap\.json', 'pnpm-lock\.yaml', 'package\.json'\)/, 'keyed on the lockfiles and package.json');
-  assert.ok(github.indexOf('actions/cache@v4') < github.indexOf('bash checks/install-deps.sh'), 'cache restored before install');
+  assert.ok(github.indexOf('actions/cache@') < github.indexOf('bash checks/install-deps.sh'), 'cache restored before install');
   assert.match(gitlab, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
   assert.match(gitlab, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
   assert.match(gitlab, /YAD_NODE_VERSION:\s*["']22["']/);
@@ -12026,7 +12026,7 @@ test('docs shell: the template cannot change without a new shell version', (t) =
 
 test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop-safe', () => {
   const gh = pagesWorkflow('github');
-  assert.match(gh, /deploy-pages@v5/);
+  assert.match(gh, /deploy-pages@[0-9a-f]{40} # v5\./);
   assert.match(gh, /concurrency:/);                 // deploy-loop guard
   assert.match(gh, /# yad-managed/);
   // both the overview AND per-epic sites are assembled into ./public (epics nested under epics/<id>/)
@@ -12046,6 +12046,51 @@ test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop
   assert.match(gl, /artifacts:/);
   assert.match(gl, /epics\/\*\/docs-site/);         // GitLab publishes per-epic sites too
   assert.equal(pagesWorkflowPath('gitlab'), '.gitlab/ci/yad-docs.yml');
+});
+
+// A tag such as `@v4` can be moved to other code; a commit hash cannot. The `# vX.Y.Z` after the hash
+// is what Dependabot reads to keep the pin current. And a workflow with no top-level `permissions:`
+// gets the repository's default token, which may be able to write. OpenSSF Scorecard flags both.
+test('every GitHub workflow yadflow ships or runs pins actions by hash and sets top-level permissions', () => {
+  const dirs = ['skills/yad-checks/templates/github', 'skills/yad-product-bridge/templates/github', '.github/workflows'];
+  const files = dirs.flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.yml'))
+    .map((f) => [`${d}/${f}`, fs.readFileSync(path.join(ROOT, d, f), 'utf8')]));
+  files.push(['pagesWorkflow(github)', pagesWorkflow('github')]);
+  assert.ok(files.length >= 10, 'found the workflows');
+  // One action at one major is pinned to one SHA everywhere. Dependabot bumps only .github/workflows,
+  // so this is what makes a bump there fail until the templates and pagesWorkflow get the same pin.
+  const pins = new Map();
+  for (const [name, text] of files) {
+    // The block runs to the next line that starts at column 0 (a blank line inside it does not end it).
+    const top = text.match(/^permissions:(.*)(\n(?:[ \t].*|)(?=\n|$))*/m);
+    assert.ok(top, `${name}: top-level permissions`);
+    assert.doesNotMatch(top[0].replace(/#.*$/gm, ''), /write/, `${name}: the top-level token is read-only; a job asks for write itself`);
+    for (const [, ref] of text.matchAll(/^\s*(?:-\s+)?uses:\s*(\S+.*)$/gm)) {
+      if (ref.startsWith('./')) continue;
+      const m = ref.match(/^([\w.-]+\/[\w./-]+)@([0-9a-f]{40}) # v(\d+)(\.\d+)*$/);
+      assert.ok(m, `${name}: ${ref} is pinned by hash with a version comment`);
+      const key = `${m[1]}@v${m[3]}`;
+      if (!pins.has(key)) pins.set(key, [m[2], name]);
+      assert.equal(m[2], pins.get(key)[0], `${name}: ${key} has the same pin as ${pins.get(key)[1]}`);
+    }
+    // Each job, from the `jobs:` block only; a key line may carry quotes or a trailing comment.
+    const jobsAt = text.search(/^jobs:/m);
+    const jobs = jobsAt < 0 ? [] : text.slice(jobsAt).split(/^(?= {2}["']?[\w-]+["']?:)/m).slice(1);
+    for (const job of jobs) {
+      const id = job.split(':')[0].trim();
+      // verified-commits calls `gh api` for the Verified badge, and gh refuses to run in Actions without GH_TOKEN.
+      if (/checks\/verified-commits\.sh/.test(job)) assert.match(job, /GH_TOKEN: \$\{\{ github\.token \}\}/, `${name}: ${id} passes GH_TOKEN`);
+      // ledger-guard must NOT get one yet. Its bot exemption trusts the author text plus the Verified
+      // badge, but the badge proves only that the committer signed — any contributor who signs can
+      // write "yad-gate-sync" as the author. With no token the badge lookup fails, and every
+      // bot-attributed commit is refused, which is the safe answer until that check is fixed.
+      // gh reads GITHUB_TOKEN too, and a workflow-level `env:` reaches every job.
+      if (/checks\/ledger-guard\.sh/.test(job)) {
+        assert.doesNotMatch(job, /\b(GH|GITHUB)_TOKEN\b/, `${name}: ${id} must not pass a gh token (see the comment above)`);
+        assert.doesNotMatch(text.slice(0, jobsAt), /\b(GH|GITHUB)_TOKEN\b/, `${name}: no workflow-level gh token reaches ${id}`);
+      }
+    }
+  }
 });
 
 test('runDocs: list/sync/wire orchestrate over generated sites and install the Pages CI', async () => {
