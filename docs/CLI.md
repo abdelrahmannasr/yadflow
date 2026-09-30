@@ -1178,12 +1178,15 @@ Four rules it keeps:
   It is worked out fresh every time; nothing is saved.
 - **An MCP server is named, never described.** Its entry holds a command, arguments, a URL, headers and
   environment variables, and those often carry a token. Only the name is read out. Your home folder is
-  shown as `~`, never as its full path.
+  shown as `~`, never as its full path. In the terminal, a name holds no character that could move the
+  cursor, recolour the screen, reorder the line or hide itself: each is printed as `?`. `--json` hands
+  names to a program unchanged, apart from JSON's own escaping.
 - **A file it cannot read is reported, not guessed.** A JSON file it reads — an MCP list, the plugin
   list, a plugin's own files, a settings file that turns plugins on or off — that does not parse, or is
   too big to read, is listed under `problems` (by place and reason only), and everything else is still
   listed. So is a `mcpServers` that is not an object, and a plugin whose `plugin.json` names an MCP
-  file outside the plugin or one that is not there (the path it gave is never shown). Gemini CLI's
+  file outside the plugin, one that is not there, or the plugin folder itself (the path it gave is
+  never shown). Gemini CLI's
   `settings.json` may hold `//` and `/* */` comments, because Gemini CLI allows them; the other JSON
   files are read strictly, as their agents read them.
 - **Codex's `config.toml` is read for keys only.** Every value is skipped whole — a multi-line list, a
