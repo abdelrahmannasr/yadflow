@@ -11,7 +11,7 @@ flowchart TD
 
     f["1 · Checkout feature<br/>epic, architecture,<br/>contract, UI, stories"]:::work
     d["2 · Fix: add the missing<br/>queue test<br/>new story, new tests"]:::work
-    c["3 · Change: sort the queue<br/>new epic text<br/>replaces one story"]:::work
+    c["3 · Change: sort the queue<br/>new epic text<br/>retires one story"]:::work
 
     keep["Still applies<br/>architecture · contract · UI<br/>other stories"]:::knowledge
     gone["Replaced or retired<br/>old epic text<br/>old queue story"]:::retired
@@ -20,7 +20,7 @@ flowchart TD
     f -->|fix builds on it| d
     f -->|change builds on it| c
     f -.->|still applies| keep
-    c -.->|replaces| gone
+    c -.->|replaces or retires| gone
     keep --> now
     d -->|story and tests add up| now
     c -->|latest epic text| now
