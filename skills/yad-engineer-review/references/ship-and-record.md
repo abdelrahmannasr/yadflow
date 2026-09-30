@@ -70,7 +70,7 @@ This is the Build analogue of Shape's `approvals.json` — files only, no hidden
 future service can drive ship by writing the same records. Like the trust log and build-state, it is a
 machine-written ledger committed by **`yad checkpoint`** (the Build analogue of `yad gate` sync),
 not by hand: after recording the ship, `yad checkpoint --push` lands the new `build-log/` shard as a
-`chore(hub): …` audit-trail commit on the default branch (allowlist-scoped to the Build ledgers,
+`chore(product): …` audit-trail commit on the default branch (allowlist-scoped to the Build ledgers,
 never a Shape gate file); `yad tidy up` folds finished shards into `build-log.json` later.
 
 ### Retroactive ship — a pre-tracking story (#142)
@@ -134,7 +134,7 @@ reclaimed after 30s, and a live one reports `YAD-STATE-006` rather than writing 
 (`yad review trailer/context/nudge`, a real trailer/cards/chat session over the diff), `none` for a bare
 approve. The optional `companion` block records which faces ran. It is **soft by default** (both count;
 a bare approve draws a friendly `yad review nudge`); it only gates ship when
-`hub.review.requireEngagement: true`. `yad review reconcile --epic <id> --repo <r> --pr <n>` reads the
+`review.requireEngagement: true` in the Product settings. `yad review reconcile --epic <id> --repo <r> --pr <n>` reads the
 code PR's approvals (with the engagement signal) and stamps them onto the matching ship record — writing
 back into the ship's shard where it lives (or its folded entry if the story was already tidied) — the
 Build **bridge**, the analogue of `yad gate sync`. The signal is gameable by design ("visible, not
@@ -151,7 +151,7 @@ The story frontmatter `status` reflects build progress:
 - `shipped` — **every** task in `tasks.md` has a ship record.
 
 You write this flip into `stories/<story>.md`, but **do not hand-commit it** — the next
-`yad checkpoint --push` carries it in the same `chore(hub)` commit as the ledgers (the story now has a
+`yad checkpoint --push` carries it in the same `chore(product)` commit as the ledgers (the story now has a
 build-log ship, so checkpoint stages it; #112). This is what keeps the story artifact from drifting
 from the build ledger, so there is never a reason to fall back to a raw `git push origin main`.
 

@@ -1,6 +1,6 @@
 ---
 name: yad-connect-repos
-description: 'Connects code repos to the Product so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product default branch as a chore(hub): sync code-context [skip ci] audit commit. Also drafts each code repo's risk map (.sdlc/risk-map — a level per directory, no names), classified by reading the code and marked guessed for a person to confirm. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", "list connected repos", or "push the code-map refresh".'
+description: 'Connects code repos to the Product so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product default branch as a chore(product): sync code-context [skip ci] audit commit. Also drafts each code repo's risk map (.sdlc/risk-map — a level per directory, no names), classified by reading the code and marked guessed for a person to confirm. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", "list connected repos", or "push the code-map refresh".'
 ---
 
 # SDLC — Connect Code Repos (make the brain code-aware)
@@ -28,7 +28,7 @@ repo itself — a draft of that repo's risk map (Step 3b), which the team commit
 
 ## Inputs
 
-- `action` — `connect` | `refresh` | `list` | `disconnect` | `detect-hub` (default `connect`).
+- `action` — `connect` | `refresh` | `list` | `disconnect` | `detect-product` (default `connect`; `detect-hub`, the old name, still works).
 - `repo` — the repo's short name (the key used in stories' `repos:` tag, e.g. `backend`).
 - `path` — local path to the code repo (relative to `{project-root}` or absolute). For local repos.
   It must resolve inside the **workspace** — the project root's parent — so the standard layout, where
@@ -161,7 +161,7 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
   `syncedHead` + `lastSyncedAt`. Same machinery as `connect`. Once the AI has regenerated the
   `code-map.md` (Step 3), publish it to the Product with **`yad repo refresh <repo> --push`**: it
   commits the tracked code-maps + `.sdlc/repos.json` (never the gitignored `pack.md`) as one
-  audit-trail commit `chore(hub): sync code-context — <repos> by @<login> [skip ci]` and pushes it
+  audit-trail commit `chore(product): sync code-context — <repos> by @<login> [skip ci]` and pushes it
   straight to the Product's **default branch** (add `--allow-branch` to commit on a non-default branch).
   This is the code-context analogue of `yad checkpoint` — human-owned machine state, no Task trailer,
   no Co-Authored-By.
@@ -176,7 +176,7 @@ The Product is itself a git repo on a platform. This action records that so the 
 approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-product-bridge`). It
 writes only `{project-root}/.sdlc/product.json` and its older name `.sdlc/hub.json` (`config.yaml` `product.config` (older projects: `hub.config`)) — never an epic's state/approvals.
 
-- **`detect-hub`** — detect the Product's own platform and upsert the Product settings: read
+- **`detect-product`** — detect the Product's own platform and upsert the Product settings: read
   `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name), then write
   `.sdlc/product.json` and copy it byte for byte to `.sdlc/hub.json` (`cp .sdlc/product.json .sdlc/hub.json`;
   both until v5 — two that differ by even a space are refused, YAD-STATE-008 — E122). Run

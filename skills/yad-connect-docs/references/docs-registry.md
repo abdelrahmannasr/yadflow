@@ -1,7 +1,7 @@
 # `.sdlc/docs.json` — the docs/Pages registry
 
 Project-wide, shared across every epic's docs site **and** the project overview site (NOT per-epic).
-The sibling of `.sdlc/hub.json`, `.sdlc/repos.json`, and `.sdlc/design.json`. Written by
+The sibling of `.sdlc/product.json`, `.sdlc/repos.json`, and `.sdlc/design.json`. Written by
 `yad-connect-docs`; read by `yad-docs`, `yad-docs-overview`, `yad-docs-sync`, and the `yad docs` CLI.
 Holds **no credentials** — every field is a plain reference. Auth is always the local user's own
 `gh`/`glab`/git session.
@@ -11,8 +11,8 @@ Holds **no credentials** — every field is a plain reference. Auth is always th
 ```json
 {
   "target": "github-pages | gitlab-pages | none",
-  "scope": "hub | <repo-name> | dedicated",
-  "publishRepo": "<repo or hub name>",
+  "scope": "product | <repo-name> | dedicated",
+  "publishRepo": "<repo or Product name>",
   "basePath": "/<repo>/",
   "public": true,
   "auth": "user",
@@ -25,7 +25,7 @@ Holds **no credentials** — every field is a plain reference. Auth is always th
 | Field | Meaning |
 |-------|---------|
 | `target` | The publish adapter. `none` = deliberate build-only (no publish, no error). |
-| `scope` | Where the Pages site publishes from: the `hub` repo, one connected `<repo-name>`, or a `dedicated` docs repo. |
+| `scope` | Where the Pages site publishes from: the `product` repo, one connected `<repo-name>`, or a `dedicated` docs repo. A file written before 4.0 says `hub`, the old name for `product`; read it the same way. |
 | `publishRepo` | The concrete repo name resolved from `scope`. `null` when `target: "none"`. |
 | `basePath` | The Vite `base` substituted into each generated site (resolution table below). Normalized to a leading + trailing `/`. |
 | `public` | Whether the published site is public. |
@@ -38,7 +38,7 @@ Holds **no credentials** — every field is a plain reference. Auth is always th
 
 ## Platform auto-detection (from `.sdlc/product.json`)
 
-When `target` is not given, read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name) and map the Product's `platform` the same way `yad-connect-repos` maps a repo host:
+When `target` is not given, read `.sdlc/product.json` (`.sdlc/product.json` on an older Product that has only that name) and map the Product's `platform` the same way `yad-connect-repos` maps a repo host:
 
 | `product.json` `platform` | default `target` |
 |-----------------------|------------------|

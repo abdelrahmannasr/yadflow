@@ -66,7 +66,7 @@ roles — there are no roles, and yadflow keeps no list of people:
   one person may work on the Product (E74). Relay it as a suggestion to run `yad mode team`; never switch
   the mode yourself, and never read it as a fault.
 - **When the people cannot be counted** (`active: null` — for example Product CI, which checks out only
-  the hub, so the connected repos are not on disk): **no cap is computed or shown**, and the base holds as
+  the Product, so the connected repos are not on disk): **no cap is computed or shown**, and the base holds as
   always. `yad gate status` and `yad gate sync` print the arithmetic — read it from there rather than
   recomputing it.
 - **Touched domains** only name and label the review; they add no approvals. For a step with a risk
@@ -173,7 +173,7 @@ replaced. This is the **no-platform** path (E112): with a platform the approvals
 command refuses and names `yad gate sync`; on a verified ledger CI writes them at merge.
 `engagement` records whether the approval came through the [Review Companion](../yad-review-companion/SKILL.md)
 (a real trailer/cards/chat session = `verified`) or as a bare click (`none`). It is soft by default
-(both count; a bare approve draws a friendly nudge) and only gates when `hub.review.requireEngagement`
+(both count; a bare approve draws a friendly nudge) and only gates when `review.requireEngagement` (Product settings)
 is on — see `references/gating.md`. The signal is gameable by design ("visible, not impossible").
 Then write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named record** — the command
 writes the ledger only, never this file, so rewrite it after every `yad gate approve`. It has three
@@ -239,7 +239,7 @@ The step may advance **iff ALL hold**:
    the base holds. Report the shortfall in the record; do not hold the step on it.
    This matches `gatePredicate`, which returns `rule: "count"`, the count as `gateRule`/`have`/`short`,
    `active`, and `cap` (null when `active` is null), and never puts the risk step in `missing`.
-   `active: null` means no source could be read, never "nobody". With `hub.review.requireEngagement`
+   `active: null` means no source could be read, never "nobody". With `review.requireEngagement` (Product settings)
    on, only `verified` approvals count.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
    newest `approved` record). If it changed, approvals are stale → return to `comment`. For the

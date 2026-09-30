@@ -17,7 +17,7 @@ setting by hand, edit `product.json`, then run `yad migrate --apply --keep produ
 `hub.json`). A Product that has only `hub.json` has not been migrated: edit `hub.json`, and never create a
 `product.json` beside it by hand — `--keep product` would copy that one file over every other setting.
 
-(`config.yaml` `product.config` (older projects: `hub.config`).) Created/updated by `yad-connect-repos action: detect-hub`.
+(`config.yaml` `product.config` (older projects: `hub.config`).) Created/updated by `yad-connect-repos action: detect-product` (older name: `detect-hub`).
 
 ## Schema
 
@@ -35,7 +35,7 @@ setting by hand, edit `product.json`, then run `yad migrate --apply --keep produ
   "solo": false,                                              // SOLO MODE, and the one that decides: true waives the approval requirement on every review gate (the merge + resolved threads still gate). Set by `yad setup --solo` / `--team <n>` or `yad mode`
   "mode": "team",                                             // the roadmap's name for the same switch (E10): "solo" | "team", written beside `solo` by `yad mode` and `yad setup`. NOT read by the gates this major — `yad doctor` warns `mode:disagree` when it contradicts `solo`. Not the ledger switch: "verified mode" elsewhere means `ledger`
   "mode_set": { "from": "solo", "to": "team", "by": "al", "date": "2026-09-15", "reason": null }, // the last change of mode (E10): who, when, why. `yad mode solo` requires the reason
-  "detectedAt": "2026-06-08"                                  // last detect-hub run (YYYY-MM-DD)
+  "detectedAt": "2026-06-08"                                  // last detect-product run (YYYY-MM-DD)
 }
 ```
 
@@ -70,11 +70,11 @@ closed.
 
 ## Detection
 
-`detect-hub` reuses the same host-detection logic this skill already applies to code repos:
+`detect-product` reuses the same host-detection logic this skill already applies to code repos:
 run `git remote get-url origin` **on the Product itself** and read the host —
 `github.com` → `github`, `gitlab.com`/self-hosted GitLab → `gitlab`, no remote → `platform: null`.
 Auth is the **local user's own** `gh`/`glab`/git credentials; **no tokens are ever stored** (same rule
-as the registry). `detect-hub` upserts the file in place: it writes `product.json`, then copies it byte for byte to `hub.json` (`cp`) — idempotent and safe to re-run.
+as the registry). `detect-product` upserts the file in place: it writes `product.json`, then copies it byte for byte to `hub.json` (`cp`) — idempotent and safe to re-run.
 
 **`git_url` is required whenever `platform` is non-null.** `yad doctor` uses it to scope the auth
 probe to the Product's own host (an unscoped `glab auth status` fails on any unrelated broken instance),
@@ -117,6 +117,6 @@ This mirrors how `repos.json` and the per-epic `.sdlc/` state are committed.
 
 ## Greenfield
 
-A brand-new Product has no `product.json` (and no `hub.json`). That is valid — the Shape gate runs local until `detect-hub`
+A brand-new Product has no `product.json` (and no `hub.json`). That is valid — the Shape gate runs local until `detect-product`
 records a platform. The verified ledger is purely additive; nothing about authoring or the gate predicate changes.
 ```

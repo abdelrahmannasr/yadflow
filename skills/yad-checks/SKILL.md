@@ -34,7 +34,7 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    The code-repo `yad-checks` workflow uses Node 22 by default (the build/test/lint job on GitHub; every
    `yad-*` gate job's image in the GitLab fragment) and reads `YAD_NODE_VERSION` (a GitHub repository
    variable or GitLab CI/CD variable) for repos whose declared runtime differs (a declared `packageManager` needs Corepack, so the override must be a line that
-   bundles a current one: 20.19+, 22.14+ or 24; Node 25+ dropped it). The Product-side workflows (verified-commits, hub-checks, update-guard,
+   bundles a current one: 20.19+, 22.14+ or 24; Node 25+ dropped it). The Product-side workflows (verified-commits, product-checks, update-guard,
    gate-sync) only run the `yad` CLI and keep their own pinned Node; the variable does not reach them.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
    that and is a no-op for other runners (see `references/check-gates.md`).
@@ -128,7 +128,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 
 ## Inputs
 
-- `repo`  — the code repo to wire/run gates for (one of an epic's repos), or `hub` to wire the Product itself.
+- `repo`  — the code repo to wire/run gates for (one of an epic's repos), or `product` to wire the Product itself (`hub`, the old name, still works).
 - `action` — `wire` (install the gates into the repo) | `run` (run the three gates now). Default `run`.
 - `base`  — for `run`: the base ref to diff against (the PR/MR target; default the repo's default branch).
 
@@ -136,7 +136,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 
 ### Step 1 — Resolve the code repo
 Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path` in `.sdlc/repos.json`); confirm
-it is its own git repo. Operate inside it with absolute paths. For `repo: hub`, the target is
+it is its own git repo. Operate inside it with absolute paths. For `repo: product`, the target is
 `{project-root}` itself and the platform comes from `.sdlc/product.json` (`.sdlc/hub.json` on an older Product) — see "Wiring the Product" in
 `references/check-gates.md`.
 
@@ -190,7 +190,7 @@ Re-running `wire` is **idempotent** — markers (`# yad-managed: yad-checks`,
 `# yad-managed-include: yad-checks`) and the include-entry check make a second run a no-op.
 Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff).
 
-**The Product is wired the same way.** `repo: hub` wires the Product repo itself (platform from `.sdlc/product.json`)
+**The Product is wired the same way.** `repo: product` wires the Product repo itself (platform from `.sdlc/product.json`)
 with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
 
 **The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.mjs` →

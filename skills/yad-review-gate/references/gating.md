@@ -116,7 +116,7 @@ people, because the connected repos are not on disk there.
 
 **When the people cannot be counted** (`active: null` — a source could not be read), **no cap is
 computed or shown**, and the base holds as always. The engine never guesses a small number from an
-unknown. Product CI is usually this case: it checks out only the hub, so on a Product with connected
+unknown. Product CI is usually this case: it checks out only the Product, so on a Product with connected
 repos the repos are not on disk.
 
 **Every cap is recorded.** When a **team** gate passes on its counted approvals while the cap lowered
@@ -177,7 +177,7 @@ not be counted, nothing is suggested: `yad mode` and `yad doctor` (a warning) sa
 `verified` when it was recorded through the companion (a real trailer/cards/chat session), `none` for a
 bare UI click. By **default (soft)** both count: a bare approve still passes the gate but is recorded
 `none` and draws a friendly public @-mention nudge, so review *quality* is visible without blocking
-anyone. When `hub.review.requireEngagement: true`, only `verified` approvals are counted toward the
+anyone. When `review.requireEngagement: true` in the Product settings, only `verified` approvals are counted toward the
 approvers above; when that leaves the gate short, it adds a line saying how many approvals did not count (a determined faker
 can still run an empty session — the signal is **gameable by design**; it raises the cost of a
 rubber-stamp and makes laziness visible, it does not prove a human read the artifact). Philosophy:

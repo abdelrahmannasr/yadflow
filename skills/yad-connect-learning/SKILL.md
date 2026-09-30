@@ -27,7 +27,7 @@ explains the concept. The learning layer is **purely opt-in and never blocks a g
   an MCP like the design/testing tools (DeepTutor ships no MCP server). The skill detects the **binary on
   PATH** and degrades when it is absent; it never installs DeepTutor.
 - Registry: `{project-root}/.sdlc/learning.json` (project-wide, shared across all epics — NOT per-epic),
-  the sibling of `.sdlc/repos.json`, `.sdlc/hub.json`, `.sdlc/design.json`, and `.sdlc/testing.json`.
+  the sibling of `.sdlc/repos.json`, `.sdlc/product.json`, `.sdlc/design.json`, and `.sdlc/testing.json`.
 - Per-epic, per-member learning records + rendered tutorials are written later by `yad-learn`
   (`epics/EP-<slug>/.sdlc/learning-records.json` and `epics/EP-<slug>/learning/`), not here.
 - Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.

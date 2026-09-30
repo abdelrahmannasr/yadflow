@@ -23,7 +23,7 @@ routing helper.
   - `templates/gitlab/merge_request_templates/Default.md` → installs to
     `<repo>/.gitlab/merge_request_templates/Default.md`
   - `templates/checks/risk-route.sh` → installs to `<repo>/checks/risk-route.sh` (advisory routing helper)
-  - **Product variants** (`repo: hub`) — Shape artifact-review PR/MR bodies:
+  - **Product variants** (`repo: product`) — Shape artifact-review PR/MR bodies:
     `templates/product/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
     `templates/product/gitlab/merge_request_templates/Default.md` →
     `{project-root}/.gitlab/merge_request_templates/Default.md`. The Product body carries no `Task:` trailer
@@ -33,7 +33,7 @@ routing helper.
   `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
   that cutoff is invisible to the gate even though the MR shows it, and the failure reads "does not use
   the template" (#164). Both GitLab templates say so in a comment and keep `## Summary` /
-  `## Impact & Risk` / `## Checklist` (hub: `## Artifact under review` / `## Impact & Risk (front-half)`
+  `## Impact & Risk` / `## Checklist` (Product: `## Artifact under review` / `## Impact & Risk (front-half)`
   / `## Checklist`) early, so a truncated body still passes. Long narrative goes **after** them.
   Sections may be reordered freely; deleting one fails the gate. GitHub is unaffected.
 - **Installed code-repo templates are yad-managed.** `yad update` rewrites them on upgrade (the Product
@@ -54,7 +54,7 @@ routing helper.
 
 ## Inputs
 
-- `repo`   — the code repo to add the template to (one of an epic's repos), or `hub` for the Product.
+- `repo`   — the code repo to add the template to (one of an epic's repos), or `product` for the Product (`hub`, the old name, still works).
 - `action` — `wire` (commit the matching template + helper) | `route` (print the approver count from a
   PR body). Default `wire`.
 - `body`   — for `route`: a file holding the PR/MR description to evaluate.
@@ -64,14 +64,14 @@ routing helper.
 ### Step 1 — Resolve the repo and detect the platform
 Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path`). Detect the platform: a GitHub
 remote or `.github/` → GitHub; a GitLab remote or `.gitlab/` → GitLab. If ambiguous, ask. For
-`repo: hub`, the target is `{project-root}` itself and the platform comes from `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name).
+`repo: product`, the target is `{project-root}` itself and the platform comes from `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name).
 
 ### Step 2 — `wire` (drop only the matching template)
 Copy from this skill's `templates/`:
 - GitHub → `templates/github/pull_request_template.md` to `<repo>/.github/pull_request_template.md`.
 - GitLab → `templates/gitlab/merge_request_templates/Default.md` to
   `<repo>/.gitlab/merge_request_templates/Default.md`.
-- **`repo: hub`** → use the `templates/product/<platform>/…` variants, installed into `{project-root}`'s own
+- **`repo: product`** → use the `templates/product/<platform>/…` variants, installed into `{project-root}`'s own
   `.github/`/`.gitlab/`. The Product's routing helper (`product-route.sh`) stays in `yad-product-bridge`'s
   `templates/checks/`; neither this skill nor `yad setup` / `yad check --fix` installs it.
 Drop **only the matching** template (drop both only if the repo genuinely uses both). For code repos also

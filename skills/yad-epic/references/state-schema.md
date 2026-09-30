@@ -28,8 +28,8 @@ Three rules go with it, and they are permanent (`docs/roadmap-idea-1.md`, Part 2
 1. **A file with no version counts as version 1.** Nothing has to be rewritten to be readable. Files
    written before the stamp existed are read as shape 1, and get the key the next time the engine
    writes them.
-2. **The list files never carry it.** `approvals.json`, `comments.json`, `hub-prs.json` (also written
-   as `product-prs.json`) and `reconcile-debt.json` are JSON arrays at the top level, and an array cannot hold a key. Rule 1
+2. **The list files never carry it.** `approvals.json`, `comments.json`, `product-prs.json` (also written
+   under its older name `hub-prs.json`) and `reconcile-debt.json` are JSON arrays at the top level, and an array cannot hold a key. Rule 1
    covers them: no version means version 1.
 3. **`schemaVersion` is not the CLI version.** `.sdlc/cli-version.json` records which release of the
    `yad` CLI set the project up, and changes on every release. `schemaVersion` describes the file's
@@ -614,7 +614,7 @@ rather than *who approved*:
 | `pr` | the PR/MR number the approval arrived on. The second proof of a genuine re-approval, and the only one available on GitLab: a re-opened review is always a new PR, so an approval on a different number cannot be the old one re-read. Records written before this field existed are stamped once, from the `hub-prs.json` pointer they were recorded against. |
 | `commit`, `url`, `reviewId` | the platform's evidence for the review (E64): the commit it was given on, its link, and its node id. GitHub only, and only when the read gave them — never written `null`. An MR approval on GitLab is not tied to a commit, so none is recorded there. For the record only; the gate never reads them. |
 | `rosterName` | on an older entry whose login was recorded from the roster (E64), the name it had. The gate lets an exact submission time move such an entry to the person who really submitted that review. |
-| `engagement` | `verified` when the approval carried the companion's engagement marker, else `none`. Advisory unless `hub.review.requireEngagement` is on. |
+| `engagement` | `verified` when the approval carried the companion's engagement marker, else `none`. Advisory unless `review.requireEngagement` (Product settings) is on. |
 
 `date` is when the sync **recorded** the approval, not when it was given — it is preserved across an
 unchanged re-sync so that re-reading a review never churns the ledger.
@@ -694,7 +694,7 @@ whether to advance on its own. Two new files under `.sdlc/` do this.
 > **Who commits these.** `build-state/<story-id>.json`, `trust-log.json`, and `build-log.json` are
 > **machine-written** by Build (`yad-run`, `yad-engineer-review`) and committed by
 > **`yad checkpoint`** — the Build analogue of the Shape `yad gate ci` sync. It lands them as
-> one `chore(hub): sync Build state — <epic>/<story> by @<login>` audit-trail commit, on the
+> one `chore(product): sync Build state — <epic>/<story> by @<login>` audit-trail commit, on the
 > default branch, staging **only** these three ledgers by an explicit allowlist (never a Shape
 > gate file — `state/approvals/comments/product-prs/hub-prs.json`, `reviews/*.md` — so `ledger-guard` never trips).
 > Teammates don't review these machine writes; the commit exists so CI, `yad status`, and other

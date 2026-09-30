@@ -1,4 +1,4 @@
-<!-- SDLC HUB MR template — Shape artifact review (epic / architecture+contract / ui-design / stories). -->
+<!-- SDLC Product MR template — Shape artifact review (epic / architecture+contract / ui-design / stories). -->
 <!-- This MR is a REVIEW VEHICLE on the Product, not a code merge. The file gate (yad-review-gate)
      advances the step when this MR is MERGED with the approvals met and every thread resolved. Reviewers
      approve/comment here; `yad gate sync` (or CI at merge, with a verified ledger) pulls that into the file ledger. -->
