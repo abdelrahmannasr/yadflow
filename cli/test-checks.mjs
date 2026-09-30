@@ -2,6 +2,8 @@
 // Run: node --test cli/test-checks.mjs
 // verified-commits.sh is covered in cli/test.mjs; this file covers the rest of the
 // production safety gates: spec-link, contract-check, build-test-lint, risk-route.
+// Before anything else: no background git clean-up racing a test's removal of its repository.
+import './fixtures/git-quiet.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';

@@ -1,4 +1,6 @@
 // Phase 6 feature-thread engine tests. Run: node --test cli/test-threads.mjs
+// Before anything else: no background git clean-up racing a test's removal of its repository.
+import './fixtures/git-quiet.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

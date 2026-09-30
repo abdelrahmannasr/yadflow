@@ -8,6 +8,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# No background git clean-up racing the removal of the scratch repos (see cli/fixtures/git-quiet.mjs).
+export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'maintenance.auto=false' 'receive.autogc=false' 'gc.auto=0'"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/yad-e2e.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
