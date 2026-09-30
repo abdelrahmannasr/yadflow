@@ -187,9 +187,13 @@ export function skillMeta(text) {
 // with a trailing comment is otherwise read AS the value (the frontmatter trap this project has hit).
 function scalar(v) {
   const t = v.trim();
-  // The closing quote is the FIRST one after the opening (a `\"` escape aside), so `"a" # was "b"` is `a`.
-  const q = t.match(/^"((?:[^"\\]|\\.)*)"\s*(#.*)?$/) || t.match(/^'([^']*)'\s*(#.*)?$/);
-  if (q) return q[1];
+  // The closing quote is the FIRST one after the opening, escapes aside, so `"a" # was "b"` is `a`. A
+  // double-quoted value decodes its escapes (JSON's are a subset of YAML's); a single-quoted one has only
+  // one, `''` for a quote.
+  const dq = t.match(/^"((?:[^"\\]|\\.)*)"\s*(#.*)?$/);
+  if (dq) { try { return JSON.parse(`"${dq[1]}"`); } catch { return dq[1]; } }
+  const sq = t.match(/^'((?:[^']|'')*)'\s*(#.*)?$/);
+  if (sq) return sq[1].replace(/''/g, "'");
   return t.replace(/(^|\s)#.*$/, '').trim();
 }
 
@@ -451,6 +455,7 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
     if (doc === null || (doc !== undefined && !isPlainObject(doc))) problem('user', CLAUDE_USER_CONFIG, NOT_JSON);
     else if (doc) {
       if (isPlainObject(doc.mcpServers)) items.push(...mcpItems(doc.mcpServers, { scope: 'user', where: shownPath('user', CLAUDE_USER_CONFIG), agents: ['Claude Code'] }));
+      else if (doc.mcpServers !== undefined) problem('user', CLAUDE_USER_CONFIG, NOT_SERVERS);
       // Keyed by the folder's absolute path as Claude Code wrote it: the exact spelling first, then any key
       // that is the same folder by another spelling (a link, or letter case on Windows and macOS).
       const projects = isPlainObject(doc.projects) ? doc.projects : {};
@@ -458,6 +463,7 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
       const mine = key === undefined ? null : projects[key];
       // `user`, not `project`: these live in YOUR home folder and a teammate who clones gets none of them.
       if (isPlainObject(mine?.mcpServers)) items.push(...mcpItems(mine.mcpServers, { scope: 'user', where: `${shownPath('user', CLAUDE_USER_CONFIG)} (this folder)`, agents: ['Claude Code'] }));
+      else if (isPlainObject(mine) && mine.mcpServers !== undefined) problem('user', `${CLAUDE_USER_CONFIG} (this folder)`, NOT_SERVERS);
     }
   }
 
@@ -553,10 +559,12 @@ function pluginMcp(at, id, scope, problem) {
   const manifest = jsonOf(path.join(at, '.claude-plugin', 'plugin.json'));
   if (manifest === null || (manifest !== undefined && !isPlainObject(manifest))) bad('.claude-plugin/plugin.json');
   const declared = isPlainObject(manifest) ? manifest.mcpServers : undefined;
-  // `mcpServers` may be the servers, the path of a file holding them, or a list of either.
+  // `mcpServers` may be the servers, the path of a file holding them, or a list of either. Anything else
+  // is a problem, as a `mcpServers` that is not an object is everywhere else.
   const one = (d) => {
     if (isPlainObject(d)) add(d, '.claude-plugin/plugin.json');
     else if (typeof d === 'string') fromFile(d);
+    else bad('.claude-plugin/plugin.json', NOT_SERVERS);
   };
   if (declared === undefined) fromFile('.mcp.json');
   else if (Array.isArray(declared)) declared.forEach(one);

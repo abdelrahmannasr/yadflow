@@ -231,6 +231,7 @@ test('E50: a file that is there but unreadable is a problem, named by place and 
     put(path.join(proj, '.cursor/mcp.json'), JSON.stringify({ mcpServers: ['not', 'an', 'object'] }));
     put(path.join(home, '.claude.json'), '[1, 2]');
     put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: [] }));
+    // `~/.claude.json` is broken on purpose below; the next test covers its `mcpServers` shapes.
     put(path.join(home, '.gemini/settings.json'), 'null');
     // A comment is allowed in Gemini's settings only: in Cursor's file it stops Cursor loading it.
     put(path.join(home, '.cursor/mcp.json'), '// mine\n{ "mcpServers": { "x": {} } }');
@@ -257,6 +258,27 @@ test('E50: a settings file that cannot be read is a problem, and the answer fall
     put(path.join(home, '.claude/settings.json'), '{ broken');
     const same = detectInstalled(home, { home });
     assert.equal(same.problems.filter((p) => p.problem.startsWith('could not be read')).length, 1, JSON.stringify(same.problems));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E50: a `mcpServers` that is not an object is a problem wherever it is read', () => {
+  const T = tmp();
+  const proj = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  try {
+    fs.mkdirSync(proj, { recursive: true });
+    put(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: SECRET, projects: { [path.resolve(proj)]: { mcpServers: [1] } } }));
+    const plug = path.join(home, 'plug');
+    put(path.join(plug, '.claude-plugin/plugin.json'), JSON.stringify({ mcpServers: [5, { ok: {} }] }));
+    put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: { 'q@m': [{ scope: 'user', installPath: plug }] } }));
+    const { items, problems } = detectInstalled(proj, { home });
+    assert.deepEqual(items.filter((i) => i.kind === 'mcp').map((i) => i.name), ['ok'], 'the good entry of a list still counts');
+    assert.deepEqual(problems, [
+      { where: '~/.claude.json', problem: '`mcpServers` is not an object' },
+      { where: '~/.claude.json (this folder)', problem: '`mcpServers` is not an object' },
+      { where: '~/.claude/plugins (q@m: .claude-plugin/plugin.json)', problem: '`mcpServers` is not an object' },
+    ]);
+    assert.ok(!JSON.stringify(problems).includes(SECRET));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -324,6 +346,11 @@ test('E50: the frontmatter, TOML name and TOML table readers', () => {
   assert.equal(tomlAgentName('name = """multi"""'), null, 'a multi-line string is never read');
   assert.deepEqual(skillMeta('---\nname: foo # a comment\nversion: "1 # kept"\n---\n'), { name: 'foo', version: '1 # kept' });
   assert.deepEqual(skillMeta(`---\nname: "a" # was "b"\nversion: 'x' # 'y'\n---\n`), { name: 'a', version: 'x' }, 'the value ends at its own closing quote');
+  assert.deepEqual(skillMeta(String.raw`---
+name: 'it''s'
+version: "1\"2"
+---
+`), { name: "it's", version: '1"2' }, "YAML's quote escapes are decoded");
   assert.deepEqual(skillMeta('---\nmetadata:\n  a:\n    version: 9\n  version: 2\n---\n'), { version: '2' }, 'a deeper version is not metadata.version');
   assert.deepEqual(JSON.parse(stripJsonComments(String.raw`{"u":"http://x//y", // c
  "b":/* z */1, "q":"a\"//"}`)), { u: 'http://x//y', b: 1, q: 'a"//' });
