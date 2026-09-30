@@ -27767,6 +27767,7 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
     // naming only the edited one let a stale one fail every PR after the team followed the advice.
     const tpl = path.join(T, 'checks/pr-template.sh');
     const cm = path.join(T, 'checks/commit-message.sh');
+    const shippedOf = (g) => fs.readFileSync(path.join(ROOT, g === 'commit-message.sh' ? 'skills/yad-checks/templates/checks' : 'skills/yad-pr-template/templates/checks', g), 'utf8');
     const refuse = (p) => fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
     refuse(gate); // edited: after the last run the record says yad wrote the shipped copy
     refuse(cm);
@@ -27795,6 +27796,29 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
     assert.match(refOf().hint, /but first restore \.sdlc\/managed\.json from git \(it does not read, so yad cannot tell which of checks\/commit-message\.sh [^;]*; and checks\/pr-title\.sh [^;]*; and checks\/pr-template\.sh [^)]*\) are its own\), then run `yad update`/);
     assert.doesNotMatch(refOf().hint, /does not manage/);
     fs.writeFileSync(recFile, recText);
+    // The settings as the unreadable file (review 6): only hub.json, which does not parse — or parses, but is
+    // not an object. `yad update` does not refuse there, so the hint must not say it does.
+    const prodFile = path.join(T, '.sdlc/product.json');
+    const legacyFile = path.join(T, '.sdlc/hub.json');
+    const prodText = fs.readFileSync(prodFile, 'utf8');
+    fs.rmSync(prodFile);
+    for (const bad of ['{bad', '"x"', '[]']) {
+      fs.writeFileSync(legacyFile, bad);
+      assert.match(refOf().hint, /but first restore \.sdlc\/hub\.json from git \(it does not read/, bad);
+      fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile hub "$T"', '--profile product "$T"'));
+      const h = profOf('pr-title.sh').hint;
+      assert.match(h, /^restore \.sdlc\/hub\.json from git — it does not read, so yad cannot tell whether this copy is its own — then run/, bad);
+      assert.doesNotMatch(h, /refuses/, bad);
+      fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile product "$T"', '--profile hub "$T"'));
+    }
+    fs.writeFileSync(prodFile, prodText);
+    fs.writeFileSync(legacyFile, prodText);
+    // One gate alone: "whether", not "which of".
+    for (const g of ['commit-message.sh', 'pr-template.sh']) fs.writeFileSync(path.join(T, 'checks', g), shippedOf(g));
+    fs.writeFileSync(recFile, '{bad');
+    assert.match(refOf().hint, /yad cannot tell whether checks\/pr-title\.sh \(it refuses [^)]*\) is its own\), then run/);
+    fs.writeFileSync(recFile, recText);
+    refuse(tpl); refuse(cm);
     // Two edited at once: plural, and the one fix said for each.
     const rec3 = JSON.parse(recText);
     rec3.files['checks/commit-message.sh'] = 'sha256:not-this-copy';
