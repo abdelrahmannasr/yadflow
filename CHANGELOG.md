@@ -1,3 +1,10 @@
+## [4.0.1](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.0...v4.0.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **cli:** point the error-code hint at the real error-code table ([76ee3d0](https://github.com/abdelrahmannasr/yadflow/commit/76ee3d071efc76a5029c2fc234c05eaefe31cd0b))
+
 # [4.0.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.18.1...v4.0.0) (2026-09-30)
 
 
