@@ -55,8 +55,8 @@ the risk step.
 counted by its git name, an approval by its platform login, and yadflow never joins the two without
 exact evidence. So an ordinary two-person team can read as **four**. At four the cap lowers nothing,
 and an enforced contract gate would ask three approvals of a team with one person who is not the author
-— a gate it could never pass. A later yadflow change turns the capped count on together with
-`yad gate lower --reason`, the way out of a gate that cannot be met, once the count is accurate.
+— a gate it could never pass. Enforcing the capped count, with a way out for a gate that cannot be
+met, is roadmap row E108, which is parked. Until then the count is advice only.
 
 **When a gate may not pass (E73).** `yad gate status` and `yad gate sync` print a warning line under a
 team review gate that has not passed yet, when the count of people suggests the gate may not pass. It is a
@@ -280,8 +280,8 @@ unchanged**: it counts distinct approvers regardless of how they were recorded.
 - One approver who is not the author keeps review load low on a small team (design priority 2) while
   still requiring a second pair of eyes (priority 1, code quality / production safety).
 - The risk step asks for more people only where a change can break a shared surface
-  (contract/auth/payments). It is advisory for now: the capacity cap (E72) is reported. A later change will
-  enforce it together with `yad gate lower --reason`, so that a gate asking for more people than the team
-  has will always have a way out. Until then E73 only warns when a gate may not pass.
+  (contract/auth/payments). It is advisory for now: the capacity cap (E72) is reported. Enforcing it, with a way
+  out for a gate that asks for more people than the team has, is roadmap row E108, which is parked. Until
+  then E73 only warns when a gate may not pass.
 - No stored list of people: it goes stale, and repository access already decides who can approve.
 - Everything is a file, so a future service can drive the same gate by writing the same records.

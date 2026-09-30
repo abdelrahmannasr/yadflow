@@ -59,9 +59,10 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   template. An **output enrichment, never a gate** — it never touches epic state, approvals, or the
   contract lock. `generate` / `refresh` / `deploy`.
 - **`yad-docs-overview`** — Generates the project **SDLC-overview site** (`docs/sdlc-site/`) — every
-  stage from setup → ship as flow paths / system components / stakeholder roles, reusing the same shell —
-  superseding the hand-maintained `docs/index.html` (folded into the site as `public/report.html`, linked
-  from the nav).
+  stage from setup → ship as flow paths / system components / stakeholder roles, reusing the same shell.
+  The hand-maintained report (`docs/sdlc-site/public/report.html`) stays the **main documentation** at
+  the Pages root (served as both `report.html` and `index.html`); the interactive site mounts under
+  `app/`, is reached from the report, and links back to it. Deploys with `yad docs deploy --overview`.
 - **`yad-docs-sync`** — Keeps the sites fresh: detects staleness (a content hash of the authored
   artifacts + the connected repos' HEAD shas vs each site's build manifest), regenerates + redeploys, and
   can wire a CI job that rebuilds on push. Generalizes the rule that feature work must hand-update the
@@ -154,11 +155,11 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   a time** (`yad review walkthrough` / `yad gate walkthrough`), gives comprehensive context per change,
   then **asks them about it**; the engineer answers and asks back until **both are satisfied** (dual
   sign-off). It doubles as a learning session — demonstrates a transferable review method, scores the
-  engineer, and records their review-skill growth in the **local-only** `yad-learn` ledger (`yad status`
-  rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
+  engineer, and records their review-skill growth in the **local-only** `yad-learn` ledger (the `yad-status`
+  skill rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
   surfaces genuine concerns as normal blocking comments.
 - **`yad-product-bridge`** — The templated PR/MR bridge for the Shape gate. When the Product has a platform
-  (`.sdlc/product.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
+  (`.sdlc/product.json`), it opens a review PR/MR per artifact, applies the touched-domain labels (it requests no reviewers), and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
   ledger. The file ledger stays the source of truth; degrades to a local gate with no platform, where
   `yad gate approve`, `yad gate comment` and `yad gate advance` record the review (E112).
@@ -185,19 +186,26 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   both code repos and the Product. CI-agnostic bash for GitHub Actions and GitLab CI. Also
   installs the **agent guardrail** on a verified Product — `hooks/ledger-guard.mjs`, a harness hook that
   refuses an agent the CI-owned ledger write up front and names `yad gate open`, rather than letting
-  `ledger-guard` reject it in CI twenty minutes later (#171).
+  `ledger-guard` reject it in CI twenty minutes later (#171) — and the same rule for a person: a git
+  **pre-commit** hook (`.git/hooks/pre-commit`, per clone) that refuses a commit of a CI-owned ledger
+  file (E48). On every Product, in both ledger modes, it also installs the **capture** post-edit hook
+  (`hooks/yad-capture.mjs`), which snapshots each changed Shape draft to the person's private
+  `yad/wip/<name>/<epic>` branch (E43).
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
   an Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2.
   A `high` directory on the base branch's risk map adds 1 too, the larger step winning (E66).
   Includes `risk-route.sh` plus the `pr-title.sh` / `pr-template.sh` gate scripts.
 - **`yad-commit`** — build helper. Commit ONE staged atomic change by the conventions (Conventional
-  subject, `Task → Contract-Change → Co-Authored-By` trailers, the `--ai` co-author footer, the ≤3-file
-  atomic guard). Drives `yad commit`.
+  subject, `Task → Contract-Change → Ledger-Override → Co-Authored-By` trailers, the `--ai` co-author
+  footer, the ≤3-file atomic guard). `--manual --reason "<why>"` commits past the ledger pre-commit hook
+  and records the reason as a `Ledger-Override:` trailer; the ledger-guard check on the PR still fails
+  it (E49). Drives `yad commit`.
 - **`yad-open-pr`** — build helper. Open a code-repo task PR/MR from the committed template: push the
   branch, prefill the body, assign the committer (no reviewers are requested). Once it is open, prints a
   reviewer **suggestion** (E68): who has committed in the touched folders in the last 30 days, and what
   CODEOWNERS lists — a hint only, never a request. Bases the PR on the repo's **resolved
-  default branch** (`repos.json` → the platform → `origin/HEAD` → `main`; `--base` overrides), and
+  default branch** (`--base` → `repos.json` → for a PR against the Product itself, `product.json`'s
+  `default_branch` → the platform → `origin/HEAD` → `main`), and
   warns when the base is not the platform default — a mis-based PR silently gets no AI first pass.
   Drives `yad open-pr`.
 - **`yad-ship`** — build helper. Commit **and** open the task PR/MR in one step (`yad commit` then
