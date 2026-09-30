@@ -56,8 +56,10 @@ are no fix releases for an older major.
   - Dependabot watches only this repo's `.github/workflows/`, not the templates. A test fails the build
     if any rule above is broken, and also if one action at one major has two different pins — so a
     Dependabot bump fails until every file on that major gets the same pin in the same change.
-  - If your own Dependabot bumps a pin in an installed copy, `yad update` then reports that file as
-    `modified` and leaves it alone, so it stops receiving template changes.
+  - If your own Dependabot bumps a pin in an installed copy of a `skills/*/templates/github` workflow,
+    `yad update` then reports that file as `modified` and leaves it alone, so it stops receiving
+    template changes. `yad-docs.yml` is different: `yad docs sync --wire` rewrites it whole, so a pin
+    you changed there goes back to the shipped one.
 
 ## Scope notes for researchers
 
