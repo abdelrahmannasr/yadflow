@@ -744,14 +744,14 @@ export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_W
 //   'unreadable'   the settings do not read (or are not an object), or   restore the file, then run yad update
 //                  the provenance record does not: yad cannot tell (with
 //                  an unreadable record, update itself refuses until then)
-//   'drift'        a file under two names says different things (E122):  run yad migrate, then yad update
-//                  every command but doctor/migrate refuses until one copy
-//                  is chosen — so nothing else can be the first step
+//   'drift'        a file under two names says different things (E122):  yad migrate --apply, then doctor
+//                  every command but doctor/migrate/report refuses until
+//                  one copy is kept — so nothing else can be the first step
 //   'unmanaged'    yad has no action for it (Product not verified)       fix it by hand    same        same
-// The last two are read from the file on disk.
+// 'unreadable' and 'unmanaged' are read from the file on disk; 'drift' needs no gate read at all.
 // On a run that fixes, a gate that run replaces is left out: after it, the gate is the shipped copy.
-// `drift`: the pairs `productDrift` found, as the caller lists them (plan.mjs lists no epics) — the same pairs
-// that make every command refuse (`productDriftError`).
+// `drift`: `productDriftPairs(root)` (cli/epic-state.mjs; plan.mjs lists no epics) — the pairs every command refuses
+// on. Only `yad doctor` passes it: `yad check`/`update` never run under drift, the dispatcher refuses them first.
 export function productGateBlockers(root, { fix = false, overwriteLocal = false, drift = [] } = {}) {
   let actions = [];
   let unreadable = null; // the file that does not read, for 'unreadable' (review 5)
@@ -790,7 +790,7 @@ export function gateProfileFix(b) {
   if (b.state === 'outdated') return 'run `yad update`: it replaces this copy, which yad wrote, with the shipped one';
   if (b.state === 'unrecorded') return `run \`yad update\`: it replaces it with the shipped one and saves yours as ${saved(b)}`;
   if (b.state === 'kept') return `it was changed by hand, so \`yad update\` keeps it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${saved(b)})`;
-  if (b.state === 'drift') return `${driftWords(b.pairs)}, so \`yad update\` refuses until one copy is chosen: run \`yad migrate\` to see the difference and keep one, then \`yad update\` and \`yad doctor\` again`;
+  if (b.state === 'drift') return `${driftWords(b.pairs)}, so \`yad update\` refuses until one copy is kept: run \`yad migrate\` to see the difference, then \`yad migrate --apply\` to keep one, then \`yad doctor\` again — it says what this check needs`;
   if (b.state === 'unreadable') return `restore ${b.file} from git — it does not read, so yad cannot tell whether this copy is its own${b.file === MANAGED_LEDGER ? ' (and `yad update` refuses until then)' : ''} — then run \`yad update\` and \`yad doctor\` again`;
   return `fix it by hand — yad does not manage the checks on this Product, so no \`yad update\` replaces it: ${PRODUCT_PROFILE_FIX.split(' — ')[0]}`;
 }
@@ -802,7 +802,9 @@ export function oldProfileAdvice(blockers) {
   const parts = [];
   const split = blockers.filter((b) => b.state === 'drift');
   if (split.length) {
-    parts.push(`run \`yad migrate\` to choose one copy — ${driftWords(split[0].pairs)}, so every yad command but \`yad doctor\` and \`yad migrate\` refuses until then — and \`yad doctor\` again: it says what ${split.length > 1 ? `${split.map((b) => b.gate).join(', ')} need` : `${split[0].gate} needs`}`);
+    const names = split.map((b) => b.gate);
+    const listed = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} need` : `${names[0]} needs`;
+    parts.push(`run \`yad migrate\` to see the difference, then \`yad migrate --apply\` to keep one copy — ${driftWords(split[0].pairs)}, so every yad command but \`yad doctor\`, \`yad migrate\` and \`yad report\` refuses until then — and \`yad doctor\` again: it says what ${listed}`);
   }
   const lost = blockers.filter((b) => b.state === 'unreadable');
   if (lost.length) {

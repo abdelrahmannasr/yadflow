@@ -21,13 +21,13 @@ import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, war
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
-  MANAGED_LEDGER, MIRRORED_FILES, PRODUCT_RENAME_GUIDE_URL, PROJECT_FILES, preferring, productConfigPath, productDrift, SCHEMA_VERSION,
+  MANAGED_LEDGER, MIRRORED_FILES, PRODUCT_RENAME_GUIDE_URL, PROJECT_FILES, preferring, productConfigPath, SCHEMA_VERSION,
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
 import {
-  artifactHash, canonicalApprovals, canonicalComments, canonicalProductPrs, DISCOVERY_EPIC, epicIds, epicRel,
+  artifactHash, canonicalApprovals, canonicalComments, canonicalProductPrs, DISCOVERY_EPIC, epicIds, epicRel, productDriftPairs,
   epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isGateStep, isPassed, stampProfile, stampStepStates, stampWorkItemType, writeState,
 } from './epic-state.mjs';
 
@@ -902,9 +902,7 @@ const bytesOrNull = (abs) => { try { return fs.readFileSync(abs); } catch { retu
 
 // Every drifted pair under `root`, project-relative, with what differs.
 export function driftedPairs(root) {
-  let dirs = [];
-  try { dirs = epicIds(root).map(epicRel); } catch { /* the settings file is still checked */ }
-  return productDrift(root, dirs).map(({ canonical, legacy }) => {
+  return productDriftPairs(root).map(({ canonical, legacy }) => {
     const pair = { canonical, legacy, differences: describeDrift(path.join(root, canonical), path.join(root, legacy)) };
     // What each name held when the difference was shown — not part of the report (not enumerable), but
     // `checkDrift` refuses a pair that has changed since, because it is not the pair the person chose for.

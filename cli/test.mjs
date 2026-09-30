@@ -27860,13 +27860,19 @@ test('E124: with the settings under two names disagreeing, the gate advice says 
     for (const other of ['{bad', JSON.stringify({ platform: 'github', ledger: 'local' })]) {
       fs.writeFileSync(path.join(T, '.sdlc/hub.json'), other);
       const h = ref();
-      assert.match(h, /; but first run `yad migrate` to choose one copy — \.sdlc\/product\.json and \.sdlc\/hub\.json say different things, so every yad command but `yad doctor` and `yad migrate` refuses until then — and `yad doctor` again: it says what checks\/pr-title\.sh needs$/, other);
+      assert.match(h, /; but first run `yad migrate` to see the difference, then `yad migrate --apply` to keep one copy — \.sdlc\/product\.json and \.sdlc\/hub\.json say different things, so every yad command but `yad doctor`, `yad migrate` and `yad report` refuses until then — and `yad doctor` again: it says what checks\/pr-title\.sh needs$/, other);
       assert.doesNotMatch(h, /run `yad update`|fix checks/, other);
       fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replace('--profile hub "$T"', '--profile product "$T"'));
       assert.match(collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh').hint,
-        /^\.sdlc\/product\.json and \.sdlc\/hub\.json say different things, so `yad update` refuses until one copy is chosen: run `yad migrate`/, other);
+        /^\.sdlc\/product\.json and \.sdlc\/hub\.json say different things, so `yad update` refuses until one copy is kept: run `yad migrate` to see the difference, then `yad migrate --apply` to keep one, then `yad doctor` again — it says what this check needs$/, other);
       fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replace('--profile product "$T"', '--profile hub "$T"'));
     }
+    // Three gates at once: listed with an "and".
+    for (const g of ['commit-message.sh', 'pr-template.sh']) {
+      const p = path.join(T, 'checks', g);
+      fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    }
+    assert.match(ref(), /it says what checks\/commit-message\.sh, checks\/pr-title\.sh and checks\/pr-template\.sh need$/);
     // And the refusal is real: the command the other advice would name does not run.
     assert.throws(() => { const { productDriftError } = epicStateForDrift; const e = productDriftError(T); if (e) throw e; }, (e) => e.code === 'YAD-STATE-008');
     // A product.json that does not read is still 'unreadable' (restore it), not drift — that comes first.
