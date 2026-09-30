@@ -15,12 +15,13 @@ one page before starting, read this one. For depth, see [`docs/CLI.md`](docs/CLI
 
 ### Your four repos
 
-You will have **four separate git repos**, each with one job:
+You will have **four separate git repos**, each with one job, plus the **yadflow** tool itself:
 
 ```
-  yadflow         ──►  the SKILLS SOURCE
-  (this repo)          You install the workflow skills from here, and pull updates from here.
-                       No real product work happens inside it.
+  yadflow         ──►  the TOOL
+  (npm package)        The `yad` CLI and the 38 workflow skills, installed from npm
+                       (`npx yadflow …` or `npm install -g yadflow`). You never clone it,
+                       and no real product work happens inside it.
 
   Product         ──►  the THINKING
   (new repo)           All epics, contracts, stories, reviews, and state.
@@ -36,7 +37,7 @@ You will have **four separate git repos**, each with one job:
 flowchart LR
     classDef prod fill:#fcf3cf,stroke:#b7950b,color:#000
     classDef code fill:#d6eaf8,stroke:#2471a3,color:#000
-    src["yadflow<br/>skills source"]
+    src["yadflow<br/>npm package: CLI + skills"]
     prod["Product<br/>epics · contracts · stories · state"]:::prod
     r1["code-repo-1"]:::code
     r2["code-repo-2"]:::code
@@ -62,14 +63,14 @@ all; `yad-product-bridge` mirrors Shape reviews to real PR/MRs on the Product.
 ```mermaid
 flowchart TD
     classDef gated fill:#fdebd0,stroke:#ca6f1e,color:#000
-    classDef earns fill:#d6eaf8,stroke:#2471a3,color:#000
+    classDef canauto fill:#d6eaf8,stroke:#2471a3,color:#000
     classDef locked fill:#eaecee,stroke:#566573,color:#000,stroke-dasharray:5 3
     classDef artifact fill:#fcf3cf,stroke:#b7950b,color:#000
     classDef sentinel fill:#d5f5e3,stroke:#1e8449,color:#000
 
     subgraph SETUP["0 · One-time setup (team lead, per project)"]
       direction TB
-      inst["install skills<br/>+ wire each repo"]
+      inst["yad new / init / join<br/>install skills + wire each repo"]
       conn["yad-connect-repos<br/>cache each repo's code-map"]
       sync["yad-sync-repos<br/>switch every repo to default branch + ff pull"]
       inst --> conn --> sync
@@ -96,8 +97,8 @@ flowchart TD
     subgraph BUILD["B · Build — per story, per code repo"]
       direction TB
       sp["yad-spec<br/>→ specs/&lt;story&gt;/"]
-      im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
-      ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template"]:::earns
+      im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::canauto
+      ck["yad-checks<br/>spec-link · contract-check · risk-map · build/test/lint<br/>lineage-check · epic-open · reconcile-debt<br/>verified-commits · commit-message · pr-title · pr-template"]:::canauto
       prm["yad-ship: commit + open PR/MR"]
       eng{{"yad-engineer-review<br/>human · never automated"}}:::locked
       merged(["merge → build-log.json"]):::sentinel
@@ -106,7 +107,7 @@ flowchart TD
 
     subgraph AUTO["C · Automation — switched on & reversible"]
       direction TB
-      run["yad-run<br/>the dial (yad dial) + trust-log.json"]:::earns
+      run["yad-run<br/>the dial (yad dial) + trust-log.json"]:::canauto
       cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state (chore(product))"]
       kill["yad kill → all advance: human"]
       run --> cpt
@@ -179,28 +180,41 @@ nothing to keep in step and nothing to migrate.
 
 ## 3. One-time setup (the team lead does this once)
 
-**a. Create the Product repo.** Just an empty git repo. You don't need to scaffold anything — the
-first `yad-epic` run creates `epics/EP-<slug>/` and its state files for you.
+A **workspace** is one folder that holds the Product (`product/`) and your code repos side by side.
+One command makes it. Each code repo stays its own separate git repo (its own `.git`).
 
-**b. Make sure your 3 code repos exist.** Each is its own separate git repo (its own `.git`).
-
-**c. Install everything with the CLI.** From the Product repo, run the guided setup — it installs the
-skills into the IDE dirs, detects the Product platform, connects your code repos, and wires each one (CI gates,
-PR/MR template):
+**a. Create the Product.** Pick the command that fits:
 
 ```bash
-cd <product-repo>
-npx yadflow setup
+npx yadflow new acme     # a new product: makes acme/product/, runs git init, then the guided setup
+npx yadflow init         # code repos you already have: run it in the folder that holds them
 ```
+
+`new` creates nothing online. At the end it prints the `gh repo create` / `glab repo create` line that
+puts the Product on GitHub or GitLab — run it yourself. `init` makes `product/` beside your repos and
+asks, one repo at a time, whether to connect it.
+
+**b. The guided setup runs inside it.** Both commands run the same wizard as `npx yadflow setup` (which
+you can also run by hand inside an existing Product repo). It installs the skills into the agent folders
+you pick, detects the Product platform, connects your code repos, and wires each one (CI gates, PR/MR
+template). It also leaves a small `.yad-workspace.json` in the workspace, so `yad` finds the Product
+from inside any repo it registers. You don't need to scaffold anything else — the first `yad-epic` run
+creates `epics/EP-<slug>/` and its state files for you.
+
+**c. Push the Product and invite the team.** Run the printed `gh`/`glab` line, commit, and push. Then
+teammates join with `yad join <url>` (section 4).
 
 > Re-run `npx yadflow check --fix` after any workflow update — it reports what is
 > missing / drifted / stale and reconciles only what changed (it never re-asks for what you already
 > answered).
 >
-> **Upgrading to a new yadflow version:** run `npx yadflow update`. It installs newly-added skills
-> (e.g. `yad-review-companion`), updates changed skills, and re-copies updated gate scripts into your
-> connected repos. All new review-gate fields are optional and default-off, so your in-flight epics,
-> Product settings, open review PRs, and ledgers keep working with no migration.
+> **Upgrading to a new yadflow version:** in the Product, run `npm install -g yadflow` (the latest
+> release), then `yad migrate` (a preview of the state files the new release would rewrite — it writes
+> nothing), then `yad migrate --apply` (it rewrites them and keeps a `<file>.yad-orig` copy of each), then
+> `yad update` (it installs newly-added skills, updates changed skills, and re-copies updated gate
+> scripts into your connected repos), then `yad doctor` to confirm. On a minor or patch release
+> `yad migrate` usually has nothing to do. Coming from 3.x? Read
+> [upgrading to 4.0](docs/migrations/upgrading-to-4.md) first.
 >
 > **Landing the upgrade for the whole team:** `npx yadflow update` only writes the changed files into
 > the working trees — someone still has to commit them across every repo. Run `npx yadflow update
@@ -210,37 +224,25 @@ npx yadflow setup
 > repo's default branch — a repo on a feature branch is skipped with a warning, never disturbed.
 > Because it pushes directly to the default branch there is **no PR/MR**, so the normal gate suite is
 > skipped; a dedicated push-on-default-branch **`yad-update-guard`** (a GitHub workflow / GitLab CI
-> fragment) re-checks just two things on the commit — that it is **signed by a known author**
-> (`verified-commits`) and follows the **commit convention** (`commit-message`). yadflow prints an
+> fragment) re-checks just two things on the commit — that it carries a **signature GitHub or GitLab
+> marks as Verified** (`verified-commits`; there is no list of allowed authors — write access to the
+> repo decides who may commit) and follows the **commit convention** (`commit-message`). yadflow prints an
 > announce banner before it starts: **tell the team and pause merges on those repos until it
 > finishes**, so the direct-to-default-branch pushes don't collide with in-flight work. (Direct pushes
 > to the default branch must be permitted for the committer — adjust branch protection accordingly.)
 
-<details>
-<summary>Manual fallback (no CLI)</summary>
+**Where the skills live.** The CLI installs the skills into the Product itself — into the agent
+folders you picked (`.claude/skills/`, `.agents/skills/`, and so on), not into your home folder. You
+have two choices:
 
-```bash
-git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
-mkdir -p ~/.claude/skills
-for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
-         yad-spec yad-implement yad-checks \
-         yad-pr-template yad-product-bridge \
-         yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
-         yad-change yad-timeline yad-defects yad-reconcile yad-stub \
-         yad-run yad-status; do
-  rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
-done
-```
+- **Commit them.** Anyone who clones the Product gets the skills with it.
+- **Have git ignore those folders** (ignore the folder itself, for example `.claude/`). Then each
+  person gets a private copy when they run `yad join`, and `yad update` refreshes it.
 
-Re-run this block after you `git pull` updates into `yadflow`.
-</details>
->
-> **Alternative:** if you'd rather not have each person install, commit the `yad-*` skill folders into
-> the Product repo itself (under `.claude/skills/`). Then anyone who clones the Product gets the skills
-> automatically. The user-level install above is the recommended default.
+There is no manual install any more: the skills call `yad` commands, so they need the CLI anyway.
 
-**d. Wire each code repo once.** From inside the Product (or with the repo path), run for each of the 3 repos:
+**d. Wire each code repo.** The setup already does this for every repo it connects. For a repo you
+add later, run from inside the Product (or with the repo path):
 
 ```text
 yad-checks          repo:<repo> action: wire   # installs the CI gates (merges with existing CI, never clobbers)
@@ -262,12 +264,23 @@ yad-product-bridge      action: wire                                  # merge-ti
 
 There is no list of reviewers to set up. yadflow keeps no roster: anyone with access to the Product repo
 can approve, and the platform records who did — each approval is stored under the approver's
-GitHub/GitLab **login**. A review PR requests no reviewers, so ask them on the PR itself. With the
-Product on a platform, the Shape gate opens a review PR per artifact and `yad-review-gate action: sync`
-pulls approvals/comments back. No platform (or `bridge_enabled: false`)? The gate just runs local — skip d2.
+GitHub/GitLab **login**. A review PR requests no reviewers, so ask them on the PR itself.
 
-With the gate-sync CI wired, you usually don't run `sync` at all: the **merge** of a review PR triggers
-it in the Product's CI, and the ledger update is committed straight to the Product's default branch (`git pull`
+**Who writes the gate ledger.** The **gate ledger** is the set of files that record where each epic
+stands (`state.json`, `approvals.json`, `comments.json`, `reviews/`). The Product setting `ledger` in
+`.sdlc/product.json` decides who writes it:
+
+| Setting | Who writes the ledger | How a review advances |
+|---|---|---|
+| No platform | your machine | `yad gate comment`, `yad gate approve … --by <name>`, then `yad gate advance` (see section 10) |
+| `ledger: local` + a platform | your machine | reviewers approve on the review PR/MR; after the merge, `yad gate sync` pulls that into the ledger and advances the step |
+| `ledger: verified` + a platform | CI only | reviewers approve on the review PR/MR; the **merge** makes the Product's CI run `yad gate ci --merged`, which writes the ledger. `yad gate sync` only shows what CI will do |
+
+With no platform, skip d2. (An older Product may still say `bridge_enabled: true` instead of
+`ledger: verified`; `yad migrate` adds the new key.)
+
+In verified mode you usually don't run anything after the review: the **merge** of a review PR triggers
+the gate in the Product's CI, and the ledger update is committed straight to the Product's default branch (`git pull`
 to see it). Nothing fires pre-merge — approvals and change requests live on the platform, which is the
 source of truth while the review is open, and CI never touches the review branch (so an in-flight
 approval is never dismissed by a CI commit). CI never approves or merges — the merge click stays human.
@@ -302,25 +315,21 @@ You can start without any of them.
 
 ## 4. Onboarding a team member (every developer, copy-paste)
 
-1. Clone the **Product** and the **code repos** you'll work in.
-2. Install the skills once (same block as step 3c above):
+1. Join with one command, using the Product's git URL:
 
-```bash
-git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
-mkdir -p ~/.claude/skills
-for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
-         yad-spec yad-implement yad-checks \
-         yad-pr-template yad-product-bridge \
-         yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
-         yad-change yad-timeline yad-defects yad-reconcile yad-stub \
-         yad-run yad-status; do
-  rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
-done
-```
+   ```bash
+   npx yadflow join <product-url>
+   ```
 
-3. That's it. Open Claude Code **in the Product** to work on epics; open it **in a code repo** to
-   build stories.
+   It clones the Product into `<folder>/product/`, then every code repo the Product registers, beside it.
+   Then it does only the per-machine steps: the skill copies the Product's git ignores, and a git
+   **pre-commit hook** (a small script git runs before each commit) in your clone. It never commits,
+   never pushes, and never changes a file the team shares. A repo that fails to clone is named and
+   skipped; run `yad join <url>` again to fetch what is still missing.
+2. **A repo added after you joined?** Run `yad repo clone` in the Product. It clones every registered
+   repo that is missing on this machine. `yad repo list` shows which ones are **not cloned**.
+3. That's it. Open your agent **in the Product** to work on epics; open it **in a code repo** to
+   build stories. `yad next` tells you what to do first.
 
 To run a skill, just ask your agent by name — e.g. *"run `yad-epic`"*. All state is plain files
 you can also read and edit directly.
@@ -379,17 +388,20 @@ flowchart LR
 ```
 
 - `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.* If the Product
-  is on a platform (step 3d2), this also opens a review **PR/MR on the Product** for the artifact.
-- `action: approve` (the reviewer's platform login) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
-  the Product PR and you run `action: sync` to pull that platform state into the ledger.
-- `action: advance` — moves forward **only if** the rule is met; otherwise it tells you what is still missing.
-  (Merging the review PR does **not** advance — `advance` does; the file ledger stays the source of truth.)
-- With the Product's gate-sync CI wired (step 3d2), `sync` runs **automatically when the review PR/MR is
-  merged** and commits the ledger to the Product's default branch — the same predicate, just triggered by
-  the merge instead of a human command. Nothing runs pre-merge: while the review is open the platform
-  holds the state (native approvals + threads), and CI never touches the review branch, so an
-  in-flight approval is never dismissed by a CI commit. A scheduled job re-checks recently-merged
-  reviews as a safety net.
+  is on a platform (step 3d2), this also opens a review **PR/MR on the Product** for the artifact
+  (`yad gate open`).
+- **With a platform, the merge is what advances.** Reviewers approve and comment on the review PR/MR.
+  Once the approvals are enough and every comment thread is resolved, a person merges it. Then:
+  - `ledger: local` — run `yad gate sync <epic>` (or `action: sync`). It pulls the approvals and comments
+    into the ledger and advances the step.
+  - `ledger: verified` — nothing to run. The Product's CI runs `yad gate ci --merged` at the merge and
+    commits the ledger to the Product's default branch. `yad gate sync` is only an advisory view here.
+    Nothing runs pre-merge: while the review is open the platform holds the state (native approvals +
+    threads), and CI never touches the review branch, so an in-flight approval is never dismissed by a
+    CI commit. A scheduled job re-checks recently-merged reviews as a safety net.
+- **With no platform**, record the review by hand: `yad gate comment <epic> <artifact> --by <name>`,
+  `yad gate approve <epic> <artifact> --by <name>`, then `yad gate advance <epic> <artifact>`. `advance`
+  moves forward **only if** the rule is met; otherwise it tells you what is still missing.
 
 ---
 
@@ -405,8 +417,12 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    AI tool that helped (chosen from `config.yaml` `build.ai_coauthor.allowed`).
 3. **Check** — `yad-checks repo:<repo> action: run` → the gates must pass: spec-link,
    contract-check, build/test/lint, verified-commits (every commit signed with a
-   platform-Verified key — on the Product and every repo; write access decides who can author), and the
-   pattern gates commit-message / pr-title / pr-template.
+   platform-Verified key — on the Product and every repo; write access decides who can author), the
+   pattern gates commit-message / pr-title / pr-template, and the feature-thread gates: lineage-check
+   (a change, defect or hotfix epic must thread to a real parent), epic-open (no new work on a sealed,
+   fully shipped epic) and reconcile-debt (a thread with an open hotfix debt must pay it first). The
+   risk-map check runs too, but it only warns: it reports how many approvers the PR asks for and never
+   blocks a merge.
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
    to print the approval count and the touched domains (no reviewers are requested — ask them on the PR). The PR is based on the repo's **own default branch** (resolved:
@@ -422,7 +438,7 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    `yad tidy up` folds them in later. An empty `build-log.json` is normal — it is only half the ledger.
    The machine-written ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed for you
    by **`yad checkpoint`** — a `chore(product)` audit-trail commit Build runs so you never hand-commit
-   this state; you don't review these machine writes, but CI and `yad status` on other machines must see them.
+   this state; you don't review these machine writes, but CI and the `yad-status` skill on other machines must see them.
    The `trust-log`/`build-log` entries are written as small **shard files** (one per entry), so two people
    driving different stories of the same epic never conflict; once a story ships, **`yad checkpoint`**'s
    companion **`yad tidy up`** folds its finished shards back into the single ledger file (the manual
@@ -495,8 +511,8 @@ project's approval settings say so.
   adds 1; a step with several tags takes the largest, never the sum. None of the approvals should be the
   author's own.
 - **What holds a gate:** one approval from someone other than the author (the **base**), plus every
-  comment thread resolved and the review PR merged. The risk step is **advisory**. A later yadflow change will enforce it, capped by the
-  active people, together with `yad gate lower --reason`, a recorded way out of a gate a team cannot meet.
+  comment thread resolved and the review PR merged. The risk step is **advisory**. Enforcing it, capped by
+  the active people, is planned but parked (roadmap row E108).
 - **The cap (reported):** the engine caps the count at the number of **active people less one** (never
   below 1) and prints it. "Active people" means people who committed or approved lately, counted live.
   The `− 1` leaves one seat for the author. A contract gate's capped ask is 1 with 2 active people, 2 with
@@ -505,9 +521,8 @@ project's approval settings say so.
 - **Why the cap is not enforced yet:** the count of people can read high. A commit is counted by its git
   name and an approval by its platform login, and they are two people until proven one — so a
   two-person team can read as four, the cap lowers nothing, and an enforced gate would lock them out.
-  The capped count will be enforced only once the count is accurate, together with
-  `yad gate lower --reason`, a way out of a gate that cannot be met. Until then the engine only warns
-  when a gate may not pass (see the last point below).
+  Enforcing the capped count waits until the count is accurate, and that work is parked (roadmap row
+  E108). Until then the engine only warns when a gate may not pass (see the last point below).
 - `yad gate sync` and `yad gate status` print the count, for example
   `count: 3 approvers = base 1 + contract risk 2 — capped to 1: 2 active people, less one seat for the author — base enforced, risk step advisory — 1 short`.
   A team gate that passed on its counted approvals while the cap lowered its ask says so later: `count capped from 3 to 1 (2 active people)`.
@@ -593,7 +608,50 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
 
 ---
 
-## 10. Naming cheat sheet
+## 10. Working together: drafts, the ledger, and the record
+
+Short notes on the commands a team uses every day. Each one is covered in full in
+[`docs/CLI.md`](docs/CLI.md).
+
+**Drafts and who is editing what** (in the Product, during Shape):
+
+| Command | What it does |
+|---|---|
+| `yad capture` | Saves your changed Shape drafts onto a private branch, `yad/wip/<your git name>/<epic>`, without touching your checkout. A hook runs it after every agent edit (Claude Code and Cursor), so you rarely type it. |
+| `yad claims [<epic>]` | Lists who else is editing which file right now, read from everyone's capture branches. It is advice, not a lock: nothing is blocked. |
+| `yad fold <epic> <step>` | Ends an authoring step with one clean commit, `docs(<epic>): author <step>`, holding only that step's files. The authoring skills run it for you. |
+| `yad assign <epic> <step> [--to <name>]` / `yad unassign` / `yad owners` | Names one person as the owner of an authoring step (for example "Bob writes the architecture"). Advice only: it never blocks an edit or a review. |
+
+**Reviews with no GitHub or GitLab.** When the Product has no platform, the review is recorded on your
+machine: `yad gate comment <epic> <artifact> --by <name>` records who commented,
+`yad gate approve <epic> <artifact> --by <name>` records one approval, and
+`yad gate advance <epic> <artifact>` moves the step forward when the rule is met.
+
+**The two ledger modes.** The `ledger` setting in `.sdlc/product.json` decides who writes the gate
+ledger (see the table in section 3, step d2):
+
+- `ledger: local` — your machine writes it. It works offline and needs no CI.
+- `ledger: verified` — only CI writes it, at the merge of a review PR/MR, with a signed commit. A guard
+  stops anyone else: the `ledger-guard` check in CI, an agent hook (Claude Code and Cursor), and a git
+  pre-commit hook in each clone.
+
+**When a ledger change must land anyway** (verified mode): `yad commit --manual --reason "<why>" --type
+<type> -m "<subject>"` commits past the local hook and records your reason in the commit as a
+`Ledger-Override: <why>` line. The CI check still fails that commit, and shows your reason, so someone
+allowed to bypass the rules must merge it. What to switch on in GitHub or GitLab so the checks really
+hold a merge: [`docs/branch-protection.md`](docs/branch-protection.md).
+
+**Reading the record** (writes nothing to your work):
+
+- `yad history list` shows every work item, newest first. `yad history show <id>` prints one item's
+  steps and approvals, and `yad history search <text>` finds text in ids, titles, themes, types and repos, and in
+  who closed or merged a step.
+- `yad index` rebuilds `.sdlc/index.json`, a single file with one summary per work item, so a reader
+  opens one file instead of walking every epic folder.
+
+---
+
+## 11. Naming cheat sheet
 
 Work sits on four rungs. There is nothing above the Product, and nothing between Story and Task:
 
@@ -635,7 +693,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 
 ---
 
-## 11. The skills at a glance (what to invoke)
+## 12. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
 descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
@@ -646,6 +704,9 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-connect-design` | Connect a design tool (Figma / pencil) so `yad-ui` can materialize the screens (setup). |
 | `yad-connect-testing` | Connect a testing tool (Playwright / cypress / pytest / maestro) so `yad-test-cases` can implement the automation (setup). |
 | `yad-connect-learning` | Connect a learning tool (DeepTutor) so `yad-learn` can tutor the team in context (setup). |
+| `yad-connect-docs` | Connect a docs publishing target (GitHub Pages / GitLab Pages, or build-only) so the generated docs sites can be deployed (setup). |
+| `yad-sync-repos` | Switch every connected repo to its default branch and fast-forward it from origin, in one go. Skips a repo with local changes. |
+| `yad-discovery` | *(Optional, once per product)* Write the **Foundation** in `foundation/` — purpose, scope, MVP, roadmap, stack, repos — after `yad foundation new`. |
 | `yad-learn` | At any stage, learn a concept in the context of what's being built; records a personal, local-only skills log (gitignored, never committed/pushed). Opt-in, never gates. |
 | `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
 | `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
@@ -655,10 +716,11 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
 | `yad-review-companion` | Make review fun & visible: 60-sec trailer, swipe cards, grounded chat, engagement signal + friendly nudge (Shape gate & code PRs). |
+| `yad-pair-review` | A guided, two-way review: the AI walks you through a change one stop at a time, highest risk first, and asks you about each. Its CLI side is `yad gate walkthrough` (Shape) and `yad review walkthrough` (code PR). |
 | `yad-product-bridge` | Open the review PR/MR on the Product and sync platform approvals back. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |
-| `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |
+| `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template, the feature-thread gates lineage-check / epic-open / reconcile-debt, and the advisory risk-map check). |
 | `yad-pr-template` | Install the platform PR/MR template + risk routing + the pr-title/pr-template gate scripts. |
 | `yad-commit` | Commit one staged atomic change by the conventions (`--ai` co-author footer, atomic guard). |
 | `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, assign the committer — no reviewers are requested; it prints a reviewer suggestion from recent history and CODEOWNERS, a hint only), based on the repo's **resolved default branch** — `--base` overrides, and a non-default base warns (it costs the AI first pass). |
@@ -674,10 +736,14 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad checkpoint` *(CLI)* | Commit the machine-written Build ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(product)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |
 | `yad tidy up` *(CLI)* | Fold a shipped story's finished `trust-log`/`build-log` **shards** back into the single ledger file — the manual "pack it up" companion to the shard-then-fold storage (like `git gc`). Default branch only, `--push` to push; a no-op when nothing is foldable. |
 | `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
+| `yad-docs` | Generate an epic's interactive documentation site from its approved artifacts, and publish it. Never a gate. |
+| `yad-docs-overview` | Generate the project-level overview site (`docs/sdlc-site/`) that shows every yadflow stage. |
+| `yad-docs-sync` | Report which generated docs sites are stale, and why; rebuild them on request. |
+| `yad-report` | File a bug against yadflow with privacy-safe diagnostics. It shows you the exact text and asks before posting. |
 
 ---
 
-## 12. Want more detail?
+## 13. Want more detail?
 
 - **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
