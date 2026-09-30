@@ -1241,7 +1241,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   if (!push) return { synced, committed: true, pushed: false };
 
   if (pushWithRebase(root, target).ok) { ok(`pushed to origin/${target}`); return { synced, committed: true, pushed: true }; }
-  fail(`could not push to origin/${target}${merged ? ' — protected default branch? allow the gate bot to push the merge advance (see yad-hub-bridge references/bridge.md)' : ''} — or run \`yad gate sync\` locally`);
+  fail(`could not push to origin/${target}${merged ? ' — protected default branch? allow the gate bot to push the merge advance (see yad-product-bridge references/bridge.md)' : ''} — or run \`yad gate sync\` locally`);
   process.exitCode = 1;
   return { synced, committed: true, pushed: false };
 }
@@ -1745,7 +1745,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     '- This step advances when approvals are satisfied, all threads are resolved, and this PR is merged.',
     '',
     // Required by the Product `pr-template` gate (check_hub_body). Mirrors the Checklist block of the
-    // committed static template (yad-pr-template/templates/hub/<platform>/) so the generated body
+    // committed static template (yad-pr-template/templates/product/<platform>/) so the generated body
     // passes on the first CI run.
     '## Checklist',
     '- [ ] `owner` set in the artifact frontmatter (inherited from `epic.md`)',

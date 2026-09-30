@@ -211,7 +211,7 @@ Report: epic ID, the path to `analysis.md`, and that the next action is **review
 `yad-review-gate` (base rule: 1 distinct approver, who should not be the author). **Never mark the analysis-review step approved
 here** — only real reviewers do that through the gate. Shape steps do not auto-advance. When the
 analysis gate passes, control moves to `yad-epic`, which reads `analysis.md` as input. When the
-Product has a platform, the gate opens a review PR on the Product (via `yad-hub-bridge`) and
+Product has a platform, the gate opens a review PR on the Product (via `yad-product-bridge`) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
 is recorded local.
 

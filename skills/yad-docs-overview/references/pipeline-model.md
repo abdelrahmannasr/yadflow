@@ -76,7 +76,7 @@ The gated authoring chain + the reusable review gate (10 steps, or 12 with the o
 | `yad-test-cases` | → `test-cases-review` (parallel, non-blocking) | `test-cases.md`, `test-links.json` |
 | `yad-review-gate` | the shared gate | `reviews/*.md`, `approvals.json`, `comments.json` |
 | `yad-review-companion` | the fun/visible review layer (trailer/cards/chat + engagement) | `approvals.json` `engagement`, platform trailer/cards |
-| `yad-hub-bridge` | the platform PR/MR bridge | `product-prs.json` + `hub-prs.json` |
+| `yad-product-bridge` | the platform PR/MR bridge | `product-prs.json` + `hub-prs.json` |
 
 ### Path: Build (`phase: 3-build`)
 Per-story, per-repo: `spec → tasks → implement → checks → engineer-review`, plus the commit/PR helpers.

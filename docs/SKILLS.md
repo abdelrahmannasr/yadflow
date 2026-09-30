@@ -157,7 +157,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   engineer, and records their review-skill growth in the **local-only** `yad-learn` ledger (`yad status`
   rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
   surfaces genuine concerns as normal blocking comments.
-- **`yad-hub-bridge`** — The templated PR/MR bridge for the Shape gate. When the Product has a platform
+- **`yad-product-bridge`** — The templated PR/MR bridge for the Shape gate. When the Product has a platform
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
   ledger. The file ledger stays the source of truth; degrades to a local gate with no platform, where

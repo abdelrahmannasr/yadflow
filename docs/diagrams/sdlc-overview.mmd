@@ -90,7 +90,7 @@ flowchart LR
     cepic -. re-author only the changed artifacts .-> ar
     cepic -. defect / behavioural change .-> st
     run -. drives earned Build steps .-> im
-    bridge["yad-hub-bridge<br/>review PR/MR ↔ ledger (merge-time)"]:::gated
+    bridge["yad-product-bridge<br/>review PR/MR ↔ ledger (merge-time)"]:::gated
     bridge -. advances on merge .-> gEp
     status["yad-status<br/>read-only view over all of it"]
     status -. observes .-> FRONT

@@ -22,7 +22,7 @@
   `auth`/`payments`, 1 otherwise (the largest step, never the sum). No approval should be the author’s own.
 - Enforced: **1 approval** (the base). The risk step is **advisory**. `yad gate status <epic>`
   prints the count capped at the active people less one (one seat is left for the author), and
-  `yad-hub-bridge`'s `hub-route.sh` run on this description prints the full count.
+  `yad-product-bridge`'s `product-route.sh` run on this description prints the full count.
 - No reviewers are requested automatically — ask them on this PR. The `domain:<repo>` labels show the touched repos.
 
 ## How to review (this drives the gate)

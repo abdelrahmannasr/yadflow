@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyHubActions, renamedNameHits, PRODUCT_PROFILE_GATES, PRODUCT_CHECK_WORKFLOWS, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -755,6 +755,8 @@ export function ciTagsChecks(checks, root, hub, registry) {
     fragments.push(
       { scope: 'hub', file: '.gitlab/ci/yad-gate-sync.yml', path: path.join(root, '.gitlab/ci/yad-gate-sync.yml') },
       { scope: 'hub', file: '.gitlab/ci/yad-verified-commits.yml', path: path.join(root, '.gitlab/ci/yad-verified-commits.yml') },
+      { scope: 'hub', file: '.gitlab/ci/yad-product-checks.yml', path: path.join(root, '.gitlab/ci/yad-product-checks.yml') },
+      // Its old name (E123), while it is still there — `renamed:` says to run `yad update`.
       { scope: 'hub', file: '.gitlab/ci/yad-hub-checks.yml', path: path.join(root, '.gitlab/ci/yad-hub-checks.yml') },
     );
   }
@@ -1949,21 +1951,81 @@ export function productPathBlindGate(file) {
 }
 
 // `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
-// through; that is safe only while the hub-checks workflow lists renames by BOTH paths (`--no-renames`).
+// through; that is safe only while the product-checks workflow lists renames by BOTH paths (`--no-renames`).
 // `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
 // workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
-export const HUB_CHECK_WORKFLOWS = ['.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml'];
+// The old names too (E123): an edited `yad-hub-checks.yml` is kept by `yad update`, and still runs.
 export function ownerGuardChecks(checks, root) {
   const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
   // The exemption's own pattern, not any mention of the folder: a comment is not a rule.
   const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('\\.sdlc/owners/[^/]+\\.json$'));
   if (!exempting.length) return;
   // Line by line: one fixed diff line must not hide its blind twin in the other job.
-  const blind = HUB_CHECK_WORKFLOWS.filter((rel) => renameBlindText(read(rel) || ''));
+  const blind = PRODUCT_CHECK_WORKFLOWS.filter((rel) => renameBlindText(read(rel) || ''));
   if (!blind.length) return;
   check(checks, 'owners:rename-blind', 'project', 'warn',
     `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,
     'add `--no-renames` (and `-c core.quotePath=false`) to that workflow\'s `git diff --name-only` lines, as the shipped one has — `yad update` did not replace it because it was changed by hand');
+}
+
+// Names the hub -> Product rename moved (E123), on the Product. Two kinds, both warnings:
+//   renamed:<old path>   something yad installed is still under its old name — a skill folder, or a CI
+//                        file. `yad update` renames it; an edited CI file it keeps, and says how to finish.
+//   renamed-ref:<file>   a file of the team's own names one of our old CI names, by file and line. yad
+//                        never edits those files; the one exception is the include line in the root
+//                        .gitlab-ci.yml, which `yad update` rewrites when it replaces the old fragment.
+// Silent when nothing old is left, so a project that never had the old names sees no line at all.
+export function renamedChecks(checks, root) {
+  if (!exists(productConfigPath(root))) return;
+  let installed = [];
+  // An unreadable provenance record or IDE target is named by its own check; this one then says nothing.
+  try { installed = [...legacyModuleActions(root), ...legacyHubActions(root)]; } catch { /* named elsewhere */ }
+  for (const a of installed) {
+    const { from, to } = a.rename;
+    check(checks, `renamed:${from}`, 'project', 'warn',
+      `${from} is an old name — renamed ${to}`,
+      a.status === 'modified'
+        ? `it was edited, so \`yad update\` keeps it: \`yad update --overwrite-local\` replaces it with ${to} (your copy is saved as ${path.basename(from)}${BACKUP_SUFFIX}); then copy your edits into ${to}`
+        : 'run `yad update` — it installs the new name and removes the old one');
+  }
+  const byFile = new Map();
+  for (const h of renamedNameHits(root)) {
+    if (!byFile.has(h.file)) byFile.set(h.file, []);
+    byFile.get(h.file).push(h);
+  }
+  for (const [file, hits] of byFile) {
+    const listed = hits.map((h) => `line ${h.line} \`${h.old}\` → \`${h.new}\``).join(', ');
+    const theirs = hits.filter((h) => !h.rewrittenBy);
+    // The include line is rewritten by yad — by a plain `yad update`, or, when the old fragment was edited,
+    // only by `--overwrite-local`. Until then the new fragment is not installed, so a hand edit of that line
+    // would include a file that is not there and fail every pipeline (review 1): say to leave it.
+    const late = hits.some((h) => h.rewrittenBy === 'overwrite-local');
+    const by = late ? '`yad update --overwrite-local`' : '`yad update`';
+    const all = theirs.length === hits.length;
+    const what = all ? (hits.length > 1 ? 'each' : 'it') : theirs.map((h) => `line ${h.line}`).join(', ');
+    const hint = theirs.length === 0
+      ? `${by} rewrites it when it replaces the old fragment${late ? ' — leave it until then: the new fragment is not installed before that' : ''}`
+      : `yad does not edit this file — change ${what} to ${!all && theirs.length > 1 ? 'their new names' : 'its new name'}${all ? '' : ` (${by} rewrites the include line itself${late ? ' — leave that one until then' : ''})`}`;
+    check(checks, `renamed-ref:${file}`, 'project', 'warn',
+      `${file} names what 4.0 renamed: ${listed}`, hint);
+  }
+}
+
+// `profile:<gate>` (E123). A Product workflow passes `--profile product` to the pattern gates, and a gate the
+// team edited before 4.0 — which `yad update` keeps — accepts only `code|hub`, so every Product PR fails it.
+// A warning, like E123's other lines. Only when a workflow on disk passes that profile; an old workflow still
+// passing `hub` breaks nothing.
+export function productProfileChecks(checks, root) {
+  if (!exists(productConfigPath(root))) return;
+  const passing = workflowsPassingProduct(root);
+  if (!passing.length) return;
+  for (const gate of PRODUCT_PROFILE_GATES) {
+    const gap = productProfileGap(path.join(root, gate));
+    if (!gap) continue;
+    check(checks, `profile:${gate}`, 'project', 'warn',
+      productProfileEffect(gap, gate, `${passing.join(' and ')} ${passing.length > 1 ? 'pass' : 'passes'}`),
+      `it was changed by hand, so \`yad update\` kept it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${path.basename(gate)}${BACKUP_SUFFIX})`);
+  }
 }
 
 // `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
@@ -2400,6 +2462,8 @@ export function collectDoctor(root, { headCount = null } = {}) {
   stepStateChecks(checks, root);
   ownerChecks(checks, root);
   ownerGuardChecks(checks, root);
+  renamedChecks(checks, root);
+  productProfileChecks(checks, root);
   phaseChecks(checks, root);
   laneChecks(checks, root);
   epicChecks(checks, root);

@@ -50,11 +50,13 @@ done
 case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [commit-message]: unknown --profile '$PROFILE' (code|hub|product)."; exit 1 ;; esac
 # `product` is the new name for the `hub` profile and BOTH are accepted.
 #
-# Not because the two sides update separately — they do not: this script and the workflow that passes
-# the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and land together on one `yad update`. It is
-# the plain add-before-remove ladder instead: accept the new spelling now, switch the workflow
-# templates to emit it in a later release, drop the old one after that. Every shipped template still
-# passes `--profile hub` today, so this arm is dead weight until that switch — which is the point.
+# This script and the workflow that passes the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and
+# normally land together on one `yad update` — but not always: a copy the team edited is kept. So the
+# order is add-before-remove: the new spelling was accepted first, the workflow templates switched to
+# emit it in E123 (`yad-product-checks.yml`), and the old one is dropped after that. `hub` stays
+# accepted meanwhile, for a workflow of the team's own or one they edited. The other direction — an
+# edited copy of THIS script from before 4.0, which rejects `product`, beside the new workflow — fails
+# every Product PR; `yad update` and `yad doctor` (`profile:`) say so.
 #
 # Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
 # load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`

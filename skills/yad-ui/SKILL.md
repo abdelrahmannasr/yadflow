@@ -216,7 +216,7 @@ Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used
 tool and what it produced (e.g. "Figma — 4 screens generated", the file URL + `design-links.json` path,
 or "no design tool — markdown-only"), and that the next action is **review** via `yad-review-gate` (base
 rule: 1 distinct approver, who should not be the author). **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review PR on the
-Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
+Product (via `yad-product-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
 the ledger; otherwise the review is recorded local.
 
 ## Reference

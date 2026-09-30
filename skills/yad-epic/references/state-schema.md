@@ -556,7 +556,7 @@ unchanged.)
 Each front **authoring** step opens its own git branch at the start of the step, named
 `<step>/EP-<slug>` where `<step>` ∈ `analysis | epic | architecture | ui-design | stories | test-cases`
 (`config.yaml` `defaults.shape_authoring_branch`). This is **distinct** from the review branch
-`review/EP-<slug>/<artifact-base>` that `yad-hub-bridge` opens later for the review PR/MR.
+`review/EP-<slug>/<artifact-base>` that `yad-product-bridge` opens later for the review PR/MR.
 
 The shared procedure (run once the `EP-<slug>` is known):
 1. **Git-safe / greenfield-safe:** if `{project-root}` is not a git work tree
@@ -596,10 +596,10 @@ name. The gate never reads the role. While the roster is on disk, the next sync 
 `yad gate ci`) records the login on such an entry when the roster places it for certain, removes `role`
 and `domain`, and keeps the old name in `rosterName` (E64). Some entries are left as they are — a name two
 logins share, or several records that do not prove they are one review (most GitLab role records); see
-`yad-hub-bridge/references/login-roster.md`. The dated `approved.md` still prints the roles as recorded.
+`yad-product-bridge/references/login-roster.md`. The dated `approved.md` still prints the roles as recorded.
 
 `source: "bridge"` marks an approval synced from a Product review PR/MR by `yad-review-gate action: sync`
-(via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`, except for the
+(via `yad-product-bridge`). Manual approvals omit `source` and are never altered by `sync`, except for the
 login recorded on an older entry (above). A manual approval written by `yad gate approve` (E112, a
 Product with no platform) carries `artifactHash`, so an edit to the artifact revokes it as it revokes a
 bridge approval; one written by hand before E112 has none, so an edit does not revoke it.

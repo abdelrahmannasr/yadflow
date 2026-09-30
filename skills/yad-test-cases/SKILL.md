@@ -195,7 +195,7 @@ Report: the path to `test-cases.md`, the connected testing tool and what it prod
 Build may already be underway in parallel, and that the next action is **review** via
 `yad-review-gate` (base rule: 1 distinct approver, who should not be the author). **Never record approval here.** Shape steps do not
 auto-advance. When the Product has a platform, the gate opens a review
-PR on the Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
+PR on the Product (via `yad-product-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
 into the ledger; otherwise the review is recorded local.
 
 ## Reference

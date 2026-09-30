@@ -401,7 +401,7 @@
       </div>
     </div>
     <div class="caption">
-      <code>yad-status</code> is a read-only view over all of it · <code>yad-hub-bridge</code> mirrors Shape reviews to real PRs/MRs · <code>yad thread</code> / <code>yad reconcile</code> surface a feature's evolution and any post-lock drift.
+      <code>yad-status</code> is a read-only view over all of it · <code>yad-product-bridge</code> mirrors Shape reviews to real PRs/MRs · <code>yad thread</code> / <code>yad reconcile</code> surface a feature's evolution and any post-lock drift.
     </div>
   </div>
 
@@ -538,7 +538,7 @@ each code repo/
   <div class="term"><strong>Reviewer</strong><span class="badge b-role">roles</span><br>Anyone with access to the repo who reads, challenges and comments on an artifact, and records an approval when satisfied. The approval is recorded under their platform login.</div>
   <div class="term"><strong>local gate</strong><span class="badge b-gate">gates</span><br>The gate run purely on files (no platform): reviewers comment in <code>reviews/…--comments.md</code>, approvals land in <code>approvals.json</code>, and an explicit <code>advance</code> moves the step. The mode everything degrades to when there is no GitHub/GitLab or no CLI.</div>
   <div class="term"><strong>PR-driven gate</strong><span class="badge b-gate">gates</span><br>When the Product is on a platform: each artifact’s review rides a real PR/MR. Reviewers approve/comment there; <code>yad gate sync</code> maps that state into the file ledger, and the step auto-advances <em>on merge</em> once the rule is met and every comment thread is resolved. The merge click is the human approval act.</div>
-  <div class="term"><strong>Hub bridge (<code>yad-hub-bridge</code>)</strong><span class="badge b-gate">gates</span><br>The machinery that connects the file ledger to platform PRs/MRs: opens the review PR per artifact, labels it (<code>domain:&lt;repo&gt;</code> for touched repos) without requesting reviewers, and provides the read-only <code>gh</code>/<code>glab</code> recipes for syncing approvals and comments back.</div>
+  <div class="term"><strong>Hub bridge (<code>yad-product-bridge</code>)</strong><span class="badge b-gate">gates</span><br>The machinery that connects the file ledger to platform PRs/MRs: opens the review PR per artifact, labels it (<code>domain:&lt;repo&gt;</code> for touched repos) without requesting reviewers, and provides the read-only <code>gh</code>/<code>glab</code> recipes for syncing approvals and comments back.</div>
   <div class="term"><strong>Merge-time gate sync</strong><span class="badge b-gate">gates</span><br>A CI workflow on the Product that runs <code>yad gate ci</code> on merge — <strong>CI is the sole writer of the ledger</strong>, and writes only at merge, on the default branch. During review CI writes nothing: the platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review branch — so an in-flight approval is never dismissed and required checks never strand. On the human merge it re-reads approvals, advances the step, and flips the artifact status on the default branch. The sweep that catches a missed merge keeps re-visiting each merged review for a week — that costs a read, not a commit, because the ledgers are written in a canonical order and an unchanged record re-serializes to an identical file (#163). A <code>ledger-guard</code> check keeps humans out of the gate files — with one carve-out: a brand-new epic's <strong>seed</strong>, which no CI path can write, so it rides the epic's first review PR/MR (creation, not mutation). CI never approves and never merges; the human keeps the merge click, then <code>git pull</code>s.</div>
   <div class="term"><strong>Approval revocation (re-hash)</strong><span class="badge b-gate">gates</span><br>If a reviewed artifact actually changes after approval, the recorded approvals are revoked automatically (the artifact is re-hashed) — reviewers get a fresh pass at the new content.</div>
   <div class="term"><strong>Risk tags / risk routing</strong><span class="badge b-gate">gates</span><br>Labels (<code>contract</code>, <code>auth</code>, <code>payments</code>) and the PR template’s Impact &amp; Risk block that decide how many must approve. High risk adds 1 and a touched contract surface adds 2 (<code>risk-route.sh</code> prints the count, e.g. <code>ROUTE: 3 approvers = base 1 + contract risk 2</code>, and lists the touched domains as a hint for whom to ask).</div>
@@ -751,7 +751,7 @@ each code repo/
     <tr><td><a href="#sk-stories"><code>yad-stories</code></a></td><td>Front</td><td>Break the epic into repo-tagged stories.</td></tr>
     <tr><td><a href="#sk-test-cases"><code>yad-test-cases</code></a></td><td>Front</td><td>With the test architect, author the test cases; implement the automation when a testing tool is connected.</td></tr>
     <tr><td><a href="#sk-gate"><code>yad-review-gate</code></a></td><td>Cross-cutting</td><td>Review / comment / approve / advance <strong>any</strong> gate.</td></tr>
-    <tr><td><a href="#sk-bridge"><code>yad-hub-bridge</code></a></td><td>Cross-cutting</td><td>Run Shape reviews over real PRs/MRs and sync them back.</td></tr>
+    <tr><td><a href="#sk-bridge"><code>yad-product-bridge</code></a></td><td>Cross-cutting</td><td>Run Shape reviews over real PRs/MRs and sync them back.</td></tr>
     <tr><td><a href="#sk-companion"><code>yad-review-companion</code></a></td><td>Cross-cutting</td><td>A 60-second trailer, review cards and a grounded chat on any review PR/MR.</td></tr>
     <tr><td><a href="#sk-pair-review"><code>yad-pair-review</code></a></td><td>Cross-cutting</td><td>A guided, two-way walkthrough of a PR/MR, one risk-ordered stop at a time.</td></tr>
     <tr><td><a href="#sk-spec"><code>yad-spec</code></a></td><td>Build A</td><td>Spec one ready story in one repo (Spec Kit ceremony).</td></tr>
@@ -917,10 +917,10 @@ yad-review-gate … action: advance    # move on — only if the rule is met, el
   </div>
 
   <div class="skillcard" id="sk-bridge">
-    <h4><code>yad-hub-bridge</code></h4>
+    <h4><code>yad-product-bridge</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> the verified ledger between the file ledger and real PRs/MRs on the Product: opens a review PR per artifact and labels it (it requests no reviewers), and provides the read-only <code>gh</code>/<code>glab</code> recipes that pull platform approvals and comments back into the files. The file ledger always stays the source of truth.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Mostly invoked <em>for</em> you by the gate (its <code>open</code>/<code>sync</code>). You call it directly once, to wire the event-driven sync CI:</div>
-<pre><code>yad-hub-bridge action: wire    # Product CI runs `yad gate ci` on every approve / request-changes / merge</code></pre>
+<pre><code>yad-product-bridge action: wire    # Product CI runs `yad gate ci` on every approve / request-changes / merge</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Once during setup (step “wire the Product”), if you want Shape reviews to ride real PRs/MRs. No platform or no <code>gh</code>/<code>glab</code>? Everything degrades to the local gate with no error — you never <em>need</em> this skill.</div>
   </div>
 

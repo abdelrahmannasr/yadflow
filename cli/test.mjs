@@ -1117,13 +1117,307 @@ test('gitlab migration rewrites the root .gitlab-ci.yml include to the new fragm
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// E123: the hub -> Product rename of what yad installed. A workflow yad wrote under its old name goes by
+// the provenance record, in the three states every managed file has: unedited → removed; no record →
+// removed after a .yad-orig copy; edited → kept (`modified`) until --overwrite-local.
+const oldHubChecks = '.github/workflows/yad-hub-checks.yml';
+const newProductChecks = '.github/workflows/yad-product-checks.yml';
+const shippedHubChecks = () => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-product-checks.yml'), 'utf8')
+  .replace(/yad-product-checks/g, 'yad-hub-checks').replace(/--profile product/g, '--profile hub');
+const ledgerOf = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8')).files;
+// Puts the Product back to a pre-E123 install: the old workflow, recorded as written by yad, the new one gone.
+function preE123Product(T) {
+  fs.rmSync(path.join(T, newProductChecks), { force: true });
+  fs.writeFileSync(path.join(T, oldHubChecks), shippedHubChecks());
+  const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
+  delete rec.files[newProductChecks];
+  rec.files[oldHubChecks] = contentShaOf(path.join(T, oldHubChecks));
+  fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
+}
+const { contentSha: contentShaOf } = await import('./lib.mjs');
+
+test('E123 update: an unedited yad-hub-checks.yml becomes yad-product-checks.yml, and leaves the record', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    assert.ok(fs.existsSync(path.join(T, newProductChecks)), 'a fresh install writes the new name');
+    assert.ok(!fs.existsSync(path.join(T, oldHubChecks)), 'and never the old one');
+    preE123Product(T);
+    const r = await reconcile(T, { fix: true, scope: 'changed' });
+    assert.ok(r.items.some((i) => i.status === 'legacy' && i.item === `${oldHubChecks} → ${newProductChecks}`), 'planned as a rename');
+    assert.ok(!fs.existsSync(path.join(T, oldHubChecks)), 'old name removed');
+    assert.ok(!fs.existsSync(path.join(T, `${oldHubChecks}.yad-orig`)), 'no copy: the record proves it was ours, unedited');
+    assert.equal(fs.readFileSync(path.join(T, newProductChecks), 'utf8'), fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-product-checks.yml'), 'utf8'));
+    assert.ok(!Object.hasOwn(ledgerOf(T), oldHubChecks), 'the old line left the provenance record');
+    assert.ok(Object.hasOwn(ledgerOf(T), newProductChecks), 'the new one is recorded');
+    const again = await reconcile(T, { fix: false });
+    assert.equal(again.counts.legacy, 0, 'idempotent');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 update: an old workflow with no record is removed after a .yad-orig copy', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
+    delete rec.files[oldHubChecks];
+    fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
+    const before = fs.readFileSync(path.join(T, oldHubChecks), 'utf8');
+    await reconcile(T, { fix: true, scope: 'changed' });
+    assert.ok(!fs.existsSync(path.join(T, oldHubChecks)), 'old name removed');
+    assert.equal(fs.readFileSync(path.join(T, `${oldHubChecks}.yad-orig`), 'utf8'), before, 'its content is kept beside it');
+    assert.ok(fs.existsSync(path.join(T, newProductChecks)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 update: an edited old workflow is kept (modified) until --overwrite-local, which saves it first', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    const edited = `${shippedHubChecks()}# our own step\n`;
+    fs.writeFileSync(path.join(T, oldHubChecks), edited);
+    const { value: r, out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+    assert.ok(r.items.some((i) => i.status === 'modified' && i.item.startsWith(oldHubChecks)), 'reported as modified');
+    assert.equal(fs.readFileSync(path.join(T, oldHubChecks), 'utf8'), edited, 'kept as the team left it');
+    assert.match(out, /hub\/\.github\/workflows\/yad-hub-checks\.yml was renamed \.github\/workflows\/yad-product-checks\.yml in this release, but it was edited, so it is kept — it goes on running under its old name/);
+    assert.match(out, /`yad update --overwrite-local` replaces it with \.github\/workflows\/yad-product-checks\.yml \(your copy is saved as yad-hub-checks\.yml\.yad-orig\); then copy your edits into/);
+    assert.ok(Object.hasOwn(ledgerOf(T), oldHubChecks), 'nothing done, so the record keeps its line');
+    assert.ok(!fs.existsSync(path.join(T, newProductChecks)), 'and the new name is not installed beside it');
+    await reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true });
+    assert.ok(!fs.existsSync(path.join(T, oldHubChecks)), 'removed under --overwrite-local');
+    assert.ok(fs.existsSync(path.join(T, newProductChecks)), 'and the new name installed');
+    assert.equal(fs.readFileSync(path.join(T, `${oldHubChecks}.yad-orig`), 'utf8'), edited, 'after saving the edit');
+    assert.ok(!Object.hasOwn(ledgerOf(T), oldHubChecks));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1: old and new both present — the rename never writes over an edited new file', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const mine = `${fs.readFileSync(path.join(T, newProductChecks), 'utf8')}# the team's step\n`;
+    fs.writeFileSync(path.join(T, newProductChecks), mine);
+    // The old name, unedited and recorded, beside it.
+    fs.writeFileSync(path.join(T, oldHubChecks), shippedHubChecks());
+    const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
+    rec.files[oldHubChecks] = contentShaOf(path.join(T, oldHubChecks));
+    fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
+    for (const opts of [{ scope: 'changed' }, { scope: 'all' }]) {
+      await reconcile(T, { fix: true, ...opts });
+      assert.equal(fs.readFileSync(path.join(T, newProductChecks), 'utf8'), mine, `the team's edit survives (${opts.scope})`);
+      assert.ok(!fs.existsSync(path.join(T, oldHubChecks)), 'the old name is still removed');
+    }
+    // --overwrite-local reaches it through its own action, with its own copy.
+    await reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true });
+    assert.equal(fs.readFileSync(path.join(T, `${newProductChecks}.yad-orig`), 'utf8'), mine);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1: an edited old workflow kept — its new name is not installed beside it, even by check --fix', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    fs.writeFileSync(path.join(T, oldHubChecks), `${shippedHubChecks()}# ours\n`);
+    const r = await reconcile(T, { fix: true, scope: 'all' });
+    assert.ok(!fs.existsSync(path.join(T, newProductChecks)), 'not installed: both would run every gate twice');
+    assert.ok(!r.items.some((i) => i.item === newProductChecks), 'and not reported as missing');
+    const { withoutKeptRenames } = await import('./plan.mjs');
+    const kept = { rename: { from: 'a.yml', to: 'b.yml' }, status: 'modified', root: T };
+    const newOne = { managed: { dest: path.join(T, 'b.yml') }, status: 'missing' };
+    assert.deepEqual(withoutKeptRenames([kept, newOne]), [kept]);
+    assert.equal(withoutKeptRenames([{ ...kept, status: 'legacy' }, newOne]).length, 2, 'a rename that happens installs normally');
+    fs.writeFileSync(path.join(T, 'b.yml'), 'x');
+    assert.equal(withoutKeptRenames([kept, newOne]).length, 2, 'a new file already there is judged by its own action');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1 (GitLab): an edited old fragment — the include line is left for --overwrite-local, and the text says so', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const oldFrag = '.gitlab/ci/yad-hub-checks.yml';
+    const newFrag = '.gitlab/ci/yad-product-checks.yml';
+    fs.rmSync(path.join(T, newFrag));
+    const edited = '# yad-managed-include: yad-checks\nyad-hub-commit-message: { script: [ours] }\n';
+    fs.writeFileSync(path.join(T, oldFrag), edited);
+    const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
+    delete rec.files[newFrag];
+    rec.files[oldFrag] = 'sha256:somethingelse';
+    fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
+    // A job named on the include line itself is the team's; only the path inside is yad's to rewrite.
+    fs.writeFileSync(path.join(T, '.gitlab-ci.yml'), `include:\n  - local: '${oldFrag}' # needs yad-hub-pr-title\n`);
+    const { collectDoctor } = await import('./doctor.mjs');
+    const ref = collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.gitlab-ci.yml');
+    assert.equal(ref.message, '.gitlab-ci.yml names what 4.0 renamed: line 2 `yad-hub-checks` → `yad-product-checks`, line 2 `yad-hub-pr-title` → `yad-product-pr-title`');
+    assert.equal(ref.hint, 'yad does not edit this file — change line 2 to its new name (`yad update --overwrite-local` rewrites the include line itself — leave that one until then)');
+    let { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'all' }));
+    assert.ok(!fs.existsSync(path.join(T, newFrag)), 'the new fragment waits for the rename');
+    assert.equal(fs.readFileSync(path.join(T, oldFrag), 'utf8'), edited);
+    assert.match(out, /\.gitlab-ci\.yml:2 includes the edited old fragment — `yad update --overwrite-local` rewrites it when it replaces that fragment; leave it until then/);
+    assert.match(out, /was edited, so it is kept — the root \.gitlab-ci\.yml goes on including it under its old name/);
+    ({ out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true })));
+    assert.doesNotMatch(out, /so it is kept/, 'not said on the run that replaces it');
+    assert.match(out, /\.gitlab-ci\.yml:2 includes the old fragment — rewritten to name yad-product-checks/);
+    assert.ok(fs.readFileSync(path.join(T, '.gitlab-ci.yml'), 'utf8').includes(`- local: '${newFrag}' # needs yad-hub-pr-title`));
+    assert.ok(fs.existsSync(path.join(T, newFrag)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 1: an edited Product gate that rejects --profile product is named by update and doctor', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const gate = path.join(T, 'checks/pr-title.sh');
+    fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+    assert.match(out, /hub\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes — every Product PR fails that check — it was edited, so it is kept/);
+    const { collectDoctor } = await import('./doctor.mjs');
+    const hit = collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:'));
+    assert.deepEqual(hit.map((x) => [x.id, x.status]), [['profile:checks/pr-title.sh', 'warn']]);
+    assert.match(hit[0].message, /^checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes/);
+    // With no workflow passing `product`, nothing breaks, and nothing is said.
+    fs.rmSync(path.join(T, newProductChecks));
+    assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0);
+    // Every shipped gate accepts it.
+    const { productProfileGap } = await import('./plan.mjs');
+    for (const g of ['skills/yad-checks/templates/checks/commit-message.sh', 'skills/yad-pr-template/templates/checks/pr-title.sh', 'skills/yad-pr-template/templates/checks/pr-template.sh']) {
+      assert.equal(productProfileGap(path.join(ROOT, g)), null, g);
+    }
+    // `product` in the list but never turned into `hub`: it passes the list and skips every Product rule.
+    const shipped = fs.readFileSync(path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-title.sh'), 'utf8');
+    fs.writeFileSync(gate, shipped.replace('[ "$PROFILE" = product ] && PROFILE=hub', ''));
+    assert.equal(productProfileGap(gate), 'unmapped');
+    await reconcile(T, { fix: true }); // puts the new workflow back
+    const unmapped = collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh');
+    assert.match(unmapped.message, /^checks\/pr-title\.sh accepts `--profile product` but never turns it into `hub`, which \.github\/workflows\/yad-product-checks\.yml passes — so it skips the Product's rules and passes what it should stop$/);
+    // Other spellings of the branch and of the mapping are read as the same thing.
+    for (const [branch, mapping, gap] of [
+      ['if [ $PROFILE = hub ]; then', '', 'unmapped'],
+      ['if [[ "$PROFILE" == hub ]]; then', '', 'unmapped'],
+      ['if [ "$PROFILE" = hub ]; then', '[[ $PROFILE == product ]] && PROFILE=hub', null],
+      ['if [ "$PROFILE" = hub ]; then', 'case "$PROFILE" in product) PROFILE=hub ;; esac', null],
+      ['if [ "$PROFILE" = hub ]; then', '# we used to run [ "$PROFILE" = product ] && PROFILE=hub here', 'unmapped'],
+    ]) {
+      fs.writeFileSync(gate, `case "$PROFILE" in code|hub|product) ;; *) exit 1 ;; esac\n${mapping}\n${branch}\n  :\nfi\n`);
+      assert.equal(productProfileGap(gate), gap, `${branch} / ${mapping}`);
+    }
+    // commit-message.sh has no `= hub` branch, so a missing mapping there changes nothing.
+    const cm = path.join(T, 'checks/commit-message.sh');
+    fs.writeFileSync(cm, fs.readFileSync(cm, 'utf8').replace('[ "$PROFILE" = product ] && PROFILE=hub', ''));
+    assert.equal(productProfileGap(cm), null);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 2: an edited gate beside a kept old workflow that passes hub — nothing breaks, nothing is said', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    fs.writeFileSync(path.join(T, oldHubChecks), `${shippedHubChecks()}# ours\n`);
+    const gate = path.join(T, 'checks/pr-title.sh');
+    fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
+    const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'all' }));
+    assert.doesNotMatch(out, /--profile product/, 'the kept workflow passes hub, which the gate accepts');
+    const { collectDoctor } = await import('./doctor.mjs');
+    assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0, 'doctor agrees');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 review 2: the new name --overwrite-local installs is recorded, so edits copied into it survive the next update', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    preE123Product(T);
+    fs.writeFileSync(path.join(T, oldHubChecks), `${shippedHubChecks()}# ours\n`);
+    await reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true });
+    assert.ok(Object.hasOwn(ledgerOf(T), newProductChecks), 'recorded as yad wrote it');
+    const mine = `${fs.readFileSync(path.join(T, newProductChecks), 'utf8')}# ours\n`;
+    fs.writeFileSync(path.join(T, newProductChecks), mine);
+    const r = await reconcile(T, { fix: true, scope: 'changed' });
+    assert.equal(fs.readFileSync(path.join(T, newProductChecks), 'utf8'), mine, 'the copied-in edit is kept');
+    assert.ok(r.items.some((i) => i.item === newProductChecks && i.status === 'modified'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 update: a file at the old path that yad did not write (no marker) is never touched', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    // The pre-2.0 marker is not ours for this entry either: each rename checks its own.
+    for (const body of ['name: our-own\non: push\n', '# sdlc-managed: sdlc-checks\nname: x\n']) {
+      fs.writeFileSync(path.join(T, oldHubChecks), body);
+      const r = await reconcile(T, { fix: true, scope: 'changed' });
+      assert.equal(r.counts.legacy, 0);
+      assert.equal(fs.readFileSync(path.join(T, oldHubChecks), 'utf8'), body);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 update (GitLab): the fragment is renamed and the root include line rewritten; the preview says so', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const oldFrag = '.gitlab/ci/yad-hub-checks.yml';
+    const newFrag = '.gitlab/ci/yad-product-checks.yml';
+    fs.rmSync(path.join(T, newFrag));
+    fs.writeFileSync(path.join(T, oldFrag), '# yad-managed-include: yad-checks\nyad-hub-commit-message: {}\n');
+    fs.writeFileSync(path.join(T, '.gitlab-ci.yml'), `include:\n  - local: '${oldFrag}'\n  - local: '.gitlab/ci/yad-gate-sync.yml'\nmine:\n  needs: [yad-hub-pr-title]\n`);
+    const { value: plan, out } = await captureConsole(() => reconcile(T, { fix: false }));
+    assert.ok(plan.items.some((i) => i.status === 'legacy' && i.item === `${oldFrag} → ${newFrag}`));
+    assert.match(out, /\.gitlab-ci\.yml:2 includes the old fragment — rewritten by `yad check --fix`\/`yad update` to name yad-product-checks/);
+    assert.match(out, /\.gitlab-ci\.yml:5 names `yad-hub-pr-title`, renamed `yad-product-pr-title` in 4\.0 — yad does not edit this file; change it by hand/);
+    await reconcile(T, { fix: true, scope: 'changed' });
+    assert.ok(!fs.existsSync(path.join(T, oldFrag)));
+    assert.ok(fs.existsSync(path.join(T, newFrag)));
+    const rootCi = fs.readFileSync(path.join(T, '.gitlab-ci.yml'), 'utf8');
+    assert.ok(rootCi.includes(`- local: '${newFrag}'`), 'include rewritten');
+    assert.ok(rootCi.includes('needs: [yad-hub-pr-title]'), 'a job of the team\'s own is not edited');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 skill rename: yad-hub-bridge (and the older sdlc-hub-bridge) become yad-product-bridge, folder and opencode', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e123-skill-'));
+  try {
+    for (const old of ['yad-hub-bridge', 'sdlc-hub-bridge']) {
+      fs.mkdirSync(path.join(T, '.claude/skills', old), { recursive: true });
+      fs.writeFileSync(path.join(T, '.claude/skills', old, 'SKILL.md'), `---\nname: ${old}\n---\n`);
+    }
+    fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.opencode/commands/yad-hub-bridge.md'), '---\nname: yad-hub-bridge\n---\n');
+    const actions = legacyModuleActions(T, ['.claude', '.opencode']);
+    assert.deepEqual(actions.map((a) => a.rename.from).sort(),
+      ['.claude/skills/sdlc-hub-bridge', '.claude/skills/yad-hub-bridge', '.opencode/commands/yad-hub-bridge.md']);
+    for (const a of actions) a.apply();
+    assert.ok(!fs.existsSync(path.join(T, '.claude/skills/yad-hub-bridge')));
+    assert.ok(!fs.existsSync(path.join(T, '.claude/skills/sdlc-hub-bridge')));
+    assert.ok(!fs.existsSync(path.join(T, '.opencode/commands/yad-hub-bridge.md')));
+    assert.match(fs.readFileSync(path.join(T, '.claude/skills/yad-product-bridge/SKILL.md'), 'utf8'), /^name: yad-product-bridge$/m);
+    assert.match(fs.readFileSync(path.join(T, '.opencode/commands/yad-product-bridge.md'), 'utf8'), /^name: yad-product-bridge$/m);
+    assert.equal(legacyModuleActions(T, ['.claude', '.opencode']).length, 0, 'idempotent');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // Every GitLab fragment that runs a docker-image job must carry `tags: [$YAD_RUNNER_TAGS]` so a
 // tag-locked instance can route it (issue #50). Guards against a future revert dropping the tag.
 test('gitlab fragments declare tags: [$YAD_RUNNER_TAGS] on their docker jobs', () => {
   for (const rel of [
     'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml',
     'skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml',
-    'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml',
+    'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml',
   ]) {
     const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');
     assert.ok(/^\s*image:/m.test(txt), `${rel}: expected an image: job`);
@@ -24393,6 +24687,10 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     assert.deepEqual(local.value.pushed, { pushed: 'local', why: 'no remote named origin' });
     assert.match(local.out, /local only — no remote named origin/);
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    // No clean-up of its own after a push: a recent git (2.55 on the macOS runner) may start `gc`/maintenance in
+    // the background once a push lands, and a lock file it writes into the bare repo made the `rmSync` below fail
+    // with ENOTEMPTY (PR #297 CI). The retries cover any other short-lived writer.
+    for (const [k, v] of [['receive.autogc', 'false'], ['gc.auto', '0'], ['maintenance.auto', 'false']]) execFileSync('git', ['config', k, v], { cwd: remote });
     g('remote', 'add', 'origin', remote);
     const spawned = [];
     const spawner = (cmd, args, opts) => { spawned.push({ cmd, args, opts }); return { unref() {} }; };
@@ -24419,7 +24717,10 @@ test('E43 push: none with no remote; the hook starts ONE detached push per windo
     const manual = await captureRun(T, { noPush: false });
     assert.equal(manual.value.pushed.pushed, 'done', manual.out);
     assert.equal(execFileSync('git', ['rev-parse', 'yad/wip/ann-lee/EP-x'], { cwd: remote, encoding: 'utf8' }).trim(), g('rev-parse', 'yad/wip/ann-lee/EP-x'));
-  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(remote, { recursive: true, force: true }); }
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    fs.rmSync(remote, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
 });
 
 test('E43 people: capture branches, local and remote-tracking, are not counted as anyone committing', () => {
@@ -25555,7 +25856,7 @@ test('E114 doctor: a gate file is read one bash command at a time (review 2)', a
   assert.equal(blind('x="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "o/m...HEAD" > "$x"\n'), false);
   assert.equal(blind('  # we used to run git diff --name-only here\n'), false);
   for (const rel of ['skills/yad-checks/templates/checks/contract-check.sh', 'skills/yad-backfill/templates/checks/backfill-check.sh',
-    'skills/yad-checks/templates/github/yad-hub-checks.yml', 'skills/yad-checks/templates/gitlab/yad-hub-checks.gitlab-ci.yml']) {
+    'skills/yad-checks/templates/github/yad-product-checks.yml', 'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml']) {
     assert.equal(blind(fs.readFileSync(path.join(ROOT, rel), 'utf8')), false, `${rel} as shipped is not blind`);
   }
 });
@@ -25566,28 +25867,98 @@ test('E47 doctor: new owner-exempting checks beside a hub workflow that lists re
     const { collectDoctor } = await import('./doctor.mjs');
     const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'owners:rename-blind');
     const shipped = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    w('.github/workflows/yad-hub-checks.yml', shipped('skills/yad-checks/templates/github/yad-hub-checks.yml').replace(/ --no-renames/g, '').replace(/-c core\.quotePath=false /g, ''));
+    w('.github/workflows/yad-product-checks.yml', shipped('skills/yad-checks/templates/github/yad-product-checks.yml').replace(/ --no-renames/g, '').replace(/-c core\.quotePath=false /g, ''));
     assert.deepEqual(blind(), [], 'old checks: the exemption is not there, so nothing is open');
     w('checks/pr-title.sh', shipped('skills/yad-pr-template/templates/checks/pr-title.sh'));
     const hit = blind();
     assert.equal(hit.length, 1);
-    assert.match(hit[0].message, /\.github\/workflows\/yad-hub-checks\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
-    w('.github/workflows/yad-hub-checks.yml', shipped('skills/yad-checks/templates/github/yad-hub-checks.yml'));
+    assert.match(hit[0].message, /\.github\/workflows\/yad-product-checks\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
+    w('.github/workflows/yad-product-checks.yml', shipped('skills/yad-checks/templates/github/yad-product-checks.yml'));
     assert.deepEqual(blind(), [], 'the shipped workflow is fine');
     // One line fixed and its twin not: still blind (a job the team does not require would let it through).
-    const lines = shipped('skills/yad-checks/templates/github/yad-hub-checks.yml').split('\n');
+    const lines = shipped('skills/yad-checks/templates/github/yad-product-checks.yml').split('\n');
     const first = lines.findIndex((l) => l.includes('--no-renames'));
     lines[first] = lines[first].replace(' --no-renames', '');
-    w('.github/workflows/yad-hub-checks.yml', lines.join('\n'));
+    w('.github/workflows/yad-product-checks.yml', lines.join('\n'));
     assert.equal(blind().length, 1);
     // A comment is neither a blind line nor a fix.
-    w('.github/workflows/yad-hub-checks.yml', `# we used to run git diff --name-only here\n${shipped('skills/yad-checks/templates/github/yad-hub-checks.yml')}`);
+    w('.github/workflows/yad-product-checks.yml', `# we used to run git diff --name-only here\n${shipped('skills/yad-checks/templates/github/yad-product-checks.yml')}`);
     assert.deepEqual(blind(), []);
-    w('.gitlab/ci/yad-hub-checks.yml', 'x: git diff --name-only "origin/main...HEAD"\n');
-    assert.match(blind()[0].message, /^\.gitlab\/ci\/yad-hub-checks\.yml/);
+    w('.gitlab/ci/yad-product-checks.yml', 'x: git diff --name-only "origin/main...HEAD"\n');
+    assert.match(blind()[0].message, /^\.gitlab\/ci\/yad-product-checks\.yml/);
+    // E123: the old name is read too — an edited one is kept by `yad update`, and still runs.
+    fs.rmSync(path.join(T, '.gitlab/ci/yad-product-checks.yml'));
+    w('.github/workflows/yad-hub-checks.yml', 'x: git diff --name-only "origin/main...HEAD"\n');
+    assert.match(blind()[0].message, /^\.github\/workflows\/yad-hub-checks\.yml/);
     // The Foundation-guard reader still knows both releases of the checks.
     const { staleFoundationGuards } = await import('./epic-state.mjs');
     assert.deepEqual(staleFoundationGuards(T), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// E123: `yad doctor` names what the hub -> Product rename left behind — an old installed name (`renamed:`),
+// and each line of the team's own files that names one of our old CI names (`renamed-ref:`).
+test('E123 doctor: renamed: for an old installed name, renamed-ref: per file of the team\'s own, first line decides', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e123-doctor-'));
+  const w = (rel, body) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), body); };
+  try {
+    const { collectDoctor } = await import('./doctor.mjs');
+    const ids = () => collectDoctor(T).checks.filter((x) => /^renamed(-ref)?:/.test(x.id));
+    w('.sdlc/product.json', JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    w('.sdlc/hub.json', JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    assert.deepEqual(ids(), [], 'nothing old: no line at all');
+
+    w('.claude/skills/yad-hub-bridge/SKILL.md', '---\nname: yad-hub-bridge\n---\n');
+    w('.github/workflows/yad-hub-checks.yml', '# yad-managed: yad-checks\nname: yad-hub-checks\n');
+    let found = ids();
+    assert.deepEqual(found.map((x) => x.id).sort(), ['renamed:.claude/skills/yad-hub-bridge', 'renamed:.github/workflows/yad-hub-checks.yml']);
+    assert.ok(found.every((x) => x.status === 'warn' && /run `yad update`/.test(x.hint)));
+    assert.match(found.find((x) => x.id.endsWith('yad-hub-checks.yml')).message, /is an old name — renamed \.github\/workflows\/yad-product-checks\.yml$/);
+    fs.rmSync(path.join(T, '.claude'), { recursive: true });
+    fs.rmSync(path.join(T, '.github/workflows/yad-hub-checks.yml'));
+
+    // The team's own files. yad's own CI files start `# yad-managed` on line 1 and are skipped; a mention on a
+    // later line is not a marker. Boundaries: a longer name of the team's own is not ours.
+    w('.github/workflows/ours.yml', '# yad-managed: yad-checks\non:\n  workflow_run:\n    workflows: [yad-hub-checks]\n');
+    w('.github/workflows/deploy.yml', 'on:\n  workflow_run:\n    workflows: [yad-hub-checks]\n# yad-managed: yad-checks\njobs: { a: { needs: yad-hub-deploy } }\n');
+    w('.github/workflows/other.yaml', 'x: yad-hub-checks-extra\ny: my.yad-hub-checks\n');
+    w('README.md', '![a](https://github.com/o/r/actions/workflows/yad-hub-checks.yml/badge.svg)\n![b](https://github.com/o/r/workflows/yad-hub-checks/badge.svg)\n');
+    w('.github/CODEOWNERS', '/.github/workflows/yad-hub-checks.yml @team\n');
+    w('docs/CODEOWNERS', '/.gitlab/ci/yad-hub-checks.yml @team\n');
+    w('.gitlab/ci/mine.yml', 'a:\n  extends: .yad_hub_mr_only\n  needs: [yad-hub-commit-message, yad-hub-verified-commits]\n  b: !reference [yad-hub-ledger-guard, script]\n');
+    found = ids();
+    const by = Object.fromEntries(found.map((x) => [x.id, x]));
+    assert.deepEqual(Object.keys(by).sort(), [
+      'renamed-ref:.github/CODEOWNERS', 'renamed-ref:.github/workflows/deploy.yml', 'renamed-ref:.gitlab/ci/mine.yml',
+      'renamed-ref:README.md', 'renamed-ref:docs/CODEOWNERS',
+    ]);
+    assert.equal(by['renamed-ref:.github/workflows/deploy.yml'].message,
+      '.github/workflows/deploy.yml names what 4.0 renamed: line 3 `yad-hub-checks` → `yad-product-checks`');
+    assert.equal(by['renamed-ref:README.md'].message,
+      'README.md names what 4.0 renamed: line 1 `yad-hub-checks` → `yad-product-checks`, line 2 `yad-hub-checks` → `yad-product-checks`');
+    assert.equal(by['renamed-ref:.gitlab/ci/mine.yml'].message,
+      '.gitlab/ci/mine.yml names what 4.0 renamed: line 2 `.yad_hub_mr_only` → `.yad_product_mr_only`, line 3 `yad-hub-commit-message` → `yad-product-commit-message`, line 3 `yad-hub-verified-commits` → `yad-product-verified-commits`, line 4 `yad-hub-ledger-guard` → `yad-product-ledger-guard`');
+    assert.equal(by['renamed-ref:README.md'].hint, 'yad does not edit this file — change each to its new name');
+    assert.equal(by['renamed-ref:docs/CODEOWNERS'].hint, 'yad does not edit this file — change it to its new name');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E123 doctor: the GitLab include line yad update will rewrite is said as such, the rest of the file is the team\'s', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e123-doctor-gl-'));
+  const w = (rel, body) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), body); };
+  try {
+    const { collectDoctor } = await import('./doctor.mjs');
+    const ref = () => collectDoctor(T).checks.find((x) => x.id === 'renamed-ref:.gitlab-ci.yml');
+    w('.sdlc/product.json', JSON.stringify({ platform: 'gitlab', ledger: 'verified' }));
+    w('.sdlc/hub.json', JSON.stringify({ platform: 'gitlab', ledger: 'verified' }));
+    w('.gitlab/ci/yad-hub-checks.yml', '# yad-managed-include: yad-checks\nx: 1\n');
+    w('.gitlab-ci.yml', "include:\n  - local: '.gitlab/ci/yad-hub-checks.yml'\n");
+    assert.equal(ref().hint, '`yad update` rewrites it when it replaces the old fragment');
+    w('.gitlab-ci.yml', "include:\n  - local: '.gitlab/ci/yad-hub-checks.yml'\nm:\n  needs: [yad-hub-pr-title]\n");
+    assert.equal(ref().hint, 'yad does not edit this file — change line 4 to its new name (`yad update` rewrites the include line itself)');
+    // With no old fragment for yad to replace, the include line is the team's to change too.
+    fs.rmSync(path.join(T, '.gitlab/ci/yad-hub-checks.yml'));
+    assert.equal(ref().hint, 'yad does not edit this file — change each to its new name');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

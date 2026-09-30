@@ -10,7 +10,7 @@ import {
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
-  legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
+  legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions, withoutKeptRenames,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { modeFields, modeOf } from './mode.mjs';
@@ -610,21 +610,23 @@ export async function runSetup(root, opts = {}) {
   const wired = [];
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
-    const repoWiring = repoActions(root, repo);
+    // Migrate renamed wired CI (marker-owned sdlc-*.yml -> yad-*.yml); a user-authored same-named file is
+    // never touched, and an edited one is kept without its new name beside it (E123, `withoutKeptRenames`).
+    const repoLegacy = legacyRepoActions(root, repo);
+    const repoWiring = withoutKeptRenames([...repoActions(root, repo), ...repoLegacy]).filter((a) => !repoLegacy.includes(a));
     applyActions(repoWiring, { force: true });
     wired.push(...repoWiring);
-    // Migrate pre-2.0 wired CI (marker-owned sdlc-*.yml -> yad-*.yml); a user-authored
-    // same-named file is never touched.
-    applyActions(legacyRepoActions(root, repo), { force: true });
+    applyActions(repoLegacy, { force: true });
   }
   // the Product: event-driven gate-sync CI, so platform approvals/merges drive `yad gate ci`
-  const hubWiring = productActions(root);
+  const hubLegacy = legacyHubActions(root);
+  const hubWiring = withoutKeptRenames([...productActions(root), ...hubLegacy]).filter((a) => !hubLegacy.includes(a));
   if (hubWiring.length) {
     log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
     applyActions(hubWiring, { force: true });
     wired.push(...hubWiring);
   }
-  applyActions(legacyHubActions(root), { force: true });
+  applyActions(hubLegacy, { force: true });
   // the Product, locally: the harness ledger guard, so an agent is refused the CI-owned ledger write at
   // the moment it tries it rather than by a failed pipeline later (#171). Verified-only like the CI
   // above — with no bridge the ledger is locally owned and the guard would be wrong.

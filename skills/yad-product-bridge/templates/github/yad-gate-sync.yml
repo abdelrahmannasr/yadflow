@@ -1,4 +1,4 @@
-# yad-managed: yad-hub-bridge
+# yad-managed: yad-product-bridge
 # Merge-time gate sync for the PRODUCT (Path B). CI is the SOLE writer of the ledger, and it
 # writes ONLY at merge, ONLY to the default branch.
 #

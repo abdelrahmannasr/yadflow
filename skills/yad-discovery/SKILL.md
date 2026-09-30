@@ -159,7 +159,7 @@ yad gate open EP-foundation foundation/
 the gate passes, the ledger moves to the `foundation-done` sentinel (not `ready-for-build` — the
 Foundation has no Build). From then on `foundation/roadmap.md` and `foundation/scope.md` are the inputs
 each `yad-epic` reads (its "Step 2c"). When the Product has a platform, the gate opens a review PR on the
-Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals and comments
+Product (via `yad-product-bridge`) and `yad-review-gate action: sync` pulls platform approvals and comments
 into the ledger; otherwise the review is recorded locally.
 
 ## Reference

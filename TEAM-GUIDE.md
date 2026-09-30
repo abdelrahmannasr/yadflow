@@ -57,7 +57,7 @@ Everything *from the spec onward* (specs, tasks, code) lives in each **code repo
 
 Setup is one-time. The **Shape** part is human-gated and runs once per epic in the Product; **Build**
 runs once per story per code repo; **automation** is opt-in, switched on by the team with `yad dial`. `yad-status` reads it
-all; `yad-hub-bridge` mirrors Shape reviews to real PR/MRs on the Product.
+all; `yad-product-bridge` mirrors Shape reviews to real PR/MRs on the Product.
 
 ```mermaid
 flowchart TD
@@ -116,7 +116,7 @@ flowchart TD
     conn --> an
     rfb --> sp
     run -. drives Build steps set to auto .-> im
-    bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
+    bridge["yad-product-bridge<br/>review PR/MR ↔ file ledger"]:::gated
     bridge -. syncs approvals .-> gEp
     status["yad-status — read-only view over all of it"]
     status -. observes .-> FRONT
@@ -225,7 +225,7 @@ mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
          yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
-         yad-pr-template yad-hub-bridge \
+         yad-pr-template yad-product-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
          yad-change yad-timeline yad-defects yad-reconcile yad-stub \
          yad-run yad-status; do
@@ -257,7 +257,7 @@ yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + r
 yad-connect-repos action: detect-hub                              # records the Product's platform in .sdlc/hub.json
 yad-pr-template     repo:hub action: wire                         # Product's Shape PR/MR body template
 yad-checks          repo:hub action: wire                         # Product gates: commit-message, pr-title, pr-template, ledger-guard, verified-commits
-yad-hub-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
+yad-product-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
 There is no list of reviewers to set up. yadflow keeps no roster: anyone with access to the Product repo
@@ -311,7 +311,7 @@ mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
          yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
-         yad-pr-template yad-hub-bridge \
+         yad-pr-template yad-product-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
          yad-change yad-timeline yad-defects yad-reconcile yad-stub \
          yad-run yad-status; do
@@ -655,7 +655,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
 | `yad-review-companion` | Make review fun & visible: 60-sec trailer, swipe cards, grounded chat, engagement signal + friendly nudge (Shape gate & code PRs). |
-| `yad-hub-bridge` | Open the review PR/MR on the Product and sync platform approvals back. |
+| `yad-product-bridge` | Open the review PR/MR on the Product and sync platform approvals back. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |
 | `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |

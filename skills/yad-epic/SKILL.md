@@ -281,7 +281,7 @@ reviewers approve, through the gate.
 Report: epic ID, the path to `epic.md`, and that the next action is **review** via
 `yad-review-gate`. **Never mark the epic-review step approved here** — only real reviewers do that
 through the gate. Shape steps do not auto-advance. When the Product has a platform, the gate opens a review
-PR on the Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/
+PR on the Product (via `yad-product-bridge`) and `yad-review-gate action: sync` pulls platform approvals/
 comments into the ledger; otherwise the review is recorded local.
 
 ## Reference

@@ -44,7 +44,7 @@ export const SKILLS = [
   'yad-implement',
   'yad-checks',
   'yad-pr-template',
-  'yad-hub-bridge',
+  'yad-product-bridge',
   'yad-commit',
   'yad-open-pr',
   'yad-ship',
@@ -63,8 +63,11 @@ export const SKILLS = [
   'yad-stub',
 ];
 
-// Pre-2.0 skill names (the sdlc-* -> yad-* rename). `check`/`update` migrate any install
-// still carrying an old name: remove the old copy, install the renamed one.
+// Old skill names. `check`/`update` migrate any install still carrying one: remove the old copy,
+// install the renamed one. A value is one old name or a list of them — a skill renamed twice keeps
+// every name it shipped under, since an install can skip releases. Read through `legacySkillPairs`.
+//   sdlc-* -> yad-*          the 2.0 rename.
+//   yad-hub-bridge           the 4.0 hub -> Product rename (E123).
 export const LEGACY_SKILLS = {
   'yad-analysis': 'sdlc-author-analysis',
   'yad-epic': 'sdlc-author-epic',
@@ -76,7 +79,7 @@ export const LEGACY_SKILLS = {
   'yad-implement': 'sdlc-implement',
   'yad-checks': 'sdlc-checks',
   'yad-pr-template': 'sdlc-pr-template',
-  'yad-hub-bridge': 'sdlc-hub-bridge',
+  'yad-product-bridge': ['sdlc-hub-bridge', 'yad-hub-bridge'],
   // Step E ("ship") was renamed to yad-engineer-review (the yad-ship name now belongs to the new
   // commit+open-PR combined skill). Pre-2.0 installs carry sdlc-ship → migrate it to yad-engineer-review.
   // A 2.x install carrying yad-ship-as-Step-E is simply overwritten with the new combined content on
@@ -87,6 +90,9 @@ export const LEGACY_SKILLS = {
   'yad-review-gate': 'sdlc-review-gate',
   'yad-status': 'sdlc-status',
 };
+// Every (current name, old name) pair in LEGACY_SKILLS, one pair per old name.
+export const legacySkillPairs = () => Object.entries(LEGACY_SKILLS)
+  .flatMap(([skill, old]) => (Array.isArray(old) ? old : [old]).map((o) => [skill, o]));
 
 // Skills removed in a later release that must be PURGED from existing installs. Unlike
 // LEGACY_SKILLS (a rename: drop old name, install new), these have no replacement — a rerun of
@@ -96,22 +102,28 @@ export const LEGACY_SKILLS = {
 //   yad-review-comments — removed in 2.x (was sdlc-review-comments pre-2.0).
 export const REMOVED_SKILLS = ['yad-review-comments', 'sdlc-review-comments'];
 
-// Pre-2.0 wired-file dests replaced by renamed ones (old dest -> new dest, per platform).
-// An old file is removed ONLY when its first line carries the old ownership marker —
-// a same-named file the user authored themselves is never touched.
+// Wired-file dests replaced by renamed ones (old dest -> { to: new dest, marker }, per platform).
+// An old file is removed ONLY when its first line starts with that entry's ownership marker — a
+// same-named file the user authored themselves is never touched. Each entry carries its own marker
+// because each rename happened under a different one: the pre-2.0 files start `# sdlc-managed`, the
+// hub -> Product ones (E123) `# yad-managed: yad-checks` (GitHub) or `# yad-managed-include: yad-checks`
+// (GitLab). A marker is not proof nobody edited the file: `legacyFileActions` (cli/plan.mjs) also
+// asks the provenance record, as every other managed file does.
 export const LEGACY_MARKER = '# sdlc-managed';
 export const LEGACY_REPO_FILES = {
-  github: { '.github/workflows/sdlc-checks.yml': '.github/workflows/yad-checks.yml' },
-  gitlab: { '.gitlab/ci/sdlc-checks.yml': '.gitlab/ci/yad-checks.yml' },
+  github: { '.github/workflows/sdlc-checks.yml': { to: '.github/workflows/yad-checks.yml', marker: LEGACY_MARKER } },
+  gitlab: { '.gitlab/ci/sdlc-checks.yml': { to: '.gitlab/ci/yad-checks.yml', marker: LEGACY_MARKER } },
 };
 export const LEGACY_PRODUCT_FILES = {
   github: {
-    '.github/workflows/sdlc-gate-sync.yml': '.github/workflows/yad-gate-sync.yml',
-    '.github/workflows/sdlc-verified-commits.yml': '.github/workflows/yad-verified-commits.yml',
+    '.github/workflows/sdlc-gate-sync.yml': { to: '.github/workflows/yad-gate-sync.yml', marker: LEGACY_MARKER },
+    '.github/workflows/sdlc-verified-commits.yml': { to: '.github/workflows/yad-verified-commits.yml', marker: LEGACY_MARKER },
+    '.github/workflows/yad-hub-checks.yml': { to: '.github/workflows/yad-product-checks.yml', marker: '# yad-managed: yad-checks' },
   },
   gitlab: {
-    '.gitlab/ci/sdlc-gate-sync.yml': '.gitlab/ci/yad-gate-sync.yml',
-    '.gitlab/ci/sdlc-verified-commits.yml': '.gitlab/ci/yad-verified-commits.yml',
+    '.gitlab/ci/sdlc-gate-sync.yml': { to: '.gitlab/ci/yad-gate-sync.yml', marker: LEGACY_MARKER },
+    '.gitlab/ci/sdlc-verified-commits.yml': { to: '.gitlab/ci/yad-verified-commits.yml', marker: LEGACY_MARKER },
+    '.gitlab/ci/yad-hub-checks.yml': { to: '.gitlab/ci/yad-product-checks.yml', marker: '# yad-managed-include: yad-checks' },
   },
 };
 
@@ -518,23 +530,23 @@ export const PRODUCT_WIRING = {
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
     // The ledger is CI-owned: block non-bot commits to gate-state files on the Product review PRs.
     { src: 'skills/yad-checks/templates/checks/ledger-guard.sh', dest: 'checks/ledger-guard.sh', exec: true },
-    // Pattern gates run on the Product too (profile: hub) — commit subject + PR title + PR body.
+    // Pattern gates run on the Product too (profile: product) — commit subject + PR title + PR body.
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-template.sh', dest: 'checks/pr-template.sh', exec: true },
   ],
   github: [
-    { src: 'skills/yad-hub-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },
+    { src: 'skills/yad-product-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/github/yad-verified-commits.yml', dest: '.github/workflows/yad-verified-commits.yml' },
-    { src: 'skills/yad-checks/templates/github/yad-hub-checks.yml', dest: '.github/workflows/yad-hub-checks.yml' },
+    { src: 'skills/yad-checks/templates/github/yad-product-checks.yml', dest: '.github/workflows/yad-product-checks.yml' },
     // Integrity gate for the Product's own direct-to-default pushes (`yad update --push`; the machine-
     // state `yad checkpoint`/`gate ci` commits carry [skip ci] and are intentionally not re-checked).
     { src: 'skills/yad-checks/templates/github/yad-update-guard.yml', dest: '.github/workflows/yad-update-guard.yml' },
   ],
   gitlab: [
-    { src: 'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml', dest: '.gitlab/ci/yad-gate-sync.yml' },
+    { src: 'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml', dest: '.gitlab/ci/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml', dest: '.gitlab/ci/yad-verified-commits.yml' },
-    { src: 'skills/yad-checks/templates/gitlab/yad-hub-checks.gitlab-ci.yml', dest: '.gitlab/ci/yad-hub-checks.yml' },
+    { src: 'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml', dest: '.gitlab/ci/yad-product-checks.yml' },
     { src: 'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml', dest: '.gitlab/ci/yad-update-guard.yml' },
   ],
 };

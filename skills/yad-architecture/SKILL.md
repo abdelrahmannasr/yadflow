@@ -212,7 +212,7 @@ the count at the active people less one, floor 1, and prints it (E72) — with 2
 ask is 1, with 3 it is 2, with 4 or more all 3 — and a shortfall never holds the gate. When the people
 cannot be counted (as in Product CI with connected repos), no cap is shown. The review PR requests no reviewers; the team asks them on the PR itself.
 **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate
-opens a review PR on the Product (via `yad-hub-bridge`, labelled per touched repo) and
+opens a review PR on the Product (via `yad-product-bridge`, labelled per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; a contract re-lock
 invalidates prior platform approvals too. Otherwise the review is recorded local.
 

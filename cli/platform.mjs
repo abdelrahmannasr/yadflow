@@ -1,5 +1,5 @@
 // Platform adapter — the ONLY place that shells out to gh/glab. Read recipes mirror
-// skills/yad-hub-bridge/references/bridge.md. Everything runs as the local user (gh/glab own auth);
+// skills/yad-product-bridge/references/bridge.md. Everything runs as the local user (gh/glab own auth);
 // no tokens are stored. Pure mapping fns (resolveLogin/mapApprovers) are exported for unit tests;
 // readPr is injectable so the gate can be tested with a fake.
 import { URLSearchParams } from 'node:url';

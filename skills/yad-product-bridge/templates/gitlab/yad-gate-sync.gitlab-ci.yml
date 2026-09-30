@@ -1,4 +1,4 @@
-# yad-managed-include: yad-hub-bridge
+# yad-managed-include: yad-product-bridge
 # Merge-time gate sync for the PRODUCT, as an INCLUDABLE fragment (Path B). Pulled into the
 # Product's root .gitlab-ci.yml via:
 #   include:
