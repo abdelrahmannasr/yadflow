@@ -741,12 +741,18 @@ export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_W
 //   'outdated'     yad's own copy, older than this release               run yad update    replaced    replaced
 //   'unrecorded'   no record (a pre-3.16 install): update backs it up    run yad update    replaced    replaced
 //   'kept'         edited since yad wrote it: update keeps it            fix it            fix it      replaced
-//   'unmanaged'    yad has no action for it (not verified, or the        fix it by hand    same        same
-//                  record cannot be read) — read from the file on disk
+//   'unreadable'   the settings or the provenance record do not read,    restore the file, then run yad update
+//                  so yad cannot tell (update itself refuses until then)
+//   'unmanaged'    yad has no action for it (Product not verified)       fix it by hand    same        same
+// The last two are read from the file on disk.
 // On a run that fixes, a gate that run replaces is left out: after it, the gate is the shipped copy.
 export function productGateBlockers(root, { fix = false, overwriteLocal = false } = {}) {
   let actions = [];
-  try { actions = productActions(root); } catch { /* an unreadable record: every gate reads as 'unmanaged' */ }
+  let unreadable = null; // the file that does not read, for 'unreadable' (review 5)
+  try { readJSONStrict(productConfigPath(root), null); } catch { unreadable = path.relative(root, productConfigPath(root)).split(path.sep).join('/'); }
+  if (!unreadable) {
+    try { actions = productActions(root); } catch { unreadable = MANAGED_LEDGER; }
+  }
   const byGate = new Map(actions.filter((a) => a.managed)
     .map((a) => [path.relative(root, a.managed.dest).split(path.sep).join('/'), a]));
   const out = [];
@@ -755,10 +761,11 @@ export function productGateBlockers(root, { fix = false, overwriteLocal = false 
     if (!gap) continue;
     const a = byGate.get(gate);
     let state;
-    if (!a) state = 'unmanaged';
+    if (unreadable) state = 'unreadable';
+    else if (!a) state = 'unmanaged';
     else if (a.status === 'modified') state = fix && overwriteLocal ? null : 'kept';
     else state = fix ? null : (a.backup ? 'unrecorded' : 'outdated');
-    if (state) out.push({ gate, gap, state });
+    if (state) out.push({ gate, gap, state, ...(unreadable ? { file: unreadable } : {}) });
   }
   return out;
 }
@@ -769,6 +776,7 @@ export function gateProfileFix(b) {
   if (b.state === 'outdated') return 'run `yad update`: it replaces this copy, which yad wrote, with the shipped one';
   if (b.state === 'unrecorded') return `run \`yad update\`: it replaces it with the shipped one and saves yours as ${saved(b)}`;
   if (b.state === 'kept') return `it was changed by hand, so \`yad update\` keeps it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${saved(b)})`;
+  if (b.state === 'unreadable') return `restore ${b.file} from git — it does not read, so yad cannot tell whether this copy is its own (and \`yad update\` refuses until then) — then run \`yad update\` and \`yad doctor\` again`;
   return `fix it by hand — yad does not manage the checks on this Product, so no \`yad update\` replaces it: ${PRODUCT_PROFILE_FIX.split(' — ')[0]}`;
 }
 // What to do before a team changes its `--profile hub` to `product`, or '' when nothing stands in the way —
@@ -777,6 +785,10 @@ export function gateProfileFix(b) {
 export function oldProfileAdvice(blockers) {
   if (!blockers.length) return '';
   const parts = [];
+  const lost = blockers.filter((b) => b.state === 'unreadable');
+  if (lost.length) {
+    parts.push(`restore ${lost[0].file} from git (it does not read, so yad cannot tell which of ${lost.map(gapWords).join('; and ')} ${lost.length > 1 ? 'are' : 'is'} its own), then run \`yad update\` and \`yad doctor\` again`);
+  }
   const replace = blockers.filter((b) => b.state === 'outdated' || b.state === 'unrecorded');
   if (replace.length) {
     const backed = replace.filter((b) => b.state === 'unrecorded');
@@ -784,13 +796,14 @@ export function oldProfileAdvice(blockers) {
   }
   const kept = blockers.filter((b) => b.state === 'kept');
   if (kept.length) {
-    parts.push(`fix ${kept.map(gapWords).join('; and ')} — ${kept.length > 1 ? 'they were' : 'it was'} edited, so \`yad update\` keeps ${kept.length > 1 ? 'them' : 'it'}: ${PRODUCT_PROFILE_FIX}`);
+    parts.push(`fix ${kept.map(gapWords).join('; and ')} — ${kept.length > 1 ? 'they were' : 'it was'} edited, so \`yad update\` keeps ${kept.length > 1 ? 'them; for each one' : 'it'}: ${PRODUCT_PROFILE_FIX}`);
   }
   const own = blockers.filter((b) => b.state === 'unmanaged');
   if (own.length) {
     parts.push(`fix ${own.map(gapWords).join('; and ')} by hand — yad does not manage the checks on this Product`);
   }
-  return `but first ${parts.join('; and ')}`;
+  // `; then`, never `; and` — the gate lists inside a part already use `; and` (review 5).
+  return `but first ${parts.join('; then ')}`;
 }
 
 // The new name of a renamed CI file is not installed while an edited old one is kept (`modified`): both

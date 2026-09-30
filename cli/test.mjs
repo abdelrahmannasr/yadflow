@@ -27776,7 +27776,7 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
     delete rec2.files['checks/pr-template.sh']; // no record: a pre-3.16 install
     fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec2));
     const mixed = refOf().hint;
-    assert.match(mixed, /but first run `yad update`, which replaces checks\/commit-message\.sh \(it refuses [^)]*\); and checks\/pr-template\.sh \(it refuses [^)]*\) \(saving your copy as checks\/pr-template\.sh\.yad-orig\); and fix checks\/pr-title\.sh \(it refuses [^)]*\) — it was edited/, mixed);
+    assert.match(mixed, /but first run `yad update`, which replaces checks\/commit-message\.sh \(it refuses [^)]*\); and checks\/pr-template\.sh \(it refuses [^)]*\) \(saving your copy as checks\/pr-template\.sh\.yad-orig\); then fix checks\/pr-title\.sh \(it refuses [^)]*\) — it was edited/, mixed);
     // The same gates, one `profile:` line each, once the team passes `product`: each with its own step.
     fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile hub "$T"', '--profile product "$T"'));
     const profOf = (g) => collectDoctor(T).checks.find((x) => x.id === `profile:checks/${g}`);
@@ -27784,6 +27784,25 @@ test('E124: renamed-ref names a team workflow that passes --profile hub, in ever
     assert.match(profOf('pr-title.sh').hint, /^it was changed by hand, so `yad update` keeps it: /);
     assert.match(profOf('commit-message.sh').hint, /^run `yad update`: it replaces this copy, which yad wrote/);
     assert.match(profOf('pr-template.sh').hint, /^run `yad update`: it replaces it with the shipped one and saves yours as checks\/pr-template\.sh\.yad-orig/);
+
+    // (4b) A provenance record that does not read (review 5): yad cannot tell whose each copy is, and update
+    // refuses, so the step is to restore it — never "yad does not manage the checks", which was false here.
+    const recFile = path.join(T, '.sdlc/managed.json');
+    const recText = fs.readFileSync(recFile, 'utf8');
+    fs.writeFileSync(recFile, '{bad');
+    assert.match(profOf('pr-title.sh').hint, /^restore \.sdlc\/managed\.json from git — it does not read/);
+    fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile product "$T"', '--profile hub "$T"'));
+    assert.match(refOf().hint, /but first restore \.sdlc\/managed\.json from git \(it does not read, so yad cannot tell which of checks\/commit-message\.sh [^;]*; and checks\/pr-title\.sh [^;]*; and checks\/pr-template\.sh [^)]*\) are its own\), then run `yad update`/);
+    assert.doesNotMatch(refOf().hint, /does not manage/);
+    fs.writeFileSync(recFile, recText);
+    // Two edited at once: plural, and the one fix said for each.
+    const rec3 = JSON.parse(recText);
+    rec3.files['checks/commit-message.sh'] = 'sha256:not-this-copy';
+    rec3.files['checks/pr-template.sh'] = 'sha256:not-this-copy';
+    fs.writeFileSync(recFile, JSON.stringify(rec3));
+    assert.match(refOf().hint, /— they were edited, so `yad update` keeps them; for each one: add `product`/);
+    fs.writeFileSync(recFile, recText);
+    fs.writeFileSync(ours, fs.readFileSync(ours, 'utf8').replaceAll('--profile hub "$T"', '--profile product "$T"'));
 
     // (5) A Product not in verified mode: yad manages no checks there, so the file on disk is read (review 4).
     fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github' }));
