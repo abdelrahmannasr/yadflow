@@ -76,8 +76,8 @@ const MCP_JSON_PLACES = [
   { scope: 'project', file: '.mcp.json', agents: ['Claude Code'] },
   { scope: 'project', file: '.cursor/mcp.json', agents: ['Cursor'] },
   { scope: 'user', file: '.cursor/mcp.json', agents: ['Cursor'] },
-  { scope: 'project', file: '.gemini/settings.json', agents: ['Gemini CLI'] },
-  { scope: 'user', file: '.gemini/settings.json', agents: ['Gemini CLI'] },
+  { scope: 'project', file: '.gemini/settings.json', agents: ['Gemini CLI'], comments: true },
+  { scope: 'user', file: '.gemini/settings.json', agents: ['Gemini CLI'], comments: true },
 ];
 
 // Codex's config: MCP servers and plugins are TOML tables.
@@ -110,22 +110,48 @@ function bytesOf(file, max = MAX_FILE_BYTES) {
 
 // Parsed JSON, `undefined` when the file is not there, and `null` when it is there but does not parse
 // (or is too big to read) — the caller reports that as a problem rather than as "no servers".
-function jsonOf(file) {
+function jsonOf(file, { comments = false } = {}) {
   if (!statOf(file)) return undefined;
   const bytes = bytesOf(file, MAX_CONFIG_BYTES);
   if (!bytes) return null;
-  try { return JSON.parse(bytes.toString('utf8')); } catch { return null; }
+  const text = bytes.toString('utf8').replace(/^\uFEFF/, '');
+  try { return JSON.parse(comments ? stripJsonComments(text) : text); } catch { return null; }
 }
 
-const sha256 = (bytes) => `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+// `//` and `/* */` comments removed, strings left alone — for a file its agent reads that way (Gemini CLI
+// strips comments from settings.json before parsing it). Not for the others: a comment there stops the
+// agent from loading the file, so reading past it would report servers the agent never sees.
+export function stripJsonComments(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+      out += '\n';
+    } else if (ch === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? text.length : end + 1;
+      out += ' ';
+    } else out += ch;
+  }
+  return out;
+}
+
+// The same content hashes the same on every machine: CRLF counts as LF, as `contentSha` in lib.mjs does
+// (E113). Git on Windows checks a committed SKILL.md out with CRLF, and E55 will compare these hashes
+// across machines. A file with no CR hashes exactly as its bytes do.
+const sha256 = (bytes) => {
+  const text = bytes.includes(13) ? Buffer.from(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : bytes;
+  return `sha256:${crypto.createHash('sha256').update(text).digest('hex')}`;
+};
 const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 // ---- the three file formats -------------------------------------------------------------------------
-
-const unquote = (v) => {
-  const t = v.trim();
-  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
-};
 
 // The two frontmatter keys this needs: `name`, and `version` — at the top, or nested one level under
 // `metadata:` (the Agent Skills spec puts it there). A small reader on purpose: a YAML library is a
@@ -135,68 +161,180 @@ export function skillMeta(text) {
   if (!m) return {};
   const out = {};
   let inMetadata = false;
+  let childIndent = null; // the indent of `metadata:`'s own keys; a deeper `version:` is not its version
   for (const line of m[1].split(/\r?\n/)) {
     const top = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
     if (top) {
-      inMetadata = top[1] === 'metadata' && top[2].trim() === '';
-      if ((top[1] === 'name' || top[1] === 'version') && top[2].trim()) out[top[1]] = unquote(top[2]);
+      inMetadata = top[1] === 'metadata' && scalar(top[2]) === '';
+      childIndent = null;
+      if ((top[1] === 'name' || top[1] === 'version') && scalar(top[2])) out[top[1]] = scalar(top[2]);
       continue;
     }
-    const nested = inMetadata && line.match(/^\s+version:\s*(.+)$/);
-    if (nested && out.version === undefined) out.version = unquote(nested[1]);
+    const nested = inMetadata && line.match(/^(\s+)([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (!nested) continue;
+    childIndent ??= nested[1].length;
+    if (nested[1].length === childIndent && nested[2] === 'version' && out.version === undefined && scalar(nested[3])) out.version = scalar(nested[3]);
   }
   return out;
 }
 
+// A one-line YAML value: a quoted string as written, or a plain one with a ` # comment` cut off. A value
+// with a trailing comment is otherwise read AS the value (the frontmatter trap this project has hit).
+function scalar(v) {
+  const t = v.trim();
+  const q = t.match(/^(["'])(.*)\1\s*(#.*)?$/);
+  if (q) return q[2];
+  return t.replace(/(^|\s)#.*$/, '').trim();
+}
+
+// ---- TOML: keys only --------------------------------------------------------------------------------
+//
+// Codex keeps MCP servers and plugins as TOML tables, and its agents as TOML files. This reads KEYS, and
+// the one string value `name`, and skips every other value WHOLE — a multi-line array, a `"""` string,
+// an inline table — so text inside a value can never be taken for a key. That matters because the values
+// under `[mcp_servers.<name>]` are commands, arguments and environment variables, and they hold tokens:
+// a line-by-line reader once listed `"sk-live-…"`, an element of a multi-line `args` array, as a server.
+// A statement this cannot follow is dropped up to the end of its line; nothing from it is kept.
+
+// The file as tokens: strings, bare words, punctuation and line breaks. Comments are dropped. A
+// multi-line string is only ever a value, so its text is never kept (`v: null`).
+function tomlTokens(text) {
+  const src = String(text).replace(/^\uFEFF/, '');
+  const out = [];
+  let i = 0;
+  const decode = (raw) => { try { return JSON.parse(`"${raw}"`); } catch { return raw; } };
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '\n') { out.push({ t: 'nl' }); i++; continue; }
+    if (ch === ' ' || ch === '\t' || ch === '\r') { i++; continue; }
+    if (ch === '#') { while (i < src.length && src[i] !== '\n') i++; continue; }
+    const triple = src.slice(i, i + 3);
+    if (triple === '"""' || triple === "'''") {
+      let j = i + 3;
+      for (;;) {
+        const at = src.indexOf(triple, j);
+        if (at < 0) { j = src.length; break; }
+        // In a basic string `\"""` is an escaped quote, unless the backslash is itself escaped.
+        let slashes = 0;
+        while (triple === '"""' && src[at - 1 - slashes] === '\\') slashes++;
+        if (slashes % 2 === 1) { j = at + 1; continue; }
+        // Up to two quotes may sit right before the closing three: the string ends at the last three.
+        j = at + 3;
+        while (src[j] === triple[0] && j - at < 5) j++;
+        break;
+      }
+      out.push({ t: 'str', v: null });
+      i = j;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== ch && src[j] !== '\n') j += ch === '"' && src[j] === '\\' ? 2 : 1;
+      const raw = src.slice(i + 1, Math.min(j, src.length));
+      out.push({ t: 'str', v: ch === '"' ? decode(raw) : raw });
+      i = src[j] === ch ? j + 1 : j;
+      continue;
+    }
+    if ('[]{}=.,'.includes(ch)) { out.push({ t: ch }); i++; continue; }
+    let j = i;
+    while (j < src.length && !' \t\r\n#[]{}=.,"\''.includes(src[j])) j++;
+    out.push({ t: 'word', v: src.slice(i, j) });
+    i = j;
+  }
+  return out;
+}
+
+// Every statement of the file: a table header (`header: true`), or a `key = value` with its FULL path
+// (the header's path, then the key's own). For a value, only two things are kept: a single-line string
+// (`str`, for the one caller that wants `name`) and the first-level keys of an inline table.
+function tomlEntries(text) {
+  const tk = tomlTokens(text);
+  const entries = [];
+  let i = 0;
+  let table = [];
+  const isKey = (x) => !!x && (x.t === 'word' || (x.t === 'str' && x.v !== null));
+  const toLineEnd = () => { while (i < tk.length && tk[i].t !== 'nl') i++; };
+  const keyPath = () => {
+    const parts = [];
+    while (isKey(tk[i])) {
+      parts.push(tk[i].v);
+      i++;
+      if (tk[i]?.t === '.') i++; else break;
+    }
+    return parts;
+  };
+  // Steps over one value, and returns the first-level keys when it is an inline table.
+  const value = (depth = 0) => {
+    const x = tk[i];
+    if (!x || depth > 64) { toLineEnd(); return null; }
+    if (x.t === '{') {
+      i++;
+      const keys = [];
+      while (i < tk.length && tk[i].t !== '}') {
+        if (tk[i].t === ',' || tk[i].t === 'nl') { i++; continue; }
+        const k = keyPath();
+        if (!k.length || tk[i]?.t !== '=') { i++; continue; }
+        i++;
+        keys.push(k[0]);
+        value(depth + 1);
+      }
+      i++;
+      return keys;
+    }
+    if (x.t === '[') {
+      i++;
+      while (i < tk.length && tk[i].t !== ']') {
+        if (tk[i].t === ',' || tk[i].t === 'nl') { i++; continue; }
+        const before = i;
+        value(depth + 1);
+        if (i === before) i++;
+      }
+      i++;
+      return null;
+    }
+    if (x.t === 'str') { i++; return null; }
+    // A bare scalar — a number, a date, `true` — may hold dots: step over words and dots together.
+    while (i < tk.length && (tk[i].t === 'word' || tk[i].t === '.')) i++;
+    return null;
+  };
+  while (i < tk.length) {
+    if (tk[i].t === 'nl') { i++; continue; }
+    if (tk[i].t === '[') {
+      i += tk[i + 1]?.t === '[' ? 2 : 1;
+      table = keyPath();
+      toLineEnd();
+      entries.push({ path: table, header: true });
+      continue;
+    }
+    const k = keyPath();
+    if (!k.length || tk[i]?.t !== '=') { toLineEnd(); continue; }
+    i++;
+    const str = tk[i]?.t === 'str' ? tk[i].v : null;
+    const inlineKeys = value();
+    entries.push({ path: [...table, ...k], str, inlineKeys });
+    toLineEnd();
+  }
+  return entries;
+}
+
 // A Codex agent file's top-level `name = "…"` (before any table header).
 export function tomlAgentName(text) {
-  for (const line of String(text).split(/\r?\n/)) {
-    if (/^\s*\[/.test(line)) return null;
-    const m = line.match(/^\s*name\s*=\s*("([^"\\]*)"|'([^']*)')\s*(#.*)?$/);
-    if (m) return m[2] ?? m[3];
+  for (const e of tomlEntries(text)) {
+    if (e.header) return null;
+    if (e.path.length === 1 && e.path[0] === 'name') return typeof e.str === 'string' && e.str ? e.str : null;
   }
   return null;
 }
 
-// One key of a dotted TOML path: bare, "double" or 'single' quoted. Returns [key, rest] or null.
-function tomlKey(s) {
-  const t = s.trimStart();
-  const m = t.match(/^(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)"|'([^']*)')/);
-  if (!m) return null;
-  return [m[1] ?? m[2] ?? m[3], t.slice(m[0].length).trimStart()];
-}
-
 // The names under a TOML table (`mcp_servers`, `plugins`), from any of the ways TOML can write them:
-//   [mcp_servers.docs]        [mcp_servers.docs.env]        [mcp_servers] + docs = { … } / docs.command = …
-// Only KEYS are read. A line inside a multi-line string could look like a header; for a list of names
-// that is acceptable, and it never exposes a value.
+//   [mcp_servers.docs]   [mcp_servers.docs.env]   [mcp_servers] + docs = { … } / docs.command = …
+//   mcp_servers.docs.command = …   mcp_servers = { docs = { … } }
 export function tomlTableNames(text, table) {
   const names = new Set();
-  let current = null; // the header path of the table the lines below belong to
-  for (const raw of String(text).split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line.startsWith('[')) {
-      const inner = line.replace(/^\[\[?/, '');
-      const path_ = [];
-      let rest = inner;
-      for (let k = tomlKey(rest); k; k = tomlKey(rest)) {
-        path_.push(k[0]);
-        rest = k[1];
-        if (rest.startsWith('.')) rest = rest.slice(1); else break;
-      }
-      current = path_;
-      if (path_[0] === table && path_.length >= 2) names.add(path_[1]);
-      continue;
-    }
-    if (!line || line.startsWith('#')) continue;
-    // A key under the bare `[table]` header, or a dotted `table.name…` key at the top level.
-    const k = tomlKey(line);
-    if (!k) continue;
-    if (current?.length === 1 && current[0] === table) names.add(k[0]);
-    else if (current === null && k[0] === table && k[1].startsWith('.')) {
-      const sub = tomlKey(k[1].slice(1));
-      if (sub) names.add(sub[0]);
-    }
+  for (const e of tomlEntries(text)) {
+    if (e.path[0] !== table) continue;
+    if (e.path.length >= 2) names.add(e.path[1]);
+    else if (Array.isArray(e.inlineKeys)) for (const k of e.inlineKeys) names.add(k);
   }
   return [...names].sort();
 }
@@ -282,7 +420,7 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
   for (const place of scopes(AGENT_PLACES)) items.push(...agentsIn(baseOf(place.scope, root, home), place));
 
   for (const place of scopes(MCP_JSON_PLACES)) {
-    const doc = jsonOf(path.join(baseOf(place.scope, root, home), place.file));
+    const doc = jsonOf(path.join(baseOf(place.scope, root, home), place.file), { comments: !!place.comments });
     if (doc === undefined) continue;
     if (!isPlainObject(doc)) { problem(place.scope, place.file, 'does not parse as a JSON object'); continue; }
     if (doc.mcpServers === undefined) continue;
@@ -302,7 +440,8 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
       const projects = isPlainObject(doc.projects) ? doc.projects : {};
       const key = Object.hasOwn(projects, path.resolve(root)) ? path.resolve(root) : Object.keys(projects).find((k) => samePath(k, root));
       const mine = key === undefined ? null : projects[key];
-      if (isPlainObject(mine?.mcpServers)) items.push(...mcpItems(mine.mcpServers, { scope: 'project', where: `${shownPath('user', CLAUDE_USER_CONFIG)} (this folder)`, agents: ['Claude Code'] }));
+      // `user`, not `project`: these live in YOUR home folder and a teammate who clones gets none of them.
+      if (isPlainObject(mine?.mcpServers)) items.push(...mcpItems(mine.mcpServers, { scope: 'user', where: `${shownPath('user', CLAUDE_USER_CONFIG)} (this folder)`, agents: ['Claude Code'] }));
     }
   }
 
@@ -331,20 +470,28 @@ function claudePlugins(root, home, problem) {
   const doc = jsonOf(path.join(home, CLAUDE_PLUGINS));
   if (doc === undefined) return items;
   if (!isPlainObject(doc) || !isPlainObject(doc.plugins)) { problem('user', CLAUDE_PLUGINS, 'does not parse as the installed-plugins list'); return items; }
-  const settings = jsonOf(path.join(home, CLAUDE_USER_SETTINGS));
-  const enabledMap = isPlainObject(settings?.enabledPlugins) ? settings.enabledPlugins : null;
+  // On or off, as Claude Code decides it: `.claude/settings.local.json` over `.claude/settings.json` in the
+  // folder, over `~/.claude/settings.json`. null when none of the three says.
+  const enabledIn = [path.join(root, '.claude/settings.local.json'), path.join(root, '.claude/settings.json'), path.join(home, CLAUDE_USER_SETTINGS)]
+    .map((f) => jsonOf(f)).map((d) => (isPlainObject(d?.enabledPlugins) ? d.enabledPlugins : null));
+  const enabledOf = (id) => {
+    for (const m of enabledIn) if (m && Object.hasOwn(m, id) && typeof m[id] === 'boolean') return m[id];
+    return null;
+  };
   for (const id of Object.keys(doc.plugins).sort()) {
     const installs = Array.isArray(doc.plugins[id]) ? doc.plugins[id] : [];
     for (const inst of installs) {
       if (!isPlainObject(inst)) continue;
       if (typeof inst.projectPath === 'string' && !samePath(inst.projectPath, root)) continue;
-      const scope = inst.scope === 'user' || inst.scope === undefined ? 'user' : 'project';
+      // Claude Code's `project` scope is recorded in the folder's own `.claude/settings.json`, so a teammate
+      // gets it; `user` and `local` are this person's alone.
+      const scope = inst.scope === 'project' ? 'project' : 'user';
       const version = typeof inst.version === 'string' ? inst.version : null;
       items.push({
         kind: 'plugin', name: id, scope, where: shownPath('user', CLAUDE_PLUGINS), agents: ['Claude Code'], version,
         commit: typeof inst.gitCommitSha === 'string' ? inst.gitCommitSha : null,
         // null when the settings file does not say: an absent entry is not proof it is off.
-        enabled: enabledMap && Object.hasOwn(enabledMap, id) ? enabledMap[id] === true : null,
+        enabled: enabledOf(id),
       });
       const at = typeof inst.installPath === 'string' ? inst.installPath : null;
       if (!at || !isDir(at)) continue;
@@ -362,19 +509,30 @@ function claudePlugins(root, home, problem) {
 function pluginMcp(at, id, scope, problem) {
   const found = [];
   const add = (servers, rel) => found.push(...mcpItems(servers, { scope, where: `${id}: ${rel}`, agents: ['Claude Code'], plugin: id }));
+  const bad = (rel) => problem('user', `.claude/plugins (${id}: ${rel})`, 'does not parse as a JSON object');
   const fromFile = (rel) => {
     const full = path.resolve(at, rel);
-    if (path.relative(at, full).startsWith('..')) return; // a plugin's own files only
+    // The plugin's own files only. `path.relative` across two Windows drives is an absolute path with no
+    // `..` in it, so that is refused too; a name that merely starts with `..` (`..x.json`) is not.
+    const r = path.relative(at, full);
+    if (!r || r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) return;
     const doc = jsonOf(full);
     if (doc === undefined) return;
-    if (!isPlainObject(doc)) { problem('user', `.claude/plugins (${id}: ${rel})`, 'does not parse as a JSON object'); return; }
+    if (!isPlainObject(doc)) { bad(r.split(path.sep).join('/')); return; }
     // `.mcp.json` wraps the servers in `mcpServers`; a file plugin.json points at may list them bare.
-    add(isPlainObject(doc.mcpServers) ? doc.mcpServers : doc, rel);
+    add(isPlainObject(doc.mcpServers) ? doc.mcpServers : doc, r.split(path.sep).join('/'));
   };
   const manifest = jsonOf(path.join(at, '.claude-plugin', 'plugin.json'));
-  if (isPlainObject(manifest?.mcpServers)) add(manifest.mcpServers, '.claude-plugin/plugin.json');
-  else if (typeof manifest?.mcpServers === 'string') fromFile(manifest.mcpServers);
-  else fromFile('.mcp.json');
+  if (manifest === null || (manifest !== undefined && !isPlainObject(manifest))) bad('.claude-plugin/plugin.json');
+  const declared = isPlainObject(manifest) ? manifest.mcpServers : undefined;
+  // `mcpServers` may be the servers, the path of a file holding them, or a list of either.
+  const one = (d) => {
+    if (isPlainObject(d)) add(d, '.claude-plugin/plugin.json');
+    else if (typeof d === 'string') fromFile(d);
+  };
+  if (declared === undefined) fromFile('.mcp.json');
+  else if (Array.isArray(declared)) declared.forEach(one);
+  else one(declared);
   return found;
 }
 
@@ -406,12 +564,12 @@ export function runDetect(root, { json = false, home = os.homedir() } = {}) {
     const groups = new Map();
     for (const it of mine) {
       const place = it.plugin ? `plugin ${it.plugin}` : kind === 'skill' || kind === 'agent' ? it.where.replace(/\/[^/]+$/, '') : it.where;
-      const key = `${place}|${it.scope}|${it.agents.join(', ')}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(it);
+      const agents = it.agents.join(', ');
+      const key = JSON.stringify([place, it.scope, agents]);
+      if (!groups.has(key)) groups.set(key, { place, scope: it.scope, agents, list: [] });
+      groups.get(key).list.push(it);
     }
-    for (const [key, list] of groups) {
-      const [place, scope, agents] = key.split('|');
+    for (const { place, scope, agents, list } of groups.values()) {
       log(`  ${c.cyan(clean(place))} ${c.dim(`[${scope}] — ${list.length} — read by ${agents}`)}`);
       const label = (it) => (it.version ? `${clean(it.name)} ${c.dim(clean(it.version))}` : clean(it.name)) + (it.enabled === false ? c.dim(' (disabled)') : '');
       const shown = list.slice(0, NAMES_SHOWN).map(label).join(', ');
@@ -421,7 +579,7 @@ export function runDetect(root, { json = false, home = os.homedir() } = {}) {
   const dupes = duplicateNames(items.filter((i) => i.kind === 'skill'));
   if (dupes.length) info(`${dupes.length} skill name(s) are installed in more than one place (${dupes.slice(0, 5).map(clean).join(', ')}${dupes.length > 5 ? ', …' : ''}) — which copy an agent loads is that agent's rule`);
   if (items.length) info('`yad detect --json` lists every item, with its version and content hash');
-  for (const p of problems) log(`  ${c.yellow('!')} ${p.where}: ${p.problem}`);
+  for (const p of problems) log(`  ${c.yellow('!')} ${clean(p.where)}: ${p.problem}`);
   return undefined;
 }
 

@@ -19,9 +19,9 @@ if (process.env.NODE_TEST_CONTEXT) {
   }
 }
 
-process.env.YAD_NO_UPDATE_CHECK = '1';
+process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
-const { detectInstalled, skillMeta, tomlAgentName, tomlTableNames } = await import('./detect.mjs');
+const { detectInstalled, skillMeta, stripJsonComments, tomlAgentName, tomlTableNames } = await import('./detect.mjs');
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const YAD = path.join(ROOT, 'bin', 'yad.mjs');
@@ -70,7 +70,7 @@ function fixture() {
   fs.mkdirSync(path.join(proj, '.claude/skills/empty'), { recursive: true });
   put(path.join(proj, '.claude/skills/README.md'), 'hello');
   // Frontmatter with a BOM and Windows line ends, and a quoted name.
-  put(path.join(proj, '.claude/skills/crlf/SKILL.md'), '﻿---\r\nname: \'crlf-skill\'\r\nversion: 3\r\n---\r\nbody\r\n');
+  put(path.join(proj, '.claude/skills/crlf/SKILL.md'), '\uFEFF---\r\nname: \'crlf-skill\'\r\nversion: 3\r\n---\r\nbody\r\n');
   // A SKILL.md too big to read: left out, not read into memory.
   put(path.join(proj, '.claude/skills/huge/SKILL.md'), `---\nname: huge\n---\n${'x'.repeat(1024 * 1024 + 1)}`);
 
@@ -95,7 +95,8 @@ function fixture() {
   put(path.join(proj, '.mcp.json'), JSON.stringify({ mcpServers: { 'proj-server': server } }));
   put(path.join(proj, '.cursor/mcp.json'), JSON.stringify({ mcpServers: { 'cursor-server': server } }));
   put(path.join(home, '.cursor/mcp.json'), JSON.stringify({ mcpServers: { 'cursor-home': server } }));
-  put(path.join(proj, '.gemini/settings.json'), JSON.stringify({ theme: 'dark', mcpServers: { 'gem-server': server } }));
+  // Gemini CLI strips comments from its settings before reading them, so a commented file still counts.
+  put(path.join(proj, '.gemini/settings.json'), `// my settings\n{ "theme": "dark", /* servers: */ "mcpServers": ${JSON.stringify({ 'gem-server': server })} }`);
   put(path.join(home, '.gemini/settings.json'), JSON.stringify({ theme: 'dark' }));
   put(path.join(home, '.claude.json'), JSON.stringify({
     mcpServers: { 'user-server': server },
@@ -103,7 +104,7 @@ function fixture() {
   }));
   put(path.join(home, '.codex/config.toml'), [
     'model = "x"',
-    `[mcp_servers.docs]\ncommand = "npx"\nargs = ["${SECRET}"]`,
+    `[mcp_servers.docs]\ncommand = "npx"\nargs = [\n  "--token",\n  "${SECRET}"\n]\ndescription = """\n${SECRET}=1\n[mcp_servers.fake]\n"""`,
     `[mcp_servers.docs.env]\nKEY = "${SECRET}"`,
     '[mcp_servers."quoted.name"]\nurl = "https://example.invalid"',
     '[plugins."tool@market"]\nenabled = true',
@@ -119,6 +120,11 @@ function fixture() {
   put(path.join(plug('p3'), '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p3', mcpServers: './servers.json' }));
   put(path.join(plug('p3'), 'servers.json'), JSON.stringify({ 'p3-mcp': server }));
   put(path.join(plug('p4'), '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p4', mcpServers: '../p1/.mcp.json' }));
+  // `mcpServers` as a list of paths and objects; a name that only starts with `..` is still the plugin's.
+  put(path.join(plug('p5'), '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p5', mcpServers: ['./a.json', { 'p5-inline': server }, '..x.json'] }));
+  put(path.join(plug('p5'), 'a.json'), JSON.stringify({ mcpServers: { 'p5-a': server } }));
+  put(path.join(plug('p5'), '..x.json'), JSON.stringify({ 'p5-dots': server }));
+  put(path.join(plug('p6'), '.claude-plugin/plugin.json'), '{ not json');
   put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
     version: 2,
     plugins: {
@@ -126,10 +132,15 @@ function fixture() {
       'p2@m': [{ scope: 'local', projectPath: proj, installPath: plug('p2'), version: '2.0.0' }],
       'p3@m': [{ scope: 'project', projectPath: path.join(T, 'elsewhere'), installPath: plug('p3'), version: '3.0.0' }],
       'p4@m': [{ scope: 'user', installPath: plug('p4') }],
+      'p5@m': [{ scope: 'project', projectPath: proj, installPath: plug('p5') }],
+      'p6@m': [{ scope: 'user', installPath: plug('p6') }],
       'gone@m': [{ scope: 'user', installPath: path.join(T, 'missing') }],
     },
   }));
-  put(path.join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'p1@m': true, 'p4@m': false } }));
+  put(path.join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'p1@m': true, 'p4@m': false, 'p2@m': true } }));
+  // The folder's own settings win over the home folder's, and settings.local.json over settings.json.
+  put(path.join(proj, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'p2@m': true, 'p4@m': true } }));
+  put(path.join(proj, '.claude/settings.local.json'), JSON.stringify({ enabledPlugins: { 'p2@m': false } }));
   return { T, proj, home };
 }
 
@@ -137,7 +148,7 @@ test('E50: every place is read, and each item says where it came from and which 
   const { T, proj, home } = fixture();
   try {
     const { items, problems } = detectInstalled(proj, { home });
-    assert.deepEqual(problems, []);
+    assert.deepEqual(problems, [{ where: '~/.claude/plugins (p6@m: .claude-plugin/plugin.json)', problem: 'does not parse as a JSON object' }]);
 
     const alpha = find(items, 'skill', 'alpha');
     assert.deepEqual(alpha.map((i) => [i.scope, i.where, i.version]), [['project', '.claude/skills/alpha', '1.2.0'], ['user', '~/.claude/skills/alpha', null]]);
@@ -163,16 +174,19 @@ test('E50: every place is read, and each item says where it came from and which 
     const mcp = items.filter((i) => i.kind === 'mcp').map((i) => `${i.name}@${i.where}@${i.scope}`).sort();
     assert.deepEqual(mcp, [
       'cursor-home@~/.cursor/mcp.json@user', 'cursor-server@.cursor/mcp.json@project', 'docs@~/.codex/config.toml@user',
-      'gem-server@.gemini/settings.json@project', 'local-server@~/.claude.json (this folder)@project',
-      'p1-mcp@p1@m: .mcp.json@user', 'p2-mcp@p2@m: .claude-plugin/plugin.json@project', 'proj-codex@.codex/config.toml@project',
+      'gem-server@.gemini/settings.json@project', 'local-server@~/.claude.json (this folder)@user',
+      'p1-mcp@p1@m: .mcp.json@user', 'p2-mcp@p2@m: .claude-plugin/plugin.json@user',
+      'p5-a@p5@m: a.json@project', 'p5-dots@p5@m: ..x.json@project', 'p5-inline@p5@m: .claude-plugin/plugin.json@project',
+      'proj-codex@.codex/config.toml@project',
       'proj-server@.mcp.json@project', 'quoted.name@~/.codex/config.toml@user', 'user-server@~/.claude.json@user',
     ]);
 
     const plugins = items.filter((i) => i.kind === 'plugin').map((i) => [i.name, i.scope, i.version, i.enabled]);
     assert.deepEqual(plugins, [
       ['tool@market', 'user', null, undefined],
-      ['gone@m', 'user', null, null], ['p1@m', 'user', '1.0.0', true], ['p2@m', 'project', '2.0.0', null], ['p4@m', 'user', null, false],
-    ], 'another folder\'s plugin (p3) is left out; enabled only when the settings say');
+      ['gone@m', 'user', null, null], ['p1@m', 'user', '1.0.0', true], ['p2@m', 'user', '2.0.0', false], ['p4@m', 'user', null, true],
+      ['p5@m', 'project', null, null], ['p6@m', 'user', null, null],
+    ], 'another folder\'s plugin (p3) is left out; `local` is the user\'s; the folder\'s settings win, local first');
     assert.equal(find(items, 'plugin', 'p1@m')[0].commit, 'abc123');
     const p1skill = find(items, 'skill', 'p1-skill')[0];
     assert.deepEqual([p1skill.plugin, p1skill.version, p1skill.where], ['p1@m', '1.0.0', 'p1@m: skills/p1-skill']);
@@ -182,9 +196,14 @@ test('E50: every place is read, and each item says where it came from and which 
     // The same keys on every item.
     for (const it of items) for (const k of ['kind', 'name', 'scope', 'where', 'agents', 'version', 'hash', 'plugin']) assert.ok(Object.hasOwn(it, k), `${it.kind} ${it.name} has ${k}`);
     // No secret, and no absolute home path, anywhere in the answer.
-    const text = JSON.stringify({ items, problems });
-    assert.ok(!text.includes(SECRET), 'an MCP server is named, never described');
-    assert.ok(!text.includes(home), 'the home folder is shown as ~');
+    // Every string of the answer, as it is — JSON.stringify doubles a Windows backslash, so a search of
+    // the serialised text could never find a leaked Windows path.
+    const strings = [];
+    const walk = (v) => { if (typeof v === 'string') strings.push(v); else if (v && typeof v === 'object') Object.values(v).forEach(walk); };
+    walk({ items, problems });
+    assert.ok(!strings.some((v) => v.includes(SECRET)), 'an MCP server is named, never described');
+    assert.ok(!strings.some((v) => v.includes(home) || v.includes(T)), 'the home folder is shown as ~, and no absolute path appears');
+    assert.equal(find(items, 'mcp', 'fake').length, 0, 'text inside a multi-line string is not a server');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -267,20 +286,45 @@ test('E50: the frontmatter, TOML name and TOML table readers', () => {
   ].join('\n');
   assert.deepEqual(tomlTableNames(toml, 'mcp_servers'), ['also', 'bare_one', 'dotted', 'inline', 'lit', 'spaced']);
   assert.deepEqual(tomlTableNames('', 'plugins'), []);
+  // Text inside a value is never a key — the leak the first reader had.
+  assert.deepEqual(tomlTableNames(`[mcp_servers]\ndocs.command = "npx"\ndocs.args = [\n  "--token",\n  "${SECRET}"\n]\n`, 'mcp_servers'), ['docs']);
+  assert.deepEqual(tomlTableNames(`[mcp_servers]\ndocs.d = """\n${SECRET}=1\n[mcp_servers.fake]\n"""\nb = 1\n`, 'mcp_servers'), ['b', 'docs']);
+  assert.deepEqual(tomlTableNames(`[mcp_servers]\nd.x = '''\n${SECRET} = 2\n'''\n`, 'mcp_servers'), ['d']);
+  assert.deepEqual(tomlTableNames('[a]\nx = [\n  ["mcp_servers"],\n]\nafter = 1\n[mcp_servers.y]\n', 'mcp_servers'), ['y'], 'a nested array line is not a header, so `after` stays in [a]');
+  assert.deepEqual(tomlTableNames('mcp_servers = { docs = { command = "x" }, "q.x" = {} }\n', 'mcp_servers'), ['docs', 'q.x'], 'a top-level inline table');
+  assert.deepEqual(tomlTableNames(String.raw`[mcp_servers."a\"b"]`, 'mcp_servers'), ['a"b'], 'escapes in a quoted key are decoded');
+  assert.equal(tomlAgentName('name = """multi"""'), null, 'a multi-line string is never read');
+  assert.deepEqual(skillMeta('---\nname: foo # a comment\nversion: "1 # kept"\n---\n'), { name: 'foo', version: '1 # kept' });
+  assert.deepEqual(skillMeta('---\nmetadata:\n  a:\n    version: 9\n  version: 2\n---\n'), { version: '2' }, 'a deeper version is not metadata.version');
+  assert.deepEqual(JSON.parse(stripJsonComments(String.raw`{"u":"http://x//y", // c
+ "b":/* z */1, "q":"a\"//"}`)), { u: 'http://x//y', b: 1, q: 'a"//' });
+});
+
+test('E50: the same SKILL.md hashes the same with LF and CRLF line ends', () => {
+  const T = tmp();
+  try {
+    put(path.join(T, 'a/.claude/skills/s/SKILL.md'), '---\nname: s\n---\nbody\n');
+    put(path.join(T, 'b/.claude/skills/s/SKILL.md'), '---\r\nname: s\r\n---\r\nbody\r\n');
+    const h = (d) => detectInstalled(path.join(T, d), { home: null }).items[0].hash;
+    assert.equal(h('a'), h('b'));
+    assert.equal(h('a'), sha(path.join(T, 'a/.claude/skills/s/SKILL.md')), 'a file with no CR hashes as its bytes');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 // The command as a person runs it: HOME (and USERPROFILE, which Windows reads) point at a fixture.
 function yad(args, { cwd, home }) {
   return spawnSync(process.execPath, [YAD, ...args], {
-    cwd, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: '1', YAD_NO_UPDATE_CHECK: '1' },
+    cwd, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: '1' },
   });
 }
 
 test('E50: `yad detect --json` answers in the E1 envelope, from a folder that is not a Product', () => {
   const { T, proj, home } = fixture();
   try {
+    const before = snapshot(T);
     const r = yad(['detect', '--json'], { cwd: proj, home });
     assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(snapshot(T), before, 'the whole command writes nothing, in the folder or the home folder');
     const out = JSON.parse(r.stdout);
     assert.equal(out.command, 'detect');
     assert.equal(out.ok, true);
@@ -300,7 +344,7 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
     assert.match(r.stdout, /\.claude\/skills \[project\] — 14 — read by Claude Code, Cursor/);
     assert.match(r.stdout, /… and 6 more/);
     assert.match(r.stdout, /1 skill name\(s\) are installed in more than one place \(alpha\)/);
-    assert.match(r.stdout, /p4@m(?: \S+)? \(disabled\)/);
+    assert.match(r.stdout, /p2@m(?: \S+)? \(disabled\)/, "the folder's settings.local.json turns p2 off");
     assert.ok(!r.stdout.includes(SECRET));
 
     skill(path.join(proj, '.claude/skills'), 'esc', 'name: "evil\u001b[2Jname"\n');

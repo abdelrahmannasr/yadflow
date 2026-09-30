@@ -116,7 +116,7 @@ ${c.bold('Where am I / what next')}
                                        Bind a step to a skill of your own. Several skills run in
                                        the order given, one after another — each costs tokens
   yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
-  yad detect [--json]                  Which skills, agents, MCP servers and plugins are installed
+  yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
                                        MCP servers are named, never their commands or settings
@@ -1001,7 +1001,8 @@ main()
       // block reason travels on — an update banner there would land in front of a model.
       // Resolved the way main() resolves it, NOT from argv[2]: that is the first raw argument, so
       // `yad --dir <path> hook ledger-guard` puts `--dir` there and the banner slips through.
-      if (parseArgs(process.argv.slice(2))._[0] !== 'hook') {
+      // Nor `detect` (E50): it promises no network and no file written, and the check does both.
+      if (!['hook', 'detect'].includes(parseArgs(process.argv.slice(2))._[0])) {
         const { maybeNotifyUpdate } = await import('./commands.mjs');
         await maybeNotifyUpdate();
       }
