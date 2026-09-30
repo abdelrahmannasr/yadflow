@@ -1172,19 +1172,23 @@ What it reads, per agent (checked against each agent's own documentation on 2026
 | Gemini CLI | `.gemini/skills/`, `.agents/skills/`, in the folder and in `~` | `.gemini/agents/`, `~/.gemini/agents/` | `mcpServers` in `.gemini/settings.json`, `~/.gemini/settings.json` |
 | GitHub Copilot, Zencoder, opencode | the project folders yad installs into | — | — |
 
-Three rules it keeps:
+Four rules it keeps:
 
 - **It only reads.** No file is written, no folder is made, no program is run and no network is used.
   It is worked out fresh every time; nothing is saved.
 - **An MCP server is named, never described.** Its entry holds a command, arguments, a URL, headers and
   environment variables, and those often carry a token. Only the name is read out. Your home folder is
   shown as `~`, never as its full path.
-- **A file it cannot read is reported, not guessed.** A settings file that does not parse is listed
-  under `problems` (by place and reason only), and everything else is still listed. Gemini CLI's
+- **A file it cannot read is reported, not guessed.** A JSON file it reads — an MCP list, the plugin
+  list, a plugin's own files, a settings file that turns plugins on or off — that does not parse, or is
+  too big to read, is listed under `problems` (by place and reason only), and everything else is still
+  listed. So is a `mcpServers` that is not an object. Gemini CLI's
   `settings.json` may hold `//` and `/* */` comments, because Gemini CLI allows them; the other JSON
   files are read strictly, as their agents read them.
 - **Codex's `config.toml` is read for keys only.** Every value is skipped whole — a multi-line list, a
-  `"""` string, an inline table — so text inside a value is never taken for a server name.
+  `"""` string, an inline table — so text inside a value is never taken for a server name. A reader of
+  keys cannot tell a broken file from a good one: a `config.toml` Codex would refuse may still list the
+  keys it holds, and is not reported as a problem.
 
 The same skill name in several places is listed once per place, with a count at the end. Which copy
 an agent actually loads is that agent's own rule; `yad detect` does not decide it. A Claude Code plugin
