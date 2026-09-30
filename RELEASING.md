@@ -322,6 +322,17 @@ notes for the major): anything else merged between steps 1 and 5 ships in the st
 having been tried on `next`. If the release push has already happened with no run, the fix is the
 same — merge the docs PR, then push `main` to `release` again; it is a plain fast-forward.
 
+**Keep every skip marker out of that PR's title and commit messages.** GitHub reads the whole message
+of the newest pushed commit, and a merge commit's message carries the PR title. It skips on any of
+`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` and `[actions skip]`, and on a `skip-checks: true`
+trailer — even when the marker is only quoted, as in a PR *about* the marker. The first fix for the 4.0.0
+promotion was titled that way, so its merge started no run either. Check before pushing:
+
+```bash
+git log -1 --format=%B origin/main | grep -iE '\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks: *true' \
+  && echo "main ends on a skip marker: merge another docs PR first"
+```
+
 **Then point `next` at the stable version.** semantic-release moves `latest` to the new version, but it
 leaves the `next` dist-tag (npm's name for a channel) on the last pre-release. That is **older** than
 `latest`, and it lacks everything that went into the stable version after it. Anyone who still types
