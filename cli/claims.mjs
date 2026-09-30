@@ -22,7 +22,7 @@
 // may lose the race in silence. Nothing reads those copies while the local branch exists, and a capture by
 // hand fetches (with prune) before it relies on them.
 //
-// LIMITS, said in the README: capture off, or offline, is invisible; the push runs at most every 5 minutes;
+// LIMITS, said in docs/CLI.md (claims): capture off, or offline, is invisible; the push runs at most every 5 minutes;
 // two people with one git name share branches, so they never see each other; clocks are the committer's.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';

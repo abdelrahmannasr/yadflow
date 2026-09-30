@@ -1,6 +1,6 @@
 # The `yad` CLI — install, update, reconcile, drive the gates
 
-The full command reference for the `yad` CLI. For the big-picture concepts see the
+The full command reference for the `yad` CLI. For an introduction see the
 [README](../README.md); for a step-by-step walkthrough see [`WALKTHROUGH.md`](WALKTHROUGH.md) or the
 [plain-language team guide](../TEAM-GUIDE.md).
 
@@ -15,7 +15,7 @@ no clone needed.
 > `git config core.autocrlf input` in the Product clone — approvals are bound to exact bytes, and a CRLF
 > checkout reads them as stale (`yad doctor` warns). The bash check gates run on your CI runner, not your
 > machine. The rest of the CLI, the full suite and the end-to-end harness are not yet tested on Windows.
-> Requires **Node.js ≥ 18**.
+> Requires **Node.js ≥ 18**. The details, per agent and per tool: [Platform support](#platform-support).
 
 ## Commands
 
@@ -576,6 +576,28 @@ one, re-run `… check --fix` to copy it into the IDE folders and `.sdlc/config.
 > provenance (tokenless OIDC), ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No
 > manual `npm publish`. See [`RELEASING.md`](../RELEASING.md).
 
+## Which AI agents are supported
+
+An **agent skill** is a folder holding a `SKILL.md` file — instructions the agent loads when the task
+matches. `SKILL.md` is now a format several agents read, and `.agents/skills/` is the directory
+several of them agreed to look in. So one install can serve more than one agent.
+
+`yad setup` asks which directories to install into. Pick by the agent you use:
+
+| Directory | Agents that read it |
+| --- | --- |
+| `.claude/` | Claude Code. Cursor also reads it for compatibility. |
+| `.agents/` | Codex CLI, Gemini CLI, Cursor, GitHub Copilot |
+| `.cursor/` | Cursor — its own directory. Not needed if you install `.agents/`. |
+| `.gemini/` | Gemini CLI — its own directory. Not needed if you install `.agents/`. |
+| `.zencoder/` | Zencoder |
+| `.opencode/` | opencode — installed as flat `commands/<skill>.md` files, not folders |
+
+A fresh setup offers **`.claude,.agents`**, which together cover every agent in the table. A project that already
+has an INSTALL in one of them — a `skills/` folder, or an armed hook entry — is offered that one
+instead; a `.cursor/` holding only Cursor rules is not an install, and is offered the default. Checked against each agent's
+own documentation on 2026-09-16; `yad doctor` prints the same table's verdict for your project.
+
 ## Managed files: what `yad` owns, and what you edited
 
 `setup` / `check --fix` / `update` write a fixed set of **managed files** into the Product and every
@@ -642,6 +664,113 @@ never a silent reset — restore it from git, or delete it to start over from th
 
 > **Not yet supported:** marking a customization as *accepted* so it stops being reported (an
 > opt-out list of managed paths you own). Until then, `modified` is a permanent, deliberate nag.
+
+## Working together: capture, claims, owners and fold
+
+These four commands are how a team shares draft work without stepping on each other. Capture runs
+by itself; the rest are commands you (or a skill) run. Claims and owners are **advice, not locks**.
+
+### Background capture
+
+`yad capture` saves your work in progress without touching your checkout (E43). It takes every changed
+file under `epics/` and `foundation/` — except the ledger (any `.sdlc/` folder and `reviews/`; the four
+files a person or a skill writes there, `contract-lock.json`, `change.json`, `design-links.json` and
+`test-links.json`, are included) — and commits it onto
+a private branch per epic, `yad/wip/<your git name>/<epic>`. It uses git's low-level commands in a
+throwaway index, so your branch, your staged changes and your files stay exactly as they were, and no
+git hook runs.
+
+| What | How |
+| --- | --- |
+| When | After every agent edit, by a hook yad wires in both ledger modes: Claude Code `PostToolUse` in `.claude/settings.json`, Cursor `afterFileEdit` in `.cursor/hooks.json`. Any other agent or editor: run `yad capture` yourself. Each capture takes every changed artifact, so your own editor's edits ride along |
+| Push | A capture commits at once, locally. The hook pushes your capture branches (and fetches everyone else's, for claims) in the background at most once every 5 minutes, with no password prompt and a short timeout, so an edit never waits on the network. `yad capture` by hand pushes straight away. With no remote, or offline, the captures stay local and nothing fails |
+| CI | yadflow's own push workflow skips `yad/wip/**`. `yad doctor` names any of **your** workflows a push to `yad/wip/*` would start (no branch filter, `branches: ["**"]`, or a `branches-ignore` that does not name it), so you can add `branches-ignore: ["yad/wip/**"]` |
+| Off | `"capture": false` in the Product config (`yad check --fix` then removes the hook), or `YAD_CAPTURE=0` for one shell |
+
+The capture commits are unsigned on purpose — a signing prompt inside a hook would hang the agent — and
+each carries `Yad-Epic`, `Yad-Base` and `Yad-Branch` lines. They are drafts: the commit your history
+keeps is the fold, below. The push is never forced: if you capture the same epic on two machines, the second push is refused rather than overwriting the first, and a `yad capture` you run by hand says so and names the branch (delete one copy with `git branch -D` to continue the other) — the hook's background push cannot report it. **To remove a capture branch for good** — say a secret was captured — delete it on origin first, then on every machine that has it run `git branch -D yad/wip/<you>/<epic>` **and** `git branch -dr origin/yad/wip/<you>/<epic>` (the second deletes that machine's saved copy of origin's branch; it says so if there is none): a machine that still holds either one rebuilds the branch and pushes it back. On a fresh clone, a capture continues the branch already on origin. Two people with the same git name share branches. The people count that caps review gates
+(E71) does not count capture commits.
+
+### Who else is editing a file (claims)
+
+`yad claims` lists who else is editing which artifact right now (E46). It is **advice, not a lock**:
+nothing stops anyone, because with no server a real lock is impossible. There is nothing to record by
+hand — a claim is read from the capture branches: someone's `yad/wip/<name>/<epic>` branch holds a
+saved change to that file that is not on the default branch yet.
+
+| What | How |
+| --- | --- |
+| A claim | A file of the epic that differs between the capture branch's last save and the commit that save was built on — the person's own edits, never what a pull brought in |
+| Ends | 4 hours after that branch's last save, or at once when the file on the default branch matches the saved one (the work was merged) |
+| `yad claims [<epic>]` | Fetches everyone's capture branches first (short timeout, no prompts), then lists each claim: file, person, last save. `--no-fetch` reads what is already here; `--json` too |
+| At edit time | When an edit changes a file someone else has a claim on, the capture hook says so. Under Claude Code the agent reads it (and you see it); under Cursor it is a line on stderr. It never blocks, never waits on the network, and names the same person and file at most once an hour |
+| Fresh enough | The hook's background push (at most every 5 minutes) also fetches everyone's capture branches in the background |
+
+**Limits.** Someone with capture off, or offline, is invisible. A claim can be up to about 5 minutes
+late. Two people with the same git name share capture branches, so they never see each other. Times
+are the saver's own clock, shown in UTC.
+
+### Who owns a step (assign)
+
+`yad assign` gives one authoring step to one person (E47) — for example "Bob writes the
+architecture". It is stronger advice than a claim, because it is decided in advance, but it is still
+**advice, not a lock**: it never blocks an edit, never holds a review gate and never stops a fold.
+
+| What | How |
+| --- | --- |
+| `yad assign <epic> <step> [--to <name>]` | Assigns the step to you, or to the person whose **git name** you give (the name they commit with). Only authoring steps that write an artifact (`epic`, `architecture`, `stories`, …); review steps are not assigned, because the platform and the gate count decide who approves. If someone else already owns the step it is refused and names them; `--force` replaces them |
+| `yad unassign <epic> <step>` | Removes the assignment. Your own freely; someone else's needs `--force` |
+| `yad owners [<epic>]` | Lists every assignment, whether it is live, and any owner file that cannot be read. `--json` too |
+| Where it is kept | One small file per step: `epics/<epic>/.sdlc/owners/<step>.json` (`foundation/.sdlc/owners/` for the Foundation). It is not a ledger file, so you can write it in both ledger modes. `yad assign` does not commit it, and `yad fold` never takes it (an assignment is not authoring): commit it on its own — on a `verified` Product, in a PR of its own (the Product checks let a PR that changes only owner files through, since E47; run `yad update` so your copies of the checks and of the product-checks workflow have that rule; `yad doctor` warns `owners:rename-blind` if a hand-edited workflow was kept) — so the team sees it when they pull. It is captured to your `yad/wip/…` branch like any artifact, but it is not counted as a claim |
+| Live | While the step's work is open: the step is not finished, or its review has not passed yet. After that the file stays as a record; re-opening the step makes it live again. There is no time limit |
+| Shown | `yad next` prints `owner: <name>` under the step (and under its review) while it is live |
+| At edit time | When your edit changes a file of a step someone else owns, the capture hook says so — to the agent under Claude Code, on stderr under Cursor — at most once an hour per step. One note carries both this and any claim warning |
+
+**Limits.** The name is the git name, made branch-safe the way capture branch names are — so it matches
+the capture hook without asking GitHub or GitLab. Two people with the same git name look like one owner.
+A git name with no Latin letters is branch-safe only through the person's email, so someone else can
+assign it only once that person has a capture branch here (`--to` finds it by the git name the branch was
+saved under). With capture off, there is no edit-time warning.
+
+### Folding a step into one commit
+
+`yad fold <epic> <step>` ends an authoring step (E44). It makes the one commit the record keeps,
+`docs(<epic>): author <step>` — for example `docs(EP-checkout): author architecture`. The authoring
+skills run it at the end of their step; you can run it yourself too.
+
+| What | How |
+| --- | --- |
+| Files | Only that step's files: the ones its review covers (architecture is `architecture.md`, `contract.md` and `.sdlc/contract-lock.json`; stories is everything under `stories/`), plus what the step's skill writes beside them (`DESIGN.md` and `.sdlc/design-links.json` for the UI step, `.sdlc/test-links.json` for test cases). Other changed files of the epic are named and left on disk, so a half-written draft of another step never lands in this commit |
+| The ledger | Follows `ledger` mode. `local`: the epic's changed ledger files go in the same commit — one step, one commit. `verified`: CI writes the ledger at merge, so the fold leaves those files for CI — except while the epic is brand new (no `.sdlc/state.json` in HEAD yet): then its new ledger files are its seed, which is the case `ledger-guard` allows and the only way a seed reaches the default branch. Once the epic is seeded, even a NEW ledger file (a `reviews/*.md` written by hand) is left for CI, because the guard would reject it |
+| The seed | While the epic is brand new, the first fold also takes the new person-written `.sdlc/` files beside the ledger — a change-epic's `change.json` and its pointer `contract-lock.json` — in both modes |
+| The commit | A normal `git commit`, so it is signed if your git signs (with `ledger: verified` it warns when signing is off: the review PR's signature check would fail), and your commit hooks run. Only the step's files are committed; anything else you staged stays staged. It ends with `Yad-Epic`, `Yad-Step` and `Yad-Folded` lines — the last is the tip of your capture branch, the drafts this commit folds (`none` with capture off) |
+| Where | With `ledger: verified`, never on the default branch — artifacts reach it only through the review PR. With `ledger: local`, anywhere |
+| The drafts | Your `yad/wip/<you>/<epic>` branch is left as it is: the draft history stays for the later rework measurement (E95), and nothing has to be deleted on other machines. The next capture has nothing new to save |
+
+A step with no changed files has nothing to fold, and says so. `yad open-pr` on a review branch warns
+when that step's files have changes no fold has committed — they are not in the review.
+
+## The local ledger guard, per agent
+
+In **verified mode** — where CI owns the gate ledger — yadflow installs a local guardrail that stops
+an agent hand-editing the gate files, at the moment of the edit rather than twenty minutes later in a
+failed pipeline. It needs a hook that can run *before* a write and refuse it. Two agents have one:
+
+| Agent | Wired into | Event |
+| --- | --- | --- |
+| Claude Code | `.claude/settings.json` | `PreToolUse` |
+| Cursor | `.cursor/hooks.json` | `preToolUse` |
+
+Cursor answers this kind of hook in JSON rather than by exit code, and treats an empty answer as a
+refusal — so a `.cursor` project also gets a small adapter script, `hooks/ledger-guard-cursor.mjs`,
+which always replies properly. Without it the guard would have blocked every file write instead of
+just the gate files.
+
+Every other directory gets the script (`hooks/ledger-guard.mjs`) and no wiring — they have no such
+hook, so those agents are guarded by CI alone. `yad doctor` says so by name rather than staying
+silent. The Cursor wiring follows Cursor's published hook protocol and has not yet been exercised
+against a live Cursor session.
 
 ## The six phases
 
@@ -1494,9 +1623,11 @@ anything. It names `npx` rather than your installed `yad` on purpose — the mig
 the version that introduces them, so the copy you already have would report that nothing changes.
 Minor and patch upgrades never say this, because everything below a major is additive.
 
-**Upgrading from 3.x to 4.0.** Run these in order, from the Product:
+**Upgrading to any new release.** Run these in order, from the Product. On a minor or patch release
+`yad migrate` usually has nothing to do; on a major it rewrites the state files the new release
+expects. Coming from 3.x, read [Upgrading to 4.0](migrations/upgrading-to-4.md) first.
 
-1. `npm install -g yadflow` — the latest stable CLI.
+1. `npm install -g yadflow@latest` — the latest stable CLI.
 2. `yad migrate` — preview what would change in your state files. It writes nothing.
 3. `yad migrate --apply` — make the change (each rewritten file is saved first as `<file>.yad-orig`).
 4. `yad update` — re-sync the installed `yad-*` skills, gate scripts and CI files.
@@ -1506,6 +1637,34 @@ The full guide, with what changed in 4.0 and why, is [Upgrading to 4.0](migratio
 
 Major versions are also published to a separate channel first. `npm install yadflow` always gives you
 the stable line; `npm install yadflow@next` opts you into the next major while it is being proven.
+
+## Platform support
+
+Linux and macOS are first-class (CI runs the test suite, bash gates, and the
+end-to-end harness on both). **On Windows, the agent hooks run natively, without WSL** (E113), and the
+CLI code they reach has been fixed for Windows — CI runs the hook scripts and those CLI tests on Windows.
+The rest of the CLI is not yet tested there. Requires **Node.js ≥ 18**.
+
+| On Windows | What to know |
+| --- | --- |
+| Agent hooks | Each hook is a Node script (`hooks/*.mjs`) that the agent runs as `node <script>`, so nothing needs bash or an execute bit. `node` must be on the PATH your agent runs with — if it is not, the hooks silently do not run |
+| Claude Code | Runs hook commands in **Git Bash** (part of Git for Windows). Without Git Bash it falls back to PowerShell, and the hooks do not run there. `yad doctor` warns when it cannot find Git Bash |
+| Cursor | Runs hook commands through PowerShell. The entry is `node hooks/<script>.mjs`, which PowerShell runs as it is |
+| Line endings | Set `git config core.autocrlf input` in the Product clone. With `true` (the Git for Windows default) git checks files out with CRLF line endings. yad's own managed files still compare equal, but an approval is bound to an artifact's exact bytes, so reviews approved elsewhere read as stale. `yad doctor` warns about this on Windows |
+| Check gates | Still bash scripts (`checks/*.sh`). They run on your CI runner, not on your machine |
+| Not yet tested on Windows | The full test suite and the end-to-end harness run on Linux and macOS only. A machine with no Git Bash is not covered for Claude Code |
+
+### Upgrading from a release before E113
+
+ The hooks used to be bash scripts (`hooks/*.sh`). `yad check
+--fix` (or `yad update`) rewrites each hook entry to the Node command and deletes the old script — but
+only a copy yad's own record (`.sdlc/managed.json`) proves it wrote and nobody changed. A script you
+edited, or one your own hook entry still runs, is kept. The old script is also kept until the rewritten
+settings file is **committed**: yad never commits that file for you, and a teammate who pulls must not get
+an entry that runs a deleted script. So the order is: `yad check --fix`, commit `.claude/settings.json` and
+`.cursor/hooks.json`, then `yad check --fix` again to remove the old scripts. Everyone on the team should
+upgrade together: an older yadflow does not know the new entries, and its `check --fix` puts the old
+script and entry back beside them.
 
 ## Troubleshooting (`yad doctor` + error codes)
 
