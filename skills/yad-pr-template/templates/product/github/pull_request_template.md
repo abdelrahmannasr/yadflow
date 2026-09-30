@@ -1,4 +1,4 @@
-<!-- SDLC HUB PR template — Shape artifact review (epic / architecture+contract / ui-design / stories). -->
+<!-- SDLC Product PR template — Shape artifact review (epic / architecture+contract / ui-design / stories). -->
 <!-- This PR is a REVIEW VEHICLE on the Product, not a code merge. The file gate (yad-review-gate)
      advances the step when this PR is MERGED with the approvals met and every thread resolved. Reviewers
      approve/comment here; `yad gate sync` (or CI at merge, with a verified ledger) pulls that into the file ledger. -->

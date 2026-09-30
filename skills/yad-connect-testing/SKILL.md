@@ -26,7 +26,7 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
   same shape as the design tool's MCP, not Repomix's `npx`. The skill detects the MCP and degrades when
   it is absent; it never installs an MCP server.
 - Registry: `{project-root}/.sdlc/testing.json` (project-wide, shared across all epics — NOT per-epic),
-  the sibling of `.sdlc/repos.json`, `.sdlc/hub.json`, and `.sdlc/design.json`.
+  the sibling of `.sdlc/repos.json`, `.sdlc/product.json`, and `.sdlc/design.json`.
 - Per-epic test→suite links are written later by `yad-test-cases`
   (`epics/EP-<slug>/.sdlc/test-links.json`), not here.
 - Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.

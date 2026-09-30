@@ -26,7 +26,7 @@ markdown-only exactly as before.
   shape as Impeccable's slash-commands, not Repomix's `npx`. The skill detects the MCP and degrades when
   it is absent; it never installs an MCP server.
 - Registry: `{project-root}/.sdlc/design.json` (project-wide, shared across all epics — NOT per-epic),
-  the sibling of `.sdlc/repos.json` and `.sdlc/hub.json`.
+  the sibling of `.sdlc/repos.json` and `.sdlc/product.json`.
 - Per-epic screen→frame links are written later by `yad-ui` (`epics/EP-<slug>/.sdlc/design-links.json`),
   not here.
 - Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.

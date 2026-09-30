@@ -33,7 +33,7 @@ import { collectDoctor } from './doctor.mjs';
 import { loadLedger, gatePredicate, artifactHash, acceptedHashes, optionalStepsFor } from './epic-state.mjs';
 import { loadProduct, isSolo, requireEngagement } from './gate.mjs';
 
-// E70: `yad doctor` would ask `gh` about the golden hub's branch protection — never the developer's real
+// E70: `yad doctor` would ask `gh` about the golden Product's branch protection — never the developer's real
 // account from a test (the YAD_PLATFORM_LOGIN precedent in the other suites).
 process.env.YAD_PLATFORM_READ = '0';
 
@@ -98,9 +98,9 @@ export async function collectGolden(root) {
   // The gate predicate, wired the way gateSync wires it (cli/gate.mjs). `threadsResolved` and
   // `merged` are the platform's answers, which a frozen fixture has no way to know; both are set
   // true so the snapshot isolates the part the predicate actually decides — the approval rule.
-  const { hub } = loadProduct(root);
-  const solo = isSolo(hub);
-  const reqEng = requireEngagement(hub);
+  const { productConfig } = loadProduct(root);
+  const solo = isSolo(productConfig);
+  const reqEng = requireEngagement(productConfig);
   const gates = [];
   const epicsDir = path.join(root, 'epics');
   for (const epic of fs.readdirSync(epicsDir).sort()) {

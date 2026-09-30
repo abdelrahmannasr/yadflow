@@ -623,10 +623,10 @@ export function teamHint(counted) {
 // The ONE wiring every surface uses (`yad mode`, `gate status`, `yad next`, `yad doctor`): null outside
 // solo mode, where no count is read; otherwise `teamHint` over the count the caller already read, or a
 // fresh one with the roster aliases (without them an older roster-shaped approval reads as a second
-// person). `solo` is the caller's `isSolo(hub)` — it lives in cli/gate.mjs, which imports this file.
-export function soloTeamHint(root, hub, { solo, headCount = null, today = null } = {}) {
+// person). `solo` is the caller's `isSolo(productConfig)` — it lives in cli/gate.mjs, which imports this file.
+export function soloTeamHint(root, productConfig, { solo, headCount = null, today = null } = {}) {
   if (!solo) return null;
-  return teamHint(headCount || activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) }));
+  return teamHint(headCount || activePeople(root, { today: today || undefined, aliases: legacyLogins(productConfig) }));
 }
 
 // The ONE way a suggestion is printed on a text surface: a known one as a warning line (`! …`), an

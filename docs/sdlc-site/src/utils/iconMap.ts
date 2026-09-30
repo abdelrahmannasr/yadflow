@@ -3,7 +3,7 @@
 // the PathCategory phases; message-type keys match MessageType.
 
 export const COMPONENT_ICONS: Record<string, string> = {
-  'product-hub': 'account_balance',
+  'product': 'account_balance',
   'state-json': 'explore',
   'approvals-json': 'task_alt',
   'contract-lock': 'lock',
@@ -24,7 +24,7 @@ export const COMPONENT_ICONS: Record<string, string> = {
 };
 
 export const COMPONENT_ROLES: Record<string, string> = {
-  'product-hub': 'Hub',
+  'product': 'Product',
   'state-json': 'Ledger',
   'approvals-json': 'Ledger',
   'contract-lock': 'Lock',

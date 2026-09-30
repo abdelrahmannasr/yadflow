@@ -46,7 +46,7 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
 ## Git tracking
 
 Commit the **registry** (`testing.json`) — it is small, reviewable, and holds no secrets (references
-only). This mirrors how `repos.json`, `hub.json`, and `design.json` are committed.
+only). This mirrors how `repos.json`, `product.json`, and `design.json` are committed.
 
 ## Greenfield
 

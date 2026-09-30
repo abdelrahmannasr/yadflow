@@ -26,7 +26,7 @@ and never gates.
 
 | Step (skill) | Outputs / sideEffects |
 |--------------|------------------------|
-| `yad-connect-repos` | `repos.json`, `code-context/<repo>/pack.md` + `code-map.md` (+ `detect-hub` → `product.json` + `hub.json`) |
+| `yad-connect-repos` | `repos.json`, `code-context/<repo>/pack.md` + `code-map.md` (+ `detect-product` → `product.json` + `hub.json`) |
 | `yad-connect-design` | `design.json` |
 | `yad-connect-testing` | `testing.json` |
 | `yad-connect-learning` | `learning.json` |
@@ -123,7 +123,7 @@ runs the sweep. The three thread gates ride in the Build `yad-checks` set above.
 ## System components = the durable state objects
 
 `components.ts` renders these on the canvas (deterministic positions): the **Product**; each
-`.sdlc/*.json` (`state.json`, `approvals.json`, `comments.json`, `hub.json`, `repos.json`, `design.json`,
+`.sdlc/*.json` (`state.json`, `approvals.json`, `comments.json`, `product.json`, `repos.json`, `design.json`,
 `testing.json`, `learning.json`, `docs.json`, `contract-lock.json`, `build-state/*`, `trust-log.json`,
 and the change-thread ledgers `change.json`, `reconcile-debt.json`, `build-log.json`);
 the **connected code repos**; the **design / testing / learning tools**; and the **platform**

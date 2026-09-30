@@ -20,7 +20,7 @@ import { c, ok, info, fail, hand, exists, pushWithRebase, forTerminal } from './
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './productcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
 import { codeContextPathOk } from './workspace.mjs';
@@ -128,12 +128,12 @@ export function summarizeCodeContext(files = []) {
 }
 
 // PURE — the audit-trail commit message. Subject passes the Product commit-message gate (valid type
-// `chore`, scope `hub`, non-empty description, no trailing period). No Task trailer and no
+// `chore`, scope `product`, non-empty description, no trailing period). No Task trailer and no
 // Co-Authored-By: this is human-owned machine state, not an authored code change. `[skip ci]` mirrors
 // `yad checkpoint` — it lands on the default branch and needs no PR gate suite. `label`/`author` are
 // collapsed to one line so nothing can split the subject or forge a trailer.
 export function buildCodeMapMessage({ label, author, basenames = [] }) {
-  const subject = `chore(hub): sync code-context — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
+  const subject = `chore(product): sync code-context — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
   const body = basenames.length ? `Updated: ${basenames.join(', ')}` : '';
   return body ? `${subject}\n\n${body}` : subject;
 }
@@ -143,17 +143,17 @@ export function buildCodeMapMessage({ label, author, basenames = [] }) {
 export async function publishCodeContext(root, { push = false, allowBranch = false, name = null } = {}) {
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
   if (!exists(productConfigPath(root))) {
-    fail('no .sdlc/hub.json — --push publishes the Product code-context; run it from the Product');
+    fail('no .sdlc/product.json — --push publishes the Product code-context; run it from the Product');
     process.exitCode = 1;
     return;
   }
 
-  const { hub, repos } = loadProduct(root);
+  const { productConfig, repos } = loadProduct(root);
   const registry = { repos: repos || [] };
   const git = productGit(root);
 
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  const defaultBranch = resolveDefaultBranch(git, hub);
+  const defaultBranch = resolveDefaultBranch(git, productConfig);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad repo refresh --push', root })) return;
 
   // Stage the EXPLICIT allowlist (code-maps + registry), scoped so an unrelated pre-staged file is never
@@ -219,7 +219,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   if (push) preflightGuardReadiness(root);
 
   const { label, basenames } = summarizeCodeContext(fileset);
-  const author = checkpointAuthor(platformLogin(root, hub?.platform), git('config', 'user.name').stdout);
+  const author = checkpointAuthor(platformLogin(root, productConfig?.platform), git('config', 'user.name').stdout);
   const message = buildCodeMapMessage({ label, author, basenames });
 
   // Untrack the packs by holding their bytes and removing the files across the --only commit, then

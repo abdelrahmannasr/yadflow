@@ -15,7 +15,7 @@ import { c, log, ok, info, warn, fail, hand, exists, emitJSON } from './lib.mjs'
 import path from 'node:path';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION, settingsEditHint } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
-import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { buildIndex, writeIndex, indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { printable } from './epic-state.mjs';
 
@@ -40,11 +40,11 @@ export async function runIndex(root, { json = false } = {}) {
   if (json) return emitJSON({ schemaVersion: SCHEMA_VERSION, ...built.index });
 
   log(c.bold('\nyad index'));
-  const { hub } = loadProduct(root);
+  const { productConfig } = loadProduct(root);
   const items = built.index.items;
   const unreadable = items.filter((i) => i.unreadable);
   const summary = `${items.length} work item${items.length === 1 ? '' : 's'}${unreadable.length ? `, ${unreadable.length} unreadable` : ''}`;
-  if (isVerifiedLedger(hub)) {
+  if (isVerifiedLedger(productConfig)) {
     const fresh = indexFreshness(root, built);
     info(`this Product's ledger is verified: CI rebuilds ${INDEX_FILE} when it records a merge on the default branch, and a local write could not be committed — nothing written`);
     if (fresh.state === 'current') ok(`${INDEX_FILE} is current (${summary})`);
@@ -59,7 +59,7 @@ export async function runIndex(root, { json = false } = {}) {
   }
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  const defaultBranch = resolveDefaultBranch(git, hub);
+  const defaultBranch = resolveDefaultBranch(git, productConfig);
   if (branch !== defaultBranch) {
     fail(`on '${branch}', not the default branch '${defaultBranch}' — ${INDEX_FILE} is written on the default branch only, so a branch never carries it`);
     hand(`switch to '${defaultBranch}' and re-run (if '${defaultBranch}' is wrong, set default_branch in ${settingsEditHint(root)}); \`yad index --json\` prints it here without writing`);

@@ -81,7 +81,7 @@ Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `actio
 - **Companion comments never block; genuine concerns always do.** Flag the former with `yad:noblock`;
   leave the latter unflagged.
 - **The engagement signal is gameable and you say so.** It makes review quality visible; it is not
-  proof. The strict-mode switch is `hub.review.requireEngagement` (off by default).
+  proof. The strict-mode switch is `review.requireEngagement` (Product settings) (off by default).
 - **The companion never approves on a human's behalf and never merges.** It assists; the human acts.
 
 ## local mode (no platform)

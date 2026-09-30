@@ -32,7 +32,7 @@ import { actorName } from './platform.mjs';
 // gate, so it must not block the verb.
 export function recordActor(root) {
   let platform = null;
-  try { platform = loadProduct(root)?.hub?.platform || null; } catch { /* no Product / malformed — attribute by raw git name */ }
+  try { platform = loadProduct(root)?.productConfig?.platform || null; } catch { /* no Product / malformed — attribute by raw git name */ }
   return actorName(root, platform);
 }
 
@@ -70,9 +70,9 @@ const VERBS = {
 // these verbs on a local ledger (`yad doctor` reports both), and the hook and the verb must give the same
 // answer on the same file.
 function ciOwnsLedger(root, { epic, command, undoCommand = null, runner }) {
-  const hub = readJSON(productConfigPath(root), null);
-  if (!isVerifiedLedger(hub)) return false;
-  const seeded = seededSlugs(root, hub, runner);
+  const productConfig = readJSON(productConfigPath(root), null);
+  if (!isVerifiedLedger(productConfig)) return false;
+  const seeded = seededSlugs(root, productConfig, runner);
   if (seeded === null) {
     warn(`this Product's ledger is verified, and origin could not be read — cannot tell whether CI already owns ${epicRel(epic)}/.sdlc/state.json. If the epic's first review PR has merged, ledger-guard will reject this change`);
     return false;

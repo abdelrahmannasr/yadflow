@@ -29,15 +29,15 @@ import fs from 'node:fs';
 import { ok, info, warn, fail, hand, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { capturedEpic, gitIn, isOwnerPath, pushEnv, wipName, WIP_PREFIX, fetchAllArgs } from './capture.mjs';
-import { resolveDefaultBranch } from './hubcommit.mjs';
+import { resolveDefaultBranch } from './productcommit.mjs';
 
 export const CLAIM_HOURS = 4;
 const CLAIM_MS = CLAIM_HOURS * 60 * 60 * 1000;
 
 // The default branch as a ref this clone holds — origin's copy first, then a local branch — or null.
 function defaultRef(root, git) {
-  const hub = readJSON(productConfigPath(root), {}) || {};
-  const def = resolveDefaultBranch((...a) => { const r = git(a); return { ok: r.ok, stdout: r.out.trim() }; }, hub);
+  const productConfig = readJSON(productConfigPath(root), {}) || {};
+  const def = resolveDefaultBranch((...a) => { const r = git(a); return { ok: r.ok, stdout: r.out.trim() }; }, productConfig);
   for (const ref of [`refs/remotes/origin/${def}`, `refs/heads/${def}`]) if (git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]).ok) return { ref, name: def };
   return { ref: null, name: def };
 }
@@ -149,7 +149,7 @@ export async function runClaims(root, { epic = null, noFetch = false, env = proc
       const opts = { cwd: root, encoding: 'utf8', timeout: 30_000, env: { ...env, ...pushEnv(env) } };
       const r = spawnSync('git', fetchAllArgs({ prune: true }), opts);
       fetched = r.status === 0 ? 'done' : 'failed';
-      // The default branch, for the "landed" rule — on its own: a name guessed wrong (no hub default, no
+      // The default branch, for the "landed" rule — on its own: a name guessed wrong (no Product default, no
       // origin/HEAD) must not stop the capture branches from arriving. Its failure changes nothing.
       const def = defaultRef(root, git).name;
       if (fetched === 'done') spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${def}:refs/remotes/origin/${def}`], opts);

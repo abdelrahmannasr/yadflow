@@ -45,7 +45,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   and degrading to **harness-native** tutoring when absent. Idempotent and refreshable; one connection
   per project.
 - **`yad-connect-docs`** — Connects a docs/Pages target (GitHub Pages / GitLab Pages, auto-detected from
-  `hub.json`) so the generated documentation sites can deploy. Records the target + scope + base path in
+  `product.json`) so the generated documentation sites can deploy. Records the target + scope + base path in
   `.sdlc/docs.json` (local-user auth, no stored tokens), degrading to **build-only** when no Pages host /
   CLI is present. Idempotent and refreshable; one connection per project.
 
@@ -148,7 +148,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   review **cards**, and runs a grounded **chat** where a reviewer's questions become the record. Records
   an **engagement** signal on each approval (`verified` vs `none`) and posts a friendly public nudge on a
   bare rubber-stamp. Soft by default ("visible, not impossible"); gates only when
-  `hub.review.requireEngagement`. Companion comments carry `<!-- yad:noblock -->` so they never block.
+  `review.requireEngagement` (Product settings). Companion comments carry `<!-- yad:noblock -->` so they never block.
 - **`yad-pair-review`** — The guided, two-way, **teaching** walkthrough — the AI-driven 5th companion
   face (front **and** Build). The AI walks the engineer through the change **one risk-ordered stop at
   a time** (`yad review walkthrough` / `yad gate walkthrough`), gives comprehensive context per change,
@@ -158,7 +158,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
   surfaces genuine concerns as normal blocking comments.
 - **`yad-product-bridge`** — The templated PR/MR bridge for the Shape gate. When the Product has a platform
-  (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
+  (`.sdlc/product.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
   ledger. The file ledger stays the source of truth; degrades to a local gate with no platform, where
   `yad gate approve`, `yad gate comment` and `yad gate advance` record the review (E112).
@@ -181,7 +181,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   a change touching a directory the base branch's map marks `high` asks for one more — E66 — and names
   who has committed there in the last 30 days, the people who can meet that ask — E67). Also wires **yad-update-guard** — a
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
-  with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
+  with just **verified-commits** + **commit-message**. Profile-aware (`code`|`product`), so they run on
   both code repos and the Product. CI-agnostic bash for GitHub Actions and GitLab CI. Also
   installs the **agent guardrail** on a verified Product — `hooks/ledger-guard.mjs`, a harness hook that
   refuses an agent the CI-owned ledger write up front and names `yad gate open`, rather than letting

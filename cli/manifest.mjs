@@ -375,10 +375,10 @@ export const productDrift = (root, epicDirs = []) => {
 // SAME order in bash because the check gates are standalone by design; that copy is the only one,
 // its header says so, and cli/test-checks.mjs runs a table of hub.json variants through both and
 // asserts they agree on every row. Three keys is three ways for two readers to drift.
-export const isVerifiedLedger = (hub) => {
-  if (!hub?.platform) return false;
-  if (typeof hub.ledger === 'string') return hub.ledger === 'verified';
-  return hub.bridge_enabled === true || hub.bridge === true;
+export const isVerifiedLedger = (productConfig) => {
+  if (!productConfig?.platform) return false;
+  if (typeof productConfig.ledger === 'string') return productConfig.ledger === 'verified';
+  return productConfig.bridge_enabled === true || productConfig.bridge === true;
 };
 
 // ---- the two dials (E28) ------------------------------------------------------------------------
@@ -560,6 +560,9 @@ export const PRODUCT_WIRING = {
 // The branch-protection setup guide (E48), linked from `yad doctor`'s `protection` section. A URL, not a
 // path: the reader is in their own repo, where `docs/` is not yadflow's.
 export const PROTECTION_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/blob/main/docs/branch-protection.md';
+// The hub -> Product hand-change guide (E124), linked from `yad migrate`'s last line while `.sdlc/hub.json` is on
+// disk. A URL for the same reason.
+export const PRODUCT_RENAME_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/blob/main/docs/migrations/hub-to-product.md';
 
 export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.mjs', dest: 'hooks/ledger-guard.mjs' },

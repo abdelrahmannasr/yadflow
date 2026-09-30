@@ -8,7 +8,7 @@ import {
   c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject, writeMirrored, emitJSON, refuse, collectWarning,
 } from './lib.mjs';
 import { OWNING_COMMIT_ENV } from './hook.mjs';
-import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
+import { PROJECT_FILES, isVerifiedLedger , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate, printable,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
@@ -18,7 +18,7 @@ import {
 } from './epic-state.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
-import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
+import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './productcommit.mjs';
 import {
   readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
@@ -33,8 +33,8 @@ import { err } from './errors.mjs';
 // (`actorName`). On CI that is usually the bot's git name — a job token cannot read `/user`. Best-effort,
 // like every record's `by`: attribution never blocks a gate. Kept here rather than imported from
 // skip.mjs, which imports this file.
-function closingActor(root, hub) {
-  return actorName(root, hub?.platform);
+function closingActor(root, productConfig) {
+  return actorName(root, productConfig?.platform);
 }
 
 // One line for a step's closing record — `yad gate status` prints it under a review step (E18), and
@@ -150,34 +150,34 @@ export function loadProduct(root) {
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   // Distinguish an ABSENT hub.json (null default → fine, local gate) from one that exists but
   // holds literal `null` (malformed — must not silently downgrade to local).
-  const hub = readJSONStrict(productFile, null);
-  if (hub === null && fs.existsSync(productFile)) {
+  const productConfig = readJSONStrict(productFile, null);
+  if (productConfig === null && fs.existsSync(productFile)) {
     throw err('YAD-STATE-002', `${productFile}: contains \`null\` — expected a config object`, 'fix the file or re-run `yad setup`');
   }
-  if (hub !== null) {
-    if (typeof hub !== 'object' || Array.isArray(hub)) throw err('YAD-STATE-002', `${productFile}: expected a JSON object`, 'fix the file or re-run `yad setup`');
-    if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) {
-      throw err('YAD-CFG-001', `${productFile}: unknown platform '${hub.platform}'`, 'expected github, gitlab, or null — fix the file or re-run `yad setup`');
+  if (productConfig !== null) {
+    if (typeof productConfig !== 'object' || Array.isArray(productConfig)) throw err('YAD-STATE-002', `${productFile}: expected a JSON object`, 'fix the file or re-run `yad setup`');
+    if (![null, undefined, 'github', 'gitlab'].includes(productConfig.platform)) {
+      throw err('YAD-CFG-001', `${productFile}: unknown platform '${productConfig.platform}'`, 'expected github, gitlab, or null — fix the file or re-run `yad setup`');
     }
   }
   const registry = readJSONStrict(regFile, { repos: [] });
   if (!Array.isArray(registry?.repos)) throw err('YAD-STATE-002', `${regFile}: expected a \`repos\` array`, 'fix the file or re-run `yad setup`');
-  return { hub, repos: registry.repos };
+  return { productConfig, repos: registry.repos };
 }
 
 // Solo mode (a lone developer): waive the approval requirement — on GitHub you cannot approve your own
 // PR, so an approval gate would deadlock. The review PR/MR and its merge stay (CI runs on the PR; the
 // merge advances the step). Recorded per-project in hub.json by `yad setup`.
-export const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
+export const isSolo = (productConfig) => !!(productConfig && (productConfig.solo === true || productConfig.review_gate?.solo === true));
 
 // Verified mode: CI is the sole ledger writer, so `gate open`/`sync` stay hands-off. The predicate is
 // defined once in manifest.mjs (`isVerifiedLedger`) and shared with plan.mjs's wiring and the ledger
 // hook, so no two readers can disagree about who owns the ledger (#186).
 
-// requireEngagement (config `hub.review.requireEngagement`): when on, the predicate counts only
+// requireEngagement (config `review.requireEngagement` in the Product settings): when on, the predicate counts only
 // approvals carrying a verified engagement signal. Soft-off by default — a bare approve still counts
 // but is recorded `engagement: none` and draws the friendly nudge.
-export const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === true));
+export const requireEngagement = (productConfig) => !!(productConfig && (productConfig.review?.requireEngagement === true));
 
 // `legacyLogins` LIVES in cli/epic-state.mjs now (E71): the active-people reader needs the same table to
 // recognise an older record, and importing it from here would have made a cycle (gate.mjs prints the
@@ -634,21 +634,21 @@ function stageIndexIfClean(root, git, commits = null) {
 }
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null } = {}) {
-  const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
-  const platform = hub.platform;
-  const aliases = legacyLogins(hub);
-  const clashed = ambiguousLegacyNames(hub);
-  const solo = isSolo(hub);
-  const reqEng = requireEngagement(hub);
+  const { productConfig } = loadProduct(root);
+  if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — local gate, nothing to sync`); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
+  const platform = productConfig.platform;
+  const aliases = legacyLogins(productConfig);
+  const clashed = ambiguousLegacyNames(productConfig);
+  const solo = isSolo(productConfig);
+  const reqEng = requireEngagement(productConfig);
   // Local invocation in verified mode is ADVISORY: CI is the sole ledger writer, so a human run reads
   // the platform and prints the predicate but writes nothing. CI calls gateSync with local=false.
   // With a local ledger (platform but no gate-sync CI) the local command stays the writer.
   // dryRun forces the same read-only behavior regardless of the ledger — used for the Path B pre-merge
   // evaluation, which must persist nothing (gateCi passes dryRun for a held branch event).
-  const readOnly = (local && isVerifiedLedger(hub)) || dryRun;
+  const readOnly = (local && isVerifiedLedger(productConfig)) || dryRun;
   // Who writes this run's closing records (E18). Not asked on a read-only run, which writes nothing.
-  const by = readOnly ? null : closingActor(root, hub);
+  const by = readOnly ? null : closingActor(root, productConfig);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
@@ -884,7 +884,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   refreshApprovalRecord(epicDir, open, approvals, today); // the dated side file lists them in the same order
   // Only a PERSON's sync (`local`): `gateCi` calls this too, and rebuilds the index itself, inside the
   // one allowlisted commit it makes on a merge — and never in its read-only pre-merge run.
-  if (local) refreshIndexAfterWrite(root, hub);
+  if (local) refreshIndexAfterWrite(root, productConfig);
   return { epic, synced, advanced, written: true, currentStep: state.currentStep ?? null, gates };
 }
 
@@ -920,8 +920,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 // branch: `dirty` — uncommitted or untracked files under either folder BEFORE this run began (the move
 // copies what is on disk, so they would be committed and pushed to the default branch), and a HEAD that
 // is not the default branch (the push goes to the default branch whatever is checked out).
-export function convertProductLevel(root, hub, { git = (...a) => run('git', a, { cwd: root }), defaultBranch = 'main', dirty = false } = {}) {
-  if (!isVerifiedLedger(hub)) return null;
+export function convertProductLevel(root, productConfig, { git = (...a) => run('git', a, { cwd: root }), defaultBranch = 'main', dirty = false } = {}) {
+  if (!isVerifiedLedger(productConfig)) return null;
   const move = planProductMove(root, { verified: true, ci: true });
   if (!move) return null;
   const out = (r) => (r?.ok ? String(r.stdout || '').trim() : '');
@@ -958,17 +958,17 @@ export function convertProductLevel(root, hub, { git = (...a) => run('git', a, {
 }
 
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
-  const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0, committed: false, pushed: false }; }
+  const { productConfig } = loadProduct(root);
+  if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
-  const defaultBranch = hub.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
+  const defaultBranch = productConfig.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
   // not merged) is read-only and pushes nothing; an advance lands on the default branch (see below).
 
   // Whether the old product-level folder (or foundation/) held a person's uncommitted work BEFORE this
   // run writes anything — read now, because the sync below legitimately modifies that ledger. Only asked
   // when a move could happen at all; an unreadable status counts as dirty (refuse rather than guess).
-  const legacyDirtyBefore = (merged || !branch) && isVerifiedLedger(hub)
+  const legacyDirtyBefore = (merged || !branch) && isVerifiedLedger(productConfig)
     && fs.existsSync(path.join(epicRoot(root, DISCOVERY_EPIC), '.sdlc', 'state.json'))
     ? (() => {
       const st = git('status', '--porcelain', '--untracked-files=all', '--', epicRel(DISCOVERY_EPIC), FOUNDATION_DIR);
@@ -1023,7 +1023,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // history once PER open review PR; reading it above the early exits (no platform, an unparseable
   // branch, no jobs) would pay for a 360-day `git log --all` on every push and throw it away. It is
   // one fact about the Product, so every job also prints the same number.
-  const sweepCount = jobs.length ? activePeople(root, { today: today || undefined, aliases: legacyLogins(hub) }) : null;
+  const sweepCount = jobs.length ? activePeople(root, { today: today || undefined, aliases: legacyLogins(productConfig) }) : null;
   for (const job of jobs) {
     const epicDir = epicRoot(root, job.epic);
     // Event mode (--branch) targets a single epic: fail loudly. Sweep mode skips the bad epic.
@@ -1070,7 +1070,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     }
     if (!existing || existing.number !== number || existing.branch !== job.branch) {
       ledger.productPrs = upsertProductPr(ledger.productPrs, {
-        step: step.id, artifact: job.artifact, platform: hub.platform, number,
+        step: step.id, artifact: job.artifact, platform: productConfig.platform, number,
         url: existing?.url ?? null, branch: job.branch, lastSyncedAt: existing?.lastSyncedAt ?? null,
       });
       writeMirrored(ledger.files.productPrs, ledger.files.productPrsLegacy, ledger.productPrs);
@@ -1117,8 +1117,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // not stop the review that merged.
   let stampedCount = 0;
   if (merged) {
-    const aliases = legacyLogins(hub);
-    const clashed = ambiguousLegacyNames(hub);
+    const aliases = legacyLogins(productConfig);
+    const clashed = ambiguousLegacyNames(productConfig);
     for (const e of aliases.size ? epicIds(root) : []) {
       if (touched.has(e) || failedEpics.has(e)) continue;
       const dirty = git('status', '--porcelain', '--untracked-files=all', '--', path.join(epicRel(e), '.sdlc'), path.join(epicRel(e), 'reviews'));
@@ -1142,7 +1142,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     }
   }
   const moved = (merged || !branch)
-    ? convertProductLevel(root, hub, { git, defaultBranch, dirty: legacyDirtyBefore })
+    ? convertProductLevel(root, productConfig, { git, defaultBranch, dirty: legacyDirtyBefore })
     : null;
   if (!touched.size && !moved) return { synced, committed: false, pushed: false };
 
@@ -1212,7 +1212,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // (E19 review). `stageIndexIfClean` keeps it out of a commit that does not hold what it read.
   const onDefault = (() => {
     const head = git('rev-parse', '--abbrev-ref', 'HEAD');
-    return head.ok && head.stdout === resolveDefaultBranch(git, hub);
+    return head.ok && head.stdout === resolveDefaultBranch(git, productConfig);
   })();
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
@@ -1247,16 +1247,16 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
 }
 
 export async function gateComments(root, { epic, artifact, today, reader = readPr } = {}) {
-  const { hub } = loadProduct(root);
+  const { productConfig } = loadProduct(root);
   // The --json answer (E1): each review PR, and what still blocks it.
   const prs = [];
-  if (!hub?.platform) { warn('no Product platform configured — nothing to fetch'); return { epic, prs }; }
+  if (!productConfig?.platform) { warn('no Product platform configured — nothing to fetch'); return { epic, prs }; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   const targets = (ledger.productPrs || []).filter((p) => !artifact || p.artifact === artifact);
   if (!targets.length) { warn('no review PR recorded — run `yad gate open` first'); return { epic, prs }; }
   for (const pr of targets) {
-    const pull = reader(hub.platform, pr.number, { cwd: root });
+    const pull = reader(productConfig.platform, pr.number, { cwd: root });
     if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason}`); prs.push({ artifact: pr.artifact, pr: pr.number, read: false, reason: pull.reason ?? null }); continue; }
     const cr = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     const unresolved = (pull.threads || []).filter((t) => !t.resolved);
@@ -1282,9 +1282,9 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
-  const { hub } = loadProduct(root);
-  const solo = isSolo(hub);
-  const reqEng = requireEngagement(hub);
+  const { productConfig } = loadProduct(root);
+  const solo = isSolo(productConfig);
+  const reqEng = requireEngagement(productConfig);
   const optional = optionalStepsFor(ledger.state);   // which steps THIS epic's route allows to be skipped
   // E71 — read ONCE for the whole view, not once per step: it is a Product-wide fact, and a per-step
   // read would walk every connected repo's history once for every gate on the screen.
@@ -1293,7 +1293,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   // wrong one.
   // `given` is a count the caller already read, as `gateSync` takes one — the CLI passes none; a test
   // passes one so the cap (E72) can be seen on a fixture that has no git history of its own.
-  const headCount = given || activePeople(root, { aliases: legacyLogins(hub) });
+  const headCount = given || activePeople(root, { aliases: legacyLogins(productConfig) });
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${printable(ledger.state.currentStep) ?? '(none)'}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   // Printed in solo mode too, exactly as the per-step count is: someone who later switches to team mode
   // can see the number their gates will be capped against (E72), before it holds anything for them.
@@ -1301,7 +1301,7 @@ export async function gateStatus(root, { epic, headCount: given = null } = {}) {
   note(c.dim(activeBasis(headCount)));
   // E74: in solo mode, suggest `yad mode team` when the count shows more than one person may work here.
   // An unknown count is already said by `activeSum` just above, so only a known suggestion prints.
-  printTeamHint(soloTeamHint(root, hub, { solo, headCount }));
+  printTeamHint(soloTeamHint(root, productConfig, { solo, headCount }));
   const reachSeen = new Set();   // E73: each warning line once per view, not once per step
   const gates = [];              // the --json answer (E1): each review step as this view reads it
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
@@ -1438,7 +1438,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   preflightGuardReadiness(root);
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  const defaultBranch = resolveDefaultBranch(git, loadProduct(root).hub);
+  const defaultBranch = resolveDefaultBranch(git, loadProduct(root).productConfig);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair', root })) return did(true);
 
   const spec = path.relative(root, ledger.files.state);
@@ -1474,7 +1474,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
 export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, today = new Date().toISOString().slice(0, 10) } = {}) {
-  const { hub } = loadProduct(root);
+  const { productConfig } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
@@ -1500,7 +1500,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   warnUnlockedContract(epicDir, artifact);
   warnIncompleteDiscovery(epicDir, artifact);
 
-  const verified = isVerifiedLedger(hub);
+  const verified = isVerifiedLedger(productConfig);
   // The review branch must exist ON ORIGIN: this command opens a PR against it, it never creates or
   // pushes it, and `gh pr create --head` explicitly does NOT push either — so a branch that is only
   // local still fails inside the platform CLI, which is the opaque error this guard exists to replace.
@@ -1510,7 +1510,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   //
   // Checked BEFORE any state is written: marking the step in_review and then refusing would leave the
   // ledger claiming a review is open that was never opened.
-  if (!head && hub?.platform) {
+  if (!head && productConfig?.platform) {
     const present = hasBranch(root, branch);
     if (present === false) {
       fail(`review branch '${branch}' is not on origin`);
@@ -1528,11 +1528,11 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   const author = ledger.state.steps.find((s) => s?.type === 'author' && s.artifact === step.artifact && s.id !== step.id);
   const closesAuthor = !verified && !!author && !isPassed(author) && !author.closed;
   if (!verified) {
-    ledger.state = markInReview(ledger.state, step, { by: closingActor(root, hub), date: today, hash: artifactHash(epicDir, step.artifact) });
+    ledger.state = markInReview(ledger.state, step, { by: closingActor(root, productConfig), date: today, hash: artifactHash(epicDir, step.artifact) });
     writeState(ledger.files.state, ledger.state);
-    refreshIndexAfterWrite(root, hub);
+    refreshIndexAfterWrite(root, productConfig);
   }
-  if (!hub?.platform) {
+  if (!productConfig?.platform) {
     warn('no Product platform — marked in_review locally (no PR opened)');
     ok(`${step.id} → in_review`);
     return { epic, step: step.id, artifact, branch, opened: false, url: null, markedInReview: true };
@@ -1541,9 +1541,9 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // Open the PR. In verified mode CI records the hub-prs entry (and advances) on the default branch at
   // merge — `yad gate open` never commits gate-state files (the ledger-guard check enforces that), and
   // CI writes nothing pre-merge. With a local ledger the local command records the PR itself (no CI will).
-  const body = fillHubTemplate({
+  const body = fillProductTemplate({
     epic, artifact, step, owner: ownerOf(epicDir), domains,
-    active: activePeople(root, { aliases: legacyLogins(hub) }).capacity.active,
+    active: activePeople(root, { aliases: legacyLogins(productConfig) }).capacity.active,
     // Does this epic's ROUTE have an architecture step? Asked of the recorded route and never of the
     // chain (`routeLacksStep`): a truncated legacy chain has no `architecture` row and is not on a
     // short lane, and telling its reviewer in writing that it is would be a false claim in a record
@@ -1556,11 +1556,11 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // roles, and there is no stored list to pick them from any more. The team requests them on the PR,
   // and E68 will suggest them from history. Said on the way out, so nobody waits for a request that
   // was never sent.
-  const committer = hub.platform === 'gitlab' ? platformLogin(root, hub.platform) : null;
+  const committer = productConfig.platform === 'gitlab' ? platformLogin(root, productConfig.platform) : null;
   const assignees = committer ? [committer] : [];
   const labels = domains.map((d) => `domain:${d}`); // empty unless the step names its repos (touchedDomains)
-  info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
-  const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, assignees, labels, cwd: root });
+  info(`opening review ${productConfig.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
+  const r = creator(productConfig.platform, { title: `review: ${artifact} (${epic})`, body, base: productConfig.default_branch || 'main', head: branch, assignees, labels, cwd: root });
   if (!r.ok) {
     warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`);
     return { epic, step: step.id, artifact, branch, opened: false, url: null, markedInReview: !verified, reason: r.reason || null };
@@ -1579,7 +1579,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     if (previous != null && previous !== opened && stampLegacyPr(ledger.approvals, step.id, previous)) {
       writeJSON(ledger.files.approvals, canonicalApprovals(ledger.approvals));
     }
-    ledger.productPrs = upsertProductPr(ledger.productPrs, { step: step.id, artifact, platform: hub.platform, number: opened, url: r.url, branch, lastSyncedAt: null });
+    ledger.productPrs = upsertProductPr(ledger.productPrs, { step: step.id, artifact, platform: productConfig.platform, number: opened, url: r.url, branch, lastSyncedAt: null });
     writeMirrored(ledger.files.productPrs, ledger.files.productPrsLegacy, ledger.productPrs);
     // The record was written before the PR existed, and the first close wins, so no later sync can add
     // the number. Add it here, to the record this run wrote and to nothing older (E18).
@@ -1588,7 +1588,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     if (number != null && closedHere?.closed?.via === 'review-opened' && closedHere.closed.pr == null) {
       closedHere.closed = closingRecord({ ...closedHere.closed, pr: number });
       writeState(ledger.files.state, ledger.state);
-      refreshIndexAfterWrite(root, hub);
+      refreshIndexAfterWrite(root, productConfig);
     }
   }
   ok(`opened ${r.url}`);
@@ -1605,9 +1605,9 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 // consumes this JSON, generates, and posts back via the platform (trailer/comments/approval).
 // Assemble (but don't print) the Shape grounding bundle. Shared by `review` and `walkthrough` so the
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
-// Returns { error } when there is no epic state, else { bundle, epicDir, hub }.
+// Returns { error } when there is no epic state, else { bundle, epicDir, productConfig }.
 function reviewBundle(root, { epic, artifact, headCount = null } = {}) {
-  const { hub, repos } = loadProduct(root);
+  const { productConfig, repos } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) return { error: `no epic state at ${epicDir}` };
@@ -1618,11 +1618,11 @@ function reviewBundle(root, { epic, artifact, headCount = null } = {}) {
   // two callers, `gate review` and `gate walkthrough`, and neither runs alongside `gate status` or
   // `gate sync`. Read before the bundle because the step's cap (E72) is computed from it. `headCount`
   // is a count the caller already read, as `gateSync` and `gateStatus` take one — the CLI passes none.
-  const counted = headCount || activePeople(root, { aliases: legacyLogins(hub) });
+  const counted = headCount || activePeople(root, { aliases: legacyLogins(productConfig) });
   const bundle = {
     epic,
     artifact: art,
-    platform: hub?.platform || null,
+    platform: productConfig?.platform || null,
     pr: pr ? { number: pr.number, url: pr.url } : null,
     // `gateRule` is E7's per-step rule — the number of distinct approvers the count asks for and the
     // arithmetic behind it. `escalated` says the step carries a risk tag that raises the count. `cap`
@@ -1642,13 +1642,13 @@ function reviewBundle(root, { epic, artifact, headCount = null } = {}) {
       name: r.name,
       codeMap: r.name ? path.join(root, '.sdlc/code-context', r.name, 'code-map.md') : null,
     })),
-    requireEngagement: requireEngagement(hub),
+    requireEngagement: requireEngagement(productConfig),
     markers: {
       trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->',
       engagementVerified: '<!-- yad:engagement verified -->', pair: '<!-- yad:pair -->',
     },
   };
-  return { bundle, epicDir, hub };
+  return { bundle, epicDir, productConfig };
 }
 
 export async function gateReview(root, { epic, artifact, headCount = null } = {}) {
@@ -1664,8 +1664,8 @@ export async function gateReview(root, { epic, artifact, headCount = null } = {}
 export async function gateWalkthrough(root, { epic, artifact, runner = run } = {}) {
   const r = reviewBundle(root, { epic, artifact });
   if (r.error) { refuse(r.error, null, { json: true }); return; }
-  const { bundle, hub } = r;
-  const defaultBranch = hub?.default_branch || 'main';
+  const { bundle, productConfig } = r;
+  const defaultBranch = productConfig?.default_branch || 'main';
   let stops = [];
   if (bundle.artifactPath) {
     const rel = path.relative(root, bundle.artifactPath) || bundle.artifact;
@@ -1687,17 +1687,17 @@ export async function gateWalkthrough(root, { epic, artifact, runner = run } = {
 // briefing text and passes it here; this upserts it idempotently into the review PR/MR description as a
 // delimited block, so regenerating on every artifact change never duplicates it. A platform write only.
 export async function gateTrailer(root, { epic, artifact, body, number, getBody = getPrBody, editBody = editPrBody } = {}) {
-  const { hub } = loadProduct(root);
-  if (!hub?.platform) { warn('no Product platform configured — the trailer posts to the PR/MR (local has none)'); return { number: null, posted: false }; }
+  const { productConfig } = loadProduct(root);
+  if (!productConfig?.platform) { warn('no Product platform configured — the trailer posts to the PR/MR (local has none)'); return { number: null, posted: false }; }
   if (!body || !String(body).trim()) { fail('trailer body is required: `yad gate trailer <epic> <artifact> --body <text>` (the companion generates it)'); process.exitCode = 1; return; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   const pr = (ledger.productPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
   const n = number || pr?.number;
   if (!n) { warn('no PR number — pass `--pr <n>` (in verified mode the PR is recorded in the ledger only at merge)'); return { number: null, posted: false }; }
-  const cur = getBody(hub.platform, n, { cwd: root });
+  const cur = getBody(productConfig.platform, n, { cwd: root });
   if (!cur.ok) { fail(`could not read PR #${n} description: ${cur.reason || 'unknown'}`); process.exitCode = 1; return; }
-  const r = editBody(hub.platform, n, upsertTrailerBlock(cur.body, String(body).trim()), { cwd: root });
+  const r = editBody(productConfig.platform, n, upsertTrailerBlock(cur.body, String(body).trim()), { cwd: root });
   if (!r.ok) { fail(`could not update PR #${n}: ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`trailer posted to PR #${n}`);
   return { number: n, posted: true };
@@ -1709,7 +1709,7 @@ const base = (artifact) => artifactBase(artifact);
 // `active` is the caller's already-read count (E71, `activePeople`), or null when it did not read one.
 // Passed in rather than read here for the same reason the predicate takes it: this builds a string and
 // must stay callable from a test without a Product on disk.
-export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true, active = null }) {
+export function fillProductTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true, active = null }) {
   const rule = gateRuleFor(step);
   const cap = gateCapFor(rule, active);
   // What the count asks for. Only the base holds (until E108); the cap (E72) is shown when it lowered the
@@ -1744,7 +1744,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
     '- This step advances when approvals are satisfied, all threads are resolved, and this PR is merged.',
     '',
-    // Required by the Product `pr-template` gate (check_hub_body). Mirrors the Checklist block of the
+    // Required by the Product `pr-template` gate (check_product_body). Mirrors the Checklist block of the
     // committed static template (yad-pr-template/templates/product/<platform>/) so the generated body
     // passes on the first CI run.
     '## Checklist',

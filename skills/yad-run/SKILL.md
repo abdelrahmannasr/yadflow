@@ -117,7 +117,7 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
 
 **Commit the machine-written state.** After each iteration's writes (the trust-log shard in 2 and the
 build-state change in 4), run `yad checkpoint --push` from `{project-root}`. It commits *only* the
-`trust-log/` shards + `build-state/<story>.json` (never a Shape gate file) as one `chore(hub): …`
+`trust-log/` shards + `build-state/<story>.json` (never a Shape gate file) as one `chore(product): …`
 audit-trail commit, and only ever on the default branch. It is a safe no-op when nothing changed, so
 call it every iteration — teammates don't review these machine writes, but CI and `yad status` on
 other machines must see current trust evidence. Never run it off the default branch (it will refuse):

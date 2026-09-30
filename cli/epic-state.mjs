@@ -37,7 +37,7 @@ const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 // `short` is measured against the capped ask and printed, and never enforced.
 //
 // WHEN THE COUNT IS UNKNOWN (`active: null`) no cap is computed at all: an unknown is never a small
-// number (E71). Product CI is usually that case — it checks out only the hub, so connected repos are
+// number (E71). Product CI is usually that case — it checks out only the Product, so connected repos are
 // not on disk — and the surfaces say so.
 //
 // Until E62 the base was not what held a gate either: a ROLE rule read from the roster did (1 owner,
@@ -263,10 +263,10 @@ export const gateRuleEnforced = (rule, cap = null) => {
 //
 // It sat in cli/gate.mjs until E71, which needs it in the active-people reader that gate.mjs prints —
 // a cycle. It is pure and data-only, so it belongs here beside `gateRuleFor`; gate.mjs re-exports it.
-export function legacyLogins(hub) {
+export function legacyLogins(productConfig) {
   const out = new Map();
   const clash = new Set();
-  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
+  for (const e of Array.isArray(productConfig?.roster) ? productConfig.roster : []) {
     if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
     if (out.has(e.name) && out.get(e.name) !== e.login) clash.add(e.name);
     out.set(e.name, e.login);
@@ -1709,7 +1709,7 @@ export function gatePredicate({
   const stale = forStep.filter((a) => isStaleHash(a.artifactHash, accepted));
   const live = forStep.filter((a) => !stale.includes(a));
 
-  // requireEngagement (config `hub.review.requireEngagement`, soft-off by default): only an approval
+  // requireEngagement (config `review.requireEngagement` in the Product settings, soft-off by default): only an approval
   // carrying a verified engagement signal counts. The signal is gameable by design — this raises the
   // cost of a bare rubber-stamp, it does not claim to prove a human read the artifact.
   const counted = requireEngagement ? live.filter((a) => a.engagement === 'verified') : live;

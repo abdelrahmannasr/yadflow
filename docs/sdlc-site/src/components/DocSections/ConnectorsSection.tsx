@@ -12,10 +12,10 @@ const CONNECTORS = [
 
 const ORDER = [
   { step: 'Install the module', detail: 'npx yadflow setup copies the yad-* skills and installs .sdlc/config.yaml.' },
-  { step: 'Detect the Product', detail: 'Detect GitHub/GitLab from the remote into hub.json. No people are collected: repository access decides who can review, and the platform records who approved.' },
+  { step: 'Detect the Product', detail: 'Detect GitHub/GitLab from the remote into product.json. No people are collected: repository access decides who can review, and the platform records who approved.' },
   { step: 'Connect code repos', detail: 'Register each repo in repos.json and cache a Repomix pack + code-map so the Shape phases are code-aware.' },
   { step: 'Connect design / testing / learning', detail: 'Optional, one per project — each degrades gracefully and records that it is absent.' },
-  { step: 'Connect a docs target', detail: 'Resolve the Pages host + Vite base path from hub.json so the generated sites can deploy.' },
+  { step: 'Connect a docs target', detail: 'Resolve the Pages host + Vite base path from product.json so the generated sites can deploy.' },
 ];
 
 const FACTS = [
@@ -23,7 +23,7 @@ const FACTS = [
   'Every connector is idempotent and refreshable; most are one-per-project (repos can be many).',
   'A connector is never a gated state — it never touches epic state, approvals, or the contract lock.',
   'Staleness for code repos is tracked by HEAD sha and is a human decision: yad repo list / yad repo refresh.',
-  'yad repo refresh --push publishes the refreshed code-maps + registry to the Product default branch as a chore(hub): sync code-context [skip ci] audit commit.',
+  'yad repo refresh --push publishes the refreshed code-maps + registry to the Product default branch as a chore(product): sync code-context [skip ci] audit commit.',
   'Connecting or refreshing a repo also drafts its risk map, .sdlc/risk-map in the code repo: the AI reads the code and marks each directory high, medium or low as guessed; a person confirms each level in a PR. A PR touching a high directory asks for one more approver — a guessed level counts too — from someone who committed there in the last 30 days. No names, and yad update never touches the file.',
 ];
 

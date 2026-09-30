@@ -13,7 +13,7 @@ import { productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch } from './productcommit.mjs';
 import { foldTrust, foldBuild } from './ledger.mjs';
 import { epicRoot, isValidEpicId, readFrontmatter } from './epic-state.mjs';
 
@@ -40,15 +40,15 @@ export async function runTidy(root, opts = {}) {
   log(c.bold('\nyad tidy up'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
   if (!exists(productConfigPath(root))) {
-    fail('no .sdlc/hub.json — run `yad tidy up` from the Product');
+    fail('no .sdlc/product.json — run `yad tidy up` from the Product');
     process.exitCode = 1;
     return;
   }
 
-  const { hub } = loadProduct(root);
+  const { productConfig } = loadProduct(root);
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  const defaultBranch = resolveDefaultBranch(git, hub);
+  const defaultBranch = resolveDefaultBranch(git, productConfig);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad tidy up', root })) return;
 
   if (opts.epic && !isValidEpicId(opts.epic)) { fail(`invalid epic id '${opts.epic}'`); process.exitCode = 1; return; }
@@ -70,9 +70,9 @@ export async function runTidy(root, opts = {}) {
   }
   if (!folded) { info('nothing to tidy — no finished shards to fold'); return { folded: 0, epics: [], message: null, committed: false, pushed: false, dryRun: !!opts.dryRun }; }
 
-  const author = checkpointAuthor(platformLogin(root, hub?.platform), git('config', 'user.name').stdout);
+  const author = checkpointAuthor(platformLogin(root, productConfig?.platform), git('config', 'user.name').stdout);
   const label = touched.length === 1 ? touched[0] : `${touched.length} epics`;
-  const message = `chore(hub): tidy Build ledgers — ${label} by ${author} [skip ci]`;
+  const message = `chore(product): tidy Build ledgers — ${label} by ${author} [skip ci]`;
 
   if (opts.dryRun) {
     log('\n' + c.dim(message) + '\n');

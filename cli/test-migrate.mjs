@@ -325,7 +325,7 @@ test('migrate: a project in local (non-verified) mode migrates its gate ledger l
 // The value is COMPUTED from what the engine already decided about the Product, never copied from the
 // flag. That distinction is the whole safety argument for this migration: an upgrade must not change
 // what a project does. The table covers every hub.json a real project can be sitting on.
-test('migrate 1 -> 2: `ledger` records what the Product was already doing, for every hub shape', async () => {
+test('migrate 1 -> 2: `ledger` records what the Product was already doing, for every settings shape', async () => {
   const { isVerifiedLedger } = await import('./manifest.mjs');
   const cases = [
     ['platform + bridge_enabled', { platform: 'github', bridge_enabled: true }, 'verified'],
@@ -337,10 +337,10 @@ test('migrate 1 -> 2: `ledger` records what the Product was already doing, for e
     ['flag true but NO platform', { bridge_enabled: true }, 'local'],
     ['platform null + flag true', { platform: null, bridge_enabled: true }, 'local'],
   ];
-  for (const [name, hub, expected] of cases) {
-    const T = project({ files: { '.sdlc/hub.json': JSON.stringify(hub, null, 2) + '\n' } });
+  for (const [name, productConfig, expected] of cases) {
+    const T = project({ files: { '.sdlc/hub.json': JSON.stringify(productConfig, null, 2) + '\n' } });
     try {
-      const before = isVerifiedLedger(hub);
+      const before = isVerifiedLedger(productConfig);
       await runMigrate(T, { apply: true });
       const after = read(path.join(T, '.sdlc/hub.json'));
       assert.equal(after.ledger, expected, name);
@@ -348,8 +348,8 @@ test('migrate 1 -> 2: `ledger` records what the Product was already doing, for e
       assert.equal(isVerifiedLedger(after), before, `${name}: migrating changed what the engine DOES`);
       // Add before you remove (rule 3): the old key survives, because a ledger-guard that has not
       // been refreshed by `yad update` yet is still reading it.
-      if ('bridge_enabled' in hub) assert.equal(after.bridge_enabled, hub.bridge_enabled, `${name}: old key kept`);
-      if ('bridge' in hub) assert.equal(after.bridge, hub.bridge, `${name}: legacy key kept`);
+      if ('bridge_enabled' in productConfig) assert.equal(after.bridge_enabled, productConfig.bridge_enabled, `${name}: old key kept`);
+      if ('bridge' in productConfig) assert.equal(after.bridge, productConfig.bridge, `${name}: legacy key kept`);
     } finally { cleanup(T); }
   }
 });
@@ -358,12 +358,12 @@ test('migrate 1 -> 2: `ledger` records what the Product was already doing, for e
 // project that has not migrated yet, and if it wrote `ledger` there the Product would claim shape 1 while
 // holding a shape-2 key — which makes doctor's drift report a lie about the one file this change is
 // about. The old booleans carry the setting until `yad migrate` adds the key.
-test('migrate 1 -> 2: a shape-1 hub written by an older shape stays coherent, then migrates cleanly', async () => {
+test('migrate 1 -> 2: shape-1 settings written by an older shape stays coherent, then migrates cleanly', async () => {
   const { isVerifiedLedger } = await import('./manifest.mjs');
   const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github",\n  "bridge_enabled": true\n}\n' } });
   try {
     const before = read(path.join(T, '.sdlc/hub.json'));
-    assert.equal('ledger' in before, false, 'a shape-1 hub carries no shape-2 key');
+    assert.equal('ledger' in before, false, 'shape-1 settings carry no shape-2 key');
     assert.equal(isVerifiedLedger(before), true, 'and the old booleans still answer the question');
     await runMigrate(T, { apply: true });
     const after = read(path.join(T, '.sdlc/hub.json'));
@@ -382,7 +382,7 @@ test('migrate 1 -> 2: only hub.json gains `ledger`; every other file just record
     await runMigrate(T, { apply: true });
     const repos = read(path.join(T, '.sdlc/repos.json'));
     const lock = read(path.join(T, 'epics/EP-x/.sdlc/contract-lock.json'));
-    assert.deepEqual(repos, { schemaVersion: ENGINE_SHAPE, repos: [] }, 'a non-hub file gains the stamp and nothing else');
+    assert.deepEqual(repos, { schemaVersion: ENGINE_SHAPE, repos: [] }, 'a file other than the settings gains the stamp and nothing else');
     assert.deepEqual(lock, { schemaVersion: ENGINE_SHAPE, hash: 'sha256:abc' });
     assert.equal('ledger' in repos, false, '`ledger` belongs to hub.json alone');
   } finally { cleanup(T); }
@@ -408,15 +408,31 @@ test('migrate 1 -> 2: running it twice is a no-op, and does not overwrite the ba
 // The settings file changes NAME, which is harder than changing a field, because a file is opened by
 // name from outside this codebase — `templates/checks/ledger-guard.sh` lives in the user's own repo
 // and opens `.sdlc/hub.json` by that literal path. So both names exist for one major.
+// E124: while the old settings name is on disk, the LAST line names the guide to the changes no command
+// makes — after an apply, in a preview, and when there is nothing to do. Once only product.json is left, never.
+test('E124: yad migrate ends with the hub -> Product guide while hub.json is on disk, and only then', async () => {
+  const { PRODUCT_RENAME_GUIDE_URL } = await import('./manifest.mjs');
+  const last = (out) => out.split('\n').filter((l) => l.trim()).at(-1);
+  const T = project();
+  try {
+    assert.ok(last(await grab(() => runMigrate(T, {}))).includes(PRODUCT_RENAME_GUIDE_URL), 'a preview');
+    assert.ok(last(await grab(() => runMigrate(T, { apply: true }))).includes(PRODUCT_RENAME_GUIDE_URL), 'an apply');
+    assert.ok(last(await grab(() => runMigrate(T, {}))).includes(PRODUCT_RENAME_GUIDE_URL), 'nothing to do');
+    fs.rmSync(path.join(T, '.sdlc/hub.json'));
+    assert.ok(fs.existsSync(path.join(T, '.sdlc/product.json')));
+    assert.ok(!(await grab(() => runMigrate(T, {}))).includes(PRODUCT_RENAME_GUIDE_URL), 'only product.json: no guide line');
+  } finally { cleanup(T); }
+});
+
 test('migrate 2 -> 3: the settings file gains its new name and KEEPS the old one', async () => {
   const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github",\n  "bridge_enabled": true\n}\n' } });
   try {
     const res = await runMigrate(T, { apply: true });
     const product = path.join(T, '.sdlc/product.json');
-    const hub = path.join(T, '.sdlc/hub.json');
+    const legacy = path.join(T, '.sdlc/hub.json');
     assert.ok(fs.existsSync(product), 'the new name exists');
-    assert.ok(fs.existsSync(hub), 'and the old one is still there — removing it would disarm an un-refreshed ledger-guard');
-    assert.equal(fs.readFileSync(product, 'utf8'), fs.readFileSync(hub, 'utf8'), 'byte-identical, not merely similar');
+    assert.ok(fs.existsSync(legacy), 'and the old one is still there — removing it would disarm an un-refreshed ledger-guard');
+    assert.equal(fs.readFileSync(product, 'utf8'), fs.readFileSync(legacy, 'utf8'), 'byte-identical, not merely similar');
     assert.equal(read(product).schemaVersion, ENGINE_SHAPE);
     assert.ok(res.written.includes('.sdlc/product.json'), 'and the report names the file it created');
   } finally { cleanup(T); }

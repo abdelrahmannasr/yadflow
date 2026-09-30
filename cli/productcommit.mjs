@@ -23,9 +23,9 @@ export function preflightGuardReadiness(root, why = 'the yad-update-guard requir
 // NEVER the current branch — falling back to it (as gate.mjs does, safe there because CI checks out the
 // default branch) would make the guard below a no-op on a WIP branch and let an unsigned commit land in
 // a future PR's range.
-export function resolveDefaultBranch(git, hub) {
+export function resolveDefaultBranch(git, productConfig) {
   const originHead = git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD'); // e.g. "origin/main"
-  return hub?.default_branch
+  return productConfig?.default_branch
     || (originHead.ok && originHead.stdout ? originHead.stdout.replace(/^origin\//, '') : '')
     || 'main';
 }

@@ -496,7 +496,7 @@ function readGitLab(base, runner, unknown) {
 }
 
 // The doctor line for one answer: { status: 'ok'|'warn', message, hint }. `name` is the repo's name in
-// yad (or "Product hub"). In solo mode (the user's decision) the facts print as `ok` with no banner — one
+// yad (or "Product"). In solo mode (the user's decision) the facts print as `ok` with no banner — one
 // person cannot approve their own pull request, so "no approval rules" may be the right setup — except
 // the old solo warning: a required approval there blocks the solo developer's own merge.
 //

@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { isPlainObject, writeJSON, info, warn } from './lib.mjs';
 import { isVerifiedLedger } from './manifest.mjs';
-import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import {
   epicIds, epicRel, epicRoot, unlistedLedgerDirs, parseFrontmatter, lineageFrom, stepStatus, STEP_STATES,
   FOUNDATION_EPIC, FOUNDATION_TITLE, titleOf,
@@ -270,11 +270,11 @@ export function uncommittedIndexInputs(root, commits = null) {
 // The index is derived: a failure to rebuild it is said, and never stops the gate write it follows.
 // Returns whether the file changed, so a caller that commits can carry it in the same commit. `quiet`
 // for a caller whose stdout is JSON: the warning still goes to stderr.
-export function refreshIndexAfterWrite(root, hub, { quiet = false } = {}) {
-  if (isVerifiedLedger(hub) || !fs.existsSync(path.join(root, '.git'))) return false;
+export function refreshIndexAfterWrite(root, productConfig, { quiet = false } = {}) {
+  if (isVerifiedLedger(productConfig) || !fs.existsSync(path.join(root, '.git'))) return false;
   const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  if (!branch || branch !== resolveDefaultBranch(git, hub)) return false;
+  if (!branch || branch !== resolveDefaultBranch(git, productConfig)) return false;
   try {
     const changed = writeIndex(root);
     if (changed && !quiet) info(`rebuilt ${INDEX_FILE}`);

@@ -7,16 +7,16 @@ import type { SystemComponent } from "./types";
 //
 // Layout — a left-to-right PIPELINE (positions are 0–100), read as five aligned
 // columns so the flow is organized rather than a hub-and-spoke spider, with a
-// loop-back arc (trust-log → product-hub, drawn in FlowCanvas) expressing the
+// loop-back arc (trust-log → product, drawn in FlowCanvas) expressing the
 // repeated-per-epic cycle:
-//   • Col 1 — product-hub (the brain that drives the pipeline)
+//   • Col 1 — product (the brain that drives the pipeline)
 //   • Col 2 — the file ledger the Product owns + the code registry: state / approvals / contract-lock / repos-json
 //   • Col 3 — the connectors + code resource: design / testing / learning json + code-repos
 //   • Col 4 — the connected tools + docs target: design / testing / learning tool + docs-json
 //   • Col 5 — publish / evidence terminal: platform + trust-log (loops back to the Product)
 export const COMPONENTS: SystemComponent[] = [
   {
-    id: "product-hub",
+    id: "product",
     label: "Product",
     icon: "🏛️",
     color: "#2471a3",
@@ -130,7 +130,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#566573",
     position: { x: 68, y: 80 },
     description:
-      "Docs/Pages publishing target (github-pages / gitlab-pages / build-only), auto-detected from hub.json.",
+      "Docs/Pages publishing target (github-pages / gitlab-pages / build-only), auto-detected from product.json.",
   },
   {
     id: "platform",
@@ -148,7 +148,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#b7950b",
     position: { x: 88, y: 67 },
     description:
-      "Every Build run's verdict — the run record yad dial shows beside a step\'s dial, as advice. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
+      "Every Build run's verdict — the run record yad dial shows beside a step\'s dial, as advice. Committed by `yad checkpoint` (chore(product), default branch, allowlist-scoped).",
   },
   // Phase 6 — the feature-thread ledgers (post-lock change management).
   {
@@ -176,6 +176,6 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#1e8449",
     position: { x: 58, y: 92 },
     description:
-      "The per-epic ship ledger — every merged story recorded at merge time. Shard-then-fold: each ship is written as its own file under `.sdlc/build-log/` (so concurrent shippers never conflict) and readers union those shards with the folded `build-log.json`; `yad tidy up` later compacts those shards into the folded file — reading the folded file alone misses every unfolded ship. A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
+      "The per-epic ship ledger — every merged story recorded at merge time. Shard-then-fold: each ship is written as its own file under `.sdlc/build-log/` (so concurrent shippers never conflict) and readers union those shards with the folded `build-log.json`; `yad tidy up` later compacts those shards into the folded file — reading the folded file alone misses every unfolded ship. A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic. Committed by `yad checkpoint` (chore(product), default branch, allowlist-scoped).",
   },
 ];

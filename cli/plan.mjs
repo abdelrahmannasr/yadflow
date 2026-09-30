@@ -607,6 +607,13 @@ export const RENAMED_CI_NAMES = Object.freeze([
   ['yad-hub-verified-commits', 'yad-product-verified-commits'],
   ['.yad_hub_mr_only', '.yad_product_mr_only'],
 ]);
+// The profile value a team's own CI file may pass (E124 review 1). The gates still accept `--profile hub` until
+// v5, but a gate edited after 4.0 without the line that would turn `hub` into `product` lets `--profile hub`
+// skip the Product's rules (the cell `productProfileGap` does not judge) — so the CI line is named instead.
+// Its own pattern: `=` or any run of spaces, the value bare or quoted, and nothing after it that could be part
+// of a longer word (`--profile hubble`, `--profile hub.x`). Only the literal is seen: a value passed through a
+// variable (`--profile "$P"`) is not. Only in CI files — a README that quotes the command is prose.
+const OLD_PROFILE_RE = /(?<![\w-])--profile(?:=|[ \t]+)(["']?)hub\1(?![\w.-])/g;
 const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Bounded on both sides by anything that cannot be part of a name, so `yad-hub-checks-extra` is not a hit.
 const RENAMED_CI_RE = new RegExp(`(?<![\\w.-])(${RENAMED_CI_NAMES.map(([o]) => escapeRe(o)).join('|')})(?![\\w-])`, 'g');
@@ -638,7 +645,7 @@ function renamedNameFiles(root) {
 export function renamedNameHits(root) {
   const fragments = new Map();
   try {
-    for (const a of legacyHubActions(root)) {
+    for (const a of legacyProductActions(root)) {
       if (a.paths.includes('.gitlab-ci.yml') || a.status === 'modified') fragments.set(a.rename.from, a.status === 'modified' ? 'overwrite-local' : 'update');
     }
   } catch { /* an unreadable provenance record: nothing is promised, so every hit reads as the team's to change */ }
@@ -649,7 +656,13 @@ export function renamedNameHits(root) {
       if (!fs.lstatSync(path.join(root, file)).isFile()) continue;
       text = fs.readFileSync(path.join(root, file), 'utf8');
     } catch { continue; }
+    const ci = /\.ya?ml$/.test(file);
     text.split(/\r?\n/).forEach((line, i) => {
+      if (ci) {
+        for (const m of line.matchAll(OLD_PROFILE_RE)) {
+          hits.push({ file, line: i + 1, old: m[0], new: m[0].replace(/hub(["']?)$/, 'product$1'), rewrittenBy: null, profile: true });
+        }
+      }
       for (const m of line.matchAll(RENAMED_CI_RE)) {
         const next = RENAMED_CI_NAMES.find(([o]) => o === m[1])[1];
         // Per match, not per line: only the fragment path itself is rewritten, not a job named beside it.
@@ -671,9 +684,21 @@ export function renamedNameHits(root) {
 // The Product's pattern gates, whose workflow passes `--profile product` since E123. A copy the team edited
 // is kept by `yad update` — and one from before 4.0 accepts only `code|hub`, so it fails every Product PR
 // with "unknown --profile 'product'" (review 1). 'rejects' when the gate's own `case "$PROFILE" in …)` list lacks
-// `product`; 'unmapped' when it has it, but the gate branches on `= hub` with no line turning `product` into
-// `hub` — then `product` passes the list and silently skips every Product rule (review 2); null otherwise,
-// and for a copy with no such list, which is not judged.
+// `product`; 'unmapped' when it has it, but the gate branches on `= hub` with no line turning `product`
+// into `hub` — then `product` passes the list and silently skips every Product rule (review 2); null otherwise,
+// and for a copy with no such list, which is not judged. The shipped copies branch on `= product` since
+// E124 (and turn `hub` into `product`), so they read null here; the `= hub` shape is an older copy's.
+//
+// Every case, as gate shape × the value a workflow passes (E124):
+//   gate                                           passes product     passes hub
+//   branches on `= hub`, maps product -> hub       ok                 ok
+//   branches on `= hub`, no mapping                'unmapped'         ok
+//   list without `product` (before 4.0)            'rejects'          ok
+//   branches on `= product`, maps hub -> product   ok (shipped)       ok (shipped)
+//   branches on `= product`, no mapping            ok                 skips the Product rules — see below
+// The last cell is not judged here, from the gate: it is closed from the workflow side instead. A team's own CI
+// line that passes `--profile hub` literally is a `renamed-ref:` hit (OLD_PROFILE_RE), and yad's own old
+// workflow is a `renamed:` one. A value passed through a variable is not seen.
 export const PRODUCT_PROFILE_GATES = Object.freeze(['checks/commit-message.sh', 'checks/pr-title.sh', 'checks/pr-template.sh']);
 export function productProfileGap(file) {
   let text;
@@ -686,13 +711,16 @@ export function productProfileGap(file) {
   // A comment is prose, not code: the shipped copies explain the mapping in one.
   const code = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
   const mapped = /product[^\n]*\bPROFILE=["']?hub\b/.test(code);
-  return /\$\{?PROFILE\}?"?\s*==?\s*["']?hub\b/.test(code) && !mapped ? 'unmapped' : null;
+  // The line that maps the old name (the shipped shape since E124: turn `hub` into `product`) compares with `= hub` too, but it is
+  // the mapping, not a branch — so it is not what the branch test below looks for.
+  const branches = code.split('\n').filter((l) => !/\bPROFILE=["']?product\b/.test(l)).join('\n');
+  return /\$\{?PROFILE\}?"?\s*==?\s*["']?hub\b/.test(branches) && !mapped ? 'unmapped' : null;
 }
 // What each gap does to a Product PR, and the one fix for both — shared by `yad doctor` and `yad update`.
 export const productProfileEffect = (gap, gate, passing) => (gap === 'rejects'
   ? `${gate} does not accept \`--profile product\`, which ${passing} — every Product PR fails that check`
   : `${gate} accepts \`--profile product\` but never turns it into \`hub\`, which ${passing} — so it skips the Product's rules and passes what it should stop`);
-export const PRODUCT_PROFILE_FIX = 'add `product` to its `case "$PROFILE" in` list and `[ "$PROFILE" = product ] && PROFILE=hub` after it, as the shipped copy has — or replace it with `yad update --overwrite-local`';
+export const PRODUCT_PROFILE_FIX = 'add `product` to its `case "$PROFILE" in` list and `[ "$PROFILE" = product ] && PROFILE=hub` after it — or replace it with the shipped copy, which branches on `product` itself: `yad update --overwrite-local`';
 
 // The Product's checks workflows, under the new name and the old (E123): an edited old one is kept, and runs.
 export const PRODUCT_CHECK_WORKFLOWS = Object.freeze([
@@ -700,9 +728,88 @@ export const PRODUCT_CHECK_WORKFLOWS = Object.freeze([
   '.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml',
 ]);
 // Those of them on disk that pass `--profile product` to the gates.
-export const workflowsPassingProduct = (root) => PRODUCT_CHECK_WORKFLOWS.filter((rel) => {
-  try { return /--profile[ =]product\b/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
+// yad's own workflows, and the team's own CI files (E124 review 2): a team that follows `renamed-ref:` and changes
+// its `--profile hub` to `product` must then hear from `profile:` if an edited gate still rejects it.
+export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_WORKFLOWS,
+  ...renamedNameFiles(root).filter((rel) => /\.ya?ml$/.test(rel))])].filter((rel) => {
+  try { return /--profile(?:=|[ \t]+)(["']?)product\1(?![\w.-])/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
 });
+// The Product gates that would mishandle `--profile product` (E124 reviews 2–4): refuse it ('rejects'), or take it
+// and skip the Product's rules ('unmapped'). Each gate's state decides what to do first, and is read from the
+// provenance record through `productActions` — never guessed from the file:
+//   state          what it is                                            before a run      on update   --overwrite-local
+//   'outdated'     yad's own copy, older than this release               run yad update    replaced    replaced
+//   'unrecorded'   no record (a pre-3.16 install): update backs it up    run yad update    replaced    replaced
+//   'kept'         edited since yad wrote it: update keeps it            fix it            fix it      replaced
+//   'unreadable'   the settings do not read (or are not an object), or   restore the file, then run yad update
+//                  the provenance record does not: yad cannot tell (with
+//                  an unreadable record, update itself refuses until then)
+//   'unmanaged'    yad has no action for it (Product not verified)       fix it by hand    same        same
+// The last two are read from the file on disk.
+// On a run that fixes, a gate that run replaces is left out: after it, the gate is the shipped copy.
+export function productGateBlockers(root, { fix = false, overwriteLocal = false } = {}) {
+  let actions = [];
+  let unreadable = null; // the file that does not read, for 'unreadable' (review 5)
+  const settings = productConfigPath(root);
+  try {
+    // Not an object is as unreadable as not parsing: `yad doctor` fails both (review 6).
+    if (exists(settings) && !isPlainObject(readJSONStrict(settings, null))) throw new Error('not an object');
+  } catch { unreadable = path.relative(root, settings).split(path.sep).join('/'); }
+  if (!unreadable) {
+    try { actions = productActions(root); } catch { unreadable = MANAGED_LEDGER; }
+  }
+  const byGate = new Map(actions.filter((a) => a.managed)
+    .map((a) => [path.relative(root, a.managed.dest).split(path.sep).join('/'), a]));
+  const out = [];
+  for (const gate of PRODUCT_PROFILE_GATES) {
+    const gap = productProfileGap(path.join(root, gate));
+    if (!gap) continue;
+    const a = byGate.get(gate);
+    let state;
+    if (unreadable) state = 'unreadable';
+    else if (!a) state = 'unmanaged';
+    else if (a.status === 'modified') state = fix && overwriteLocal ? null : 'kept';
+    else state = fix ? null : (a.backup ? 'unrecorded' : 'outdated');
+    if (state) out.push({ gate, gap, state, ...(unreadable ? { file: unreadable } : {}) });
+  }
+  return out;
+}
+const gapWords = (b) => `${b.gate} (it ${b.gap === 'rejects' ? 'refuses `--profile product`, so every Product PR would fail it' : 'takes `--profile product` but then skips the Product\'s rules'})`;
+const saved = (b) => `${b.gate}${BACKUP_SUFFIX}`;
+// What to do about ONE gate — `yad doctor`'s `profile:<gate>` hint.
+export function gateProfileFix(b) {
+  if (b.state === 'outdated') return 'run `yad update`: it replaces this copy, which yad wrote, with the shipped one';
+  if (b.state === 'unrecorded') return `run \`yad update\`: it replaces it with the shipped one and saves yours as ${saved(b)}`;
+  if (b.state === 'kept') return `it was changed by hand, so \`yad update\` keeps it: ${PRODUCT_PROFILE_FIX} (your copy is saved as ${saved(b)})`;
+  if (b.state === 'unreadable') return `restore ${b.file} from git — it does not read, so yad cannot tell whether this copy is its own${b.file === MANAGED_LEDGER ? ' (and `yad update` refuses until then)' : ''} — then run \`yad update\` and \`yad doctor\` again`;
+  return `fix it by hand — yad does not manage the checks on this Product, so no \`yad update\` replaces it: ${PRODUCT_PROFILE_FIX.split(' — ')[0]}`;
+}
+// What to do before a team changes its `--profile hub` to `product`, or '' when nothing stands in the way —
+// one sentence for `yad doctor` and `yad check`/`update` alike, naming EVERY gate in the way, each group with
+// its own step (review 4: naming only the edited one let a stale one fail every PR).
+export function oldProfileAdvice(blockers) {
+  if (!blockers.length) return '';
+  const parts = [];
+  const lost = blockers.filter((b) => b.state === 'unreadable');
+  if (lost.length) {
+    parts.push(`restore ${lost[0].file} from git (it does not read, so yad cannot tell ${lost.length > 1 ? `which of ${lost.map(gapWords).join('; and ')} are` : `whether ${gapWords(lost[0])} is`} its own), then run \`yad update\` and \`yad doctor\` again`);
+  }
+  const replace = blockers.filter((b) => b.state === 'outdated' || b.state === 'unrecorded');
+  if (replace.length) {
+    const backed = replace.filter((b) => b.state === 'unrecorded');
+    parts.push(`run \`yad update\`, which replaces ${replace.map(gapWords).join('; and ')}${backed.length ? ` (saving your ${backed.length > 1 ? 'copies' : 'copy'} as ${backed.map(saved).join(', ')})` : ''}`);
+  }
+  const kept = blockers.filter((b) => b.state === 'kept');
+  if (kept.length) {
+    parts.push(`fix ${kept.map(gapWords).join('; and ')} — ${kept.length > 1 ? 'they were' : 'it was'} edited, so \`yad update\` keeps ${kept.length > 1 ? 'them; for each one' : 'it'}: ${PRODUCT_PROFILE_FIX}`);
+  }
+  const own = blockers.filter((b) => b.state === 'unmanaged');
+  if (own.length) {
+    parts.push(`fix ${own.map(gapWords).join('; and ')} by hand — yad does not manage the checks on this Product`);
+  }
+  // `; then`, never `; and` — the gate lists inside a part already use `; and` (review 5).
+  return `but first ${parts.join('; then ')}`;
+}
 
 // The new name of a renamed CI file is not installed while an edited old one is kept (`modified`): both
 // would run on GitHub — every gate twice, the stock one undoing whatever the team's edit loosened — and on
@@ -717,11 +824,11 @@ export function legacyRepoActions(root, repo) {
   return legacyFileActions(repo.name, path.resolve(root, repo.path), LEGACY_REPO_FILES[repo.platform], wiringFor(repo.platform));
 }
 
-export function legacyHubActions(root) {
-  const hub = readJSON(productConfigPath(root));
-  if (!isVerifiedLedger(hub)) return [];
-  const wiring = [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[hub.platform] || [])];
-  return legacyFileActions('hub', root, LEGACY_PRODUCT_FILES[hub.platform], wiring);
+export function legacyProductActions(root) {
+  const productConfig = readJSON(productConfigPath(root));
+  if (!isVerifiedLedger(productConfig)) return [];
+  const wiring = [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[productConfig.platform] || [])];
+  return legacyFileActions('product', root, LEGACY_PRODUCT_FILES[productConfig.platform], wiring);
 }
 
 // Per-repo wiring (gate scripts, CI, PR template).
@@ -789,7 +896,7 @@ function productLinkAction(root, repo, repoRoot) {
   const top = gitTop(repoRoot);
   if (!top || top === gitTop(root)) return null;
   const dest = path.join(repoRoot, PRODUCT_LINK);
-  const hub = readJSON(productConfigPath(root), {}) || {};
+  const productConfig = readJSON(productConfigPath(root), {}) || {};
   let current;
   try { current = readJSONStrict(dest, null); } catch { current = undefined; }
   const base = {
@@ -799,11 +906,11 @@ function productLinkAction(root, repo, repoRoot) {
     paths: [PRODUCT_LINK],
   };
   const want = {
-    git_url: publicGitUrl(hub.git_url),
+    git_url: publicGitUrl(productConfig.git_url),
     path: isPlainObject(current) && typeof current.path === 'string' && current.path ? current.path : PRODUCT_LINK_DEFAULT_PATH,
     // Unknown stays null (review 1): a guessed `main` failed every clone of a Product whose trunk is
     // `master`; with none, checks/product-checkout.sh clones the remote's own default branch.
-    default_branch: typeof hub.default_branch === 'string' && hub.default_branch ? hub.default_branch : null,
+    default_branch: typeof productConfig.default_branch === 'string' && productConfig.default_branch ? productConfig.default_branch : null,
   };
   // A record that does not parse, or is not an object, is someone's: reported and never overwritten by
   // a plain update; `--overwrite-local` saves it beside itself first, like any managed file.
@@ -836,14 +943,14 @@ function productLinkAction(root, repo, repoRoot) {
 // Product wiring (gate-sync + verified-commits CI on the Product itself). Only when the Product has a
 // platform and the verified ledger is explicitly enabled — a local Product stays local, with no error.
 export function productActions(root) {
-  const hub = readJSON(productConfigPath(root));
-  // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented hub-config schema); older setup versions
+  const productConfig = readJSON(productConfigPath(root));
+  // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented Product settings schema); older setup versions
   // wrote `bridge` — `isVerifiedLedger` accepts an explicit true in either spelling, and is the one
   // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
-  if (!isVerifiedLedger(hub)) return [];
+  if (!isVerifiedLedger(productConfig)) return [];
   const ledger = readManagedLedger(root);
-  return [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[hub.platform] || [])].map((w) =>
-    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+  return [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[productConfig.platform] || [])].map((w) =>
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
 }
 
@@ -1107,11 +1214,11 @@ function hookSettingsAction(root, adapter) {
 // the entry that invokes it. Verified-only exactly like `productActions` — with a local ledger it is
 // locally owned, the hand-edit the authoring skills describe is CORRECT, and a guard would be wrong.
 export function hookActions(root, ideTargets = ideTargetsFor(root)) {
-  const hub = readJSON(productConfigPath(root));
-  if (!isVerifiedLedger(hub)) return [];
+  const productConfig = readJSON(productConfigPath(root));
+  if (!isVerifiedLedger(productConfig)) return [];
   const ledger = readManagedLedger(root);
   const actions = HOOK_WIRING.map((w) =>
-    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
   for (const ide of safeIdeTargetsFor(root, ideTargets)) {
     const adapter = HOOK_ADAPTERS[ide];
@@ -1121,7 +1228,7 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
     // `.claude`-only tree is a file nobody can explain. It is pushed BEFORE the settings entry that
     // points at it, so the two land in the order `asNew` already guarantees they land together.
     for (const w of adapter.wiring) {
-      actions.push(wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }));
+      actions.push(wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }));
     }
     actions.push(hookSettingsAction(root, adapter));
   }
@@ -1145,8 +1252,8 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
 // Verified-only, like `hookActions`, and for the same reason: with a local ledger none of this was
 // installed in the first place.
 export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
-  const hub = readJSON(productConfigPath(root));
-  if (!isVerifiedLedger(hub)) return [];
+  const productConfig = readJSON(productConfigPath(root));
+  if (!isVerifiedLedger(productConfig)) return [];
   const kept = new Set(safeIdeTargetsFor(root, ideTargets));
   const stillNeeded = new Set(
     [...kept].flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest)),
@@ -1187,7 +1294,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
       const dest = path.join(root, w.dest);
       if (!exists(dest)) continue;
       actions.push({
-        scope: 'hub',
+        scope: 'product',
         item: `${w.dest} (removed)`,
         status: 'removed',
         root,
@@ -1297,7 +1404,7 @@ export function gitHookActions(root) {
   const sameBytes = st.state === 'outdated' && (() => { try { return fs.readFileSync(st.file, 'utf8') === st.expected; } catch { return false; } })();
   const backup = st.state === 'outdated' && !sameBytes ? backupPathFor(st.file) : null;
   return [{
-    scope: 'hub',
+    scope: 'product',
     item: 'pre-commit git hook (this clone)',
     status,
     root,
@@ -1323,7 +1430,7 @@ export function orphanGitHookActions(root) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
   if (text !== gitPreCommitScript(prefix)) return [];
-  return [{ scope: 'hub', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
+  return [{ scope: 'product', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
 }
 
 // The sentence for a clone where yad may not write the hook, or null.
@@ -1353,7 +1460,7 @@ export function captureHookActions(root, ideTargets = ideTargetsFor(root)) {
   if (!captureWanted(root)) return [];
   const ledger = readManagedLedger(root);
   const actions = CAPTURE_WIRING.map((w) =>
-    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
   for (const ide of safeIdeTargetsFor(root, ideTargets)) {
     const adapter = CAPTURE_ADAPTERS[ide];
@@ -1398,7 +1505,7 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
     for (const w of CAPTURE_WIRING) {
       const dest = path.join(root, w.dest);
       if (!exists(dest)) continue;
-      actions.push({ scope: 'hub', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
+      actions.push({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
     }
   }
   return actions;
@@ -1467,15 +1574,15 @@ const GUARD_SCRIPTS = new Set(['hooks/ledger-guard.sh', 'hooks/ledger-guard-curs
 // It never promises what `yad check --fix` will do: both callers are reached only for entries that run has
 // NOT taken out (another event, `settings.local.json`, a file changed since the plan), so the reader acts.
 export function entryAdvice(root, scriptRel) {
-  const hub = readJSON(productConfigPath(root), null);
+  const productConfig = readJSON(productConfigPath(root), null);
   // Capture off: no Node capture script is installed, so there is nothing to point at (review 8).
   if (!GUARD_SCRIPTS.has(scriptRel) && !captureWanted(root)) {
     return 'remove each entry that runs it — capture is off here (`"capture": false` in the Product config), so no capture hook should run';
   }
-  if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(hub)) {
+  if (!GUARD_SCRIPTS.has(scriptRel) || isVerifiedLedger(productConfig)) {
     return 'point each entry that runs it at the `node hooks/….mjs` command yad now writes, or remove it if that harness should no longer run the hook';
   }
-  return hub === null
+  return productConfig === null
     ? 'the Product config does not read, so yad cannot tell whether a ledger guard belongs here — fix the config, or remove each entry that runs it'
     : 'remove each entry that runs it — this Product has no ledger guard (its ledger is not verified), so `yad check --fix` leaves those entries alone';
 }
@@ -1551,7 +1658,7 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
       continue;
     }
     actions.push({
-      scope: 'hub',
+      scope: 'product',
       item: `${scriptRel} (removed)`,
       status: 'removed',
       root,

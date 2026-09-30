@@ -35,8 +35,8 @@ while [ $# -gt 0 ]; do
     *) ARGS+=("$1"); shift ;;
   esac
 done
-case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --profile '$PROFILE' (code|hub|product)."; exit 1 ;; esac
-# `product` is the new name for the `hub` profile and BOTH are accepted.
+case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --profile '$PROFILE' (code|product, or hub, the old name for product)."; exit 1 ;; esac
+# `product` is the Product's profile. `hub` is its old name, and BOTH are accepted.
 #
 # This script and the workflow that passes the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and
 # normally land together on one `yad update` — but not always: a copy the team edited is kept. So the
@@ -46,11 +46,11 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --p
 # edited copy of THIS script from before 4.0, which rejects `product`, beside the new workflow — fails
 # every Product PR; `yad update` and `yad doctor` (`profile:`) say so.
 #
-# Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
-# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`
+# Normalised to `product` immediately, so nothing below has to know there are two spellings. That is
+# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `hub` and the `= product`
 # branch is skipped, taking the whole review-branch arm with it — including the guard that stops a
 # plain code title carrying an artifact change past its review.
-[ "$PROFILE" = product ] && PROFILE=hub
+[ "$PROFILE" = hub ] && PROFILE=product
 
 
 # True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
@@ -117,14 +117,14 @@ check_code_body() {
 }
 
 # The Shape artifact-review template.
-check_hub_body() {
+check_product_body() {
   require_heading '## Artifact under review' '## Artifact under review'
   # Add before you remove (change-safety rule 3). `front-half` is the ORIGINAL spelling and it is
   # still what `yad gate open` emits and what the shipped Product template carries; `Shape` is the
   # replacement, accepted here first so that this script is lenient BEFORE anything starts writing
   # the new wording. That ordering is the whole point: this file is refreshed by `yad update`
   # (PRODUCT_WIRING, cli/manifest.mjs), but the PR template beside it is NOT — it is installed only by
-  # the `yad-pr-template repo:hub action: wire` skill, which nothing runs automatically. So a Product
+  # the `yad-pr-template repo:product action: wire` skill, which nothing runs automatically. So a Product
   # WILL sit with a refreshed checker next to an old template, and the checker has to accept both.
   # The emitter flips to `(Shape)` in the next major; only after that may `front-half` be dropped.
   require_heading '## Impact & Risk \((front-half|Shape)\)' '## Impact & Risk (front-half)'
@@ -136,9 +136,9 @@ check_hub_body() {
 }
 
 KIND="$PROFILE"
-if [ "$PROFILE" = hub ]; then
+if [ "$PROFILE" = product ]; then
   case "$HEADREF" in
-    review/EP-*|"") check_hub_body ;;            # artifact-review PR (or unknown head — stay strict)
+    review/EP-*|"") check_product_body ;;            # artifact-review PR (or unknown head — stay strict)
     *)
       # tooling/code change to the Product itself — UNLESS it changes Shape artifacts (epics/**),
       # which must go through a review/EP-* PR. Without this guard a non-review head could carry an
@@ -147,7 +147,7 @@ if [ "$PROFILE" = hub ]; then
         echo "FAIL [pr-template]: head '${HEADREF}' changes Shape artifacts (epics/** or foundation/**) but is not a review/EP-* branch — artifact changes must go through a review PR."
         rc=1
       else
-        check_code_body; KIND="hub-tooling"
+        check_code_body; KIND="product-tooling"
       fi
       ;;
   esac

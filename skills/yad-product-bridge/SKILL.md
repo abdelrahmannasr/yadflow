@@ -49,7 +49,7 @@ author), and the matching `review+approve` step's `risk_tags` from `.sdlc/state.
 distinct approvers, where `contract` adds 2 and `auth`/`payments` add 1 (the highest tag, never the sum).
 Only the base (1 distinct approver, who should not be the author) holds the gate; the risk step is
 advisory. The gate caps the count at the active people less one and prints it (E72), but does
-not enforce it yet; when it cannot count the people — as in Product CI, which checks out only the hub —
+not enforce it yet; when it cannot count the people — as in Product CI, which checks out only the Product —
 no cap is shown. Compute the **touched domains** too: the union of story `repos` for
 `stories-review`, the epic's `repos` for a step tagged `contract`, `auth` or `payments`, none otherwise.
 They become `domain:<repo>` labels and

@@ -182,11 +182,11 @@ export const MODULES: Module[] = [
           { kind: 'callout', tone: 'info', text: 'Re-run `npx yadflow check --fix` after any workflow update — it reports what is missing / drifted / stale and reconciles only what changed. It never re-asks for what you already answered.' },
         ],
         commands: [
-          { cmd: 'cd <product-hub-repo>' },
+          { cmd: 'cd <product-repo>' },
           { cmd: 'npx yadflow setup', note: 'guided profile interview + install' },
           { cmd: 'npx yadflow check --fix', note: 'reconcile after any update' },
         ],
-        produces: ['.sdlc/hub.json', '.sdlc/cli-version.json', 'skills installed in .claude/ (and other IDE dirs)'],
+        produces: ['.sdlc/product.json', '.sdlc/hub.json', '.sdlc/cli-version.json', 'skills installed in .claude/ (and other IDE dirs)'],
         quiz: [
           {
             q: 'What does the setup wizard open with?',
@@ -216,7 +216,7 @@ export const MODULES: Module[] = [
           { cmd: 'yad-connect-repos action: connect repo:<repo> path:<path-or-git_url>' },
           { cmd: 'yad repo list', note: 'show connected repos as fresh / stale' },
           { cmd: 'yad repo refresh <repo>', note: 're-pack a repo whose code has moved' },
-          { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps and .sdlc/repos.json to the Product default branch (chore(hub) audit commit)' },
+          { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps and .sdlc/repos.json to the Product default branch (chore(product) audit commit)' },
           { cmd: 'yad risk-map draft <repo>', note: 'start the repo\'s .sdlc/risk-map: one unset line per directory; the skill then has the AI read the code and guess each level' },
           { cmd: 'yad risk-map check <repo>', note: 'warn where the map is stale — a directory with no level, a dead line, a level still guessed' },
           { cmd: 'yad codeowners check <repo>', note: 'warn where CODEOWNERS looks stale — a line that matches no file, a file the platform never reads; plus a hedged hint about @logins with no recent commit. It never writes the file' },

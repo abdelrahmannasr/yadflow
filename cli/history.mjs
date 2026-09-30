@@ -204,13 +204,13 @@ export function readState(root, id) {
   return Array.isArray(r.value?.steps) ? { state: r.value, steps: r.value.steps } : { why: 'it has no list of steps' };
 }
 
-// The Product's settings, strictly: { hub } or { why }. A file that does not parse is said, never read
+// The Product's settings, strictly: { productConfig } or { why }. A file that does not parse is said, never read
 // as "team mode, no engagement rule" — that would print a confident count the gate itself refuses.
-function readHub(root) {
+function readProductConfig(root) {
   const r = readJsonFile(productConfigPath(root));
-  if (r.missing) return { hub: null };
+  if (r.missing) return { productConfig: null };
   if (r.why) return { why: r.why };
-  return isPlainObject(r.value) ? { hub: r.value } : { why: 'it is not an object' };
+  return isPlainObject(r.value) ? { productConfig: r.value } : { why: 'it is not an object' };
 }
 
 // Why a recorded approval does not count, in the order the gate asks — or null when it counts:
@@ -227,15 +227,15 @@ function notCountedReason(a, { approved, stale, named, reqEng }) {
 const NOT_JUDGED = { stale: null, counted: null, notCounted: null };
 
 // The whole story of one item, for `show`. Throws nothing: every part that cannot be read says why.
-// `hub` / `hubWhy`: the Product's settings, or why they could not be read.
-export function itemHistory(root, item, { hub = null, hubWhy = null } = {}) {
+// `productConfig` / `productConfigWhy`: the Product's settings, or why they could not be read.
+export function itemHistory(root, item, { productConfig = null, productConfigWhy = null } = {}) {
   const epicDir = epicRoot(root, item.id);
   const stateRead = readState(root, item.id);
   const approvalsRead = readJsonFile(path.join(epicDir, '.sdlc', 'approvals.json'));
   const approvals = approvalsRead.missing ? [] : Array.isArray(approvalsRead.value) ? approvalsRead.value : null;
   const approvalsWhy = approvals ? null : approvalsRead.why || 'it is not a list';
-  const reqEng = requireEngagement(hub);
-  const solo = isSolo(hub);
+  const reqEng = requireEngagement(productConfig);
+  const solo = isSolo(productConfig);
   // The steps THIS item's route lets be skipped — what `gatePredicate` asks before it honours a skip.
   const optional = stateRead.state ? optionalStepsFor(stateRead.state) : [];
   const out = [];
@@ -302,7 +302,7 @@ export function itemHistory(root, item, { hub = null, hubWhy = null } = {}) {
         };
         if (notJudged) return { ...fields, ...NOT_JUDGED };
         const stale = !approved ? null : accepted === null ? null : isStaleHash(a.artifactHash, accepted);
-        if (approved && (stale === null || solo || hubWhy)) return { ...fields, stale, counted: null, notCounted: null };
+        if (approved && (stale === null || solo || productConfigWhy)) return { ...fields, stale, counted: null, notCounted: null };
         // Named by the gate's own test (`gatePredicate`): any text that is not blank, even text with
         // nothing printable in it — the gate counts that record, so this must too.
         const named = typeof a.approver === 'string' && a.approver.trim() !== '';
@@ -327,7 +327,7 @@ export function itemHistory(root, item, { hub = null, hubWhy = null } = {}) {
     steps: stateRead.steps ? out : null,
     stepsWhy: stateRead.steps ? null : stateRead.why,
     approvalsWhy,
-    hubWhy,
+    productConfigWhy,
   };
 }
 
@@ -451,8 +451,8 @@ function showCmd(root, read, id, { json }) {
   if (bad) return refuse(json, `${id} could not be read — ${printable(bad.why)}`, 'fix or restore its files — `yad doctor` checks them');
   const item = read.items.find((i) => i.id === id);
   if (!item) return refuse(json, `no work item ${id} in this Product`, '`yad history` lists the work items');
-  const hubRead = readHub(root);
-  const story = itemHistory(root, item, { hub: hubRead.hub ?? null, hubWhy: hubRead.why ?? null });
+  const productConfigRead = readProductConfig(root);
+  const story = itemHistory(root, item, { productConfig: productConfigRead.productConfig ?? null, productConfigWhy: productConfigRead.why ?? null });
   // Steps that cannot be read are a failure in both forms: a script reading `--json` must see it too.
   if (!story.steps) process.exitCode = 1;
   if (json) {
@@ -474,7 +474,7 @@ function showCmd(root, read, id, { json }) {
     ['shape', isShapeDone(item) ? 'done (Build is not shown here)' : null],
   ].filter(([, v]) => v);
   for (const [k, v] of facts) log(`    ${c.dim(`${k}:`)} ${v}`);
-  if (story.hubWhy) warn(`the Product's settings could not be read — ${story.hubWhy}; whether an approval counts is not told`);
+  if (story.productConfigWhy) warn(`the Product's settings could not be read — ${story.productConfigWhy}; whether an approval counts is not told`);
   if (story.approvalsWhy) {
     warn(`.sdlc/approvals.json could not be read — ${story.approvalsWhy}; no approvals are shown`);
     hand('restore it from git — `yad doctor` checks it');

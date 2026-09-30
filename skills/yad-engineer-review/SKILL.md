@@ -118,7 +118,7 @@ as one list: someone who has worked in ANY of them meets the ask. Nothing says w
 Record `engagement: verified` when the engineer reviewed through the companion (else `none` for a bare
 approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto the ship record from the
 platform (mutating the ship's shard where it lives, or its folded entry if already tidied). Soft by default (both count; a bare approve draws `yad review nudge`); only gates when
-`hub.review.requireEngagement: true`. The signal is gameable by design and sits **beside** the CI gates,
+`review.requireEngagement: true` in the Product settings. The signal is gameable by design and sits **beside** the CI gates,
 never above them.
 Recording an approval does **not** ship — shipping is a separate, explicit step. Shape discipline:
 the gate talks only through files; refuse to treat AI review as a human approval.
@@ -153,7 +153,7 @@ engineer-review rule is satisfied (Step 2). Then:
   (it never weakens the merge gate — the engineer still owns the merge).
 - **Commit the machine-written ledgers.** Run `yad checkpoint --push` from `{project-root}` to commit
   the Build ledgers just written (the `build-log/` shard, and the `trust-log/` shard /
-  `build-state/<story>.json` if the story ran through `yad-run`) as one `chore(hub): …` audit-trail
+  `build-state/<story>.json` if the story ran through `yad-run`) as one `chore(product): …` audit-trail
   commit — default branch only, staging the shard dirs (`yad tidy up` folds finished shards later),
   never a Shape gate file. It is the Build analogue of the Shape `yad gate` sync. The
   same commit also **carries the story `status:` flip** you just wrote (`approved → in-build/shipped`,

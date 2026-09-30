@@ -24,7 +24,7 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 The `<base>` argument is **optional**. The order is: the **argument**, else `SDLC_BASE`, else the
 **configured** `default_branch` (from the Product settings file — see the next section), else the remote's
 **published default branch** (`git symbolic-ref refs/remotes/origin/HEAD`), else `origin/main` —
-the same order the CLI resolves (`cli/hubcommit.mjs`, `cli/repo.mjs`), so a gate never diffs a
+the same order the CLI resolves (`cli/productcommit.mjs`, `cli/repo.mjs`), so a gate never diffs a
 different range than the `yad` commands run beside it. Each candidate must actually **resolve**
 before it is used, so a *dangling* `origin/HEAD` (trunk renamed, the old remote-tracking ref pruned)
 falls through instead of failing the gate on a fully-fetched repo. CI always passes the base
@@ -242,7 +242,7 @@ No unsigned commits reach merge — on the Product and on every connected repo. 
 
 **There is no author allowlist** (E62). yadflow keeps no list of people: write access to the repo
 decides who can author, and the signature proves which platform account made the commit. `yad check --fix`
-and `yad setup` no longer generate `.sdlc/verified-authors`, and no gate reads it or hub.json's
+and `yad setup` no longer generate `.sdlc/verified-authors`, and no gate reads it or the Product settings'
 `verified_authors` any more (`SDLC_VERIFIED_AUTHORS` is gone too). When an old `.sdlc/verified-authors`
 file is still on disk, the gate prints:
 
@@ -286,7 +286,7 @@ non-merge commit in `<base>..HEAD`:
 - **Trailers**, when present, appear in the fixed order `Task → Contract-Change → Ledger-Override →
   Co-Authored-By` (`Ledger-Override` only from `yad commit --manual --reason`; this gate does not check it).
 - Merge/squash commits (2+ parents) are skipped — their platform-generated subjects are not authored.
-- **Profiles** (`--profile code|hub|product`): the subject rule is identical on both; the gate never requires
+- **Profiles** (`--profile code|product`; `hub`, the old name for `product`, still works): the subject rule is identical on both; the gate never requires
   the `Task:` trailer (spec-link owns that on code repos; Product commits are not task-scoped).
 - **Fails closed** when `<base>` can't be resolved.
   `<base>` is optional — see [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
@@ -664,10 +664,10 @@ break nor reorder them; job names are `yad-`prefixed to avoid collisions.
 **Idempotent.** The two markers plus the include-entry check make a re-run a no-op. This is how a repo
 that already had its own pipeline keeps it and still gains the gates.
 
-## Wiring the Product (`repo: hub`)
+## Wiring the Product (`repo: product`)
 
 The Product is itself a repo on a platform (recorded in `.sdlc/product.json` by
-`yad-connect-repos action: detect-hub`). `wire repo: hub` targets `{project-root}` and uses the same
+`yad-connect-repos action: detect-product`). `wire repo: product` targets `{project-root}` and uses the same
 merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "thinking" repo (it has no
 `specs/` or `package.json` build). **What yadflow wires today** (`PRODUCT_WIRING`): `commit-message`,
 `pr-title`, `pr-template` and `ledger-guard` in `yad-product-checks`, `verified-commits` in its own workflow,

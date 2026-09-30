@@ -201,7 +201,7 @@ ${c.bold('Build helpers')}
   yad checkpoint [--push]              Commit the machine-written Build state on the Product
                                        (trust-log/build-log/build-state) — plus any story
                                        status: flip (→ in-build/shipped) backed by a build-log
-                                       ship — as one audit-trail chore(hub) commit; default
+                                       ship — as one audit-trail chore(product) commit; default
                                        branch only (--allow-branch to override); no-op when clean
   yad checkpoint --retro-ship <epic>/<story> --repo <r>
                                        Record a retroactive build-log ship for a PRE-TRACKING story
@@ -225,7 +225,7 @@ ${c.bold('Build helpers')}
                                        stay on yad/wip/…; with ledger: local the epic's ledger rides along
   yad tidy up [<epic>] [--push]        Fold FINISHED Build shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
-                                       ledger, as one chore(hub) commit — the manual "pack it up"
+                                       ledger, as one chore(product) commit — the manual "pack it up"
                                        for the shard files; a no-op when nothing is foldable
   yad index [--json]                   Rebuild .sdlc/index.json — one summary line per work item,
                                        derived from their own files; the default branch only, with no
@@ -252,7 +252,7 @@ ${c.bold('Build helpers')}
   yad repo sync [name]                 Switch each connected repo to its default branch and
                                        fast-forward it from origin; dirty repos are skipped
   yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
-                       refreshed code-maps + registry as a chore(hub): sync code-context … [skip ci]
+                       refreshed code-maps + registry as a chore(product): sync code-context … [skip ci]
                        audit commit and pushes it to the Product default branch (--allow-branch to override)
   yad risk-map check [repo] [--json]   Warn where a code repo's .sdlc/risk-map (a risk level per
                                        directory, no names) has gone stale — advisory, never blocks
@@ -293,7 +293,7 @@ ${c.bold('Options')}
   --risk <level>        open-pr: low|medium|high (default low)
   --repo <name>         open-pr: target a registered repo by name
   --base <branch>       open-pr: override the PR/MR base — default is the repo's own default
-                        branch (repos.json default_branch, else hub.json default_branch for a PR
+                        branch (repos.json default_branch, else product.json default_branch for a PR
                         on the Product itself, else the platform, else origin/HEAD, else main); a
                         non-default base loses the AI first pass (warns, never blocks)
   --epic <id>           docs: target one epic's site (EP-<slug>)
@@ -884,7 +884,7 @@ async function main() {
       // instead of "unknown command".
       refuse('yad roster was removed — yadflow keeps no list of people',
         'A gate needs one approval (not the author\'s own) from anyone with access to the repo; the platform records who approved. '
-        + 'Request reviewers on the PR itself. Keep an existing `roster` in hub.json until every review with older approvals is closed: '
+        + 'Request reviewers on the PR itself. Keep an existing `roster` in the Product settings until every review with older approvals is closed: '
         + 'it decides nothing, but the first sync uses its name → login pairs to recognise those approvals.');
       break;
     case 'docs': {

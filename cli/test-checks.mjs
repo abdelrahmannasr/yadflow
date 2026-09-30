@@ -1435,7 +1435,7 @@ test('contract-check gate: a DANGLING origin/HEAD falls through to the next cand
 });
 
 test('contract-check gate: a configured default_branch outranks the remote default (the CLI order)', () => {
-  // `.sdlc/hub.json`'s default_branch is what the CLI resolves first (cli/hubcommit.mjs) — it is how a
+  // `.sdlc/hub.json`'s default_branch is what the CLI resolves first (cli/productcommit.mjs) — it is how a
   // team overrides a stale origin/HEAD, so a gate that ignored it would diff a different range than
   // every `yad` command on the same repo.
   const { T, src } = scaffoldClonedRepo('develop');
@@ -1505,8 +1505,8 @@ const EPIC_OPEN = path.join(CHECKS, 'epic-open.sh');
 const DEBT = path.join(CHECKS, 'reconcile-debt-check.sh');
 
 // A Product with one epic. `fm` goes into epic.md frontmatter; `stories` maps story id -> status.
-function seedHubEpic(hub, epic, { fm = {}, stories = {}, debt = null } = {}) {
-  const dir = path.join(hub, 'epics', epic);
+function seedProductEpic(productConfig, epic, { fm = {}, stories = {}, debt = null } = {}) {
+  const dir = path.join(productConfig, 'epics', epic);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'epic.md'), linkMd({ epic, ...fm }) + `\n# ${epic}\n`);
   for (const [id, status] of Object.entries(stories)) {
@@ -1543,29 +1543,29 @@ const GATES = [
   {
     name: 'lineage-check',
     script: LINEAGE,
-    seed: (hub) => seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change' } }), // type change, no parent
+    seed: (productConfig) => seedProductEpic(productConfig, 'EP-demo', { fm: { kind: 'change' } }), // type change, no parent
     expect: /is type:change but declares no 'parent:'/,
   },
   {
     name: 'epic-open',
     script: EPIC_OPEN,
-    seed: (hub) => seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } }), // sealed
+    seed: (productConfig) => seedProductEpic(productConfig, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } }), // sealed
     expect: /targets SEALED epic EP-demo/,
   },
   {
     name: 'reconcile-debt',
     script: DEBT,
-    seed: (hub) => {
-      seedHubEpic(hub, 'EP-root');
-      seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change', parent: 'EP-root' } });
-      seedHubEpic(hub, 'EP-fix', { fm: { kind: 'hotfix', parent: 'EP-root' }, debt: [{ status: 'open' }] });
+    seed: (productConfig) => {
+      seedProductEpic(productConfig, 'EP-root');
+      seedProductEpic(productConfig, 'EP-demo', { fm: { kind: 'change', parent: 'EP-root' } });
+      seedProductEpic(productConfig, 'EP-fix', { fm: { kind: 'hotfix', parent: 'EP-root' }, debt: [{ status: 'open' }] });
     },
     expect: /carries OPEN hotfix debt/,
   },
   {
     name: 'contract-check',
     script: CONTRACT,
-    seed: (hub) => seedProductLock(hub, 'EP-demo', 'b'.repeat(64), '.'),
+    seed: (productConfig) => seedProductLock(productConfig, 'EP-demo', 'b'.repeat(64), '.'),
     // contract-check needs a surface change + the claim trailer; its link.md also pins a hash.
     files: {
       'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
@@ -1578,10 +1578,10 @@ const GATES = [
 
 // Where the Product lives on disk, and what `product-repo:` has to say to reach it from specs/<story>/.
 const FORMS = [
-  { name: 'absolute', hub: (T, out) => out, value: (T, out) => out },
-  { name: 'link-relative', hub: (T) => path.join(T, 'product'), value: () => '../../product' },
-  { name: 'root-relative', hub: (T) => path.join(T, 'product'), value: () => 'product' },
-  { name: 'unfenced link.md', hub: (T) => path.join(T, 'product'), value: () => '../../product', unfenced: true },
+  { name: 'absolute', productConfig: (T, out) => out, value: (T, out) => out },
+  { name: 'link-relative', productConfig: (T) => path.join(T, 'product'), value: () => '../../product' },
+  { name: 'root-relative', productConfig: (T) => path.join(T, 'product'), value: () => 'product' },
+  { name: 'unfenced link.md', productConfig: (T) => path.join(T, 'product'), value: () => '../../product', unfenced: true },
 ];
 
 // ---------- product-checkout.sh (E120) ----------
@@ -1716,8 +1716,8 @@ for (const g of GATES) {
     test(`${g.name} gate: reaches the Product with a ${form.name} product-repo (issue #149)`, () => {
       const T = scaffoldRepo();
       const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
-      const hub = form.hub(T, outside);
-      g.seed(hub);
+      const productConfig = form.productConfig(T, outside);
+      g.seed(productConfig);
       const fields = { story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': form.value(T, outside), ...(g.extraLink || {}) };
       commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
         'src/thing.js': 'x',
@@ -1797,10 +1797,10 @@ for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
 // gets two Products: `seed` is the real one, rigged so the gate FAILs iff it read it; `clean` is what an
 // author would plant, which would PASS. A FAIL with `seed`'s message proves the real one was read.
 const CLEAN = {
-  'lineage-check': (hub) => seedHubEpic(hub, 'EP-demo'), // a genesis feature epic
-  'epic-open': (hub) => seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } }),
-  'reconcile-debt': (hub) => seedHubEpic(hub, 'EP-demo'),
-  'contract-check': (hub) => seedProductLock(hub, 'EP-demo', 'a'.repeat(64), '.'), // matches the pin
+  'lineage-check': (productConfig) => seedProductEpic(productConfig, 'EP-demo'), // a genesis feature epic
+  'epic-open': (productConfig) => seedProductEpic(productConfig, 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } }),
+  'reconcile-debt': (productConfig) => seedProductEpic(productConfig, 'EP-demo'),
+  'contract-check': (productConfig) => seedProductLock(productConfig, 'EP-demo', 'a'.repeat(64), '.'), // matches the pin
 };
 
 // Commit on the base branch, then start `feature` again from it.
@@ -1810,12 +1810,12 @@ function onBase(T, files) {
   git(T, 'checkout', '-q', '-B', 'feature');
 }
 
-// Write a Product as files under <T>/<dir> (to be committed, unlike <T>/product). `hub` adds the
-// `.sdlc/hub.json` every Product commits — what makes a tracked folder a monorepo's Product.
+// Write a Product as files under <T>/<dir> (to be committed, unlike <T>/product). `settings` adds
+// the `.sdlc/hub.json` every Product commits — what makes a tracked folder a monorepo's Product.
 // `names` picks which settings names it tracks (E122: a Product is found by either, both until v5).
-function productFiles(T, dir, seed, { hub = false, names = ['hub.json'] } = {}) {
+function productFiles(T, dir, seed, { settings = false, names = ['hub.json'] } = {}) {
   seed(path.join(T, dir));
-  if (hub) {
+  if (settings) {
     fs.mkdirSync(path.join(T, dir, '.sdlc'), { recursive: true });
     for (const n of names) fs.writeFileSync(path.join(T, dir, '.sdlc', n), '{}\n');
   }
@@ -1909,24 +1909,24 @@ for (const g of GATES) {
   test(`${g.name} gate: a monorepo Product is read as it stands on the base, not as the PR leaves it (E117)`, () => {
     // The Product and the code in ONE git repo: the Product folder is tracked, so the PR could edit it.
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
-    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
-    fs.rmSync(path.join(T, 'hub'), { recursive: true, force: true });
-    productFiles(T, 'hub', clean);
+    productFiles(T, 'our-product', g.seed, { settings: true });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
+    fs.rmSync(path.join(T, 'our-product'), { recursive: true, force: true });
+    productFiles(T, 'our-product', clean);
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, `the base's Product must be read, not the PR's edit of it:\n${r.out}`);
     assert.match(r.out, g.expect);
-    assert.match(r.out, /the Product at 'hub' is kept in this repo, so it is read as it stands on main, not as this PR leaves it/);
+    assert.match(r.out, /the Product at 'our-product' is kept in this repo, so it is read as it stands on main, not as this PR leaves it/);
     fs.rmSync(T, { recursive: true, force: true });
   });
 
   test(`${g.name} gate: a monorepo Product marked export-ignore is still read from the base (E117 review 1)`, () => {
     // `git archive` drops what .gitattributes marks export-ignore; the Product came out empty.
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
-    fs.writeFileSync(path.join(T, '.gitattributes'), 'hub export-ignore\n');
-    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
+    productFiles(T, 'our-product', g.seed, { settings: true });
+    fs.writeFileSync(path.join(T, '.gitattributes'), 'our-product export-ignore\n');
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
@@ -1938,10 +1938,10 @@ for (const g of GATES) {
     // Whether the Product is kept in this repo is asked of the base: the disk is the PR's.
     for (const how of ['rm', 'mv']) {
       const T = scaffoldRepo();
-      productFiles(T, 'hub', g.seed, { hub: true });
-      onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
-      if (how === 'rm') git(T, 'rm', '-r', '-q', 'hub');
-      else git(T, 'mv', 'hub', 'hub-archive');
+      productFiles(T, 'our-product', g.seed, { settings: true });
+      onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
+      if (how === 'rm') git(T, 'rm', '-r', '-q', 'our-product');
+      else git(T, 'mv', 'our-product', 'our-product-archive');
       commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
       const r = runGate(g.script, T);
       assert.equal(r.code, 1, `${how}:\n${r.out}`);
@@ -1956,8 +1956,8 @@ for (const g of GATES) {
     // second pattern names — scoped so this PR's own files still stage.
     for (const attrs of ['*.md text eol=crlf\n', 'EP-demo/** working-tree-encoding=UTF-16\n']) {
       const T = scaffoldRepo();
-      productFiles(T, 'hub', g.seed, { hub: true });
-      onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
+      productFiles(T, 'our-product', g.seed, { settings: true });
+      onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
       commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', '.gitattributes': attrs, ...(g.files || {}) });
       const r = runGate(g.script, T);
       assert.equal(r.code, 1, `${attrs}${r.out}`);
@@ -1969,21 +1969,21 @@ for (const g of GATES) {
   test(`${g.name} gate: a symlink or submodule inside the base Product is refused by name (E117 review 2)`, () => {
     for (const kind of ['symlink', 'submodule']) {
       const T = scaffoldRepo();
-      productFiles(T, 'hub', g.seed, { hub: true });
+      productFiles(T, 'our-product', g.seed, { settings: true });
       fs.writeFileSync(path.join(T, 'elsewhere.txt'), 'x\n');
-      if (kind === 'symlink') fs.symlinkSync(path.join(T, 'elsewhere.txt'), path.join(T, 'hub/epics/link'));
-      onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
+      if (kind === 'symlink') fs.symlinkSync(path.join(T, 'elsewhere.txt'), path.join(T, 'our-product/epics/link'));
+      onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
       if (kind === 'submodule') {
         git(T, 'checkout', '-q', 'main');
         const head = git(T, 'rev-parse', 'HEAD').toString().trim();
-        git(T, 'update-index', '--add', '--cacheinfo', `160000,${head},hub/epics/sub`);
+        git(T, 'update-index', '--add', '--cacheinfo', `160000,${head},our-product/epics/sub`);
         git(T, 'commit', '-q', '-m', 'chore: add a submodule');
         git(T, 'checkout', '-q', '-B', 'feature');
       }
       commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
       const r = runGate(g.script, T);
       assert.equal(r.code, 1, `${kind}:\n${r.out}`);
-      assert.ok(r.out.includes(`'hub/epics/${kind === 'symlink' ? 'link' : 'sub'}' on main is a symlink or a submodule`), `${kind}:\n${r.out}`);
+      assert.ok(r.out.includes(`'our-product/epics/${kind === 'symlink' ? 'link' : 'sub'}' on main is a symlink or a submodule`), `${kind}:\n${r.out}`);
       fs.rmSync(T, { recursive: true, force: true });
     }
   });
@@ -2007,8 +2007,8 @@ for (const g of GATES) {
 
   test(`${g.name} gate: a Product written with CRLF line ends is still read (E117 review 2)`, () => {
     const T = scaffoldRepo();
-    const hub = path.join(T, 'product');
-    g.seed(hub);
+    const productConfig = path.join(T, 'product');
+    g.seed(productConfig);
     const crlf = (dir) => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, e.name);
@@ -2016,7 +2016,7 @@ for (const g of GATES) {
         else fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(/\r?\n/g, '\r\n'));
       }
     };
-    crlf(hub);
+    crlf(productConfig);
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '../../product') });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
@@ -2027,20 +2027,20 @@ for (const g of GATES) {
   test(`${g.name} gate: a Product the base keeps is read whatever product-repo says (E117 review 3)`, () => {
     // Spelled past the repo's own folder name, another machine's absolute path, or nowhere on a first
     // spec: the text cannot be folded to the kept Product, and a PR that deletes it leaves no disk to walk.
-    for (const value of ['past-root', '/Users/someone/work/repo/hub', '../../nowhere']) {
+    for (const value of ['past-root', '/Users/someone/work/repo/our-product', '../../nowhere']) {
       const T = scaffoldRepo();
-      productFiles(T, 'hub', g.seed, { hub: true });
-      const v = value === 'past-root' ? `../../../${path.basename(T)}/hub` : value;
+      productFiles(T, 'our-product', g.seed, { settings: true });
+      const v = value === 'past-root' ? `../../../${path.basename(T)}/our-product` : value;
       const first = value === '../../nowhere'; // the repo's first spec: no link.md on the base at all
       onBase(T, first ? {} : { 'specs/EP-demo-S01/link.md': linkFor(g, v) });
-      git(T, 'rm', '-r', '-q', 'hub');
+      git(T, 'rm', '-r', '-q', 'our-product');
       commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
         'src/thing.js': 'x', ...(g.files || {}), ...(first ? { 'specs/EP-demo-S01/link.md': linkFor(g, v) } : {}),
       });
       const r = runGate(g.script, T);
       assert.equal(r.code, 1, `${value}:\n${r.out}`);
       assert.match(r.out, g.expect, value);
-      assert.ok(r.out.includes("reaches nothing here; the Product this repo keeps at 'hub' on main holds EP-demo, so that one is read."), `${value}:\n${r.out}`);
+      assert.ok(r.out.includes("reaches nothing here; the Product this repo keeps at 'our-product' on main holds EP-demo, so that one is read."), `${value}:\n${r.out}`);
       fs.rmSync(T, { recursive: true, force: true });
     }
   });
@@ -2050,7 +2050,7 @@ for (const g of GATES) {
     // instead of the real, untracked checkout.
     const T = scaffoldRepo();
     g.seed(path.join(T, 'product'));
-    productFiles(T, 'test/fixtures/sample', clean, { hub: true });
+    productFiles(T, 'test/fixtures/sample', clean, { settings: true });
     onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../product') });
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
     const r = runGate(g.script, T);
@@ -2063,19 +2063,19 @@ for (const g of GATES) {
   test(`${g.name} gate: a monorepo Product is found by either settings name, and counted once with both (E122)`, () => {
     // Tracking only the new name: still a Product kept in this repo, read from the base.
     let T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true, names: ['product.json'] });
-    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
-    fs.rmSync(path.join(T, 'hub'), { recursive: true, force: true });
-    productFiles(T, 'hub', clean);
+    productFiles(T, 'our-product', g.seed, { settings: true, names: ['product.json'] });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
+    fs.rmSync(path.join(T, 'our-product'), { recursive: true, force: true });
+    productFiles(T, 'our-product', clean);
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
     let r = runGate(g.script, T);
     assert.equal(r.code, 1, `the base's Product must be read:\n${r.out}`);
     assert.match(r.out, g.expect);
-    assert.match(r.out, /the Product at 'hub' is kept in this repo, so it is read as it stands on main/);
+    assert.match(r.out, /the Product at 'our-product' is kept in this repo, so it is read as it stands on main/);
     fs.rmSync(T, { recursive: true, force: true });
     // Both names, and nothing reached: ONE Product holding the epic, not "more than one".
     T = scaffoldRepo();
-    productFiles(T, 'a', g.seed, { hub: true, names: ['product.json', 'hub.json'] });
+    productFiles(T, 'a', g.seed, { settings: true, names: ['product.json', 'hub.json'] });
     onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
     r = runGate(g.script, T);
@@ -2088,7 +2088,7 @@ for (const g of GATES) {
   test(`${g.name} gate: when nothing is reached, only a kept Product holding the epic is read (E117 review 4)`, () => {
     // A fixture that knows nothing of the story's epic is not read: the gate defers, as before.
     let T = scaffoldRepo();
-    productFiles(T, 'test/fixtures/sample', (hub) => seedHubEpic(hub, 'EP-other'), { hub: true });
+    productFiles(T, 'test/fixtures/sample', (productConfig) => seedProductEpic(productConfig, 'EP-other'), { settings: true });
     onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
     let r = runGate(g.script, T);
@@ -2097,8 +2097,8 @@ for (const g of GATES) {
     fs.rmSync(T, { recursive: true, force: true });
     // Two that hold it: the gate cannot tell which is meant.
     T = scaffoldRepo();
-    productFiles(T, 'a', g.seed, { hub: true });
-    productFiles(T, 'b', g.seed, { hub: true });
+    productFiles(T, 'a', g.seed, { settings: true });
+    productFiles(T, 'b', g.seed, { settings: true });
     onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
     r = runGate(g.script, T);
@@ -2110,7 +2110,7 @@ for (const g of GATES) {
   test(`${g.name} gate: an empty product-repo with a kept Product holding the epic reads it (E117 review 4)`, () => {
     // The kept Product was "read" and then three gates skipped the check on the empty value.
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
+    productFiles(T, 'our-product', g.seed, { settings: true });
     onBase(T, {});
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
       'src/thing.js': 'x', ...(g.files || {}),
@@ -2119,20 +2119,20 @@ for (const g of GATES) {
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, g.expect);
-    assert.ok(r.out.includes("link.md names no product-repo here; the Product this repo keeps at 'hub' on main holds EP-demo"), r.out);
+    assert.ok(r.out.includes("link.md names no product-repo here; the Product this repo keeps at 'our-product' on main holds EP-demo"), r.out);
     fs.rmSync(T, { recursive: true, force: true });
   });
 
   test(`${g.name} gate: a Linux magic link to the repo cannot hand the gate the PR's copy of a kept Product (E117 review 5)`, { skip: process.platform !== 'linux' && 'needs /proc (Linux)' }, () => {
     // /proc/self/cwd means a different folder to each process: the part-by-part walk (a subshell) saw
-    // its own folder and nothing tracked, while the gate's shell read the PR's edited `hub/` through it.
+    // its own folder and nothing tracked, while the gate's shell read the PR's edited `our-product/` through it.
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
+    productFiles(T, 'our-product', g.seed, { settings: true });
     onBase(T, {}); // a first spec: the PR's own product-repo is the one used
-    fs.rmSync(path.join(T, 'hub/epics'), { recursive: true, force: true });
-    clean(path.join(T, 'hub'));
+    fs.rmSync(path.join(T, 'our-product/epics'), { recursive: true, force: true });
+    clean(path.join(T, 'our-product'));
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
-      'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '/proc/self/cwd/hub'),
+      'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '/proc/self/cwd/our-product'),
     });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
@@ -2143,13 +2143,13 @@ for (const g of GATES) {
   test(`${g.name} gate: a product-repo starting with - still gets the second walk (E117 review 6)`, { skip: process.platform !== 'linux' && 'needs /proc (Linux)' }, () => {
     // `cd -P -x/…` read the value as an option and failed, and the second walk was skipped.
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
+    productFiles(T, 'our-product', g.seed, { settings: true });
     onBase(T, {});
-    fs.rmSync(path.join(T, 'hub/epics'), { recursive: true, force: true });
-    clean(path.join(T, 'hub'));
+    fs.rmSync(path.join(T, 'our-product/epics'), { recursive: true, force: true });
+    clean(path.join(T, 'our-product'));
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
       'src/thing.js': 'x', '-x/keep': 'x\n', ...(g.files || {}),
-      'specs/EP-demo-S01/link.md': linkFor(g, '-x/../../../../../../../../../proc/self/cwd/hub'),
+      'specs/EP-demo-S01/link.md': linkFor(g, '-x/../../../../../../../../../proc/self/cwd/our-product'),
     });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
@@ -2175,16 +2175,16 @@ for (const g of GATES) {
   test(`${g.name} gate: a symlink early in a large base Product is still named, not a silent exit (E117 review 6)`, () => {
     // awk stopped at the first hit; `tr` then wrote into a closed pipe and pipefail killed the gate (141).
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
-    fs.symlinkSync('EP-demo', path.join(T, 'hub/epics/AAA-link'));
-    const bulk = path.join(T, 'hub/epics/zzz-bulk');
+    productFiles(T, 'our-product', g.seed, { settings: true });
+    fs.symlinkSync('EP-demo', path.join(T, 'our-product/epics/AAA-link'));
+    const bulk = path.join(T, 'our-product/epics/zzz-bulk');
     fs.mkdirSync(bulk, { recursive: true });
     for (let i = 0; i < 2000; i++) fs.writeFileSync(path.join(bulk, `file-with-a-long-enough-name-${i}.md`), 'x\n');
     onBase(T, {});
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}), 'specs/EP-demo-S01/link.md': linkFor(g, '../../nowhere') });
     const r = runGate(g.script, T);
     assert.equal(r.code, 1, r.out);
-    assert.ok(r.out.includes("'hub/epics/AAA-link' on main is a symlink or a submodule"), `exit ${r.code}:\n${r.out}`);
+    assert.ok(r.out.includes("'our-product/epics/AAA-link' on main is a symlink or a submodule"), `exit ${r.code}:\n${r.out}`);
     fs.rmSync(T, { recursive: true, force: true });
   });
 
@@ -2192,7 +2192,7 @@ for (const g of GATES) {
     // git never lists .git/ as tracked, yet a branch name shapes it: `epics/EP-demo/x` makes
     // .git/refs/heads/epics/EP-demo/, which read as an untracked checkout holding an open epic, no lock.
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
+    productFiles(T, 'our-product', g.seed, { settings: true });
     onBase(T, {}); // the first spec: the PR's own product-repo is used
     git(T, 'branch', 'epics/EP-demo/x');
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
@@ -2212,7 +2212,7 @@ for (const g of GATES) {
       t.skip('needs a disk that ignores case');
       return;
     }
-    productFiles(T, 'hub', g.seed, { hub: true });
+    productFiles(T, 'our-product', g.seed, { settings: true });
     onBase(T, {});
     git(T, 'branch', 'epics/EP-demo/x');
     commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
@@ -2226,12 +2226,12 @@ for (const g of GATES) {
 
   test(`${g.name} gate: a .gitattributes merged into the base Product cannot re-encode it (E117 review 3)`, () => {
     const T = scaffoldRepo();
-    productFiles(T, 'hub', g.seed, { hub: true });
-    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../hub') });
+    productFiles(T, 'our-product', g.seed, { settings: true });
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
     // An earlier merged commit that adds only the attributes file (it touches nothing under specs/).
     git(T, 'checkout', '-q', 'main');
-    fs.writeFileSync(path.join(T, 'hub/epics/.gitattributes'), '*.md working-tree-encoding=UTF-16\n*.json working-tree-encoding=UTF-16\n');
-    git(T, 'add', 'hub/epics/.gitattributes');
+    fs.writeFileSync(path.join(T, 'our-product/epics/.gitattributes'), '*.md working-tree-encoding=UTF-16\n*.json working-tree-encoding=UTF-16\n');
+    git(T, 'add', 'our-product/epics/.gitattributes');
     git(T, 'commit', '-q', '-m', 'chore: attrs');
     git(T, 'checkout', '-q', '-B', 'feature');
     const files = { 'src/thing.js': 'x', ...(g.files || {}) };
@@ -2249,7 +2249,7 @@ for (const g of GATES) {
 
   test(`${g.name} gate: a monorepo Product at the repo root is read from the base too (E117)`, () => {
     const T = scaffoldRepo();
-    productFiles(T, '.', g.seed, { hub: true });
+    productFiles(T, '.', g.seed, { settings: true });
     onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../..') });
     fs.rmSync(path.join(T, 'epics'), { recursive: true, force: true });
     clean(T);
@@ -2320,7 +2320,7 @@ for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
 for (const [name, script, tag] of [['spec-link', SPEC_LINK, 'spec-link'], ['lineage-check', LINEAGE, 'lineage-check'], ['epic-open', EPIC_OPEN, 'epic-open'], ['reconcile-debt', DEBT, 'reconcile-debt']]) {
   test(`${name} gate: a story ID written as a path is refused by name (E117 review 1)`, () => {
     const T = scaffoldRepo();
-    seedHubEpic(path.join(T, 'product'), 'EP-demo');
+    seedProductEpic(path.join(T, 'product'), 'EP-demo');
     commit(T, 'feat: add thing\n\nTask: EP-demo-S01/.-T1', {
       'src/thing.js': 'x',
       'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo-S01/.', 'product-repo': '../../nowhere' }),
@@ -2427,7 +2427,7 @@ test('contract-check gate: removing an orphan slice, or a slice in a folder with
 
 test('reconcile-debt gate: a reached Product without the epic is an orphan, not "not reachable" (E117 review 2)', () => {
   const T = scaffoldRepo();
-  seedHubEpic(path.join(T, 'product'), 'EP-other');
+  seedProductEpic(path.join(T, 'product'), 'EP-other');
   linkedCommit(T, '../../product');
   const r = runGate(DEBT, T);
   assert.equal(r.code, 1, r.out);
@@ -2439,7 +2439,7 @@ for (const [name, script, tag] of [['spec-link', SPEC_LINK, 'spec-link'], ['line
   test(`${name} gate: a commit with a huge run of Task trailers gets a verdict, not a silent exit (E117 review 7)`, () => {
     // `sed | head -1` left sed writing into a closed pipe; under pipefail the gate died with 141 and no message.
     const T = scaffoldRepo();
-    seedHubEpic(path.join(T, 'product'), 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } });
+    seedProductEpic(path.join(T, 'product'), 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } });
     commit(T, `feat: add thing\n\n${Array.from({ length: 4000 }, () => 'Task: EP-demo-S01-T01').join('\n')}`, {
       'src/thing.js': 'x',
       'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../product' }),
@@ -2465,9 +2465,9 @@ test('contract-check gate: a slice under a folder that is not a story ID is refu
 for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
   test(`${g.name} gate: a link.md whose epic: is not the story's own is refused (E118)`, () => {
     const T = scaffoldRepo();
-    const hub = path.join(T, 'product');
-    g.seed(hub);
-    seedHubEpic(hub, 'EP-other', { stories: { 'EP-other-S01': 'in-progress' } }); // open, genesis, no debt
+    const productConfig = path.join(T, 'product');
+    g.seed(productConfig);
+    seedProductEpic(productConfig, 'EP-other', { stories: { 'EP-other-S01': 'in-progress' } }); // open, genesis, no debt
     commit(T, 'feat: add thing\n\nTask: EP-demo-S01-T01', {
       'src/thing.js': 'x',
       'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-other', 'product-repo': '../../product' }),
@@ -2484,7 +2484,7 @@ test('epic-open gate: a base link.md with no product-repo takes the one this PR 
   // The base value wins only when there is one. Otherwise a link.md that never had a product-repo — which
   // epic-open FAILs as malformed — could never be fixed: the fixing PR would be read by the broken value.
   const T = scaffoldRepo();
-  seedHubEpic(path.join(T, 'product'), 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } });
+  seedProductEpic(path.join(T, 'product'), 'EP-demo', { stories: { 'EP-demo-S01': 'in-progress' } });
   onBase(T, { 'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo' }) });
   linkedCommit(T, '../../product');
   const r = runGate(EPIC_OPEN, T);
@@ -2510,7 +2510,7 @@ test('contract-check gate: an untracked Product checked out inside the repo is r
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('all four hub-reading gates carry the SAME resolution block, byte for byte', () => {
+test('all four gates that read the Product settings carry the SAME resolution block, byte for byte', () => {
   // The gates are standalone by design, so the block is duplicated rather than sourced — and issue
   // #149 was caused by exactly that duplication drifting. Pin it.
   const region = (file) => {
@@ -2626,11 +2626,11 @@ test('the settings block: new name first, the old as a fallback, and two that di
       [A, A, { SDLC_PRODUCT_CONFIG: 'p.json', SDLC_HUB_CONFIG: 'h.json' }, 1, /SDLC_PRODUCT_CONFIG \(p\.json\) and SDLC_HUB_CONFIG \(h\.json\) name files that say different things/],
     ];
     put('p.json', A); put('same.json', A); put('h.json', B);
-    for (const [prod, hub, env, code, want] of rows) {
+    for (const [prod, legacy, env, code, want] of rows) {
       put('.sdlc/product.json', prod);
-      put('.sdlc/hub.json', hub);
+      put('.sdlc/hub.json', legacy);
       const r = run(env);
-      const label = `${prod ? 'product' : '-'}/${hub ? 'hub' : '-'} ${JSON.stringify(env)}`;
+      const label = `${prod ? 'product' : '-'}/${legacy ? 'hub' : '-'} ${JSON.stringify(env)}`;
       assert.equal(r.code, code, `${label}: ${r.err}`);
       if (typeof want === 'string') assert.equal(r.out, want, label);
       else { assert.match(r.err, want, label); assert.match(r.err, /^FAIL \[product-settings\]/, label); assert.equal(r.out, '', label); }
@@ -2722,44 +2722,44 @@ test('every base-taking gate actually CONSUMES resolve_base (no hardcoded origin
 
 test('epic-open gate: an ABSOLUTE product-repo reaches the Product and refuses a SEALED epic', () => {
   const T = scaffoldRepo();
-  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
-  seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } });
-  linkedCommit(T, hub);
+  const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  seedProductEpic(productConfig, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } });
+  linkedCommit(T, productConfig);
   const r = runGate(EPIC_OPEN, T);
   assert.equal(r.code, 1, 'a sealed epic must fail, not defer');
   assert.match(r.out, /targets SEALED epic EP-demo/);
-  fs.rmSync(hub, { recursive: true, force: true });
+  fs.rmSync(productConfig, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('epic-open gate: an open epic (an unshipped story) passes', () => {
   const T = scaffoldRepo();
-  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
-  seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped', 'EP-demo-S02': 'in-progress' } });
-  linkedCommit(T, hub);
+  const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  seedProductEpic(productConfig, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped', 'EP-demo-S02': 'in-progress' } });
+  linkedCommit(T, productConfig);
   const r = runGate(EPIC_OPEN, T);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /epic is open — has unshipped stories/);
-  fs.rmSync(hub, { recursive: true, force: true });
+  fs.rmSync(productConfig, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('reconcile-debt gate: an ABSOLUTE product-repo reaches the Product and freezes the thread', () => {
   const T = scaffoldRepo();
-  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
   // EP-demo threads off EP-root; the sibling hotfix EP-fix (same thread) carries OPEN debt.
-  seedHubEpic(hub, 'EP-root');
-  seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change', parent: 'EP-root' } });
-  seedHubEpic(hub, 'EP-fix', {
+  seedProductEpic(productConfig, 'EP-root');
+  seedProductEpic(productConfig, 'EP-demo', { fm: { kind: 'change', parent: 'EP-root' } });
+  seedProductEpic(productConfig, 'EP-fix', {
     fm: { kind: 'hotfix', parent: 'EP-root' },
     debt: [{ status: 'open', reason: 'ship-first hotfix' }],
   });
-  linkedCommit(T, hub);
+  linkedCommit(T, productConfig);
   const r = runGate(DEBT, T);
   assert.equal(r.code, 1, 'open thread debt must freeze the thread, not defer');
   assert.match(r.out, /thread EP-root carries OPEN hotfix debt/);
   assert.match(r.out, /EP-fix/);
-  fs.rmSync(hub, { recursive: true, force: true });
+  fs.rmSync(productConfig, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3327,11 +3327,11 @@ test('risk-route: half-filled body still routes (advisory, never aborts)', () =>
 });
 
 // ---------- product-route.sh (the Shape analogue; hub-route.sh before E123) ----------
-const HUB_ROUTE = path.join(ROOT, 'skills/yad-product-bridge/templates/checks/product-route.sh');
+const PRODUCT_ROUTE = path.join(ROOT, 'skills/yad-product-bridge/templates/checks/product-route.sh');
 
 test('product-route: prints the gate count from the risk tags — no roles, and stories no longer route by name (E62)', () => {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubroute-'));
-  const run = (lines) => runGate(HUB_ROUTE, T, [body(T, lines.join('\n'))]);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-productroute-'));
+  const run = (lines) => runGate(PRODUCT_ROUTE, T, [body(T, lines.join('\n'))]);
   let r = run(['- Artifact: `stories/`', '- **Risk tags:** none', '- **Domains / repos touched:** backend, mobile']);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /ROUTE: 1 approver = base 1 \(no risk step\)/, 'the stories review is an ordinary count gate');
@@ -3360,7 +3360,7 @@ test('risk-route: missing body file exits 2 (usage error)', () => {
 // ---------- commit-message.sh ----------
 const COMMIT_MSG = path.join(CHECKS, 'commit-message.sh');
 
-// `product` is the new spelling of the `hub` profile, accepted alongside it. Here the normalisation
+// `hub` is the old spelling of the `product` profile, accepted alongside it. Here the normalisation
 // only affects the PASS message, but an unknown value would abort the gate outright — so both
 // spellings have to be accepted, and this is the only place with a git repo to prove it in.
 for (const profile of ['hub', 'product']) {
@@ -3448,58 +3448,58 @@ test('pr-title gate: conventional code title passes; trailing period fails', () 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('pr-title gate: hub review title passes; a code title fails under hub', () => {
+test('pr-title gate: a Product review title passes; a code title fails under product', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'review: architecture.md (EP-demo)']).code, 0);
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'feat: nope']).code, 1);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', 'review: architecture.md (EP-demo)']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', 'feat: nope']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('pr-title gate: hub splits by --head — review/EP-* wants the review shape, any other branch wants a code subject', () => {
+test('pr-title gate: product splits by --head — review/EP-* wants the review shape, any other branch wants a code subject', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
   // review/EP-* head => artifact-review title required
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'review: architecture.md (EP-demo)']).code, 0);
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'chore: nope']).code, 1);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'review/EP-demo', 'review: architecture.md (EP-demo)']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'review/EP-demo', 'chore: nope']).code, 1);
   // any other head => a Product tooling PR, follows the code (Conventional-Commits) convention
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'chore: rewire the Product gates']).code, 0);
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'review: nope (EP-x)']).code, 1);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/wire-gates', 'chore: rewire the Product gates']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/wire-gates', 'review: nope (EP-x)']).code, 1);
   // no --head stays strict (artifact-review), so existing single-arg callers are unaffected
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'chore: nope']).code, 1);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', 'chore: nope']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review head — the bypass guard', () => {
+test('pr-title gate: product rejects an artifact change (epics/**) on a non-review head — the bypass guard', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
   const artifact = path.join(T, 'changed-artifact.txt');
   fs.writeFileSync(artifact, 'epics/EP-demo/epic.md\nREADME.md\n');
   const tooling = path.join(T, 'changed-tooling.txt');
   fs.writeFileSync(tooling, 'skills/yad-checks/x.sh\ncli/y.mjs\n');
   // non-review head touching epics/** => FAIL even with an otherwise-valid code title
-  const r = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', artifact, 'chore: sneak in an artifact']);
+  const r = runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', artifact, 'chore: sneak in an artifact']);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Shape artifacts/);
   // non-review head touching only tooling paths => still a tooling PR, code title passes
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the Product gates']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the Product gates']).code, 0);
   // the legitimate path: a review/EP-* head carries the artifact change and wants the review title
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, 'review: epic.md (EP-demo)']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'review/EP-demo', '--changed', artifact, 'review: epic.md (EP-demo)']).code, 0);
   // E47: step owner files alone are not an artifact change; beside a real artifact they change nothing.
   const owners = path.join(T, 'changed-owners.txt');
   fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nfoundation/.sdlc/owners/foundation.json\n');
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 0);
   fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nepics/EP-demo/epic.md\n');
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
   fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/sub/x.json\n');
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1, 'only a file directly in owners/');
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1, 'only a file directly in owners/');
   // A long list: the guard must read all of it (pipefail), and still fail.
   fs.writeFileSync(owners, `${Array.from({ length: 20000 }, (_, i) => `epics/EP-demo/notes/${i}.md`).join('\n')}\n`);
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 // ---------- pr-template.sh ----------
 const PR_TEMPLATE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
 const CODE_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/github/pull_request_template.md');
-const HUB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/product/github/pull_request_template.md');
+const PRODUCT_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/product/github/pull_request_template.md');
 
 test('pr-template gate: the real code template passes; a stripped body fails', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
@@ -3524,47 +3524,47 @@ test('pr-template gate: a prepended companion trailer block does not break the c
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('pr-template gate: the real hub template passes under --profile hub', () => {
+test('pr-template gate: the real Product template passes under --profile product', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', PRODUCT_TPL]).code, 0);
   // a missing file is a hard fail
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', path.join(T, 'nope.md')]).code, 1);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', path.join(T, 'nope.md')]).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('pr-template gate: hub splits by --head — review/EP-* wants the artifact template, any other branch wants the code template', () => {
+test('pr-template gate: product splits by --head — review/EP-* wants the artifact template, any other branch wants the code template', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
   // review/EP-* head => artifact-review template required
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', HUB_TPL]).code, 0);
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', CODE_TPL]).code, 1);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'review/EP-demo', PRODUCT_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'review/EP-demo', CODE_TPL]).code, 1);
   // any other head => a Product tooling PR, uses the code task template
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', CODE_TPL]).code, 0);
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', HUB_TPL]).code, 1);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/wire-gates', CODE_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/wire-gates', PRODUCT_TPL]).code, 1);
   // no --head stays strict (artifact-review template)
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', PRODUCT_TPL]).code, 0);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('pr-template gate: hub rejects an artifact change (epics/**) on a non-review head — the bypass guard', () => {
+test('pr-template gate: product rejects an artifact change (epics/**) on a non-review head — the bypass guard', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
   const artifact = path.join(T, 'changed-artifact.txt');
   fs.writeFileSync(artifact, 'epics/EP-demo/architecture.md\n');
   const tooling = path.join(T, 'changed-tooling.txt');
   fs.writeFileSync(tooling, 'skills/yad-checks/x.sh\n');
   // non-review head touching epics/** => FAIL even with an otherwise-valid code template body
-  const r = runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', artifact, CODE_TPL]);
+  const r = runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', artifact, CODE_TPL]);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Shape artifacts/);
   // non-review head touching only tooling paths => code task template passes
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, CODE_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', tooling, CODE_TPL]).code, 0);
   // the legitimate path: a review/EP-* head still requires the artifact-review template
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, HUB_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'review/EP-demo', '--changed', artifact, PRODUCT_TPL]).code, 0);
   // E47: step owner files alone are not an artifact change; beside a real artifact they change nothing.
   const owners = path.join(T, 'changed-owners.txt');
   fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nfoundation/.sdlc/owners/foundation.json\n');
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 0);
   fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nepics/EP-demo/architecture.md\n');
-  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 1);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3572,7 +3572,7 @@ test('pr-template gate: hub rejects an artifact change (epics/**) on a non-revie
 // can lose a required section before the gate reads it. The gate cannot un-truncate the body; what it
 // CAN do is stop reporting "does not use the template" as if the author had ignored it.
 const GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md');
-const HUB_GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/product/gitlab/merge_request_templates/Default.md');
+const PRODUCT_GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/product/gitlab/merge_request_templates/Default.md');
 
 test('pr-template gate: names the 2700-character GitLab truncation when a section falls past the cutoff', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
@@ -3610,7 +3610,7 @@ test('pr-template gate: both GitLab templates keep their required sections insid
   // The templates carry the warning as a comment, which costs characters — so assert what actually
   // matters: a template that is itself truncated at 2700 still passes its own gate, with room to
   // spare for the author's prose.
-  for (const [profile, tpl] of [['code', GITLAB_TPL], ['hub', HUB_GITLAB_TPL]]) {
+  for (const [profile, tpl] of [['code', GITLAB_TPL], ['product', PRODUCT_GITLAB_TPL]]) {
     const text = fs.readFileSync(tpl, 'utf8');
     assert.match(text, /GITLAB 2700-CHARACTER LIMIT/, `${profile} template documents the limit`);
     assert.equal(runGate(PR_TEMPLATE, T, ['--profile', profile, body(T, text.slice(0, 2700))]).code, 0);
@@ -3630,20 +3630,20 @@ test('pr-template gate: both GitLab templates keep their required sections insid
 // tests exercise the verified ledger gate + author half hermetically (the signature half mirrors
 // verified-commits, whose signature path is likewise not unit-mocked).
 const LEDGER_GUARD = path.join(CHECKS, 'ledger-guard.sh');
-// The default hub is the canonical bridge shape: a platform AND the flag. `hub` overrides it so a
+// The default settings are the canonical bridge shape: a platform AND the flag. `productConfig` overrides them so a
 // test can exercise a divergent config (no platform, legacy key, key/value split across lines).
-const VERIFIED_HUB = '{"platform":"github","bridge_enabled":true}\n';
-const enableVerified = (T, hub = VERIFIED_HUB) => {
+const VERIFIED_PRODUCT = '{"platform":"github","bridge_enabled":true}\n';
+const enableVerified = (T, productConfig = VERIFIED_PRODUCT) => {
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), hub);
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), productConfig);
 };
 
 // Put an epic's ledger on `main` (the base ref) so the branch that follows MUTATES a CI-owned ledger
 // rather than seeding a new one. scaffoldRepo cuts `feature` off the first commit, so the ledger has
 // to land on main and the working branch be re-cut from it.
-const seedLedgerOnBase = (T, epic = 'EP-x', files = {}, hub = VERIFIED_HUB) => {
+const seedLedgerOnBase = (T, epic = 'EP-x', files = {}, productConfig = VERIFIED_PRODUCT) => {
   git(T, 'checkout', '-q', 'main');
-  enableVerified(T, hub);
+  enableVerified(T, productConfig);
   commit(T, 'seed epic ledger', {
     [`epics/${epic}/epic.md`]: '# e\n',
     [`epics/${epic}/.sdlc/state.json`]: '{"epicId":"' + epic + '"}\n',
@@ -3679,13 +3679,13 @@ test('ledger-guard: the bash reader and isVerifiedLedger agree on every hub.json
     // booleans. bash tested non-emptiness here and the two readers gave opposite answers.
     ['ledger: empty string, with the old flag on', { platform: 'github', ledger: '', bridge_enabled: true }],
     ['ledger: empty string, no old flag', { platform: 'github', ledger: '' }],
-    ['a migrated verified hub carries both', { schemaVersion: 2, platform: 'github', bridge_enabled: true, ledger: 'verified' }],
+    ['migrated verified settings carry both', { schemaVersion: 2, platform: 'github', bridge_enabled: true, ledger: 'verified' }],
   ];
-  for (const [name, hub] of variants) {
-    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub, null, 2) + '\n');
+  for (const [name, productConfig] of variants) {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(productConfig, null, 2) + '\n');
     const r = runGate(LEDGER_GUARD, T, ['main'], { SDLC_HUB_CONFIG: '.sdlc/hub.json' });
     const bashSaysVerified = !/locally owned/.test(r.out);
-    assert.equal(bashSaysVerified, isVerifiedLedger(hub), `${name}: bash and JS disagree — ${r.out}`);
+    assert.equal(bashSaysVerified, isVerifiedLedger(productConfig), `${name}: bash and JS disagree — ${r.out}`);
   }
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -3892,7 +3892,7 @@ test('ledger-guard: the PREVIOUS release of this script still arms on a migrated
     JSON.stringify({ schemaVersion: 2, platform: 'github', bridge_enabled: true, ledger: 'verified' }, null, 2) + '\n');
   const r = runGate(prev, T, ['main'], { SDLC_HUB_CONFIG: '.sdlc/hub.json' });
   assert.doesNotMatch(r.out, /bridge not enabled|locally owned/,
-    'the shipped guard must still see a migrated hub as verified — otherwise migrating disarms it');
+    'the shipped guard must still see migrated settings as verified — otherwise migrating disarms it');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4341,7 +4341,7 @@ const pinVariants = () => {
 test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot trust', () => {
   for (const block of pinVariants()) {
   const M = pinMajor(block);
-  const hub = (v) => ({ '.sdlc/hub.json': `{"gate_sync_version":"${v}"}` });
+  const legacy = (v) => ({ '.sdlc/hub.json': `{"gate_sync_version":"${v}"}` });
   const stamp = (v) => ({ '.sdlc/cli-version.json': `{"version":"${v}"}` });
 
   // 4. nothing committed to read → the floating major
@@ -4349,33 +4349,33 @@ test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot t
   // 3. the version that wired the Product
   assert.equal(resolvePin(block, stamp(`${M}.15.3`)), `${M}.15.3`);
   // 2. the explicit Product pin outranks it
-  assert.equal(resolvePin(block, { ...stamp(`${M}.15.3`), ...hub(`${M}.14.0`) }), `${M}.14.0`);
+  assert.equal(resolvePin(block, { ...stamp(`${M}.15.3`), ...legacy(`${M}.14.0`) }), `${M}.14.0`);
   // 1. the platform variable outranks both, verbatim — the operator's escape hatch, including
   //    downgrading across majors, which the file sources are not allowed to do.
-  assert.equal(resolvePin(block, hub(`${M}.14.0`), { YAD_VERSION: '2.1.0' }), '2.1.0');
+  assert.equal(resolvePin(block, legacy(`${M}.14.0`), { YAD_VERSION: '2.1.0' }), '2.1.0');
 
   // A stamp from a different major is the realistic failure: `.sdlc/cli-version.json` is written by
   // whichever CLI last ran `yad check --fix`, and a long-untouched project can still say 1.0.2 — a
   // version with no `yad gate ci` at all. Skip it, do not run it.
-  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp(`${M}.15.3`) }), `${M}.15.3`);
-  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp('1.0.2') }), String(M));
+  assert.equal(resolvePin(block, { ...legacy('1.0.2'), ...stamp(`${M}.15.3`) }), `${M}.15.3`);
+  assert.equal(resolvePin(block, { ...legacy('1.0.2'), ...stamp('1.0.2') }), String(M));
   // The previous major is the case a new major creates: a Product pinned `gate_sync_version` to a 3.x
   // before `yad update` brought it a 4.x fragment. Running that 3.x against a project on a newer file
   // shape is exactly what the check is for — skip it for the stamp `yad update` wrote beside it.
-  assert.equal(resolvePin(block, { ...hub(`${M - 1}.19.0`), ...stamp(`${M}.0.0`) }), `${M}.0.0`);
-  assert.equal(resolvePin(block, { ...hub(`${M + 1}.0.0`), ...stamp(`${M}.0.0`) }), `${M}.0.0`, 'nor a newer major');
+  assert.equal(resolvePin(block, { ...legacy(`${M - 1}.19.0`), ...stamp(`${M}.0.0`) }), `${M}.0.0`);
+  assert.equal(resolvePin(block, { ...legacy(`${M + 1}.0.0`), ...stamp(`${M}.0.0`) }), `${M}.0.0`, 'nor a newer major');
   // Not a version at all → never reaches `npx -p "yadflow@$V"` on a runner holding a push token.
-  assert.equal(resolvePin(block, hub(`${M}.1.0;curl evil`)), String(M));
-  assert.equal(resolvePin(block, hub('latest')), String(M));
+  assert.equal(resolvePin(block, legacy(`${M}.1.0;curl evil`)), String(M));
+  assert.equal(resolvePin(block, legacy('latest')), String(M));
   // Prereleases are legitimate exact versions — a `next`-channel Product's stamp is one; a key split
   // across lines still reads (the #161 idiom).
   assert.equal(resolvePin(block, stamp(`${M}.0.0-next.1`)), `${M}.0.0-next.1`);
-  assert.equal(resolvePin(block, hub(`${M}.16.0-rc.1`)), `${M}.16.0-rc.1`);
+  assert.equal(resolvePin(block, legacy(`${M}.16.0-rc.1`)), `${M}.16.0-rc.1`);
   assert.equal(resolvePin(block, { '.sdlc/hub.json': `{\n "gate_sync_version":\n  "${M}.15.9"\n}` }), `${M}.15.9`);
   // E122: the Product settings are read under the new name first; the old one only when it is absent.
   const product = (v) => ({ '.sdlc/product.json': v === null ? '{}' : `{"gate_sync_version":"${v}"}` });
-  assert.equal(resolvePin(block, { ...hub(`${M}.14.0`), ...product(`${M}.13.0`) }), `${M}.13.0`, 'product.json wins');
-  assert.equal(resolvePin(block, { ...hub(`${M}.14.0`), ...product(null), ...stamp(`${M}.15.3`) }), `${M}.15.3`, 'a product.json with no pin is not a fall-through to hub.json');
+  assert.equal(resolvePin(block, { ...legacy(`${M}.14.0`), ...product(`${M}.13.0`) }), `${M}.13.0`, 'product.json wins');
+  assert.equal(resolvePin(block, { ...legacy(`${M}.14.0`), ...product(null), ...stamp(`${M}.15.3`) }), `${M}.15.3`, 'a product.json with no pin is not a fall-through to hub.json');
   assert.equal(resolvePin(block, product(`${M}.13.0`)), `${M}.13.0`);
   }
 });
@@ -4580,8 +4580,8 @@ test('shape guide: with no release tag at all, this shape is the baseline', () =
 test('lineage-check: the bash type reader and workItemType agree on every epic.md shape', async () => {
   const { workItemType, isGenesisType } = await import('./epic-state.mjs');
   const T = scaffoldRepo();
-  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
-  git(hub, 'init', '-q');
+  const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  git(productConfig, 'init', '-q');
   const variants = [
     ['old name only', { kind: 'change' }],
     ['new name only', { type: 'change' }],
@@ -4596,10 +4596,10 @@ test('lineage-check: the bash type reader and workItemType agree on every epic.m
   ];
   try {
     for (const [name, fm] of variants) {
-      fs.rmSync(path.join(hub, 'epics'), { recursive: true, force: true });
+      fs.rmSync(path.join(productConfig, 'epics'), { recursive: true, force: true });
       // No `parent:`, so the gate PASSES exactly when it reads the type as a genesis one.
-      seedHubEpic(hub, 'EP-demo', { fm });
-      linkedCommit(T, hub);
+      seedProductEpic(productConfig, 'EP-demo', { fm });
+      linkedCommit(T, productConfig);
       const r = runGate(LINEAGE, T, ['main']);
       const bashSaysGenesis = /genesis \w+ epic/.test(r.out);
       assert.equal(bashSaysGenesis, isGenesisType(workItemType(fm)), `${name}: bash and JS disagree — ${r.out}`);
@@ -4607,31 +4607,31 @@ test('lineage-check: the bash type reader and workItemType agree on every epic.m
     }
   } finally {
     fs.rmSync(T, { recursive: true, force: true });
-    fs.rmSync(hub, { recursive: true, force: true });
+    fs.rmSync(productConfig, { recursive: true, force: true });
   }
 });
 
 test('lineage-check: a chore with no parent PASSES, a defect with no parent FAILS', () => {
   const T = scaffoldRepo();
-  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
-  git(hub, 'init', '-q');
+  const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  git(productConfig, 'init', '-q');
   try {
-    seedHubEpic(hub, 'EP-demo', { fm: { type: 'chore' } });
-    linkedCommit(T, hub);
+    seedProductEpic(productConfig, 'EP-demo', { fm: { type: 'chore' } });
+    linkedCommit(T, productConfig);
     const okRun = runGate(LINEAGE, T, ['main']);
     assert.equal(okRun.code, 0, okRun.out);
     assert.match(okRun.out, /genesis chore epic/);
 
     git(T, 'reset', '-q', '--hard', 'main');
-    fs.rmSync(path.join(hub, 'epics'), { recursive: true, force: true });
-    seedHubEpic(hub, 'EP-demo', { fm: { type: 'defect' } });
-    linkedCommit(T, hub);
+    fs.rmSync(path.join(productConfig, 'epics'), { recursive: true, force: true });
+    seedProductEpic(productConfig, 'EP-demo', { fm: { type: 'defect' } });
+    linkedCommit(T, productConfig);
     const bad = runGate(LINEAGE, T, ['main']);
     assert.equal(bad.code, 1, bad.out);
     assert.match(bad.out, /is type:defect but declares no 'parent:'/);
   } finally {
     fs.rmSync(T, { recursive: true, force: true });
-    fs.rmSync(hub, { recursive: true, force: true });
+    fs.rmSync(productConfig, { recursive: true, force: true });
   }
 });
 
@@ -4708,16 +4708,16 @@ test('pr-title / pr-template gates: a Foundation change on a non-review head is 
   try {
     const changed = path.join(T, 'changed.txt');
     fs.writeFileSync(changed, 'foundation/scope.md\n');
-    const title = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, 'chore: sneak in a scope']);
+    const title = runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', changed, 'chore: sneak in a scope']);
     assert.equal(title.code, 1, title.out);
     assert.match(title.out, /foundation\/\*\*/);
     const body = path.join(T, 'body.md');
     fs.writeFileSync(body, '## Summary\nx\n');
-    const tpl = runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, body]);
+    const tpl = runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', changed, body]);
     assert.equal(tpl.code, 1, tpl.out);
     assert.match(tpl.out, /Shape artifacts/);
     // The legitimate path is unchanged: a review/EP-* head carries it.
-    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-foundation/foundation', '--changed', changed, 'review: foundation/ (EP-foundation)']).code, 0);
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'review/EP-foundation/foundation', '--changed', changed, 'review: foundation/ (EP-foundation)']).code, 0);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -5253,7 +5253,7 @@ test('risk-route and product-route: a Domains line ending in a comma still exits
   let r = runGate(RISK_ROUTE, T, [body(T, '- Risk level: high\n- Contract surface touched: no\n- Domains touched: auth, billing,\n')]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /\n {2}- auth\n {2}- billing\n/);
-  r = runGate(HUB_ROUTE, T, [body(T, '- **Risk tags:** auth\n- **Domains / repos touched:** backend, mobile,\n')]);
+  r = runGate(PRODUCT_ROUTE, T, [body(T, '- **Risk tags:** auth\n- **Domains / repos touched:** backend, mobile,\n')]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /\n {2}- backend\n {2}- mobile\n/);
   fs.rmSync(T, { recursive: true, force: true });
@@ -5623,8 +5623,8 @@ test('proven history: a directory whose name starts with `:` is a directory, nev
 
 // E47 review 3: the owner-file exemption made a RENAME the bypass. Plain `git diff --name-only` reports a
 // rename by its new path only, so `git mv epic.md .sdlc/owners/epic.json` listed nothing but an owner file.
-// This runs each hub-checks workflow's OWN diff command against a real repo, then the gates on its answer.
-test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifact change; so is a non-ASCII epic', () => {
+// This runs each product-checks workflow's OWN diff command against a real repo, then the gates on its answer.
+test('E47 Product checks: an artifact renamed into .sdlc/owners/ is still an artifact change; so is a non-ASCII epic', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e47-mv-'));
   try {
     const g = (...a) => git(T, ...a);
@@ -5649,15 +5649,15 @@ test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifac
     const quoted = path.join(T, 'quoted.txt');
     fs.writeFileSync(quoted, execFileSync('git', ['-c', 'core.quotePath=false', 'diff', '--no-renames', '--name-only', 'origin/main...HEAD'], { cwd: T, env: GIT_ENV }));
     assert.match(fs.readFileSync(quoted, 'utf8'), /^"epics\/EP-x\/stories\/EP-x-S09\\"q\.md"$/m, 'git still quotes it');
-    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1);
-    assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, CODE_TPL]).code, 1);
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1);
+    assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/quoted', '--changed', quoted, CODE_TPL]).code, 1);
     fs.writeFileSync(quoted, '"epics/EP-x/.sdlc/owners/a\\"b.json"\n');
-    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1, 'a quoted owner-shaped line fails closed');
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/quoted', '--changed', quoted, 'chore: tidy']).code, 1, 'a quoted owner-shaped line fails closed');
     // Raw bytes that are not UTF-8 (quotePath off), read under a UTF-8 locale: GNU grep would drop the line
     // from its output unless the gate reads bytes (`LC_ALL=C grep -a`). Bites on Linux; macOS grep never drops.
     fs.writeFileSync(quoted, Buffer.concat([Buffer.from('epics/EP-x/stories/EP-x-S09'), Buffer.from([0xff]), Buffer.from('.md\nepics/EP-x/.sdlc/owners/epic.json\n')]));
     for (const gate of [[PR_TITLE, 'chore: tidy'], [PR_TEMPLATE, CODE_TPL]]) {
-      const r = runGate(gate[0], T, ['--profile', 'hub', '--head', 'chore/quoted', '--changed', quoted, gate[1]], { LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' });
+      const r = runGate(gate[0], T, ['--profile', 'product', '--head', 'chore/quoted', '--changed', quoted, gate[1]], { LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' });
       assert.equal(r.code, 1, r.out);
     }
     g('checkout', '-q', 'chore/sneak');
@@ -5674,9 +5674,9 @@ test('E47 hub checks: an artifact renamed into .sdlc/owners/ is still an artifac
         const list = fs.readFileSync(changed, 'utf8');
         assert.match(list, /^epics\/EP-x\/epic\.md$/m, `${rel}: the rename's old path is listed`);
         assert.match(list, /^epics\/EP-café\/epic\.md$/m, `${rel}: a non-ASCII path is not quoted`);
-        const t = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, 'chore: tidy']);
+        const t = runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', changed, 'chore: tidy']);
         assert.equal(t.code, 1, t.out);
-        assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, CODE_TPL]).code, 1);
+        assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/sneak', '--changed', changed, CODE_TPL]).code, 1);
       }
     }
     // What the old command saw: only the owner file (and a quoted path) — the gates would have passed.

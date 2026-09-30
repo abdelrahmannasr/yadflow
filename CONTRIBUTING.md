@@ -39,7 +39,7 @@ subject — they follow one rule.)
 > **CI-enforced.** These conventions are gated by `yad-checks` on every PR/MR, on code repos **and** the
 > Product: the **commit-message** gate checks each commit subject + trailer order, the **pr-title**
 > gate checks the PR/MR title, and the **pr-template** gate checks the body uses the PR/MR template
-> (`profile: code` on code repos, `profile: hub` on the Product). `yad commit` / `yad ship` build a
+> (`profile: code` on code repos, `profile: product` on the Product). `yad commit` / `yad ship` build a
 > compliant message for you.
 
 ```

@@ -23,16 +23,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } from './lib.mjs';
 import { VERSION } from './manifest.mjs';
-import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 
 // Collapse whitespace/newline runs to a single space — keeps a stray path or hostile value from
 // breaking the one-line subject or injecting a fake trailer line.
 const oneLine = (s = '') => String(s).replace(/\s+/g, ' ').trim();
 
-// A short, human label for a repo root relative to the Product: 'hub' for the Product itself, else the
+// A short, human label for a repo root relative to the Product: 'product' for the Product itself, else the
 // registered path (e.g. demo-repos/backend), else the basename.
 export function repoLabel(productRoot, root) {
-  if (root === productRoot) return 'hub';
+  if (root === productRoot) return 'product';
   const r = path.relative(productRoot, root);
   return r && !r.startsWith('..') ? r.split(path.sep).join('/') : path.basename(root);
 }
@@ -92,25 +92,28 @@ function stageAllowlist(git, root, paths) {
 }
 
 // Commit (and, with push, push) one repo group. `defaultBranch` is the repo's configured default
-// (hub.default_branch / repo.default_branch); falls back to origin/HEAD then 'main'. Returns a small
+// (the Product's default_branch / repo.default_branch); falls back to origin/HEAD then 'main'. Returns a small
 // result object; never throws. On any hard error it sets process.exitCode so the CLI reports failure.
 export function commitAndPush(group, { push = false, allowBranch = false, productRoot, defaultBranch } = {}) {
   const { root, paths, items } = group;
   const label = repoLabel(productRoot ?? root, root);
+  // Whether this is the Product itself, from the folder — never from the label, which a repo named `product`
+  // shares (E124 review 1).
+  const isProduct = root === (productRoot ?? root);
   const git = productGit(root);
 
   // `root` must be the TOP of its OWN git repo — not merely "inside a work tree". A registered repo
   // whose clone is missing (reconcile's apply() happily recreates the wiring files) but whose path
-  // sits under the Product would otherwise report inside-work-tree=true against the HUB: git resolves the
-  // pathspecs relative to cwd, so we would stage the connected repo's files into the HUB's index and
-  // push them to the HUB's remote, mislabeled. Require the worktree top to BE this root.
+  // sits under the Product would otherwise report inside-work-tree=true against the Product: git resolves the
+  // pathspecs relative to cwd, so we would stage the connected repo's files into the Product's index and
+  // push them to the Product's remote, mislabeled. Require the worktree top to BE this root.
   const top = git('rev-parse', '--show-toplevel');
   // `samePath`, not a plain realpath compare: on Windows git's long name and Node's 8.3 short name for the
   // same folder differed, and the repo was skipped with nothing committed.
   const sameRepo = top.ok && samePath(top.stdout, root);
   if (!sameRepo) {
     warn(`${label}: not its own git repo (missing/renamed clone?) — skipped (changes left in the working tree)`);
-    return { label, committed: false, pushed: false, skipped: true, error: false };
+    return { label, product: isProduct, committed: false, pushed: false, skipped: true, error: false };
   }
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const target = defaultBranch || resolveDefaultBranch(git);
@@ -120,13 +123,13 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
       warn(`${label}: on '${branch}', not default '${target}' — --allow-branch: commit/push go to origin/${branch}`);
     } else {
       warn(`${label}: on '${branch}', not the default branch '${target}' — skipped (switch to '${target}' or pass --allow-branch)`);
-      return { label, committed: false, pushed: false, skipped: true, error: false };
+      return { label, product: isProduct, committed: false, pushed: false, skipped: true, error: false };
     }
   }
 
   const { staged, addError } = stageAllowlist(git, root, paths);
   if (addError) warn(`${label}: git add reported "${addError}" — staging may be incomplete`);
-  if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return { label, committed: false, pushed: false, skipped: false, error: false }; }
+  if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return { label, product: isProduct, committed: false, pushed: false, skipped: false, error: false }; }
 
   // Pushing HEAD lands any local commits ahead of the remote too. Warn before we add ours so the
   // operator sees unpublished WIP about to ride the update push (never silently publish it).
@@ -142,18 +145,18 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
     git('reset', '-q', '--', ...staged); // don't leave our allowlist staged for an unrelated commit to sweep up
     fail(`${label}: git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
-    return { label, committed: false, pushed: false, skipped: false, error: true };
+    return { label, product: isProduct, committed: false, pushed: false, skipped: false, error: true };
   }
   ok(`${label}: committed ${staged.length} file(s)`);
 
-  if (!push) return { label, committed: true, pushed: false, skipped: false, error: false };
-  if (pushWithRebase(root, branch).ok) { ok(`${label}: pushed to origin/${branch}`); return { label, committed: true, pushed: true, skipped: false, error: false }; }
+  if (!push) return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: false };
+  if (pushWithRebase(root, branch).ok) { ok(`${label}: pushed to origin/${branch}`); return { label, product: isProduct, committed: true, pushed: true, skipped: false, error: false }; }
   // The commit already landed locally — a re-run of `yad update --push` would see no drift and skip
   // this repo, so point the operator at the direct push of the commit that already exists.
   fail(`${label}: could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
-  hand(`resolve it in ${label === 'hub' ? '.' : label}, then push the existing commit with \`git push origin ${branch}\``);
+  hand(`resolve it in ${isProduct ? '.' : label}, then push the existing commit with \`git push origin ${branch}\``);
   process.exitCode = 1;
-  return { label, committed: true, pushed: false, skipped: false, error: true };
+  return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: true };
 }
 
 // Orchestrate the per-repo commit/push over the grouped applied actions, bookended by the announce

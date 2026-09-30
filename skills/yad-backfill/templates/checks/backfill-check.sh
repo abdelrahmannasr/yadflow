@@ -40,7 +40,7 @@ export LC_ALL=C
 # --- is duplicated, not sourced) ---
 # With no explicit base, RESOLVE the trunk instead of assuming a hardcoded `origin/main` — on a repo
 # whose trunk is `develop`/`master` that guess either fails closed or, where a stale `main` still
-# exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own order (cli/hubcommit.mjs,
+# exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own order (cli/productcommit.mjs,
 # cli/repo.mjs): the CONFIGURED default_branch first, then the remote's published default
 # (origin/HEAD), then origin/main. Each candidate must actually resolve before it is used, so a
 # DANGLING origin/HEAD (trunk renamed, the old remote-tracking ref pruned) falls through to the next

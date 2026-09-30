@@ -4,17 +4,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, readJSON, writeJSON, exists,
+  c, log, ok, info, warn, hand, readJSON, writeJSON, exists, forTerminal,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
-import { preflightGuardReadiness } from './hubcommit.mjs';
+import { preflightGuardReadiness } from './productcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions,
-  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyHubActions,
-  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct,
+  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
@@ -23,7 +23,12 @@ import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
 // The --json answer's list (E1): every managed item, as the report groups it — never the apply step.
-const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status }));
+// `product` says whose item it is: false for a connected repo's, true for the Product's own (E124 review 1).
+// The scope alone cannot say it — a repo may be named `product`, the Product's own scope.
+// A repo named `product` shares the Product's scope; in printed text it is shown with its path (E124 review 2).
+const repoShown = (repo) => `product (the code repo at ${forTerminal(repo.path)})`;
+const shown = (a) => a.shownScope ?? a.scope;
+const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
 export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
@@ -32,7 +37,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // --- missing one-time setup (needs the interactive wizard) ---
   const gaps = [];
   if (!exists(path.join(root, PROJECT_FILES.version))) gaps.push('module not installed (.sdlc/cli-version.json absent)');
-  if (!exists(productConfigPath(root))) gaps.push('hub not configured (.sdlc/hub.json absent)');
+  if (!exists(productConfigPath(root))) gaps.push('Product not configured (.sdlc/product.json absent)');
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   if (!exists(path.join(root, PROJECT_FILES.reposRegistry))) gaps.push('no repos registered (.sdlc/repos.json absent)');
 
@@ -53,7 +58,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const actions = [
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     // E123: a renamed CI file the team edited is kept, and its new name is not installed beside it.
-    ...withoutKeptRenames([...productActions(root), ...legacyHubActions(root)]), ...hookActions(root, ideTargets),
+    ...withoutKeptRenames([...productActions(root), ...legacyProductActions(root)]), ...hookActions(root, ideTargets),
     ...orphanHookActions(root, ideTargets),
     // E48: this clone's git pre-commit hook — the person's half of the ledger guard.
     ...gitHookActions(root), ...orphanGitHookActions(root),
@@ -64,7 +69,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   ];
   if (ideState.needsRepair) {
     actions.push({
-      scope: 'hub',
+      scope: 'product',
       item: `${PROJECT_FILES.version} ideTargets`,
       status: 'outdated',
       root,
@@ -73,7 +78,12 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       apply: () => undefined,
     });
   }
-  for (const repo of registry.repos) actions.push(...withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]));
+  for (const repo of registry.repos) {
+    const own = withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]);
+    // Set on the action itself: later steps compare actions by identity. `true`, not the name, which may be empty.
+    for (const a of own) { a.fromRepo = true; if (repo.name === 'product') a.shownScope = repoShown(repo); }
+    actions.push(...own);
+  }
 
   // --- stale code-context (HEAD moved since last pack) ---
   const staleRepos = [];
@@ -81,12 +91,14 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const head = gitHead(path.resolve(root, repo.path));
     if (head && repo.syncedHead && head !== repo.syncedHead) {
       staleRepos.push(repo);
-      // packRepo writes the repomix cache under the HUB root (root/repo.contextPack, e.g.
+      // packRepo writes the repomix cache under the Product root (root/repo.contextPack, e.g.
       // .sdlc/code-context/<name>/pack.md), so the touched path belongs to the Product — and is commonly
       // gitignored, in which case the push stage's check-ignore drops it. codeMap is AI-generated
       // later, not here, so only the pack is claimed.
       actions.push({
         scope: repo.name,
+        fromRepo: true, // about the repo, though its file is under the Product
+        ...(repo.name === 'product' ? { shownScope: repoShown(repo) } : {}),
         item: 'code-context',
         status: 'stale',
         root,
@@ -99,8 +111,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // --- report, grouped by scope ---
   const byScope = new Map();
   for (const a of actions) {
-    if (!byScope.has(a.scope)) byScope.set(a.scope, []);
-    byScope.get(a.scope).push(a);
+    if (!byScope.has(shown(a))) byScope.set(shown(a), []);
+    byScope.get(shown(a)).push(a);
   }
   const counts = { missing: 0, new: 0, outdated: 0, modified: 0, stale: 0, legacy: 0, removed: 0, ok: 0 };
   for (const [scopeName, items] of byScope) {
@@ -113,11 +125,15 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   for (const g of gaps) warn(g);
   // E123: the team's own files that name one of our renamed CI names — each with its file and line, the same
   // list `yad doctor` shows. yad never edits them; the include line it rewrites is said as what it is.
+  // After this run: a gate it replaces handles `product`; one it keeps (edited) may not (E124 review 3).
+  const profileFirst = oldProfileAdvice(productGateBlockers(root, { fix, overwriteLocal }));
   for (const h of renamedNameHits(root)) {
     if (h.rewrittenBy === 'update' || (h.rewrittenBy === 'overwrite-local' && overwriteLocal)) {
       info(`${h.file}:${h.line} includes the old fragment — ${fix ? 'rewritten' : `rewritten by ${h.rewrittenBy === 'update' ? '`yad check --fix`/`yad update`' : '`yad update --overwrite-local`'}`} to name ${h.new}`);
     } else if (h.rewrittenBy === 'overwrite-local') {
       info(`${h.file}:${h.line} includes the edited old fragment — \`yad update --overwrite-local\` rewrites it when it replaces that fragment; leave it until then`);
+    } else if (h.profile && profileFirst) {
+      warn(`${h.file}:${h.line} passes \`${h.old}\`, renamed \`${h.new}\` in 4.0 — change it by hand, ${profileFirst}`);
     } else warn(`${h.file}:${h.line} names \`${h.old}\`, renamed \`${h.new}\` in 4.0 — yad does not edit this file; change it by hand`);
   }
   // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
@@ -155,8 +171,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   for (const m of modified) {
     // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
     warn(m.item === PRODUCT_LINK
-      ? `${m.scope}/${m.item} is not a JSON object — left alone (--overwrite-local saves it and writes a new one)`
-      : `${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
+      ? `${shown(m)}/${m.item} is not a JSON object — left alone (--overwrite-local saves it and writes a new one)`
+      : `${shown(m)}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
   }
   // A gate-sync fragment is kept like any other edited file — but it also decides which yadflow CI runs.
   // It trusts a committed version only from its own major (`YAD_MAJOR`), and the version stamp is
@@ -175,7 +191,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const kept = pinMajorOf(m.managed.dest);
     const ships = pinMajorOf(m.managed.src);
     if (kept === null || ships === null || kept === ships) continue;
-    warn(`${m.scope}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
+    warn(`${shown(m)}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
     hand(`re-apply your edit on top of the new fragment, or replace it with \`yad update --overwrite-local\` (your copy is saved beside it as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
   }
   // A renamed file the team edited (E123): kept under its old name, so say that the rename is half done and
@@ -199,7 +215,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   }
   for (const m of overwriteLocal ? [] : modified.filter((a) => a.rename)) {
     const { from, to } = m.rename;
-    warn(`${m.scope}/${from} was renamed ${to} in this release, but it was edited, so it is kept — ${from.startsWith('.gitlab/') ? 'the root .gitlab-ci.yml goes on including it' : 'it goes on running'} under its old name`);
+    warn(`${shown(m)}/${from} was renamed ${to} in this release, but it was edited, so it is kept — ${from.startsWith('.gitlab/') ? 'the root .gitlab-ci.yml goes on including it' : 'it goes on running'} under its old name`);
     hand(`\`yad update --overwrite-local\` replaces it with ${to} (your copy is saved as ${path.basename(from)}${BACKUP_SUFFIX}); then copy your edits into ${to}`);
   }
   if (modified.length && !overwriteLocal) {
@@ -235,7 +251,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     appliedActions.push(a);
     // A backup means the replaced content was not provably ours (a pre-ledger install, or an edit
     // --overwrite-local was told to discard). Never report that as an ordinary template adoption.
-    info(`${a.status} → fixed: ${a.scope}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
+    info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
   }
   if (force) {
     // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —
@@ -248,7 +264,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   writeCanonicalStamp();
-  appliedActions.push({ scope: 'hub', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
+  appliedActions.push({ scope: 'product', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
   // Record what we wrote (and what was already correct) so the NEXT update can tell a stale managed
   // file from an edited one. Seeding the already-correct files is what migrates a pre-ledger install.
   // A file left as `modified` records nothing — it differs from the template by definition.
@@ -275,9 +291,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   let commits = [];
   if (push) {
     preflightGuardReadiness(root);
-    const hub = readJSON(productConfigPath(root), {});
-    const defByRoot = new Map([[root, hub?.default_branch]]);
-    const platformByRoot = new Map([[root, hub?.platform]]);
+    const productConfig = readJSON(productConfigPath(root), {});
+    const defByRoot = new Map([[root, productConfig?.default_branch]]);
+    const platformByRoot = new Map([[root, productConfig?.platform]]);
     for (const repo of registry.repos) {
       const repoRoot = path.resolve(root, repo.path);
       defByRoot.set(repoRoot, repo.default_branch);

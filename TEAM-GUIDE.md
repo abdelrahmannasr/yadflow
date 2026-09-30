@@ -22,7 +22,7 @@ You will have **four separate git repos**, each with one job:
   (this repo)          You install the workflow skills from here, and pull updates from here.
                        No real product work happens inside it.
 
-  product-hub     ──►  the THINKING
+  Product         ──►  the THINKING
   (new repo)           All epics, contracts, stories, reviews, and state.
                        Lives under: epics/EP-<slug>/
 
@@ -34,20 +34,20 @@ You will have **four separate git repos**, each with one job:
 
 ```mermaid
 flowchart LR
-    classDef hub fill:#fcf3cf,stroke:#b7950b,color:#000
+    classDef prod fill:#fcf3cf,stroke:#b7950b,color:#000
     classDef code fill:#d6eaf8,stroke:#2471a3,color:#000
     src["yadflow<br/>skills source"]
-    phub["product-hub<br/>epics · contracts · stories · state"]:::hub
+    prod["Product<br/>epics · contracts · stories · state"]:::prod
     r1["code-repo-1"]:::code
     r2["code-repo-2"]:::code
     r3["code-repo-3"]:::code
-    src -. install skills .-> phub
-    phub -- connect-repos:<br/>cache code-map --> r1
-    phub -- connect-repos:<br/>cache code-map --> r2
-    phub -- connect-repos:<br/>cache code-map --> r3
-    r1 -. specs & PRs link back .-> phub
-    r2 -. specs & PRs link back .-> phub
-    r3 -. specs & PRs link back .-> phub
+    src -. install skills .-> prod
+    prod -- connect-repos:<br/>cache code-map --> r1
+    prod -- connect-repos:<br/>cache code-map --> r2
+    prod -- connect-repos:<br/>cache code-map --> r3
+    r1 -. specs & PRs link back .-> prod
+    r2 -. specs & PRs link back .-> prod
+    r3 -. specs & PRs link back .-> prod
 ```
 
 **The handoff rule:** everything *up to and including the locked contract* lives in the **Product**.
@@ -107,7 +107,7 @@ flowchart TD
     subgraph AUTO["C · Automation — switched on & reversible"]
       direction TB
       run["yad-run<br/>the dial (yad dial) + trust-log.json"]:::earns
-      cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state (chore(hub))"]
+      cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state (chore(product))"]
       kill["yad kill → all advance: human"]
       run --> cpt
       run --- kill
@@ -189,7 +189,7 @@ skills into the IDE dirs, detects the Product platform, connects your code repos
 PR/MR template):
 
 ```bash
-cd <product-hub-repo>
+cd <product-repo>
 npx yadflow setup
 ```
 
@@ -200,7 +200,7 @@ npx yadflow setup
 > **Upgrading to a new yadflow version:** run `npx yadflow update`. It installs newly-added skills
 > (e.g. `yad-review-companion`), updates changed skills, and re-copies updated gate scripts into your
 > connected repos. All new review-gate fields are optional and default-off, so your in-flight epics,
-> `hub.json`, open review PRs, and ledgers keep working with no migration.
+> Product settings, open review PRs, and ledgers keep working with no migration.
 >
 > **Landing the upgrade for the whole team:** `npx yadflow update` only writes the changed files into
 > the working trees — someone still has to commit them across every repo. Run `npx yadflow update
@@ -254,9 +254,9 @@ yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + r
 **d2. Wire the Product itself** (so the Shape review can run through real PRs on the Product):
 
 ```text
-yad-connect-repos action: detect-hub                              # records the Product's platform in .sdlc/hub.json
-yad-pr-template     repo:hub action: wire                         # Product's Shape PR/MR body template
-yad-checks          repo:hub action: wire                         # Product gates: commit-message, pr-title, pr-template, ledger-guard, verified-commits
+yad-connect-repos action: detect-product                              # records the Product's platform in .sdlc/product.json
+yad-pr-template     repo:product action: wire                         # Product's Shape PR/MR body template
+yad-checks          repo:product action: wire                         # Product gates: commit-message, pr-title, pr-template, ledger-guard, verified-commits
 yad-product-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
@@ -421,7 +421,7 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    shipping different tasks never collide, readers union those shards with the folded `build-log.json`, and
    `yad tidy up` folds them in later. An empty `build-log.json` is normal — it is only half the ledger.
    The machine-written ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed for you
-   by **`yad checkpoint`** — a `chore(hub)` audit-trail commit Build runs so you never hand-commit
+   by **`yad checkpoint`** — a `chore(product)` audit-trail commit Build runs so you never hand-commit
    this state; you don't review these machine writes, but CI and `yad status` on other machines must see them.
    The `trust-log`/`build-log` entries are written as small **shard files** (one per entry), so two people
    driving different stories of the same epic never conflict; once a story ships, **`yad checkpoint`**'s
@@ -671,7 +671,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-reconcile` | Read-only **drift/orphan/debt sweep** across threads (advisory). |
 | `yad-stub` | **Mint a stub genesis epic** for a brownfield feature with no epic, so a defect/change can thread off it now; `yad-backfill promote` makes it real. |
 | `yad-run` | Drive Build on the automation dial; kill switch. |
-| `yad checkpoint` *(CLI)* | Commit the machine-written Build ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(hub)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |
+| `yad checkpoint` *(CLI)* | Commit the machine-written Build ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(product)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |
 | `yad tidy up` *(CLI)* | Fold a shipped story's finished `trust-log`/`build-log` **shards** back into the single ledger file — the manual "pack it up" companion to the shard-then-fold storage (like `git gc`). Default branch only, `--push` to push; a no-op when nothing is foldable. |
 | `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
 

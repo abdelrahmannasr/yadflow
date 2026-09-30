@@ -19,7 +19,7 @@ const GATE_GROUPS = [
     ],
   },
   {
-    layer: 'Pattern gates (profile-aware: code | hub)',
+    layer: 'Pattern gates (profile-aware: code | product)',
     items: [
       { control: 'commit-message — Conventional-Commits subject + the fixed trailer order' },
       { control: 'pr-title — the PR/MR title follows the commit-subject style' },

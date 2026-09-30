@@ -39,21 +39,21 @@ function resolveRepo(root, { repo, dir, product }) {
 // Which SDLC stage is this PR? The Product serves two vehicles; a code repo only one. Mirrors the
 // `--head` split the Product pattern gates (pr-title.sh/pr-template.sh) already apply:
 //   code-repo    — NOT the Product (a registry repo via --repo, or root is not a Product).
-//   hub-shape    — the Product itself AND head is a review/EP-* branch (artifact-review PR).
-//   hub-tooling  — the Product itself AND head is anything else (a tooling/CI change to the Product).
+//   product-shape    — the Product itself AND head is a review/EP-* branch (artifact-review PR).
+//   product-tooling  — the Product itself AND head is anything else (a tooling/CI change to the Product).
 // `meta` (truthy when resolved from the repos registry via --repo) is a connected code repo, so it is
 // never the Product regardless of its path. Otherwise "is the Product" = repoRoot resolves to root AND root
 // carries .sdlc/hub.json. path.resolve normalises `--dir .` / trailing slashes.
 export function detectStage(root, repoRoot, head, meta) {
   if (meta) return 'code-repo';
-  const isHub = path.resolve(repoRoot) === path.resolve(root)
+  const isProduct = path.resolve(repoRoot) === path.resolve(root)
     && exists(productConfigPath(root));
-  if (!isHub) return 'code-repo';
-  return /^review\/EP-[a-z0-9-]+\//.test(head || '') ? 'hub-shape' : 'hub-tooling';
+  if (!isProduct) return 'code-repo';
+  return /^review\/EP-[a-z0-9-]+\//.test(head || '') ? 'product-shape' : 'product-tooling';
 }
 
 // The bundled code-task template — the same file `REPO_WIRING` installs into code repos, resolved
-// from the package (mirrors how manifest.mjs reads ../package.json). Used for a hub-tooling PR, whose
+// from the package (mirrors how manifest.mjs reads ../package.json). Used for a product-tooling PR, whose
 // `.github/pull_request_template.md` is the ARTIFACT-REVIEW template (wrong shape for the code-task
 // Product gate). Falls back to a minimal body that still carries every section the gate requires.
 function codeTaskTemplate(platform) {
@@ -78,10 +78,10 @@ function codeTaskTemplate(platform) {
 }
 
 export function templateBody(repoRoot, platform, { task, summary, risk, contract, domains, stage }) {
-  // hub-tooling: the Product's own template is artifact-review — use the bundled code-task template so the
+  // product-tooling: the Product's own template is artifact-review — use the bundled code-task template so the
   // body matches the shape the Product `pr-template` gate demands for a non-review head.
   let base;
-  if (stage === 'hub-tooling') {
+  if (stage === 'product-tooling') {
     base = codeTaskTemplate(platform);
   } else {
     const tplPath = platform === 'gitlab'
@@ -249,11 +249,11 @@ export async function runOpenPr(root, opts = {}) {
   const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot }).stdout;
   const stage = detectStage(root, repoRoot, branch, meta);
 
-  // hub-shape: this is a Shape artifact-review PR (review/EP-*/<artifact> head on the Product). The
+  // product-shape: this is a Shape artifact-review PR (review/EP-*/<artifact> head on the Product). The
   // artifact-review title, body, and ledger bookkeeping all live in `yad gate open` — delegate to it
   // rather than emit the code-task shape (which the Product gate would reject). Push first (gateOpen does
   // not push), then hand off; any --title/--message is dropped (gateOpen sets `review: …`).
-  if (stage === 'hub-shape') {
+  if (stage === 'product-shape') {
     const parsed = parseReviewBranch(branch);
     if (!parsed) { fail(`could not parse review branch '${branch}' (expected review/EP-<slug>/<artifact>)`); process.exitCode = 1; return; }
     // E44: the review carries what was FOLDED. A step file changed since then is not on this branch.
@@ -276,17 +276,17 @@ export async function runOpenPr(root, opts = {}) {
   }
 
   // The Product's default_branch, which only applies when the PR targets the Product ITSELF
-  // (a hub-tooling branch) — for a connected code repo the Product's trunk belongs to a different repo and
-  // must never leak in. Resolved AFTER the hub-shape hand-off above, which delegates its own base to
+  // (a product-tooling branch) — for a connected code repo the Product's trunk belongs to a different repo and
+  // must never leak in. Resolved AFTER the product-shape hand-off above, which delegates its own base to
   // `yad gate open`: resolving before it would spend a platform round-trip and print a base that the
   // delegated path then ignores.
-  const hub = readJSON(productConfigPath(root), {});
+  const productConfig = readJSON(productConfigPath(root), {});
 
   // Resolve the base rather than assume it (#168). Hardcoding 'main' mis-based every PR on a repo
   // whose trunk is something else — and CodeRabbit decides auto-review eligibility from the base at
   // PR-OPEN time, so those PRs silently got no AI first pass at all.
   const { base: baseBranch, source: baseSource, platformDefault } = resolveBaseBranch(platform, {
-    cwd: repoRoot, explicit: opts.base, meta, hub: stage === 'code-repo' ? null : hub, runner: opts.runner,
+    cwd: repoRoot, explicit: opts.base, meta, productConfig: stage === 'code-repo' ? null : productConfig, runner: opts.runner,
   });
   if (branch === baseBranch) { fail(`on ${baseBranch} — switch to your task branch first`); process.exitCode = 1; return; }
   info(`base ${baseBranch} ${c.dim(`(from ${baseSource})`)}`);
@@ -296,8 +296,8 @@ export async function runOpenPr(root, opts = {}) {
   // would mean contradicting their own committed config on every PR, forever.
   if (platformDefault && platformDefault !== baseBranch) {
     warn(`base '${baseBranch}' is not the repo default '${platformDefault}' — CodeRabbit skips auto-review on a non-default base unless .coderabbit.yaml lists it under reviews.base_branches, and retargeting later does NOT undo the skip`);
-    if (baseSource === 'registry' || baseSource === 'hub') {
-      hand(`the configured default_branch (${baseSource === 'hub' ? settingsEditHint(root) : '.sdlc/repos.json'}) disagrees with the platform — reconcile them, or allow '${baseBranch}' in .coderabbit.yaml`);
+    if (baseSource === 'registry' || baseSource === 'product') {
+      hand(`the configured default_branch (${baseSource === 'product' ? settingsEditHint(root) : '.sdlc/repos.json'}) disagrees with the platform — reconcile them, or allow '${baseBranch}' in .coderabbit.yaml`);
     } else {
       hand(`open against '${platformDefault}' (or pass --base ${platformDefault}) unless you meant to stack this PR`);
     }
@@ -350,7 +350,7 @@ export async function runOpenPr(root, opts = {}) {
   // feeding the number E72 caps with. `null` is the honest answer there: we are not standing in a
   // Product, so we did not count.
   const active = (() => {
-    // Only the `code-repo` stage prints it (`routeCount`, below). On a `hub-tooling` PR this would
+    // Only the `code-repo` stage prints it (`routeCount`, below). On a `product-tooling` PR this would
     // otherwise walk the Product and every connected repo's history and throw the answer away.
     if (stage !== 'code-repo') return null;
     if (!exists(productConfigPath(root))) return null;

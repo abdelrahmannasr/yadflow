@@ -6,7 +6,7 @@
 // and the manifest-hash staleness check (reusing the head-sha idea from repo.mjs). It NEVER touches
 // epic state, approvals, or the contract lock — docs are an output enrichment, not a gate.
 //
-// Pure mapping fns (deployTargetFromHub / siteBasePath / docsArtifactHash / docsStale / pagesWorkflow)
+// Pure mapping fns (deployTargetFromProduct / siteBasePath / docsArtifactHash / docsStale / pagesWorkflow)
 // are exported for unit tests; the side-effecting runDocs orchestrates them.
 import path from 'node:path';
 import fs from 'node:fs';
@@ -35,8 +35,8 @@ export function manifestPath(root, { epic, overview } = {}) {
 
 // ---- pure: platform/target + base path ----------------------------------------------------------
 // hub.json platform -> the default Pages target (github-pages | gitlab-pages | none/build-only).
-export function deployTargetFromHub(hub = {}) {
-  const platform = hub?.platform || detectPlatform(hub?.git_url || '');
+export function deployTargetFromProduct(productConfig = {}) {
+  const platform = productConfig?.platform || detectPlatform(productConfig?.git_url || '');
   if (platform === 'github') return 'github-pages';
   if (platform === 'gitlab') return 'gitlab-pages';
   return 'none';

@@ -112,19 +112,19 @@ command -v yad >/dev/null || die "yad is not on PATH after installing the tarbal
 pass "installed $(yad --version)"
 
 say "     …and a fresh project set up with it"
-HUB="$WORK/hub"
-mkdir -p "$HUB"
-git init -q "$HUB"
-git -C "$HUB" config user.name  release-check
-git -C "$HUB" config user.email release-check@local
-( cd "$HUB" && echo "# hub" > README.md && git add -A && git commit -qm "init" )
+PRODUCT="$WORK/product"
+mkdir -p "$PRODUCT"
+git init -q "$PRODUCT"
+git -C "$PRODUCT" config user.name  release-check
+git -C "$PRODUCT" config user.email release-check@local
+( cd "$PRODUCT" && echo "# product" > README.md && git add -A && git commit -qm "init" )
 # `--ide-targets .claude` is deliberate, not a default. Without it this step takes whatever
 # DEFAULT_IDE_TARGETS currently is — which became two directories — so the gate would install 76 skill
 # folders instead of 38, double its slowest step, and quietly stop exercising the single-target shape
 # that every existing project upgrades from.
-SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" --solo --greenfield --separate --ide-targets .claude >"$WORK/setup.log" 2>&1 \
+SDLC_NONINTERACTIVE=1 yad setup --dir "$PRODUCT" --solo --greenfield --separate --ide-targets .claude >"$WORK/setup.log" 2>&1 \
   || { cat "$WORK/setup.log"; die "a fresh \`yad setup\` failed with this release"; }
-[ -f "$HUB/.sdlc/cli-version.json" ] || die "setup left no .sdlc/cli-version.json"
+[ -f "$PRODUCT/.sdlc/cli-version.json" ] || die "setup left no .sdlc/cli-version.json"
 pass "a new project can be created by this release"
 
 # ---------------------------------------------------------------------------------------------
@@ -132,7 +132,7 @@ say "5/7  yad doctor on that brand-new project"
 # A release that cannot produce a project its own doctor calls healthy is not shippable. Warnings are
 # fine (a fresh project has no repos connected yet); a FAILURE is not.
 set +e
-yad doctor --json --dir "$HUB" >"$WORK/doctor.json" 2>"$WORK/doctor.err"
+yad doctor --json --dir "$PRODUCT" >"$WORK/doctor.json" 2>"$WORK/doctor.err"
 DOCTOR_RC=$?
 set -e
 [ -s "$WORK/doctor.json" ] || { cat "$WORK/doctor.err"; die "yad doctor produced no JSON"; }

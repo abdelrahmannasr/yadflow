@@ -115,7 +115,7 @@ addresses them) — nothing advances on a half-finished session.
 
 - **Never a gate.** This skill never moves `currentStep`, never records an approval on the human's
   behalf, and never merges. It enriches the input and rides the existing soft `engagement` signal only.
-  Strict mode (`hub.review.requireEngagement`) is the gate's switch, not this skill's.
+  Strict mode (`review.requireEngagement` (Product settings)) is the gate's switch, not this skill's.
 - **The CLI never calls an LLM.** The sequencer (`stops[]`) and the markers are deterministic; *you*
   generate every briefing, question, and answer. Same split as the companion.
 - **Grounded only in real material.** Briefings/answers come from the diff + artifact + contract +

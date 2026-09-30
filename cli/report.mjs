@@ -80,8 +80,8 @@ export function sanitizeArgv(argv = []) {
 // Build the safe, postable context — the ONLY data that can reach the issue. Reads doctor for tool
 // state but keeps just the booleans, never the raw checks (which carry names + paths).
 export function sanitizeContext(dir, { error = null, argv = process.argv.slice(2) } = {}) {
-  const hub = readJSON(productConfigPath(dir), null);
-  const platform = hub && ['github', 'gitlab'].includes(hub.platform) ? hub.platform : 'local';
+  const productConfig = readJSON(productConfigPath(dir), null);
+  const platform = productConfig && ['github', 'gitlab'].includes(productConfig.platform) ? productConfig.platform : 'local';
   // Derive tool auth from doctor's checks without keeping any check text.
   const toolState = (cli, p) => (has(cli) ? (platformAuthed(p) ? 'present + authenticated' : 'present, not authenticated') : 'not installed');
   const ctx = {

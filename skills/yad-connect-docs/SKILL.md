@@ -1,6 +1,6 @@
 ---
 name: yad-connect-docs
-description: 'Connects a docs/Pages publishing target to the Product so the interactive-docs steps can build and deploy the generated SPA — not just commit its source. Registers the target into the project-wide .sdlc/docs.json (GitHub Pages / GitLab Pages / build-only), auto-detecting the platform from .sdlc/hub.json and resolving the Vite base path, with local-user auth and no stored tokens. Detects whether gh/glab is present and degrades to build-only when absent. Run at setup or any time the publish target changes. Reusable, idempotent, refreshable. Use when the user says "connect docs", "connect Pages", "refresh the docs connection", or "list the docs connection".'
+description: 'Connects a docs/Pages publishing target to the Product so the interactive-docs steps can build and deploy the generated SPA — not just commit its source. Registers the target into the project-wide .sdlc/docs.json (GitHub Pages / GitLab Pages / build-only), auto-detecting the platform from .sdlc/product.json and resolving the Vite base path, with local-user auth and no stored tokens. Detects whether gh/glab is present and degrades to build-only when absent. Run at setup or any time the publish target changes. Reusable, idempotent, refreshable. Use when the user says "connect docs", "connect Pages", "refresh the docs connection", or "list the docs connection".'
 ---
 
 # SDLC — Connect a Docs/Pages Target (make the docs steps publishable)
@@ -26,7 +26,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
   never installed by this skill, never given a token. Absent ⇒ degrade to build-only (`source:
   "unavailable"`).
 - Registry: `{project-root}/.sdlc/docs.json` (project-wide, shared across all epics + the overview —
-  NOT per-epic), the sibling of `.sdlc/hub.json`, `.sdlc/repos.json`, and `.sdlc/design.json`.
+  NOT per-epic), the sibling of `.sdlc/product.json`, `.sdlc/repos.json`, and `.sdlc/design.json`.
 - Per-epic / overview build manifests (`docs-build.json`) are written later by `yad-docs` /
   `yad-docs-overview`, not here. This skill describes the *connection*; it does not build.
 - Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
@@ -36,8 +36,12 @@ at a local `dist/` — build-only, no publish, exactly as before.
 - `action` — `connect` (default) | `refresh` | `list` | `disconnect`.
 - `target` — `github-pages` | `gitlab-pages` | `none`. Default **auto-detected** from `.sdlc/product.json`
   `platform` (github → `github-pages`, gitlab → `gitlab-pages`, null/no Product → `none`).
-- `scope` — `hub` (default) | `<repo-name>` | `dedicated`. Where the Pages site is published from (the
-  Product repo, one connected code repo, or a dedicated docs repo).
+- `scope` — `product` (default) | `<repo-name>` | `dedicated`. Where the Pages site is published from (the
+  Product repo, one connected code repo, or a dedicated docs repo). `hub` is the old name for `product`:
+  a `docs.json` written before 4.0 says `"scope": "hub"`, and it means the same thing — read it as
+  `product`, and write `product` the next time you write the file. A connected code repo that is itself named
+  `product` is recorded by its registry `path` (for example `repos/product`), never its name, so it is not read
+  as the Product.
 - `public` — `true` (default) | `false`. Whether the published site is public.
 - `base_path` — optional explicit override of the Vite `base` (otherwise resolved, Step 2).
 
@@ -61,8 +65,9 @@ tokens**; everything in the registry is a plain reference. Do **not** install a 
 
 ### Step 2 — Decide the publish scope + resolve the base path
 Resolve `scope` → `publishRepo`:
-- `hub` (default) → publish from the Product repo (read its name from `product.json` `git_url`).
-- `<repo-name>` → publish from that connected code repo (must exist in `.sdlc/repos.json`).
+- `product` (default; `hub` in an older `docs.json`) → publish from the Product repo (read its name from `product.json` `git_url`).
+- `<repo-name>` → publish from that connected code repo (must exist in `.sdlc/repos.json`). A value with a `/` in
+  it is that repo's registry `path` (the form a repo named `product` is recorded in).
 - `dedicated` → a dedicated docs repo the user names (recorded as `publishRepo`).
 
 Resolve `basePath` (the Vite `base`) per the table in `references/docs-registry.md`:
@@ -78,8 +83,8 @@ Upsert into `{project-root}/.sdlc/docs.json` (create the file + parent `.sdlc/` 
 ```json
 {
   "target": "github-pages",
-  "scope": "hub",
-  "publishRepo": "<repo or hub name>",
+  "scope": "product",
+  "publishRepo": "<repo or Product name>",
   "basePath": "/<repo>/",
   "public": true,
   "auth": "user",
@@ -89,7 +94,7 @@ Upsert into `{project-root}/.sdlc/docs.json` (create the file + parent `.sdlc/` 
 }
 ```
 
-- `target: "none"` records a deliberate build-only project: `{ "target": "none", "scope": "hub",
+- `target: "none"` records a deliberate build-only project: `{ "target": "none", "scope": "product",
   "publishRepo": null, "basePath": "/", "source": "unavailable", ... }`.
 - `connect` is **idempotent** — re-running it overwrites the single connection in place (a project has
   one docs target at a time; switching targets is just another `connect`).
