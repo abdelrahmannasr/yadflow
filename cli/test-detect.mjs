@@ -152,6 +152,7 @@ test('E50: every place is read, and each item says where it came from and which 
   try {
     const { items, problems } = detectInstalled(proj, { home });
     assert.deepEqual(problems, [
+      { where: '~/.claude/plugins (p4@m: .claude-plugin/plugin.json)', problem: 'names an MCP file outside the plugin' },
       { where: '~/.claude/plugins (p6@m: .claude-plugin/plugin.json)', problem: 'could not be read as a JSON object' },
       { where: '~/.claude/plugins (p7@m: .mcp.json)', problem: '`mcpServers` is not an object' },
     ]);
@@ -282,6 +283,39 @@ test('E50: a `mcpServers` that is not an object is a problem wherever it is read
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E50: a stray value under this folder\'s exact path does not hide its real entry', () => {
+  const T = tmp();
+  const proj = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  try {
+    fs.mkdirSync(proj, { recursive: true });
+    fs.symlinkSync(proj, path.join(T, 'link'), 'junction');
+    put(path.join(home, '.claude.json'), JSON.stringify({ projects: { [path.resolve(proj)]: 'x', [path.join(T, 'link')]: { mcpServers: { s: {} } } } }));
+    const { items } = detectInstalled(proj, { home });
+    assert.deepEqual(items.map((i) => `${i.kind}:${i.name}:${i.where}`), ['mcp:s:~/.claude.json (this folder)']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E50: a plugin MCP path that leaves the plugin, or names nothing, is a problem that shows no path', () => {
+  const T = tmp();
+  const home = path.join(T, 'h');
+  try {
+    const out = path.join(T, 'outside.json');
+    put(out, JSON.stringify({ mcpServers: { leaked: {} } }));
+    put(path.join(home, 'a/.claude-plugin/plugin.json'), JSON.stringify({ mcpServers: out }));
+    put(path.join(home, 'b/.claude-plugin/plugin.json'), JSON.stringify({ mcpServers: 'missing.json' }));
+    put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: {
+      'a@m': [{ scope: 'user', installPath: path.join(home, 'a') }], 'b@m': [{ scope: 'user', installPath: path.join(home, 'b') }],
+    } }));
+    const { items, problems } = detectInstalled(path.join(T, 'none'), { home });
+    assert.equal(items.filter((i) => i.kind === 'mcp').length, 0);
+    assert.deepEqual(problems, [
+      { where: '~/.claude/plugins (a@m: .claude-plugin/plugin.json)', problem: 'names an MCP file outside the plugin' },
+      { where: '~/.claude/plugins (b@m: .claude-plugin/plugin.json)', problem: 'names an MCP file that is not there' },
+    ]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E50: nothing installed anywhere is an empty answer, not an error', () => {
   const T = tmp();
   try {
@@ -346,6 +380,7 @@ test('E50: the frontmatter, TOML name and TOML table readers', () => {
   assert.equal(tomlAgentName('name = """multi"""'), null, 'a multi-line string is never read');
   assert.deepEqual(skillMeta('---\nname: foo # a comment\nversion: "1 # kept"\n---\n'), { name: 'foo', version: '1 # kept' });
   assert.deepEqual(skillMeta(`---\nname: "a" # was "b"\nversion: 'x' # 'y'\n---\n`), { name: 'a', version: 'x' }, 'the value ends at its own closing quote');
+  assert.deepEqual(skillMeta('---\nname: "\\u0000\\u202e"\nversion: " "\n---\n'), {}, 'a value of only invisible characters is no value');
   assert.deepEqual(skillMeta(String.raw`---
 name: 'it''s'
 version: "1\"2"
@@ -413,6 +448,9 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
     skill(path.join(proj, '.claude/skills'), 'esc', 'name: "evil\u001b[2Jname"\n');
     const esc = yad(['detect'], { cwd: proj, home });
     assert.ok(!esc.stdout.includes('\u001b'), 'no control character reaches the terminal');
+    skill(path.join(proj, '.claude/skills'), 'bidi', `name: "abc${String.fromCharCode(0x202e)}def"\n`);
+    const bidi = yad(['detect'], { cwd: proj, home });
+    assert.ok(!bidi.stdout.includes(String.fromCharCode(0x202e)), 'no character that reorders the line reaches the terminal');
 
     // A Product whose two settings files disagree: every Product command refuses it (E122); `yad detect`
     // reads none of them, so it still answers.

@@ -156,6 +156,14 @@ const sha256 = (bytes) => {
 };
 const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
+// A name or version comes from a file anyone could have written: no control character reaches the
+// terminal, where one could move the cursor or recolour what follows, and no character that reorders or
+// breaks a line (the bidirectional overrides and isolates, the line and paragraph separators). `--json`
+// escapes the control characters already.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+const clean = (v) => String(v).replace(UNSAFE, '?');
+
 // ---- the three file formats -------------------------------------------------------------------------
 
 // The two frontmatter keys this needs: `name`, and `version` — at the top, or nested one level under
@@ -172,16 +180,19 @@ export function skillMeta(text) {
     if (top) {
       inMetadata = top[1] === 'metadata' && scalar(top[2]) === '';
       childIndent = null;
-      if ((top[1] === 'name' || top[1] === 'version') && scalar(top[2])) out[top[1]] = scalar(top[2]);
+      if ((top[1] === 'name' || top[1] === 'version') && printable(scalar(top[2]))) out[top[1]] = scalar(top[2]);
       continue;
     }
     const nested = inMetadata && line.match(/^(\s+)([A-Za-z_][\w-]*):\s*(.*)$/);
     if (!nested) continue;
     childIndent ??= nested[1].length;
-    if (nested[1].length === childIndent && nested[2] === 'version' && out.version === undefined && scalar(nested[3])) out.version = scalar(nested[3]);
+    if (nested[1].length === childIndent && nested[2] === 'version' && out.version === undefined && printable(scalar(nested[3]))) out.version = scalar(nested[3]);
   }
   return out;
 }
+
+// A value made only of control and invisible characters is no value: the folder name is used instead.
+const printable = (v) => /\S/.test(String(v).replace(UNSAFE, ''));
 
 // A one-line YAML value: a quoted string as written, or a plain one with a ` # comment` cut off. A value
 // with a trailing comment is otherwise read AS the value (the frontmatter trap this project has hit).
@@ -190,6 +201,8 @@ function scalar(v) {
   // The closing quote is the FIRST one after the opening, escapes aside, so `"a" # was "b"` is `a`. A
   // double-quoted value decodes its escapes (JSON's are a subset of YAML's); a single-quoted one has only
   // one, `''` for a quote.
+  // YAML escapes JSON lacks (`\x41`, `\e`, `\0`) make the parse fail, and the value is then shown as
+  // written — a display matter only.
   const dq = t.match(/^"((?:[^"\\]|\\.)*)"\s*(#.*)?$/);
   if (dq) { try { return JSON.parse(`"${dq[1]}"`); } catch { return dq[1]; } }
   const sq = t.match(/^'((?:[^']|'')*)'\s*(#.*)?$/);
@@ -459,7 +472,11 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
       // Keyed by the folder's absolute path as Claude Code wrote it: the exact spelling first, then any key
       // that is the same folder by another spelling (a link, or letter case on Windows and macOS).
       const projects = isPlainObject(doc.projects) ? doc.projects : {};
-      const key = Object.hasOwn(projects, path.resolve(root)) ? path.resolve(root) : Object.keys(projects).find((k) => samePath(k, root));
+      // Only an entry that is an object counts: a stray value under the exact spelling must not hide the
+      // real entry under another one.
+      const usable = (k) => isPlainObject(projects[k]);
+      const exact = path.resolve(root);
+      const key = Object.hasOwn(projects, exact) && usable(exact) ? exact : Object.keys(projects).find((k) => usable(k) && samePath(k, root));
       const mine = key === undefined ? null : projects[key];
       // `user`, not `project`: these live in YOUR home folder and a teammate who clones gets none of them.
       if (isPlainObject(mine?.mcpServers)) items.push(...mcpItems(mine.mcpServers, { scope: 'user', where: `${shownPath('user', CLAUDE_USER_CONFIG)} (this folder)`, agents: ['Claude Code'] }));
@@ -544,9 +561,10 @@ function pluginMcp(at, id, scope, problem) {
     // The plugin's own files only. `path.relative` across two Windows drives is an absolute path with no
     // `..` in it, so that is refused too; a name that merely starts with `..` (`..x.json`) is not.
     const r = path.relative(at, full);
-    if (!r || r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) return;
+    // Named by the manifest, never by the path it gave: that path may be absolute and name the machine.
+    if (!r || r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) { bad('.claude-plugin/plugin.json', 'names an MCP file outside the plugin'); return; }
     const doc = jsonOf(full);
-    if (doc === undefined) return;
+    if (doc === undefined) { if (rel !== '.mcp.json') bad('.claude-plugin/plugin.json', 'names an MCP file that is not there'); return; }
     if (!isPlainObject(doc)) { bad(r.split(path.sep).join('/')); return; }
     // `.mcp.json` wraps the servers in `mcpServers`; a file plugin.json points at may list them bare. A
     // `mcpServers` that is not an object is a problem, as it is in `.cursor/mcp.json` — reading the whole
@@ -576,11 +594,6 @@ function pluginMcp(at, id, scope, problem) {
 
 // How many names one place shows before "… and N more". `--json` always lists every item.
 const NAMES_SHOWN = 8;
-
-// A name or version comes from a file anyone could have written: no control character reaches the
-// terminal, where one could move the cursor or recolour what follows. `--json` escapes them already.
-// eslint-disable-next-line no-control-regex -- matching control characters is the point
-const clean = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f]/g, '?');
 
 const KIND_TITLES = [['skill', 'Skills'], ['agent', 'Agents'], ['mcp', 'MCP servers'], ['plugin', 'Plugins']];
 
