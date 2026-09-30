@@ -406,14 +406,14 @@ export const ERROR_CODES: ErrorCode[] = [
   },
   {
     code: 'YAD-CFG-001',
-    cause: 'product.json names an unknown platform.',
+    cause: 'The Product settings (product.json, or hub.json on a Product that has only that name) name an unknown platform.',
     resolution: 'Expected github, gitlab, or null — fix it or re-run yad setup.',
     severity: 'info',
     visibleTo: BUILD,
   },
   {
     code: 'YAD-CFG-005',
-    cause: 'product.json sets a platform but is missing git_url (needed to scope the auth probe and open PRs).',
+    cause: 'The Product settings (product.json, or hub.json on a Product that has only that name) set a platform but are missing git_url (needed to scope the auth probe and open PRs).',
     resolution: 'Add git_url to .sdlc/product.json (.sdlc/hub.json on a Product that has only that name; when both exist, then run yad migrate --apply --keep product), or re-run yad setup — it backfills it from the origin remote.',
     severity: 'warn',
     visibleTo: BUILD,

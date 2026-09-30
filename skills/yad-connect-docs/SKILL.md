@@ -46,7 +46,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
 ## On Activation
 
 ### Step 1 — Resolve the target + detect the platform (the publish adapter)
-Determine the `target`. If not given, read `{project-root}/.sdlc/product.json` (`.sdlc/product.json` on an older Product that has only that name) `platform` and map it the same
+Determine the `target`. If not given, read `{project-root}/.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name) `platform` and map it the same
 way the Product bridge maps repos: `github` → `github-pages`, `gitlab` → `gitlab-pages`, `null`/no Product →
 `none` (deliberate build-only). Reject a `target` value outside the three providers (fall back to the
 detected default with a warning, the way `registerRepo` falls back on an unknown platform).

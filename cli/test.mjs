@@ -27610,6 +27610,24 @@ test('E122: every caller of the default-branch guard hands it the Product root',
   }
 });
 
+// E124 review: with no platform, `gate sync` / `gate ci` name the settings file that is actually there. Naming
+// product.json on a Product that has only hub.json would have a person create a one-key product.json (E122).
+test('E124: the no-platform warning of gate sync and gate ci names the settings file on disk', async () => {
+  const { gateSync, gateCi } = await import('./gate.mjs');
+  for (const [name, want, other] of [['hub.json', /\(\.sdlc\/hub\.json\)/, /product\.json/], ['product.json', /\(\.sdlc\/product\.json\)/, /hub\.json/]]) {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-noplatform-'));
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'));
+      fs.writeFileSync(path.join(T, '.sdlc', name), '{}\n');
+      for (const run of [() => gateSync(T, { epic: 'EP-x', artifact: 'epic.md' }), () => gateCi(T, { branch: 'review/EP-x/epic', push: false })]) {
+        const { out } = await captureConsole(run);
+        assert.match(out, want, `${name}: ${out}`);
+        assert.doesNotMatch(out, other, `${name}: ${out}`);
+      }
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
 // ---------------------------------------------------------------------------------------------
 // hub-keep:start keep-list-tests
 // E124: every `hub` that survives the hub -> Product rename is kept by a named rule

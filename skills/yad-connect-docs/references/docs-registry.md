@@ -38,7 +38,7 @@ Holds **no credentials** — every field is a plain reference. Auth is always th
 
 ## Platform auto-detection (from `.sdlc/product.json`)
 
-When `target` is not given, read `.sdlc/product.json` (`.sdlc/product.json` on an older Product that has only that name) and map the Product's `platform` the same way `yad-connect-repos` maps a repo host:
+When `target` is not given, read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name) and map the Product's `platform` the same way `yad-connect-repos` maps a repo host:
 
 | `product.json` `platform` | default `target` |
 |-----------------------|------------------|

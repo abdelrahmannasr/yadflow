@@ -8,7 +8,7 @@ import {
   c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject, writeMirrored, emitJSON, refuse, collectWarning,
 } from './lib.mjs';
 import { OWNING_COMMIT_ENV } from './hook.mjs';
-import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
+import { PROJECT_FILES, isVerifiedLedger , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate, printable,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
@@ -635,7 +635,7 @@ function stageIndexIfClean(root, git, commits = null) {
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null } = {}) {
   const { productConfig } = loadProduct(root);
-  if (!productConfig?.platform) { warn('no Product platform configured (.sdlc/product.json) — local gate, nothing to sync'); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
+  if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — local gate, nothing to sync`); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
   const platform = productConfig.platform;
   const aliases = legacyLogins(productConfig);
   const clashed = ambiguousLegacyNames(productConfig);
@@ -959,7 +959,7 @@ export function convertProductLevel(root, productConfig, { git = (...a) => run('
 
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { productConfig } = loadProduct(root);
-  if (!productConfig?.platform) { warn('no Product platform configured (.sdlc/product.json) — nothing to sync'); return { synced: 0, committed: false, pushed: false }; }
+  if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = productConfig.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
