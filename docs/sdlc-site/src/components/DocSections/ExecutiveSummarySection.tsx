@@ -25,7 +25,8 @@ export function ExecutiveSummarySection() {
         <h4 className="text-sm font-bold text-slate-200 mb-2">What is yadflow?</h4>
         <p className="text-sm text-slate-400 leading-relaxed">
           <strong className="text-white">Yadflow</strong> (<em>yahd-flow</em> — from{' '}
-          <span dir="rtl">يد</span>, Arabic for "hand") is the AI-driven, gated, team, multi-repo SDLC: a{' '}
+          <span dir="rtl">يد</span>, Arabic for "hand") is shared project memory and workflows for
+          teams building with AI. Under the hood it is a{' '}
           <strong className="text-white">team, gated, file-driven SDLC engine</strong>: every step writes a
           file and stops at a gate, and who advances that gate — a human, or a machine for a Build step the team set to auto — is
           a per-step setting. The principle:{' '}

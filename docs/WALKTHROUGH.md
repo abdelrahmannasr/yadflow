@@ -4,7 +4,7 @@ The full path from nothing to shipped code, by hand. Each numbered step names th
 detailed sections below expand every phase. Invoke a skill by name in your agent/IDE (e.g. *"run
 `yad-epic`"*); state lives in files you can also edit directly.
 
-For the big-picture concepts see the [README](../README.md); for command reference see
+For an introduction see the [README](../README.md); for command reference see
 [`CLI.md`](CLI.md); for the skill catalog see [`SKILLS.md`](SKILLS.md); for the plain-language team
 version see [`TEAM-GUIDE.md`](../TEAM-GUIDE.md).
 

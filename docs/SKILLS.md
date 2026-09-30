@@ -9,7 +9,7 @@ setting: `yad skill bind <step> <skill>` records your own in `.sdlc/skills.json`
 that one from then on. Several skills on one step run as a chain, in order. See
 [choosing the skill for a step](CLI.md#choosing-the-skill-for-a-step).
 
-For the big-picture concepts see the [README](../README.md); for the step-by-step path see
+For an introduction see the [README](../README.md); for the step-by-step path see
 [`WALKTHROUGH.md`](WALKTHROUGH.md) or the [team guide](../TEAM-GUIDE.md). A condensed "when do I reach
 for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 
