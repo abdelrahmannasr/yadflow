@@ -1,6 +1,6 @@
 {
   "target": "github-pages",
-  "scope": "hub",
+  "scope": "product",
   "publishRepo": "yadflow",
   "basePath": "/yadflow/",
   "public": true,

@@ -40,7 +40,7 @@ export async function runTidy(root, opts = {}) {
   log(c.bold('\nyad tidy up'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
   if (!exists(productConfigPath(root))) {
-    fail('no .sdlc/hub.json — run `yad tidy up` from the Product');
+    fail('no .sdlc/product.json — run `yad tidy up` from the Product');
     process.exitCode = 1;
     return;
   }
@@ -72,7 +72,7 @@ export async function runTidy(root, opts = {}) {
 
   const author = checkpointAuthor(platformLogin(root, productConfig?.platform), git('config', 'user.name').stdout);
   const label = touched.length === 1 ? touched[0] : `${touched.length} epics`;
-  const message = `chore(hub): tidy Build ledgers — ${label} by ${author} [skip ci]`;
+  const message = `chore(product): tidy Build ledgers — ${label} by ${author} [skip ci]`;
 
   if (opts.dryRun) {
     log('\n' + c.dim(message) + '\n');

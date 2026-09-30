@@ -34,8 +34,8 @@ while [ $# -gt 0 ]; do
     *) ARGS+=("$1"); shift ;;
   esac
 done
-case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --profile '$PROFILE' (code|hub|product)."; exit 1 ;; esac
-# `product` is the new name for the `hub` profile and BOTH are accepted.
+case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --profile '$PROFILE' (code|product, or hub, the old name for product)."; exit 1 ;; esac
+# `product` is the Product's profile. `hub` is its old name, and BOTH are accepted.
 #
 # This script and the workflow that passes the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and
 # normally land together on one `yad update` — but not always: a copy the team edited is kept. So the
@@ -45,11 +45,11 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --prof
 # edited copy of THIS script from before 4.0, which rejects `product`, beside the new workflow — fails
 # every Product PR; `yad update` and `yad doctor` (`profile:`) say so.
 #
-# Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
-# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`
+# Normalised to `product` immediately, so nothing below has to know there are two spellings. That is
+# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `hub` and the `= product`
 # branch is skipped, taking the whole review-branch arm with it — including the guard that stops a
 # plain code title carrying an artifact change past its review.
-[ "$PROFILE" = product ] && PROFILE=hub
+[ "$PROFILE" = hub ] && PROFILE=product
 
 
 # True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
@@ -86,12 +86,12 @@ check_code_title() {
   exit 0
 }
 
-if [ "$PROFILE" = hub ]; then
+if [ "$PROFILE" = product ]; then
   # review/EP-* head branch (or unknown head ref) => Shape artifact-review PR: 'review: <artifact> (EP-<slug>)'.
   case "$HEADREF" in
     review/EP-*|"")
       if printf '%s' "$TITLE" | grep -qE '^review: .+ \(EP-[a-z0-9-]+\)$'; then
-        echo "PASS [pr-title]: '${TITLE}' (profile: hub, artifact-review)"
+        echo "PASS [pr-title]: '${TITLE}' (profile: product, artifact-review)"
         exit 0
       fi
       echo "FAIL [pr-title]: '${TITLE}' is not a Product review title 'review: <artifact> (EP-<slug>)'."

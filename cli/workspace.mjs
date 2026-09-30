@@ -466,7 +466,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
     if (!r.ok) return refuse(`could not clone the Product: ${shown(r.error)}`);
     ok(`cloned the Product into ${path.join(wsName, PRODUCT_DIR)}/`);
   }
-  if (!exists(productConfigPath(product))) return refuse(`${path.join(wsName, PRODUCT_DIR)}/ has no .sdlc/hub.json — that repo is not a yad Product`);
+  if (!exists(productConfigPath(product))) return refuse(`${path.join(wsName, PRODUCT_DIR)}/ has no .sdlc/product.json — that repo is not a yad Product`);
 
   const { registry, problem } = readRegistry(product);
   if (problem) warn(`${problem} — nothing to clone; fix it in the Product and re-run`);

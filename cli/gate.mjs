@@ -174,7 +174,7 @@ export const isSolo = (productConfig) => !!(productConfig && (productConfig.solo
 // defined once in manifest.mjs (`isVerifiedLedger`) and shared with plan.mjs's wiring and the ledger
 // hook, so no two readers can disagree about who owns the ledger (#186).
 
-// requireEngagement (config `hub.review.requireEngagement`): when on, the predicate counts only
+// requireEngagement (config `review.requireEngagement` in the Product settings): when on, the predicate counts only
 // approvals carrying a verified engagement signal. Soft-off by default — a bare approve still counts
 // but is recorded `engagement: none` and draws the friendly nudge.
 export const requireEngagement = (productConfig) => !!(productConfig && (productConfig.review?.requireEngagement === true));
@@ -635,7 +635,7 @@ function stageIndexIfClean(root, git, commits = null) {
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null } = {}) {
   const { productConfig } = loadProduct(root);
-  if (!productConfig?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
+  if (!productConfig?.platform) { warn('no Product platform configured (.sdlc/product.json) — local gate, nothing to sync'); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
   const platform = productConfig.platform;
   const aliases = legacyLogins(productConfig);
   const clashed = ambiguousLegacyNames(productConfig);
@@ -959,7 +959,7 @@ export function convertProductLevel(root, productConfig, { git = (...a) => run('
 
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { productConfig } = loadProduct(root);
-  if (!productConfig?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0, committed: false, pushed: false }; }
+  if (!productConfig?.platform) { warn('no Product platform configured (.sdlc/product.json) — nothing to sync'); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = productConfig.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
@@ -1605,7 +1605,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 // consumes this JSON, generates, and posts back via the platform (trailer/comments/approval).
 // Assemble (but don't print) the Shape grounding bundle. Shared by `review` and `walkthrough` so the
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
-// Returns { error } when there is no epic state, else { bundle, epicDir, hub }.
+// Returns { error } when there is no epic state, else { bundle, epicDir, productConfig }.
 function reviewBundle(root, { epic, artifact, headCount = null } = {}) {
   const { productConfig, repos } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
@@ -1744,7 +1744,7 @@ export function fillProductTemplate({ epic, artifact, step, owner, domains, hasA
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
     '- This step advances when approvals are satisfied, all threads are resolved, and this PR is merged.',
     '',
-    // Required by the Product `pr-template` gate (check_hub_body). Mirrors the Checklist block of the
+    // Required by the Product `pr-template` gate (check_product_body). Mirrors the Checklist block of the
     // committed static template (yad-pr-template/templates/product/<platform>/) so the generated body
     // passes on the first CI run.
     '## Checklist',

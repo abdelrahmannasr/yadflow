@@ -276,7 +276,7 @@ export async function resolveProfile(root, opts = {}) {
   const productConfig = readJSON(productConfigPath(root), null);
   const prev = (productConfig && productConfig.profile) || {};
 
-  // 1. Solo or team (+ size). --solo / --team <n> win; else carry hub.solo forward; else ask.
+  // 1. Solo or team (+ size). --solo / --team <n> win; else carry the Product's `solo` forward; else ask.
   let solo, team_size;
   if (opts.solo) { solo = true; team_size = 1; }
   else if (opts.team != null) { team_size = Math.max(1, parseInt(opts.team, 10) || 1); solo = team_size <= 1; }
@@ -340,7 +340,7 @@ export async function runSetup(root, opts = {}) {
     if (await askYesNo('Not a git repo. Run `git init` here?', true)) {
       run('git', ['init'], { cwd: root });
       ok('git initialized');
-    } else warn('continuing without git — hub detection will be skipped');
+    } else warn('continuing without git — the Product platform will not be detected');
   } else ok('git repo detected');
   for (const tool of ['git', 'node']) has(tool) ? ok(`${tool} present`) : warn(`${tool} not found on PATH`);
   if (!has('npx')) warn('npx not found — repomix packing will be skipped');
@@ -393,18 +393,18 @@ export async function runSetup(root, opts = {}) {
   S('Product platform');
   guide(solo
     ? [
-      'Your hub is this repo on GitHub/GitLab (or none for a local gate).',
+      'Your Product is this repo on GitHub/GitLab (or none for a local gate).',
       'Solo: you review by merging your own PR (approval waived).',
     ]
     : [
-      'Your hub is this repo on GitHub/GitLab; reviewers approve artifacts there.',
+      'Your Product is this repo on GitHub/GitLab; reviewers approve artifacts there.',
       'yad keeps no list of people: anyone with access to the repo can approve, and the platform records who did.',
       'A gate needs one approval, which should not come from the author (GitHub blocks self-approval; GitLab only if its settings do).',
       'It also reports how many people it would like: 3 on a contract review, 2 where auth or payments is touched, 1 elsewhere. That extra number is advisory for now.',
     ]);
   const productPath = productConfigPath(root);
-  if (exists(productPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
-    info('keeping existing .sdlc/hub.json');
+  if (exists(productPath) && !(await askYesNo(`${path.relative(root, productPath)} exists — reconfigure?`, false))) {
+    info(`keeping the existing ${path.relative(root, productPath)}`);
   } else {
     const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root });
     if (!remote.ok && exists(path.join(root, '.git'))) info('no origin remote — platform detection skipped');
@@ -459,7 +459,7 @@ export async function runSetup(root, opts = {}) {
     if (modeMoved || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size }) || backfillUrl) {
       writeProductConfig(root, { ...cur, ...(backfillUrl ? { git_url: backfillUrl } : {}), ...mode, profile: { codebase, repo_layout, team_size } });
       if (mode.mode_set) info(`mode: ${mode.mode_set.from} → ${mode.mode_set.to} (recorded as mode_set)`);
-      if (backfillUrl) info(`backfilled hub git_url from origin: ${backfillUrl}`);
+      if (backfillUrl) info(`backfilled the Product's git_url from origin: ${backfillUrl}`);
       else info(`recorded profile: ${solo ? 'solo' : `team(${team_size})`}, ${codebase}, ${repo_layout}`);
     }
   }
@@ -622,7 +622,7 @@ export async function runSetup(root, opts = {}) {
   const productLegacy = legacyProductActions(root);
   const productWiring = withoutKeptRenames([...productActions(root), ...productLegacy]).filter((a) => !productLegacy.includes(a));
   if (productWiring.length) {
-    log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
+    log(`  ${c.bold('product')} ${c.dim('(gate-sync + verified-commits CI)')}`);
     applyActions(productWiring, { force: true });
     wired.push(...productWiring);
   }
@@ -632,7 +632,7 @@ export async function runSetup(root, opts = {}) {
   // above — with no bridge the ledger is locally owned and the guard would be wrong.
   const hookWiring = hookActions(root, ideTargets);
   if (hookWiring.length) {
-    log(`  ${c.bold('hub')} ${c.dim('(agent ledger guard)')}`);
+    log(`  ${c.bold('product')} ${c.dim('(agent ledger guard)')}`);
     applyActions(hookWiring, { force: true });
     wired.push(...hookWiring);
   }
@@ -640,7 +640,7 @@ export async function runSetup(root, opts = {}) {
   // so it is not pushed to `wired` (nothing to stage).
   const gitHook = gitHookActions(root);
   if (gitHook.length) {
-    log(`  ${c.bold('hub')} ${c.dim('(git pre-commit ledger guard, this clone)')}`);
+    log(`  ${c.bold('product')} ${c.dim('(git pre-commit ledger guard, this clone)')}`);
     applyActions(gitHook, { force: true });
   }
   const gitHookNote = gitHookAdvice(gitHookState(root));
@@ -649,7 +649,7 @@ export async function runSetup(root, opts = {}) {
   // `yad/wip/<name>/<epic>` branches. Both ledger modes; `"capture": false` in the Product config turns it off.
   const captureWiring = captureHookActions(root, ideTargets);
   if (captureWiring.length) {
-    log(`  ${c.bold('hub')} ${c.dim('(wip capture)')}`);
+    log(`  ${c.bold('product')} ${c.dim('(wip capture)')}`);
     applyActions(captureWiring, { force: true });
     wired.push(...captureWiring);
   }

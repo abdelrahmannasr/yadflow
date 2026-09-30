@@ -77,11 +77,11 @@ export const FlowCanvas: React.FC = () => {
 
   // Optional loop-back arc, swept below the canvas to read as "the pipeline repeats".
   // Rendered only when both endpoint nodes exist (e.g. the SDLC-overview's
-  // trust-log → product-hub cycle); a no-op for diagrams without them.
+  // trust-log → product cycle); a no-op for diagrams without them.
   const loopBack = useMemo(() => {
     if (dims.width === 0) return null;
     const a = COMPONENTS.find((c) => c.id === 'trust-log');
-    const b = COMPONENTS.find((c) => c.id === 'product-hub');
+    const b = COMPONENTS.find((c) => c.id === 'product');
     if (!a || !b) return null;
     const x1 = (a.position.x / 100) * dims.width;
     const y1 = (a.position.y / 100) * dims.height;

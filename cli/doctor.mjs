@@ -122,20 +122,20 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // hub.json: parse + shape
   let productConfig = null;
   if (!exists(productPath)) {
-    check(checks, 'hub', 'project', 'warn', `${settingsRel} absent — local gate`, 'run `yad setup` to configure a platform');
+    check(checks, 'product', 'project', 'warn', `${settingsRel} absent — local gate`, 'run `yad setup` to configure a platform');
   } else {
     let productConfigBroken = false;
     try {
       productConfig = readJSONStrict(productPath, null);
     } catch (e) {
       productConfigBroken = true;
-      check(checks, 'hub', 'project', 'fail', `${settingsRel} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
+      check(checks, 'product', 'project', 'fail', `${settingsRel} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
     }
     if (productConfigBroken) { /* reported above */ }
-    else if (typeof productConfig !== 'object' || Array.isArray(productConfig) || productConfig === null) check(checks, 'hub', 'project', 'fail', `${settingsRel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
-    else if (![null, undefined, 'github', 'gitlab'].includes(productConfig.platform)) check(checks, 'hub', 'project', 'fail', `${settingsRel}: unknown platform '${forTerminal(productConfig.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
+    else if (typeof productConfig !== 'object' || Array.isArray(productConfig) || productConfig === null) check(checks, 'product', 'project', 'fail', `${settingsRel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    else if (![null, undefined, 'github', 'gitlab'].includes(productConfig.platform)) check(checks, 'product', 'project', 'fail', `${settingsRel}: unknown platform '${forTerminal(productConfig.platform)}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
-      check(checks, 'hub', 'project', 'ok', `hub: ${productConfig.platform || 'local'}`);
+      check(checks, 'product', 'project', 'ok', `product: ${productConfig.platform || 'local'}`);
       // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
       // name → login pairs only let the first sync recognise older approvals (`legacyLogins`) — so say so
       // — a team that still edits it would otherwise believe it decides something. An empty list (what a
@@ -218,7 +218,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // resolved host), so it fires even when an origin remote can substitute: the field itself
         // is required regardless.
         if (!hostFromGitUrl(productConfig.git_url)) {
-          check(checks, 'hub-git-url', 'project', 'warn',
+          check(checks, 'product-git-url', 'project', 'warn',
             `${settingsRel} sets platform '${productConfig.platform}' but has no git_url [YAD-CFG-005]`,
             `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
         }
@@ -233,8 +233,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // inside `gh auth login --hostname …` for the person to run.
         const host = plainHost(rawHost);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
-        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the hub\'s git remote URL names a host that is not a plain host name', `fix git_url in ${settingsEditHint(root)} (or fix the origin remote) to name a plain host`);
-        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', `add git_url to ${settingsEditHint(root)}, so the auth probe can target the right host`);
+        else if (rawHost && !host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the Product\'s git remote URL names a host that is not a plain host name', `fix git_url in ${settingsEditHint(root)} (or fix the origin remote) to name a plain host`);
+        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — the Product\'s host is unknown (no git_url / origin)', `add git_url to ${settingsEditHint(root)}, so the auth probe can target the right host`);
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
@@ -753,11 +753,11 @@ export function ciTagsChecks(checks, root, productConfig, registry) {
   const fragments = [];
   if (productConfig?.platform === 'gitlab' && isVerifiedLedger(productConfig)) {
     fragments.push(
-      { scope: 'hub', file: '.gitlab/ci/yad-gate-sync.yml', path: path.join(root, '.gitlab/ci/yad-gate-sync.yml') },
-      { scope: 'hub', file: '.gitlab/ci/yad-verified-commits.yml', path: path.join(root, '.gitlab/ci/yad-verified-commits.yml') },
-      { scope: 'hub', file: '.gitlab/ci/yad-product-checks.yml', path: path.join(root, '.gitlab/ci/yad-product-checks.yml') },
+      { scope: 'product', file: '.gitlab/ci/yad-gate-sync.yml', path: path.join(root, '.gitlab/ci/yad-gate-sync.yml') },
+      { scope: 'product', file: '.gitlab/ci/yad-verified-commits.yml', path: path.join(root, '.gitlab/ci/yad-verified-commits.yml') },
+      { scope: 'product', file: '.gitlab/ci/yad-product-checks.yml', path: path.join(root, '.gitlab/ci/yad-product-checks.yml') },
       // Its old name (E123), while it is still there — `renamed:` says to run `yad update`.
-      { scope: 'hub', file: '.gitlab/ci/yad-hub-checks.yml', path: path.join(root, '.gitlab/ci/yad-hub-checks.yml') },
+      { scope: 'product', file: '.gitlab/ci/yad-hub-checks.yml', path: path.join(root, '.gitlab/ci/yad-hub-checks.yml') },
     );
   }
   for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
@@ -1968,7 +1968,7 @@ export function ownerGuardChecks(checks, root) {
     'add `--no-renames` (and `-c core.quotePath=false`) to that workflow\'s `git diff --name-only` lines, as the shipped one has — `yad update` did not replace it because it was changed by hand');
 }
 
-// Names the hub -> Product rename moved (E123), on the Product. Two kinds, both warnings:
+// Names the `hub` -> Product rename moved (E123), on the Product. Two kinds, both warnings:
 //   renamed:<old path>   something yad installed is still under its old name — a skill folder, or a CI
 //                        file. `yad update` renames it; an edited CI file it keeps, and says how to finish.
 //   renamed-ref:<file>   a file of the team's own names one of our old CI names, by file and line. yad
@@ -2322,7 +2322,7 @@ export function codeownersChecks(checks, root) {
   }
 }
 
-// E70 — what the platform holds on the Product hub's branch and on each connected repo's: branch
+// E70 — what the platform holds on the Product's branch and on each connected repo's: branch
 // protection, and whether a rule requires an approval before a merge (cli/protection.mjs). Never quiet
 // (rule 6): every repo gets a line, and a read that failed says "not known" and why — never "fine", never
 // "unprotected". Advisory, like E69: a warning at most, never a failure — the platform holds a merge, not
@@ -2342,8 +2342,8 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     check(checks, id, 'protection', line.status, line.message, line.hint || '', { protection: protectionJSON(r), alwaysHint: true });
   };
   if (isPlainObject(productConfig)) {
-    // `protection` alone, never `protection:hub`: a connected repo may be named `hub`.
-    emit('protection', 'Product hub', {
+    // `protection` alone, never `protection:product`: a connected repo may be named `product`.
+    emit('protection', 'Product', {
       platform: productConfig.platform || null,
       gitUrl: productConfig.git_url || origin(root),
       branch: typeof productConfig.default_branch === 'string' && productConfig.default_branch ? productConfig.default_branch : null,

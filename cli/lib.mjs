@@ -36,7 +36,7 @@ export const forTerminal = (s) => [...String(s ?? '')].map((ch) => { const n = c
 // file could hold `api; curl …|sh` (E81 reviews 9–10; here since review 15, for doctor and people.mjs).
 export const asArg = (name) => (typeof name === 'string' && /^\w[\w.-]*$/.test(name) ? name : '<name>');
 
-export const JSON_VERSION = 1;
+export const JSON_VERSION = 2;
 export const ENVELOPE_KEYS = ['jsonVersion', 'version', 'command'];
 let jsonRun = null;
 export function beginJSON(command) { jsonRun = { command, emitted: false, warnings: [], failures: [] }; }

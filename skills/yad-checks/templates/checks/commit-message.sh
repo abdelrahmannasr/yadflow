@@ -7,7 +7,7 @@
 #   - any trailers appear in the fixed order Task -> Contract-Change -> Co-Authored-By.
 # Keep the type list in sync with cli/manifest.mjs COMMIT_TYPES and config.yaml build.commit_subject_style.
 #
-# Profiles (--profile code|hub|product, default code): the subject rule is identical on the Product and on
+# Profiles (--profile code|product, default code; `hub` is the old name for product): the subject rule is identical on the Product and on
 # code repos (both follow CONTRIBUTING). The Task trailer is NOT required here (the spec-link gate owns
 # that on code repos; Product commits are not task-scoped) — this gate only checks SHAPE and ORDER.
 #
@@ -47,8 +47,8 @@ while [ $# -gt 0 ]; do
     *) ARGS+=("$1"); shift ;;
   esac
 done
-case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [commit-message]: unknown --profile '$PROFILE' (code|hub|product)."; exit 1 ;; esac
-# `product` is the new name for the `hub` profile and BOTH are accepted.
+case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [commit-message]: unknown --profile '$PROFILE' (code|product, or hub, the old name for product)."; exit 1 ;; esac
+# `product` is the Product's profile. `hub` is its old name, and BOTH are accepted.
 #
 # This script and the workflow that passes the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and
 # normally land together on one `yad update` — but not always: a copy the team edited is kept. So the
@@ -58,11 +58,11 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [commit-message]: unknown 
 # edited copy of THIS script from before 4.0, which rejects `product`, beside the new workflow — fails
 # every Product PR; `yad update` and `yad doctor` (`profile:`) say so.
 #
-# Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
-# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`
+# Normalised to `product` immediately, so nothing below has to know there are two spellings. That is
+# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `hub` and the `= product`
 # branch is skipped, taking the whole review-branch arm with it — including the guard that stops a
 # plain code title carrying an artifact change past its review.
-[ "$PROFILE" = product ] && PROFILE=hub
+[ "$PROFILE" = hub ] && PROFILE=product
 
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it

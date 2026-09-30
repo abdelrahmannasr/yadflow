@@ -21,7 +21,7 @@ import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, war
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
-  MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES, preferring, productConfigPath, productDrift, SCHEMA_VERSION,
+  MANAGED_LEDGER, MIRRORED_FILES, PRODUCT_RENAME_GUIDE_URL, PROJECT_FILES, preferring, productConfigPath, productDrift, SCHEMA_VERSION,
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
@@ -78,6 +78,7 @@ export const MIGRATIONS = [
       ? { ...obj, ledger: isVerifiedLedger(obj) ? 'verified' : 'local' }
       : obj),
   },
+  // hub-keep:start shape-3-step
   {
     from: 2,
     to: 3,
@@ -118,6 +119,7 @@ export const MIGRATIONS = [
       };
     },
   },
+  // hub-keep:end
   {
     from: 3,
     to: 4,
@@ -1172,6 +1174,8 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
     }
     if (blocked.length) warn('some files were left untouched — see above');
     if (apply && written.length) hand('then run `yad update`, which refreshes the check gates installed in your repos');
+    // E124: the last line, for as long as the old settings name is on disk — the changes no command makes.
+    if (exists(path.join(root, PROJECT_FILES.productConfigLegacy))) info(`the hub → Product changes only you can make (your own CI settings, scripts, badges), and the order to run things in: ${PRODUCT_RENAME_GUIDE_URL}`);
   }
 
   if (blocked.length || productBlocked) process.exitCode = 1;

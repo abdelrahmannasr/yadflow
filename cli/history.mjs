@@ -204,7 +204,7 @@ export function readState(root, id) {
   return Array.isArray(r.value?.steps) ? { state: r.value, steps: r.value.steps } : { why: 'it has no list of steps' };
 }
 
-// The Product's settings, strictly: { hub } or { why }. A file that does not parse is said, never read
+// The Product's settings, strictly: { productConfig } or { why }. A file that does not parse is said, never read
 // as "team mode, no engagement rule" — that would print a confident count the gate itself refuses.
 function readProductConfig(root) {
   const r = readJsonFile(productConfigPath(root));
@@ -227,7 +227,7 @@ function notCountedReason(a, { approved, stale, named, reqEng }) {
 const NOT_JUDGED = { stale: null, counted: null, notCounted: null };
 
 // The whole story of one item, for `show`. Throws nothing: every part that cannot be read says why.
-// `hub` / `hubWhy`: the Product's settings, or why they could not be read.
+// `productConfig` / `productConfigWhy`: the Product's settings, or why they could not be read.
 export function itemHistory(root, item, { productConfig = null, productConfigWhy = null } = {}) {
   const epicDir = epicRoot(root, item.id);
   const stateRead = readState(root, item.id);

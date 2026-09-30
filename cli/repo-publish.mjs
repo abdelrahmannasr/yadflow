@@ -128,12 +128,12 @@ export function summarizeCodeContext(files = []) {
 }
 
 // PURE — the audit-trail commit message. Subject passes the Product commit-message gate (valid type
-// `chore`, scope `hub`, non-empty description, no trailing period). No Task trailer and no
+// `chore`, scope `product`, non-empty description, no trailing period). No Task trailer and no
 // Co-Authored-By: this is human-owned machine state, not an authored code change. `[skip ci]` mirrors
 // `yad checkpoint` — it lands on the default branch and needs no PR gate suite. `label`/`author` are
 // collapsed to one line so nothing can split the subject or forge a trailer.
 export function buildCodeMapMessage({ label, author, basenames = [] }) {
-  const subject = `chore(hub): sync code-context — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
+  const subject = `chore(product): sync code-context — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
   const body = basenames.length ? `Updated: ${basenames.join(', ')}` : '';
   return body ? `${subject}\n\n${body}` : subject;
 }
@@ -143,7 +143,7 @@ export function buildCodeMapMessage({ label, author, basenames = [] }) {
 export async function publishCodeContext(root, { push = false, allowBranch = false, name = null } = {}) {
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
   if (!exists(productConfigPath(root))) {
-    fail('no .sdlc/hub.json — --push publishes the Product code-context; run it from the Product');
+    fail('no .sdlc/product.json — --push publishes the Product code-context; run it from the Product');
     process.exitCode = 1;
     return;
   }

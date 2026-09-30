@@ -2,7 +2,7 @@
 // build-state) as one audit-trail commit. This is the Build analogue of the Shape gate sync
 // (cli/gate.mjs): the SDLC's Build part (yad-run, yad-engineer-review) WRITES these ledgers into the
 // working tree but never commits them, so teammates/CI/`yad status` on other machines see stale trust
-// evidence. checkpoint lands them with a `chore(hub): ...` message.
+// evidence. checkpoint lands them with a `chore(product): ...` message.
 //
 // It also carries the Build story `status:` flip (approved → in-build/shipped) that
 // yad-engineer-review writes into stories/<id>.md but no command committed — the #112 drift where
@@ -68,7 +68,7 @@ const BACK_HALF_STATUSES = new Set(['in-build', 'shipped']);
 //   2. its current frontmatter `status:` is a Build value (in-build | shipped).
 // A candidate is only actually carried when its staged diff is the `status:` line ALONE — runCheckpoint
 // drops any candidate whose working tree also changed prose/other frontmatter (stagedStoryIsStatusOnly),
-// so an unrelated edit can never ride into a `chore(hub) … [skip ci]` commit that bypasses review.
+// so an unrelated edit can never ride into a `chore(product) … [skip ci]` commit that bypasses review.
 // The shared `git add`/`diff --cached` machinery then commits ONLY the ones that actually differ from
 // HEAD (so a story already committed at shipped is a no-op).
 //
@@ -139,11 +139,11 @@ export function checkpointAuthor(login, name) {
 }
 
 // PURE — the audit-trail commit message. The subject passes the Product commit-message gate (valid type
-// `chore`, optional scope `hub`, non-empty description, no trailing period). No Task trailer and no
+// `chore`, optional scope `product`, non-empty description, no trailing period). No Task trailer and no
 // Co-Authored-By footer: this is human-owned machine state, not an authored code change. `label` and
 // `author` are collapsed to one line so nothing can split the subject or forge a trailer.
 export function buildCheckpointMessage({ label, author, basenames = [] }) {
-  const subject = `chore(hub): sync Build state — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
+  const subject = `chore(product): sync Build state — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
   const body = basenames.length ? `Updated: ${basenames.join(', ')}` : '';
   return body ? `${subject}\n\n${body}` : subject;
 }
@@ -307,7 +307,7 @@ export async function runCheckpoint(root, opts = {}) {
   log(c.bold('\nyad checkpoint'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
   if (!exists(productConfigPath(root))) {
-    fail('no .sdlc/hub.json — checkpoint commits the Product Build ledger; run it from the Product');
+    fail('no .sdlc/product.json — checkpoint commits the Product Build ledger; run it from the Product');
     process.exitCode = 1;
     return;
   }

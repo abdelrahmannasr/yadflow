@@ -197,7 +197,7 @@ export function baseDirFor(env = process.env, runner = run, payloadCwd = null) {
   if (typeof payloadCwd === 'string' && payloadCwd) return payloadCwd;
   // `process.cwd()` BEFORE the git toplevel, which is the opposite of the old order and fixes a real
   // miss: the documented layout puts the Product in a subdirectory of its repo, so the toplevel is the
-  // repo, `hubRootFor` walks up from there, finds no `hub.json`, and ALLOWS a ledger edit it must
+  // repo, `productRootFor` walks up from there, finds no `hub.json`, and ALLOWS a ledger edit it must
   // refuse. Anchoring too deep still tends to resolve into the Product and deny; anchoring too
   // shallow misses entirely, so the shallower guess goes last.
   if (process.cwd()) return process.cwd();
@@ -313,7 +313,7 @@ export function denyMessage({ epic, rel, productRoot }) {
     'follows on merge.',
     '',
     ...PERSON_DOOR,
-    `hub: ${productRoot}   ·   a person can skip this hook for one command: YAD_HOOK_DISABLE=1`,
+    `product: ${productRoot}   ·   a person can skip this hook for one command: YAD_HOOK_DISABLE=1`,
   ].join('\n');
 }
 
@@ -329,7 +329,7 @@ export function indexDenyMessage({ rel, productRoot }) {
     'To see whether the committed one is behind:   yad doctor',
     '',
     ...PERSON_DOOR,
-    `hub: ${productRoot}   ·   a person can skip this hook for one command: YAD_HOOK_DISABLE=1`,
+    `product: ${productRoot}   ·   a person can skip this hook for one command: YAD_HOOK_DISABLE=1`,
   ].join('\n');
 }
 
@@ -467,7 +467,7 @@ export function commitDenyMessage({ hits, top }) {
     'To commit anyway, with the reason recorded in the commit (it adds a `Ledger-Override:` line):',
     '  yad commit --manual --reason "<why>" --type <type> -m "<subject>"   (add --force above 3 files)',
     'The check on the pull request still fails it, and quotes the reason.',
-    `hub: ${roots.join(', ')}`,
+    `product: ${roots.join(', ')}`,
   ].join('\n');
 }
 

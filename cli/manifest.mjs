@@ -560,6 +560,9 @@ export const PRODUCT_WIRING = {
 // The branch-protection setup guide (E48), linked from `yad doctor`'s `protection` section. A URL, not a
 // path: the reader is in their own repo, where `docs/` is not yadflow's.
 export const PROTECTION_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/blob/main/docs/branch-protection.md';
+// The hub -> Product hand-change guide (E124), linked from `yad migrate`'s last line while `.sdlc/hub.json` is on
+// disk. A URL for the same reason.
+export const PRODUCT_RENAME_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/blob/main/docs/migrations/hub-to-product.md';
 
 export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.mjs', dest: 'hooks/ledger-guard.mjs' },

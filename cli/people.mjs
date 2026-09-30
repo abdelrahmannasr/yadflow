@@ -623,7 +623,7 @@ export function teamHint(counted) {
 // The ONE wiring every surface uses (`yad mode`, `gate status`, `yad next`, `yad doctor`): null outside
 // solo mode, where no count is read; otherwise `teamHint` over the count the caller already read, or a
 // fresh one with the roster aliases (without them an older roster-shaped approval reads as a second
-// person). `solo` is the caller's `isSolo(hub)` — it lives in cli/gate.mjs, which imports this file.
+// person). `solo` is the caller's `isSolo(productConfig)` — it lives in cli/gate.mjs, which imports this file.
 export function soloTeamHint(root, productConfig, { solo, headCount = null, today = null } = {}) {
   if (!solo) return null;
   return teamHint(headCount || activePeople(root, { today: today || undefined, aliases: legacyLogins(productConfig) }));

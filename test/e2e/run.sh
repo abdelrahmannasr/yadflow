@@ -62,46 +62,46 @@ export E2E_GH_PHASE_FILE="$WORK/gh-phase"
 echo pending > "$E2E_GH_PHASE_FILE"
 [ "$(command -v gh)" = "$WORK/shim/gh" ] || die "fake gh not first on PATH"
 
-say "scaffold hub + code repo"
-HUB="$WORK/hub"
-BACKEND="$HUB/repos/backend"
+say "scaffold Product + code repo"
+PRODUCT="$WORK/product"
+BACKEND="$PRODUCT/repos/backend"
 mkdir -p "$BACKEND"
-git init -q "$HUB" && git_id "$HUB"
-( cd "$HUB" && echo "# hub" > README.md && git add -A && git commit -qm "init hub" )
+git init -q "$PRODUCT" && git_id "$PRODUCT"
+( cd "$PRODUCT" && echo "# product" > README.md && git add -A && git commit -qm "init product" )
 git init -q "$BACKEND" && git_id "$BACKEND"
 ( cd "$BACKEND" && echo '{}' > package.json && git add -A && git commit -qm "init backend" && git branch -qM main )
 HEAD_BACKEND="$(git -C "$BACKEND" rev-parse HEAD)"
 
 # Pre-seed Product config + registry so the non-interactive setup keeps them. The roster, emails and
 # domain_owner are what an older release wrote: left on disk, never read (E62).
-mkdir -p "$HUB/.sdlc"
-cat > "$HUB/.sdlc/hub.json" <<EOF
+mkdir -p "$PRODUCT/.sdlc"
+cat > "$PRODUCT/.sdlc/hub.json" <<EOF
 {"platform":"github","bridge_enabled":true,"bridge":true,"default_branch":"main","roster":[
   {"login":"alice","name":"Alice","role":"owner","email":"alice@corp.io"},
   {"login":"bob","name":"Bob","role":"reviewer","email":"bob@corp.io"}
 ]}
 EOF
-cat > "$HUB/.sdlc/repos.json" <<EOF
+cat > "$PRODUCT/.sdlc/repos.json" <<EOF
 {"repos":[{"name":"backend","path":"repos/backend","platform":"github","domain_owner":"Alice",
  "default_branch":"main","syncedHead":"$HEAD_BACKEND",
  "contextPack":".sdlc/code-context/backend/pack.md","codeMap":".sdlc/code-context/backend/code-map.md"}]}
 EOF
 
 say "yad setup (non-interactive, team profile + tools configured)"
-SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" --team 2 --brownfield --separate --tools || die "yad setup failed"
-jassert "$HUB/.sdlc/hub.json" 'j.solo === false && j.profile.codebase === "brownfield" && j.profile.repo_layout === "separate" && j.profile.team_size === 2'
-[ -f "$HUB/.claude/skills/yad-epic/SKILL.md" ] || die "skills not installed"
+SDLC_NONINTERACTIVE=1 yad setup --dir "$PRODUCT" --team 2 --brownfield --separate --tools || die "yad setup failed"
+jassert "$PRODUCT/.sdlc/hub.json" 'j.solo === false && j.profile.codebase === "brownfield" && j.profile.repo_layout === "separate" && j.profile.team_size === 2'
+[ -f "$PRODUCT/.claude/skills/yad-epic/SKILL.md" ] || die "skills not installed"
 [ -f "$BACKEND/checks/spec-link.sh" ] || die "code repo not wired with check gates"
 [ -x "$BACKEND/checks/spec-link.sh" ] || die "spec-link.sh not executable"
 # No author allowlist is generated any more: the verified-commits gate checks signatures only (E62).
-[ ! -f "$HUB/.sdlc/verified-authors" ] || die "verified-authors must not be generated — the roster that fed it is gone"
+[ ! -f "$PRODUCT/.sdlc/verified-authors" ] || die "verified-authors must not be generated — the roster that fed it is gone"
 
 say "setup recorded the pluggable tool connections (design + testing)"
-jassert "$HUB/.sdlc/design.json" 'j.tool === "figma" && j.auth === "user" && j.source === null'
-jassert "$HUB/.sdlc/testing.json" 'j.tool === "playwright" && j.auth === "user" && j.source === null'
+jassert "$PRODUCT/.sdlc/design.json" 'j.tool === "figma" && j.auth === "user" && j.source === null'
+jassert "$PRODUCT/.sdlc/testing.json" 'j.tool === "playwright" && j.auth === "user" && j.source === null'
 
 say "yad check is clean after setup"
-CHECK_OUT="$(yad check --dir "$HUB")" || die "yad check failed"
+CHECK_OUT="$(yad check --dir "$PRODUCT")" || die "yad check failed"
 echo "$CHECK_OUT" | grep -q "summary: 0 missing, 0 new, 0 outdated, 0 modified, 0 stale, 0 legacy" \
   || die "yad check reports drift right after setup: $(echo "$CHECK_OUT" | grep summary)"
 # Land the wiring on the code repo's main (as a real team would) so feature branches diff clean.
@@ -109,7 +109,7 @@ echo "$CHECK_OUT" | grep -q "summary: 0 missing, 0 new, 0 outdated, 0 modified, 
 ( cd "$BACKEND" && git add -A && git commit -qm "chore: wire yad check gates" )
 
 say "seed an epic at its review gate"
-EPIC="$HUB/epics/EP-e2e"
+EPIC="$PRODUCT/epics/EP-e2e"
 mkdir -p "$EPIC/.sdlc"
 printf -- '---\nowner: Alice\nrepos: [backend]\nstatus: draft\n---\n# EP-e2e\n' > "$EPIC/epic.md"
 cat > "$EPIC/.sdlc/state.json" <<'EOF'
@@ -120,12 +120,12 @@ cat > "$EPIC/.sdlc/state.json" <<'EOF'
 EOF
 
 say "yad gate open opens the PR but writes NO ledger (CI is the sole writer)"
-yad gate open EP-e2e epic.md --dir "$HUB" || die "gate open failed"
+yad gate open EP-e2e epic.md --dir "$PRODUCT" || die "gate open failed"
 [ ! -f "$EPIC/.sdlc/hub-prs.json" ] && [ ! -f "$EPIC/.sdlc/product-prs.json" ] || die "gate open must not write the ledger in verified mode"
 
 say "CI pre-merge is read-only in verified mode (Path B): no ledger, the platform is the source of truth"
 echo pending > "$E2E_GH_PHASE_FILE"
-yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
+yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$PRODUCT" || die "gate ci (pre-merge) failed"
 [ ! -f "$EPIC/.sdlc/hub-prs.json" ] && [ ! -f "$EPIC/.sdlc/product-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
 [ ! -f "$EPIC/.sdlc/approvals.json" ] || die "pre-merge must not write approvals (Path B)"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
@@ -133,26 +133,26 @@ fa_status "$EPIC/epic.md" draft   # CI never touches the artifact pre-merge
 
 say "local yad gate sync is advisory in verified mode (writes nothing, even on an approved+merged PR)"
 echo approved > "$E2E_GH_PHASE_FILE"
-yad gate sync EP-e2e epic.md --dir "$HUB" || die "advisory gate sync failed"
+yad gate sync EP-e2e epic.md --dir "$PRODUCT" || die "advisory gate sync failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
 
 say "CI --merged advances on the default branch: step done + artifact status approved"
-yad gate ci --branch review/EP-e2e/epic --pr 7 --merged --no-push --dir "$HUB" || die "gate ci (merge) failed"
+yad gate ci --branch review/EP-e2e/epic --pr 7 --merged --no-push --dir "$PRODUCT" || die "gate ci (merge) failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
 # The platform login, with no role: the roster seeded above is left on disk and never read (E62).
 jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "alice" && a.role === undefined && a.status === "approved")'
 # The closing record names the login the platform CLI reports for whoever ran the merge sync (E62).
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").closed.by === "octo-ci"'
 fa_status "$EPIC/epic.md" approved
-yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
+yad gate status EP-e2e --dir "$PRODUCT" >/dev/null || die "gate status failed"
 
 say "yad sync-status is idempotent and preserves owned values"
-SYNC_OUT="$(yad sync-status EP-e2e --dir "$HUB")" || die "sync-status failed"
+SYNC_OUT="$(yad sync-status EP-e2e --dir "$PRODUCT")" || die "sync-status failed"
 echo "$SYNC_OUT" | grep -qi "in sync" || die "sync-status should report nothing to do after the gate ran: $SYNC_OUT"
-yad sync-status EP-e2e --dir "$HUB" --dry-run >/dev/null || die "sync-status --dry-run failed"
+yad sync-status EP-e2e --dir "$PRODUCT" --dry-run >/dev/null || die "sync-status --dry-run failed"
 
 say "gate ci pre-merge makes NO commit in verified mode (Path B): nothing rides the review branch"
-CIE="$HUB/epics/EP-cici"
+CIE="$PRODUCT/epics/EP-cici"
 mkdir -p "$CIE/.sdlc"
 printf -- '---\nid: EP-cici\nowner: Alice\nrepos: [backend]\nstatus: draft\n---\n# EP-cici\n' > "$CIE/epic.md"
 cat > "$CIE/.sdlc/state.json" <<'EOF'
@@ -162,40 +162,40 @@ cat > "$CIE/.sdlc/state.json" <<'EOF'
 ]}
 EOF
 echo pending > "$E2E_GH_PHASE_FILE"
-HEAD_BEFORE="$(git -C "$HUB" rev-parse HEAD)"
-yad gate ci --branch review/EP-cici/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
+HEAD_BEFORE="$(git -C "$PRODUCT" rev-parse HEAD)"
+yad gate ci --branch review/EP-cici/epic --pr 7 --no-push --dir "$PRODUCT" || die "gate ci (pre-merge) failed"
 # Path B: pre-merge writes/commits nothing — the platform PR holds the review state until merge.
-[ "$HEAD_BEFORE" = "$(git -C "$HUB" rev-parse HEAD)" ] || die "pre-merge must not commit (Path B)"
+[ "$HEAD_BEFORE" = "$(git -C "$PRODUCT" rev-parse HEAD)" ] || die "pre-merge must not commit (Path B)"
 [ ! -f "$CIE/.sdlc/hub-prs.json" ] && [ ! -f "$CIE/.sdlc/product-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
 jassert "$CIE/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
 fa_status "$CIE/epic.md" draft   # CI never touches the artifact pre-merge
 
 say "gate ci --merged: advances the step + flips status to approved on the default branch"
 echo approved > "$E2E_GH_PHASE_FILE"
-yad gate ci --branch review/EP-cici/epic --pr 7 --merged --no-push --dir "$HUB" || die "gate ci (merge) failed"
+yad gate ci --branch review/EP-cici/epic --pr 7 --merged --no-push --dir "$PRODUCT" || die "gate ci (merge) failed"
 jassert "$CIE/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
 fa_status "$CIE/epic.md" approved
-MERGE_FILES="$(git -C "$HUB" show --name-only --format= HEAD | grep '^epics/EP-cici/' || true)"
+MERGE_FILES="$(git -C "$PRODUCT" show --name-only --format= HEAD | grep '^epics/EP-cici/' || true)"
 echo "$MERGE_FILES" | grep -q '^epics/EP-cici/epic.md' || die "merge must commit the artifact status flip: $MERGE_FILES"
 
 say "yad next drives Build and guards step order"
-NEXT_OUT="$(yad next EP-e2e --dir "$HUB")" || die "yad next failed"
+NEXT_OUT="$(yad next EP-e2e --dir "$PRODUCT")" || die "yad next failed"
 echo "$NEXT_OUT" | grep -qi "build\|yad-run" || die "yad next should point at Build at ready-for-build: $NEXT_OUT"
-yad next EP-e2e --check epic --dir "$HUB" && die "precondition --check must exit non-zero for a done step"
-yad next --dir "$HUB" >/dev/null || die "general yad next failed"
+yad next EP-e2e --check epic --dir "$PRODUCT" && die "precondition --check must exit non-zero for a done step"
+yad next --dir "$PRODUCT" >/dev/null || die "general yad next failed"
 
 say "yad doctor is healthy on the fresh project"
-yad doctor --dir "$HUB" >/dev/null || die "doctor must pass on a healthy project"
+yad doctor --dir "$PRODUCT" >/dev/null || die "doctor must pass on a healthy project"
 
 say "a corrupt ledger fails loudly (never silently defaulted)"
 cp "$EPIC/.sdlc/approvals.json" "$WORK/approvals.bak"
 echo '{ corrupt' > "$EPIC/.sdlc/approvals.json"
-if yad gate sync EP-e2e epic.md --dir "$HUB" >/dev/null 2>&1; then
+if yad gate sync EP-e2e epic.md --dir "$PRODUCT" >/dev/null 2>&1; then
   die "gate sync must fail on a corrupt approvals.json"
 fi
-DOCTOR_OUT="$(yad doctor --json --dir "$HUB" || true)"
+DOCTOR_OUT="$(yad doctor --json --dir "$PRODUCT" || true)"
 echo "$DOCTOR_OUT" | grep -q "YAD-STATE-001" || die "doctor must surface the corrupt ledger with YAD-STATE-001"
-if yad doctor --dir "$HUB" >/dev/null 2>&1; then
+if yad doctor --dir "$PRODUCT" >/dev/null 2>&1; then
   die "doctor must exit 1 while a ledger is corrupt"
 fi
 cp "$WORK/approvals.bak" "$EPIC/.sdlc/approvals.json"
@@ -210,8 +210,8 @@ yad commit --dir "$BACKEND" --type feat -m "add endpoint" || die "yad commit fai
 git -C "$BACKEND" log -1 --format=%B | grep -q "Task: EP-e2e-S01-T01" || die "Task trailer missing from commit"
 
 say "yad review walkthrough sequences the code diff into ordered stops (pair review)"
-HEAD_HUB_WALK="$(git -C "$HUB" rev-parse HEAD)"
-WALK_JSON="$(yad review walkthrough --dir "$HUB" --repo backend --pr 1)" || die "yad review walkthrough failed"
+HEAD_PRODUCT_WALK="$(git -C "$PRODUCT" rev-parse HEAD)"
+WALK_JSON="$(yad review walkthrough --dir "$PRODUCT" --repo backend --pr 1)" || die "yad review walkthrough failed"
 echo "$WALK_JSON" | node -e '
   let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
     const o=JSON.parse(s);
@@ -220,7 +220,7 @@ echo "$WALK_JSON" | node -e '
     if(o.markers.pair!=="<!-- yad:pair -->") throw new Error("pair marker missing from bundle");
   });
 ' || die "walkthrough stops malformed"
-[ "$HEAD_HUB_WALK" = "$(git -C "$HUB" rev-parse HEAD)" ] || die "walkthrough must not write/commit anything (advisory only)"
+[ "$HEAD_PRODUCT_WALK" = "$(git -C "$PRODUCT" rev-parse HEAD)" ] || die "walkthrough must not write/commit anything (advisory only)"
 ls "$EPIC/.sdlc/" | grep -qi "pair\|walkthrough" && die "walkthrough must not create a ledger file"
 
 say "installed check gates pass on the linked branch"

@@ -6,7 +6,7 @@
 // and the manifest-hash staleness check (reusing the head-sha idea from repo.mjs). It NEVER touches
 // epic state, approvals, or the contract lock — docs are an output enrichment, not a gate.
 //
-// Pure mapping fns (deployTargetFromHub / siteBasePath / docsArtifactHash / docsStale / pagesWorkflow)
+// Pure mapping fns (deployTargetFromProduct / siteBasePath / docsArtifactHash / docsStale / pagesWorkflow)
 // are exported for unit tests; the side-effecting runDocs orchestrates them.
 import path from 'node:path';
 import fs from 'node:fs';

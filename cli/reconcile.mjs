@@ -32,7 +32,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // --- missing one-time setup (needs the interactive wizard) ---
   const gaps = [];
   if (!exists(path.join(root, PROJECT_FILES.version))) gaps.push('module not installed (.sdlc/cli-version.json absent)');
-  if (!exists(productConfigPath(root))) gaps.push('hub not configured (.sdlc/hub.json absent)');
+  if (!exists(productConfigPath(root))) gaps.push('Product not configured (.sdlc/product.json absent)');
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   if (!exists(path.join(root, PROJECT_FILES.reposRegistry))) gaps.push('no repos registered (.sdlc/repos.json absent)');
 
@@ -64,7 +64,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   ];
   if (ideState.needsRepair) {
     actions.push({
-      scope: 'hub',
+      scope: 'product',
       item: `${PROJECT_FILES.version} ideTargets`,
       status: 'outdated',
       root,
@@ -81,7 +81,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const head = gitHead(path.resolve(root, repo.path));
     if (head && repo.syncedHead && head !== repo.syncedHead) {
       staleRepos.push(repo);
-      // packRepo writes the repomix cache under the HUB root (root/repo.contextPack, e.g.
+      // packRepo writes the repomix cache under the Product root (root/repo.contextPack, e.g.
       // .sdlc/code-context/<name>/pack.md), so the touched path belongs to the Product — and is commonly
       // gitignored, in which case the push stage's check-ignore drops it. codeMap is AI-generated
       // later, not here, so only the pack is claimed.
@@ -248,7 +248,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   writeCanonicalStamp();
-  appliedActions.push({ scope: 'hub', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
+  appliedActions.push({ scope: 'product', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
   // Record what we wrote (and what was already correct) so the NEXT update can tell a stale managed
   // file from an edited one. Seeding the already-correct files is what migrates a pre-ledger install.
   // A file left as `modified` records nothing — it differs from the template by definition.

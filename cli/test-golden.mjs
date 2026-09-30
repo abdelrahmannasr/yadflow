@@ -33,7 +33,7 @@ import { collectDoctor } from './doctor.mjs';
 import { loadLedger, gatePredicate, artifactHash, acceptedHashes, optionalStepsFor } from './epic-state.mjs';
 import { loadProduct, isSolo, requireEngagement } from './gate.mjs';
 
-// E70: `yad doctor` would ask `gh` about the golden hub's branch protection — never the developer's real
+// E70: `yad doctor` would ask `gh` about the golden Product's branch protection — never the developer's real
 // account from a test (the YAD_PLATFORM_LOGIN precedent in the other suites).
 process.env.YAD_PLATFORM_READ = '0';
 

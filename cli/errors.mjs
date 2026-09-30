@@ -24,11 +24,11 @@ export const CODES = {
   'YAD-STATE-006': 'a Build ledger is locked by another yad process that is writing it',
   'YAD-STATE-007': 'an epic cannot be seeded — the profile, the type or the existing ledger refuses it',
   'YAD-STATE-008': 'a file kept under two names (product.json + hub.json, or product-prs.json + hub-prs.json) says different things under each',
-  'YAD-CFG-001': 'hub.json names an unknown platform (expected github, gitlab, or null)',
+  'YAD-CFG-001': 'the Product settings (product.json) name an unknown platform (expected github, gitlab, or null)',
   'YAD-CFG-002': 'design.json names an unknown design tool (expected one of config.yaml design.tools, or none)',
   'YAD-CFG-003': 'testing.json names an unknown testing tool (expected one of config.yaml testing.tools, or none)',
   'YAD-CFG-004': 'learning.json names an unknown learning tool (expected one of config.yaml learning.tools, or none)',
-  'YAD-CFG-005': 'hub.json sets a platform but is missing git_url (required to scope auth + open PRs)',
+  'YAD-CFG-005': 'the Product settings (product.json) set a platform but are missing git_url (required to scope auth + open PRs)',
   'YAD-CFG-006': 'skills.json binds a step to something that is not a skill name (expected a string, or a non-empty list of strings)',
   'YAD-CLI-001': 'a --json run needed an answer that only a prompt could give',
 };

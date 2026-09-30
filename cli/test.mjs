@@ -1016,7 +1016,7 @@ test('setup purge: removedModuleActions deletes lingering yad-review-comments in
 
 test('module action builders reject unknown, alias, absolute, traversal, non-string, and empty targets', () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-boundary-'));
-  const T = path.join(parent, 'hub');
+  const T = path.join(parent, 'product');
   const sentinel = path.join(parent, 'sentinel.txt');
   fs.mkdirSync(T);
   fs.writeFileSync(sentinel, 'safe');
@@ -1040,7 +1040,7 @@ test('module action builders reject file and symlink IDE roots before constructi
   skip: process.platform === 'win32',
 }, () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-root-'));
-  const T = path.join(parent, 'hub');
+  const T = path.join(parent, 'product');
   const outside = path.join(parent, 'outside');
   fs.mkdirSync(T);
   fs.mkdirSync(outside);
@@ -1059,7 +1059,7 @@ test('module action builders reject file and symlink IDE roots before constructi
 
 test('OpenCode write actions reject unsafe command leaves before constructing actions', () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-opencode-leaf-'));
-  const T = path.join(parent, 'hub');
+  const T = path.join(parent, 'product');
   const commands = path.join(T, '.opencode/commands');
   const currentDest = path.join(commands, 'yad-discovery.md');
   const outside = path.join(parent, 'outside.txt');
@@ -1186,7 +1186,7 @@ test('E123 update: an edited old workflow is kept (modified) until --overwrite-l
     const { value: r, out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
     assert.ok(r.items.some((i) => i.status === 'modified' && i.item.startsWith(oldHubChecks)), 'reported as modified');
     assert.equal(fs.readFileSync(path.join(T, oldHubChecks), 'utf8'), edited, 'kept as the team left it');
-    assert.match(out, /hub\/\.github\/workflows\/yad-hub-checks\.yml was renamed \.github\/workflows\/yad-product-checks\.yml in this release, but it was edited, so it is kept — it goes on running under its old name/);
+    assert.match(out, /product\/\.github\/workflows\/yad-hub-checks\.yml was renamed \.github\/workflows\/yad-product-checks\.yml in this release, but it was edited, so it is kept — it goes on running under its old name/);
     assert.match(out, /`yad update --overwrite-local` replaces it with \.github\/workflows\/yad-product-checks\.yml \(your copy is saved as yad-hub-checks\.yml\.yad-orig\); then copy your edits into/);
     assert.ok(Object.hasOwn(ledgerOf(T), oldHubChecks), 'nothing done, so the record keeps its line');
     assert.ok(!fs.existsSync(path.join(T, newProductChecks)), 'and the new name is not installed beside it');
@@ -1282,7 +1282,7 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
     const gate = path.join(T, 'checks/pr-title.sh');
     fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
     const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
-    assert.match(out, /hub\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes — every Product PR fails that check — it was edited, so it is kept/);
+    assert.match(out, /product\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes — every Product PR fails that check — it was edited, so it is kept/);
     const { collectDoctor } = await import('./doctor.mjs');
     const hit = collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:'));
     assert.deepEqual(hit.map((x) => [x.id, x.status]), [['profile:checks/pr-title.sh', 'warn']]);
@@ -1296,8 +1296,10 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
       assert.equal(productProfileGap(path.join(ROOT, g)), null, g);
     }
     // `product` in the list but never turned into `hub`: it passes the list and skips every Product rule.
+    // Built from the shipped copy as a 4.0.0-next copy had it: branching on `= hub`, with no mapping line.
     const shipped = fs.readFileSync(path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-title.sh'), 'utf8');
-    fs.writeFileSync(gate, shipped.replace('[ "$PROFILE" = product ] && PROFILE=hub', ''));
+    assert.ok(shipped.includes('[ "$PROFILE" = hub ] && PROFILE=product') && shipped.includes('if [ "$PROFILE" = product ]; then'), 'the shipped shape this test rewrites');
+    fs.writeFileSync(gate, shipped.replace('[ "$PROFILE" = hub ] && PROFILE=product', '').replace('if [ "$PROFILE" = product ]; then', 'if [ "$PROFILE" = hub ]; then'));
     assert.equal(productProfileGap(gate), 'unmapped');
     await reconcile(T, { fix: true }); // puts the new workflow back
     const unmapped = collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh');
@@ -1309,13 +1311,16 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
       ['if [ "$PROFILE" = hub ]; then', '[[ $PROFILE == product ]] && PROFILE=hub', null],
       ['if [ "$PROFILE" = hub ]; then', 'case "$PROFILE" in product) PROFILE=hub ;; esac', null],
       ['if [ "$PROFILE" = hub ]; then', '# we used to run [ "$PROFILE" = product ] && PROFILE=hub here', 'unmapped'],
+      // The shipped shape since E124: the mapping compares with `= hub`, and is not a branch.
+      ['if [ "$PROFILE" = product ]; then', '[ "$PROFILE" = hub ] && PROFILE=product', null],
+      ['if [[ $PROFILE == product ]]; then', '[[ "$PROFILE" == hub ]] && PROFILE="product"', null],
     ]) {
       fs.writeFileSync(gate, `case "$PROFILE" in code|hub|product) ;; *) exit 1 ;; esac\n${mapping}\n${branch}\n  :\nfi\n`);
       assert.equal(productProfileGap(gate), gap, `${branch} / ${mapping}`);
     }
     // commit-message.sh has no `= hub` branch, so a missing mapping there changes nothing.
     const cm = path.join(T, 'checks/commit-message.sh');
-    fs.writeFileSync(cm, fs.readFileSync(cm, 'utf8').replace('[ "$PROFILE" = product ] && PROFILE=hub', ''));
+    fs.writeFileSync(cm, fs.readFileSync(cm, 'utf8').replace('[ "$PROFILE" = hub ] && PROFILE=product', ''));
     assert.equal(productProfileGap(cm), null);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -1828,7 +1833,7 @@ function productDir() {
   return T;
 }
 
-test('detectStage: code-repo when the root is not a hub, or the target repo is a sub-repo', () => {
+test('detectStage: code-repo when the root is not a Product, or the target repo is a sub-repo', () => {
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-')); // no hub.json
   assert.equal(detectStage(plain, plain, 'feat/EP-x-S01-T01'), 'code-repo');
   const T = productDir();
@@ -1840,20 +1845,20 @@ test('detectStage: code-repo when the root is not a hub, or the target repo is a
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('detectStage: on the Product, a review/EP-* head is hub-shape, anything else is hub-tooling', () => {
+test('detectStage: on the Product, a review/EP-* head is product-shape, anything else is product-tooling', () => {
   const T = productDir();
-  assert.equal(detectStage(T, T, 'review/EP-demo/architecture'), 'hub-shape');
-  assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'hub-shape');
-  assert.equal(detectStage(T, T, 'ci/some-fix'), 'hub-tooling');
-  assert.equal(detectStage(T, T, 'review/not-an-epic/x'), 'hub-tooling'); // must be review/EP-*
+  assert.equal(detectStage(T, T, 'review/EP-demo/architecture'), 'product-shape');
+  assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'product-shape');
+  assert.equal(detectStage(T, T, 'ci/some-fix'), 'product-tooling');
+  assert.equal(detectStage(T, T, 'review/not-an-epic/x'), 'product-tooling'); // must be review/EP-*
   // path.resolve normalises a trailing-slash / "." repoRoot to the same Product
-  assert.equal(detectStage(T, T + path.sep, 'ci/x'), 'hub-tooling');
+  assert.equal(detectStage(T, T + path.sep, 'ci/x'), 'product-tooling');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('templateBody: hub-tooling emits the code-task shape (fixes #80) and fills the risk', () => {
+test('templateBody: product-tooling emits the code-task shape (fixes #80) and fills the risk', () => {
   const T = productDir();
-  const b = templateBody(T, 'github', { task: 'EP-x-S01-T01', risk: 'low', contract: false, domains: 'hub', stage: 'hub-tooling' });
+  const b = templateBody(T, 'github', { task: 'EP-x-S01-T01', risk: 'low', contract: false, domains: 'product', stage: 'product-tooling' });
   assert.match(b, /## Summary/);
   assert.match(b, /## Checklist/);
   assert.match(b, /\*\*Risk level:\*\* low/);
@@ -1862,15 +1867,15 @@ test('templateBody: hub-tooling emits the code-task shape (fixes #80) and fills 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('templateBody: the hub-tooling body passes the real pr-template hub gate on a tooling head (#80 regression)', () => {
+test('templateBody: the product-tooling body passes the real pr-template Product gate on a tooling head (#80 regression)', () => {
   const T = productDir();
-  const b = templateBody(T, 'github', { risk: 'low', stage: 'hub-tooling' });
+  const b = templateBody(T, 'github', { risk: 'low', stage: 'product-tooling' });
   const bodyFile = path.join(T, 'pr-body.md');
   fs.writeFileSync(bodyFile, b);
   const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
   // before the fix this body was the artifact-review template and the gate FAILED it.
   const code = (() => {
-    try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'ci/some-fix', bodyFile], { stdio: 'pipe' }); return 0; }
+    try { execFileSync('bash', [gate, '--profile', 'product', '--head', 'ci/some-fix', bodyFile], { stdio: 'pipe' }); return 0; }
     catch (e) { return e.status; }
   })();
   assert.equal(code, 0);
@@ -1901,8 +1906,8 @@ for (const profile of ['hub', 'product']) {
     fs.rmSync(T, { recursive: true, force: true });
   });
 
-  // pr-title is where the normalisation is load-bearing. Without it `$PROFILE` stays `product`, the
-  // `= hub` branch is skipped, and the whole review-branch arm — including the guard that stops a
+  // pr-title is where the normalisation is load-bearing. Without it `$PROFILE` stays `hub`, the
+  // `= product` branch is skipped, and the whole review-branch arm — including the guard that stops a
   // plain code title carrying an artifact change past the artifact review — never runs. So this
   // asserts BOTH directions: the right title passes, and the wrong one is still refused.
   test(`pr-title: --profile ${profile} accepts a review title`, () => {
@@ -1925,7 +1930,7 @@ for (const profile of ['hub', 'product']) {
 // A sweep once rewrote the compatibility regex itself into `(Shape|Shape)`; these two cases are
 // what would have caught that.
 for (const heading of ['## Impact & Risk (front-half)', '## Impact & Risk (Shape)']) {
-  test(`pr-template hub gate accepts '${heading}' (rule 3: add before you remove)`, () => {
+  test(`pr-template Product gate accepts '${heading}' (rule 3: add before you remove)`, () => {
     const T = productDir();
     const bodyFile = path.join(T, 'pr-body.md');
     fs.writeFileSync(bodyFile, [
@@ -1935,7 +1940,7 @@ for (const heading of ['## Impact & Risk (front-half)', '## Impact & Risk (Shape
     ].join('\n'));
     const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
     const r = (() => {
-      try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-demo/architecture', bodyFile], { stdio: 'pipe' }); return { code: 0, out: '' }; }
+      try { execFileSync('bash', [gate, '--profile', 'product', '--head', 'review/EP-demo/architecture', bodyFile], { stdio: 'pipe' }); return { code: 0, out: '' }; }
       catch (e) { return { code: e.status, out: String(e.stdout || '') + String(e.stderr || '') }; }
     })();
     assert.equal(r.code, 0, `the Product gate rejected '${heading}':\n${r.out}`);
@@ -1943,13 +1948,13 @@ for (const heading of ['## Impact & Risk (front-half)', '## Impact & Risk (Shape
   });
 }
 
-test('fillHubTemplate: the generated review-PR body carries every section the Product gate requires (#103)', () => {
+test('fillProductTemplate: the generated review-PR body carries every section the Product gate requires (#103)', () => {
   const b = fillProductTemplate({
     epic: 'EP-demo', artifact: 'architecture.md',
     step: { id: 'architecture-review', risk_tags: ['contract'] },
     owner: 'alice', domains: ['backend', 'mobile'],
   });
-  // check_hub_body requires all four; `## Checklist` was the one missing before the fix.
+  // check_product_body requires all four; `## Checklist` was the one missing before the fix.
   assert.match(b, /^## Artifact under review$/m);
   assert.match(b, /^## Impact & Risk \(front-half\)$/m);
   assert.match(b, /^## Checklist$/m);
@@ -1960,7 +1965,7 @@ test('fillHubTemplate: the generated review-PR body carries every section the Pr
   assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory\)$/m);
 });
 
-test('fillHubTemplate: an untagged step states the count too — the floor is still a number', () => {
+test('fillProductTemplate: an untagged step states the count too — the floor is still a number', () => {
   const b = fillProductTemplate({
     epic: 'EP-demo', artifact: 'epic.md', step: { id: 'epic-review', risk_tags: [] },
     owner: 'alice', domains: ['backend'],
@@ -1969,8 +1974,8 @@ test('fillHubTemplate: an untagged step states the count too — the floor is st
   assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 1 approver = base 1$/m);
 });
 
-test('fillHubTemplate: the generated body passes the real pr-template hub gate (#103 regression)', () => {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubbody-'));
+test('fillProductTemplate: the generated body passes the real pr-template Product gate (#103 regression)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-productbody-'));
   const b = fillProductTemplate({
     epic: 'EP-demo', artifact: 'architecture.md',
     step: { id: 'architecture-review', risk_tags: [] },
@@ -1981,14 +1986,14 @@ test('fillHubTemplate: the generated body passes the real pr-template hub gate (
   const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
   // before the fix the generated body omitted `## Checklist` and the gate FAILED it on a review/EP-* head.
   const code = (() => {
-    try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-demo/architecture', bodyFile], { stdio: 'pipe' }); return 0; }
+    try { execFileSync('bash', [gate, '--profile', 'product', '--head', 'review/EP-demo/architecture', bodyFile], { stdio: 'pipe' }); return 0; }
     catch (e) { return e.status; }
   })();
   assert.equal(code, 0);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('fillHubTemplate: a short-lane review PR does not ask for a contract re-lock it cannot do (E40)', () => {
+test('fillProductTemplate: a short-lane review PR does not ask for a contract re-lock it cannot do (E40)', () => {
   const args = {
     epic: 'EP-bump-deps', artifact: 'stories/', step: { id: 'stories-review', risk_tags: [] },
     owner: 'alice', domains: ['backend'],
@@ -2013,7 +2018,7 @@ test('fillHubTemplate: a short-lane review PR does not ask for a contract re-loc
     const bodyFile = path.join(T, 'pr-body.md');
     fs.writeFileSync(bodyFile, body);
     const code = (() => {
-      try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-bump-deps/stories', bodyFile], { stdio: 'pipe' }); return 0; }
+      try { execFileSync('bash', [gate, '--profile', 'product', '--head', 'review/EP-bump-deps/stories', bodyFile], { stdio: 'pipe' }); return 0; }
       catch (e) { return e.status; }
     })();
     assert.equal(code, 0, 'both wordings must pass the Product gate');
@@ -2021,19 +2026,19 @@ test('fillHubTemplate: a short-lane review PR does not ask for a contract re-loc
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('templateBody: code-repo / hub-shape stages read the repo\'s own committed template', () => {
+test('templateBody: code-repo / product-shape stages read the repo\'s own committed template', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
   fs.mkdirSync(path.join(T, '.github'), { recursive: true });
   fs.writeFileSync(path.join(T, '.github/pull_request_template.md'), '## Summary\n- **Risk level:** medium\n');
-  // a non-hub-tooling stage uses the committed repo template (here a marker we can detect)
+  // a non-product-tooling stage uses the committed repo template (here a marker we can detect)
   const b = templateBody(T, 'github', { risk: 'high', stage: 'code-repo' });
   assert.match(b, /\*\*Risk level:\*\* high/); // the committed template's value is overwritten
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('templateBody: hub-tooling on gitlab uses the bundled MR template, not the repo file', () => {
+test('templateBody: product-tooling on gitlab uses the bundled MR template, not the repo file', () => {
   const T = productDir(); // its .github file would be artifact-review; gitlab must pull the packaged one
-  const b = templateBody(T, 'gitlab', { risk: 'low', stage: 'hub-tooling' });
+  const b = templateBody(T, 'gitlab', { risk: 'low', stage: 'product-tooling' });
   assert.match(b, /## Summary/);
   assert.match(b, /## Checklist/);
   assert.match(b, /\*\*Risk level:\*\* low/);
@@ -2041,9 +2046,9 @@ test('templateBody: hub-tooling on gitlab uses the bundled MR template, not the 
 });
 
 test('templateBody: fills the Spec dir from the task and the Summary from the commit (stale-placeholder fix)', () => {
-  const T = productDir(); // hub-tooling loads the real bundled template (carries the Spec + Summary placeholders)
+  const T = productDir(); // product-tooling loads the real bundled template (carries the Spec + Summary placeholders)
   const b = templateBody(T, 'github', {
-    task: 'EP-resident-portal-v1-S06-T08', summary: 'Add the thing', risk: 'low', stage: 'hub-tooling',
+    task: 'EP-resident-portal-v1-S06-T08', summary: 'Add the thing', risk: 'low', stage: 'product-tooling',
   });
   // Story/task line is the task; the Spec line is the STORY dir (task minus its -T0N suffix), not the placeholder
   assert.match(b, /- Story \/ task: `EP-resident-portal-v1-S06-T08`/);
@@ -2057,7 +2062,7 @@ test('templateBody: fills the Spec dir from the task and the Summary from the co
 
 test('templateBody: a `$` in the summary is inserted verbatim, not read as a $1/$& replacement token', () => {
   const T = productDir();
-  const b = templateBody(T, 'github', { summary: 'use $1 as the fallback and $& too', risk: 'low', stage: 'hub-tooling' });
+  const b = templateBody(T, 'github', { summary: 'use $1 as the fallback and $& too', risk: 'low', stage: 'product-tooling' });
   assert.match(b, /## Summary\nuse \$1 as the fallback and \$& too\n/);
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -2075,14 +2080,14 @@ test('templateBody: a CRLF-checked-out template still gets its Summary filled (W
 
 test('templateBody: without a task/summary the Spec + Summary placeholders degrade in place', () => {
   const T = productDir();
-  const b = templateBody(T, 'github', { risk: 'low', stage: 'hub-tooling' });
+  const b = templateBody(T, 'github', { risk: 'low', stage: 'product-tooling' });
   assert.match(b, /specs\/EP-<slug>-S0N\//); // no task => story placeholder preserved
   assert.match(b, /What this PR does/);       // no summary => guidance comment preserved
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------------------------
-// gateOpen head override (P1) + runOpenPr hub-shape delegation failure signalling (P2)
+// gateOpen head override (P1) + runOpenPr product-shape delegation failure signalling (P2)
 // ---------------------------------------------------------------------------------------------
 const { gateOpen } = await import('./gate.mjs');
 const { branchExists } = await import('./platform.mjs');
@@ -2182,7 +2187,7 @@ test('gateOpen: requests NO reviewers, still labels the touched domain (E62, BUG
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit code (P2)', async () => {
+test('runOpenPr: a product-shape delegation that opens no PR sets a non-zero exit code (P2)', async () => {
   const prev = process.exitCode;
   const T = productWithStoriesStep();
   let bare;
@@ -2197,7 +2202,7 @@ test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit co
     git(T, 'checkout', '-q', '-b', 'review/EP-demo/stories-S01');
     process.exitCode = 0;
     // pass --platform so open-pr's OWN platform detection passes (a bare-file remote is neither
-    // github nor gitlab) and execution actually reaches the hub-shape delegation, not the early abort.
+    // github nor gitlab) and execution actually reaches the product-shape delegation, not the early abort.
     let res;
     const out = await grab(() => runOpenPr(T, { platform: 'github' }).then((r) => { res = r; }));
     assert.match(out, /no Product platform/);                 // proves the delegated gateOpen was reached
@@ -2248,13 +2253,13 @@ test('runOpenPr bases the PR on the platform default, not a hardcoded main (#168
   }
 });
 
-test('runOpenPr never lets the HUB default_branch become a code repo\'s base (#168)', async () => {
+test('runOpenPr never lets the Product default_branch become a code repo\'s base (#168)', async () => {
   const prev = process.exitCode;
   const { T, bare } = codeRepoWithRemote();
   // A Product that owns this repo via the registry. The Product's own trunk is `trunk` — a DIFFERENT repo's
   // branch, which must never leak into a code-repo PR — and the registry entry deliberately declares
   // no default_branch, so the resolution has to fall past the Product rung to the platform.
-  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-basehub-'));
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-baseproduct-'));
   try {
     process.exitCode = 0;
     fs.mkdirSync(path.join(H, '.sdlc'), { recursive: true });
@@ -3589,27 +3594,27 @@ test('runSetup: team + --tools records a team profile and configures the optiona
 
 test('runSetup: fresh write records git_url from the origin remote', async () => {
   const { T } = scaffold();
-  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/hub.git');
+  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/product.git');
   process.env.SDLC_NONINTERACTIVE = '1';
   try {
     await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] });
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
   const productConfig = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
   assert.equal(productConfig.platform, 'github', 'platform detected from origin');
-  assert.equal(productConfig.git_url, 'https://github.com/acme/hub.git', 'git_url recorded from origin');
+  assert.equal(productConfig.git_url, 'https://github.com/acme/product.git', 'git_url recorded from origin');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('runSetup: re-run backfills a missing git_url without clobbering the roster', async () => {
   const { T } = scaffold();
-  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/hub.git');
+  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/product.git');
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice', roles: { hub: ['owner'] } }] }));
   process.env.SDLC_NONINTERACTIVE = '1';
   try {
     await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }); // keeps existing (no reconfigure)
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
   const productConfig = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
-  assert.equal(productConfig.git_url, 'https://github.com/acme/hub.git', 'missing git_url backfilled from origin');
+  assert.equal(productConfig.git_url, 'https://github.com/acme/product.git', 'missing git_url backfilled from origin');
   assert.equal(productConfig.roster.length, 1, 'roster preserved');
   // A re-run that changes an existing Product's mode records it, and names setup as the reason (E10).
   assert.deepEqual([productConfig.solo, productConfig.mode, productConfig.mode_set?.from, productConfig.mode_set?.to, productConfig.mode_set?.reason], [true, 'solo', 'team', 'solo', 'yad setup']);
@@ -3619,17 +3624,17 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
 
 // Regression for #97: a reconfigure must never drop a key it does not collect. Since E62 that includes a
 // `roster` and `verified_authors` an older release wrote: nothing reads them, and nothing deletes them.
-test('buildReconfiguredHub: overlays what this run collected and keeps every other key as it was', () => {
+test('buildReconfiguredProductConfig: overlays what this run collected and keeps every other key as it was', () => {
   const cur = {
     platform: 'github',
     verified_authors: ['dev@acme.com'],
     roster: [{ login: 'al', name: 'alice', email: 'al@acme.com', roles: { hub: ['owner'] } }],
   };
   const next = buildReconfiguredProductConfig(cur, {
-    platform: 'github', git_url: 'https://github.com/acme/hub.git', bridge_enabled: true, bridge: true,
+    platform: 'github', git_url: 'https://github.com/acme/product.git', bridge_enabled: true, bridge: true,
     default_branch: 'main', solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 },
   });
-  assert.equal(next.git_url, 'https://github.com/acme/hub.git', 'git_url added');
+  assert.equal(next.git_url, 'https://github.com/acme/product.git', 'git_url added');
   assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors left on disk');
   assert.deepEqual(next.roster, cur.roster, 'an older roster left on disk, untouched');
   assert.equal(next.solo, true, 'reconfigured fields overlaid');
@@ -5360,7 +5365,7 @@ test('a wrong-shape state.json fails with the file named', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('an unknown hub platform fails fast instead of degrading to local', async () => {
+test('an unknown Product platform fails fast instead of degrading to local', async () => {
   const { T } = scaffoldEpic();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'bitbucket', roster: [] }));
   await assert.rejects(
@@ -6149,7 +6154,7 @@ test('platformDefaultBranch asks gh/glab and degrades to ok:false instead of thr
   assert.equal(none.calls.length, 0);
 });
 
-test('resolveBaseBranch: flag > registry > hub > platform > origin/HEAD > main (#168)', () => {
+test('resolveBaseBranch: flag > registry > product > platform > origin/HEAD > main (#168)', () => {
   const gh = () => fakeRunner({ 'gh repo view': 'staging', 'git symbolic-ref': 'origin/trunk' });
 
   // 1. an explicit --base wins over everything
@@ -6163,7 +6168,7 @@ test('resolveBaseBranch: flag > registry > hub > platform > origin/HEAD > main (
     { base: 'develop', source: 'registry', platformDefault: 'staging' },
   );
   // 3. hub.json's default_branch, for a PR against the Product itself
-  assert.equal(resolveBaseBranch('github', { productConfig: { default_branch: 'trunk' }, runner: gh() }).source, 'hub');
+  assert.equal(resolveBaseBranch('github', { productConfig: { default_branch: 'trunk' }, runner: gh() }).source, 'product');
   // 4. THE #168 REGRESSION: no registry entry (the run-from-inside-the-code-repo path) must reach the
   //    platform, not fall through to a hardcoded 'main'
   assert.deepEqual(
@@ -6258,7 +6263,7 @@ test('runCommit dry-run prints without committing', async () => {
 
 // runCommit's missing-Task warning is code-repo specific (spec-link is a repo gate, not a Product gate):
 // on the Product it must reassure, not threaten with a gate that does not run there.
-test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', async () => {
+test('runCommit: the missing-Task warning is stage-aware (Product vs code repo)', async () => {
   // a Product (carries .sdlc/hub.json), staged change on a branch with no -S0N-T0N id
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
@@ -8758,7 +8763,7 @@ test('readPr (GitLab): approved_at becomes the approval\'s submission time; an i
 // E112 — `yad gate approve|comment|advance`: the review gate on a Product with no platform
 // ---------------------------------------------------------------------------------------------
 const e112 = await import('./gate-local.mjs');
-// A Product with NO platform, one epic whose epic review is open. `hub` replaces the Product config, so the
+// A Product with NO platform, one epic whose epic review is open. `productConfig` replaces the Product config, so the
 // same fixture gives the platform twins. The count of people is handed in, so no test walks git.
 function localEpic({ productConfig = { default_branch: 'main' }, owner = 'alice', steps = null } = {}) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e112-'));
@@ -10199,7 +10204,7 @@ test('check --fix wires the Product gate-sync CI only when the ledger is verifie
   // Product on github with a verified ledger -> wired + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
-  assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'hub workflow installed');
+  assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'Product workflow installed');
   const again = await reconcile(T, { fix: false });
   assert.equal(again.counts.missing, 0);
   assert.equal(again.counts.outdated, 0);
@@ -11201,7 +11206,7 @@ test('doctor: a project holding ONLY the new settings name is seen, not treated 
     schemaVersion: 3, platform: 'github', git_url: 'https://example.com/a/b.git', ledger: 'verified', roster: [],
   }, null, 2) + '\n');
   const r = await doctorOn(T);
-  const productConfig = r.checks.find((c) => c.id === 'hub');
+  const productConfig = r.checks.find((c) => c.id === 'product');
   assert.ok(productConfig, 'the settings file must be found under either name');
   assert.notEqual(productConfig.status, 'warn', `reported as absent: ${productConfig.message}`);
   assert.match(productConfig.message, /github/);
@@ -11611,7 +11616,7 @@ test('doctor and the gate: a malformed roster no longer fails anything — nothi
   await reconcile(T, { fix: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: 'oops' }));
   const r = await doctorOn(T);
-  assert.ok(!r.checks.some((x) => x.id === 'hub' && x.status === 'fail'), 'the hub check does not fail on a key nothing reads');
+  assert.ok(!r.checks.some((x) => x.id === 'product' && x.status === 'fail'), 'the product check does not fail on a key nothing reads');
   const { loadProduct } = await import('./gate.mjs');
   assert.doesNotThrow(() => loadProduct(T), 'the gate loads the Product');
   fs.rmSync(T, { recursive: true, force: true });
@@ -11659,12 +11664,12 @@ test('doctor: design.json recorded but MCP unconfirmed warns (points at yad-conn
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('doctor: hub with a platform but no git_url warns YAD-CFG-005 (not a misleading YAD-ENV-002)', async () => {
+test('doctor: Product settings with a platform but no git_url warns YAD-CFG-005 (not a misleading YAD-ENV-002)', async () => {
   const { T } = scaffold();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
   const r = await doctorOn(T);
-  assert.ok(r.checks.some((x) => x.id === 'hub-git-url' && x.status === 'warn' && /YAD-CFG-005/.test(x.message)), 'missing git_url must warn YAD-CFG-005');
+  assert.ok(r.checks.some((x) => x.id === 'product-git-url' && x.status === 'warn' && /YAD-CFG-005/.test(x.message)), 'missing git_url must warn YAD-CFG-005');
   assert.equal(r.failed, 0, 'the warning must never be a failure');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -11734,12 +11739,12 @@ test('doctor E64: the roster warning says when it can go — counted with the sa
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('doctor: hub with git_url present emits no hub-git-url warning', async () => {
+test('doctor: Product settings with git_url present emit no product-git-url warning', async () => {
   const { T } = scaffold();
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [], git_url: 'https://gitlab.com/acme/hub.git' }));
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [], git_url: 'https://gitlab.com/acme/product.git' }));
   await reconcile(T, { fix: true });
   const r = await doctorOn(T);
-  assert.ok(!r.checks.some((x) => x.id === 'hub-git-url'), 'a present git_url is silent');
+  assert.ok(!r.checks.some((x) => x.id === 'product-git-url'), 'a present git_url is silent');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -11899,7 +11904,7 @@ const {
   runDocs: runDocsFresh,
 } = await import('./docs.mjs');
 
-test('deployTargetFromHub maps platform (and git_url) to a Pages target', () => {
+test('deployTargetFromProduct maps platform (and git_url) to a Pages target', () => {
   assert.equal(deployTargetFromProduct({ platform: 'github' }), 'github-pages');
   assert.equal(deployTargetFromProduct({ platform: 'gitlab' }), 'gitlab-pages');
   assert.equal(deployTargetFromProduct({ platform: null }), 'none');
@@ -12014,7 +12019,7 @@ test('docs shell: the template cannot change without a new shell version', (t) =
   const tracked = listed.split('\0').filter(Boolean).sort();
   const h = createHash('sha256');
   for (const f of tracked) h.update(`${f}:${createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}\n`);
-  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab' };
+  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169' };
   assert.equal('sha256:' + h.digest('hex'), PINNED[shellVersion()],
     `skills/yad-docs/templates/app changed, or its version did. Bump "version" in its package.json, then pin the new fingerprint here under that version.`);
 });
@@ -12048,7 +12053,7 @@ test('runDocs: list/sync/wire orchestrate over generated sites and install the P
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-run-'));
   // a connected github-pages target + one generated epic site with artifacts and a manifest
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'github-pages', scope: 'hub', basePath: '/yadflow/', source: 'gh' }));
+  fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'github-pages', scope: 'product', basePath: '/yadflow/', source: 'gh' }));
   fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
   const ep = path.join(T, 'epics/EP-x');
   fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
@@ -12087,7 +12092,7 @@ test('runDocs: list/sync/wire orchestrate over generated sites and install the P
 function docsBuildFixture() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-build-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'hub', basePath: '/', source: 'unavailable' }));
+  fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'product', basePath: '/', source: 'unavailable' }));
   fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
   for (const id of ['EP-a', 'EP-b']) {
     const ep = path.join(T, 'epics', id);
@@ -12166,7 +12171,7 @@ test('docs build/deploy: a failed npm build exits 1, the other sites are still b
 
     // The twin arm: a Pages platform whose CLI is on PATH. With every build failed it must not end on a
     // green "deploy via" tick; with a build it does.
-    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'github-pages', scope: 'hub', basePath: '/', source: 'gh' }));
+    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'github-pages', scope: 'product', basePath: '/', source: 'gh' }));
     fs.writeFileSync(path.join(T, 'fakebin/gh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const none = yad(['docs', 'deploy'], { FAKE_NPM_FAIL: 'build' });
     assert.equal(none.code, 1);
@@ -12179,7 +12184,7 @@ test('docs build/deploy: a failed npm build exits 1, the other sites are still b
     const all = yad(['docs', 'deploy']);
     assert.equal(all.code, 0);
     assert.match(all.stdout, /✓ deploy via the github Pages workflow on push/, 'only a run where every site built ends on a tick');
-    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'hub', basePath: '/', source: 'unavailable' }));
+    fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'none', scope: 'product', basePath: '/', source: 'unavailable' }));
 
     // Every build passing: exit 0, ok true, the same keys.
     const good = yad(['docs', 'build', '--json']);
@@ -13045,12 +13050,12 @@ test('checkpointAuthor prefers the @login, falls back to git name, then a placeh
   assert.equal(checkpointAuthor(null, '   '), 'unknown');
 });
 
-test('buildCheckpointMessage: chore(hub) subject, no trailing period, no AI footer, body lists files', () => {
+test('buildCheckpointMessage: chore(product) subject, no trailing period, no AI footer, body lists files', () => {
   const msg = buildCheckpointMessage({
     label: 'EP-a/EP-a-S03', author: '@abdelrahmannasr',
     basenames: ['trust-log.json', 'build-state/EP-a-S03.json'],
   });
-  assert.equal(msg.split('\n')[0], 'chore(hub): sync Build state — EP-a/EP-a-S03 by @abdelrahmannasr [skip ci]');
+  assert.equal(msg.split('\n')[0], 'chore(product): sync Build state — EP-a/EP-a-S03 by @abdelrahmannasr [skip ci]');
   assert.ok(!/\.$/.test(msg.split('\n')[0]), 'subject must not end with a period');
   assert.ok(!/Co-Authored-By/.test(msg), 'no AI co-author footer');
   assert.match(msg, /\nUpdated: trust-log\.json, build-state\/EP-a-S03\.json$/);
@@ -13067,13 +13072,13 @@ test('buildLedgerPathspecs lists only the Build ledgers that exist — never the
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subject', async () => {
+test('runCheckpoint commits ONLY the Build ledgers with a chore(product) audit subject', async () => {
   const prev = process.exitCode;
   const T = productForCheckpoint();
   writeBuildLedgers(T, 'EP-checkout', 'EP-checkout-S03');
   await grab(() => runCheckpoint(T, {}));
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.equal(subject, 'chore(hub): sync Build state — EP-checkout/EP-checkout-S03 by abdelrahman [skip ci]');
+  assert.equal(subject, 'chore(product): sync Build state — EP-checkout/EP-checkout-S03 by abdelrahman [skip ci]');
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(files.length && files.every((f) => /\.sdlc\/(trust-log\.json|build-log\.json|build-state\/)/.test(f)), `only Build: ${files.join()}`);
   assert.ok(!files.some((f) => f.endsWith('state.json')), 'Shape state.json must not be committed');
@@ -13134,7 +13139,7 @@ test('runCheckpoint --dry-run prints the message but commits nothing and leaves 
   writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const head0 = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, { dryRun: true }));
-  assert.match(out, /chore\(hub\): sync Build state/);
+  assert.match(out, /chore\(product\): sync Build state/);
   assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), head0, 'dry run makes no commit');
   assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'dry run leaves the index clean');
   process.exitCode = prev;
@@ -13160,13 +13165,13 @@ test('runCheckpoint --push lands the commit on the bare remote default branch', 
   fs.rmSync(bare, { recursive: true, force: true });
 });
 
-test('runCheckpoint aborts on a non-hub dir (no .sdlc/hub.json)', async () => {
+test('runCheckpoint aborts on a non-Product dir (no .sdlc/hub.json)', async () => {
   const prev = process.exitCode;
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-nohub-'));
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-noproduct-'));
   git(T, 'init', '-q');
   const out = await grab(() => runCheckpoint(T, {}));
-  assert.match(out, /no \.sdlc\/hub\.json/);
-  assert.ok(process.exitCode, 'a non-hub dir sets a non-zero exit code');
+  assert.match(out, /no \.sdlc\/product\.json/);
+  assert.ok(process.exitCode, 'a non-Product dir sets a non-zero exit code');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -13220,7 +13225,7 @@ test('runCheckpoint carries the story status flip (approved → shipped) alongsi
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.deepEqual(files, ['epics/EP-a/stories/EP-a-S01.md'], 'the story flip rides in the checkpoint commit');
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.match(subject, /^chore\(hub\): sync Build state — EP-a\/EP-a-S01 by abdelrahman \[skip ci\]$/);
+  assert.match(subject, /^chore\(product\): sync Build state — EP-a\/EP-a-S01 by abdelrahman \[skip ci\]$/);
   assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'nothing left uncommitted — no raw git-to-main needed');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
@@ -13569,7 +13574,7 @@ test('summarizeStaged labels "2 stories" across two carried story files', () => 
 
 // --- regression tests for the Fable5 review findings ---
 
-test('runCheckpoint guard fires even with hub.default_branch UNSET — never trusts the current branch (HIGH-2)', async () => {
+test('runCheckpoint guard fires even with the Product default_branch UNSET — never trusts the current branch (HIGH-2)', async () => {
   const prev = process.exitCode;
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-nodef-'));
   git(T, 'init', '-q');
@@ -14029,7 +14034,7 @@ test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, co
   assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/build-log.json'))).ships.length, 1, 'S01 ship folded in');
   // the union reader still sees BOTH the folded S01 and the loose S02
   assert.equal(readTrustRuns(ep).length, 2, 'union: folded S01 + loose S02');
-  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy Build ledgers — EP-demo by abdelrahman [skip ci]');
+  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(product): tidy Build ledgers — EP-demo by abdelrahman [skip ci]');
   const out = await grab(() => runTidy(T, {}));
   assert.match(out, /nothing to tidy/);
   assert.ok(!process.exitCode);
@@ -14185,14 +14190,14 @@ const { buildUpdateMessage, groupByRoot, repoLabel } = await import('./update-co
 const { VERSION: PKG_VERSION } = await import('./manifest.mjs');
 
 test('buildUpdateMessage: valid chore(yad-update) subject, version-stamped, no [skip ci]/Task/Co-Authored-By', () => {
-  const m = buildUpdateMessage({ version: '3.7.0', items: ['hub/checks/verified-commits.sh', 'backend/checks/spec-link.sh'] });
+  const m = buildUpdateMessage({ version: '3.7.0', items: ['product/checks/verified-commits.sh', 'backend/checks/spec-link.sh'] });
   const subject = m.split('\n')[0];
   assert.equal(subject, 'chore(yad-update): sync SDLC install to yadflow v3.7.0');
   assert.doesNotMatch(m, /\[skip ci\]/i, 'must NOT skip CI — the yad-update-guard has to run');
   assert.doesNotMatch(m, /^Task:/mi);
   assert.doesNotMatch(m, /Co-Authored-By/i);
   assert.doesNotMatch(subject, /\.$/, 'no trailing period (commit-message gate)');
-  assert.match(m, /- hub\/checks\/verified-commits\.sh/, 'body lists changed items as bullets');
+  assert.match(m, /- product\/checks\/verified-commits\.sh/, 'body lists changed items as bullets');
 });
 
 test('buildUpdateMessage: defaults to package version and a bodyless subject with no items', () => {
@@ -14210,27 +14215,27 @@ test('buildUpdateMessage: collapses newlines in an item so it cannot forge a tra
 
 test('groupByRoot: groups paths + item labels by root, dedups paths, ignores rootless actions', () => {
   const groups = groupByRoot([
-    { scope: 'hub', item: 'a', root: '/hub', paths: ['x', 'y'] },
-    { scope: 'hub', item: 'b', root: '/hub', paths: ['y', 'z'] },
+    { scope: 'product', item: 'a', root: '/product', paths: ['x', 'y'] },
+    { scope: 'product', item: 'b', root: '/product', paths: ['y', 'z'] },
     { scope: 'be', item: 'c', root: '/repo', paths: ['p'] },
     { scope: 'x', item: 'd' }, // no root/paths -> ignored
   ]);
   assert.equal(groups.length, 2);
-  assert.deepEqual(groups[0].root, '/hub');
+  assert.deepEqual(groups[0].root, '/product');
   assert.deepEqual([...groups[0].paths].sort(), ['x', 'y', 'z']);
-  assert.deepEqual(groups[0].items, ['hub/a', 'hub/b']);
+  assert.deepEqual(groups[0].items, ['product/a', 'product/b']);
   assert.deepEqual(groups[1].root, '/repo');
 });
 
-test('repoLabel: hub root -> "hub", connected repo -> its relative path', () => {
-  assert.equal(repoLabel('/hub', '/hub'), 'hub');
-  assert.equal(repoLabel('/hub', '/hub/demo/backend'), 'demo/backend');
+test('repoLabel: Product root -> "product", connected repo -> its relative path', () => {
+  assert.equal(repoLabel('/product', '/product'), 'product');
+  assert.equal(repoLabel('/product', '/product/demo/backend'), 'demo/backend');
 });
 
 // Scaffold a Product + connected backend, each with a bare origin on `main`, hub.json bridge-enabled.
 function scaffoldWithRemotes() {
   const { T, backend } = scaffold();
-  const productBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubbare-')); git(productBare, 'init', '-q', '--bare');
+  const productBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-productbare-')); git(productBare, 'init', '-q', '--bare');
   const beBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bebare-')); git(beBare, 'init', '-q', '--bare');
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', bridge_enabled: true, roster: [] }));
   // Product: seed a commit, name the branch main, wire origin
@@ -14254,7 +14259,7 @@ test('reconcile --push: commits chore(yad-update) on the Product + connected rep
 
     // Product commit
     const productSubject = git(T, 'log', '-1', '--format=%s').toString().trim();
-    assert.match(productSubject, new RegExp(`^chore\\(yad-update\\): sync SDLC install to yadflow v${PKG_VERSION.replace(/\./g, '\\.')}$`), 'hub subject');
+    assert.match(productSubject, new RegExp(`^chore\\(yad-update\\): sync SDLC install to yadflow v${PKG_VERSION.replace(/\./g, '\\.')}$`), 'Product subject');
     assert.doesNotMatch(git(T, 'log', '-1', '--format=%B').toString(), /\[skip ci\]/i, 'no [skip ci] on the Product commit');
     // the version stamp + new guard workflow rode the Product commit
     const productCommitFiles = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
@@ -14267,7 +14272,7 @@ test('reconcile --push: commits chore(yad-update) on the Product + connected rep
     assert.ok(fs.existsSync(path.join(backend, '.github/workflows/yad-update-guard.yml')), 'backend guard workflow installed');
 
     // both pushed to their bare origins
-    assert.match(git(productBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'hub pushed to origin/main');
+    assert.match(git(productBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'Product pushed to origin/main');
     assert.match(git(beBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'backend pushed to origin/main');
     assert.ok(!process.exitCode, 'clean push -> zero exit code');
   } finally {
@@ -14294,7 +14299,7 @@ test('commitAndPush: a path that is NOT its own repo top (nested plain dir) is s
     });
     assert.match(out, /not its own git repo/, 'nested plain dir is refused');
     // the enclosing Product must NOT have gained a commit or a staged backend file
-    assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), '1', 'hub still has only the seed commit');
+    assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), '1', 'Product still has only the seed commit');
     assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'nothing staged into the Product index');
   } finally {
     process.exitCode = prev;
@@ -14315,7 +14320,7 @@ test('reconcile --push: a connected repo on a non-default branch is skipped, not
     // and nothing was pushed to the backend remote
     assert.doesNotMatch(git(beBare, 'log', '--oneline', '--all').toString(), /chore\(yad-update\)/, 'backend remote untouched');
     // the Product itself (on main) still committed + pushed — one repo being skipped doesn't block the rest
-    assert.match(git(T, 'log', '-1', '--format=%s').toString(), /chore\(yad-update\)/, 'hub still published');
+    assert.match(git(T, 'log', '-1', '--format=%s').toString(), /chore\(yad-update\)/, 'Product still published');
     // and the summary must NOT claim "merges can resume" when a repo was skipped (CodeRabbit fix)
     assert.match(out, /update incomplete/, 'skipped repo => incomplete summary');
     assert.doesNotMatch(out, /merges can resume/);
@@ -14331,10 +14336,10 @@ test('reconcile --push: a connected repo on a non-default branch is skipped, not
 const { buildCodeMapMessage, codeMapPathspecs, packPathspecs, summarizeCodeContext, publishCodeContext } = await import('./repo-publish.mjs');
 const { ensurePackIgnored, PACK_IGNORE_GLOB } = await import('./setup.mjs');
 
-test('buildCodeMapMessage: valid chore(hub) code-context subject with [skip ci], no Task/Co-Authored-By', () => {
+test('buildCodeMapMessage: valid chore(product) code-context subject with [skip ci], no Task/Co-Authored-By', () => {
   const m = buildCodeMapMessage({ label: 'backend', author: '@amn', basenames: ['.sdlc/code-context/backend/code-map.md', '.sdlc/repos.json'] });
   const subject = m.split('\n')[0];
-  assert.equal(subject, 'chore(hub): sync code-context — backend by @amn [skip ci]');
+  assert.equal(subject, 'chore(product): sync code-context — backend by @amn [skip ci]');
   assert.doesNotMatch(m, /^Task:/mi);
   assert.doesNotMatch(m, /Co-Authored-By/i);
   assert.match(m, /Updated: .*code-map\.md/, 'body lists the staged files');
@@ -14513,7 +14518,7 @@ test('publishCodeContext: a nothing-to-publish run leaves unrelated staged work 
   }
 });
 
-test('publishCodeContext: commits chore(hub) code-context, pushes to origin/main, then is idempotent', async () => {
+test('publishCodeContext: commits chore(product) code-context, pushes to origin/main, then is idempotent', async () => {
   const prev = process.exitCode;
   const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
@@ -14524,11 +14529,11 @@ test('publishCodeContext: commits chore(hub) code-context, pushes to origin/main
     await grab(() => publishCodeContext(T, { push: true }));
 
     const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-    assert.match(subject, /^chore\(hub\): sync code-context — backend by .+ \[skip ci\]$/, 'audit-trail subject');
+    assert.match(subject, /^chore\(product\): sync code-context — backend by .+ \[skip ci\]$/, 'audit-trail subject');
     const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
     assert.match(files, /\.sdlc\/code-context\/backend\/code-map\.md/, 'code-map committed');
     assert.doesNotMatch(files, /pack\.md/, 'the gitignored pack never rides along');
-    assert.match(git(productBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(hub\): sync code-context/, 'pushed to origin/main');
+    assert.match(git(productBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(product\): sync code-context/, 'pushed to origin/main');
     assert.ok(!process.exitCode, 'clean push -> zero exit code');
 
     // idempotent: a re-run with nothing new and already pushed is a clean no-op (no second commit)
@@ -14619,14 +14624,14 @@ test('publishCodeContext: non-default branch is skipped unless --allow-branch', 
   }
 });
 
-test('publishCodeContext: outside a hub (no hub.json) fails with a non-zero exit code', async () => {
+test('publishCodeContext: outside a Product (no hub.json) fails with a non-zero exit code', async () => {
   const prev = process.exitCode;
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nohub-'));
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-noproduct-'));
   try {
     process.exitCode = 0;
     git(T, 'init', '-q');
     const out = await grab(() => publishCodeContext(T, { push: false }));
-    assert.match(out, /hub\.json/, 'refuses to publish outside the Product');
+    assert.match(out, /product\.json/, 'refuses to publish outside the Product');
     assert.ok(process.exitCode, 'sets a non-zero exit code');
   } finally {
     process.exitCode = prev;
@@ -15203,7 +15208,7 @@ test('ledger hook denies a mutation of a ledger already on the base ref, and nam
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('ledger hook reads the seeded set from origin/<default>, hub-relative — never a local branch', () => {
+test('ledger hook reads the seeded set from origin/<default>, Product-relative — never a local branch', () => {
   // The two bugs this pins, both of which fail OPEN and both of which a path-only assertion missed:
   //   * a bare local `main` is whatever the developer last pulled (`git fetch` never moves it), so a
   //     merged epic's ledger reads as absent and a real mutation is waved through;
@@ -15215,8 +15220,8 @@ test('ledger hook reads the seeded set from origin/<default>, hub-relative — n
     decide(T, 'epics/EP-seeded/.sdlc/state.json', { runner });
     const probe = runner.calls.find((c) => c.includes('ls-tree'));
     assert.ok(probe, 'the seeded set is read with ls-tree');
-    // Both ledger folders, hub-relative: `epics` and the Foundation's own `foundation` (E75).
-    assert.match(probe, /ls-tree -r --name-only -z origin\/main -- epics foundation$/, 'origin/<default>, hub-relative pathspec');
+    // Both ledger folders, Product-relative: `epics` and the Foundation's own `foundation` (E75).
+    assert.match(probe, /ls-tree -r --name-only -z origin\/main -- epics foundation$/, 'origin/<default>, Product-relative pathspec');
     assert.ok(!runner.calls.some((c) => c.includes('cat-file')), 'no repo-root-relative rev:path probe');
     assert.ok(!runner.calls.some((c) => / main\^\{commit\}/.test(c)), 'the local branch is never a candidate');
     // The config's default_branch is used as origin/<it>, not as a local ref.
@@ -15329,7 +15334,7 @@ test('ledger hook resolves the Product from the edited PATH, not the session roo
     const v = ledgerGuardDecision(['product/epics/EP-seeded/.sdlc/state.json'], {
       env: { CLAUDE_PROJECT_DIR: workspace }, runner: fakeGit(),
     });
-    assert.equal(v.allow, false, 'a relative path under the workspace still resolves to its hub');
+    assert.equal(v.allow, false, 'a relative path under the workspace still resolves to its Product');
     assert.equal(productRootFor(path.join(T, 'epics/EP-seeded/.sdlc/state.json')), T);
     // A path in no Product at all is simply not ours to judge.
     assert.equal(productRootFor(path.join(workspace, 'backend/src/index.ts')), null);
@@ -15476,7 +15481,7 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     }
 
     // A RELATIVE path is anchored on the payload's own `cwd` when the harness sends one. Without it,
-    // a Product in a subdirectory of its repo fell back to the git toplevel, `hubRootFor` found no
+    // a Product in a subdirectory of its repo fell back to the git toplevel, `productRootFor` found no
     // hub.json above it, and the edit was ALLOWED.
     assert.equal(runHookAt(path.dirname(T), '{"cwd":"' + T + '","tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}').code, 2,
       'the payload cwd anchors the relative path');
@@ -15584,7 +15589,7 @@ test('hookMatcherFires tells an armed entry from an installed-but-dead one', () 
   assert.equal(hookMatcherFires({ hooks: { PreToolUse: [{ matcher: HOOK_TOOL_MATCHER, hooks: [{ command: 'echo' }] }] } }), false, 'not our entry');
 });
 
-test('hookActions wires the guard on a verified hub, and nothing with a local ledger', () => {
+test('hookActions wires the guard on a verified Product, and nothing with a local ledger', () => {
   const T = hookProduct();
   try {
     fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
@@ -15796,7 +15801,7 @@ test('hookActions wires every target that has a hook protocol, and only those', 
     const both = hookActions(T, ['.claude', '.cursor', '.agents']);
     assert.deepEqual(both.map((a) => a.item),
       ['hooks/ledger-guard.mjs', 'settings.json', 'hooks/ledger-guard-cursor.mjs', 'hooks.json']);
-    assert.deepEqual(both.map((a) => a.scope), ['hub', '.claude', 'hub', '.cursor']);
+    assert.deepEqual(both.map((a) => a.scope), ['product', '.claude', 'product', '.cursor']);
     for (const a of both) a.apply();
     assert.deepEqual(hookActions(T, ['.claude', '.cursor', '.agents']).map((a) => a.status), ['ok', 'ok', 'ok', 'ok']);
     // Cursor's relative command is written as seen from the project root, which is where its docs say
@@ -16972,7 +16977,7 @@ test('CLI: `yad roster` was removed, and says where the people model went instea
       assert.equal(r.code, 1, r.out);
       assert.match(r.out, /yad roster was removed — yadflow keeps no list of people/);
       assert.match(r.out, /one approval \(not the author's own\) from anyone with access/);
-      assert.match(r.out, /Keep an existing `roster` in hub\.json until every review with older approvals is closed/);
+      assert.match(r.out, /Keep an existing `roster` in the Product settings until every review with older approvals is closed/);
     }
     assert.ok(!fs.existsSync(path.join(T, '.sdlc')), 'and it writes nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -20631,8 +20636,8 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   l = protectionLine({ ...base, protected: true, approvals: 1, from: ['x'], codeOwners: true, fileReviewers: true }, { name: 'b' });
   assert.match(l.message, /; a code owner must also approve a change to a file CODEOWNERS lists; a named reviewer must also approve a change to some files — yad reports this/);
   // Solo: a required approval blocks the solo developer's own merge — the old solo probe's warning.
-  l = protectionLine({ ...base, protected: true, approvals: 1, from: ['classic branch protection'] }, { name: 'Product hub', solo: true });
-  assert.deepEqual([l.status, l.message], ['warn', 'Product hub: solo mode, but a pull request into `main` on GitHub acme/app needs 1 approval (from: classic branch protection) — you cannot approve your own pull request, so the merge is blocked unless you may bypass the rule (who may bypass is not read)']);
+  l = protectionLine({ ...base, protected: true, approvals: 1, from: ['classic branch protection'] }, { name: 'Product', solo: true });
+  assert.deepEqual([l.status, l.message], ['warn', 'Product: solo mode, but a pull request into `main` on GitHub acme/app needs 1 approval (from: classic branch protection) — you cannot approve your own pull request, so the merge is blocked unless you may bypass the rule (who may bypass is not read)']);
   // Solo keeps every fact team mode prints: the scoped facts, and an unprotected branch.
   l = protectionLine({ ...base, protected: true, approvals: 1, from: ['x'], codeOwners: null, fileReviewers: true }, { name: 'b', solo: true });
   assert.match(l.message, /needs 1 approval \(from: x\); a named reviewer must also approve a change to some files; whether a code owner must approve some files is not known — you cannot approve/);
@@ -20672,7 +20677,7 @@ test('E70 protectionLine: the Part 3 banner word for word only when both halves 
   }
   assert.match(protectionLine({ ...base, platform: 'gitlab', protected: true, approvals: 1, from: ['x'] }, { name: 'b', solo: true }).message,
     /— GitLab may not let you approve your own merge request \(a project setting yad does not read\), so the merge may be blocked$/);
-  assert.equal(protectionLine({ ...base, protected: true, approvals: 1, from: ['classic branch protection'] }, { name: 'Product hub', solo: true }).hint,
+  assert.equal(protectionLine({ ...base, protected: true, approvals: 1, from: ['classic branch protection'] }, { name: 'Product', solo: true }).hint,
     'relax the required approvals in GitHub\'s branch protection or a ruleset for `main`');
   // Approvals not known.
   // "also" only where an approval count is already required.
@@ -20973,7 +20978,7 @@ test('E70: every printed line obeys the rules a reader would notice, over every 
   assert.ok(distinct.size >= 1380, `the grid says less than it did: ${distinct.size} distinct lines — re-measure if a wording change merged lines on purpose`);
 });
 
-test('yad doctor: the protection section — one line for the hub and each connected repo; warns, never fails', async () => {
+test('yad doctor: the protection section — one line for the Product and each connected repo; warns, never fails', async () => {
   const { protectionChecks, collectDoctor } = await import('./doctor.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e70-doc-'));
   try {
@@ -21000,7 +21005,7 @@ test('yad doctor: the protection section — one line for the hub and each conne
     assert.deepEqual(checks.map((x) => [x.id, x.section, x.status]), [
       ['protection', 'protection', 'warn'], ['protection:backend', 'protection', 'ok'], ['protection:mobile', 'protection', 'warn'], ['protection:web', 'protection', 'warn'],
     ]);
-    assert.equal(checks[0].message, `Product hub (GitHub acme/app, branch \`main\`): ${BANNER}`);
+    assert.equal(checks[0].message, `Product (GitHub acme/app, branch \`main\`): ${BANNER}`);
     assert.equal(checks[1].message, 'backend: a pull request into `main` on GitHub acme/backend needs at least 1 approval (from: a repo ruleset (id 7)); whether a code owner must approve some files is not known — yad reports this and enforces nothing', 'classic protection unread: the code-owner fact is not known');
     assert.match(checks[2].message, /^mobile: not known whether `main` requires an approval — no git remote URL yad can read/);
     assert.match(checks[3].message, /^web: `main` is protected on GitLab acme\/app, but whether a merge needs an approval is not known — GitLab refused to show the approval rules \(HTTP 403\)/);
@@ -21014,12 +21019,12 @@ test('yad doctor: the protection section — one line for the hub and each conne
     assert.deepEqual(checks.map((x) => x.status), ['ok', 'warn', 'ok', 'ok'], 'except a required approval, which blocks the solo developer\'s own merge');
     assert.match(checks[1].message, /^backend: solo mode, but a pull request into `main` on GitHub acme\/backend needs at least 1 approval \(from: a repo ruleset \(id 7\)\); whether a code owner must approve some files is not known — you cannot approve your own pull request, so the merge is blocked unless you may bypass the rule/);
     assert.ok(checks.every((x) => !x.message.includes(BANNER)));
-    // A hub with no platform, and no default branch named anywhere: not known, said — never quiet.
+    // A Product with no platform, and no default branch named anywhere: not known, said — never quiet.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
     fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
     checks = [];
     protectionChecks(checks, T, { runner: f.runner, env: ON });
-    assert.deepEqual(checks.map((x) => [x.status, x.message]), [['warn', 'Product hub: not known whether the default branch requires an approval — no platform (GitHub or GitLab) is set, so there is no platform to ask']]);
+    assert.deepEqual(checks.map((x) => [x.status, x.message]), [['warn', 'Product: not known whether the default branch requires an approval — no platform (GitHub or GitLab) is set, so there is no platform to ask']]);
     // A repo's name with an `@` is hidden in the check id too, not only in the line.
     fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'me@corp.com', path: 'x', platform: 'github', git_url: null }] }));
     checks = [];
@@ -21027,7 +21032,7 @@ test('yad doctor: the protection section — one line for the hub and each conne
     assert.deepEqual(checks.map((x) => x.id), ['protection', 'protection:#1'], 'one word, and `#` cannot be in a repo name, so it cannot collide');
     assert.ok(!/corp\.com/.test(JSON.stringify(checks)));
     fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
-    // No hub file: only the repos.
+    // No Product settings file: only the repos.
     fs.rmSync(path.join(T, '.sdlc/hub.json'));
     checks = [];
     protectionChecks(checks, T, { runner: f.runner, env: ON });
@@ -21043,7 +21048,7 @@ test('yad doctor: the protection section — one line for the hub and each conne
     // `--json` alone (the user's decision, 2026-09-22).
     const printed = yadRun(T, 'doctor');
     const said = printed.out;
-    assert.match(said, /✓ Product hub: not known whether `main` requires an approval — platform reads are turned off/);
+    assert.match(said, /✓ Product: not known whether `main` requires an approval — platform reads are turned off/);
     assert.match(said, /→ unset YAD_PLATFORM_READ to let `yad doctor` ask the platform/);
     // `alwaysHint` drives that printing; it is not part of the shape a script reads.
     const asJson = JSON.parse(yadRun(T, 'doctor', '--json').out);
@@ -24492,7 +24497,7 @@ test('E1 review: gate ci --json names every epic it skipped', () => {
 // ---------------------------------------------------------------------------------------------
 const cap = await import('./capture.mjs');
 // A Product in a git repo with a git identity (a test that commits must set one — CI Linux cannot guess),
-// one epic committed. `hub` is the Product config.
+// one epic committed. `productConfig` is the Product config.
 function captureFixture({ productConfig = { default_branch: 'main' }, commit = true, name = 'Ann Lee' } = {}) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-capture-'));
   const g = (...a) => execFileSync('git', a, { cwd: T, encoding: 'utf8', stdio: 'pipe' }).trim();
@@ -24770,7 +24775,7 @@ test('E43 wiring: the capture hook is wired in both ledger modes, in each harnes
       fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
       fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(productConfig));
       const acts = captureHookActions(T, ['.claude', '.cursor', '.agents']);
-      assert.deepEqual(acts.map((a) => [a.scope, a.item, a.status]), [['hub', 'hooks/yad-capture.mjs', 'new'], ['.claude', 'settings.json', 'new'], ['.cursor', 'hooks.json', 'new']], JSON.stringify(productConfig));
+      assert.deepEqual(acts.map((a) => [a.scope, a.item, a.status]), [['product', 'hooks/yad-capture.mjs', 'new'], ['.claude', 'settings.json', 'new'], ['.cursor', 'hooks.json', 'new']], JSON.stringify(productConfig));
       for (const a of acts) a.apply();
             const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
       assert.deepEqual(cursor, { version: 1, hooks: { afterFileEdit: [{ command: 'node hooks/yad-capture.mjs' }] } });
@@ -25875,7 +25880,7 @@ test('E114 doctor: a gate file is read one bash command at a time (review 2)', a
   }
 });
 
-test('E47 doctor: new owner-exempting checks beside a hub workflow that lists renames by one path is owners:rename-blind', async () => {
+test('E47 doctor: new owner-exempting checks beside a Product workflow that lists renames by one path is owners:rename-blind', async () => {
   const { T, w } = ownersFixture();
   try {
     const { collectDoctor } = await import('./doctor.mjs');
@@ -26162,10 +26167,10 @@ test('E79 review 1: yad init never turns someone\'s code into the Product', () =
     assert.ok(!fs.existsSync(path.join(ws, 'product', '.sdlc')), 'nothing written into it');
     assert.equal(e79Yad(T, ws, ['init', '--path', 'api']).status, 1, '--path to a code repo is refused too');
 
-    const ok = e79Yad(T, ws, ['init', '--path', 'hub', '--solo', '--greenfield', '--ide-targets', '.claude']);
+    const ok = e79Yad(T, ws, ['init', '--path', 'the-product', '--solo', '--greenfield', '--ide-targets', '.claude']);
     assert.equal(ok.status, 0, ok.stdout + ok.stderr);
     assert.match(ok.stdout + ok.stderr, /not offered .*: my app/);
-    const reg = JSON.parse(fs.readFileSync(path.join(ws, 'hub', '.sdlc', 'repos.json'), 'utf8'));
+    const reg = JSON.parse(fs.readFileSync(path.join(ws, 'the-product', '.sdlc', 'repos.json'), 'utf8'));
     assert.deepEqual(reg.repos.map((x) => x.name).sort(), ['api', 'product'], 'the code repo named product is offered as a code repo');
 
     // A fresh clone of an empty remote — only `.git` — may become the Product.
@@ -27187,7 +27192,7 @@ test('E81 review 13: a registry host that is not a plain host name is never used
     e79Git(T, product, 'commit', '-qm', 'p');
     const doc = e79Yad(T, product, ['doctor']);
     assert.ok(!hasRaw(doc.stdout + doc.stderr), 'doctor prints no raw control character');
-    // guardDefaultBranch (reached by `yad repo refresh --push`) prints the hub's branch cleaned.
+    // guardDefaultBranch (reached by `yad repo refresh --push`) prints the Product's branch cleaned.
     const g = spawnSync(process.execPath, ['--input-type=module', '-e',
       `const { guardDefaultBranch } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'cli', 'productcommit.mjs')).href)}); guardDefaultBranch('feat', '\\u001b[31mRED');`], { encoding: 'utf8', env: e79Env(T) });
     assert.match(g.stdout + g.stderr, /not the default branch ' \[31mRED'/);
@@ -27195,7 +27200,7 @@ test('E81 review 13: a registry host that is not a plain host name is never used
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E81 review 14: doctor builds no login command from a hub host that is not a plain host name; hub.json text is cleaned', () => {
+test('E81 review 14: doctor builds no login command from a Product host that is not a plain host name; hub.json text is cleaned', () => {
   const hasRaw = (t) => ['\u001b', '\u009b', '\u202e'].some((ch) => t.includes(ch));
   const T = e79Tmp();
   try {
@@ -27211,7 +27216,7 @@ test('E81 review 14: doctor builds no login command from a hub host that is not 
     const doc = e79Yad(T, product, ['doctor'], env);
     const out = doc.stdout + doc.stderr;
     assert.doesNotMatch(out, /curl/, 'the host is never repeated');
-    assert.match(out, /auth check skipped — the hub's git remote URL names a host that is not a plain host name/);
+    assert.match(out, /auth check skipped — the Product's git remote URL names a host that is not a plain host name/);
     assert.ok(!hasRaw(out), 'no raw control character');
     fs.writeFileSync(productFile, JSON.stringify({ platform: '\u001b[31mEVIL\u202e' }));
     assert.ok(!hasRaw(e79Yad(T, product, ['doctor'], env).stdout));
@@ -27463,12 +27468,12 @@ test('E122: doctor names the settings file it actually read — product.json whe
     fs.writeFileSync(path.join(T, '.sdlc/product.json'), bad);
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), bad);
     let r = await doctorOn(T);
-    let c = r.checks.find((x) => x.id === 'hub');
+    let c = r.checks.find((x) => x.id === 'product');
     assert.match(c.message, /^\.sdlc\/product\.json: unknown platform/, 'the file to fix is the one read');
     // An older Product with only the old name: that one is named.
     fs.rmSync(path.join(T, '.sdlc/product.json'));
     r = await doctorOn(T);
-    c = r.checks.find((x) => x.id === 'hub');
+    c = r.checks.find((x) => x.id === 'product');
     assert.match(c.message, /^\.sdlc\/hub\.json: unknown platform/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -27569,11 +27574,11 @@ test('E122: a settings hint names the file that is read, and the migrate step on
     // copied over every other setting by `--keep product`.
     assert.equal(settingsEditHint(T), '.sdlc/hub.json');
     let r = await doctorOn(T);
-    assert.match(r.checks.find((c) => c.id === 'hub-git-url').hint, /^add git_url to \.sdlc\/hub\.json \(or re-run/);
+    assert.match(r.checks.find((c) => c.id === 'product-git-url').hint, /^add git_url to \.sdlc\/hub\.json \(or re-run/);
     fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"platform":"github"}\n');
     assert.equal(settingsEditHint(T), '.sdlc/product.json, then `yad migrate --apply --keep product`');
     r = await doctorOn(T);
-    assert.match(r.checks.find((c) => c.id === 'hub-git-url').hint, /^add git_url to \.sdlc\/product\.json, then `yad migrate --apply --keep product`/);
+    assert.match(r.checks.find((c) => c.id === 'product-git-url').hint, /^add git_url to \.sdlc\/product\.json, then `yad migrate --apply --keep product`/);
     fs.rmSync(path.join(T, '.sdlc/hub.json'));
     assert.equal(settingsEditHint(T), '.sdlc/product.json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }

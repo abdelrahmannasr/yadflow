@@ -671,9 +671,21 @@ export function renamedNameHits(root) {
 // The Product's pattern gates, whose workflow passes `--profile product` since E123. A copy the team edited
 // is kept by `yad update` — and one from before 4.0 accepts only `code|hub`, so it fails every Product PR
 // with "unknown --profile 'product'" (review 1). 'rejects' when the gate's own `case "$PROFILE" in …)` list lacks
-// `product`; 'unmapped' when it has it, but the gate branches on `= hub` with no line turning `product` into
-// `hub` — then `product` passes the list and silently skips every Product rule (review 2); null otherwise,
-// and for a copy with no such list, which is not judged.
+// `product`; 'unmapped' when it has it, but the gate branches on `= hub` with no line turning `product`
+// into `hub` — then `product` passes the list and silently skips every Product rule (review 2); null otherwise,
+// and for a copy with no such list, which is not judged. The shipped copies branch on `= product` since
+// E124 (and turn `hub` into `product`), so they read null here; the `= hub` shape is an older copy's.
+//
+// Every case, as gate shape × the value a workflow passes (E124):
+//   gate                                           passes product     passes hub
+//   branches on `= hub`, maps product -> hub       ok                 ok
+//   branches on `= hub`, no mapping                'unmapped'         ok
+//   list without `product` (before 4.0)            'rejects'          ok
+//   branches on `= product`, maps hub -> product   ok (shipped)       ok (shipped)
+//   branches on `= product`, no mapping            ok                 skips the Product rules — NOT checked
+// The last cell is left out on purpose: that copy is one a team edits after E124 ships AND strips of its
+// mapping line, beside an old workflow that `renamed:` already names. It cannot exist before 4.0 is on
+// `latest`; the E123 cells exist on every 3.x install today.
 export const PRODUCT_PROFILE_GATES = Object.freeze(['checks/commit-message.sh', 'checks/pr-title.sh', 'checks/pr-template.sh']);
 export function productProfileGap(file) {
   let text;
@@ -686,13 +698,16 @@ export function productProfileGap(file) {
   // A comment is prose, not code: the shipped copies explain the mapping in one.
   const code = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
   const mapped = /product[^\n]*\bPROFILE=["']?hub\b/.test(code);
-  return /\$\{?PROFILE\}?"?\s*==?\s*["']?hub\b/.test(code) && !mapped ? 'unmapped' : null;
+  // The line that maps the old name (the shipped shape since E124: turn `hub` into `product`) compares with `= hub` too, but it is
+  // the mapping, not a branch — so it is not what the branch test below looks for.
+  const branches = code.split('\n').filter((l) => !/\bPROFILE=["']?product\b/.test(l)).join('\n');
+  return /\$\{?PROFILE\}?"?\s*==?\s*["']?hub\b/.test(branches) && !mapped ? 'unmapped' : null;
 }
 // What each gap does to a Product PR, and the one fix for both — shared by `yad doctor` and `yad update`.
 export const productProfileEffect = (gap, gate, passing) => (gap === 'rejects'
   ? `${gate} does not accept \`--profile product\`, which ${passing} — every Product PR fails that check`
   : `${gate} accepts \`--profile product\` but never turns it into \`hub\`, which ${passing} — so it skips the Product's rules and passes what it should stop`);
-export const PRODUCT_PROFILE_FIX = 'add `product` to its `case "$PROFILE" in` list and `[ "$PROFILE" = product ] && PROFILE=hub` after it, as the shipped copy has — or replace it with `yad update --overwrite-local`';
+export const PRODUCT_PROFILE_FIX = 'add `product` to its `case "$PROFILE" in` list and `[ "$PROFILE" = product ] && PROFILE=hub` after it — or replace it with the shipped copy, which branches on `product` itself: `yad update --overwrite-local`';
 
 // The Product's checks workflows, under the new name and the old (E123): an edited old one is kept, and runs.
 export const PRODUCT_CHECK_WORKFLOWS = Object.freeze([
@@ -721,7 +736,7 @@ export function legacyProductActions(root) {
   const productConfig = readJSON(productConfigPath(root));
   if (!isVerifiedLedger(productConfig)) return [];
   const wiring = [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[productConfig.platform] || [])];
-  return legacyFileActions('hub', root, LEGACY_PRODUCT_FILES[productConfig.platform], wiring);
+  return legacyFileActions('product', root, LEGACY_PRODUCT_FILES[productConfig.platform], wiring);
 }
 
 // Per-repo wiring (gate scripts, CI, PR template).
@@ -837,13 +852,13 @@ function productLinkAction(root, repo, repoRoot) {
 // platform and the verified ledger is explicitly enabled — a local Product stays local, with no error.
 export function productActions(root) {
   const productConfig = readJSON(productConfigPath(root));
-  // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented hub-config schema); older setup versions
+  // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented Product settings schema); older setup versions
   // wrote `bridge` — `isVerifiedLedger` accepts an explicit true in either spelling, and is the one
   // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
   if (!isVerifiedLedger(productConfig)) return [];
   const ledger = readManagedLedger(root);
   return [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[productConfig.platform] || [])].map((w) =>
-    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
 }
 
@@ -1111,7 +1126,7 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
   if (!isVerifiedLedger(productConfig)) return [];
   const ledger = readManagedLedger(root);
   const actions = HOOK_WIRING.map((w) =>
-    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
   for (const ide of safeIdeTargetsFor(root, ideTargets)) {
     const adapter = HOOK_ADAPTERS[ide];
@@ -1121,7 +1136,7 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
     // `.claude`-only tree is a file nobody can explain. It is pushed BEFORE the settings entry that
     // points at it, so the two land in the order `asNew` already guarantees they land together.
     for (const w of adapter.wiring) {
-      actions.push(wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }));
+      actions.push(wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }));
     }
     actions.push(hookSettingsAction(root, adapter));
   }
@@ -1187,7 +1202,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
       const dest = path.join(root, w.dest);
       if (!exists(dest)) continue;
       actions.push({
-        scope: 'hub',
+        scope: 'product',
         item: `${w.dest} (removed)`,
         status: 'removed',
         root,
@@ -1297,7 +1312,7 @@ export function gitHookActions(root) {
   const sameBytes = st.state === 'outdated' && (() => { try { return fs.readFileSync(st.file, 'utf8') === st.expected; } catch { return false; } })();
   const backup = st.state === 'outdated' && !sameBytes ? backupPathFor(st.file) : null;
   return [{
-    scope: 'hub',
+    scope: 'product',
     item: 'pre-commit git hook (this clone)',
     status,
     root,
@@ -1323,7 +1338,7 @@ export function orphanGitHookActions(root) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
   if (text !== gitPreCommitScript(prefix)) return [];
-  return [{ scope: 'hub', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
+  return [{ scope: 'product', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
 }
 
 // The sentence for a clone where yad may not write the hook, or null.
@@ -1353,7 +1368,7 @@ export function captureHookActions(root, ideTargets = ideTargetsFor(root)) {
   if (!captureWanted(root)) return [];
   const ledger = readManagedLedger(root);
   const actions = CAPTURE_WIRING.map((w) =>
-    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
   for (const ide of safeIdeTargetsFor(root, ideTargets)) {
     const adapter = CAPTURE_ADAPTERS[ide];
@@ -1398,7 +1413,7 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
     for (const w of CAPTURE_WIRING) {
       const dest = path.join(root, w.dest);
       if (!exists(dest)) continue;
-      actions.push({ scope: 'hub', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
+      actions.push({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
     }
   }
   return actions;
@@ -1551,7 +1566,7 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
       continue;
     }
     actions.push({
-      scope: 'hub',
+      scope: 'product',
       item: `${scriptRel} (removed)`,
       status: 'removed',
       root,
