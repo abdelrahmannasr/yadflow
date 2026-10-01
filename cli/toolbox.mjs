@@ -499,7 +499,10 @@ export function loadChoices(productRoot) {
     else doc = r.doc;
   }
   const shipped = new Map();
+  // A line no `yad toolbox remove <id>` can reach — no id, or an empty one — is fixed by hand only.
+  let unreachable = false;
   for (const [id, v] of Object.entries(doc.shipped ?? {})) {
+    if (!id) unreachable = true;
     // A tool from a newer release, or a typo: the line stays in the file and does nothing here.
     if (!shippedTool(id)) problems.push(`${FILE}: \`${clean(id)}\` is not a tool this yadflow ships — ignored`);
     else if (!CHOICES.includes(v)) problems.push(`${FILE}: \`${id}\` should be "use" or "skip" — ignored`);
@@ -507,13 +510,15 @@ export function loadChoices(productRoot) {
   }
   const custom = [];
   for (const [i, t] of (doc.custom ?? []).entries()) {
-    const label = isObject(t) && typeof t.id === 'string' ? `\`${clean(t.id)}\`` : `number ${i + 1}`;
+    const hasId = isObject(t) && typeof t.id === 'string' && t.id.length > 0;
+    const label = hasId ? `\`${clean(t.id)}\`` : `number ${i + 1}`;
     const p = customProblems(t);
+    if (p.length && !hasId) unreachable = true;
     if (p.length) problems.push(`${FILE}: custom tool ${label} is ignored — ${p.join('; ')}`);
     else if (custom.some((c2) => c2.id === t.id)) problems.push(`${FILE}: custom tool ${label} is listed twice — the first one is used`);
     else custom.push(customRow(t));
   }
-  return { problems, shipped, custom, connected: productRoot ? connectedTools(productRoot) : new Map() };
+  return { problems, unreachable, shipped, custom, connected: productRoot ? connectedTools(productRoot) : new Map() };
 }
 
 // Is a tool in use here, and why. `because`: core | connected | added | removed | custom | null.
@@ -730,14 +735,21 @@ export function runToolboxAdd(productRoot, { id, custom = false, json = false, .
   const connected = connectedTools(productRoot);
   const was = toolUse(tool, loadChoices(productRoot));
   const shipped = setShipped(doc, tool, 'use', connected);
-  const changed = !sameJSON(shipped, doc.shipped);
-  if (changed) save(productRoot, doc, shipped, list);
+  // A custom entry under a shipped id is ignored; it goes in the same write, as `remove` does it.
+  const left = list.filter((t) => !sameId(id)(t));
+  const copies = list.length - left.length;
+  const shippedChanged = !sameJSON(shipped, doc.shipped);
+  const changed = shippedChanged || copies > 0;
+  if (changed) save(productRoot, doc, shipped, left);
   const now = toolUse(tool, usedFrom(shipped, connected));
-  sayEdit(tool, was, now, changed);
+  sayEdit(tool, was, now, shippedChanged);
+  if (copies) info(`removed ${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${id}, which ${copies > 1 ? 'were' : 'was'} ignored (it is a shipped tool's id)`);
   // Records only: the person installs it.
   const how = howToGet(tool);
   if (how.length) hand(`to install it: ${how.join('   or   ')}`);
-  if (changed) hand(`written to ${FILE} — commit it so the team shares it (undo with \`yad toolbox remove ${id}\`); \`yad toolbox check\` says whether it is found`);
+  // An undo is offered only when the tool's use changed: after clearing a line that did nothing, the
+  // "opposite" command would switch the tool off, not put anything back.
+  if (changed) hand(`written to ${FILE} — commit it so the team shares it${was.used !== now.used ? ` (undo with \`yad toolbox remove ${id}\`)` : ''}; \`yad toolbox check\` says whether it is found`);
   return { id, ...now, changed, ...where(productRoot) };
 }
 
@@ -760,28 +772,31 @@ export function runToolboxRemove(productRoot, { id, json = false, ...flags } = {
     if (!TOOL_ID.test(id)) return refuse(`\`${clean(id)}\` is not a tool id`, 'an id is lower-case letters, digits and dashes — `yad toolbox list --json` shows each one', { json });
     return refuse(`${id} is not in the toolbox`, '`yad toolbox list --json` shows each id', { json });
   }
-  const connected = connectedTools(productRoot);
-  const was = tool ? toolUse(tool, loadChoices(productRoot)) : null;
-  let shipped;
-  if (tool) shipped = setShipped(doc, tool, 'skip', connected);
-  else {
-    shipped = { ...shipped0 };
-    delete shipped[id];
-  }
-  const changed = copies > 0 || !sameJSON(shipped, doc.shipped);
-  if (changed) save(productRoot, doc, shipped, left);
-
   if (tool) {
+    const connected = connectedTools(productRoot);
+    const was = toolUse(tool, loadChoices(productRoot));
+    const shipped = setShipped(doc, tool, 'skip', connected);
+    const shippedChanged = !sameJSON(shipped, doc.shipped);
+    const changed = shippedChanged || copies > 0;
+    if (changed) save(productRoot, doc, shipped, left);
     const now = toolUse(tool, usedFrom(shipped, connected));
-    sayEdit(tool, was, now, changed);
-    // A custom entry under a shipped tool's id was ignored all along; it is gone too.
-    if (copies) info(`also removed ${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${id}, which ${copies > 1 ? 'were' : 'was'} ignored (it is a shipped tool's id)`);
+    // The shipped part and the dead custom copies are two facts, each said once.
+    if (shippedChanged || !copies) sayEdit(tool, was, now, shippedChanged);
+    if (copies) {
+      const what = `${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${id}, which ${copies > 1 ? 'were' : 'was'} ignored (it is a shipped tool's id)`;
+      info(shippedChanged ? `also removed ${what}` : `removed ${what} — ${tool.name} is still ${now.used ? 'used' : 'not used'} here`);
+    }
     // Removing it from the toolbox does not disconnect it: the connect skill owns that file.
     if (connected.has(id)) info(`${connected.get(id)} still connects it — \`${tool.usedBy[0]}\` changes the connection`);
-    if (changed) hand(`written to ${FILE} — commit it so the team shares it (undo with \`yad toolbox add ${id}\`)`);
+    if (changed) hand(`written to ${FILE} — commit it so the team shares it${was.used !== now.used ? ` (undo with \`yad toolbox add ${id}\`)` : ''}`);
     return { id, ...now, changed, ...where(productRoot) };
   }
-  if (copies) ok(`${clean(id)} removed — it was one of this project's own tools${copies > 1 ? ` (listed ${copies} times; every copy is gone)` : ''}`);
+  const usableBefore = loadChoices(productRoot).custom.some((r) => r.id === id);
+  save(productRoot, doc, (() => { const sh = { ...shipped0 }; if (deadLine) delete sh[id]; return sh; })(), left);
+  if (copies) {
+    const many = copies > 1 ? ` (listed ${copies} times; every copy is gone)` : '';
+    ok(usableBefore ? `${clean(id)} removed — it was one of this project's own tools${many}` : `removed the entry for ${clean(id)}, which was ignored${many}`);
+  }
   if (deadLine) ok(`removed the line for \`${clean(id)}\` under shipped — a tool this yadflow does not ship`);
   hand(`written to ${FILE} — commit it so the team shares it`);
   return { id, used: false, because: null, changed: true, ...where(productRoot) };

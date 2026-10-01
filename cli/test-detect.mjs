@@ -802,7 +802,7 @@ test('E86: a broken or odd toolbox.json — the list still answers with the defa
     assert.match(loadChoices(p).problems[0], /`shipped` must be a JSON object/);
     put(path.join(p, '.sdlc/toolbox.json'), '{"custom":{"id":"x"}}');
     assert.match(loadChoices(p).problems[0], /`custom` must be a JSON list/);
-    assert.deepEqual(loadChoices(null), { problems: [], shipped: new Map(), custom: [], connected: new Map() });
+    assert.deepEqual(loadChoices(null), { problems: [], unreachable: false, shipped: new Map(), custom: [], connected: new Map() });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -1017,9 +1017,11 @@ test('E86 review 1: removing a line that did nothing is said as that, not as "no
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.deepEqual([JSON.parse(r.stdout).changed, JSON.parse(r.stdout).used], [true, true]);
     assert.match(r.stderr, /Repomix is already used here — removed a line in \.sdlc\/toolbox\.json that did nothing/);
+    assert.doesNotMatch(r.stderr, /undo with/, 'the "opposite" command would switch Repomix off, not undo');
     assert.doesNotMatch(r.stderr, /nothing to change/);
     r = yad(['toolbox', 'remove', 'figma'], { cwd: p, home });
     assert.match(r.stdout, /Figma is already not used here — removed a line in \.sdlc\/toolbox\.json that did nothing/);
+    assert.doesNotMatch(r.stdout, /undo with/);
     // A bad value on a tool that is not used by default: `add` now really uses it.
     r = yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
     assert.match(r.stdout, /ECC .* is used here now/);
@@ -1071,7 +1073,7 @@ test('E86 review 1: refusals answer in JSON; --dir names the Product itself for 
       const out = JSON.parse(r.stdout);
       assert.deepEqual([out.ok, out.command], [false, 'toolbox add']);
       assert.match(out.error, /no Product here/);
-      assert.match(out.hint, /name the Product folder itself/);
+      assert.match(out.hint, /name the Product folder itself \(the one holding \.sdlc\/product\.json\): --dir \S*p$/, 'the refusal names the Product it found');
     }
     assert.deepEqual(snapshot(T), before, 'nothing written');
     let r = yad(['toolbox', 'add', 'ecc', '--json', '--dir', p], { cwd: T, home });
@@ -1165,6 +1167,48 @@ test('E86 review 2: doctor says an entry with no id is fixed by hand', async () 
   const { toolboxFileChecks } = await import('./doctor.mjs');
   const { T, p } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ role: 'r' }] }) });
   try {
+    const checks = [];
+    toolboxFileChecks(checks, p);
+    assert.match(checks[0].hint, /\(an entry with no id: fix it by hand\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E86 review 3 ----------
+
+test('E86 review 3: a dead custom entry under a shipped id is one removal, said once, with no false undo', () => {
+  const dead = (id) => ({ id, role: 'r', fallback: 'f', detect: { bins: ['x'] } });
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { 'spec-kit': 'skip' }, custom: [dead('ecc'), dead('spec-kit'), dead('repomix')] }) });
+  try {
+    // Scenario A: ecc is not used; only its dead custom entry goes.
+    let r = yad(['toolbox', 'remove', 'ecc'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /removed 1 custom entry under the id ecc, which was ignored .* — ECC .* is still not used here/);
+    assert.doesNotMatch(r.stdout, /also removed|already not used|undo with/);
+    // Scenario B: spec-kit already skipped.
+    r = yad(['toolbox', 'remove', 'spec-kit'], { cwd: p, home });
+    assert.match(r.stdout, /removed 1 custom entry under the id spec-kit, .* — Spec Kit is still not used here/);
+    assert.doesNotMatch(r.stdout, /undo with/);
+    // add clears a dead entry too, and says so once.
+    r = yad(['toolbox', 'add', 'repomix'], { cwd: p, home });
+    assert.match(r.stdout, /Repomix is already used here — nothing to change/);
+    assert.match(r.stdout, /removed 1 custom entry under the id repomix, which was ignored/);
+    assert.doesNotMatch(r.stdout, /undo with/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { 'spec-kit': 'skip' } });
+    // A real change still offers its undo.
+    r = yad(['toolbox', 'add', 'spec-kit'], { cwd: p, home });
+    assert.match(r.stdout, /undo with `yad toolbox remove spec-kit`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 3: removing an entry that was ignored says so; an empty id is fixed by hand', async () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { '': 'use' }, custom: [{ id: 'half' }, { id: '', role: 'r' }] }) });
+  try {
+    const r = yad(['toolbox', 'remove', 'half'], { cwd: p, home });
+    assert.match(r.stdout, /removed the entry for half, which was ignored/);
+    assert.doesNotMatch(r.stdout, /one of this project's own tools/);
+    const c = loadChoices(p);
+    assert.equal(c.unreachable, true);
+    const { toolboxFileChecks } = await import('./doctor.mjs');
     const checks = [];
     toolboxFileChecks(checks, p);
     assert.match(checks[0].hint, /\(an entry with no id: fix it by hand\)/);

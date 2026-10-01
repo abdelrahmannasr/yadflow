@@ -2121,10 +2121,10 @@ export function toolboxFileChecks(checks, root) {
     check(checks, 'toolbox', 'project', 'fail', `${rel} ${error}`, 'fix the JSON or restore it from git — `yad toolbox list` shows the defaults until then');
     return;
   }
-  const { problems, shipped, custom } = loadChoices(root);
+  const { problems, unreachable, shipped, custom } = loadChoices(root);
   if (problems.length) {
-    // An entry with no id is named by its place (`number 2`); only hand-editing reaches it.
-    const noId = problems.some((p) => /custom tool number \d+ /.test(p));
+    // An entry with no id (or an empty one) is out of `remove`'s reach; only hand-editing fixes it.
+    const noId = unreachable;
     check(checks, 'toolbox', 'project', 'warn', `${rel}: ${problems.length} line(s) do nothing — ${problems.map((p) => p.replace(`${rel}: `, '')).join('; ')} [YAD-CFG-007]`,
       `fix them by hand, or \`yad toolbox remove <id>\` — it clears whatever the file holds under that id — and add the tool again${noId ? ' (an entry with no id: fix it by hand)' : ''}`);
     return;
