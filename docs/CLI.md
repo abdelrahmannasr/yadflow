@@ -1181,7 +1181,7 @@ Each entry records:
 | `detect` | what shows it is here: skill names or prefixes, a plugin, an MCP server name, a program on PATH, or `npx` for a tool fetched on demand |
 | `versions` | a known-good range, or `null` when no bound has been tested yet (all of them, for now). A range uses full versions (`>=3.0.0 <4.0.0`, `^3.2.0`, `~1.4.0`); a partial one such as `~1` is refused, and `<4.0.0` also keeps out 4.0.0's own pre-releases |
 | `fallback` | what yadflow does without it |
-| `records` | the exact line a skill writes when the tool is absent (`speckit: not-installed`) |
+| `records` | the exact line a skill writes when it did not use the tool (`speckit: not-installed`); see [what a skill does when its tool is missing](#what-a-skill-does-when-its-tool-is-missing) |
 
 **How a tool is found.** The toolbox reads the same answer as `yad detect`, and looks for a program by
 reading the `PATH` folders. It starts no program, installs nothing and uses no network. Repomix counts
@@ -1269,6 +1269,37 @@ in use. `add` and `remove` write only a difference from that default, so the fil
   `--json` answer gains `toolbox: { used, findings, problems }` — the tool ids in use, the same
   `findings` as `yad toolbox check --json`, and any line of `toolbox.json` that does nothing. If the
   check itself cannot run, the command still finishes, warns, and answers `error: "could not check"`.
+
+### What a skill does when its tool is missing
+
+Every skill that uses a toolbox tool has a section named **When a tool is missing** (E87). It lists
+each tool the skill uses, when to use it, and what the skill does instead — the fallback — in the
+toolbox's own words. The skills are `yad-spec` (Spec Kit), `yad-ui` (Impeccable, Figma, Pencil),
+`yad-connect-repos` and `yad-backfill` (Repomix), `yad-test-cases` and `yad-connect-testing` (the
+testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-learning` (DeepTutor).
+
+- **The skill asks yad, not its own guess.** It runs `yad toolbox list --json` and reads its tool's
+  entry, run where the tool runs (`--dir <the code repo>` for work inside one, so tools installed
+  there are found). A core tool is used when the entry says `used: true` and its state is `installed` or
+  `available`. So one rule decides for every skill, and a plugin turned off in Claude Code counts as
+  missing. If yad cannot answer (it is not installed there, or the command fails), the skill uses its
+  own check, as before.
+- **A team's choice is followed.** After `yad toolbox remove spec-kit`, `yad-spec` writes the spec files
+  by hand even on a machine where Spec Kit is installed.
+- **A connector follows its Product file.** Figma, Playwright, DeepTutor and the rest are used when
+  `design.json`, `testing.json` or `learning.json` connects them, as before. `yad toolbox remove figma`
+  does not change that; `yad-connect-design` does.
+- **The skill records it.** Where a skill writes a line when the tool was not used, the line is the
+  entry's `records`: `speckit: not-installed`, `impeccable: not-installed`, and
+  `source: repomix-unavailable` (in a backfill spec's frontmatter and in `repos.json`). It means the
+  tool was not used, whatever the reason. The skill also tells you which tools it used and why.
+- **The toolbox owns the words.** To change a fallback, change `cli/toolbox.mjs` and run
+  `node scripts/skill-fallbacks.mjs`, which rewrites every section. A test fails when a section and the
+  toolbox disagree, or when a skill has the section but no tool names it.
+
+Not covered: CodeRabbit (the AI reviewer `yad-engineer-review` wires) and `gh` / `glab` (the GitHub
+and GitLab programs several skills call) are not in the toolbox, so no skill declares a fallback for
+them yet.
 
 ## What is installed
 

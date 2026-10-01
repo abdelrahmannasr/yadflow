@@ -257,7 +257,7 @@ The record is worth trusting because people approve what goes into it.
 - linked changes and `yad thread`
 - `yad history`, `yad next` and `yad usage`
 - `yad detect`, which lists the skills, agents, MCP servers and plugins installed for each AI agent
-- `yad toolbox list`, which shows the external tools yadflow can use, which ones you have, and what happens without each; `yad toolbox add` / `remove` record the tools your team uses, and `yad toolbox check` lists the ones not ready on your machine (`yad setup`, `check`, `update` and `join` print the same list, and never install anything)
+- `yad toolbox list`, which shows the external tools yadflow can use, which ones you have, and what happens without each; `yad toolbox add` / `remove` record the tools your team uses, and `yad toolbox check` lists the ones not ready on your machine (`yad setup`, `check`, `update` and `join` print the same list, and never install anything); each skill that uses a tool reads the same answer and says what it does without it
 - draft saving, claims and owners
 - the CI checks
 - the Review Companion
