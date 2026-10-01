@@ -1258,3 +1258,61 @@ test('E86: a removed tool\'s fallback reads as "without it", and a copy\'s reaso
     assert.match(r.stdout, /also removed 1 custom entry under the id ecc, which was ignored \(the id is a shipped tool's\)/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---------- E85: the toolbox step of setup, check, update and join ----------
+
+const { offerToolbox, toolboxCheckLines } = await import('./toolbox.mjs');
+const { stripAnsi } = await import('./lib.mjs');
+
+test('E85: the check lines — nothing in use, everything here, and what is missing with how to get it', () => {
+  const plain = (lines) => lines.map(stripAnsi);
+  assert.match(plain(toolboxCheckLines({ used: [], findings: [] }))[0], /uses no tool from the toolbox — `yad toolbox list` shows them all/);
+  const repomix = TOOLBOX.find((t) => t.id === 'repomix');
+  assert.deepEqual(plain(toolboxCheckLines({ used: [repomix], findings: [] })), ['  ✓ all 1 tool(s) this project uses are here: Repomix']);
+  const lines = plain(toolboxCheckLines({ used: [repomix], findings: [{ id: 'repomix', name: 'Repomix', problem: 'missing', fallback: repomix.fallback }] }));
+  assert.match(lines[0], /1 of the 1 tool\(s\) this project uses is not ready here\. None is required\./);
+  assert.ok(lines.some((l) => l.includes(`npm: ${repomix.install[0].command}`)), 'the install command is printed, not run');
+  assert.match(lines.at(-1), /without it: /);
+});
+
+test('E85: the offer never fails the command it is part of — a check that throws is said, and the answer is empty', () => {
+  const { T, p } = product();
+  try {
+    const res = offerToolbox(p, p, { items: [], has: () => { throw new Error('PATH unreadable'); } });
+    assert.deepEqual(res, { used: [], findings: [], problems: [], error: 'could not check' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E85: `yad setup` offers the tools in use after the tools step — a connector chosen there counts — and writes no toolbox.json', () => {
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e85-')));
+  const p = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  fs.mkdirSync(p, { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
+  try {
+    const env = { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1' };
+    const run = (args) => spawnSync(process.execPath, [YAD, ...args], { cwd: p, encoding: 'utf8', env });
+    // --tools with no answers takes each tool step's default: Figma, Playwright, DeepTutor.
+    const r = run(['setup', '--solo', '--greenfield', '--monorepo', '--tools', '--ide-targets', '.claude', '--json']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const out = JSON.parse(r.stdout);
+    for (const id of ['repomix', 'spec-kit', 'impeccable', 'figma', 'playwright', 'deeptutor']) assert.ok(out.toolbox.used.includes(id), id);
+    assert.ok(out.toolbox.findings.some((f) => f.id === 'playwright' && f.problem === 'missing'), 'an empty home folder has no Playwright');
+    assert.ok(!fs.existsSync(path.join(p, '.sdlc/toolbox.json')), 'offering writes no choice');
+
+    const human = run(['setup', '--solo', '--greenfield', '--monorepo', '--ide-targets', '.claude']);
+    assert.equal(human.status, 0, human.stdout + human.stderr);
+    assert.match(human.stdout, /\[9\/10\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed for you[\s\S]*\[10\/10\] Done/);
+
+    // `yad check` and `yad update` end with the same section, exit 0 with tools missing, and write no choice.
+    for (const verb of ['check', 'update']) {
+      const j = run([verb, '--json']);
+      assert.equal(j.status, 0, verb + j.stdout + j.stderr);
+      const a = JSON.parse(j.stdout);
+      assert.ok(a.toolbox.used.includes('playwright') && a.toolbox.findings.length > 0, verb);
+      const h = run([verb]);
+      assert.match(h.stdout, /\nToolbox\n[\s\S]*– Playwright MCP: not found/, verb);
+    }
+    assert.ok(!fs.existsSync(path.join(p, '.sdlc/toolbox.json')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

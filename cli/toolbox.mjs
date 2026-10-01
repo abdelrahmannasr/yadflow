@@ -604,28 +604,53 @@ export function toolboxCheck(root, productRoot, opts = {}) {
   return { used, findings, problems };
 }
 
-// NEVER FAILS (decided with the row): no tool is required, so a missing one is news, not an error. Exit 0.
-export function runToolboxCheck(root, { json = false, productRoot = null, ...opts } = {}) {
-  const { used, findings, problems } = toolboxCheck(root, productRoot, opts);
-  if (json) return emitJSON({ ok: true, ...(productRoot ? where(productRoot) : { product: null, file: null }), used: used.map((r) => r.id), findings, problems });
-  for (const p of problems) warn(p);
-  if (!findings.length) {
-    ok(`all ${used.length} tool(s) this project uses are here: ${used.map((r) => clean(r.name)).join(', ')}`);
-    return undefined;
-  }
-  log(c.bold(`${findings.length} of the ${used.length} tool(s) this project uses ${findings.length === 1 ? 'is' : 'are'} not ready here. None is required.`));
+// The lines a check prints, from `toolboxCheck`'s answer, without the closing hint. One printer for
+// `yad toolbox check` and for the toolbox step of setup, update, check and join (E85), so they cannot
+// say it differently.
+export function toolboxCheckLines({ used, findings }) {
+  if (!used.length) return [`  ${c.dim('•')} this project uses no tool from the toolbox — \`yad toolbox list\` shows them all`];
+  if (!findings.length) return [`  ${c.green('✓')} all ${used.length} tool(s) this project uses are here: ${used.map((r) => clean(r.name)).join(', ')}`];
+  const lines = [c.bold(`${findings.length} of the ${used.length} tool(s) this project uses ${findings.length === 1 ? 'is' : 'are'} not ready here. None is required.`)];
   for (const f of findings) {
     const r = used.find((u) => u.id === f.id);
     const what = f.problem === 'missing' ? 'not found'
       : f.problem === 'disabled' ? 'installed, but its plugin is turned off in your Claude Code settings'
         : `version ${clean(f.version)} is outside the known-good range ${f.versions} — still used`;
-    log(`  ${f.problem === 'out-of-range' ? c.yellow('!') : c.dim('–')} ${c.bold(clean(f.name))}: ${what}`);
-    if (f.problem === 'disabled') log(`      ${c.dim('turn it on with /plugin in Claude Code')}`);
-    else for (const line of howToGet(r)) log(`      ${c.dim(line)}`);
-    if (f.problem !== 'out-of-range') log(`      ${c.dim(`without it: ${clean(f.fallback)}`)}`);
+    lines.push(`  ${f.problem === 'out-of-range' ? c.yellow('!') : c.dim('–')} ${c.bold(clean(f.name))}: ${what}`);
+    if (f.problem === 'disabled') lines.push(`      ${c.dim('turn it on with /plugin in Claude Code')}`);
+    else for (const line of howToGet(r)) lines.push(`      ${c.dim(line)}`);
+    if (f.problem !== 'out-of-range') lines.push(`      ${c.dim(`without it: ${clean(f.fallback)}`)}`);
   }
-  info(productRoot ? 'stop using a tool here with `yad toolbox remove <id>`' : 'no Product here, so this checks the core tools only');
+  return lines;
+}
+
+// NEVER FAILS (decided with the row): no tool is required, so a missing one is news, not an error. Exit 0.
+export function runToolboxCheck(root, { json = false, productRoot = null, ...opts } = {}) {
+  const res = toolboxCheck(root, productRoot, opts);
+  const { used, findings, problems } = res;
+  if (json) return emitJSON({ ok: true, ...(productRoot ? where(productRoot) : { product: null, file: null }), used: used.map((r) => r.id), findings, problems });
+  for (const p of problems) warn(p);
+  for (const line of toolboxCheckLines(res)) log(line);
+  if (findings.length) info(productRoot ? 'stop using a tool here with `yad toolbox remove <id>`' : 'no Product here, so this checks the core tools only');
   return undefined;
+}
+
+// The toolbox step of `yad setup`, `yad check`, `yad update` and `yad join` (E85). It OFFERS: it prints
+// what the project uses that is not here and how to get it. It installs nothing, runs no program and
+// writes no file (decided with the row, as `yad toolbox add` is) — and it never fails the command it is
+// part of. Returns the part of the --json answer it adds: `{ used, findings, problems }`.
+export function offerToolbox(root, productRoot, opts = {}) {
+  let res;
+  // A step inside another command: if finding tools throws (a home folder that cannot be read), the
+  // command it is part of still finishes, and says why the step is missing.
+  try { res = toolboxCheck(root, productRoot, opts); } catch (e) {
+    warn(`toolbox: could not check the tools here (${clean(e?.message ?? String(e))}) — run \`yad toolbox check\` to see why`);
+    return { used: [], findings: [], problems: [], error: 'could not check' };
+  }
+  for (const p of res.problems) warn(p);
+  for (const line of toolboxCheckLines(res)) log(line);
+  if (res.findings.length) info('nothing is installed for you: run the command you choose, or stop using a tool with `yad toolbox remove <id>`');
+  return { used: res.used.map((r) => r.id), findings: res.findings, problems: res.problems };
 }
 
 // `--detect skill:x,plugin:p` → { skills: ['x'], plugins: ['p'] }, or { error }.

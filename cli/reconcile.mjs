@@ -19,6 +19,7 @@ import {
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
+import { offerToolbox } from './toolbox.mjs';
 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
@@ -238,8 +239,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (!fix) {
     if (workspaceFile === 'missing') info(`no ${WORKSPACE_FILE} beside the Product — \`yad check --fix\` writes it, so yad finds the Product from its code repos`);
     if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
+    const toolbox = toolboxSection(root);
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
-    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile };
+    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile, toolbox };
   }
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
@@ -314,5 +316,15 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       },
     });
   }
-  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile };
+  const toolbox = toolboxSection(root);
+  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile, toolbox };
+}
+
+// E85: `yad check` and `yad update` end with the toolbox check — the tools this Product uses that are not
+// here. Report only: it never adds to what `--fix` applies, never changes the exit code, and installs
+// nothing. Both verbs, because both run here and a release can add a core tool.
+function toolboxSection(root) {
+  log('');
+  log(c.bold('Toolbox'));
+  return offerToolbox(root, root);
 }

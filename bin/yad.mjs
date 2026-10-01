@@ -24,7 +24,8 @@ ${c.bold('Start a workspace')} ${c.dim('(the folder holding product/ and the cod
                        Never commits, pushes, or changes a shared file
 
 ${c.bold('Setup & maintenance')}
-  yad setup            Guided first-run setup (profile interview, install, connect & wire repos)
+  yad setup            Guided first-run setup (profile interview, install, connect & wire repos,
+                       then the tools this project uses that are missing — offered, never installed)
                        profile flags: --solo | --team <n>, --greenfield | --brownfield,
                        --monorepo | --separate, --tools (configure design/testing/learning now)
   yad check            Report what is missing / drifted / modified / stale / legacy (read-only)

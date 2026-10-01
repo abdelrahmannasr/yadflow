@@ -32,6 +32,7 @@ import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
 import { moduleActions, gitHookActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
+import { offerToolbox } from './toolbox.mjs';
 
 // E80: the file that lets yad find the Product from inside the repos it registers. Written by all three.
 function noteWorkspaceFile(product) {
@@ -483,6 +484,11 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   const hook = gitHookActions(product);
   for (const a of hook) a.apply();
   if (hook.length) ok('installed the git pre-commit hook in this clone');
+  // E85: the tools the team chose (the Product's toolbox.json, just cloned) that this machine lacks. A
+  // new teammate is the person most likely to miss one. Offered, never installed.
+  log('');
+  log(c.bold('Toolbox'));
+  const toolbox = offerToolbox(product, product);
 
   log('');
   if (repos.failed.length) hand(`${repos.failed.length} repo(s) not cloned — fix what is named above and re-run \`yad join ${shown(url)}\`; it keeps what is already there`);
@@ -490,6 +496,6 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   return {
     workspace, product,
     repos, skills: { installed: skills.installed, stale: skills.stale.length, shared: skills.shared.length },
-    hook: hook.length ? 'installed' : 'unchanged',
+    hook: hook.length ? 'installed' : 'unchanged', toolbox,
   };
 }
