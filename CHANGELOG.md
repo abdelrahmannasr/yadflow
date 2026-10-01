@@ -1,3 +1,19 @@
+# [4.1.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.1...v4.1.0) (2026-10-01)
+
+
+### Bug Fixes
+
+* **detect:** a non-object mcpServers is a problem in every file (E50 review 3) ([d917c72](https://github.com/abdelrahmannasr/yadflow/commit/d917c7229f98c61b5904659b82ece3cf13612ce9))
+* **detect:** read Codex TOML keys only, keep plugins inside their folder (E50 review 1) ([be11fd2](https://github.com/abdelrahmannasr/yadflow/commit/be11fd2fcad238f994a2a68db609ddd8db2a0c8b))
+* **detect:** report plugin MCP paths that leave or miss, keep lines in order (E50 review 4) ([84c0a6a](https://github.com/abdelrahmannasr/yadflow/commit/84c0a6ae44458ba78cbc4c418b1c307090150a8e))
+* **detect:** report unreadable settings and a non-object mcpServers (E50 review 2) ([a4f7f20](https://github.com/abdelrahmannasr/yadflow/commit/a4f7f20ba5728bcd33ed4a2498026ab3ef6baa43))
+* **detect:** zero-width names, and a plugin that names .mcp.json itself (E50 review 5) ([6704c9d](https://github.com/abdelrahmannasr/yadflow/commit/6704c9db3ea5a03db968445ec9eb5b36922c4c55))
+
+
+### Features
+
+* **detect:** yad detect lists installed skills, agents, MCP servers and plugins (E50) ([ccd7142](https://github.com/abdelrahmannasr/yadflow/commit/ccd71428ac6e64624160b9b2cb867c4ec2522653))
+
 ## [4.0.1](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.0...v4.0.1) (2026-09-30)
 
 
