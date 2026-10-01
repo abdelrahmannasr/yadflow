@@ -76,6 +76,7 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. In solo mode the project view (no epic) first suggests `yad mode team` when more than one person may work on the Product (E74, see [When solo mode may be wrong](#the-pr-driven-review-gate)). |
 | `yad skill list` / `yad skill bind <step> <skill>…` / `yad skill unbind <step>` | **Choose which skill runs which step.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. `list` shows every step a skill runs — Shape review gates are excluded, since `yad gate` drives those — what runs each one, and where that answer came from: `project` (you bound it), `engine` (the default) or `ignored` (your file has a line for that step and the line names no skill, so the default still runs). `--json` for a script. `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A **Shape review gate** is refused (nothing would ever invoke the binding); `engineer-review` is a Build step in its own right and **is** bindable. A step this release does not know is recorded with a warning, because your file wins. `unbind` drops the line and the step goes back to the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
 | `yad detect` | **See what is installed for the agents that work here.** Lists the skills, agents (subagents), MCP servers and plugins found in this folder and in your home folder, and which agents read each place — Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder, opencode. Read-only: it writes nothing and uses no network. An MCP server is named, never described — its command, arguments and settings can hold a token. `--json` lists every item with its version and content hash (a sha256 of its `SKILL.md` or agent file, with Windows line ends counted as plain ones). See [what is installed](#what-is-installed). |
+| `yad toolbox list` | **See the external tools yadflow can use, and which you have.** Lists every tool in the toolbox in three groups — **core** (offered at setup: Repomix, Spec Kit, Impeccable), **recommended** (pools of skills you may choose: BMAD-METHOD, ECC, mattpocock/skills) and **connectors** (the design, testing and learning tools a Product connects: Figma, Pencil, Playwright, Cypress, pytest, Maestro, DeepTutor). For each: what it is for, whether it is found here, and what yadflow does without it. Read-only; it installs nothing. `--json` adds each tool's licence, source, checked date, install commands and where it was found. `yad toolbox` alone is `list`; `add`, `remove` and `check` arrive in E86. See [the toolbox](#the-toolbox). |
 | `yad dial <step> [--to auto\|human]` / `yad dial <epic> <story> --repo <name> <step> [--to auto\|human]` / `yad kill --reason <text>` / `yad unkill [--reason <text>]` | **Set a step's advance dial, and the kill switch (E34).** Automation is no longer earned: the team sets the dial, and the engine shows the step's run record beside it as **advice, never a refusal**. With one word, `yad dial` sets a **Shape author step** for the whole project, in `.sdlc/automation.json`; that choice is **recorded, not acted on** — nothing drives a Shape step on its own until the engine runs agents. With an epic, a story and `--repo`, it sets a **Build lane step** (`spec`, `tasks`, `implement`, `checks`) in `build-state/<story>.json`, writing both dial names, and prints that step's run record in that repo (runs, % `approved-unchanged`); the `yad-run` skill then moves past the step on its own after a clean run. No `--to` only reads, and a gate asked that way answers `human` — it is always a person. The Foundation steps are Product-level and refused. A review gate — the engineer review and every Shape review — is refused, and so is a lane step `yad-run` has not written yet, an undeclared repo and a skipped lane. `yad kill --reason` holds **every** step at `advance: human`, recorded with who, when and why in `.sdlc/automation.json`; `yad unkill` lets each step follow its own dial again, keeping the record it replaces as `kill.previous`. An `automation.json` that will not parse is read as the kill switch ON, and neither command writes over it. `--json` on all three. `yad next` says when a dial is held by the kill switch, and that a Shape `auto` is only recorded. The old `kill_switch` line in `_bmad/sdlc/config.yaml` is no longer read — `yad doctor` fails on one left `true`. |
 | `yad mode` / `yad mode solo --reason <text>` / `yad mode team [--reason <text>]` | **Who must approve (E10).** Solo mode waives the approval requirement on every review gate — the merge and the resolved threads still decide — and team mode counts approvals. With no word it reads the mode the gates act on and the last change; in solo mode it also counts the active people and suggests `yad mode team` when more than one person may work on the Product (E74 — a suggestion only, see [When solo mode may be wrong](#the-pr-driven-review-gate)). `yad mode solo` needs `--reason`, because every open gate stops counting approvals, CI's included on a verified Product; `yad mode team` takes one optionally. The change is recorded as `mode_set` (`from`, `to`, `by`, `date`, `reason`) in `.sdlc/product.json` / `hub.json`, and `mode: solo\|team` is written beside the `solo` flag — `solo` is still the one the gates read this major. **Nothing looks back:** a gate that already passed keeps its record, and the command names each open review, which follows the new mode from its next sync. A gate that passes in solo mode records `waived: "solo"` on its closing record, and `yad gate status` prints it. On a verified Product the open reviews live on the platform, so it says that every open review PR/MR follows the new mode from its next CI run, and `--json` carries `openReviewsKnown: false`. The Product config that is read (`product.json`, or `hub.json` when it is absent) is never written over when it will not parse. `--json` for both. |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (an old installed name: pre-2.0 `sdlc-*`, or 4.0's `hub` → `product` renames) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
@@ -1145,6 +1146,50 @@ as an empty one, because a command whose job is to say what to do next must stil
 because a binding on one would record a decision that never happens. Bind the step being reviewed
 instead: `architecture`, not `architecture-review`. `engineer-review` is not one of them — it is a
 Build step in its own right, the locked human merge gate, and it has a skill, so it can be bound.
+
+## The toolbox
+
+yadflow can use some tools it does not ship. **None is required: every one has a fallback**, so a
+missing tool makes yadflow do less, never stop. The toolbox is the one list of them. It ships inside
+yadflow and moves with each release; a project cannot change it yet (`yad toolbox add` / `remove`
+arrive in E86).
+
+```bash
+yad toolbox          # the same as: yad toolbox list
+yad toolbox --json   # every field, plus what was found here
+```
+
+| Group | Tools | What it means |
+|---|---|---|
+| core | Repomix, Spec Kit, Impeccable | offered at setup (E85) |
+| recommended | BMAD-METHOD, ECC, mattpocock/skills | pools of skills and agents you may bind to a step; never pushed |
+| connector | Figma, Pencil, Playwright, Cypress, pytest, Maestro, DeepTutor | the tools a Product connects with `yad-connect-design`, `yad-connect-testing` and `yad-connect-learning` |
+
+Each entry records:
+
+| Field | Meaning |
+|---|---|
+| `role` | what yadflow uses it for |
+| `licence`, `source`, `checked` | its licence, its own repository or docs, and the day its facts were checked there |
+| `install` | the documented install commands, each typed `plugin`, `npm`, `python` or `script`. A tool set up inside a desktop app has none, and `manual` links the vendor's steps |
+| `detect` | what shows it is here: skill names or prefixes, a plugin, an MCP server name, a program on PATH, or `npx` for a tool fetched on demand |
+| `versions` | a known-good range, or `null` when no bound has been tested yet (all of them, for now) |
+| `fallback` | what yadflow does without it |
+| `records` | the exact line a skill writes when the tool is absent (`speckit: not-installed`) |
+
+**How a tool is found.** The toolbox reads the same answer as `yad detect`, and looks for a program by
+reading the `PATH` folders. It starts no program, installs nothing and uses no network. Repomix counts
+as `available` whenever `npx` is there, because yadflow runs it through `npx repomix@latest`. An MCP
+server is matched by its name only, because its settings are never read: a server another package
+registered under the same name (common for `playwright`) is counted as found.
+
+**A version outside the range warns; it does not switch the tool off.** The tool is still used, and the
+list says which range is known to work.
+
+**Every install command was checked against the tool's own repository or docs**, never guessed from a
+package name: npm `ecc`, for example, is an unrelated crypto library, and ECC's package is
+`ecc-universal`. Where no official command exists — Cypress and pytest have no official MCP server
+that runs local tests — the entry says so and links the vendor's docs instead.
 
 ## What is installed
 
