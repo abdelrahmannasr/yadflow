@@ -183,6 +183,9 @@ Build by hand"** below.
   project's choice or the engine's default. `yad skill bind <step> <skill>` records your own in
   `.sdlc/skills.json`; pass several and they run as a chain, in order, each costing another model run.
   `yad skill unbind <step>` goes back to the default.
+- **`yad detect`** — which skills, agents, MCP servers and plugins are installed for the agents that work
+  here, in this folder and in your home folder, and which agents read each place. Read-only; an MCP
+  server is named, never its settings. `--json` lists every item with its version and content hash.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.

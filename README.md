@@ -255,6 +255,7 @@ The record is worth trusting because people approve what goes into it.
 - the Shape and Build steps with review gates
 - linked changes and `yad thread`
 - `yad history`, `yad next` and `yad usage`
+- `yad detect`, which lists the skills, agents, MCP servers and plugins installed for each AI agent
 - draft saving, claims and owners
 - the CI checks
 - the Review Companion
