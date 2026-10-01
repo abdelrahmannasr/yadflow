@@ -342,8 +342,11 @@ export function versionInRange(version, range) {
 export function onPath(bin, { env = process.env, platform = process.platform } = {}) {
   // Only absolute folders: an empty or relative entry means "the current folder", which is not where a
   // tool is installed, and would make the answer depend on where `yad` happened to run.
-  const isAbs = platform === 'win32' ? path.win32.isAbsolute : path.posix.isAbsolute;
-  const dirs = String(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').filter((d) => d && isAbs(d));
+  // On Windows that means a drive and a root (C:\x) or a share (\\server\share): \x is on whatever drive
+  // is current, and D:x in that drive's current folder. Windows accepts an entry in quotes; so does this.
+  const isAbs = platform === 'win32' ? (d) => /^[A-Za-z]:[\\/]/.test(d) || /^[\\/]{2}[^\\/]/.test(d) : path.posix.isAbsolute;
+  const unquote = (d) => (platform === 'win32' ? d.replace(/^"(.*)"$/, '$1') : d);
+  const dirs = String(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').map(unquote).filter((d) => d && isAbs(d));
   const exts = platform === 'win32' ? ['', ...String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
   for (const dir of dirs) {
     for (const ext of exts) {
@@ -371,8 +374,10 @@ export function toolStatus(tool, items, { has = onPath } = {}) {
   // A Claude Code plugin your settings turn off is not loaded, and neither is anything it brings (its
   // skills, agents and MCP servers carry its id in `plugin`). `enabled: null` means no setting says, which
   // is on. So a tool found ONLY through a plugin that is off is `disabled`, not installed.
-  const off = new Set(items.filter((it) => it.kind === 'plugin' && it.enabled === false).map((it) => it.name));
-  const isOff = (it) => off.has(it.kind === 'plugin' ? it.name : it.plugin);
+  // Claude Code's plugins only: a Codex plugin of the same name has its own switch, which is not read.
+  const claude = (it) => Array.isArray(it.agents) && it.agents.includes('Claude Code');
+  const off = new Set(items.filter((it) => it.kind === 'plugin' && it.enabled === false && claude(it)).map((it) => it.name));
+  const isOff = (it) => claude(it) && off.has(it.kind === 'plugin' ? it.name : it.plugin);
   const matches = items.filter((it) => {
     if (it.kind === 'skill') return (d.skills ?? []).some((n) => lower(n) === lower(it.name)) || (d.skillPrefixes ?? []).some((p) => lower(it.name).startsWith(lower(p)));
     if (it.kind === 'plugin') return pluginMatches(it.name, d.plugins ?? []);
@@ -385,8 +390,9 @@ export function toolStatus(tool, items, { has = onPath } = {}) {
   const version = hits.map((h) => h.version).find((v) => typeof v === 'string' && v) ?? null;
   const inRange = tool.versions === null ? null : versionInRange(version, tool.versions);
   if (found.length) return { state: 'installed', found, version, inRange };
-  if (matches.length) return { state: 'disabled', found: [...new Set(matches.map((h) => h.where))], version: null, inRange: null };
+  // `npx` before `disabled`: yadflow runs such a tool through npx, so a plugin that is off does not stop it.
   if (d.npx && has('npx')) return { state: 'available', found: ['npx on PATH'], version: null, inRange: null };
+  if (matches.length) return { state: 'disabled', found: [...new Set(matches.map((h) => h.where))], version: null, inRange: null };
   return { state: 'missing', found: [], version: null, inRange: null };
 }
 

@@ -592,8 +592,15 @@ test('E84: onPath reads the PATH folders and starts nothing', () => {
     // Windows: a program is its name plus a PATHEXT ending.
     put(path.join(T, 'w/maestro.CMD'), '@echo off');
     const winEnv = { Path: path.join(T, 'w'), PATHEXT: '.EXE;.CMD' };
-    assert.equal(onPath('maestro', { env: winEnv, platform: 'win32' }), true);
+    // Only a real Windows folder (a drive and a root) is absolute under Windows' rule, so the found case
+    // holds on the Windows runner; elsewhere the same folder is correctly not one.
+    const onWindowsDrive = /^[A-Za-z]:[\\/]/.test(path.join(T, 'w'));
+    assert.equal(onPath('maestro', { env: winEnv, platform: 'win32' }), onWindowsDrive);
     assert.equal(onPath('maestro', { env: { ...winEnv, PATHEXT: '.EXE' }, platform: 'win32' }), false);
+    // Windows accepts an entry in quotes. Only a drive and a root, or a share, is absolute there; the
+    // folder below stands in for one (on a Mac or Linux runner it is a plain absolute path).
+    assert.equal(onPath('maestro', { env: { Path: `"${path.join(T, 'w')}"`, PATHEXT: '.CMD' }, platform: 'win32' }), onWindowsDrive, 'a quoted entry is read like an unquoted one');
+    for (const rel of ['\\w', 'D:w', '.\\w']) assert.equal(onPath('maestro', { env: { Path: rel, PATHEXT: '.CMD' }, platform: 'win32' }), false, rel);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -621,8 +628,9 @@ test('E84: toolStatus — installed, available through npx, missing; versions wa
 
 test('E84: a tool found only through a plugin your settings turn off is `disabled`, not installed', () => {
   const tool = { ...TOOLBOX.find((t) => t.id === 'figma') };
-  const plugin = (enabled) => ({ kind: 'plugin', name: 'figma@claude-plugins-official', where: '~/.claude/plugins/installed_plugins.json', version: '2.2.124', plugin: null, enabled });
-  const server = { kind: 'mcp', name: 'figma', where: 'figma@claude-plugins-official: .mcp.json', version: null, plugin: 'figma@claude-plugins-official' };
+  const CC = ['Claude Code'];
+  const plugin = (enabled) => ({ kind: 'plugin', name: 'figma@claude-plugins-official', where: '~/.claude/plugins/installed_plugins.json', agents: CC, version: '2.2.124', plugin: null, enabled });
+  const server = { kind: 'mcp', name: 'figma', where: 'figma@claude-plugins-official: .mcp.json', agents: CC, version: null, plugin: 'figma@claude-plugins-official' };
   const off = toolStatus(tool, [plugin(false), server], { has: () => false });
   assert.deepEqual([off.state, off.found.length], ['disabled', 2], 'the plugin AND the server it brings are off');
   assert.equal(toolStatus(tool, [plugin(null), server], { has: () => false }).state, 'installed', 'no setting means on');
@@ -630,6 +638,15 @@ test('E84: a tool found only through a plugin your settings turn off is `disable
   // The same server added by hand (no plugin) still counts while the plugin is off.
   const own = { ...server, where: '~/.claude.json', plugin: null };
   assert.deepEqual(toolStatus(tool, [plugin(false), server, own], { has: () => false }).found, ['~/.claude.json']);
+  // A Codex plugin of the same name has its own switch: the Claude Code one being off says nothing about it.
+  const codex = { kind: 'plugin', name: 'figma@claude-plugins-official', where: '~/.codex/config.toml', agents: ['Codex CLI'], version: null, plugin: null };
+  assert.deepEqual(toolStatus(tool, [plugin(false), codex], { has: () => false }).found, ['~/.codex/config.toml']);
+  // A tool yadflow runs through npx stays available when its plugin is off.
+  const repomix = TOOLBOX.find((t) => t.id === 'repomix');
+  const rp = { kind: 'plugin', name: 'repomix-mcp@repomix', where: 'p', agents: CC, version: null, plugin: null, enabled: false };
+  const rs = { kind: 'mcp', name: 'repomix', where: 'repomix-mcp@repomix: .mcp.json', agents: CC, version: null, plugin: 'repomix-mcp@repomix' };
+  assert.equal(toolStatus(repomix, [rp, rs], { has: (b) => b === 'npx' }).state, 'available');
+  assert.equal(toolStatus(repomix, [rp, rs], { has: () => false }).state, 'disabled');
   const text = toolboxLines([{ ...tool, status: off }]).join('\n');
   assert.match(text, /Figma .*: installed, but its plugin is turned off in your Claude Code settings\n\s+without it: markdown-only/);
 });
