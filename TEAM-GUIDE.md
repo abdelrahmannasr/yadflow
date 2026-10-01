@@ -606,6 +606,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   each place (Claude Code, Codex CLI, Cursor, Gemini CLI and others). It only reads, and names an MCP
   server without showing its settings, which can hold a token. `--json` adds each item's version and
   a content hash.
+- **See the toolbox:** `yad toolbox list` shows the external tools yadflow can use — core tools offered
+  at setup (Repomix, Spec Kit, Impeccable), optional skill pools, and the design, testing and learning
+  tools a Product connects — whether each is found here, and what yadflow does without it. None is
+  required. It installs nothing.
 - **Something not working? Run the doctor first:** `npx yadflow doctor`. It checks your environment (git,
   Node, and whether `gh` or `glab` is installed and logged in — a warning if not), that the `.sdlc/` config
   parses and points at real repos, and that every epic ledger loads. It also asks GitHub or GitLab, with

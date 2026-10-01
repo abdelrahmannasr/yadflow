@@ -163,7 +163,7 @@ const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 // `--json` escapes only U+0000–001F and hands the rest to a program unchanged.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
-const clean = (v) => String(v).replace(UNSAFE, '?');
+export const clean = (v) => String(v).replace(UNSAFE, '?');
 
 // ---- the three file formats -------------------------------------------------------------------------
 

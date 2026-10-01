@@ -792,6 +792,7 @@ export const MODULES: Module[] = [
             '`yad doctor` — environment + state health check; attach `--json` to a bug report. It also says whether each repo\'s branch requires an approval on GitHub or GitLab — or that it is not known, and why.',
             '`yad skill list` — which skill runs which step. `yad skill bind <step> <skill>` records your own choice in `.sdlc/skills.json`; pass several and they run as a chain, each costing another model run.',
             '`yad detect` — which skills, agents, MCP servers and plugins each AI agent can use here (this folder and your home folder). Read-only; MCP servers are named, never their settings.',
+            '`yad toolbox list` — the external tools yadflow can use, which ones you have, and what yadflow does without each. None is required.',
             '`npx yadflow check --fix` — reconcile the install after any update.',
             '`yad history` — every work item, newest first; `yad history show <id>` gives one item\'s steps and approvals, and `yad history search <text>` finds one.',
             '`yad mode` — shows who must approve; `yad mode solo --reason <why>` waives approvals (the merge still decides) and `yad mode team` counts them again.',
