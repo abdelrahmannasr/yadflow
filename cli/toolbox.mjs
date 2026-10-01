@@ -684,6 +684,16 @@ function sayEdit(tool, was, now, changed) {
   else if (was.used === now.used) info(`${tool.name} is already ${state} — removed a line in ${FILE} that did nothing`);
   else ok(now.used ? `${tool.name} is used here now` : `${tool.name} is not used here now — ${clean(tool.fallback)}`);
 }
+// The whole report of an edit to a SHIPPED tool, for both verbs — one function, so `add` and `remove`
+// cannot say it differently again. Two facts, each said once: the shipped part (`sayEdit`), and the
+// dead custom copies under the tool's id that the same write removed.
+function sayShippedEdit(tool, was, now, shippedChanged, copies) {
+  if (shippedChanged || !copies) sayEdit(tool, was, now, shippedChanged);
+  if (copies) {
+    const what = `${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${tool.id}, which ${copies > 1 ? 'were' : 'was'} ignored (it is a shipped tool's id)`;
+    info(shippedChanged ? `also removed ${what}` : `removed ${what} — ${tool.name} is still ${now.used ? 'used' : 'not used'} here`);
+  }
+}
 const usedFrom = (shipped, connected) => ({ shipped: new Map(Object.entries(shipped).filter(([, v]) => CHOICES.includes(v))), connected });
 const sameId = (id) => (t) => isObject(t) && t.id === id;
 
@@ -742,8 +752,7 @@ export function runToolboxAdd(productRoot, { id, custom = false, json = false, .
   const changed = shippedChanged || copies > 0;
   if (changed) save(productRoot, doc, shipped, left);
   const now = toolUse(tool, usedFrom(shipped, connected));
-  sayEdit(tool, was, now, shippedChanged);
-  if (copies) info(`removed ${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${id}, which ${copies > 1 ? 'were' : 'was'} ignored (it is a shipped tool's id)`);
+  sayShippedEdit(tool, was, now, shippedChanged, copies);
   // Records only: the person installs it.
   const how = howToGet(tool);
   if (how.length) hand(`to install it: ${how.join('   or   ')}`);
@@ -780,19 +789,16 @@ export function runToolboxRemove(productRoot, { id, json = false, ...flags } = {
     const changed = shippedChanged || copies > 0;
     if (changed) save(productRoot, doc, shipped, left);
     const now = toolUse(tool, usedFrom(shipped, connected));
-    // The shipped part and the dead custom copies are two facts, each said once.
-    if (shippedChanged || !copies) sayEdit(tool, was, now, shippedChanged);
-    if (copies) {
-      const what = `${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${id}, which ${copies > 1 ? 'were' : 'was'} ignored (it is a shipped tool's id)`;
-      info(shippedChanged ? `also removed ${what}` : `removed ${what} — ${tool.name} is still ${now.used ? 'used' : 'not used'} here`);
-    }
+    sayShippedEdit(tool, was, now, shippedChanged, copies);
     // Removing it from the toolbox does not disconnect it: the connect skill owns that file.
     if (connected.has(id)) info(`${connected.get(id)} still connects it — \`${tool.usedBy[0]}\` changes the connection`);
     if (changed) hand(`written to ${FILE} — commit it so the team shares it${was.used !== now.used ? ` (undo with \`yad toolbox add ${id}\`)` : ''}`);
     return { id, ...now, changed, ...where(productRoot) };
   }
   const usableBefore = loadChoices(productRoot).custom.some((r) => r.id === id);
-  save(productRoot, doc, (() => { const sh = { ...shipped0 }; if (deadLine) delete sh[id]; return sh; })(), left);
+  const shipped = { ...shipped0 };
+  if (deadLine) delete shipped[id];
+  save(productRoot, doc, shipped, left);
   if (copies) {
     const many = copies > 1 ? ` (listed ${copies} times; every copy is gone)` : '';
     ok(usableBefore ? `${clean(id)} removed — it was one of this project's own tools${many}` : `removed the entry for ${clean(id)}, which was ignored${many}`);

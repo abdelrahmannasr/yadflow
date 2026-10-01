@@ -1169,7 +1169,7 @@ test('E86 review 2: doctor says an entry with no id is fixed by hand', async () 
   try {
     const checks = [];
     toolboxFileChecks(checks, p);
-    assert.match(checks[0].hint, /\(an entry with no id: fix it by hand\)/);
+    assert.match(checks[0].hint, /\(an entry with no id, or an empty one: fix it by hand\)/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -1190,8 +1190,8 @@ test('E86 review 3: a dead custom entry under a shipped id is one removal, said 
     assert.doesNotMatch(r.stdout, /undo with/);
     // add clears a dead entry too, and says so once.
     r = yad(['toolbox', 'add', 'repomix'], { cwd: p, home });
-    assert.match(r.stdout, /Repomix is already used here — nothing to change/);
-    assert.match(r.stdout, /removed 1 custom entry under the id repomix, which was ignored/);
+    assert.match(r.stdout, /removed 1 custom entry under the id repomix, which was ignored .* — Repomix is still used here/);
+    assert.doesNotMatch(r.stdout, /nothing to change|also removed/, 'one write, said once');
     assert.doesNotMatch(r.stdout, /undo with/);
     assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { 'spec-kit': 'skip' } });
     // A real change still offers its undo.
@@ -1211,6 +1211,39 @@ test('E86 review 3: removing an entry that was ignored says so; an empty id is f
     const { toolboxFileChecks } = await import('./doctor.mjs');
     const checks = [];
     toolboxFileChecks(checks, p);
-    assert.match(checks[0].hint, /\(an entry with no id: fix it by hand\)/);
+    assert.match(checks[0].hint, /\(an entry with no id, or an empty one: fix it by hand\)/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E86 review 4 ----------
+
+test('E86 review 4: add says "also removed" when the shipped part changed too', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ id: 'ecc', role: 'r', fallback: 'f', detect: { bins: ['x'] } }] }) });
+  try {
+    const r = yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
+    assert.match(r.stdout, /ECC .* is used here now/);
+    assert.match(r.stdout, /also removed 1 custom entry under the id ecc/);
+    assert.match(r.stdout, /undo with `yad toolbox remove ecc`/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { ecc: 'use' } });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 4: each way to be out of remove\'s reach is flagged on its own; a broken entry with an id is not', async () => {
+  const { toolboxFileChecks } = await import('./doctor.mjs');
+  for (const [doc, flagged] of [
+    [{ shipped: { '': 'use' } }, true],
+    [{ custom: [{ id: '', role: 'r' }] }, true],
+    [{ custom: [{ role: 'r' }] }, true],
+    [{ custom: ['str'] }, true],
+    [{ custom: [{ id: 'Bad Id', role: 'r' }] }, false],
+    [{ shipped: { 'future-tool': 'use' } }, false],
+  ]) {
+    const { T, p } = product({ '.sdlc/toolbox.json': JSON.stringify(doc) });
+    try {
+      assert.equal(loadChoices(p).unreachable, flagged, JSON.stringify(doc));
+      const checks = [];
+      toolboxFileChecks(checks, p);
+      assert.equal(/fix it by hand\)/.test(checks[0].hint), flagged, JSON.stringify(doc));
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
 });
