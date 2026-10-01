@@ -623,7 +623,8 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
 // the safe way round, since nothing outside the section is cut.
 // The text is taken whole and its closing `#`s cut after, in two steps: one lazy pattern for both was
 // slow (square of the length) on a line with a long run of spaces.
-const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+(.*))?$/;
+// `[^]*`, not `.*`: `.` stops at a lone \r or a Unicode line break, and `$` then forces a slow retry.
+const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+([^]*))?$/;
 const headingOf = (line) => {
   const h = HEADING.exec(line);
   if (!h) return null;
@@ -655,7 +656,7 @@ function sectionBounds(lines) {
   let fence = null;
   const headings = [];
   lines.forEach((l, i) => {
-    const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(l);
+    const f = /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
     if (fence) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
     } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) fence = f[1];
@@ -675,21 +676,27 @@ function sectionBounds(lines) {
 // of the section, and a rewrite would cut part of the skill. It reads the text, not the bounds that
 // produced it, so it catches the misread the bounds cannot see. A `---` after a blank line, a list item
 // or a heading is only a divider, and is allowed.
+const isHeading = (s) => /^ {0,3}#{1,6}([ \t]|$)/.test(s);
+const isItem = (s) => /^ {0,3}([-*+]|\d{1,9}[.)])[ \t]/.test(s);
+// Can an item interrupt a paragraph? Only a bullet or an ordered item starting at 1 (CommonMark).
+const interrupts = (s) => /^ {0,3}([-*+]|0*1[.)])[ \t]/.test(s);
+
 export function sectionMisreadLine(section) {
   const lines = section.split('\n');
+  // The block a line belongs to runs from the last blank line or heading. `list` says whether that
+  // block is a list: its first item starts one if it is the block's first line, or if it can interrupt
+  // the paragraph above it — `2. a` and `3. b` under a line of text are still that paragraph's text.
+  // Kept as the loop goes, so each line is read once.
+  let top = 1;
+  let list = null; // null: no item met in this block yet
   for (let i = 1; i < lines.length; i++) {
     const l = lines[i];
     if (/^ {0,3}(>\s*)*#{1,6}(\s|$)|^\s*<h[1-6][\s>]|^ {0,3}(`{3,}|~{3,})/i.test(l)) return l;
-    // An underline makes a heading only under a paragraph line: after a blank line, a list item or a
-    // heading, `---` is a divider (CommonMark).
-    // A list item counts only where it starts a list (after a blank line, a heading or another item):
-    // after a paragraph line, `2. item` is still paragraph text. `#hashtag` is text, not a heading.
-    const isHeading = (s) => /^ {0,3}#{1,6}([ \t]|$)/.test(s ?? '');
-    const isItem = (s) => /^\s*([-*+]|\d+[.)])\s/.test(s ?? '');
+    // An underline makes a heading only under paragraph text: under a heading or a list, `---` is a
+    // divider (CommonMark). `#hashtag` is text, not a heading.
     const above = lines[i - 1];
-    const before = lines[i - 2];
-    const listStart = isItem(above) && (i - 2 < 0 || before.trim() === '' || isHeading(before) || isItem(before));
-    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && above.trim() !== '' && !isHeading(above) && !listStart) return l;
+    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && above.trim() !== '' && !isHeading(above) && list !== true) return l;
+    if (l.trim() === '') { top = i + 1; list = null; } else if (list === null && isItem(l)) list = i === top || interrupts(l);
   }
   return null;
 }
@@ -718,11 +725,14 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
   return out;
 }
 
+// By hand: /\n+$/ restarts at every newline of a long blank run in the middle of the text.
+const dropTrailingNewlines = (s) => { let k = s.length; while (k > 0 && s[k - 1] === '\n') k--; return s.slice(0, k); };
+
 // The section as the skill holds it (LF, trailing blank lines dropped), or null when it has none.
 export function skillSectionOf(text) {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const { at, end } = sectionBounds(lines);
-  return at === undefined ? null : lines.slice(at, end).join('\n').replace(/\n+$/, '');
+  return at === undefined ? null : dropTrailingNewlines(lines.slice(at, end).join('\n'));
 }
 
 // The skill's text with `section` in place of its old one, or, when it has none, just before its first
@@ -738,7 +748,7 @@ export function withSkillSection(text, section) {
   if (at !== undefined) out = [...lines.slice(0, at), ...add, ...lines.slice(end)];
   else if (section === null) out = lines;
   else if (first === undefined) {
-    const body = lines.join('\n').replace(/\n*$/, '');
+    const body = dropTrailingNewlines(lines.join('\n'));
     out = body ? [...body.split('\n'), '', ...add] : add;
   }
   else out = [...lines.slice(0, first), ...add, ...lines.slice(first)];

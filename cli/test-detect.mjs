@@ -612,12 +612,43 @@ test('E87: the section is found and written the same way in a CRLF file, and nev
   assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n#hashtag\n---`), '---');
   assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. item\n---`), '---');
   assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n- one\n- two\n---`), null, 'a list, then a divider');
+  // A list is judged from its first item: a bullet or `1.` can follow a line of text and start one;
+  // `2.` cannot, so `2. a` / `3. b` under text stay paragraph text and a --- under them is caught.
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n- a\n---`), null);
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n1. a\n---`), null);
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n- a\n  more\n- b\n---`), null);
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. a\n3. b\n---`), '---');
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. a\n3. b\n===`), '===');
   for (const [body, line] of [['Usage\n-', '-'], ['Usage\n- ', '- '], ['Usage\n===', '==='], ['<h2>Usage</h2>', '<h2>Usage</h2>'], ['> ## Quoted', '> ## Quoted'], ['```\ncode', '```'], ['#### Deep', '#### Deep']]) {
     assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n${body}`), line, JSON.stringify(body));
   }
   // Indented up to three spaces, or a tab after the hashes: still a heading, so the section ends there.
   for (const next of ['   ## Usage', '##\tUsage', '  # Title']) {
     assert.equal(skillSectionOf(`# S\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n${next}\n\nkeep\n`), `${SKILL_FALLBACK_HEADING}\n\nold`, JSON.stringify(next));
+  }
+});
+
+// Every function that reads a skill's text, on long awkward input: a pattern that backtracks shows up
+// here as seconds, whichever function holds it. One test for the whole class, so a fix in one place
+// cannot leave its twin slow (rounds 5 to 7 found them one at a time).
+test('E87: the section readers stay fast on long, awkward input', () => {
+  const N = 40000;
+  const H = SKILL_FALLBACK_HEADING;
+  const inputs = [
+    `## a${' '.repeat(N)}x`, `## a${' \t'.repeat(N)}`, `## a ${'#'.repeat(N)}x`, `##${' '.repeat(N)}\rx`,
+    `##${' '.repeat(N)}\u2028x`, `\`\`\`${'`'.repeat(N)}\rx`, `~~~${'~'.repeat(N)}\u2029x`, `x${'\n'.repeat(N)}x`,
+    `${H}\n${'\n'.repeat(N)}x`, `${H}\n${'- a\n---\n'.repeat(N / 8)}`, `${H}\n${'x\n'.repeat(N / 2)}---`,
+    `${H}\n${'2. a\n'.repeat(N / 5)}---`, `${'#'.repeat(N)}`, `${H}\n${'> '.repeat(N)}x`, `${H}\n<h${'2'.repeat(N)}`,
+  ];
+  for (const input of inputs) {
+    const t0 = Date.now();
+    isFallbackHeading(input);
+    countFallbackHeadings(input);
+    skillSectionOf(input);
+    withSkillSection(input, `${H}\n\nbody`);
+    withSkillSection(input, null);
+    sectionMisreadLine(input.startsWith(H) ? input : `${H}\n${input}`);
+    assert.ok(Date.now() - t0 < 1000, `slow on ${JSON.stringify(input.slice(0, 30))}… (${Date.now() - t0} ms)`);
   }
 });
 
