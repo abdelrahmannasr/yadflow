@@ -118,9 +118,16 @@ ${c.bold('Where am I / what next')}
   yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
   yad toolbox list [--json] [--dir <folder>]
                                        The external tools yadflow can use — core (offered at setup),
-                                       recommended pools, and the design/testing/learning connectors —
-                                       whether each is found here, and what yadflow does without it.
-                                       Read-only; installs nothing (add/remove/check arrive in E86)
+                                       recommended pools, the design/testing/learning connectors and
+                                       this project's own — whether each is found here, whether this
+                                       project uses it, and what yadflow does without it. Installs nothing
+  yad toolbox check [--json]           The tools this project uses that are not ready here, each with
+                                       its install command and fallback. Never fails: none is required
+  yad toolbox add <id>                 Use a tool in this Product (.sdlc/toolbox.json); prints how to
+                                       install it, installs nothing. Your own tool: add <id> --custom
+                                       --role "<text>" --fallback "<text>" --detect <kind>:<name>[,…]
+                                       [--install "<type>: <command>"] [--source <https URL>]
+  yad toolbox remove <id>              Stop using a tool in this Product, or drop one of your own
   yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
@@ -331,7 +338,7 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -378,6 +385,7 @@ function parseArgs(argv) {
     // The roadmap and the release check spell the default `--preview`. Accepting it means a script can
     // say what it means rather than relying on the absence of a flag.
     else if (a === '--preview') o.apply = false;
+    else if (a === '--custom') o.custom = true;
     else if (a === '--json') o.json = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else if (a === '-v' || a === '--version') o.version = true;
@@ -427,7 +435,7 @@ const ACTIONS = {
   docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard'] },
-  toolbox: { known: ['list'], default: 'list' },
+  toolbox: { known: ['list', 'check', 'add', 'remove'], default: 'list' },
 };
 // E80 — how each command finds its folder. A PRODUCT command works on the Product; a REPO command works
 // on the code repo it runs in and reads the Product beside it. The rest take their folder as given:
@@ -630,14 +638,46 @@ async function main() {
       result = await commands.runMigrate(o.dir, { apply: o.apply, json: o.json, keep: o.keep ?? null });
       break;
     case 'toolbox': {
-      // E84. The shipped list, and what this machine has of it; writes nothing. E86 adds the writers.
-      const [, action, extra] = o._;
-      if (action !== undefined && action !== 'list') {
-        refuse(['add', 'remove', 'check'].includes(action) ? `yad toolbox ${action} is not built yet (E86)` : `unknown toolbox action: ${action} (list)`, 'usage: yad toolbox list [--json] [--dir <folder>]');
+      // E84 + E86. Finding a tool reads the folder yad runs in (a code repo's own skills count); the
+      // team's choices are the Product's `.sdlc/toolbox.json`, found the way every Product command finds
+      // it. So `toolbox` is not in PRODUCT_CMDS: that would move the finding to the Product's folder.
+      const [, action = 'list', id, extra] = o._;
+      const usage = 'usage: yad toolbox list | check | add <id> [--custom …] | remove <id>   [--json] [--dir <folder>]';
+      if (!['list', 'check', 'add', 'remove'].includes(action)) { refuse(`unknown toolbox action: ${action} (list, check, add, remove)`, usage); break; }
+      const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
+      const rel = (p) => path.relative(process.cwd(), p) || '.';
+      if (action === 'list' || action === 'check') {
+        if (id) { refuse(`yad toolbox ${action} takes no more words (got: ${id})`, usage); break; }
+        // A reader may be pointed at a code repo with --dir: it finds tools there and reads the Product
+        // that repo belongs to. Why no Product was found is said, as every Product command says it —
+        // otherwise the team's choices would be missing from the answer without a word.
+        if (found?.problem) warn(`${found.problem} — showing the defaults`);
+        else if (found?.elsewhere) warn(`this folder is not in a repo the Product registers — the Product is ${rel(found.elsewhere)}: cd there, or pass --dir ${rel(found.elsewhere)}`);
+        const productRoot = found?.root ?? null;
+        const run = action === 'list' ? commands.runToolboxList : commands.runToolboxCheck;
+        result = run(o.dir || process.cwd(), { json: o.json, productRoot });
         break;
       }
-      if (extra) { refuse(`yad toolbox list takes no more words (got: ${extra})`, 'usage: yad toolbox list [--json] [--dir <folder>]'); break; }
-      result = commands.runToolboxList(o.dir || process.cwd(), { json: o.json });
+      if (extra) { refuse(`yad toolbox ${action} takes one tool id (got also: ${extra})`, usage); break; }
+      // A writer: the Product's file, never a code repo's, and the same refusals every writer has. With
+      // --dir it is the Product itself, as for every other Product command (`yad skill bind --dir`) —
+      // never a folder a walk up from it happens to reach.
+      const productRoot = dirGiven ? (found?.via === 'here' ? found.root : null) : (found?.root ?? null);
+      if (!productRoot) {
+        const near = found?.root ?? found?.elsewhere;
+        const where = dirGiven ? `with --dir, name the Product folder itself (the one holding .sdlc/product.json)${near ? `: --dir ${rel(near)}` : ''}`
+          : found?.elsewhere ? `the Product is ${rel(found.elsewhere)}: cd there, or pass --dir ${rel(found.elsewhere)}`
+            : `${found?.problem ? `${found.problem}. ` : ''}run it from the Product, from inside a repo it registers, or pass --dir <the Product>; \`yad new\` / \`yad init\` start one`;
+        refuse(`no Product here (${o.dir}) — yad toolbox ${action} writes the Product's .sdlc/toolbox.json`, where);
+        break;
+      }
+      if (found.via !== 'here') process.stderr.write(c.dim(`Product: ${rel(productRoot)}\n`));
+      commands.warnIfProjectAhead(productRoot);
+      const drift = commands.productDriftError(productRoot);
+      if (drift) throw drift;
+      result = action === 'add'
+        ? commands.runToolboxAdd(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json })
+        : commands.runToolboxRemove(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json });
       break;
     }
     case 'detect': {

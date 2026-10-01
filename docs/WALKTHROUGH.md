@@ -187,7 +187,9 @@ Build by hand"** below.
   here, in this folder and in your home folder, and which agents read each place. Read-only; an MCP
   server is named, never its settings. `--json` lists every item with its version and content hash.
 - **`yad toolbox list`** — the external tools yadflow can use (core, recommended pools, connectors), whether
-  each is found here, and the fallback when it is not. None is required; it installs nothing.
+  each is found here, whether this Product uses it, and the fallback when it is not. None is required; it
+  installs nothing. `yad toolbox add <id>` / `remove <id>` choose the tools this Product uses (saved in
+  `.sdlc/toolbox.json`), and `yad toolbox check` lists the chosen ones that are not ready here.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.

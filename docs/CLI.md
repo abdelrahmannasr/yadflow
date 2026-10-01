@@ -76,7 +76,8 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. In solo mode the project view (no epic) first suggests `yad mode team` when more than one person may work on the Product (E74, see [When solo mode may be wrong](#the-pr-driven-review-gate)). |
 | `yad skill list` / `yad skill bind <step> <skill>…` / `yad skill unbind <step>` | **Choose which skill runs which step.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. `list` shows every step a skill runs — Shape review gates are excluded, since `yad gate` drives those — what runs each one, and where that answer came from: `project` (you bound it), `engine` (the default) or `ignored` (your file has a line for that step and the line names no skill, so the default still runs). `--json` for a script. `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A **Shape review gate** is refused (nothing would ever invoke the binding); `engineer-review` is a Build step in its own right and **is** bindable. A step this release does not know is recorded with a warning, because your file wins. `unbind` drops the line and the step goes back to the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
 | `yad detect` | **See what is installed for the agents that work here.** Lists the skills, agents (subagents), MCP servers and plugins found in this folder and in your home folder, and which agents read each place — Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder, opencode. Read-only: it writes nothing and uses no network. An MCP server is named, never described — its command, arguments and settings can hold a token. `--json` lists every item with its version and content hash (a sha256 of its `SKILL.md` or agent file, with Windows line ends counted as plain ones). See [what is installed](#what-is-installed). |
-| `yad toolbox list` | **See the external tools yadflow can use, and which you have.** Lists every tool in the toolbox in three groups — **core** (offered at setup: Repomix, Spec Kit, Impeccable), **recommended** (pools of skills you may choose: BMAD-METHOD, ECC, mattpocock/skills) and **connectors** (the design, testing and learning tools a Product connects: Figma, Pencil, Playwright, Cypress, pytest, Maestro, DeepTutor). For each: what it is for, whether it is found here, and what yadflow does without it. Read-only; it installs nothing. `--json` adds each tool's licence, source, checked date, install commands and where it was found. `yad toolbox` alone is `list`; `add`, `remove` and `check` arrive in E86. See [the toolbox](#the-toolbox). |
+| `yad toolbox list` | **See the external tools yadflow can use, and which you have.** Lists every tool in the toolbox in three groups — **core** (offered at setup: Repomix, Spec Kit, Impeccable), **recommended** (pools of skills you may choose: BMAD-METHOD, ECC, mattpocock/skills) and **connectors** (the design, testing and learning tools a Product connects: Figma, Pencil, Playwright, Cypress, pytest, Maestro, DeepTutor). For each: what it is for, whether it is found here, whether this Product uses it, and what yadflow does without it. Read-only; it installs nothing. `--json` adds each tool's licence, source, checked date, install commands and where it was found. `yad toolbox` alone is `list`. See [the toolbox](#the-toolbox). |
+| `yad toolbox add <id>` / `yad toolbox remove <id>` / `yad toolbox check` | **Choose the tools this Product uses (E86).** `add` marks a tool as used here and prints how to install it; `remove` stops using it. The choice is saved in the Product's `.sdlc/toolbox.json` — commit it so the team shares it. `add <id> --custom --role "<text>" --fallback "<text>" --detect <kind>:<name>[,…]` adds a tool of your own (`--install "<type>: <command>"` and `--source <https URL>` are optional). Neither installs anything. `check` lists the tools this Product uses that are not ready here, each with its install command and fallback; it never fails, because no tool is required. See [choosing the team's tools](#choosing-the-teams-tools). |
 | `yad dial <step> [--to auto\|human]` / `yad dial <epic> <story> --repo <name> <step> [--to auto\|human]` / `yad kill --reason <text>` / `yad unkill [--reason <text>]` | **Set a step's advance dial, and the kill switch (E34).** Automation is no longer earned: the team sets the dial, and the engine shows the step's run record beside it as **advice, never a refusal**. With one word, `yad dial` sets a **Shape author step** for the whole project, in `.sdlc/automation.json`; that choice is **recorded, not acted on** — nothing drives a Shape step on its own until the engine runs agents. With an epic, a story and `--repo`, it sets a **Build lane step** (`spec`, `tasks`, `implement`, `checks`) in `build-state/<story>.json`, writing both dial names, and prints that step's run record in that repo (runs, % `approved-unchanged`); the `yad-run` skill then moves past the step on its own after a clean run. No `--to` only reads, and a gate asked that way answers `human` — it is always a person. The Foundation steps are Product-level and refused. A review gate — the engineer review and every Shape review — is refused, and so is a lane step `yad-run` has not written yet, an undeclared repo and a skipped lane. `yad kill --reason` holds **every** step at `advance: human`, recorded with who, when and why in `.sdlc/automation.json`; `yad unkill` lets each step follow its own dial again, keeping the record it replaces as `kill.previous`. An `automation.json` that will not parse is read as the kill switch ON, and neither command writes over it. `--json` on all three. `yad next` says when a dial is held by the kill switch, and that a Shape `auto` is only recorded. The old `kill_switch` line in `_bmad/sdlc/config.yaml` is no longer read — `yad doctor` fails on one left `true`. |
 | `yad mode` / `yad mode solo --reason <text>` / `yad mode team [--reason <text>]` | **Who must approve (E10).** Solo mode waives the approval requirement on every review gate — the merge and the resolved threads still decide — and team mode counts approvals. With no word it reads the mode the gates act on and the last change; in solo mode it also counts the active people and suggests `yad mode team` when more than one person may work on the Product (E74 — a suggestion only, see [When solo mode may be wrong](#the-pr-driven-review-gate)). `yad mode solo` needs `--reason`, because every open gate stops counting approvals, CI's included on a verified Product; `yad mode team` takes one optionally. The change is recorded as `mode_set` (`from`, `to`, `by`, `date`, `reason`) in `.sdlc/product.json` / `hub.json`, and `mode: solo\|team` is written beside the `solo` flag — `solo` is still the one the gates read this major. **Nothing looks back:** a gate that already passed keeps its record, and the command names each open review, which follows the new mode from its next sync. A gate that passes in solo mode records `waived: "solo"` on its closing record, and `yad gate status` prints it. On a verified Product the open reviews live on the platform, so it says that every open review PR/MR follows the new mode from its next CI run, and `--json` carries `openReviewsKnown: false`. The Product config that is read (`product.json`, or `hub.json` when it is absent) is never written over when it will not parse. `--json` for both. |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (an old installed name: pre-2.0 `sdlc-*`, or 4.0's `hub` → `product` renames) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
@@ -853,6 +854,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | Check | What it means | What to do |
 |---|---|---|
 | `automation` | `.sdlc/automation.json` does not parse or has the wrong shape (**fail**). Every step is held at `advance: human` until it is fixed, and neither `yad dial` nor `yad kill` writes over it. | Fix the JSON, or delete the file to go back to the defaults (kill switch off, every Shape step human). |
+| `toolbox` | `.sdlc/toolbox.json` (E86) does not parse or has the wrong shape (**fail**), or has lines that do nothing — a tool this yadflow does not ship, a choice other than `use` or `skip`, a custom tool that is incomplete, malformed, listed twice or uses a shipped tool's id (**warn**, `YAD-CFG-007`). `yad toolbox list` ignores those lines and shows the defaults; `add` and `remove` refuse a file that does not parse. **ok** names how many choices and custom tools the file holds. A missing tool is never reported here — that is `yad toolbox check`. | Fix the JSON or the line, or `yad toolbox remove <id>` (it clears whatever the file holds under that id) and add the tool again. An entry with no id, or an empty one, is fixed by hand. |
 | `owners:ignored` | A step owner file (`.sdlc/owners/<step>.json`, E47) cannot be read, is named for a step that cannot be assigned, or names a step that is not on the epic's chain (**warn**). It is ignored everywhere else: no owner is shown and the edit-time warning is off. | For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them. |
 | `owners:rename-blind` | The wired `pr-title` / `pr-template` checks let a PR of step owner files alone through (E47), but a Product-checks workflow (`.github/workflows/yad-product-checks.yml` or `.gitlab/ci/yad-product-checks.yml`, or the same file under its pre-E123 name `yad-hub-checks.yml`) lists a PR's changes without `--no-renames` (**warn**). Then moving an artifact into `.sdlc/owners/` on a non-review branch passes both checks. It happens when `yad update` kept a workflow the team edited by hand. Each `git … diff … --name-only` (or `--raw`) command is checked on its own, read as bash reads it (a `#` line is prose; a line ending in `\` goes on to the next; `&&`, `\|\|`, `;` and `\|` separate commands). Only the shipped file names (new and old) are read: a Product that runs the checks from another workflow file, or from a GitLab `include:`, is not checked, so a clean doctor is not proof there. | Add `--no-renames` and `-c core.quotePath=false` to that workflow's `git diff --name-only` lines, as the shipped one has. |
 | `renamed:<old path>` | Something yad installed is still under a name 4.0 changed (E123): the `yad-hub-bridge` skill folder (or `.opencode/commands/yad-hub-bridge.md`), or the Product's `.github/workflows/yad-hub-checks.yml` / `.gitlab/ci/yad-hub-checks.yml` (**warn**). Pre-2.0 `sdlc-*` names are reported the same way. Silent when nothing old is left. | `yad update` — it installs the new name and removes the old one. An old CI file you edited is kept, and goes on running under its old name — the new name is not installed beside it, so nothing runs twice: `yad update --overwrite-local` replaces it with the new one (your copy is saved as `<file>.yad-orig`), then copy your edits into the new file. |
@@ -1151,8 +1153,8 @@ Build step in its own right, the locked human merge gate, and it has a skill, so
 
 yadflow can use some tools it does not ship. **None is required: every one has a fallback**, so a
 missing tool makes yadflow do less, never stop. The toolbox is the one list of them. It ships inside
-yadflow and moves with each release; a project cannot change it yet (`yad toolbox add` / `remove`
-arrive in E86).
+yadflow and moves with each release. A Product records which of them its team uses, and adds its own,
+with `yad toolbox add` / `remove` ([below](#choosing-the-teams-tools)).
 
 ```bash
 yad toolbox          # the same as: yad toolbox list
@@ -1195,6 +1197,62 @@ list says which range is known to work.
 package name: npm `ecc`, for example, is an unrelated crypto library, and ECC's package is
 `ecc-universal`. Where no official command exists — Cypress and pytest have no official MCP server
 that runs local tests — the entry says so and links the vendor's docs instead.
+
+### Choosing the team's tools
+
+A Product records which toolbox tools its team uses in **`.sdlc/toolbox.json`**. Commit it, so everyone
+shares one answer. Nothing in this section installs a tool or starts a program: `add` prints the install
+command, and you run it.
+
+```bash
+yad toolbox add bmad-method      # use a shipped tool here; prints how to install it
+yad toolbox remove spec-kit      # stop using one (yad-spec then writes the spec files by hand)
+yad toolbox add doclint --custom --role "lints the docs" --fallback "the docs are not linted" \
+  --detect bin:doclint --install "npm: npm install -g doclint"     # a tool of your own
+yad toolbox check                # the tools this Product uses that are not ready on this machine
+```
+
+**In use by default:** the three core tools, and the connector the Product already connected — the
+`tool` that `design.json`, `testing.json` or `learning.json` names. Every other tool is listed but not
+in use. `add` and `remove` write only a difference from that default, so the file stays short:
+
+```json
+{
+  "schemaVersion": 10,
+  "shipped": { "bmad-method": "use", "spec-kit": "skip" },
+  "custom": [
+    { "id": "doclint", "role": "lints the docs", "fallback": "the docs are not linted",
+      "detect": { "bins": ["doclint"] }, "install": [{ "type": "npm", "command": "npm install -g doclint" }] }
+  ]
+}
+```
+
+| Part | Meaning |
+|---|---|
+| `shipped` | a shipped tool's id → `use` (used here, though not by default) or `skip` (not used here, though it would be by default) |
+| `custom` | the team's own tools. Each needs an `id` (lower-case words joined by `-`, not a shipped tool's id), a `role`, a `fallback` and a `detect`; `name`, `install` and an https `source` are optional |
+| `detect` | what shows the tool is here, as in a shipped entry: `skills`, `skillPrefixes`, `plugins`, `mcp`, `bins`. On the command line: `--detect skill:<name>,prefix:<start>,plugin:<name>,mcp:<server>,bin:<program>` |
+
+- **Where it runs.** `add` and `remove` write the Product's file. Run them from the Product, from inside
+  a code repo it registers, or with `--dir <the Product>` (the Product folder itself, as for every
+  Product command); anywhere else they refuse. `list` and `check` look for tools in the folder you run
+  them in, or the one `--dir` names (a code repo's own skills count), and read the choices from the
+  Product that folder belongs to. With no Product, they show the defaults and say why none was found.
+- **A program is a name.** `bins` holds program names looked up on `PATH`, never paths: a `/` or `\`
+  is refused, so the shared file cannot make a teammate's `check` look at a file it chose.
+- **`remove` does not disconnect.** Removing a connected tool such as Figma marks it unused in the
+  toolbox; `design.json` still connects it, and `yad-connect-design` changes that.
+- **A broken file is never written over.** If `toolbox.json` does not parse, `add` and `remove` refuse
+  and leave it as it is; `list` and `check` warn and show the defaults. A line that does nothing — a tool
+  this release does not ship, a choice other than `use` or `skip`, a custom tool that is incomplete,
+  malformed, listed twice or uses a shipped tool's id — is ignored, and `yad doctor` names it (`toolbox`,
+  warn, `YAD-CFG-007`). `yad toolbox remove <id>` clears whatever the file holds under that id, and
+  `add <id>` clears a custom entry that wrongly uses a shipped tool's id; an entry with no id, or an
+  empty one, is fixed by hand. Both offer an undo only when the tool's use really changed.
+- **`check` never fails.** It names each tool this Product uses that is missing, turned off in your
+  Claude Code settings, or outside its known-good versions, with the install command and what yadflow
+  does without it, and exits 0. `yad doctor` does not report missing tools. Setup and update will use
+  the same check (E85, not built yet).
 
 ## What is installed
 
@@ -2056,6 +2114,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-CFG-004` | `learning.json` names an unknown learning tool | expected one of `config.yaml` `learning.tools` (e.g. `deeptutor`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-005` | the Product settings (`product.json`, or `hub.json` on a Product that has only that name) set a platform but are missing `git_url` (needed to scope auth + open PRs) | add `git_url` to `.sdlc/product.json` (`.sdlc/hub.json` on a Product that has only that name; when both exist, then run `yad migrate --apply --keep product`), or re-run `yad setup` — it backfills it from the origin remote |
 | `YAD-CFG-006` | `.sdlc/skills.json` binds a step to something that is not a skill name | each value must be a skill name (a string) or a non-empty list of them. `yad doctor` warns and names the steps; the engine ignores those lines and runs its default skill. Fix the line, or `yad skill unbind <step>` |
+| `YAD-CFG-007` | `.sdlc/toolbox.json` has a line that does nothing: a tool this yadflow does not ship, a choice other than `use` or `skip`, or a custom tool that is incomplete (no role, fallback or `detect`), malformed (a bad id, `install` or `source`, a path in `bins`), listed twice, or uses a shipped tool's id (E86) | `yad doctor` warns and names each line; `yad toolbox list` ignores those lines and shows the default. Fix the line by hand, or `yad toolbox remove <id>` — it clears whatever the file holds under that id — and add the tool again. An entry with no id, or an empty one, is out of `remove`'s reach: fix it by hand |
 | `YAD-CLI-001` | a `--json` run needed an answer only a prompt could give (E1) | a `--json` run never asks a question. Pass the answer as a flag (`yad --help` lists them), set `SDLC_NONINTERACTIVE=1` to take the defaults, or run without `--json` |
 
 Filing a bug? The fastest path is **`yad report`** — it files the issue for you in the yadflow repo

@@ -25,6 +25,7 @@ import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { readOwners } from './owners.mjs';
+import { loadChoices, readToolboxFile } from './toolbox.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
 // entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
@@ -446,6 +447,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // inside the `project` block. The renderer prints a header every time the section CHANGES, so a
   // `project` check added after the `shape` section prints the word "project" a second time.
   skillBindingChecks(checks, root);
+  toolboxFileChecks(checks, root);
 
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead
   let registry = { repos: [] };
@@ -2105,6 +2107,28 @@ export function skillBindingChecks(checks, root) {
     check(checks, 'skills:bound', 'project', 'ok',
       `skills: ${bound.length} step(s) bound${chained ? `, ${chained} to more than one skill` : ''}`);
   }
+}
+
+// `.sdlc/toolbox.json`: which toolbox tools this Product uses or skips, and its own tools (E86). Absent is
+// the normal case. THE FILE ONLY: whether a tool is installed is `yad toolbox check`'s answer, and a
+// missing tool is never a doctor line (decided with E86 — no tool is required). A broken file fails, as
+// skills.json does; a line that does nothing warns, because `yad toolbox list` quietly shows the default.
+export function toolboxFileChecks(checks, root) {
+  const rel = PROJECT_FILES.toolboxConfig;
+  if (!exists(path.join(root, rel))) return;
+  const { error } = readToolboxFile(root);
+  if (error) {
+    check(checks, 'toolbox', 'project', 'fail', `${rel} ${error}`, 'fix the JSON or restore it from git — `yad toolbox list` shows the defaults until then');
+    return;
+  }
+  const { problems, unreachable, shipped, custom } = loadChoices(root);
+  if (problems.length) {
+    // An entry with no id (or an empty one) is out of `remove`'s reach; only hand-editing fixes it.
+    check(checks, 'toolbox', 'project', 'warn', `${rel}: ${problems.length} line(s) do nothing — ${problems.map((p) => p.replace(`${rel}: `, '')).join('; ')} [YAD-CFG-007]`,
+      `fix them by hand, or \`yad toolbox remove <id>\` — it clears whatever the file holds under that id — and add the tool again${unreachable ? ' (an entry with no id, or an empty one: fix it by hand)' : ''}`);
+    return;
+  }
+  check(checks, 'toolbox', 'project', 'ok', `toolbox: ${shipped.size} shipped tool choice(s), ${custom.length} tool(s) of this project's own`);
 }
 
 // A step this release does not recognise. Every step the engine can run has a row in the step

@@ -673,7 +673,7 @@ test('E84: the printed list — a warning for a version out of range, the fallba
   assert.ok(!text.includes('Recommended —'), 'a tier with no rows is not printed');
 });
 
-test('E84: `yad toolbox list` answers in the E1 envelope, writes nothing, and refuses what E86 will add', () => {
+test('E84: `yad toolbox list` answers in the E1 envelope, writes nothing, and refuses a word it does not know', () => {
   const T = tmp();
   const proj = path.join(T, 'p');
   const home = path.join(T, 'h');
@@ -700,10 +700,561 @@ test('E84: `yad toolbox list` answers in the E1 envelope, writes nothing, and re
     assert.equal(human.status, 0, human.stderr);
     assert.match(human.stdout, /Impeccable .*: installed 3\.7\.1/);
 
-    for (const [args, re] of [[['toolbox', 'add', 'x'], /not built yet \(E86\)/], [['toolbox', 'check'], /not built yet \(E86\)/], [['toolbox', 'frob'], /unknown toolbox action: frob/], [['toolbox', 'list', 'extra'], /takes no more words/]]) {
+    for (const [args, re] of [[['toolbox', 'frob'], /unknown toolbox action: frob/], [['toolbox', 'list', 'extra'], /takes no more words/], [['toolbox', 'check', 'extra'], /takes no more words/]]) {
       const bad = yad(args, { cwd: proj, home });
       assert.equal(bad.status, 1, args.join(' '));
       assert.match(bad.stdout, re);
     }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E86: the team's choices ----------
+
+const { connectedTools, customProblems, loadChoices, parseDetect, parseInstall, toolUse, toolboxCheck, toolboxRows } = await import('./toolbox.mjs');
+
+// A Product: settings, plus any files given as { 'rel/path': text }.
+function product(files = {}) {
+  const T = tmp();
+  const p = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  fs.mkdirSync(home, { recursive: true });
+  put(path.join(p, '.sdlc/product.json'), '{"schemaVersion":10,"platform":null}\n');
+  for (const [rel, text] of Object.entries(files)) put(path.join(p, rel), text);
+  return { T, p, home };
+}
+const toolboxJSON = (p) => JSON.parse(fs.readFileSync(path.join(p, '.sdlc/toolbox.json'), 'utf8'));
+const CUSTOM = { id: 'doclint', role: 'lints the docs', fallback: 'the docs are not linted', detect: { bins: ['doclint-e86'] } };
+
+test('E86: in use by default — the core tools, and the connector a Product connected; a choice overrides either', () => {
+  const none = { shipped: new Map(), connected: new Map() };
+  const byId = (id) => TOOLBOX.find((t) => t.id === id);
+  assert.deepEqual(toolUse(byId('spec-kit'), none), { used: true, because: 'core' });
+  assert.deepEqual(toolUse(byId('bmad-method'), none), { used: false, because: null });
+  assert.deepEqual(toolUse(byId('figma'), none), { used: false, because: null });
+  const figma = { shipped: new Map(), connected: new Map([['figma', '.sdlc/design.json']]) };
+  assert.deepEqual(toolUse(byId('figma'), figma), { used: true, because: 'connected', connectedIn: '.sdlc/design.json' });
+  assert.deepEqual(toolUse(byId('spec-kit'), { ...none, shipped: new Map([['spec-kit', 'skip']]) }), { used: false, because: 'removed' });
+  assert.deepEqual(toolUse(byId('figma'), { ...figma, shipped: new Map([['figma', 'skip']]) }), { used: false, because: 'removed' });
+  assert.deepEqual(toolUse(byId('ecc'), { ...none, shipped: new Map([['ecc', 'use']]) }), { used: true, because: 'added' });
+
+  // What counts as connected: a connector id the toolbox knows. `none`, an unknown adapter, a core tool
+  // and a broken file name nothing — and none of them stops the read.
+  const { T, p } = product({
+    '.sdlc/design.json': '{"tool":"pencil"}', '.sdlc/testing.json': '{"tool":"none"}', '.sdlc/learning.json': '{broken',
+  });
+  try {
+    assert.deepEqual([...connectedTools(p)], [['pencil', '.sdlc/design.json']]);
+    put(path.join(p, '.sdlc/testing.json'), '{"tool":"spec-kit"}');
+    put(path.join(p, '.sdlc/learning.json'), '{"tool":"my-own-tutor"}');
+    assert.deepEqual([...connectedTools(p)], [['pencil', '.sdlc/design.json']]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86: a team\'s own entry — what makes it usable, and the two flag readers', () => {
+  assert.deepEqual(customProblems(CUSTOM), []);
+  assert.deepEqual(customProblems({ ...CUSTOM, install: [{ type: 'npm', command: 'npx doclint' }], source: 'https://example.com', name: 'Doc Lint' }), []);
+  const bad = (t, re) => assert.match(customProblems(t).join('\n'), re, JSON.stringify(t));
+  bad({ ...CUSTOM, id: 'Doc Lint' }, /id is lower-case/);
+  bad({ ...CUSTOM, id: 'spec-kit' }, /not the id of a shipped tool/);
+  bad({ ...CUSTOM, role: ' ' }, /role says/);
+  bad({ ...CUSTOM, fallback: undefined }, /fallback says/);
+  bad({ ...CUSTOM, detect: {} }, /detect names at least one/);
+  bad({ ...CUSTOM, detect: { programs: ['x'] } }, /detect names at least one/);
+  bad({ ...CUSTOM, detect: { bins: [''] } }, /detect names at least one/);
+  bad({ ...CUSTOM, install: [{ type: 'docker', command: 'x' }] }, /install, when set/);
+  bad({ ...CUSTOM, source: 'http://example.com' }, /https URL/);
+  assert.deepEqual(customProblems('x'), ['an entry is a JSON object']);
+
+  assert.deepEqual(parseDetect('skill:a, prefix:b-,plugin:c,mcp:d,bin:e,bin:f'), { detect: { skills: ['a'], skillPrefixes: ['b-'], plugins: ['c'], mcp: ['d'], bins: ['e', 'f'] } });
+  assert.match(parseDetect('program:x').error, /not <kind>:<name>/);
+  assert.match(parseDetect('').error, /names nothing/);
+  assert.match(parseDetect('__proto__:x').error, /not <kind>:<name>/, 'only the five kinds become keys');
+  assert.deepEqual(parseInstall('npm:  npx doclint --yes '), { route: { type: 'npm', command: 'npx doclint --yes' } });
+  assert.match(parseInstall('docker: run x').error, /<type>: <command>/);
+  assert.match(parseInstall('npx doclint').error, /<type>: <command>/);
+});
+
+test('E86: a broken or odd toolbox.json — the list still answers with the defaults, and names each line that does nothing', () => {
+  const doc = {
+    schemaVersion: 10,
+    // `__proto__` from JSON.parse is an own key, not the prototype: it is reported, never applied.
+    shipped: JSON.parse('{"ecc":"use","spec-kit":"maybe","future-tool":"use","__proto__":"use"}'),
+    custom: [CUSTOM, { ...CUSTOM }, { id: 'half' }, 7],
+  };
+  const { T, p } = product({ '.sdlc/toolbox.json': JSON.stringify(doc) });
+  try {
+    const c = loadChoices(p);
+    assert.deepEqual([...c.shipped], [['ecc', 'use']]);
+    assert.deepEqual(c.custom.map((t) => [t.id, t.tier, t.name]), [['doclint', 'project', 'doclint']]);
+    const text = c.problems.join('\n');
+    assert.match(text, /`spec-kit` should be "use" or "skip"/);
+    assert.match(text, /`future-tool` is not a tool this yadflow ships/);
+    assert.match(text, /`__proto__` is not a tool this yadflow ships/);
+    assert.match(text, /`doclint` is listed twice/);
+    assert.match(text, /`half` is ignored — .*role says/);
+    assert.match(text, /number 4 is ignored — an entry is a JSON object/);
+    assert.equal(Object.getPrototypeOf(c.shipped), Map.prototype);
+
+    put(path.join(p, '.sdlc/toolbox.json'), '{not json');
+    const broken = loadChoices(p);
+    assert.match(broken.problems[0], /does not parse \[YAD-STATE-001\] — showing the defaults/);
+    put(path.join(p, '.sdlc/toolbox.json'), '{"shipped":["ecc"]}');
+    assert.match(loadChoices(p).problems[0], /`shipped` must be a JSON object/);
+    put(path.join(p, '.sdlc/toolbox.json'), '{"custom":{"id":"x"}}');
+    assert.match(loadChoices(p).problems[0], /`custom` must be a JSON list/);
+    assert.deepEqual(loadChoices(null), { problems: [], unreachable: false, shipped: new Map(), custom: [], connected: new Map() });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86: a team\'s own words are cleaned before they reach the terminal', () => {
+  const ESC = String.fromCharCode(27);
+  const { T, p } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ ...CUSTOM, name: `Doc${ESC}[2J`, role: `lints${ESC}]0;x`, fallback: `none${ESC}[31m` }] }) });
+  try {
+    const { rows } = toolboxRows(p, p, { items: [], has: () => false });
+    const text = toolboxLines(rows).join('\n');
+    assert.match(text, /Added by this project\n\s+– Doc\?\[2J — lints\?\]0;x: not found \[used here\]\n\s+without it: none\?\[31m/);
+    assert.ok(!text.includes(ESC));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86: `yad toolbox add / remove` write only the difference from the default, and install nothing', () => {
+  const { T, p, home } = product({ '.sdlc/design.json': '{"tool":"figma"}' });
+  const file = path.join(p, '.sdlc/toolbox.json');
+  try {
+    // A shipped tool that is not in use: `use` is written, and the install commands are printed.
+    let r = yad(['toolbox', 'add', 'bmad-method'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /BMAD-METHOD is used here now/);
+    assert.match(r.stdout, /to install it: npm: npx bmad-method install {3}or {3}plugin:/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { 'bmad-method': 'use' } });
+
+    // Already in use: nothing written — not even the same bytes again.
+    const before = snapshot(T);
+    for (const id of ['bmad-method', 'spec-kit', 'figma']) {
+      r = yad(['toolbox', 'add', id, '--json'], { cwd: p, home });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      const out = JSON.parse(r.stdout);
+      assert.deepEqual([out.command, out.changed, out.used], ['toolbox add', false, true], id);
+      assert.match(r.stderr, /is already used here — nothing to change/);
+    }
+    assert.deepEqual(snapshot(T), before);
+
+    // A core tool and a connected one are skipped by writing `skip`; adding them back deletes the line.
+    r = yad(['toolbox', 'remove', 'spec-kit'], { cwd: p, home });
+    assert.match(r.stdout, /Spec Kit is not used here now\. Without it: yad-spec writes the same spec files by hand/);
+    r = yad(['toolbox', 'remove', 'figma'], { cwd: p, home });
+    assert.match(r.stdout, /\.sdlc\/design\.json still connects it — `yad-connect-design` changes the connection/);
+    assert.deepEqual(toolboxJSON(p).shipped, { 'bmad-method': 'use', 'spec-kit': 'skip', figma: 'skip' });
+    yad(['toolbox', 'add', 'spec-kit'], { cwd: p, home });
+    yad(['toolbox', 'add', 'figma'], { cwd: p, home });
+    yad(['toolbox', 'remove', 'bmad-method'], { cwd: p, home });
+    // The last choice gone: the file stays, holding its stamp, and keeps a key this release does not know.
+    const doc = toolboxJSON(p);
+    assert.deepEqual(doc, { schemaVersion: 10 });
+    fs.writeFileSync(file, JSON.stringify({ ...doc, later: { kept: true } }));
+    r = yad(['toolbox', 'remove', 'ecc'], { cwd: p, home });
+    assert.match(r.stdout, /ECC .* is already not used here — nothing to change/);
+    yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, later: { kept: true }, shipped: { ecc: 'use' } });
+
+    // A tool of the team's own.
+    r = yad(['toolbox', 'add', 'doclint', '--custom', '--role', 'lints the docs', '--fallback', 'the docs are not linted',
+      '--detect', 'bin:doclint-e86,mcp:doclint', '--install', 'npm: npm install -g doclint', '--source', 'https://example.com/doclint'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(toolboxJSON(p).custom, [{ id: 'doclint', role: 'lints the docs', fallback: 'the docs are not linted',
+      detect: { bins: ['doclint-e86'], mcp: ['doclint'] }, install: [{ type: 'npm', command: 'npm install -g doclint' }], source: 'https://example.com/doclint' }]);
+    r = yad(['toolbox', 'add', 'doclint'], { cwd: p, home });
+    assert.match(r.stdout, /already one of this project's tools — nothing to change/);
+    r = yad(['toolbox', 'remove', 'doclint'], { cwd: p, home });
+    assert.match(r.stdout, /doclint removed/);
+    assert.equal(toolboxJSON(p).custom, undefined);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86: `yad toolbox add / remove` refuse — and never write over a file they cannot read', () => {
+  const { T, p, home } = product();
+  try {
+    const refuses = (args, re, cwd = p) => {
+      const r = yad(['toolbox', ...args], { cwd, home });
+      assert.equal(r.status, 1, `${args.join(' ')}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stdout, re, args.join(' '));
+    };
+    const before = snapshot(T);
+    refuses(['add'], /needs a tool id/);
+    refuses(['remove'], /needs a tool id/);
+    refuses(['add', 'a', 'b'], /takes one tool id/);
+    refuses(['add', 'Not_An_Id'], /is not a tool id/);
+    refuses(['add', '__proto__'], /is not a tool id/);
+    refuses(['add', 'nope'], /nope is not in the toolbox/);
+    refuses(['remove', 'nope'], /nope is not in the toolbox/);
+    refuses(['add', 'ecc', '--role', 'x'], /--role describes a tool of your own, and goes with --custom/);
+    refuses(['add', 'spec-kit', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'bin:x'], /spec-kit is a shipped tool/);
+    refuses(['add', 'x', '--custom', '--role', 'r', '--fallback', 'f'], /needs --detect/);
+    refuses(['add', 'x', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'exe:x'], /not <kind>:<name>/);
+    refuses(['add', 'x', '--custom', '--role', 'r', '--detect', 'bin:x'], /cannot add x: fallback says/);
+    refuses(['add', 'x', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'bin:x', '--install', 'brew install x'], /--install is "<type>: <command>"/);
+    refuses(['add', 'x', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'bin:x', '--source', 'http://x'], /source, when set, is an https URL/);
+    // Not a Product: nothing is written into the folder it ran in.
+    const elsewhere = path.join(T, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    refuses(['add', 'ecc'], /no Product here .* writes the Product's \.sdlc\/toolbox\.json/, elsewhere);
+    assert.deepEqual(snapshot(T).filter((l) => !l.startsWith('elsewhere')), before);
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+
+    // A file that does not parse is refused, byte for byte unchanged.
+    const file = path.join(p, '.sdlc/toolbox.json');
+    fs.writeFileSync(file, '{"shipped":{"ecc":"use"},');
+    refuses(['add', 'bmad-method'], /does not parse \[YAD-STATE-001\]/);
+    refuses(['remove', 'ecc'], /does not parse/);
+    assert.equal(fs.readFileSync(file, 'utf8'), '{"shipped":{"ecc":"use"},');
+    fs.writeFileSync(file, '[]');
+    refuses(['add', 'bmad-method'], /has the wrong shape \[YAD-STATE-002\]/);
+    assert.equal(fs.readFileSync(file, 'utf8'), '[]');
+
+    // Settings under two names that disagree: every writer refuses (E122); the list still answers.
+    fs.rmSync(file);
+    put(path.join(p, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    const drift = yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
+    assert.equal(drift.status, 1);
+    assert.match(drift.stdout + drift.stderr, /YAD-STATE-008/);
+    assert.ok(!fs.existsSync(file));
+    assert.equal(yad(['toolbox', 'list'], { cwd: p, home }).status, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86: from inside a code repo — the Product\'s file is written, and the repo\'s own skills are found', () => {
+  const { T, p, home } = product({ '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }] }) });
+  const repo = path.join(p, 'api');
+  try {
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    // A skill only this code repo has.
+    skill(path.join(repo, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    let r = yad(['toolbox', 'add', 'ecc'], { cwd: repo, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /Product: \.\./);
+    assert.deepEqual(toolboxJSON(p).shipped, { ecc: 'use' });
+    assert.ok(!fs.existsSync(path.join(repo, '.sdlc')), 'nothing written into the code repo');
+
+    r = yad(['toolbox', 'list', '--json'], { cwd: repo, home });
+    assert.equal(r.status, 0, r.stderr);
+    const byId = Object.fromEntries(JSON.parse(r.stdout).tools.map((t) => [t.id, t]));
+    assert.deepEqual([byId.impeccable.status.state, byId.impeccable.used], ['installed', true], 'found in the code repo');
+    assert.deepEqual([byId.ecc.used, byId.ecc.because], [true, 'added'], 'the choice read from the Product');
+    // From the Product's own folder the code repo's skill is not there.
+    r = yad(['toolbox', 'list', '--json'], { cwd: p, home });
+    assert.equal(JSON.parse(r.stdout).tools.find((t) => t.id === 'impeccable').status.state, 'missing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86: `yad toolbox check` names what the project uses and is not here — and exits 0', () => {
+  const { T, p, home } = product({
+    '.sdlc/design.json': '{"tool":"figma"}',
+    '.sdlc/toolbox.json': JSON.stringify({ shipped: { 'bmad-method': 'use', 'spec-kit': 'skip' }, custom: [CUSTOM] }),
+  });
+  try {
+    const before = snapshot(T);
+    const r = yad(['toolbox', 'check', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(snapshot(T), before, 'check writes nothing');
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.command, 'toolbox check');
+    assert.equal(out.ok, true);
+    assert.ok(out.used.includes('figma') && out.used.includes('bmad-method') && out.used.includes('doclint'));
+    assert.ok(!out.used.includes('spec-kit') && !out.used.includes('ecc'));
+    const f = Object.fromEntries(out.findings.map((x) => [x.id, x]));
+    assert.equal(f.figma.problem, 'missing');
+    assert.equal(f['bmad-method'].install[0].command, 'npx bmad-method install');
+    assert.equal(f.doclint.fallback, 'the docs are not linted');
+    assert.equal(f['spec-kit'], undefined, 'a removed tool is not reported');
+
+    const human = yad(['toolbox', 'check'], { cwd: p, home });
+    assert.equal(human.status, 0);
+    assert.match(human.stdout, /are not ready here\. None is required\./);
+    assert.match(human.stdout, /– Figma: not found\n\s+plugin: claude plugin install figma@claude-plugins-official\n\s+without it: markdown-only/);
+    assert.match(human.stdout, /– doclint: not found\n\s+without it: the docs are not linted/);
+
+    // The same answer as a function, for E85: a turned-off plugin and an out-of-range version are named too.
+    const tools = [{ ...TOOLBOX.find((t) => t.id === 'impeccable'), versions: '>=4.0.0' }, TOOLBOX.find((t) => t.id === 'repomix')];
+    const items = [
+      { kind: 'skill', name: 'impeccable', where: 'x', agents: ['Claude Code'], version: '3.7.1', plugin: null },
+      { kind: 'plugin', name: 'repomix-mcp@repomix', where: 'y', agents: ['Claude Code'], version: null, plugin: null, enabled: false },
+    ];
+    const res = toolboxCheck(p, null, { tools, items, has: () => false });
+    assert.deepEqual(res.findings.map((x) => [x.id, x.problem]), [['impeccable', 'out-of-range'], ['repomix', 'disabled']]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86: doctor reports a toolbox.json that does nothing, never a missing tool, and rewrites nothing', async () => {
+  const { toolboxFileChecks } = await import('./doctor.mjs');
+  const run = (text) => {
+    const { T, p } = product(text === null ? {} : { '.sdlc/toolbox.json': text });
+    try {
+      const checks = [];
+      toolboxFileChecks(checks, p);
+      if (text !== null) assert.equal(fs.readFileSync(path.join(p, '.sdlc/toolbox.json'), 'utf8'), text);
+      return checks.map((c) => [c.status, c.id, c.message]);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  };
+  assert.deepEqual(run(null), []);
+  const [[s1, id1, m1]] = run('{oops');
+  assert.deepEqual([s1, id1], ['fail', 'toolbox']);
+  assert.match(m1, /does not parse \[YAD-STATE-001\]/);
+  const [[s2, , m2]] = run(JSON.stringify({ shipped: { nope: 'use', ecc: 'yes' } }));
+  assert.equal(s2, 'warn');
+  assert.match(m2, /2 line\(s\) do nothing — `nope` is not a tool .*`ecc` should be "use" or "skip".*\[YAD-CFG-007\]/);
+  const [[s3, , m3]] = run(JSON.stringify({ shipped: { 'bmad-method': 'use' }, custom: [CUSTOM] }));
+  assert.equal(s3, 'ok');
+  assert.match(m3, /1 shipped tool choice\(s\), 1 tool\(s\) of this project's own/);
+});
+
+// ---------- E86 review 1 ----------
+
+test('E86 review 1: removing a line that did nothing is said as that, not as "nothing to change"', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { repomix: 'use', figma: 'bogus', ecc: 'yes' } }) });
+  try {
+    // repomix is core: its `use` repeats the default.
+    let r = yad(['toolbox', 'add', 'repomix', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).changed, JSON.parse(r.stdout).used], [true, true]);
+    assert.match(r.stderr, /Repomix is already used here — removed a line in \.sdlc\/toolbox\.json that did nothing/);
+    assert.doesNotMatch(r.stderr, /undo with/, 'the "opposite" command would switch Repomix off, not undo');
+    assert.doesNotMatch(r.stderr, /nothing to change/);
+    r = yad(['toolbox', 'remove', 'figma'], { cwd: p, home });
+    assert.match(r.stdout, /Figma is already not used here — removed a line in \.sdlc\/toolbox\.json that did nothing/);
+    assert.doesNotMatch(r.stdout, /undo with/);
+    // A bad value on a tool that is not used by default: `add` now really uses it.
+    r = yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
+    assert.match(r.stdout, /ECC .* is used here now/);
+    assert.deepEqual(toolboxJSON(p).shipped, { ecc: 'use' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 1: an entry the list ignores is never answered as in use, and remove clears every kind of dead line', () => {
+  const { T, p, home } = product({
+    '.sdlc/toolbox.json': JSON.stringify({ shipped: { 'future-tool': 'use', ecc: 'use' }, custom: [{ id: 'half' }, { id: 'Doc Lint', role: 'r', fallback: 'f', detect: { bins: ['x'] } }, CUSTOM, CUSTOM] }),
+  });
+  try {
+    let r = yad(['toolbox', 'add', 'half', '--json'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual([out.ok, out.command], [false, 'toolbox add']);
+    assert.match(out.error, /half is in \.sdlc\/toolbox\.json but ignored: role says/);
+    for (const id of ['half', 'Doc Lint', 'future-tool']) {
+      r = yad(['toolbox', 'remove', id], { cwd: p, home });
+      assert.equal(r.status, 0, `${id}\n${r.stdout}${r.stderr}`);
+    }
+    r = yad(['toolbox', 'remove', 'doclint'], { cwd: p, home });
+    assert.match(r.stdout, /doclint removed — .*listed 2 times; every copy is gone/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { ecc: 'use' } });
+    r = yad(['toolbox', 'remove', 'Doc Lint'], { cwd: p, home });
+    assert.match(r.stdout, /is not a tool id/, 'an id the file no longer holds is judged as an id again');
+    r = yad(['toolbox', 'remove', 'ecc', '--role', 'x'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /remove takes only the tool id \(got --role\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 1: a custom program is a name, never a path; a detect kind is one of the five', () => {
+  for (const bin of ['../x', 'a/b', 'a\\b', '..', '.']) assert.match(customProblems({ ...CUSTOM, detect: { bins: [bin] } }).join(), /names programs, not paths/, bin);
+  assert.match(parseDetect('constructor:x').error, /not <kind>:<name>/);
+  assert.match(parseDetect('toString:x').error, /not <kind>:<name>/);
+});
+
+test('E86 review 1: refusals answer in JSON; --dir names the Product itself for a writer, any folder for a reader', () => {
+  const { T, p, home } = product({ '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }] }) });
+  const repo = path.join(p, 'api');
+  try {
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(p, 'specs'));
+    const before = snapshot(T);
+    for (const dir of [repo, path.join(p, 'specs'), path.join(p, 'typo')]) {
+      const r = yad(['toolbox', 'add', 'ecc', '--json', '--dir', dir], { cwd: T, home });
+      assert.equal(r.status, 1, dir);
+      const out = JSON.parse(r.stdout);
+      assert.deepEqual([out.ok, out.command], [false, 'toolbox add']);
+      assert.match(out.error, /no Product here/);
+      assert.match(out.hint, /name the Product folder itself \(the one holding \.sdlc\/product\.json\): --dir \S*p$/, 'the refusal names the Product it found');
+    }
+    assert.deepEqual(snapshot(T), before, 'nothing written');
+    let r = yad(['toolbox', 'add', 'ecc', '--json', '--dir', p], { cwd: T, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).product, JSON.parse(r.stdout).file], ['p', '.sdlc/toolbox.json']);
+    // A reader pointed at the code repo reads the Product it belongs to.
+    r = yad(['toolbox', 'list', '--json', '--dir', repo], { cwd: T, home });
+    const list = JSON.parse(r.stdout);
+    assert.equal(list.product, 'p');
+    assert.equal(list.tools.find((t) => t.id === 'ecc').because, 'added');
+    // Drift refused under --json too.
+    put(path.join(p, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    r = yad(['toolbox', 'remove', 'ecc', '--json'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    assert.equal(JSON.parse(r.stdout).code, 'YAD-STATE-008');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 1: through a workspace — a repo beside the Product writes it; the workspace folder itself is told where it is', () => {
+  const T = tmp();
+  const ws = path.join(T, 'ws');
+  const p = path.join(ws, 'product');
+  const repo = path.join(ws, 'api');
+  const home = path.join(T, 'h');
+  try {
+    fs.mkdirSync(home, { recursive: true });
+    put(path.join(p, '.sdlc/product.json'), '{"schemaVersion":10,"platform":null}\n');
+    put(path.join(p, '.sdlc/repos.json'), JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: '../api' }] }));
+    put(path.join(ws, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'product' }));
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    let r = yad(['toolbox', 'add', 'ecc'], { cwd: repo, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(toolboxJSON(p).shipped, { ecc: 'use' });
+    r = yad(['toolbox', 'list'], { cwd: ws, home });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /not in a repo the Product registers — the Product is product/);
+    r = yad(['toolbox', 'add', 'bmad-method'], { cwd: ws, home });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /the Product is product: cd there/);
+    // A broken workspace file is named, not silently skipped.
+    put(path.join(ws, '.yad-workspace.json'), '{"version":9,"product":"product"}');
+    r = yad(['toolbox', 'check'], { cwd: repo, home });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /is version 9, .* — showing the defaults/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E86 review 2 ----------
+
+test('E86 review 2: one remove clears everything under an id, and its answer agrees with the list', () => {
+  const dead = { id: 'ecc', role: 'r', fallback: 'f', detect: { bins: ['x'] } };
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { ecc: 'use', doclint: 'use' }, custom: [dead, CUSTOM] }) });
+  try {
+    // A dead custom entry under a shipped id, and the shipped `use` line: both go, and the tool is unused.
+    let r = yad(['toolbox', 'remove', 'ecc', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).used, JSON.parse(r.stdout).changed], [false, true]);
+    assert.match(r.stderr, /also removed 1 custom entry under the id ecc, which was ignored/);
+    const listed = (id) => JSON.parse(yad(['toolbox', 'list', '--json'], { cwd: p, home }).stdout).tools.find((t) => t.id === id);
+    assert.equal(listed('ecc').used, false);
+    // A valid custom tool and a dead shipped line under its id: one run, no line left under it.
+    r = yad(['toolbox', 'remove', 'doclint'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /doclint removed/);
+    assert.match(r.stdout, /removed the line for `doclint` under shipped/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10 });
+    // A core tool with a dead custom entry under its id: removed AND unused.
+    fs.writeFileSync(path.join(p, '.sdlc/toolbox.json'), JSON.stringify({ custom: [{ ...dead, id: 'spec-kit' }] }));
+    r = yad(['toolbox', 'remove', 'spec-kit', '--json'], { cwd: p, home });
+    assert.equal(JSON.parse(r.stdout).used, false);
+    assert.equal(listed('spec-kit').used, false);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { 'spec-kit': 'skip' } });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 2: add judges "in use" exactly as the list does — a broken copy before a good one, or alone', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ id: 'doclint', role: 'r' }, CUSTOM, { id: 'half' }] }) });
+  try {
+    let r = yad(['toolbox', 'add', 'doclint', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).used, JSON.parse(r.stdout).changed], [true, false]);
+    r = yad(['toolbox', 'add', 'doclint', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'bin:x'], { cwd: p, home });
+    assert.match(r.stdout, /doclint is already one of this project's tools/);
+    r = yad(['toolbox', 'add', 'half', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'bin:x'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /half is in \.sdlc\/toolbox\.json but ignored: role says/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 2: doctor says an entry with no id is fixed by hand', async () => {
+  const { toolboxFileChecks } = await import('./doctor.mjs');
+  const { T, p } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ role: 'r' }] }) });
+  try {
+    const checks = [];
+    toolboxFileChecks(checks, p);
+    assert.match(checks[0].hint, /\(an entry with no id, or an empty one: fix it by hand\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E86 review 3 ----------
+
+test('E86 review 3: a dead custom entry under a shipped id is one removal, said once, with no false undo', () => {
+  const dead = (id) => ({ id, role: 'r', fallback: 'f', detect: { bins: ['x'] } });
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { 'spec-kit': 'skip' }, custom: [dead('ecc'), dead('spec-kit'), dead('repomix')] }) });
+  try {
+    // Scenario A: ecc is not used; only its dead custom entry goes.
+    let r = yad(['toolbox', 'remove', 'ecc'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /removed 1 custom entry under the id ecc, which was ignored .* — ECC .* is still not used here/);
+    assert.doesNotMatch(r.stdout, /also removed|already not used|undo with/);
+    // Scenario B: spec-kit already skipped.
+    r = yad(['toolbox', 'remove', 'spec-kit'], { cwd: p, home });
+    assert.match(r.stdout, /removed 1 custom entry under the id spec-kit, .* — Spec Kit is still not used here/);
+    assert.doesNotMatch(r.stdout, /undo with/);
+    // add clears a dead entry too, and says so once.
+    r = yad(['toolbox', 'add', 'repomix'], { cwd: p, home });
+    assert.match(r.stdout, /removed 1 custom entry under the id repomix, which was ignored .* — Repomix is still used here/);
+    assert.doesNotMatch(r.stdout, /nothing to change|also removed/, 'one write, said once');
+    assert.doesNotMatch(r.stdout, /undo with/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { 'spec-kit': 'skip' } });
+    // A real change still offers its undo.
+    r = yad(['toolbox', 'add', 'spec-kit'], { cwd: p, home });
+    assert.match(r.stdout, /undo with `yad toolbox remove spec-kit`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 3: removing an entry that was ignored says so; an empty id is fixed by hand', async () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { '': 'use' }, custom: [{ id: 'half' }, { id: '', role: 'r' }] }) });
+  try {
+    const r = yad(['toolbox', 'remove', 'half'], { cwd: p, home });
+    assert.match(r.stdout, /removed the entry for half, which was ignored/);
+    assert.doesNotMatch(r.stdout, /one of this project's own tools/);
+    const c = loadChoices(p);
+    assert.equal(c.unreachable, true);
+    const { toolboxFileChecks } = await import('./doctor.mjs');
+    const checks = [];
+    toolboxFileChecks(checks, p);
+    assert.match(checks[0].hint, /\(an entry with no id, or an empty one: fix it by hand\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E86 review 4 ----------
+
+test('E86 review 4: add says "also removed" when the shipped part changed too', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ id: 'ecc', role: 'r', fallback: 'f', detect: { bins: ['x'] } }] }) });
+  try {
+    const r = yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
+    assert.match(r.stdout, /ECC .* is used here now/);
+    assert.match(r.stdout, /also removed 1 custom entry under the id ecc/);
+    assert.match(r.stdout, /undo with `yad toolbox remove ecc`/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { ecc: 'use' } });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 4: each way to be out of remove\'s reach is flagged on its own; a broken entry with an id is not', async () => {
+  const { toolboxFileChecks } = await import('./doctor.mjs');
+  for (const [doc, flagged] of [
+    [{ shipped: { '': 'use' } }, true],
+    [{ custom: [{ id: '', role: 'r' }] }, true],
+    [{ custom: [{ role: 'r' }] }, true],
+    [{ custom: ['str'] }, true],
+    [{ custom: [{ id: 'Bad Id', role: 'r' }] }, false],
+    [{ shipped: { 'future-tool': 'use' } }, false],
+  ]) {
+    const { T, p } = product({ '.sdlc/toolbox.json': JSON.stringify(doc) });
+    try {
+      assert.equal(loadChoices(p).unreachable, flagged, JSON.stringify(doc));
+      const checks = [];
+      toolboxFileChecks(checks, p);
+      assert.equal(/fix it by hand\)/.test(checks[0].hint), flagged, JSON.stringify(doc));
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+// ---------- E86 small notes ----------
+
+test('E86: a removed tool\'s fallback reads as "without it", and a copy\'s reason names the id', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { ecc: 'use' }, custom: [{ id: 'ecc', role: 'r', fallback: 'f', detect: { bins: ['x'] } }] }) });
+  try {
+    const r = yad(['toolbox', 'remove', 'ecc'], { cwd: p, home });
+    assert.match(r.stdout, /ECC .* is not used here now\. Without it: nothing changes: yadflow's own skills run every step/);
+    assert.match(r.stdout, /also removed 1 custom entry under the id ecc, which was ignored \(the id is a shipped tool's\)/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

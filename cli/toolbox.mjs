@@ -2,6 +2,9 @@
 // yadflow does without it (E84).
 //
 //   yad toolbox list [--json] [--dir <folder>]
+//   yad toolbox check [--json] [--dir <folder>]
+//   yad toolbox add <id> | add <id> --custom --role … --fallback … --detect … [--install …] [--source …]
+//   yad toolbox remove <id>
 //
 // THE RULE IT EXISTS FOR: no external tool is ever mandatory, and every one declares a fallback. yadflow
 // degrades; it never breaks. This file is the one place that says, per tool, what "degrades" means.
@@ -9,9 +12,9 @@
 // NOT `manifest.mjs`. That is the INSTALL manifest — the files yadflow copies into a project. This list
 // is about tools yadflow does NOT ship and never installs on its own.
 //
-// SHIPPED, NOT A PROJECT FILE (decided with the row). The list moves with each release, like the step
-// catalogue. A project-level file that adds or removes tools is E86's (`yad toolbox add / remove`); its
-// shape is designed there, by its first writer.
+// SHIPPED, NOT A PROJECT FILE (decided with E84). The list moves with each release, like the step
+// catalogue. What a team CHOOSES from it is a project file, `.sdlc/toolbox.json` in the Product (E86):
+// which shipped tools it uses or skips, and its own tools. See "the team's choices" below.
 //
 // THREE TIERS:
 //   core         offered at setup (E85) — repomix, spec-kit, impeccable
@@ -33,8 +36,9 @@
 // up inside a desktop app has no command: its `install` is empty and `manual` links the vendor's steps.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, emitJSON, info, log } from './lib.mjs';
+import { c, emitJSON, exists, hand, info, log, ok, readJSON, readJSONStrict, refuse, warn, writeJSON } from './lib.mjs';
 import { clean, detectInstalled } from './detect.mjs';
+import { PROJECT_FILES, SCHEMA_VERSION } from './manifest.mjs';
 
 export const INSTALL_TYPES = Object.freeze(['plugin', 'npm', 'python', 'script']);
 export const TIERS = Object.freeze(['core', 'recommended', 'connector']);
@@ -397,17 +401,162 @@ export function toolStatus(tool, items, { has = onPath } = {}) {
   return { state: 'missing', found: [], version: null, inRange: null };
 }
 
+// ---- the team's choices (E86) -----------------------------------------------------------------------
+//
+// `.sdlc/toolbox.json` in the Product, committed, so the whole team shares one answer:
+//
+//   { "schemaVersion": 10,
+//     "shipped": { "<id>": "use" | "skip" },     only where this project differs from the default
+//     "custom":  [ { "id", "role", "fallback", "detect", "install"?, "source"?, "name"? } ] }
+//
+// IN USE BY DEFAULT: the core tools (setup offers them), and a connector the Product has connected — the
+// `tool` its design.json, testing.json or learning.json names. Everything else is listed, not in use.
+// `add` and `remove` write only a difference from that default, so the file never repeats one, and a
+// later release that changes a default is not overruled by a line nobody chose.
+//
+// RECORDS ONLY (decided with the row). Nothing here installs a tool or starts a program: `add` prints the
+// install command, and the person runs it. `yad toolbox check` then says whether it is found.
+
+export const TOOL_ID = /^[a-z0-9][a-z0-9-]*$/;
+const CHOICES = ['use', 'skip'];
+// `--detect skill:x,prefix:y-,plugin:p,mcp:m,bin:b` — the same five things a shipped entry looks for.
+const DETECT_KINDS = Object.freeze({ skill: 'skills', prefix: 'skillPrefixes', plugin: 'plugins', mcp: 'mcp', bin: 'bins' });
+const CONNECTOR_FILES = ['designConfig', 'testingConfig', 'learningConfig'];
+const FILE = PROJECT_FILES.toolboxConfig;
+const ADD_USAGE = 'usage: yad toolbox add <id>   or   yad toolbox add <id> --custom --role "<what it does>" --fallback "<what happens without it>" --detect <kind>:<name>[,…] [--install "<type>: <command>"] [--source <https URL>]';
+
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const shippedTool = (id) => TOOLBOX.find((t) => t.id === id) ?? null;
+
+// The file as it is on disk, for a read-modify-write: `{ doc }` or `{ error }`. STRICT, like
+// `yad skill bind`: a file that does not parse is refused, never rebuilt from nothing — that would delete
+// every choice in it, silently.
+export function readToolboxFile(root) {
+  const file = path.join(root, FILE);
+  if (!exists(file)) return { doc: {} };
+  let raw;
+  try { raw = readJSONStrict(file, null); } catch { return { error: 'does not parse [YAD-STATE-001]' }; }
+  if (!isObject(raw)) return { error: 'has the wrong shape [YAD-STATE-002]' };
+  if (raw.shipped !== undefined && !isObject(raw.shipped)) return { error: '`shipped` must be a JSON object [YAD-STATE-002]' };
+  if (raw.custom !== undefined && !Array.isArray(raw.custom)) return { error: '`custom` must be a JSON list [YAD-STATE-002]' };
+  return { doc: raw };
+}
+
+// Every way a team's own entry can be malformed, as sentences; [] means it is usable. Lighter than
+// `toolProblems`: a licence, a checked date and `usedBy` are the shipped list's promises, not a team's.
+export function customProblems(t) {
+  if (!isObject(t)) return ['an entry is a JSON object'];
+  const out = [];
+  const need = (ok, what) => { if (!ok) out.push(what); };
+  need(typeof t.id === 'string' && TOOL_ID.test(t.id), 'id is lower-case words joined by -');
+  need(!(typeof t.id === 'string' && shippedTool(t.id)), 'id is not the id of a shipped tool');
+  need(t.name === undefined || (typeof t.name === 'string' && t.name.length > 0), 'name, when set, is text');
+  need(typeof t.role === 'string' && t.role.trim().length > 0, 'role says what it does');
+  need(typeof t.fallback === 'string' && t.fallback.trim().length > 0, 'fallback says what happens without it');
+  const d = t.detect;
+  const kinds = Object.values(DETECT_KINDS);
+  need(isObject(d) && Object.keys(d).every((k) => kinds.includes(k) && isStringList(d[k])) && kinds.some((k) => d[k]?.length),
+    `detect names at least one thing to look for (${kinds.join(', ')}), each a list of names`);
+  // A program is a plain name looked up on PATH. A path (`../x`) would make every teammate's `check`
+  // look at a file the shared file chose, so it is refused.
+  need(!isObject(d) || !Array.isArray(d.bins) || d.bins.every((b) => typeof b !== 'string' || (!/[\\/]/.test(b) && b !== '.' && b !== '..')),
+    'detect.bins names programs, not paths (no / or \\)');
+  need(t.install === undefined || (Array.isArray(t.install) && t.install.every((r) => INSTALL_TYPES.includes(r?.type) && typeof r?.command === 'string' && r.command.length > 0)),
+    `install, when set, is a list of { type: ${INSTALL_TYPES.join(' | ')}, command }`);
+  need(t.source === undefined || t.source === null || (typeof t.source === 'string' && /^https:\/\//.test(t.source)), 'source, when set, is an https URL');
+  return out;
+}
+
+// A team's entry in the shipped entries' shape, so one printer and one finder serve both.
+const customRow = (t) => ({
+  id: t.id, name: t.name || t.id, tier: 'project', role: t.role,
+  licence: null, source: t.source ?? null, checked: null,
+  install: t.install ?? [], manual: null,
+  detect: Object.fromEntries(Object.values(DETECT_KINDS).filter((k) => t.detect[k]?.length).map((k) => [k, t.detect[k]])),
+  versions: null, fallback: t.fallback, records: null, note: null, usedBy: [],
+});
+
+// The connector each of design.json, testing.json and learning.json names, when it is one the toolbox
+// knows: id → the file. `none` and an adapter the toolbox does not list name nothing here.
+export function connectedTools(root) {
+  const out = new Map();
+  for (const key of CONNECTOR_FILES) {
+    const doc = readJSON(path.join(root, PROJECT_FILES[key]), null);
+    const id = isObject(doc) && typeof doc.tool === 'string' ? doc.tool : null;
+    if (id && shippedTool(id)?.tier === 'connector' && !out.has(id)) out.set(id, PROJECT_FILES[key]);
+  }
+  return out;
+}
+
+// What the Product says, read leniently: a broken file or line is a `problem` and the defaults stand,
+// because a list must still answer. With no Product, there is nothing to read: the defaults.
+export function loadChoices(productRoot) {
+  const problems = [];
+  let doc = {};
+  if (productRoot) {
+    const r = readToolboxFile(productRoot);
+    if (r.error) problems.push(`${FILE} ${r.error} — showing the defaults`);
+    else doc = r.doc;
+  }
+  const shipped = new Map();
+  // A line no `yad toolbox remove <id>` can reach — no id, or an empty one — is fixed by hand only.
+  let unreachable = false;
+  for (const [id, v] of Object.entries(doc.shipped ?? {})) {
+    if (!id) unreachable = true;
+    // A tool from a newer release, or a typo: the line stays in the file and does nothing here.
+    if (!shippedTool(id)) problems.push(`${FILE}: \`${clean(id)}\` is not a tool this yadflow ships — ignored`);
+    else if (!CHOICES.includes(v)) problems.push(`${FILE}: \`${id}\` should be "use" or "skip" — ignored`);
+    else shipped.set(id, v);
+  }
+  const custom = [];
+  for (const [i, t] of (doc.custom ?? []).entries()) {
+    const hasId = isObject(t) && typeof t.id === 'string' && t.id.length > 0;
+    const label = hasId ? `\`${clean(t.id)}\`` : `number ${i + 1}`;
+    const p = customProblems(t);
+    if (p.length && !hasId) unreachable = true;
+    if (p.length) problems.push(`${FILE}: custom tool ${label} is ignored — ${p.join('; ')}`);
+    else if (custom.some((c2) => c2.id === t.id)) problems.push(`${FILE}: custom tool ${label} is listed twice — the first one is used`);
+    else custom.push(customRow(t));
+  }
+  return { problems, unreachable, shipped, custom, connected: productRoot ? connectedTools(productRoot) : new Map() };
+}
+
+// Is a tool in use here, and why. `because`: core | connected | added | removed | custom | null.
+const defaultUsed = (tool, connected) => tool.tier === 'core' || connected.has(tool.id);
+export function toolUse(tool, { shipped, connected }) {
+  if (tool.tier === 'project') return { used: true, because: 'custom' };
+  const choice = shipped.get(tool.id);
+  if (choice === 'use') return { used: true, because: 'added' };
+  if (choice === 'skip') return { used: false, because: 'removed' };
+  if (tool.tier === 'core') return { used: true, because: 'core' };
+  if (connected.has(tool.id)) return { used: true, because: 'connected', connectedIn: connected.get(tool.id) };
+  return { used: false, because: null };
+}
+
+// Every row — shipped, then the team's own — with what is found here and whether it is in use. Finding
+// reads `detectRoot` (the folder yad runs in: a code repo's own skills count); the choices come from the
+// Product, which may be another folder.
+export function toolboxRows(detectRoot, productRoot, { tools = TOOLBOX, items = null, has = onPath } = {}) {
+  const found = items ?? detectInstalled(detectRoot).items;
+  const choices = loadChoices(productRoot);
+  const rows = [...tools, ...choices.custom].map((t) => ({ ...t, status: toolStatus(t, found, { has }), ...toolUse(t, choices) }));
+  return { rows, problems: choices.problems };
+}
+
 // ---- the command ------------------------------------------------------------------------------------
 
+const TITLES = { ...TIER_TITLES, project: 'Added by this project' };
+const BECAUSE = { core: 'used here', connected: 'used here — connected', added: 'used here — added', custom: 'used here', removed: 'not used here — removed' };
+
 // The lines `yad toolbox list` prints, from rows that already carry their status. Separate so a test can
-// read them: a version is the one value here that comes from a file on disk, so it is cleaned like every
-// name `yad detect` prints.
+// read them. Everything from a file is cleaned like every name `yad detect` prints: a found version, and
+// every word of a team's own entry (the Product's file is shared, so anyone can write in it).
 export function toolboxLines(rows) {
   const lines = [c.bold('The toolbox — external tools yadflow can use. None is required; each has a fallback.')];
-  for (const tier of TIERS) {
+  for (const tier of [...TIERS, 'project']) {
     const mine = rows.filter((r) => r.tier === tier);
     if (!mine.length) continue;
-    lines.push('', c.bold(TIER_TITLES[tier]));
+    lines.push('', c.bold(TITLES[tier]));
     for (const r of mine) {
       const s = r.status;
       const version = s.version ? clean(s.version) : null;
@@ -415,20 +564,251 @@ export function toolboxLines(rows) {
       const state = s.state === 'installed' ? `installed${version ? ` ${version}` : ''}`
         : s.state === 'available' ? 'available (npx fetches it when needed)'
           : s.state === 'disabled' ? 'installed, but its plugin is turned off in your Claude Code settings' : 'not found';
-      lines.push(`  ${mark} ${c.bold(r.name)} ${c.dim(`— ${r.role}`)}: ${state}`);
+      const tag = r.because ? c.cyan(` [${BECAUSE[r.because]}]`) : '';
+      lines.push(`  ${mark} ${c.bold(clean(r.name))} ${c.dim(`— ${clean(r.role)}`)}: ${state}${tag}`);
       if (s.inRange === false) lines.push(`      ${c.yellow('!')} version ${version} is outside the known-good range ${r.versions} — still used; if it misbehaves, install a version in range`);
-      if (s.state === 'missing' || s.state === 'disabled') lines.push(`      ${c.dim(`without it: ${r.fallback}`)}`);
+      if (s.state === 'missing' || s.state === 'disabled') lines.push(`      ${c.dim(`without it: ${clean(r.fallback)}`)}`);
       if (r.note) lines.push(`      ${c.dim(r.note)}`);
     }
   }
   return lines;
 }
 
-export function runToolboxList(root, { json = false, tools = TOOLBOX, items = null, has = onPath } = {}) {
-  const found = items ?? detectInstalled(root).items;
-  const rows = tools.map((t) => ({ ...t, status: toolStatus(t, found, { has }) }));
-  if (json) return emitJSON({ ok: true, tools: rows });
+export function runToolboxList(root, { json = false, productRoot = null, tools = TOOLBOX, items = null, has = onPath } = {}) {
+  const { rows, problems } = toolboxRows(root, productRoot, { tools, items, has });
+  if (json) return emitJSON({ ok: true, ...(productRoot ? where(productRoot) : { product: null, file: null }), tools: rows, problems });
   for (const line of toolboxLines(rows)) log(line);
+  for (const p of problems) warn(p);
+  info(productRoot
+    ? '[used here] = in use in this Product; change it with `yad toolbox add <id>` / `yad toolbox remove <id>`'
+    : 'no Product here, so this shows the defaults: the core tools are the ones in use');
   info('`yad toolbox list --json` adds each tool\'s licence, source, install commands and where it was found');
   return undefined;
+}
+
+// How to get a tool, as lines: each install command, else the vendor's steps, else its source.
+const howToGet = (r) => (r.install.length ? r.install.map((i) => `${i.type}: ${clean(i.command)}`)
+  : r.manual ? [`set it up by hand: ${r.manual}`] : r.source ? [`see ${clean(r.source)}`] : []);
+
+// The tools this project uses that are not ready here: `missing`, `disabled` (its plugin is off), or
+// `out-of-range` (found, but outside its known-good versions — still used). The function E85 calls.
+export function toolboxCheck(root, productRoot, opts = {}) {
+  const { rows, problems } = toolboxRows(root, productRoot, opts);
+  const used = rows.filter((r) => r.used);
+  const findings = used.flatMap((r) => {
+    const s = r.status;
+    const problem = s.state === 'missing' ? 'missing' : s.state === 'disabled' ? 'disabled' : s.inRange === false ? 'out-of-range' : null;
+    if (!problem) return [];
+    return [{ id: r.id, name: r.name, tier: r.tier, problem, version: s.version, versions: r.versions, install: r.install, manual: r.manual, source: r.source, fallback: r.fallback }];
+  });
+  return { used, findings, problems };
+}
+
+// NEVER FAILS (decided with the row): no tool is required, so a missing one is news, not an error. Exit 0.
+export function runToolboxCheck(root, { json = false, productRoot = null, ...opts } = {}) {
+  const { used, findings, problems } = toolboxCheck(root, productRoot, opts);
+  if (json) return emitJSON({ ok: true, ...(productRoot ? where(productRoot) : { product: null, file: null }), used: used.map((r) => r.id), findings, problems });
+  for (const p of problems) warn(p);
+  if (!findings.length) {
+    ok(`all ${used.length} tool(s) this project uses are here: ${used.map((r) => clean(r.name)).join(', ')}`);
+    return undefined;
+  }
+  log(c.bold(`${findings.length} of the ${used.length} tool(s) this project uses ${findings.length === 1 ? 'is' : 'are'} not ready here. None is required.`));
+  for (const f of findings) {
+    const r = used.find((u) => u.id === f.id);
+    const what = f.problem === 'missing' ? 'not found'
+      : f.problem === 'disabled' ? 'installed, but its plugin is turned off in your Claude Code settings'
+        : `version ${clean(f.version)} is outside the known-good range ${f.versions} — still used`;
+    log(`  ${f.problem === 'out-of-range' ? c.yellow('!') : c.dim('–')} ${c.bold(clean(f.name))}: ${what}`);
+    if (f.problem === 'disabled') log(`      ${c.dim('turn it on with /plugin in Claude Code')}`);
+    else for (const line of howToGet(r)) log(`      ${c.dim(line)}`);
+    if (f.problem !== 'out-of-range') log(`      ${c.dim(`without it: ${clean(f.fallback)}`)}`);
+  }
+  info(productRoot ? 'stop using a tool here with `yad toolbox remove <id>`' : 'no Product here, so this checks the core tools only');
+  return undefined;
+}
+
+// `--detect skill:x,plugin:p` → { skills: ['x'], plugins: ['p'] }, or { error }.
+export function parseDetect(text) {
+  const out = {};
+  for (const part of String(text ?? '').split(',').map((p) => p.trim()).filter(Boolean)) {
+    const m = part.match(/^([a-z]+):(.+)$/);
+    const key = m && Object.hasOwn(DETECT_KINDS, m[1]) ? DETECT_KINDS[m[1]] : null;
+    if (!key) return { error: `\`${clean(part)}\` is not <kind>:<name> — the kinds are ${Object.keys(DETECT_KINDS).join(', ')}` };
+    (out[key] ??= []).push(m[2].trim());
+  }
+  return Object.keys(out).length ? { detect: out } : { error: '--detect names nothing to look for' };
+}
+
+// `--install "npm: npx thing"` → { type, command }, or { error }.
+export function parseInstall(text) {
+  const m = String(text ?? '').match(/^\s*([a-z]+)\s*:\s*(.+?)\s*$/);
+  if (!m || !INSTALL_TYPES.includes(m[1])) return { error: `--install is "<type>: <command>", the type one of ${INSTALL_TYPES.join(', ')}` };
+  return { route: { type: m[1], command: m[2] } };
+}
+
+const CUSTOM_FLAGS = ['role', 'fallback', 'detect', 'install', 'source'];
+const brokenFile = (error, json) => refuse(`${FILE} ${error}`, 'fix the file (or restore it from git) first — writing over it would delete every choice it holds', { json });
+
+// The document plus one edit, ready to write. `schemaVersion` is set outright, as `yad skill bind` does:
+// this command is the file's engine writer, so its write IS the file's migration. Keys this release does
+// not know are kept; an empty `shipped` or `custom` is left out.
+function save(productRoot, doc, shipped, custom) {
+  const next = { ...doc, schemaVersion: SCHEMA_VERSION, shipped, custom };
+  if (!Object.keys(shipped).length) delete next.shipped;
+  if (!custom.length) delete next.custom;
+  writeJSON(path.join(productRoot, FILE), next);
+}
+
+// The one edit both verbs make to a shipped tool: write `want` only where it differs from the default.
+function setShipped(doc, tool, want, connected) {
+  const shipped = { ...(isObject(doc.shipped) ? doc.shipped : {}) };
+  if (defaultUsed(tool, connected) === (want === 'use')) delete shipped[tool.id];
+  else shipped[tool.id] = want;
+  return shipped;
+}
+const sameJSON = (a, b) => JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+
+// Where the file is, for an answer: the Product as a path from here, since run from a code repo nothing
+// else on stdout names it. Both sides as the disk has them: `process.cwd()` is already resolved, and a
+// Product reached through a link (macOS's /var is /private/var) would otherwise climb to the top and back.
+const onDisk = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+const where = (productRoot) => ({ product: path.relative(onDisk(process.cwd()), onDisk(productRoot)) || '.', file: FILE });
+
+// The edit to a shipped tool, said truthfully. Whether the FILE changed and whether the tool's USE changed
+// are two questions: removing a line that did nothing (`"figma": "bogus"`, or one that repeats the
+// default) changes the file and not the use.
+function sayEdit(tool, was, now, changed) {
+  const state = now.used ? 'used here' : 'not used here';
+  if (!changed) info(`${tool.name} is already ${state} — nothing to change`);
+  else if (was.used === now.used) info(`${tool.name} is already ${state} — removed a line in ${FILE} that did nothing`);
+  // The fallback is printed as `list` prints it, after "without it:" — on its own, ECC's ("nothing
+  // changes: …") read as if the remove had done nothing.
+  else ok(now.used ? `${tool.name} is used here now` : `${tool.name} is not used here now. Without it: ${clean(tool.fallback)}`);
+}
+// The whole report of an edit to a SHIPPED tool, for both verbs — one function, so `add` and `remove`
+// cannot say it differently again. Two facts, each said once: the shipped part (`sayEdit`), and the
+// dead custom copies under the tool's id that the same write removed.
+function sayShippedEdit(tool, was, now, shippedChanged, copies) {
+  if (shippedChanged || !copies) sayEdit(tool, was, now, shippedChanged);
+  if (copies) {
+    // When only copies went, the tool's use did not change: `customProblems` rejects every custom entry
+    // under a shipped tool's id, so no copy ever counted toward using it. If that rule ever changes,
+    // this branch must call `sayEdit` too.
+    const what = `${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${tool.id}, which ${copies > 1 ? 'were' : 'was'} ignored (the id is a shipped tool's)`;
+    info(shippedChanged ? `also removed ${what}` : `removed ${what} — ${tool.name} is still ${now.used ? 'used' : 'not used'} here`);
+  }
+}
+const usedFrom = (shipped, connected) => ({ shipped: new Map(Object.entries(shipped).filter(([, v]) => CHOICES.includes(v))), connected });
+const sameId = (id) => (t) => isObject(t) && t.id === id;
+
+export function runToolboxAdd(productRoot, { id, custom = false, json = false, ...flags } = {}) {
+  if (!id) return refuse('yad toolbox add needs a tool id', ADD_USAGE, { json });
+  if (!TOOL_ID.test(id)) return refuse(`\`${clean(id)}\` is not a tool id`, 'an id is lower-case letters, digits and dashes — `yad toolbox list --json` shows each one', { json });
+  const given = CUSTOM_FLAGS.filter((k) => flags[k] !== undefined);
+  if (!custom && given.length) return refuse(`--${given[0]} describes a tool of your own, and goes with --custom`, ADD_USAGE, { json });
+  const { doc, error } = readToolboxFile(productRoot);
+  if (error) return brokenFile(error, json);
+  const list = Array.isArray(doc.custom) ? doc.custom : [];
+  const tool = shippedTool(id);
+  const mine = list.find(sameId(id));
+  // In use exactly when `list` says so: `loadChoices` keeps the first USABLE copy, so a broken copy
+  // before a good one does not make the tool unused, and a broken copy alone does not make it used.
+  const usable = loadChoices(productRoot).custom.some((r) => r.id === id);
+  const ignored = () => refuse(`${id} is in ${FILE} but ignored: ${customProblems(mine).join('; ')}`, `fix it by hand, or \`yad toolbox remove ${id}\` and add it again with --custom`, { json });
+
+  if (custom) {
+    if (tool) return refuse(`${id} is a shipped tool`, `\`yad toolbox add ${id}\` marks it as used here`, { json });
+    if (usable) return refuse(`${id} is already one of this project's tools`, `to change it, \`yad toolbox remove ${id}\` and add it again`, { json });
+    if (mine) return ignored();
+    const d = parseDetect(flags.detect);
+    if (flags.detect === undefined || d.error) return refuse(d.error && flags.detect !== undefined ? d.error : 'a tool of your own needs --detect, so yadflow can tell whether it is here', ADD_USAGE, { json });
+    const entry = { id, role: flags.role, fallback: flags.fallback, detect: d.detect };
+    if (flags.install !== undefined) {
+      const r = parseInstall(flags.install);
+      if (r.error) return refuse(r.error, ADD_USAGE, { json });
+      entry.install = [r.route];
+    }
+    if (flags.source !== undefined) entry.source = flags.source;
+    const problems = customProblems(entry);
+    if (problems.length) return refuse(`cannot add ${id}: ${problems.join('; ')}`, ADD_USAGE, { json });
+    save(productRoot, doc, isObject(doc.shipped) ? doc.shipped : {}, [...list, entry]);
+    ok(`${id} added — a tool of this project's own, in use here`);
+    hand(`written to ${FILE} — commit it so the team shares it (undo with \`yad toolbox remove ${id}\`); \`yad toolbox check\` says whether it is found`);
+    return { id, used: true, because: 'custom', changed: true, ...where(productRoot) };
+  }
+
+  if (!tool) {
+    if (usable) {
+      info(`${id} is already one of this project's tools — nothing to change`);
+      return { id, used: true, because: 'custom', changed: false, ...where(productRoot) };
+    }
+    // An entry `list` and `check` ignore is not in use, whatever the file says.
+    if (mine) return ignored();
+    return refuse(`${id} is not in the toolbox`, '`yad toolbox list --json` shows each id; add a tool of your own with `yad toolbox add <id> --custom …`', { json });
+  }
+  const connected = connectedTools(productRoot);
+  const was = toolUse(tool, loadChoices(productRoot));
+  const shipped = setShipped(doc, tool, 'use', connected);
+  // A custom entry under a shipped id is ignored; it goes in the same write, as `remove` does it.
+  const left = list.filter((t) => !sameId(id)(t));
+  const copies = list.length - left.length;
+  const shippedChanged = !sameJSON(shipped, doc.shipped);
+  const changed = shippedChanged || copies > 0;
+  if (changed) save(productRoot, doc, shipped, left);
+  const now = toolUse(tool, usedFrom(shipped, connected));
+  sayShippedEdit(tool, was, now, shippedChanged, copies);
+  // Records only: the person installs it.
+  const how = howToGet(tool);
+  if (how.length) hand(`to install it: ${how.join('   or   ')}`);
+  // An undo is offered only when the tool's use changed: after clearing a line that did nothing, the
+  // "opposite" command would switch the tool off, not put anything back.
+  if (changed) hand(`written to ${FILE} — commit it so the team shares it${was.used !== now.used ? ` (undo with \`yad toolbox remove ${id}\`)` : ''}; \`yad toolbox check\` says whether it is found`);
+  return { id, ...now, changed, ...where(productRoot) };
+}
+
+// Removes EVERYTHING the file holds under `id`, in one write: the shipped tool's use, every custom entry
+// with that id (a dead one sharing a shipped tool's id included), and a shipped line for a tool this
+// release does not ship — so it also clears each line `yad doctor` names as doing nothing.
+export function runToolboxRemove(productRoot, { id, json = false, ...flags } = {}) {
+  if (!id) return refuse('yad toolbox remove needs a tool id', 'usage: yad toolbox remove <id>', { json });
+  const given = CUSTOM_FLAGS.filter((k) => flags[k] !== undefined);
+  if (flags.custom || given.length) return refuse(`yad toolbox remove takes only the tool id (got ${flags.custom ? '--custom' : `--${given[0]}`})`, 'usage: yad toolbox remove <id>', { json });
+  const { doc, error } = readToolboxFile(productRoot);
+  if (error) return brokenFile(error, json);
+  const list = Array.isArray(doc.custom) ? doc.custom : [];
+  const shipped0 = isObject(doc.shipped) ? doc.shipped : {};
+  const tool = shippedTool(id);
+  const left = list.filter((t) => !sameId(id)(t));
+  const copies = list.length - left.length;
+  const deadLine = !tool && Object.hasOwn(shipped0, id);
+  if (!tool && !copies && !deadLine) {
+    if (!TOOL_ID.test(id)) return refuse(`\`${clean(id)}\` is not a tool id`, 'an id is lower-case letters, digits and dashes — `yad toolbox list --json` shows each one', { json });
+    return refuse(`${id} is not in the toolbox`, '`yad toolbox list --json` shows each id', { json });
+  }
+  if (tool) {
+    const connected = connectedTools(productRoot);
+    const was = toolUse(tool, loadChoices(productRoot));
+    const shipped = setShipped(doc, tool, 'skip', connected);
+    const shippedChanged = !sameJSON(shipped, doc.shipped);
+    const changed = shippedChanged || copies > 0;
+    if (changed) save(productRoot, doc, shipped, left);
+    const now = toolUse(tool, usedFrom(shipped, connected));
+    sayShippedEdit(tool, was, now, shippedChanged, copies);
+    // Removing it from the toolbox does not disconnect it: the connect skill owns that file.
+    if (connected.has(id)) info(`${connected.get(id)} still connects it — \`${tool.usedBy[0]}\` changes the connection`);
+    if (changed) hand(`written to ${FILE} — commit it so the team shares it${was.used !== now.used ? ` (undo with \`yad toolbox add ${id}\`)` : ''}`);
+    return { id, ...now, changed, ...where(productRoot) };
+  }
+  const usableBefore = loadChoices(productRoot).custom.some((r) => r.id === id);
+  const shipped = { ...shipped0 };
+  if (deadLine) delete shipped[id];
+  save(productRoot, doc, shipped, left);
+  if (copies) {
+    const many = copies > 1 ? ` (listed ${copies} times; every copy is gone)` : '';
+    ok(usableBefore ? `${clean(id)} removed — it was one of this project's own tools${many}` : `removed the entry for ${clean(id)}, which was ignored${many}`);
+  }
+  if (deadLine) ok(`removed the line for \`${clean(id)}\` under shipped — a tool this yadflow does not ship`);
+  hand(`written to ${FILE} — commit it so the team shares it`);
+  return { id, used: false, because: null, changed: true, ...where(productRoot) };
 }
