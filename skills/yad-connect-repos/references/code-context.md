@@ -20,8 +20,8 @@ npx repomix@latest --compress --include-logs --style markdown \
 - **Secretlint runs by default** — if a secret is reported, **STOP and redact** before any AI reads the
   pack. Never let a secret reach the model or the cache.
 
-Pack the whole repo, or the source boundary defined in the project's constitution. If `npx repomix` is
-unavailable, degrade: hand-assemble the same context (the repo's source tree + recent git log) and
+Pack the whole repo, or the source boundary defined in the project's constitution. If Repomix is not
+used (the skill's "When a tool is missing" section says how to tell), degrade: hand-assemble the same context (the repo's source tree + recent git log) and
 record `source: repomix-unavailable` in the registry entry.
 
 ## Layer 2 — the code-map (lightweight index, the default the brain reads)
@@ -93,7 +93,7 @@ lands the removal + the managed `.gitignore` line in the same audit commit. The 
 ## Why this stays DRY with backfill
 
 `yad-backfill` already documents the exact Repomix command, the Secretlint discipline, the
-`repomix: unavailable` degrade, and the "describe what exists, do not invent" prompt
+`source: repomix-unavailable` degrade, and the "describe what exists, do not invent" prompt
 (`../yad-backfill/references/backfill.md`). This skill reuses all of it; the only differences are
 **scope** (repo-wide index vs one feature) and **output** (a lightweight code-map for the brain vs a
 human-approved feature spec). Backfill produces a *verified* spec that gates changes; connect produces a

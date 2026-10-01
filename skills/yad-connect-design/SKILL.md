@@ -16,6 +16,20 @@ connected and its MCP is available, the `ux-designer` lens **generates** screens
 **links** an existing human-made design and reads it back); when nothing is connected, `yad-ui` runs
 markdown-only exactly as before.
 
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read the
+entry with the tool's `id`. Run it where the tool will run: for work inside a code repo, add
+`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).
+If yad cannot answer (it is not installed here, or the command fails),
+use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.
+
+- **Figma** (`figma`, a connector). Used when `.sdlc/design.json` connects it: the connect skill writes that file, and the steps below follow it. Without it: markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
+- **Pencil (pen.dev)** (`pencil`, a connector). Used when `.sdlc/design.json` connects it: the connect skill writes that file, and the steps below follow it. Without it: markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).

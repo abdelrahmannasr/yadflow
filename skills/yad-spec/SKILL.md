@@ -14,9 +14,23 @@ when driven by the orchestrator (`yad-run`, Phase 4) it records a `spec`/`tasks`
 (Step 8) — but it never auto-advances a contract change or a Shape step.
 
 Spec Kit is driven as **harness slash-commands** (`/speckit.*`), not a subprocess CLI (Phase 0
-Deviation 3). When Spec Kit is not installed, the same files are hand-authored in Spec Kit's exact
-layout and the spec is marked `speckit: not-installed` — the workflow does not block on the tool. This
+Deviation 3). When Spec Kit is not used (**When a tool is missing** below), the same files are
+hand-authored in Spec Kit's exact layout and the spec is marked `speckit: not-installed` — the workflow
+does not block on the tool. This
 is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
+
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read the
+entry with the tool's `id`. Run it where the tool will run: for work inside a code repo, add
+`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).
+If yad cannot answer (it is not installed here, or the command fails),
+use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.
+
+- **Spec Kit** (`spec-kit`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove spec-kit`) — do this instead: yad-spec writes the same spec files by hand, in Spec Kit's layout. Record `speckit: not-installed` — it means the tool was not used, whatever the reason.
 
 ## Conventions
 
@@ -75,8 +89,10 @@ contract here. (On a route that HAS one; the short lanes do not — see below.)
   already exists, a commit that only DELETES it is allowed through, which is the way back out.)
 
 ### Step 4 — Detect Spec Kit
-Check for `/speckit.*` slash-commands and/or `demo-repos/<repo>/.specify/`. Record the result for
-Step 6's frontmatter (`speckit: installed | not-installed`).
+Read Spec Kit's entry in `yad toolbox list --json --dir demo-repos/<repo>`, as **When a tool is
+missing** says. If yad cannot answer, check for `/speckit.*` slash-commands and/or
+`demo-repos/<repo>/.specify/`. Record the result for Step 6's
+frontmatter (`speckit: installed | not-installed`).
 
 ### Step 5 — Run the heavy ceremony ONCE (or degrade)
 **Installed** — from inside `demo-repos/<repo>/`, drive, in order:

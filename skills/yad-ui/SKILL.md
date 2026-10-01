@@ -21,6 +21,21 @@ The visual design is materialized in the **design tool connected via `yad-connec
 is connected, the step degrades to the Markdown artifacts only — the design tool is additive, exactly
 like Impeccable.
 
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read the
+entry with the tool's `id`. Run it where the tool will run: for work inside a code repo, add
+`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).
+If yad cannot answer (it is not installed here, or the command fails),
+use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.
+
+- **Impeccable** (`impeccable`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove impeccable`) — do this instead: Markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly. Record `impeccable: not-installed` — it means the tool was not used, whatever the reason.
+- **Figma** (`figma`, a connector). Used when `.sdlc/design.json` connects it: the connect skill writes that file, and the steps below follow it. Without it: markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
+- **Pencil (pen.dev)** (`pencil`, a connector). Used when `.sdlc/design.json` connects it: the connect skill writes that file, and the steps below follow it. Without it: markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory.
@@ -102,7 +117,8 @@ Adopt the **ux-designer** lens. Drive Impeccable as slash-commands:
 `/impeccable document` generates the root `DESIGN.md` from existing code; `/impeccable extract` pulls
 components/tokens into the design system; `/impeccable craft` is shape-then-build for the new screens.
 
-**Graceful degradation:** if Impeccable is not installed (no `/impeccable …` commands available), the
+**Graceful degradation:** if Impeccable is not used — read its entry as **When a tool is missing** says; if yad
+cannot answer, no `/impeccable …` commands are available — the
 `ux-designer` lens authors `ui-design.md` and `DESIGN.md` directly, and you **note in `ui-design.md`
 that Impeccable was not used**. Do not run `npx impeccable skills install` as part of this step — tool
 installation is out of scope for Shape.

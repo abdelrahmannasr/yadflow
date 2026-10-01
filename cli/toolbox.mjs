@@ -50,8 +50,9 @@ const CHECKED = '2026-10-01';
 // the routes the roadmap's four types describe (plugin, npm, python, script); a tool's other routes
 // (Docker, Homebrew, a VS Code extension) are in its own README, which `source` links. `versions` is null
 // everywhere for now: no bound has been tested yet — E88 vets each default and is where a known-good
-// range is earned. `records` is the exact line a skill writes when the tool is absent, so E87 can point
-// the skill at this entry without renaming anything.
+// range is earned. `records` is the exact line a skill writes when the tool is absent. Each skill in
+// `usedBy` quotes `fallback` and `records` word for word in its "When a tool is missing" section (E87):
+// change the words here, then rewrite the sections with `skillFallbackSection`.
 export const TOOLBOX = Object.freeze([
   // ---- core: offered at setup --------------------------------------------------------------------
   {
@@ -66,9 +67,9 @@ export const TOOLBOX = Object.freeze([
     // yad runs it through `npx repomix@latest` (setup, `yad repo refresh`), so `npx` alone makes it usable.
     detect: { npx: true, bins: ['repomix'], plugins: ['repomix-mcp', 'repomix-commands', 'repomix-explorer'], mcp: ['repomix'], skills: ['repomix-explorer'] },
     versions: null,
-    fallback: 'no code pack: repos are not packed, and the Shape steps read the code map alone',
-    records: null, note: null,
-    usedBy: ['yad setup', 'yad repo refresh', 'yad-connect-repos'],
+    fallback: 'no Repomix pack: yad setup and yad repo refresh skip it, yad-connect-repos and yad-backfill put the same context together by hand from the source tree and the recent git log, and the Shape steps read the code map',
+    records: 'source: repomix-unavailable', note: null,
+    usedBy: ['yad setup', 'yad repo refresh', 'yad-connect-repos', 'yad-backfill'],
   },
   {
     id: 'spec-kit', name: 'Spec Kit', tier: 'core', role: 'runs the spec ceremony (specify → plan → tasks) in a code repo',
@@ -263,10 +264,13 @@ export function toolProblems(t) {
   }
   need(t?.versions === null || (typeof t?.versions === 'string' && parseRange(t.versions) !== null), 'versions is null or a range this reader understands');
   need(typeof t?.fallback === 'string' && t.fallback.length > 0, 'fallback says what yadflow does without it');
+  // A skill's section adds the full stop (E87), so a fallback ending in one would print two.
+  need(typeof t?.fallback !== 'string' || !/[.\s]$/.test(t.fallback), 'fallback ends without a full stop or a space');
   need(t?.records === null || (typeof t?.records === 'string' && t.records.length > 0), 'records is null or the line a skill writes');
   need(t?.note === null || (typeof t?.note === 'string' && t.note.length > 0), 'note is null or a sentence');
   need(t?.manual === null || (typeof t?.manual === 'string' && /^https:\/\//.test(t.manual)), 'manual is null or an https URL');
   need(isStringList(t?.usedBy), 'usedBy lists the skills or commands that use it');
+  need(t?.tier !== 'connector' || !isStringList(t?.usedBy) || connectorFile(t) !== null, 'a connector names the yad-connect-* skill that connects it');
   return out;
 }
 
@@ -531,6 +535,56 @@ export function toolUse(tool, { shipped, connected }) {
   if (tool.tier === 'core') return { used: true, because: 'core' };
   if (connected.has(tool.id)) return { used: true, because: 'connected', connectedIn: connected.get(tool.id) };
   return { used: false, because: null };
+}
+
+// ---- what a skill does when its tool is missing (E87) ------------------------------------------------
+//
+// Every skill a shipped tool's `usedBy` names carries one section, built here, so its words are the
+// toolbox's words and a test can hold the two together. A skill decides from yad's own answer — one rule
+// for every skill, which already sees a plugin turned off in Claude Code — not from its own guess:
+//   core       used when `yad toolbox list --json` says `used: true` and the state is `installed` or
+//              `available`. A team's `skip` (`yad toolbox remove <id>`) means the fallback, even when the
+//              tool is installed.
+//   connector  used when the Product's design, testing or learning file connects it. The connect skill
+//              writes that file and the step skill follows it, as before E87.
+// Recommended tools are bound with `yad skill bind`, so no skill names one.
+export const SKILL_FALLBACK_HEADING = '## When a tool is missing';
+const CONNECT_FILES = { 'yad-connect-design': 'designConfig', 'yad-connect-testing': 'testingConfig', 'yad-connect-learning': 'learningConfig' };
+
+// The Product file that connects a connector: the one its `yad-connect-*` skill writes.
+export function connectorFile(tool) {
+  const skill = tool.usedBy.find((u) => CONNECT_FILES[u]);
+  return skill ? PROJECT_FILES[CONNECT_FILES[skill]] : null;
+}
+
+// The skills (folders under skills/, not `yad <command>`s) that use a tool.
+export const skillsUsing = (tool) => tool.usedBy.filter((u) => !u.startsWith('yad '));
+
+export function skillFallbackSection(skill, tools = TOOLBOX) {
+  const mine = tools.filter((t) => t.tier !== 'recommended' && skillsUsing(t).includes(skill));
+  if (!mine.length) return null;
+  const lines = [
+    SKILL_FALLBACK_HEADING,
+    '',
+    '<!-- Written from yadflow\'s cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->',
+    '',
+    'No tool below is required. When one is missing, this skill still finishes, using the fallback written',
+    'beside it. Decide from yad\'s answer, not from a guess: run `yad toolbox list --json` and read the',
+    'entry with the tool\'s `id`. Run it where the tool will run: for work inside a code repo, add',
+    '`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).',
+    'If yad cannot answer (it is not installed here, or the command fails),',
+    'use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.',
+    '',
+  ];
+  for (const t of mine) {
+    const record = t.records ? ` Record \`${t.records}\` — it means the tool was not used, whatever the reason.` : '';
+    if (t.tier === 'connector') {
+      lines.push(`- **${t.name}** (\`${t.id}\`, a connector). Used when \`${connectorFile(t)}\` connects it: the connect skill writes that file, and the steps below follow it. Without it: ${t.fallback}.${record}`);
+    } else {
+      lines.push(`- **${t.name}** (\`${t.id}\`). Use it when its entry has \`used: true\` and \`status.state\` is \`installed\` or \`available\`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (\`yad toolbox remove ${t.id}\`) — do this instead: ${t.fallback}.${record}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 // Every row — shipped, then the team's own — with what is found here and whether it is in use. Finding

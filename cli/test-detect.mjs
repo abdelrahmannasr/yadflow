@@ -500,6 +500,52 @@ test('E84: a fallback a skill records is written there word for word, so E87 ren
   }
 });
 
+// E87: every skill a tool names says what it does without it, in the toolbox's own words. Held in both
+// directions: a skill the toolbox names has the section, word for word, and a skill with the section is
+// one the toolbox names. `node scripts/skill-fallbacks.mjs` rewrites the sections after a wording change.
+const { SKILL_FALLBACK_HEADING, connectorFile, skillFallbackSection, skillsUsing } = await import('./toolbox.mjs');
+const skillSection = (text) => {
+  const lines = text.split('\n');
+  const at = lines.indexOf(SKILL_FALLBACK_HEADING);
+  if (at < 0) return null;
+  const end = lines.findIndex((l, i) => i > at && l.startsWith('## '));
+  return lines.slice(at, end < 0 ? lines.length : end).join('\n').replace(/\n+$/, '');
+};
+
+test('E87: every skill a tool names quotes its fallback word for word, and no other skill has the section', () => {
+  const skills = fs.readdirSync(path.join(ROOT, 'skills')).filter((s) => fs.existsSync(path.join(ROOT, 'skills', s, 'SKILL.md')));
+  const named = new Set(TOOLBOX.filter((t) => t.tier !== 'recommended').flatMap(skillsUsing));
+  assert.ok(named.size >= 9, 'the toolbox names the skills that use its tools');
+  for (const t of TOOLBOX) for (const u of t.usedBy) assert.ok(u.startsWith('yad ') || skills.includes(u), `${t.id}: usedBy "${u}" is a yad command or a skill folder`);
+  for (const s of skills) {
+    const found = skillSection(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8'));
+    if (named.has(s)) assert.equal(found, skillFallbackSection(s), `skills/${s}/SKILL.md: the section matches the toolbox — run node scripts/skill-fallbacks.mjs`);
+    else assert.equal(found, null, `skills/${s}/SKILL.md has the section, but no toolbox tool names ${s}`);
+  }
+  // The rewriting script agrees: nothing to change.
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'skill-fallbacks.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test('E87: the section says when to use each tool, its fallback, and what to record', () => {
+  assert.equal(skillFallbackSection('yad-epic'), null, 'a skill no tool names gets no section');
+  const spec = skillFallbackSection('yad-spec');
+  assert.ok(spec.startsWith(`${SKILL_FALLBACK_HEADING}\n`));
+  assert.match(spec, /`yad toolbox list --json`/, 'decide from yad\'s answer');
+  assert.match(spec, /`used: true` and `status\.state` is `installed` or `available`/);
+  assert.match(spec, /`yad toolbox remove spec-kit`/, 'a team skip means the fallback');
+  assert.ok(spec.includes(`${TOOLBOX.find((t) => t.id === 'spec-kit').fallback}. Record \`speckit: not-installed\``));
+  // A connector follows the file its connect skill writes, not the toolbox's use flag.
+  const ui = skillFallbackSection('yad-ui');
+  assert.match(ui, /\*\*Figma\*\* \(`figma`, a connector\)\. Used when `\.sdlc\/design\.json` connects it/);
+  assert.doesNotMatch(ui, /yad toolbox remove figma/);
+  assert.equal(connectorFile(TOOLBOX.find((t) => t.id === 'deeptutor')), '.sdlc/learning.json');
+  assert.equal(connectorFile(TOOLBOX.find((t) => t.id === 'spec-kit')), null);
+  // Recommended tools are bound with `yad skill bind`, never named by a skill.
+  const fake = [{ ...TOOLBOX.find((t) => t.id === 'ecc'), usedBy: ['yad-epic'] }];
+  assert.equal(skillFallbackSection('yad-epic', fake), null);
+});
+
 test('E84: the connectors are the adapters skills/sdlc/config.yaml names, with the same fallbacks', () => {
   const yaml = fs.readFileSync(path.join(ROOT, 'skills/sdlc/config.yaml'), 'utf8');
   const named = [];
@@ -542,6 +588,10 @@ test('E84: toolProblems names each way an entry can be wrong', () => {
   }
   assert.ok(bad({ install: [{ type: 'npm', command: '' }] }).some((p) => p.includes('has its command')));
   assert.ok(toolProblems(null).length > 5, 'nothing at all is many problems, not a crash');
+  // E87: a skill's section adds the full stop, and a connector says which file connects it.
+  assert.ok(bad({ fallback: 'writes it by hand.' }).some((p) => p.startsWith('fallback ends')));
+  assert.ok(bad({ tier: 'connector', usedBy: ['yad-ui'] }).some((p) => p.startsWith('a connector names')));
+  assert.deepEqual(bad({ tier: 'connector', usedBy: ['yad-connect-testing', 'yad-test-cases'] }), []);
 });
 
 test('E84: versions and ranges', () => {

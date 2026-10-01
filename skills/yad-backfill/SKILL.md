@@ -11,6 +11,19 @@ generating a spec for what is **already built** — so future changes have a con
 it count. Gating is **per touched feature**: a new change is blocked only until the features it touches
 have approved specs — never the whole repo at once.
 
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read the
+entry with the tool's `id`. Run it where the tool will run: for work inside a code repo, add
+`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).
+If yad cannot answer (it is not installed here, or the command fails),
+use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.
+
+- **Repomix** (`repomix`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove repomix`) — do this instead: no Repomix pack: yad setup and yad repo refresh skip it, yad-connect-repos and yad-backfill put the same context together by hand from the source tree and the recent git log, and the Shape steps read the code map. Record `source: repomix-unavailable` — it means the tool was not used, whatever the reason.
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory; code repos are separate git repos under
@@ -44,8 +57,9 @@ npx repomix@latest --compress --include "<feature globs>" --include-logs --style
 ```
 `--compress` (Tree-sitter structural compression) keeps it small; `--include-logs` adds the relevant
 git history (default 50; `--include-logs-count N` to change); Secretlint secret-scans by default. If a
-secret is reported, STOP and have it removed/redacted before continuing. (If `npx repomix` is
-unavailable, degrade: hand-assemble the same feature context and record `repomix: unavailable`.)
+secret is reported, STOP and have it removed/redacted before continuing. (If Repomix is not
+used — see **When a tool is missing** — degrade: hand-assemble the same feature context and record
+`source: repomix-unavailable`.)
 
 ### Step 3 — `draft` (describe what exists — do NOT invent)
 Feed the packed context to the AI with the **"describe what exists, do not invent"** instruction
@@ -58,7 +72,7 @@ repo: <repo>
 artifact: backfill-spec
 status: draft
 verified: false
-source: repomix         # or "repomix: unavailable" when degraded
+source: repomix         # or repomix-unavailable when degraded
 generated: <YYYY-MM-DD>
 ---
 ```
