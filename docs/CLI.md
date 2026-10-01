@@ -1184,7 +1184,9 @@ server is matched by its name only, because its settings are never read: a serve
 registered under the same name (common for `playwright`) is counted as found. A tool found only
 through a Claude Code plugin your settings turn off shows as **installed, but its plugin is turned
 off**, with its fallback: the agent does not load it. A program is looked for in the absolute folders
-of `PATH` only; an empty or relative entry means "wherever yad ran", which is not an install.
+of `PATH` only; an empty or relative entry means "wherever yad ran", which is not an install. On
+Windows, absolute means a drive and a root (`C:\tools`) or a share (`\\server\share`); `\tools` and
+`D:tools` are not, and an entry in double quotes is read without them.
 
 **A version outside the range warns; it does not switch the tool off.** The tool is still used, and the
 list says which range is known to work.
