@@ -1,3 +1,18 @@
+# [4.3.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.2.0...v4.3.0) (2026-10-01)
+
+
+### Bug Fixes
+
+* **toolbox:** E85 review 1 — hint order, the folder check looks in, team-wide remove advice ([c7f6592](https://github.com/abdelrahmannasr/yadflow/commit/c7f65922cdad49e9816c4cbe81190283392c1df6))
+* **toolbox:** E85 review 2 — look for tools at the top of the repo, read --dir's Product ([82fb5ed](https://github.com/abdelrahmannasr/yadflow/commit/82fb5ed6a1afcf364a9844d3faf2676bd4a84274))
+* **toolbox:** E85 review 3 — a worktree is its own checkout; look at the deepest top ([4926799](https://github.com/abdelrahmannasr/yadflow/commit/4926799f6db758c7abb59029bd8e71923550c227))
+* **toolbox:** E85 review 4 — find the checkout top under both spellings of a linked folder ([9728384](https://github.com/abdelrahmannasr/yadflow/commit/9728384c140178d55608d2ab2b67037a2f80140d))
+
+
+### Features
+
+* **toolbox:** offer the missing tools in setup, check, update and join (E85) ([53e06c6](https://github.com/abdelrahmannasr/yadflow/commit/53e06c6da8bf585ced68435b052d01ba4ca5e6fa))
+
 # [4.2.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.1.0...v4.2.0) (2026-10-01)
 
 
