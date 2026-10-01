@@ -664,7 +664,8 @@ async function main() {
       // never a folder a walk up from it happens to reach.
       const productRoot = dirGiven ? (found?.via === 'here' ? found.root : null) : (found?.root ?? null);
       if (!productRoot) {
-        const where = dirGiven ? 'with --dir, name the Product folder itself (the one holding .sdlc/product.json)'
+        const near = found?.root ?? found?.elsewhere;
+        const where = dirGiven ? `with --dir, name the Product folder itself (the one holding .sdlc/product.json)${near ? `: --dir ${rel(near)}` : ''}`
           : found?.elsewhere ? `the Product is ${rel(found.elsewhere)}: cd there, or pass --dir ${rel(found.elsewhere)}`
             : `${found?.problem ? `${found.problem}. ` : ''}run it from the Product, from inside a repo it registers, or pass --dir <the Product>; \`yad new\` / \`yad init\` start one`;
         refuse(`no Product here (${o.dir}) — yad toolbox ${action} writes the Product's .sdlc/toolbox.json`, where);

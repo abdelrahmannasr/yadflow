@@ -1118,3 +1118,55 @@ test('E86 review 1: through a workspace — a repo beside the Product writes it;
     assert.match(r.stdout, /is version 9, .* — showing the defaults/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---------- E86 review 2 ----------
+
+test('E86 review 2: one remove clears everything under an id, and its answer agrees with the list', () => {
+  const dead = { id: 'ecc', role: 'r', fallback: 'f', detect: { bins: ['x'] } };
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { ecc: 'use', doclint: 'use' }, custom: [dead, CUSTOM] }) });
+  try {
+    // A dead custom entry under a shipped id, and the shipped `use` line: both go, and the tool is unused.
+    let r = yad(['toolbox', 'remove', 'ecc', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).used, JSON.parse(r.stdout).changed], [false, true]);
+    assert.match(r.stderr, /also removed 1 custom entry under the id ecc, which was ignored/);
+    const listed = (id) => JSON.parse(yad(['toolbox', 'list', '--json'], { cwd: p, home }).stdout).tools.find((t) => t.id === id);
+    assert.equal(listed('ecc').used, false);
+    // A valid custom tool and a dead shipped line under its id: one run, no line left under it.
+    r = yad(['toolbox', 'remove', 'doclint'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /doclint removed/);
+    assert.match(r.stdout, /removed the line for `doclint` under shipped/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10 });
+    // A core tool with a dead custom entry under its id: removed AND unused.
+    fs.writeFileSync(path.join(p, '.sdlc/toolbox.json'), JSON.stringify({ custom: [{ ...dead, id: 'spec-kit' }] }));
+    r = yad(['toolbox', 'remove', 'spec-kit', '--json'], { cwd: p, home });
+    assert.equal(JSON.parse(r.stdout).used, false);
+    assert.equal(listed('spec-kit').used, false);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { 'spec-kit': 'skip' } });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 2: add judges "in use" exactly as the list does — a broken copy before a good one, or alone', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ id: 'doclint', role: 'r' }, CUSTOM, { id: 'half' }] }) });
+  try {
+    let r = yad(['toolbox', 'add', 'doclint', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).used, JSON.parse(r.stdout).changed], [true, false]);
+    r = yad(['toolbox', 'add', 'doclint', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'bin:x'], { cwd: p, home });
+    assert.match(r.stdout, /doclint is already one of this project's tools/);
+    r = yad(['toolbox', 'add', 'half', '--custom', '--role', 'r', '--fallback', 'f', '--detect', 'bin:x'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /half is in \.sdlc\/toolbox\.json but ignored: role says/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 2: doctor says an entry with no id is fixed by hand', async () => {
+  const { toolboxFileChecks } = await import('./doctor.mjs');
+  const { T, p } = product({ '.sdlc/toolbox.json': JSON.stringify({ custom: [{ role: 'r' }] }) });
+  try {
+    const checks = [];
+    toolboxFileChecks(checks, p);
+    assert.match(checks[0].hint, /\(an entry with no id: fix it by hand\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
