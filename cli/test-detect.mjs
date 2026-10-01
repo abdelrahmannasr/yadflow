@@ -604,7 +604,14 @@ test('E87: the section is found and written the same way in a CRLF file, and nev
   assert.ok(!isFallbackHeading('## When a tool is missing \\#'));
   const t0 = Date.now();
   assert.equal(isFallbackHeading(`## a${' '.repeat(50000)}x`), false);
-  assert.ok(Date.now() - t0 < 500, 'linear on a long line');
+  assert.equal(isFallbackHeading(`## a ${'#'.repeat(50000)}x`), false);
+  assert.equal(isFallbackHeading(`## a ${'#'.repeat(50000)}x#`), false);
+  assert.ok(Date.now() - t0 < 500, 'linear on a long line, of spaces or of #s');
+  assert.ok(!isFallbackHeading('## When a tool is missing\u00a0'), 'only spaces and tabs are trimmed');
+  // Text that only looks like a heading or a list item still has its --- underline caught.
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n#hashtag\n---`), '---');
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. item\n---`), '---');
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n- one\n- two\n---`), null, 'a list, then a divider');
   for (const [body, line] of [['Usage\n-', '-'], ['Usage\n- ', '- '], ['Usage\n===', '==='], ['<h2>Usage</h2>', '<h2>Usage</h2>'], ['> ## Quoted', '> ## Quoted'], ['```\ncode', '```'], ['#### Deep', '#### Deep']]) {
     assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n${body}`), line, JSON.stringify(body));
   }

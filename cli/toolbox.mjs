@@ -628,9 +628,13 @@ const headingOf = (line) => {
   const h = HEADING.exec(line);
   if (!h) return null;
   // Cut a closing run of `#`s only when a space or tab comes before it (`## C#` keeps its `#`).
-  let text = (h[2] ?? '').trimEnd();
-  const hashes = /#+$/.exec(text);
-  if (hashes && (hashes.index === 0 || /[ \t]/.test(text[hashes.index - 1]))) text = text.slice(0, hashes.index).trimEnd();
+  // Walked back by hand: a pattern for the run of `#`s restarts at each one, which is slow on a long run.
+  // Only spaces and tabs are trimmed, as CommonMark does — by hand too, since /[ \t]+$/ backtracks.
+  const trim = (s) => { let k = s.length; while (k > 0 && (s[k - 1] === ' ' || s[k - 1] === '\t')) k--; return s.slice(0, k); };
+  let text = trim(h[2] ?? '');
+  let j = text.length;
+  while (j > 0 && text[j - 1] === '#') j--;
+  if (j < text.length && (j === 0 || text[j - 1] === ' ' || text[j - 1] === '\t')) text = trim(text.slice(0, j));
   return { level: h[1].length, text };
 };
 
@@ -678,8 +682,14 @@ export function sectionMisreadLine(section) {
     if (/^ {0,3}(>\s*)*#{1,6}(\s|$)|^\s*<h[1-6][\s>]|^ {0,3}(`{3,}|~{3,})/i.test(l)) return l;
     // An underline makes a heading only under a paragraph line: after a blank line, a list item or a
     // heading, `---` is a divider (CommonMark).
+    // A list item counts only where it starts a list (after a blank line, a heading or another item):
+    // after a paragraph line, `2. item` is still paragraph text. `#hashtag` is text, not a heading.
+    const isHeading = (s) => /^ {0,3}#{1,6}([ \t]|$)/.test(s ?? '');
+    const isItem = (s) => /^\s*([-*+]|\d+[.)])\s/.test(s ?? '');
     const above = lines[i - 1];
-    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && above.trim() !== '' && !/^\s*([-*+]|\d+[.)])\s|^ {0,3}#/.test(above)) return l;
+    const before = lines[i - 2];
+    const listStart = isItem(above) && (i - 2 < 0 || before.trim() === '' || isHeading(before) || isItem(before));
+    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && above.trim() !== '' && !isHeading(above) && !listStart) return l;
   }
   return null;
 }

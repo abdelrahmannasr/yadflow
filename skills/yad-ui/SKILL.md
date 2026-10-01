@@ -133,7 +133,8 @@ Adopt the **ux-designer** lens. Drive Impeccable as slash-commands:
 components/tokens into the design system; `/impeccable craft` is shape-then-build for the new screens.
 
 **Graceful degradation:** if Impeccable is not used (**When a tool is missing** says how to tell; if
-yad cannot answer, it is not used when no `/impeccable …` commands are available), the `ux-designer` lens authors `ui-design.md` and `DESIGN.md` directly, and you **note in `ui-design.md`
+yad cannot answer, it is not used when no `/impeccable …` commands are available), the
+`ux-designer` lens authors `ui-design.md` and `DESIGN.md` directly, and you **note in `ui-design.md`
 that Impeccable was not used**. Do not run `npx impeccable skills install` as part of this step — tool
 installation is out of scope for Shape.
 
