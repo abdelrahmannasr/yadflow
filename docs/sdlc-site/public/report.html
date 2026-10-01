@@ -626,6 +626,7 @@ each code repo/
   <div class="term"><strong>Impeccable</strong><span class="badge b-tool">tools</span><br>A UI-design tool driven via slash-commands: <code>document</code> (read the current UI into a design file), <code>extract</code> (save reusable pieces), <code>craft</code> (make new designs that match). Used by the UI step when installed; the step authors directly otherwise.</div>
   <div class="term"><strong>CodeRabbit</strong><span class="badge b-tool">tools</span><br>An AI code-review service used as the advisory first pass on PRs. Optional; never the merge authority.</div>
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
+  <div class="term"><strong>Toolbox</strong><span class="badge b-tool">tools</span><br>The one list, shipped inside yadflow, of every external tool it can use: <strong>core</strong> tools offered at setup (Repomix, Spec Kit, Impeccable), <strong>recommended</strong> skill pools never pushed (BMAD-METHOD, ECC, mattpocock/skills), and the <strong>connectors</strong> a Product links for design, testing and learning (Figma, Pencil, Playwright, Cypress, pytest, Maestro, DeepTutor). Each entry gives the tool&rsquo;s role, licence, checked install commands and its fallback. <code>yad toolbox list</code> shows which ones you have.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
   <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 38 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>ship</code>, <code>repo</code>, <code>report</code>). Every command but <code>yad hook</code> takes <code>--json</code>: one JSON object on stdout, for agents and CI.</div>
@@ -1247,6 +1248,20 @@ yad doctor               # 5. confirm everything is healthy</code></pre>
     <div class="row"><span class="lbl lbl-what">What</span> The environment and state health check: tools and their login, config files, repo paths, every epic’s ledger, and what the platform’s branch protection requires. It exits 1 on any failure, so CI can use it. Read-only.</div>
     <div class="row"><span class="lbl lbl-how">How</span> <code>yad doctor</code> &nbsp;·&nbsp; <code>yad doctor --json</code></div>
     <div class="row"><span class="lbl lbl-when">When</span> After an upgrade, after <code>yad join</code>, or whenever something seems off.</div>
+  </div>
+
+  <div class="skillcard" id="cmd-detect">
+    <h4><code>yad detect</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Lists the skills, agents, MCP servers and plugins installed for the AI agents that work here &mdash; in this folder and in your home folder &mdash; and which agents read each place (Claude Code, Codex CLI, Cursor, Gemini CLI and others). Read-only: it writes nothing, runs nothing and uses no network. An MCP server is named, never its settings, which can hold a token.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> <code>yad detect</code> &nbsp;&middot;&nbsp; <code>yad detect --json</code> (every item, with its version and content hash)</div>
+    <div class="row"><span class="lbl lbl-when">When</span> To see what an agent can use before you bind a skill to a step, or when a skill seems to be missing.</div>
+  </div>
+
+  <div class="skillcard" id="cmd-toolbox">
+    <h4><code>yad toolbox list</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The toolbox: every external tool yadflow can use, whether each is found here, and what yadflow does without it. None is required; every one has a fallback. Read-only &mdash; it installs nothing.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> <code>yad toolbox</code> &nbsp;&middot;&nbsp; <code>yad toolbox --json</code> (adds licence, source, install commands and where each was found)</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Before setup, to see which optional tools you already have; or when a step ran in its fallback mode and you want to know why.</div>
   </div>
 
   <div class="skillcard">
