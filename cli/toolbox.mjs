@@ -343,7 +343,8 @@ export function onPath(bin, { env = process.env, platform = process.platform } =
   // Only absolute folders: an empty or relative entry means "the current folder", which is not where a
   // tool is installed, and would make the answer depend on where `yad` happened to run.
   // On Windows that means a drive and a root (C:\x) or a share (\\server\share): \x is on whatever drive
-  // is current, and D:x in that drive's current folder. Windows accepts an entry in quotes; so does this.
+  // is current, and D:x in that drive's current folder. Windows accepts an entry in quotes; so does this —
+  // but not a `;` inside the quotes, which the plain split cuts in two (rare; that folder is then missed).
   const isAbs = platform === 'win32' ? (d) => /^[A-Za-z]:[\\/]/.test(d) || /^[\\/]{2}[^\\/]/.test(d) : path.posix.isAbsolute;
   const unquote = (d) => (platform === 'win32' ? d.replace(/^"(.*)"$/, '$1') : d);
   const dirs = String(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').map(unquote).filter((d) => d && isAbs(d));

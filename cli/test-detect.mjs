@@ -591,15 +591,17 @@ test('E84: onPath reads the PATH folders and starts nothing', () => {
     if (process.platform !== 'win32') assert.equal(onPath('plain', { env, platform: 'linux' }), false, 'a file that cannot run is not a program');
     // Windows: a program is its name plus a PATHEXT ending.
     put(path.join(T, 'w/maestro.CMD'), '@echo off');
-    const winEnv = { Path: path.join(T, 'w'), PATHEXT: '.EXE;.CMD' };
-    // Only a real Windows folder (a drive and a root) is absolute under Windows' rule, so the found case
-    // holds on the Windows runner; elsewhere the same folder is correctly not one.
-    const onWindowsDrive = /^[A-Za-z]:[\\/]/.test(path.join(T, 'w'));
-    assert.equal(onPath('maestro', { env: winEnv, platform: 'win32' }), onWindowsDrive);
+    // Under Windows' rule only a drive and a root, or a share, is absolute. On the Windows runner the
+    // temp folder has a drive; elsewhere `//` + the folder reads as a share AND still names the same
+    // folder on macOS and Linux, so the found side is tested on every runner.
+    const winDir = process.platform === 'win32' ? path.join(T, 'w') : `/${path.join(T, 'w')}`;
+    const winEnv = { Path: winDir, PATHEXT: '.EXE;.CMD' };
+    assert.equal(onPath('maestro', { env: winEnv, platform: 'win32' }), true);
     assert.equal(onPath('maestro', { env: { ...winEnv, PATHEXT: '.EXE' }, platform: 'win32' }), false);
     // Windows accepts an entry in quotes. Only a drive and a root, or a share, is absolute there; the
     // folder below stands in for one (on a Mac or Linux runner it is a plain absolute path).
-    assert.equal(onPath('maestro', { env: { Path: `"${path.join(T, 'w')}"`, PATHEXT: '.CMD' }, platform: 'win32' }), onWindowsDrive, 'a quoted entry is read like an unquoted one');
+    assert.equal(onPath('maestro', { env: { Path: `"${winDir}"`, PATHEXT: '.CMD' }, platform: 'win32' }), true, 'a quoted entry is read like an unquoted one');
+    assert.equal(onPath('maestro', { env: { Path: path.join(T, 'w').replace(/^[A-Za-z]:/, ''), PATHEXT: '.CMD' }, platform: 'win32' }), false, 'a root with no drive is the current drive');
     for (const rel of ['\\w', 'D:w', '.\\w']) assert.equal(onPath('maestro', { env: { Path: rel, PATHEXT: '.CMD' }, platform: 'win32' }), false, rel);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
