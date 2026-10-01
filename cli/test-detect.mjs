@@ -1402,6 +1402,9 @@ test('E85 review 3: tools are looked for at the deepest of checkout, registered 
     assert.equal(at('p/apps/web/src'), web, 'a monorepo subfolder registered as a repo → that folder, not the Product');
     assert.equal(at('be/wt/src'), beWt, 'a worktree inside a repo found through the workspace file → the worktree');
     assert.equal(at('lone/src'), lone, 'no Product → the top of the checkout');
+    // A folder reached through a link: lifted to the top of the checkout it really is in.
+    try { fs.symlinkSync(path.join(T, 'lone/src'), path.join(T, 'link'), 'dir'); } catch { /* no links here (Windows without rights) */ }
+    if (fs.existsSync(path.join(T, 'link'))) assert.equal(toolsFolder(null, path.join(T, 'link')), lone, 'through a link → the real checkout');
 
     // Through the command: a skill only the worktree has is found there, and not from api's own top.
     skill(path.join(wt, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');

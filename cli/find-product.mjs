@@ -192,7 +192,9 @@ export function gitTopOf(dir) {
 export function toolsFolder(found, from) {
   const at = real(from);
   if (!at) return from;
-  const candidates = [gitTopOf(from)];
+  // Both spellings: the shell's (through a link) and the one on disk, so `check` (given the shell's
+  // folder) and `yad toolbox check` (given the process's) look in the same place (E85 review 4).
+  const candidates = [gitTopOf(from), gitTopOf(at)];
   if (found?.root && found.repo && typeof found.repo.path === 'string') candidates.push(path.resolve(found.root, found.repo.path));
   if (found?.root && (found.via === 'here' || found.via === 'above')) candidates.push(found.root);
   let best = null;
