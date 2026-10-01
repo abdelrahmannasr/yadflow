@@ -1173,7 +1173,7 @@ Each entry records:
 | `licence`, `source`, `checked` | its licence, its own repository or docs, and the day its facts were checked there |
 | `install` | the documented install commands, each typed `plugin`, `npm`, `python` or `script`. A tool set up inside a desktop app has none, and `manual` links the vendor's steps |
 | `detect` | what shows it is here: skill names or prefixes, a plugin, an MCP server name, a program on PATH, or `npx` for a tool fetched on demand |
-| `versions` | a known-good range, or `null` when no bound has been tested yet (all of them, for now) |
+| `versions` | a known-good range, or `null` when no bound has been tested yet (all of them, for now). A range uses full versions (`>=3.0.0 <4.0.0`, `^3.2.0`, `~1.4.0`); a partial one such as `~1` is refused, and `<4.0.0` also keeps out 4.0.0's own pre-releases |
 | `fallback` | what yadflow does without it |
 | `records` | the exact line a skill writes when the tool is absent (`speckit: not-installed`) |
 
@@ -1181,7 +1181,10 @@ Each entry records:
 reading the `PATH` folders. It starts no program, installs nothing and uses no network. Repomix counts
 as `available` whenever `npx` is there, because yadflow runs it through `npx repomix@latest`. An MCP
 server is matched by its name only, because its settings are never read: a server another package
-registered under the same name (common for `playwright`) is counted as found.
+registered under the same name (common for `playwright`) is counted as found. A tool found only
+through a Claude Code plugin your settings turn off shows as **installed, but its plugin is turned
+off**, with its fallback: the agent does not load it. A program is looked for in the absolute folders
+of `PATH` only; an empty or relative entry means "wherever yad ran", which is not an install.
 
 **A version outside the range warns; it does not switch the tool off.** The tool is still used, and the
 list says which range is known to work.
