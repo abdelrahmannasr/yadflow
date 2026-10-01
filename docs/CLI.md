@@ -1282,7 +1282,7 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
   entry, run where the tool runs (`--dir <the code repo>` for work inside one, so tools installed
   there are found). A core tool is used when the entry says `used: true` and its state is `installed` or
   `available`. So one rule decides for every skill, and a plugin turned off in Claude Code counts as
-  missing. If yad cannot answer (it is not installed there, or the command fails), the skill uses its
+  not ready (`disabled`), like a missing one. If yad cannot answer (it is not installed there, or the command fails), the skill uses its
   own check, as before. yad does not see every way a tool can be set up (an older Spec Kit with only its
   `.specify/` folder, say), so when yad says `missing` and the skill's own check finds the tool, the
   skill uses it — but never when the team chose not to.
