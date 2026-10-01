@@ -608,8 +608,13 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   a content hash.
 - **See the toolbox:** `yad toolbox list` shows the external tools yadflow can use — core tools offered
   at setup (Repomix, Spec Kit, Impeccable), optional skill pools, and the design, testing and learning
-  tools a Product connects — whether each is found here, and what yadflow does without it. None is
-  required. It installs nothing.
+  tools a Product connects — whether each is found here, whether this Product uses it, and what
+  yadflow does without it. None is required. It installs nothing.
+- **Choose the team's tools:** `yad toolbox add <id>` marks a tool as used in this Product and prints
+  how to install it; `yad toolbox remove <id>` stops using one. Your own tool: `yad toolbox add <id>
+  --custom --role … --fallback … --detect bin:<program>`. The choices live in `.sdlc/toolbox.json` —
+  commit it so the team shares them. `yad toolbox check` lists the tools this Product uses that are
+  not ready on your machine, each with its install command. It never fails: none is required.
 - **Something not working? Run the doctor first:** `npx yadflow doctor`. It checks your environment (git,
   Node, and whether `gh` or `glab` is installed and logged in — a warning if not), that the `.sdlc/` config
   parses and points at real repos, and that every epic ledger loads. It also asks GitHub or GitLab, with
