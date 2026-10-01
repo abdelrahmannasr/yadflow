@@ -499,7 +499,10 @@ test('E84: a fallback a skill records is written there word for word, so E87 ren
     const skills = t.usedBy.filter((u) => fs.existsSync(path.join(ROOT, 'skills', u, 'SKILL.md')));
     assert.ok(skills.length, `${t.id}: names a skill that exists`);
     // Outside the E87 section, which quotes every record: the skill's own steps must write the line.
-    for (const s of skills) assert.ok(withSkillSection(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8'), null).includes(t.records), `${s} writes "${t.records}"`);
+    // Only the body, and outside the E87 section, which quotes every record: the skill's own steps must
+    // write the line. The description is left out too (yad-spec's names the record).
+    const body = (s) => withSkillSection(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8'), null).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+    for (const s of skills) assert.ok(body(s).includes(t.records), `${s} writes "${t.records}"`);
   }
 });
 
@@ -531,13 +534,18 @@ test('E87: the section says when to use each tool, its fallback, and what to rec
   assert.match(spec, /`yad toolbox list --json`/, 'decide from yad\'s answer');
   assert.match(spec, /`used: true` and `status\.state` is `installed` or `available`/);
   assert.match(spec, /`yad toolbox remove spec-kit`/, 'a team skip means the fallback');
-  assert.ok(spec.includes(`${TOOLBOX.find((t) => t.id === 'spec-kit').fallback}. Record \`speckit: not-installed\``));
+  assert.ok(spec.includes(`  - Fallback — ${TOOLBOX.find((t) => t.id === 'spec-kit').fallback}.\n  - Record \`speckit: not-installed\`.`));
   // A connector follows the file its connect skill writes, not the toolbox's use flag.
   const ui = skillFallbackSection('yad-ui');
   assert.match(ui, /\*\*Figma\*\* \(`figma`, a connector\)\. Used when `\.sdlc\/design\.json` connects it/);
   assert.doesNotMatch(ui, /yad toolbox remove figma/);
-  assert.match(ui, /A connector\*\* is decided by its Product file/);
-  assert.doesNotMatch(spec, /A connector\*\*/, 'only a skill with a connector says so');
+  assert.match(ui, /For the tool without "a connector" beside it, decide from yad's answer/, 'the rules are for the core tool');
+  assert.match(ui, /yad-connect-design writes that file; follow it, not yad's toolbox answer/);
+  // A skill whose tools are all connectors is not told to ask yad, then to ignore the answer.
+  for (const s of ['yad-learn', 'yad-test-cases', 'yad-connect-design', 'yad-connect-testing', 'yad-connect-learning']) {
+    assert.doesNotMatch(skillFallbackSection(s), /yad toolbox list --json|used: false/, s);
+  }
+  assert.doesNotMatch(skillFallbackSection('yad-learn'), /\n\n\n/, 'no double blank line');
   assert.match(spec, /`product` is null/, 'no Product means the team choices were not read');
   assert.match(spec, /never when the entry says `used: false`/, 'a tool yad cannot see is used, but never against a skip');
   assert.match(skillFallbackSection('yad-connect-design'), /This skill connects it, by writing `\.sdlc\/design\.json`/, 'the connect skill does not follow its own file');
@@ -568,6 +576,18 @@ test('E87: the section is found and written the same way in a CRLF file, and nev
   const fenced = `# S\n\n${SKILL_FALLBACK_HEADING}\n\n\`\`\`\n## inside\n\`\`\`\n\n## Next\n`;
   assert.equal(skillSectionOf(fenced), `${SKILL_FALLBACK_HEADING}\n\n\`\`\`\n## inside\n\`\`\``);
   assert.equal(skillSectionOf('# S\n\n```\n## When a tool is missing\n```\n'), null, 'a fenced heading is not the section');
+  // Fences close as CommonMark says: same character, at least as long, nothing after it.
+  for (const fence of ['~~~\n```\n~~~', '````\n```\n````', '```md\n## x\n```']) {
+    const t = `# S\n\n${fence}\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n## Next\n`;
+    assert.equal(skillSectionOf(t), `${SKILL_FALLBACK_HEADING}\n\nold`, JSON.stringify(fence));
+  }
+  // ```js x``` on one line is inline code, not an opening fence: later headings still count.
+  assert.equal(skillSectionOf(`# S\n\n\`\`\`js x\`\`\`\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n## Next\n`), `${SKILL_FALLBACK_HEADING}\n\nold`);
+  // A heading with trailing spaces is the section (so a rewrite never adds a second copy), and a `#`
+  // heading after it ends it.
+  const spaced = `# S\n\n${SKILL_FALLBACK_HEADING}  \n\nold\n\n# Appendix\n`;
+  assert.equal(withSkillSection(spaced, section), `# S\n\n${section}\n\n# Appendix\n`);
+  assert.equal(withSkillSection('', section), `${section}\n`, 'an empty file is the section alone');
 });
 
 test('E84: the connectors are the adapters skills/sdlc/config.yaml names, with the same fallbacks', () => {

@@ -67,8 +67,9 @@ export const TOOLBOX = Object.freeze([
     // yad runs it through `npx repomix@latest` (setup, `yad repo refresh`), so `npx` alone makes it usable.
     detect: { npx: true, bins: ['repomix'], plugins: ['repomix-mcp', 'repomix-commands', 'repomix-explorer'], mcp: ['repomix'], skills: ['repomix-explorer'] },
     versions: null,
-    fallback: 'no Repomix pack: yad-connect-repos and yad-backfill put the same context together by hand from the source tree and the recent git log, and the Shape steps read the code map (yad setup and yad repo refresh skip the pack only when npx is missing; they do not read the team\'s choice)',
-    records: 'source: repomix-unavailable', note: null,
+    fallback: 'no Repomix pack. yad-connect-repos and yad-backfill put the same context together by hand, from the source tree and the recent git log, and the Shape steps read the code map',
+    records: 'source: repomix-unavailable',
+    note: 'yad setup and yad repo refresh skip the pack only when npx is missing. They do not follow a team skip.',
     usedBy: ['yad setup', 'yad repo refresh', 'yad-connect-repos', 'yad-backfill'],
   },
   {
@@ -563,55 +564,72 @@ export const skillsUsing = (tool) => tool.usedBy.filter((u) => !u.startsWith('ya
 export function skillFallbackSection(skill, tools = TOOLBOX) {
   const mine = tools.filter((t) => t.tier !== 'recommended' && skillsUsing(t).includes(skill));
   if (!mine.length) return null;
+  const core = mine.filter((t) => t.tier !== 'connector');
+  const connectors = mine.filter((t) => t.tier === 'connector');
   const lines = [
     SKILL_FALLBACK_HEADING,
     '',
     '<!-- Written from yadflow\'s cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->',
     '',
     'No tool below is required. When one is missing, this skill still finishes, using the fallback written',
-    'beside it. Decide from yad\'s answer, not from a guess: run `yad toolbox list --json` and read, in its',
-    '`tools` list, the entry with the tool\'s `id`. Run it where the tool will run: for work inside a code',
-    'repo, add `--dir <that repo>`, so the tools installed there are found.',
-    '',
-    '- **The team\'s choices.** They come from the Product. If the answer\'s `product` is null, yad found no',
-    '  Product, so a tool the team chose not to use still shows `used: true`: tell the person that.',
-    '- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install',
-    '  may be missed). If its entry says `missing` but the check in the steps below finds the tool, use',
-    '  it — never when the entry says `used: false`.',
-    '- **When yad cannot answer** (it is not installed here, or the command fails), use the check in the',
-    '  steps below.',
-    '',
-    ...(mine.some((t) => t.tier === 'connector') ? ['- **A connector** is decided by its Product file, as its line says, not by these rules.'] : []),
-    '',
-    'Tell the person which tools you used and which fallbacks, and why.',
+    'beside it.',
     '',
   ];
-  for (const t of mine) {
-    const record = t.records ? ` Record \`${t.records}\` — it means the tool was not used, whatever the reason.` : '';
-    if (t.tier === 'connector') {
-      // The connect skill is the one that decides and writes the file; every other skill follows it.
-      const how = CONNECT_FILES[skill]
-        ? `This skill connects it, by writing \`${connectorFile(t)}\` as the steps below say; the other skills follow that file.`
-        : `Used when \`${connectorFile(t)}\` connects it: the connect skill writes that file, and the steps below follow it.`;
-      lines.push(`- **${t.name}** (\`${t.id}\`, a connector). ${how} Without it: ${t.fallback}.${record}`);
-    } else {
-      lines.push(`- **${t.name}** (\`${t.id}\`). Use it when its entry has \`used: true\` and \`status.state\` is \`installed\` or \`available\`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (\`yad toolbox remove ${t.id}\`) — do this instead: ${t.fallback}.${record}`);
-    }
+  // Only a skill with a core tool asks yad: a connector is decided by its Product file, and an answer the
+  // skill must then ignore would only confuse it.
+  if (core.length) {
+    lines.push(
+      `For ${core.length === 1 ? 'the tool' : 'each tool'} without "a connector" beside ${core.length === 1 ? 'it' : 'its name'}, decide from yad's answer, not from a guess: run`,
+      '`yad toolbox list --json` and read, in its `tools` list, the entry with the tool\'s `id`. Run it where',
+      'the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed there',
+      'are found.',
+      '',
+      '- **The team\'s choices.** They come from the Product. If the answer\'s `product` is null, yad found no',
+      '  Product, so a tool the team chose not to use still shows `used: true`. Tell the person that.',
+      '- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install',
+      '  may be missed). If the entry says `missing` but the check in the steps below finds the tool, use',
+      '  it — but never when the entry says `used: false`.',
+      '- **When yad cannot answer** (yad is not installed here, or the command fails), use the check in the',
+      '  steps below.',
+      '',
+    );
+  }
+  lines.push('Tell the person which tools you used and which fallbacks, and why.', '');
+  for (const t of core) {
+    lines.push(`- **${t.name}** (\`${t.id}\`). Use it when its entry has \`used: true\` and \`status.state\` is \`installed\` or \`available\`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (\`yad toolbox remove ${t.id}\`) — use the fallback.`);
+    lines.push(`  - Fallback — ${t.fallback}.`);
+    if (t.records) lines.push(`  - Record \`${t.records}\`. It means the tool was not used, whatever the reason.`);
+  }
+  for (const t of connectors) {
+    const file = connectorFile(t);
+    const connect = t.usedBy.find((u) => CONNECT_FILES[u]);
+    // The connect skill is the one that decides and writes the file; every other skill follows it.
+    lines.push(CONNECT_FILES[skill]
+      ? `- **${t.name}** (\`${t.id}\`, a connector). This skill connects it, by writing \`${file}\` as the steps below say. The other skills follow that file, not yad's toolbox answer.`
+      : `- **${t.name}** (\`${t.id}\`, a connector). Used when \`${file}\` connects it. ${connect} writes that file; follow it, not yad's toolbox answer.`);
+    lines.push(`  - Fallback — ${t.fallback}.`);
+    if (t.records) lines.push(`  - Record \`${t.records}\`. It means the tool was not used, whatever the reason.`);
   }
   return lines.join('\n');
 }
 
-// Where the section is in a skill's text: the heading line, up to the next `## ` heading. Lines inside a
-// ``` fence are never a heading, and a CRLF file (a Windows checkout) reads like an LF one.
+// Where the section is in a skill's text: from its heading to the next `#` or `##` heading. A line
+// inside a fenced code block is never a heading. A fence closes only with the same character, at least
+// as many times, and nothing after it (CommonMark), so a ```` fence holding ``` lines stays open.
+// The heading is matched without trailing spaces, as the test counts it.
 function sectionBounds(lines) {
-  let fence = false;
+  let fence = null;
   const headings = [];
   lines.forEach((l, i) => {
-    if (/^\s*(```|~~~)/.test(l)) fence = !fence;
-    else if (!fence && l.startsWith('## ')) headings.push(i);
+    const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(l);
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
+    } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) fence = f[1];
+    else if (/^#{1,2} /.test(l)) headings.push(i);
   });
-  const at = headings.find((i) => lines[i] === SKILL_FALLBACK_HEADING);
-  return { at, first: headings[0], end: at === undefined ? undefined : headings.find((i) => i > at) ?? lines.length };
+  const at = headings.find((i) => lines[i].trimEnd() === SKILL_FALLBACK_HEADING);
+  const first = headings.find((i) => lines[i].startsWith('## '));
+  return { at, first, end: at === undefined ? undefined : headings.find((i) => i > at) ?? lines.length };
 }
 
 // The section as the skill holds it (LF, trailing blank lines dropped), or null when it has none.
@@ -624,14 +642,19 @@ export function skillSectionOf(text) {
 // The skill's text with `section` in place of its old one, or, when it has none, just before its first
 // `## ` heading, so the agent reads it early. `null` removes it. The file keeps its own line ending.
 export function withSkillSection(text, section) {
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  // A file keeps the ending most of its lines have (a Windows checkout is all CRLF).
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const eol = crlf > (text.match(/\n/g) || []).length - crlf ? '\r\n' : '\n';
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const { at, first, end } = sectionBounds(lines);
   const add = section === null ? [] : [...section.split('\n'), ''];
   let out;
   if (at !== undefined) out = [...lines.slice(0, at), ...add, ...lines.slice(end)];
   else if (section === null) out = lines;
-  else if (first === undefined) out = [...lines.join('\n').replace(/\n*$/, '').split('\n'), '', ...add];
+  else if (first === undefined) {
+    const body = lines.join('\n').replace(/\n*$/, '');
+    out = body ? [...body.split('\n'), '', ...add] : add;
+  }
   else out = [...lines.slice(0, first), ...add, ...lines.slice(first)];
   return out.join('\n').replace(/\n/g, eol);
 }

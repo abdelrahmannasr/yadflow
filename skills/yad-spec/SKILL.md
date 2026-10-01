@@ -24,22 +24,26 @@ is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
 <!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
 
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
-beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read, in its
-`tools` list, the entry with the tool's `id`. Run it where the tool will run: for work inside a code
-repo, add `--dir <that repo>`, so the tools installed there are found.
+beside it.
+
+For the tool without "a connector" beside it, decide from yad's answer, not from a guess: run
+`yad toolbox list --json` and read, in its `tools` list, the entry with the tool's `id`. Run it where
+the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed there
+are found.
 
 - **The team's choices.** They come from the Product. If the answer's `product` is null, yad found no
-  Product, so a tool the team chose not to use still shows `used: true`: tell the person that.
+  Product, so a tool the team chose not to use still shows `used: true`. Tell the person that.
 - **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install
-  may be missed). If its entry says `missing` but the check in the steps below finds the tool, use
-  it — never when the entry says `used: false`.
-- **When yad cannot answer** (it is not installed here, or the command fails), use the check in the
+  may be missed). If the entry says `missing` but the check in the steps below finds the tool, use
+  it — but never when the entry says `used: false`.
+- **When yad cannot answer** (yad is not installed here, or the command fails), use the check in the
   steps below.
-
 
 Tell the person which tools you used and which fallbacks, and why.
 
-- **Spec Kit** (`spec-kit`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove spec-kit`) — do this instead: yad-spec writes the same spec files by hand, in Spec Kit's layout. Record `speckit: not-installed` — it means the tool was not used, whatever the reason.
+- **Spec Kit** (`spec-kit`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove spec-kit`) — use the fallback.
+  - Fallback — yad-spec writes the same spec files by hand, in Spec Kit's layout.
+  - Record `speckit: not-installed`. It means the tool was not used, whatever the reason.
 
 ## Conventions
 

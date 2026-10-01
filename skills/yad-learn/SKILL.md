@@ -27,23 +27,12 @@ approvals ledger, or the contract lock. It writes only the local learning ledger
 <!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
 
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
-beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read, in its
-`tools` list, the entry with the tool's `id`. Run it where the tool will run: for work inside a code
-repo, add `--dir <that repo>`, so the tools installed there are found.
-
-- **The team's choices.** They come from the Product. If the answer's `product` is null, yad found no
-  Product, so a tool the team chose not to use still shows `used: true`: tell the person that.
-- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install
-  may be missed). If its entry says `missing` but the check in the steps below finds the tool, use
-  it — never when the entry says `used: false`.
-- **When yad cannot answer** (it is not installed here, or the command fails), use the check in the
-  steps below.
-
-- **A connector** is decided by its Product file, as its line says, not by these rules.
+beside it.
 
 Tell the person which tools you used and which fallbacks, and why.
 
-- **DeepTutor** (`deeptutor`, a connector). Used when `.sdlc/learning.json` connects it: the connect skill writes that file, and the steps below follow it. Without it: harness-native tutoring: yad-learn has your agent read the project files directly.
+- **DeepTutor** (`deeptutor`, a connector). Used when `.sdlc/learning.json` connects it. yad-connect-learning writes that file; follow it, not yad's toolbox answer.
+  - Fallback — harness-native tutoring: yad-learn has your agent read the project files directly.
 
 ## Conventions
 
