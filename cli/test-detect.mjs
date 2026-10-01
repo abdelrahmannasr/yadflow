@@ -1380,8 +1380,10 @@ test('E85 review 2: from a subfolder, tools are looked for at the top of its rep
 test('E85 review 3: tools are looked for at the deepest of checkout, registered repo and Product that holds the folder', async () => {
   const { toolsFolder, findProduct } = await import('./find-product.mjs');
   const { T, p, home } = product({ '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }, { name: 'web', path: 'apps/web' }, { name: 'be', path: '../be' }] }) });
+  // On disk as `toolsFolder` reads it: `.native` expands a Windows short name (RUNNER~1) that the JS
+  // `realpathSync` keeps.
   try {
-    const mk = (rel, git) => { const d = path.join(T, rel); fs.mkdirSync(d, { recursive: true }); if (git === 'dir') fs.mkdirSync(path.join(d, '.git')); if (git === 'file') fs.writeFileSync(path.join(d, '.git'), 'gitdir: x\n'); return fs.realpathSync(d); };
+    const mk = (rel, git) => { const d = path.join(T, rel); fs.mkdirSync(d, { recursive: true }); if (git === 'dir') fs.mkdirSync(path.join(d, '.git')); if (git === 'file') fs.writeFileSync(path.join(d, '.git'), 'gitdir: x\n'); return fs.realpathSync.native(d); };
     mk('p', 'dir');
     const api = mk('p/api', 'dir');
     const wt = mk('p/api/.claude/worktrees/x', 'file');
@@ -1396,7 +1398,7 @@ test('E85 review 3: tools are looked for at the deepest of checkout, registered 
     const lone = mk('lone', 'dir');
     mk('lone/src');
     const at = (rel) => toolsFolder(findProduct(path.join(T, rel)), path.join(T, rel));
-    assert.equal(at('p/epics/sub'), fs.realpathSync(p), 'a Product subfolder → the Product');
+    assert.equal(at('p/epics/sub'), fs.realpathSync.native(p), 'a Product subfolder → the Product');
     assert.equal(at('p/api'), api, 'a registered repo → itself');
     assert.equal(at('p/api/.claude/worktrees/x/src'), wt, 'a worktree inside a registered repo → the worktree, never api');
     assert.equal(at('p/apps/web/src'), web, 'a monorepo subfolder registered as a repo → that folder, not the Product');
