@@ -662,7 +662,9 @@ function sectionBounds(lines) {
   // block reads as metadata, as a YAML loader would read it, and is left alone. The block closes at `---`
   // or `...`, trailing spaces allowed, as common frontmatter readers accept.
   let skip = 0;
-  if (lines[0]?.replace(/^\uFEFF/, '') === '---') {
+  // Only when the next line is a YAML key (every SKILL.md opens `name:`): a `---` divider above a
+  // title is Markdown, and treating it as frontmatter could hide a section.
+  if (trimSpaces(lines[0]?.replace(/^\uFEFF/, '') ?? '') === '---' && /^[A-Za-z_][\w-]*[ \t]*:/.test(lines[1] ?? '')) {
     const close = lines.findIndex((l, i) => i > 0 && (trimSpaces(l) === '---' || trimSpaces(l) === '...'));
     if (close > 0) skip = close + 1;
   }
@@ -718,7 +720,18 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
     // One answer for both modes: `check` names what a write would refuse.
     if (reason) out.refused.push({ skill, reason });
     if (check || reason) continue;
-    fs.writeFileSync(file, withSkillSection(text, want));
+    const next = withSkillSection(text, want);
+    // A last check that reads no Markdown at all: after a write the file holds exactly one line that
+    // looks like the heading and one like the marker (none after a removal). A copy something above
+    // could not see — inside an odd fence, say — fails it, so a write never leaves two copies.
+    const seen = next.split(/\r?\n/).map((l) => l.replace(/^[ \t]+/, '')); // any indent, even in a list
+    const copies = [seen.filter(isFallbackHeading).length, seen.filter(isFallbackEnd).length];
+    const expect = want === null ? 0 : 1;
+    if (copies[0] !== expect || copies[1] !== expect) {
+      out.refused.push({ skill, reason: 'after the write the file would hold another line that looks like the section\'s heading or end marker (in a code block, or hidden from yad) — delete or reword it' });
+      continue;
+    }
+    fs.writeFileSync(file, next);
     out.wrote.push(skill);
   }
   return out;

@@ -580,10 +580,17 @@ test('E87: the section is exactly heading to end marker, found the same way in a
   }
   // With a byte-order mark too. A section inside what looks like frontmatter (a file opening with a
   // `---` divider) shows as a marker with no heading: refused, never hidden behind a second copy.
-  assert.equal(withSkillSection('\uFEFF---\n## c\n---\n\n## Steps\n', section), `\uFEFF---\n## c\n---\n\n${section}\n\n## Steps\n`);
-  const divided = `---\n# T\n\n${section}\n\n## Steps\n\n---\n`;
-  assert.match(skillSectionProblem(divided), /without the section's heading/);
-  assert.equal(withSkillSection(divided, section), divided);
+  assert.equal(withSkillSection('\uFEFF---\nname: x\n## c\n---\n\n## Steps\n', section), `\uFEFF---\nname: x\n## c\n---\n\n${section}\n\n## Steps\n`);
+  // Frontmatter needs a YAML key on its next line: a `---` divider above a title is Markdown, so a
+  // section after it is found and rewritten in place — even with a `...` line in a code sample.
+  const divided = `---\n# T\n\n${section.replace('body', 'old')}\n\n## Steps\n\n---\n`;
+  assert.equal(skillSectionProblem(divided), null);
+  assert.equal(withSkillSection(divided, section), divided.replace('old', 'body'));
+  const dots = `---\n\n# T\n\n\`\`\`js\nfoo(\n...\n)\n\`\`\`\n\n${section.replace('body', 'old')}\n\n\`\`\`bash\nyad x\n\`\`\`\n\n## Steps\n`;
+  assert.equal(withSkillSection(dots, section), dots.replace('old', 'body'));
+  const again = withSkillSection(withSkillSection(dots, null), section);
+  assert.equal(skillSectionOf(again), section, 'removed, then added again: one copy, read back whole');
+  assert.equal(again.split('\n').filter(isFallbackHeading).length, 1);
   // A YAML value that quotes the heading is not the section: a write works, and with a stray marker in
   // the body it is refused — never a section running across the closing `---`.
   const quoted = '---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\n## Steps\n';
@@ -703,6 +710,16 @@ test('E87: the sync writes, rewrites and removes sections, keeps CRLF, and refus
     put('handmade', '# Handmade\n\nUsage\n=====\n\nkeep me\n');
     assert.deepEqual(syncSkillFallbacks(dir, { tools }).wrote, ['handmade']);
     assert.ok(get('handmade').includes('keep me'));
+    // The last check reads no Markdown: a heading-like line yad cannot see as the section (in a code
+    // block, or indented in a list) would leave two copies after a write, so the write is refused.
+    for (const hidden of ['```md\n## When a tool is missing\n```', `- item\n\n      ${SKILL_FALLBACK_END}`]) {
+      const t = `# Hidden\n\n${hidden}\n\n## Steps\n`;
+      put('named', t);
+      const r = syncSkillFallbacks(dir, { tools });
+      assert.deepEqual(r.wrote, [], JSON.stringify(hidden));
+      assert.match(r.refused.find((x) => x.skill === 'named').reason, /another line that looks like/);
+      assert.equal(get('named'), t);
+    }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   // The generator's own text always ends with its marker, and is read back whole.
   for (const s of fs.readdirSync(path.join(ROOT, 'skills'))) {
