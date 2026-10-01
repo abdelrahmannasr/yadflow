@@ -1308,7 +1308,8 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
   replaces only the lines from the heading down to that marker, so nothing else in the skill is touched.
   It refuses a section without the marker (one written by hand), a second copy, a marker with no
   heading, or a code fence that never closes, and says what to delete or close before running it
-  again. A test fails when a section and the toolbox
+  again. As a last check it refuses any write after which the file would hold a second line that looks
+  like the heading or the marker (for example one quoted in a code block). A test fails when a section and the toolbox
   disagree, or when a skill has the section but no tool names it.
 
 Not covered: CodeRabbit (the AI reviewer `yad-engineer-review` wires) and `gh` / `glab` (the GitHub
