@@ -653,7 +653,15 @@ function sectionBounds(lines) {
   let fence = null;
   const headings = [];
   const ends = [];
+  // A YAML frontmatter block at the top (`---` … `---`) is the skill's metadata, never Markdown: a
+  // `## comment` line there must not become where a new section goes.
+  let skip = 0;
+  if (lines[0] === '---') {
+    const close = lines.indexOf('---', 1);
+    if (close > 0) skip = close + 1;
+  }
   lines.forEach((l, i) => {
+    if (i < skip) return;
     const f = /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
     if (fence) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
@@ -667,15 +675,18 @@ function sectionBounds(lines) {
   const ours = headings.filter((h) => h.ours).map((h) => h.i);
   const at = ours[0];
   const end = at === undefined ? undefined : ends.find((i) => i > at);
-  // Why a section cannot be rewritten safely, or null. Without its marker, where it ends is a guess.
-  const problem = ours.length > 1 ? 'the section\'s heading is there more than once'
-    : ends.length > 1 ? 'the section\'s end marker is there more than once'
-      : at === undefined ? (ends.length ? 'the end marker is there without the section\'s heading' : null)
-        : end === undefined ? 'the section has no end marker (a copy made by hand, or older than the marker)' : null;
+  // Why a section cannot be rewritten safely, and what to do, or null. Without its marker, where the
+  // section ends is a guess; behind a fence that never closes, nothing after it can be seen at all.
+  const problem = fence !== null ? 'a code fence is never closed, so yad cannot see past it — close it'
+    : ours.length > 1 ? 'the section\'s heading is there more than once — delete the old copy, from its heading down to the end of its text'
+      : ends.length > 1 ? 'the section\'s end marker is there more than once — delete the extra marker line'
+        : at === undefined ? (ends.length ? 'the end marker is there without the section\'s heading — delete that marker line' : null)
+          : end === undefined ? 'the section has no end marker (a copy made by hand, or older than the marker) — delete it, from its heading down to the end of its text' : null;
   return { at, end, problem, first: headings.find((h) => h.level === 2)?.i };
 }
 
-// Why yad will not rewrite this skill's section, or null when it can (or there is none).
+// Why yad will not rewrite this skill's section and what to do about it, or null when it can (or there
+// is none).
 export function skillSectionProblem(text) {
   return sectionBounds(text.replace(/\r\n/g, '\n').split('\n')).problem;
 }
@@ -726,8 +737,10 @@ export function withSkillSection(text, section) {
   if (problem) return text;
   let out;
   if (at !== undefined) {
+    // A removal also takes the blank line it was written with — only when one sits above it too, so
+    // the text on either side never closes up into one paragraph.
     let after = end + 1;
-    if (section === null && lines[after] === '') after++;
+    if (section === null && lines[after] === '' && (at === 0 || lines[at - 1] === '')) after++;
     out = [...lines.slice(0, at), ...(section === null ? [] : section.split('\n')), ...lines.slice(after)];
   } else if (section === null) out = lines;
   else if (first === undefined) {

@@ -574,6 +574,13 @@ test('E87: the section is exactly heading to end marker, found the same way in a
   assert.equal(skillSectionOf(`# S\n\n${section}\n\n\n`), section);
   assert.equal(withSkillSection('# S\n\nintro\n', section), `# S\n\nintro\n\n${section}\n`);
   assert.equal(withSkillSection('', section), `${section}\n`);
+  // YAML frontmatter is metadata: a `## comment` line in it is not where a section goes.
+  for (const fm of ['---\nname: x\n## a yaml comment\n---\n', '---\ndescription: |\n  ## Usage\n---\n']) {
+    assert.equal(withSkillSection(`${fm}\n# S\n\n## Steps\n`, section), `${fm}\n# S\n\n${section}\n\n## Steps\n`, JSON.stringify(fm));
+  }
+  // A removal takes its blank line only when one sits above too: text either side never closes up.
+  assert.equal(withSkillSection(`para A\n${section}\n\npara B\n`, null), 'para A\n\npara B\n');
+  assert.equal(withSkillSection(`# T\n\nintro\n${section}\n`, null), '# T\n\nintro\n');
   // THE POINT OF THE MARKER: whatever Markdown sits inside or after the section, a rewrite replaces
   // only heading..marker. Headings the finder cannot see (setext, HTML, inside a list) are just text.
   for (const inside of ['Usage\n=====', '- a\n  ---', '<h2>x</h2>', '> ## q', '```\n## fenced\n```', '## Not ours']) {
@@ -607,6 +614,13 @@ test('E87: a section yad cannot read whole is never rewritten', () => {
     assert.equal(withSkillSection(text, null), text, 'not removed either');
     assert.equal(withSkillSection(text.replace(/\n/g, '\r\n'), section), text.replace(/\n/g, '\r\n'));
   }
+  // A fence that never closes hides everything after it, so a write could never find what it wrote.
+  for (const text of ['# T\n\n```\ncode\n', `# T\n\n<!-- example:\n\`\`\`\n-->\n\n${section}\n\n## Steps\n`]) {
+    assert.match(skillSectionProblem(text), /never closed/);
+    assert.equal(withSkillSection(text, section), text);
+  }
+  // Each reason says what to do.
+  for (const [text] of cases) assert.match(skillSectionProblem(text), / — (delete|close) /);
   assert.equal(skillSectionProblem(`# S\n\n${section}\n`), null);
   assert.equal(skillSectionProblem('# S\n'), null, 'no section is no problem');
   assert.equal(skillSectionProblem(`# S\n\n\`\`\`\n${SKILL_FALLBACK_END}\n\`\`\`\n`), null, 'a fenced marker is an example');
