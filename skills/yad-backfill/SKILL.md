@@ -85,10 +85,13 @@ repo: <repo>
 artifact: backfill-spec
 status: draft
 verified: false
-source: repomix         # or repomix-unavailable when degraded
+source: repomix
 generated: <YYYY-MM-DD>
 ---
 ```
+
+When Repomix was not used, write `source: repomix-unavailable` instead.
+
 `verified: false` means the spec is not real until a human approves it. Keep that line free of a `#`
 comment: the gate reads the whole line, so `verified: true   # approved` would not count. Mark every
 uncertain item explicitly (`<!-- unverified: ... -->`); do not fill gaps with invented behaviour.

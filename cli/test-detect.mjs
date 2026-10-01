@@ -481,7 +481,7 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
 // is tested here, on Linux, macOS and Windows.
 const { INSTALL_TYPES, TIERS, TOOLBOX, onPath, parseRange, parseVersion, toolProblems, toolStatus, toolboxLines, versionInRange } = await import('./toolbox.mjs');
 // E87: each skill's "When a tool is missing" section, built from the toolbox.
-const { SKILL_FALLBACK_HEADING, connectorFile, isFallbackHeading, sectionMisreadLine, skillFallbackSection, skillSectionOf, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
+const { SKILL_FALLBACK_HEADING, connectorFile, countFallbackHeadings, isFallbackHeading, sectionMisreadLine, skillFallbackSection, skillSectionOf, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
 
 test('E84: every shipped toolbox entry is well formed, and every tier has entries', () => {
   for (const t of TOOLBOX) assert.deepEqual(toolProblems(t), [], t.id);
@@ -516,7 +516,7 @@ test('E87: every skill a tool names quotes its fallback word for word, and no ot
   for (const s of skills) {
     const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
     // One copy at most, in any spelling: a second, stale one would be read by the agent too.
-    assert.ok(text.split(/\r?\n/).filter(isFallbackHeading).length <= 1, `skills/${s}/SKILL.md: one section`);
+    assert.ok(countFallbackHeadings(text) <= 1, `skills/${s}/SKILL.md: one section`);
     const found = skillSectionOf(text);
     if (named.has(s)) assert.equal(found, skillFallbackSection(s), `skills/${s}/SKILL.md: the section matches the toolbox — run node scripts/skill-fallbacks.mjs`);
     else assert.equal(found, null, `skills/${s}/SKILL.md has the section, but no toolbox tool names ${s}`);
@@ -595,6 +595,16 @@ test('E87: the section is found and written the same way in a CRLF file, and nev
   assert.equal(withSkillSection(`# S\n\n## When a tool is missing ##\n\nold\n\n## Next\n`, section), `# S\n\n${section}\n\n## Next\n`, 'a closing-# copy is replaced');
   // The guard: a line the toolbox never writes, quoted back; a divider after a blank line is fine.
   assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nnote\n\n---\n\nmore`), null, 'a --- divider is allowed');
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n- last bullet\n---`), null, 'a divider under a list item');
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n---`), null, 'a divider under the heading');
+  // The copy count reads like the finder: a heading shown inside a code block is not a copy.
+  assert.equal(countFallbackHeadings(`# S\n\n${SKILL_FALLBACK_HEADING}\n\nx\n\n\`\`\`md\n${SKILL_FALLBACK_HEADING}\n\`\`\`\n`), 1);
+  assert.equal(countFallbackHeadings(`# S\n\n${SKILL_FALLBACK_HEADING}\n\n   ## when a tool is missing ##\n`), 2);
+  // A title that ends in # keeps it; a heading of only #s is empty; a long line of spaces is quick.
+  assert.ok(!isFallbackHeading('## When a tool is missing \\#'));
+  const t0 = Date.now();
+  assert.equal(isFallbackHeading(`## a${' '.repeat(50000)}x`), false);
+  assert.ok(Date.now() - t0 < 500, 'linear on a long line');
   for (const [body, line] of [['Usage\n-', '-'], ['Usage\n- ', '- '], ['Usage\n===', '==='], ['<h2>Usage</h2>', '<h2>Usage</h2>'], ['> ## Quoted', '> ## Quoted'], ['```\ncode', '```'], ['#### Deep', '#### Deep']]) {
     assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n${body}`), line, JSON.stringify(body));
   }

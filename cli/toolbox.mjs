@@ -621,10 +621,17 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
 // `first`, where a new section goes, is the first `##` heading: a skill's `#` title is above it.
 // Known limit: a `##` line inside a list item reads as a heading here, which ends the section early —
 // the safe way round, since nothing outside the section is cut.
-const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
+// The text is taken whole and its closing `#`s cut after, in two steps: one lazy pattern for both was
+// slow (square of the length) on a line with a long run of spaces.
+const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+(.*))?$/;
 const headingOf = (line) => {
   const h = HEADING.exec(line);
-  return h ? { level: h[1].length, text: h[2] ?? '' } : null;
+  if (!h) return null;
+  // Cut a closing run of `#`s only when a space or tab comes before it (`## C#` keeps its `#`).
+  let text = (h[2] ?? '').trimEnd();
+  const hashes = /#+$/.exec(text);
+  if (hashes && (hashes.index === 0 || /[ \t]/.test(text[hashes.index - 1]))) text = text.slice(0, hashes.index).trimEnd();
+  return { level: h[1].length, text };
 };
 
 // Is this line the section's heading, in any spelling the finder accepts (indent, case, trailing spaces
@@ -632,6 +639,12 @@ const headingOf = (line) => {
 export function isFallbackHeading(line) {
   const h = headingOf(line.replace(/\r$/, ''));
   return h?.level === 2 && h.text.toLowerCase() === SKILL_FALLBACK_HEADING.slice(3).toLowerCase();
+}
+
+// How many lines of a skill are the section's heading, outside code fences, as the finder reads them.
+export function countFallbackHeadings(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  return sectionBounds(lines).headings.filter((h) => isFallbackHeading(lines[h.i])).length;
 }
 
 function sectionBounds(lines) {
@@ -649,21 +662,24 @@ function sectionBounds(lines) {
   });
   const at = headings.find((h) => isFallbackHeading(lines[h.i]))?.i;
   const first = headings.find((h) => h.level === 2)?.i;
-  return { at, first, end: at === undefined ? undefined : headings.find((h) => h.i > at)?.i ?? lines.length };
+  return { at, first, headings, end: at === undefined ? undefined : headings.find((h) => h.i > at)?.i ?? lines.length };
 }
 
 // The first line of a section read from a skill that `skillFallbackSection` never writes, or null: a
 // heading (`#`, `<h2>`, or one inside a `>` quote), a heading underline (`===` or `---` right under a
-// line of text), or a code fence. Such a line means the section finder may have run past the real end
+// paragraph line), or a code fence. Such a line means the section finder may have run past the real end
 // of the section, and a rewrite would cut part of the skill. It reads the text, not the bounds that
-// produced it, so it catches the misread the bounds cannot see. A `---` after a blank line is only a
-// divider, and is allowed.
+// produced it, so it catches the misread the bounds cannot see. A `---` after a blank line, a list item
+// or a heading is only a divider, and is allowed.
 export function sectionMisreadLine(section) {
   const lines = section.split('\n');
   for (let i = 1; i < lines.length; i++) {
     const l = lines[i];
     if (/^ {0,3}(>\s*)*#{1,6}(\s|$)|^\s*<h[1-6][\s>]|^ {0,3}(`{3,}|~{3,})/i.test(l)) return l;
-    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && lines[i - 1].trim() !== '') return l;
+    // An underline makes a heading only under a paragraph line: after a blank line, a list item or a
+    // heading, `---` is a divider (CommonMark).
+    const above = lines[i - 1];
+    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && above.trim() !== '' && !/^\s*([-*+]|\d+[.)])\s|^ {0,3}#/.test(above)) return l;
   }
   return null;
 }
@@ -682,13 +698,10 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
     // Compared as text, not bytes, so a CRLF checkout (Windows) is not stale for its line endings alone.
     if (have === want) continue;
     out.stale.push(skill);
-    if (check) {
-      const odd = have === null ? null : sectionMisreadLine(have);
-      if (odd !== null) out.refused.push({ skill, line: odd }); // what a write would refuse
-      continue;
-    }
+    // One answer for both modes: `check` names what a write would refuse.
     const odd = have === null ? null : sectionMisreadLine(have);
-    if (odd !== null) { out.refused.push({ skill, line: odd }); continue; }
+    if (odd !== null) out.refused.push({ skill, line: odd });
+    if (check || odd !== null) continue;
     fs.writeFileSync(file, withSkillSection(text, want));
     out.wrote.push(skill);
   }
