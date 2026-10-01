@@ -578,6 +578,16 @@ test('E87: the section is exactly heading to end marker, found the same way in a
   for (const fm of ['---\nname: x\n## a yaml comment\n---\n', '---\ndescription: |\n  ## Usage\n---\n']) {
     assert.equal(withSkillSection(`${fm}\n# S\n\n## Steps\n`, section), `${fm}\n# S\n\n${section}\n\n## Steps\n`, JSON.stringify(fm));
   }
+  // With a byte-order mark too; and a section inside what looks like frontmatter is still found, so a
+  // write replaces it rather than adding a second copy.
+  assert.equal(withSkillSection('\uFEFF---\n## c\n---\n\n## Steps\n', section), `\uFEFF---\n## c\n---\n\n${section}\n\n## Steps\n`);
+  const divided = `---\n# T\n\n${section.replace('body', 'old')}\n\n## Steps\n\n---\n`;
+  assert.equal(skillSectionProblem(divided), null);
+  assert.equal(withSkillSection(divided, section), divided.replace('old', 'body'));
+  // Insert then remove gives the file back, whatever sits above the insertion point.
+  for (const t of ['# T\nintro\n## Steps\n', '---\nname: x\n---\n## Steps\n', '# T\n\nintro\n\n## Steps\n', '# S\n\nintro\n', '']) {
+    assert.equal(withSkillSection(withSkillSection(t, section), null), t.endsWith('\n') || t === '' ? t : `${t}\n`, JSON.stringify(t));
+  }
   // A removal takes its blank line only when one sits above too: text either side never closes up.
   assert.equal(withSkillSection(`para A\n${section}\n\npara B\n`, null), 'para A\n\npara B\n');
   assert.equal(withSkillSection(`# T\n\nintro\n${section}\n`, null), '# T\n\nintro\n');
@@ -616,7 +626,7 @@ test('E87: a section yad cannot read whole is never rewritten', () => {
   }
   // A fence that never closes hides everything after it, so a write could never find what it wrote.
   for (const text of ['# T\n\n```\ncode\n', `# T\n\n<!-- example:\n\`\`\`\n-->\n\n${section}\n\n## Steps\n`]) {
-    assert.match(skillSectionProblem(text), /never closed/);
+    assert.match(skillSectionProblem(text), /never closed \(it opens on line \d+\)/);
     assert.equal(withSkillSection(text, section), text);
   }
   // Each reason says what to do.

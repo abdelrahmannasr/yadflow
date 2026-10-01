@@ -653,23 +653,25 @@ function sectionBounds(lines) {
   let fence = null;
   const headings = [];
   const ends = [];
-  // A YAML frontmatter block at the top (`---` … `---`) is the skill's metadata, never Markdown: a
-  // `## comment` line there must not become where a new section goes.
+  // A YAML frontmatter block at the top (`---` … `---`, after any byte-order mark) is the skill's
+  // metadata, never Markdown: a `## comment` line there is never where a new section goes, and a fence
+  // there is not one. Our heading and marker are still looked for in it, so a copy there is seen (and
+  // refused as a second copy) rather than hidden.
   let skip = 0;
-  if (lines[0] === '---') {
+  if (lines[0]?.replace(/^\uFEFF/, '') === '---') {
     const close = lines.indexOf('---', 1);
     if (close > 0) skip = close + 1;
   }
+  let fenceAt = -1;
   lines.forEach((l, i) => {
-    if (i < skip) return;
-    const f = /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
+    const f = i < skip ? null : /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
     if (fence) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
-    } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) fence = f[1];
+    } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) { fence = f[1]; fenceAt = i; }
     else if (isFallbackEnd(l)) ends.push(i);
     else {
       const h = headingOf(l);
-      if (h) headings.push({ i, level: h.level, ours: isFallbackHeading(l) });
+      if (h) headings.push({ i, level: h.level, ours: isFallbackHeading(l), meta: i < skip });
     }
   });
   const ours = headings.filter((h) => h.ours).map((h) => h.i);
@@ -677,12 +679,12 @@ function sectionBounds(lines) {
   const end = at === undefined ? undefined : ends.find((i) => i > at);
   // Why a section cannot be rewritten safely, and what to do, or null. Without its marker, where the
   // section ends is a guess; behind a fence that never closes, nothing after it can be seen at all.
-  const problem = fence !== null ? 'a code fence is never closed, so yad cannot see past it — close it'
-    : ours.length > 1 ? 'the section\'s heading is there more than once — delete the old copy, from its heading down to the end of its text'
+  const problem = fence !== null ? `a code fence is never closed (it opens on line ${fenceAt + 1}), so yad cannot see past it — close it`
+    : ours.length > 1 ? 'the section\'s heading is there more than once — delete one of the copies (one without an end marker, if there is one), from its heading down to the end of its text'
       : ends.length > 1 ? 'the section\'s end marker is there more than once — delete the extra marker line'
         : at === undefined ? (ends.length ? 'the end marker is there without the section\'s heading — delete that marker line' : null)
           : end === undefined ? 'the section has no end marker (a copy made by hand, or older than the marker) — delete it, from its heading down to the end of its text' : null;
-  return { at, end, problem, first: headings.find((h) => h.level === 2)?.i };
+  return { at, end, problem, first: headings.find((h) => h.level === 2 && !h.meta)?.i };
 }
 
 // Why yad will not rewrite this skill's section and what to do about it, or null when it can (or there
@@ -737,10 +739,10 @@ export function withSkillSection(text, section) {
   if (problem) return text;
   let out;
   if (at !== undefined) {
-    // A removal also takes the blank line it was written with — only when one sits above it too, so
-    // the text on either side never closes up into one paragraph.
+    // A removal also takes the blank line yad wrote below it — when a blank line sits above too, or a
+    // heading comes next (yad inserts just above one), so the text on either side never closes up.
     let after = end + 1;
-    if (section === null && lines[after] === '' && (at === 0 || lines[at - 1] === '')) after++;
+    if (section === null && lines[after] === '' && (at === 0 || lines[at - 1] === '' || headingOf(lines[after + 1] ?? '') !== null)) after++;
     out = [...lines.slice(0, at), ...(section === null ? [] : section.split('\n')), ...lines.slice(after)];
   } else if (section === null) out = lines;
   else if (first === undefined) {
