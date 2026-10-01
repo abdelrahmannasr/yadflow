@@ -1239,8 +1239,9 @@ in use. `add` and `remove` write only a difference from that default, so the fil
 
 - **Where it runs.** `add` and `remove` write the Product's file. Run them from the Product, from inside
   a code repo it registers, or with `--dir <the Product>` (the Product folder itself, as for every
-  Product command); anywhere else they refuse. `list` and `check` look for tools at the top of the repo you
-  run them in, or of the one `--dir` names (a code repo's own skills count), and read the choices from the
+  Product command); anywhere else they refuse. `list` and `check` look for tools at the top of what you
+  run them in, or of what `--dir` names — your git checkout (a worktree counts as its own), a registered
+  repo in a monorepo, or the Product, whichever is deepest (a code repo's own skills count), and read the choices from the
   Product that folder belongs to. With no Product, they show the defaults and say why none was found.
 - **A program is a name.** `bins` holds program names looked up on `PATH`, never paths: a `/` or `\`
   is refused, so the shared file cannot make a teammate's `check` look at a file it chose.
@@ -1260,7 +1261,8 @@ in use. `add` and `remove` write only a difference from that default, so the fil
   optional-tools step, so a connector chosen there counts. `yad check` and `yad update` end with a
   Toolbox section, and `yad join` with one read from the Product it just cloned — a new teammate is the
   one most likely to miss a tool. Each prints what `yad toolbox check` prints — `check` and `update` look
-  for tools at the top of the repo you run them in (or the one `--dir` names), so from a code repo its
+  for tools in the same place as `yad toolbox check` (the top of what you run them in, or of what `--dir`
+  names), so from a code repo its
   own skills count, and read the choices from that repo's Product — then says that
   nothing is installed for you. Join leaves out the advice to `yad toolbox remove` a tool: it writes the
   team's file, and one machine lacking a tool is no reason to change what the whole team uses. None of them runs a program, writes a file for it, or changes its exit code. Their

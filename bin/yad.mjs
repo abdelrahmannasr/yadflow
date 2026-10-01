@@ -465,16 +465,6 @@ function writesProduct(cmd, o) {
 
 // Where the person IS, as their shell says it: a repo reached through a link (`ws/backend -> /src/backend`)
 // is inside the workspace by the path they typed, and not by the one the disk resolves to.
-// Where to look for tools (E85 review 2): the TOP of the repo the person is in — the registered code
-// repo holding the folder, else the Product found above it — because finding reads `<folder>/.claude/…`
-// and never walks up. A subfolder would otherwise miss every tool installed at the top. Elsewhere (no
-// Product, or one that does not register this folder): the folder itself.
-function toolsFolder(found, from) {
-  if (found?.repo && typeof found.repo.path === 'string') return path.resolve(found.root, found.repo.path);
-  if (found?.root && (found.via === 'here' || found.via === 'above')) return found.root;
-  return from;
-}
-
 function shellCwd() {
   const pwd = process.env.PWD;
   try { if (pwd && path.isAbsolute(pwd) && fs.realpathSync(pwd) === fs.realpathSync(process.cwd())) return pwd; } catch { /* the disk's path, then */ }
@@ -555,7 +545,7 @@ async function main() {
   let toolboxAt = null;
   if (PRODUCT_CMDS.has(cmd) || REPO_CMDS.has(cmd)) {
     const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
-    toolboxAt = { from: toolsFolder(found, dirGiven ? o.dir : shellCwd()), product: found?.root ?? null };
+    toolboxAt = { from: commands.toolsFolder(found, dirGiven ? o.dir : shellCwd()), product: found?.root ?? null };
     const shown = (p) => path.relative(process.cwd(), p) || '.';
     if (found?.problem) warn(`${found.problem} — using ${o.dir}`);
     else if (found?.elsewhere) {
@@ -670,7 +660,7 @@ async function main() {
         else if (found?.elsewhere) warn(`this folder is not in a repo the Product registers — the Product is ${rel(found.elsewhere)}: cd there, or pass --dir ${rel(found.elsewhere)}`);
         const productRoot = found?.root ?? null;
         const run = action === 'list' ? commands.runToolboxList : commands.runToolboxCheck;
-        result = run(toolsFolder(found, o.dir || process.cwd()), { json: o.json, productRoot });
+        result = run(commands.toolsFolder(found, o.dir || process.cwd()), { json: o.json, productRoot });
         break;
       }
       if (extra) { refuse(`yad toolbox ${action} takes one tool id (got also: ${extra})`, usage); break; }

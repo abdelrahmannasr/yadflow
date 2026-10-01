@@ -181,6 +181,28 @@ export function gitTopOf(dir) {
   }
 }
 
+// Where `yad toolbox` and the toolbox section of `check` / `update` look for tools (E85), given
+// `findProduct(from)`'s answer. Finding reads `<folder>/.claude/…` and never walks up, so a subfolder
+// must be lifted to the top of what the person is working in. That is the DEEPEST of these that holds
+// `from`: the git checkout it is in (a worktree inside `api/` is its own checkout, on its own branch — never
+// swapped for api's, as in E80 review 3), the registered repo holding it (`apps/web` in a monorepo is not
+// a checkout of its own), and the Product found from it. A checkout ABOVE the Product (a Product that is
+// not a git repo, inside one that is not ours) is never deeper than the Product, so it never wins. Reads
+// only whether `.git` exists; runs nothing.
+export function toolsFolder(found, from) {
+  const at = real(from);
+  if (!at) return from;
+  const candidates = [gitTopOf(from)];
+  if (found?.root && found.repo && typeof found.repo.path === 'string') candidates.push(path.resolve(found.root, found.repo.path));
+  if (found?.root && (found.via === 'here' || found.via === 'above')) candidates.push(found.root);
+  let best = null;
+  for (const c of candidates) {
+    const cAt = c && real(c);
+    if (cAt && within(at, cAt) && (!best || cAt.length > best.length)) best = cAt;
+  }
+  return best ?? from;
+}
+
 // The registry entry for the code repo a code-repo command runs in (E80), with the folder to work in.
 // It is the CHECKOUT that must be the registered repo — not merely a folder inside it: a worktree or a
 // repo nested in `backend/` is another checkout, on another branch, and must never be swapped for
