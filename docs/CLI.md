@@ -1283,15 +1283,22 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
   there are found). A core tool is used when the entry says `used: true` and its state is `installed` or
   `available`. So one rule decides for every skill, and a plugin turned off in Claude Code counts as
   missing. If yad cannot answer (it is not installed there, or the command fails), the skill uses its
-  own check, as before.
+  own check, as before. yad does not see every way a tool can be set up (an older Spec Kit with only its
+  `.specify/` folder, say), so when yad says `missing` and the skill's own check finds the tool, the
+  skill uses it — but never when the team chose not to.
+- **No Product, no team choice.** The choices come from the Product. If yad finds none (a code repo
+  beside the Product with no workspace file), the answer's `product` is null, a skipped tool shows as
+  used, and the skill says so.
 - **A team's choice is followed.** After `yad toolbox remove spec-kit`, `yad-spec` writes the spec files
-  by hand even on a machine where Spec Kit is installed.
+  by hand even on a machine where Spec Kit is installed. The commands do not read the choice yet:
+  `yad setup` and `yad repo refresh` still pack with Repomix after `yad toolbox remove repomix`.
 - **A connector follows its Product file.** Figma, Playwright, DeepTutor and the rest are used when
   `design.json`, `testing.json` or `learning.json` connects them, as before. `yad toolbox remove figma`
   does not change that; `yad-connect-design` does.
 - **The skill records it.** Where a skill writes a line when the tool was not used, the line is the
   entry's `records`: `speckit: not-installed`, `impeccable: not-installed`, and
-  `source: repomix-unavailable` (in a backfill spec's frontmatter and in `repos.json`). It means the
+  `source: repomix-unavailable` (written by `yad-backfill` in a spec's frontmatter and by `yad-connect-repos`
+  in `repos.json`; `yad repo refresh` itself always writes `source: repomix`). It means the
   tool was not used, whatever the reason. The skill also tells you which tools it used and why.
 - **The toolbox owns the words.** To change a fallback, change `cli/toolbox.mjs` and run
   `node scripts/skill-fallbacks.mjs`, which rewrites every section. A test fails when a section and the
