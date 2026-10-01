@@ -1,3 +1,22 @@
+# [4.2.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.1.0...v4.2.0) (2026-10-01)
+
+
+### Bug Fixes
+
+* **toolbox:** a turned-off plugin is disabled, and ranges read only full versions (E84 review 1) ([56a9864](https://github.com/abdelrahmannasr/yadflow/commit/56a9864bf91b764b736c6da12b2d30cc1d1fd861))
+* **toolbox:** add and remove report a shipped-tool edit through one function (E86 review 4) ([161ece4](https://github.com/abdelrahmannasr/yadflow/commit/161ece48cffd879fe0106747ae10698f7b5e67cf))
+* **toolbox:** clearer remove and dead-copy wording (E86 review 5 notes) ([33ba0b7](https://github.com/abdelrahmannasr/yadflow/commit/33ba0b7bae11462d9b81a739df302fe20bbd2a7c))
+* **toolbox:** npx before a turned-off plugin, Claude Code switches only, Windows PATH rules (E84 review 2) ([f052979](https://github.com/abdelrahmannasr/yadflow/commit/f052979a3018790c1d7c94fe5b761ce32bf15e55))
+* **toolbox:** offer an undo only when the tool's use changed (E86 review 3) ([32e5105](https://github.com/abdelrahmannasr/yadflow/commit/32e5105bb83f856b9b37b8bc0e96e7bf15e396e1))
+* **toolbox:** one remove clears everything under an id; add agrees with the list (E86 review 2) ([da75777](https://github.com/abdelrahmannasr/yadflow/commit/da75777496e4c705e52423c77c553f35e5c99002))
+* **toolbox:** truthful edit messages, remove clears dead lines, --dir is the Product (E86 review 1) ([2159543](https://github.com/abdelrahmannasr/yadflow/commit/21595432d611e190c93d97fc707f27c432ba936f))
+
+
+### Features
+
+* **toolbox:** yad toolbox add, remove and check (E86) ([715cd4c](https://github.com/abdelrahmannasr/yadflow/commit/715cd4c6cc63ffdcfdc33c97a9d2df8078965b64))
+* **toolbox:** yad toolbox list and the shipped toolbox of external tools (E84) ([3f5374b](https://github.com/abdelrahmannasr/yadflow/commit/3f5374b830c83782b884f48a7e760943bc2349d4))
+
 # [4.1.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.0.1...v4.1.0) (2026-10-01)
 
 
