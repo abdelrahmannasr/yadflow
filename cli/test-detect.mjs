@@ -411,11 +411,11 @@ test('E50: the same SKILL.md hashes the same with LF and CRLF line ends', () => 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E50: `yad detect` skips the newer-version check — no network, no cache file', () => {
+test('E50/E84: `yad detect` and `yad toolbox` skip the newer-version check — no network, no cache file', () => {
   // A source pin, because a run from this checkout cannot show it: the check already stays quiet when the
   // package folder holds `.git`, so dropping `detect` from the skip list would pass every run here.
   const src = fs.readFileSync(YAD, 'utf8');
-  assert.match(src, /if \(!\['hook', 'detect'\]\.includes\(parseArgs\(process\.argv\.slice\(2\)\)\._\[0\]\)\) \{\s*const \{ maybeNotifyUpdate \}/);
+  assert.match(src, /if \(!\['hook', 'detect', 'toolbox'\]\.includes\(parseArgs\(process\.argv\.slice\(2\)\)\._\[0\]\)\) \{\s*const \{ maybeNotifyUpdate \}/);
 });
 
 // The command as a person runs it: HOME (and USERPROFILE, which Windows reads) point at a fixture.
@@ -473,5 +473,173 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
     const bad = yad(['detect', 'skills'], { cwd: proj, home });
     assert.equal(bad.status, 1);
     assert.match(bad.stdout, /yad detect takes no words/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- E84: the toolbox ----------
+// The shipped list of external tools, and what this machine has of them. It builds on `yad detect`, so it
+// is tested here, on Linux, macOS and Windows.
+const { INSTALL_TYPES, TIERS, TOOLBOX, onPath, parseRange, parseVersion, toolProblems, toolStatus, toolboxLines, versionInRange } = await import('./toolbox.mjs');
+
+test('E84: every shipped toolbox entry is well formed, and every tier has entries', () => {
+  for (const t of TOOLBOX) assert.deepEqual(toolProblems(t), [], t.id);
+  const ids = TOOLBOX.map((t) => t.id);
+  assert.equal(new Set(ids).size, ids.length, 'ids are unique');
+  for (const tier of TIERS) assert.ok(TOOLBOX.some((t) => t.tier === tier), tier);
+  assert.deepEqual(TOOLBOX.filter((t) => t.tier === 'core').map((t) => t.id), ['repomix', 'spec-kit', 'impeccable'], 'the roadmap\'s three core tools');
+  for (const t of TOOLBOX) for (const r of t.install) assert.ok(INSTALL_TYPES.includes(r.type), `${t.id}: ${r.type}`);
+  // The roadmap's own finding: npm `ecc` is an unrelated crypto library, never ECC's install command.
+  for (const t of TOOLBOX) for (const r of t.install) assert.doesNotMatch(r.command, /\bnpx ecc(@|\s|$)|\bnpm (i|install) (-g )?ecc(\s|$)/, t.id);
+});
+
+test('E84: a fallback a skill records is written there word for word, so E87 renames nothing', () => {
+  for (const t of TOOLBOX.filter((x) => x.records)) {
+    const skills = t.usedBy.filter((u) => fs.existsSync(path.join(ROOT, 'skills', u, 'SKILL.md')));
+    assert.ok(skills.length, `${t.id}: names a skill that exists`);
+    for (const s of skills) assert.ok(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8').includes(t.records), `${s} writes "${t.records}"`);
+  }
+});
+
+test('E84: the connectors are the adapters skills/sdlc/config.yaml names, with the same fallbacks', () => {
+  const yaml = fs.readFileSync(path.join(ROOT, 'skills/sdlc/config.yaml'), 'utf8');
+  for (const section of ['design', 'testing', 'learning']) {
+    const block = yaml.slice(yaml.search(new RegExp(`^${section}:`, 'm')));
+    const tools = block.match(/^\s+tools:\s*\[([^\]]*)\]/m)[1].split(',').map((x) => x.trim());
+    const degrade = block.match(/^\s+degrade:\s*([\w-]+)/m)[1];
+    for (const id of tools) {
+      const t = TOOLBOX.find((x) => x.id === id);
+      assert.ok(t, `${section}: ${id} is in the toolbox`);
+      assert.equal(t.tier, 'connector', id);
+      assert.ok(t.fallback.startsWith(degrade), `${id}: the fallback is config.yaml's "${degrade}"`);
+    }
+  }
+});
+
+test('E84: toolProblems names each way an entry can be wrong', () => {
+  const good = TOOLBOX[0];
+  const bad = (patch) => toolProblems({ ...good, ...patch });
+  assert.deepEqual(toolProblems(good), []);
+  assert.ok(bad({ id: 'Has Spaces' }).some((p) => p.startsWith('id ')));
+  assert.ok(bad({ tier: 'default' }).some((p) => p.startsWith('tier ')));
+  assert.ok(bad({ install: [{ type: 'brew', command: 'brew install x' }] }).some((p) => p.includes("route's type")));
+  assert.ok(bad({ install: [], manual: null }).some((p) => p.includes('manual steps')));
+  assert.ok(bad({ install: [], manual: 'https://example.invalid/setup' }).every((p) => !p.includes('manual steps')), 'no command, but a manual link, is fine');
+  assert.ok(bad({ checked: 'yesterday' }).some((p) => p.startsWith('checked ')));
+  assert.ok(bad({ source: 'http://x' }).some((p) => p.startsWith('source ')));
+  assert.ok(bad({ detect: {} }).some((p) => p.includes('at least one')));
+  assert.ok(bad({ detect: { skills: 'impeccable' } }).some((p) => p.includes('detect.skills')));
+  assert.ok(bad({ versions: 'latest' }).some((p) => p.startsWith('versions ')));
+  assert.ok(bad({ fallback: '' }).some((p) => p.startsWith('fallback ')));
+  assert.ok(bad({ usedBy: [] }).length === 0, 'an empty usedBy list is still a list');
+  assert.ok(bad({ usedBy: 'yad-ui' }).some((p) => p.startsWith('usedBy ')));
+  assert.ok(toolProblems(null).length > 5, 'nothing at all is many problems, not a crash');
+});
+
+test('E84: versions and ranges', () => {
+  assert.deepEqual(parseVersion('v1.2'), { parts: [1, 2, 0], pre: false });
+  assert.deepEqual(parseVersion('3.7.1-beta.2+build'), { parts: [3, 7, 1], pre: true });
+  assert.equal(parseVersion('aa5654b7acb7'), null, 'a git sha is not a version');
+  assert.equal(parseVersion(null), null);
+  assert.equal(parseRange('latest'), null);
+  const cases = [
+    ['3.7.1', '>=3.0.0 <4.0.0', true], ['4.0.0', '>=3.0.0 <4.0.0', false], ['2.9.9', '>=3.0.0', false],
+    ['4.0.0-beta', '^3.2', false], ['3.9.9', '^3.2', true], ['3.1.0', '^3.2', false],
+    ['0.2.5', '^0.2.1', true], ['0.3.0', '^0.2.1', false],
+    ['1.4.9', '~1.4.0', true], ['1.5.0', '~1.4.0', false],
+    ['2.0.0', '2.0.0', true], ['2.0.1', '=2.0.0', false], ['1.0.0', '>1.0.0', false], ['1.0.0', '<=1.0.0', true],
+    ['3.0.0-rc.1', '>=3.0.0', false],
+  ];
+  for (const [v, r, want] of cases) assert.equal(versionInRange(v, r), want, `${v} in ${r}`);
+  assert.equal(versionInRange('aa5654b7acb7', '>=1.0.0'), null, 'cannot tell');
+  assert.equal(versionInRange('1.0.0', null), null, 'no range, nothing to say');
+});
+
+test('E84: onPath reads the PATH folders and starts nothing', () => {
+  const T = tmp();
+  try {
+    put(path.join(T, 'a/tool'), '#!/bin/sh\n');
+    fs.chmodSync(path.join(T, 'a/tool'), 0o755);
+    put(path.join(T, 'a/plain'), 'not runnable');
+    fs.chmodSync(path.join(T, 'a/plain'), 0o644);
+    fs.mkdirSync(path.join(T, 'a/dir'), { recursive: true });
+    const env = { PATH: [path.join(T, 'none'), path.join(T, 'a')].join(':') };
+    assert.equal(onPath('tool', { env, platform: 'linux' }), true);
+    assert.equal(onPath('missing', { env, platform: 'linux' }), false);
+    assert.equal(onPath('dir', { env, platform: 'linux' }), false, 'a folder is not a program');
+    if (process.platform !== 'win32') assert.equal(onPath('plain', { env, platform: 'linux' }), false, 'a file that cannot run is not a program');
+    // Windows: a program is its name plus a PATHEXT ending.
+    put(path.join(T, 'w/maestro.CMD'), '@echo off');
+    const winEnv = { Path: path.join(T, 'w'), PATHEXT: '.EXE;.CMD' };
+    assert.equal(onPath('maestro', { env: winEnv, platform: 'win32' }), true);
+    assert.equal(onPath('maestro', { env: { ...winEnv, PATHEXT: '.EXE' }, platform: 'win32' }), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E84: toolStatus — installed, available through npx, missing; versions warn, never disqualify', () => {
+  const tool = (detect, versions = null) => ({ ...TOOLBOX[0], detect, versions });
+  const none = () => false;
+  const item = (kind, name, where, version = null) => ({ kind, name, where, version });
+  assert.equal(toolStatus(tool({ skills: ['Impeccable'] }), [item('skill', 'impeccable', '~/.claude/skills/impeccable', '3.7.1')], { has: none }).state, 'installed', 'names compare without case');
+  assert.deepEqual(toolStatus(tool({ skillPrefixes: ['speckit-'] }), [item('skill', 'speckit-plan', 'a'), item('skill', 'speckit-tasks', 'b'), item('skill', 'other', 'c')], { has: none }).found, ['a', 'b']);
+  assert.equal(toolStatus(tool({ plugins: ['figma'] }), [item('plugin', 'figma@claude-plugins-official', 'p')], { has: none }).state, 'installed', 'a plugin by its name, without the marketplace');
+  assert.equal(toolStatus(tool({ plugins: ['figma'] }), [item('plugin', 'figmatic@x', 'p')], { has: none }).state, 'missing', 'not by a prefix');
+  assert.equal(toolStatus(tool({ mcp: ['pencil'] }), [item('mcp', 'pencil', '~/.claude.json')], { has: none }).state, 'installed');
+  assert.equal(toolStatus(tool({ mcp: ['pencil'] }), [item('skill', 'pencil', 'x')], { has: none }).state, 'missing', 'the kind must match');
+  assert.deepEqual(toolStatus(tool({ bins: ['deeptutor'] }), [], { has: (b) => b === 'deeptutor' }), { state: 'installed', found: ['deeptutor on PATH'], version: null, inRange: null });
+  assert.deepEqual(toolStatus(tool({ npx: true }), [], { has: (b) => b === 'npx' }), { state: 'available', found: ['npx on PATH'], version: null, inRange: null });
+  assert.equal(toolStatus(tool({ npx: true }), [], { has: none }).state, 'missing');
+  const old = toolStatus(tool({ skills: ['impeccable'] }, '>=4.0.0'), [item('skill', 'impeccable', 'x', '3.7.1')], { has: none });
+  assert.deepEqual([old.state, old.version, old.inRange], ['installed', '3.7.1', false], 'out of range: still installed');
+  assert.equal(toolStatus(tool({ skills: ['impeccable'] }, '>=4.0.0'), [item('skill', 'impeccable', 'x', 'aa5654b7acb7')], { has: none }).inRange, null);
+});
+
+test('E84: the printed list — a warning for a version out of range, the fallback for a missing tool', () => {
+  const rows = [
+    { ...TOOLBOX.find((t) => t.id === 'impeccable'), versions: '>=4.0.0', status: { state: 'installed', found: ['x'], version: '3.7.1', inRange: false } },
+    { ...TOOLBOX.find((t) => t.id === 'spec-kit'), status: { state: 'missing', found: [], version: null, inRange: null } },
+    { ...TOOLBOX.find((t) => t.id === 'repomix'), status: { state: 'available', found: ['npx on PATH'], version: null, inRange: null } },
+    { ...TOOLBOX.find((t) => t.id === 'figma'), status: { state: 'installed', found: ['x'], version: `1${String.fromCharCode(27)}[2J`, inRange: null } },
+  ];
+  const text = toolboxLines(rows).join('\n');
+  assert.match(text, /Impeccable .*: installed 3\.7\.1\n\s+! version 3\.7\.1 is outside the known-good range >=4\.0\.0 — still used/);
+  assert.match(text, /Spec Kit .*: not found\n\s+without it: yad-spec writes the same spec files by hand/);
+  assert.match(text, /Repomix .*: available \(npx fetches it when needed\)/);
+  assert.ok(!text.includes(String.fromCharCode(27)), 'a version read from a file is cleaned for the terminal');
+  assert.ok(text.indexOf('Core —') < text.indexOf('Connectors —'), 'tiers in order');
+  assert.ok(!text.includes('Recommended —'), 'a tier with no rows is not printed');
+});
+
+test('E84: `yad toolbox list` answers in the E1 envelope, writes nothing, and refuses what E86 will add', () => {
+  const T = tmp();
+  const proj = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  try {
+    fs.mkdirSync(proj, { recursive: true });
+    skill(path.join(home, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    put(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { pencil: { env: { TOKEN: SECRET } } } }));
+    // A Product whose settings disagree: the toolbox reads none of them, so it still answers.
+    put(path.join(proj, '.sdlc/product.json'), '{"schemaVersion":10,"platform":null}\n');
+    put(path.join(proj, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    const before = snapshot(T);
+    const r = yad(['toolbox', '--json'], { cwd: proj, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(snapshot(T), before, 'nothing written');
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.command, 'toolbox list', '`yad toolbox` is `toolbox list`');
+    assert.equal(out.tools.length, TOOLBOX.length);
+    const byId = Object.fromEntries(out.tools.map((t) => [t.id, t.status]));
+    assert.deepEqual([byId.impeccable.state, byId.impeccable.version], ['installed', '3.7.1']);
+    assert.equal(byId.pencil.state, 'installed');
+    assert.ok(!r.stdout.includes(SECRET) && !r.stdout.includes(home));
+
+    const human = yad(['toolbox', 'list'], { cwd: proj, home });
+    assert.equal(human.status, 0, human.stderr);
+    assert.match(human.stdout, /Impeccable .*: installed 3\.7\.1/);
+
+    for (const [args, re] of [[['toolbox', 'add', 'x'], /not built yet \(E86\)/], [['toolbox', 'check'], /not built yet \(E86\)/], [['toolbox', 'frob'], /unknown toolbox action: frob/], [['toolbox', 'list', 'extra'], /takes no more words/]]) {
+      const bad = yad(args, { cwd: proj, home });
+      assert.equal(bad.status, 1, args.join(' '));
+      assert.match(bad.stdout, re);
+    }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

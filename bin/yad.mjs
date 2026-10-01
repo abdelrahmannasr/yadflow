@@ -116,6 +116,10 @@ ${c.bold('Where am I / what next')}
                                        Bind a step to a skill of your own. Several skills run in
                                        the order given, one after another — each costs tokens
   yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
+  yad toolbox list [--json]            The external tools yadflow can use — core (offered at setup),
+                                       recommended pools, and the design/testing/learning connectors —
+                                       whether each is found here, and what yadflow does without it.
+                                       Read-only; installs nothing (add/remove/check arrive in E86)
   yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
@@ -422,6 +426,7 @@ const ACTIONS = {
   docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard'] },
+  toolbox: { known: ['list'], default: 'list' },
 };
 // E80 — how each command finds its folder. A PRODUCT command works on the Product; a REPO command works
 // on the code repo it runs in and reads the Product beside it. The rest take their folder as given:
@@ -557,12 +562,12 @@ async function main() {
   // A project written by a newer yadflow is warned about before any command reads it (docs/migrations/
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
-  if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'detect', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
+  if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'detect', 'toolbox', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
   // E122: the Product's settings (or an epic's PR ledger) under two names that say different things.
   // Every command refuses rather than pick one — whichever it picked, somebody's edit would be silently
   // ignored. Not `doctor` (it reports the drift), `migrate` (it ends it) or `report` (it files a bug
   // about a broken flow, and reads nothing it could get wrong). `hook` returned above: it guards.
-  if (!['doctor', 'migrate', 'report', 'detect'].includes(cmd)) {
+  if (!['doctor', 'migrate', 'report', 'detect', 'toolbox'].includes(cmd)) {
     // Both the folder the command runs on and, for a code-repo command, the Product it reads.
     for (const root of new Set([o.dir || process.cwd(), o.product].filter(Boolean))) {
       const drift = commands.productDriftError(root);
@@ -623,6 +628,17 @@ async function main() {
     case 'migrate':
       result = await commands.runMigrate(o.dir, { apply: o.apply, json: o.json, keep: o.keep ?? null });
       break;
+    case 'toolbox': {
+      // E84. The shipped list, and what this machine has of it; writes nothing. E86 adds the writers.
+      const [, action, extra] = o._;
+      if (action !== undefined && action !== 'list') {
+        refuse(['add', 'remove', 'check'].includes(action) ? `yad toolbox ${action} is not built yet (E86)` : `unknown toolbox action: ${action} (list)`, 'usage: yad toolbox list [--json] [--dir <folder>]');
+        break;
+      }
+      if (extra) { refuse(`yad toolbox list takes no more words (got: ${extra})`, 'usage: yad toolbox list [--json] [--dir <folder>]'); break; }
+      result = commands.runToolboxList(o.dir || process.cwd(), { json: o.json });
+      break;
+    }
     case 'detect': {
       // E50. Reads the folder and the home folder; writes nothing.
       const [, extra] = o._;
@@ -1001,8 +1017,9 @@ main()
       // block reason travels on — an update banner there would land in front of a model.
       // Resolved the way main() resolves it, NOT from argv[2]: that is the first raw argument, so
       // `yad --dir <path> hook ledger-guard` puts `--dir` there and the banner slips through.
-      // Nor `detect` (E50): it promises no network and no file written, and the check does both.
-      if (!['hook', 'detect'].includes(parseArgs(process.argv.slice(2))._[0])) {
+      // Nor `detect` (E50) or `toolbox` (E84): they promise no network and no file written, and the
+      // check does both.
+      if (!['hook', 'detect', 'toolbox'].includes(parseArgs(process.argv.slice(2))._[0])) {
         const { maybeNotifyUpdate } = await import('./commands.mjs');
         await maybeNotifyUpdate();
       }
