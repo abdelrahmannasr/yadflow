@@ -1258,3 +1258,160 @@ test('E86: a removed tool\'s fallback reads as "without it", and a copy\'s reaso
     assert.match(r.stdout, /also removed 1 custom entry under the id ecc, which was ignored \(the id is a shipped tool's\)/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---------- E85: the toolbox step of setup, check, update and join ----------
+
+const { offerToolbox, toolboxCheckLines } = await import('./toolbox.mjs');
+const { stripAnsi } = await import('./lib.mjs');
+
+test('E85: the check lines — nothing in use, everything here, and what is missing with how to get it', () => {
+  const plain = (lines) => lines.map(stripAnsi);
+  assert.match(plain(toolboxCheckLines({ used: [], findings: [] }))[0], /uses no tool from the toolbox — `yad toolbox list` shows them all/);
+  const repomix = TOOLBOX.find((t) => t.id === 'repomix');
+  assert.deepEqual(plain(toolboxCheckLines({ used: [repomix], findings: [] })), ['  ✓ all 1 tool(s) this project uses are here: Repomix']);
+  const lines = plain(toolboxCheckLines({ used: [repomix], findings: [{ id: 'repomix', name: 'Repomix', problem: 'missing', fallback: repomix.fallback }] }));
+  assert.match(lines[0], /1 of the 1 tool\(s\) this project uses is not ready here\. None is required\./);
+  assert.ok(lines.some((l) => l.includes(`npm: ${repomix.install[0].command}`)), 'the install command is printed, not run');
+  assert.match(lines.at(-1), /without it: /);
+});
+
+test('E85: the offer never fails the command it is part of — a check that throws is said, and the answer is empty', () => {
+  const { T, p } = product();
+  try {
+    const res = offerToolbox(p, p, { items: [], has: () => { throw new Error('PATH unreadable'); } });
+    assert.deepEqual(res, { used: [], findings: [], problems: [], error: 'could not check' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E85: `yad setup` offers the tools in use after the tools step — a connector chosen there counts — and writes no toolbox.json', () => {
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e85-')));
+  const p = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  fs.mkdirSync(p, { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
+  try {
+    const env = { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1' };
+    const run = (args) => spawnSync(process.execPath, [YAD, ...args], { cwd: p, encoding: 'utf8', env });
+    // --tools with no answers takes each tool step's default: Figma, Playwright, DeepTutor.
+    const r = run(['setup', '--solo', '--greenfield', '--monorepo', '--tools', '--ide-targets', '.claude', '--json']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const out = JSON.parse(r.stdout);
+    for (const id of ['repomix', 'spec-kit', 'impeccable', 'figma', 'playwright', 'deeptutor']) assert.ok(out.toolbox.used.includes(id), id);
+    assert.ok(out.toolbox.findings.some((f) => f.id === 'playwright' && f.problem === 'missing'), 'an empty home folder has no Playwright');
+    assert.ok(!fs.existsSync(path.join(p, '.sdlc/toolbox.json')), 'offering writes no choice');
+
+    const human = run(['setup', '--solo', '--greenfield', '--monorepo', '--ide-targets', '.claude']);
+    assert.equal(human.status, 0, human.stdout + human.stderr);
+    assert.match(human.stdout, /\[9\/10\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed for you[\s\S]*\[10\/10\] Done/);
+
+    // `yad check` and `yad update` end with the same section, exit 0 with tools missing, and write no choice.
+    for (const verb of ['check', 'update']) {
+      const j = run([verb, '--json']);
+      assert.equal(j.status, 0, verb + j.stdout + j.stderr);
+      const a = JSON.parse(j.stdout);
+      assert.ok(a.toolbox.used.includes('playwright') && a.toolbox.findings.length > 0, verb);
+      const h = run([verb]);
+      assert.match(h.stdout, /\nToolbox\n[\s\S]*– Playwright MCP: not found/, verb);
+    }
+    assert.ok(!fs.existsSync(path.join(p, '.sdlc/toolbox.json')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E85 review 1: `yad check` from a code repo finds that repo\'s tools, as `yad toolbox check` does; the --fix hint comes before the section', () => {
+  const { T, p, home } = product({ '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }] }) });
+  const repo = path.join(p, 'api');
+  try {
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    skill(path.join(repo, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    const missing = (r) => JSON.parse(r.stdout).toolbox.findings.map((f) => f.id);
+    for (const verb of ['check', 'update']) {
+      const fromRepo = yad([verb, '--json'], { cwd: repo, home });
+      assert.equal(fromRepo.status, 0, verb + fromRepo.stdout + fromRepo.stderr);
+      assert.ok(!missing(fromRepo).includes('impeccable'), `${verb}: found in the code repo`);
+      assert.ok(missing(yad([verb, '--json'], { cwd: p, home })).includes('impeccable'), `${verb}: not in the Product's own folder`);
+    }
+    const human = yad(['check'], { cwd: p, home });
+    assert.match(human.stdout, /yad check --fix[^\n]*\n\nToolbox\n/, 'the --fix hint is above the Toolbox section, not under it');
+    assert.match(human.stdout, /for the whole team, stop using a tool with `yad toolbox remove <id>`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E85 review 1: join\'s offer does not advise removing a tool the team chose', () => {
+  const { T, p } = product();
+  try {
+    const lines = [];
+    const orig = console.log;
+    console.log = (...a) => lines.push(a.join(' '));
+    try {
+      offerToolbox(p, p, { canRemove: false, items: [], has: () => false });
+      offerToolbox(p, p, { items: [], has: () => false });
+    } finally { console.log = orig; }
+    const hints = lines.filter((l) => l.includes('nothing is installed for you'));
+    assert.equal(hints.length, 2);
+    assert.ok(!hints[0].includes('yad toolbox remove'), 'join: no remove advice');
+    assert.match(hints[1], /for the whole team/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E85 review 2: from a subfolder, tools are looked for at the top of its repo; --dir <code repo> reads that repo\'s Product', () => {
+  const { T, p, home } = product({
+    '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }] }),
+    '.sdlc/toolbox.json': JSON.stringify({ schemaVersion: 10, shipped: { 'spec-kit': 'skip' } }),
+  });
+  const repo = path.join(p, 'api');
+  try {
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(p, 'epics', 'sub'), { recursive: true });
+    skill(path.join(p, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    skill(path.join(repo, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    const findings = (r) => { assert.equal(r.status, 0, r.stdout + r.stderr); const o = JSON.parse(r.stdout); return (o.toolbox?.findings ?? o.findings).map((f) => f.id); };
+    for (const cwd of [path.join(p, 'epics', 'sub'), path.join(repo, 'src')]) {
+      for (const args of [['check', '--json'], ['update', '--json'], ['toolbox', 'check', '--json']]) {
+        assert.ok(!findings(yad(args, { cwd, home })).includes('impeccable'), `${args[0]} from ${path.relative(p, cwd)}: found at the repo's top`);
+      }
+    }
+    // --dir <a code repo>: the team's `skip` is read from that repo's Product, so Spec Kit is not offered.
+    const viaDir = findings(yad(['check', '--json', '--dir', repo], { cwd: T, home }));
+    assert.ok(!viaDir.includes('spec-kit') && !viaDir.includes('impeccable'), JSON.stringify(viaDir));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E85 review 3: tools are looked for at the deepest of checkout, registered repo and Product that holds the folder', async () => {
+  const { toolsFolder, findProduct } = await import('./find-product.mjs');
+  const { T, p, home } = product({ '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }, { name: 'web', path: 'apps/web' }, { name: 'be', path: '../be' }] }) });
+  // On disk as `toolsFolder` reads it: `.native` expands a Windows short name (RUNNER~1) that the JS
+  // `realpathSync` keeps.
+  try {
+    const mk = (rel, git) => { const d = path.join(T, rel); fs.mkdirSync(d, { recursive: true }); if (git === 'dir') fs.mkdirSync(path.join(d, '.git')); if (git === 'file') fs.writeFileSync(path.join(d, '.git'), 'gitdir: x\n'); return fs.realpathSync.native(d); };
+    mk('p', 'dir');
+    const api = mk('p/api', 'dir');
+    const wt = mk('p/api/.claude/worktrees/x', 'file');
+    mk('p/api/.claude/worktrees/x/src');
+    const web = mk('p/apps/web');
+    mk('p/apps/web/src');
+    mk('p/epics/sub');
+    mk('be', 'dir');
+    const beWt = mk('be/wt', 'file');
+    mk('be/wt/src');
+    fs.writeFileSync(path.join(T, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'p' }));
+    const lone = mk('lone', 'dir');
+    mk('lone/src');
+    const at = (rel) => toolsFolder(findProduct(path.join(T, rel)), path.join(T, rel));
+    assert.equal(at('p/epics/sub'), fs.realpathSync.native(p), 'a Product subfolder → the Product');
+    assert.equal(at('p/api'), api, 'a registered repo → itself');
+    assert.equal(at('p/api/.claude/worktrees/x/src'), wt, 'a worktree inside a registered repo → the worktree, never api');
+    assert.equal(at('p/apps/web/src'), web, 'a monorepo subfolder registered as a repo → that folder, not the Product');
+    assert.equal(at('be/wt/src'), beWt, 'a worktree inside a repo found through the workspace file → the worktree');
+    assert.equal(at('lone/src'), lone, 'no Product → the top of the checkout');
+    // A folder reached through a link: lifted to the top of the checkout it really is in.
+    try { fs.symlinkSync(path.join(T, 'lone/src'), path.join(T, 'link'), 'dir'); } catch { /* no links here (Windows without rights) */ }
+    if (fs.existsSync(path.join(T, 'link'))) assert.equal(toolsFolder(null, path.join(T, 'link')), lone, 'through a link → the real checkout');
+
+    // Through the command: a skill only the worktree has is found there, and not from api's own top.
+    skill(path.join(wt, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    const ids = (cwd) => JSON.parse(yad(['toolbox', 'check', '--json'], { cwd, home }).stdout).findings.map((f) => f.id);
+    assert.ok(!ids(path.join(wt, 'src')).includes('impeccable'));
+    assert.ok(ids(api).includes('impeccable'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

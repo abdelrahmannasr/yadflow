@@ -24,7 +24,8 @@ ${c.bold('Start a workspace')} ${c.dim('(the folder holding product/ and the cod
                        Never commits, pushes, or changes a shared file
 
 ${c.bold('Setup & maintenance')}
-  yad setup            Guided first-run setup (profile interview, install, connect & wire repos)
+  yad setup            Guided first-run setup (profile interview, install, connect & wire repos,
+                       then the tools this project uses that are missing — offered, never installed)
                        profile flags: --solo | --team <n>, --greenfield | --brownfield,
                        --monorepo | --separate, --tools (configure design/testing/learning now)
   yad check            Report what is missing / drifted / modified / stale / legacy (read-only)
@@ -539,8 +540,12 @@ async function main() {
   // registers (through `.yad-workspace.json`) — and says where, on stderr. A code-repo command keeps acting
   // on the repo it runs in, and is handed the Product to read (its registry: name, platform, branch).
   const dirGiven = process.argv.slice(2).some((a) => a === '--dir' || a.startsWith('--dir='));
+  // E85: where `check` and `update` look for tools, and whose choices they read — worked out from the
+  // folder the person ran yad in (or named), before a Product command moves `o.dir` to the Product.
+  let toolboxAt = null;
   if (PRODUCT_CMDS.has(cmd) || REPO_CMDS.has(cmd)) {
     const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
+    toolboxAt = { from: commands.toolsFolder(found, dirGiven ? o.dir : shellCwd()), product: found?.root ?? null };
     const shown = (p) => path.relative(process.cwd(), p) || '.';
     if (found?.problem) warn(`${found.problem} — using ${o.dir}`);
     else if (found?.elsewhere) {
@@ -625,11 +630,11 @@ async function main() {
     }
     case 'check':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
+      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'update':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
+      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'doctor':
       result = await commands.runDoctor(o.dir, { json: o.json });
@@ -655,7 +660,7 @@ async function main() {
         else if (found?.elsewhere) warn(`this folder is not in a repo the Product registers — the Product is ${rel(found.elsewhere)}: cd there, or pass --dir ${rel(found.elsewhere)}`);
         const productRoot = found?.root ?? null;
         const run = action === 'list' ? commands.runToolboxList : commands.runToolboxCheck;
-        result = run(o.dir || process.cwd(), { json: o.json, productRoot });
+        result = run(commands.toolsFolder(found, o.dir || process.cwd()), { json: o.json, productRoot });
         break;
       }
       if (extra) { refuse(`yad toolbox ${action} takes one tool id (got also: ${extra})`, usage); break; }

@@ -16,6 +16,7 @@ import {
 import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
+import { offerToolbox } from './toolbox.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -322,8 +323,9 @@ export async function runSetup(root, opts = {}) {
 
   // 0. Profile interview — branch the wizard to the user's situation (solo/team, code, repo layout).
   const { solo, team_size, codebase, repo_layout, configureTools } = await resolveProfile(root, opts);
-  // Steps: interview, preflight, install, Product, tools (1 if deferred else 3), repos, wire, coderabbit, done.
-  const total = 8 + (configureTools ? 3 : 1);
+  // Steps: interview, preflight, install, Product, tools (1 if deferred else 3), repos, wire, coderabbit,
+  // toolbox, done.
+  const total = 9 + (configureTools ? 3 : 1);
   let _n = 0;
   const S = (title) => step(++_n, total, title);
 
@@ -672,6 +674,13 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
+  // E85: the external tools this project uses that are not here, and how to get each. AFTER the tools
+  // step, so a connector chosen there counts as in use. It offers and never installs: nothing is run and
+  // no file is written, and a missing tool never fails setup (each has a fallback).
+  S('Toolbox (external tools this project uses)');
+  guide(['Each tool is optional and has a fallback. yad installs nothing: it prints how to get each one, and you choose.']);
+  const toolbox = offerToolbox(root, root);
+
   // Summary + version stamp
   S('Done');
   writeJSON(path.join(root, PROJECT_FILES.version), { version: VERSION, ideTargets, updatedAt: opts.today ?? null });
@@ -713,7 +722,7 @@ export async function runSetup(root, opts = {}) {
   // step has written, so a scripted setup passes every flag (or SDLC_NONINTERACTIVE for the defaults).
   return {
     profile: { solo, team_size, codebase, repo_layout }, ideTargets,
-    repos: registry.repos.map((r) => r.name ?? null), next: epicSkill,
+    repos: registry.repos.map((r) => r.name ?? null), next: epicSkill, toolbox,
   };
 }
 

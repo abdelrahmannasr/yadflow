@@ -26313,6 +26313,8 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     // Both names, the same bytes: one edited alone is a drift, which every command refuses (E122).
     const settings = JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(product, '.sdlc', 'product.json'), 'utf8')), platform: 'github', ledger: 'verified' });
     for (const f of ['product.json', 'hub.json']) fs.writeFileSync(path.join(product, '.sdlc', f), settings);
+    // E85: the team's toolbox choice travels with the Product, and join offers it.
+    fs.writeFileSync(path.join(product, '.sdlc', 'toolbox.json'), JSON.stringify({ schemaVersion: 10, shipped: { 'bmad-method': 'use' } }));
     fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [
       { name: 'backend', path: '../backend', git_url: path.join(remotes, 'backend.git'), platform: 'github', default_branch: 'main' },
       { name: 'escape', path: '../../outside', git_url: path.join(remotes, 'backend.git') },
@@ -26334,6 +26336,7 @@ test('E79: new → push → join rebuilds the workspace, reports bad entries, in
     assert.ok(!fs.existsSync(path.join(T, 'outside')), 'nothing written outside the workspace');
     assert.ok(answer.skills.installed.length > 0 && fs.existsSync(path.join(joined, '.claude', 'skills')), 'ignored skill copies are per machine');
     assert.equal(answer.hook, 'installed');
+    assert.ok(answer.toolbox.used.includes('bmad-method'), 'join offers the tools the team chose');
     assert.ok(fs.existsSync(path.join(joined, '.git', 'hooks', 'pre-commit')));
     assert.equal(e79Git(T, joined, 'status', '--porcelain'), '', 'join changed no file the team shares');
 
