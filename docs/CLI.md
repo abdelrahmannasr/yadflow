@@ -1307,7 +1307,8 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
   names any more. The section ends with the line `<!-- end: When a tool is missing -->`, and the script
   replaces only the lines from the heading down to that marker, so nothing else in the skill is touched.
   It refuses a section without the marker (one written by hand), a second copy, a marker with no
-  heading, or a code fence that never closes, and says what to delete or close before running it again. A test fails when a section and the toolbox
+  heading, or a code fence that never closes, and says what to delete or close before running it
+  again. A test fails when a section and the toolbox
   disagree, or when a skill has the section but no tool names it.
 
 Not covered: CodeRabbit (the AI reviewer `yad-engineer-review` wires) and `gh` / `glab` (the GitHub
