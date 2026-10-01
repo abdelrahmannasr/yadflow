@@ -26,10 +26,10 @@ is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
 beside it.
 
-For the tool without "a connector" beside it, decide from yad's answer, not from a guess: run
-`yad toolbox list --json` and read, in its `tools` list, the entry with the tool's `id`. Run it where
-the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed there
-are found.
+For Spec Kit, decide from yad's answer, not from a guess:
+run `yad toolbox list --json` and read, in its `tools` list, the entry with the tool's `id`. Run it
+where the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed
+there are found.
 
 - **The team's choices.** They come from the Product. If the answer's `product` is null, yad found no
   Product, so a tool the team chose not to use still shows `used: true`. Tell the person that.

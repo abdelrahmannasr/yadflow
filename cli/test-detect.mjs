@@ -481,7 +481,7 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
 // is tested here, on Linux, macOS and Windows.
 const { INSTALL_TYPES, TIERS, TOOLBOX, onPath, parseRange, parseVersion, toolProblems, toolStatus, toolboxLines, versionInRange } = await import('./toolbox.mjs');
 // E87: each skill's "When a tool is missing" section, built from the toolbox.
-const { SKILL_FALLBACK_HEADING, connectorFile, skillFallbackSection, skillSectionOf, skillsUsing, withSkillSection } = await import('./toolbox.mjs');
+const { SKILL_FALLBACK_HEADING, connectorFile, sectionLooksMisread, skillFallbackSection, skillSectionOf, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
 
 test('E84: every shipped toolbox entry is well formed, and every tier has entries', () => {
   for (const t of TOOLBOX) assert.deepEqual(toolProblems(t), [], t.id);
@@ -498,7 +498,6 @@ test('E84: a fallback a skill records is written there word for word, so E87 ren
   for (const t of TOOLBOX.filter((x) => x.records)) {
     const skills = t.usedBy.filter((u) => fs.existsSync(path.join(ROOT, 'skills', u, 'SKILL.md')));
     assert.ok(skills.length, `${t.id}: names a skill that exists`);
-    // Outside the E87 section, which quotes every record: the skill's own steps must write the line.
     // Only the body, and outside the E87 section, which quotes every record: the skill's own steps must
     // write the line. The description is left out too (yad-spec's names the record).
     const body = (s) => withSkillSection(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8'), null).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
@@ -539,7 +538,8 @@ test('E87: the section says when to use each tool, its fallback, and what to rec
   const ui = skillFallbackSection('yad-ui');
   assert.match(ui, /\*\*Figma\*\* \(`figma`, a connector\)\. Used when `\.sdlc\/design\.json` connects it/);
   assert.doesNotMatch(ui, /yad toolbox remove figma/);
-  assert.match(ui, /For the tool without "a connector" beside it, decide from yad's answer/, 'the rules are for the core tool');
+  assert.match(ui, /For Impeccable \(the one tool here that is not a connector\), decide from yad's answer/, 'the rules are for the core tool');
+  assert.match(spec, /\nFor Spec Kit, decide from yad's answer/, 'with no connector, the tool is named plainly');
   assert.match(ui, /yad-connect-design writes that file; follow it, not yad's toolbox answer/);
   // A skill whose tools are all connectors is not told to ask yad, then to ignore the answer.
   for (const s of ['yad-learn', 'yad-test-cases', 'yad-connect-design', 'yad-connect-testing', 'yad-connect-learning']) {
@@ -588,6 +588,40 @@ test('E87: the section is found and written the same way in a CRLF file, and nev
   const spaced = `# S\n\n${SKILL_FALLBACK_HEADING}  \n\nold\n\n# Appendix\n`;
   assert.equal(withSkillSection(spaced, section), `# S\n\n${section}\n\n# Appendix\n`);
   assert.equal(withSkillSection('', section), `${section}\n`, 'an empty file is the section alone');
+  // Indented up to three spaces, or a tab after the hashes: still a heading, so the section ends there.
+  for (const next of ['   ## Usage', '##\tUsage', '  # Title']) {
+    assert.equal(skillSectionOf(`# S\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n${next}\n\nkeep\n`), `${SKILL_FALLBACK_HEADING}\n\nold`, JSON.stringify(next));
+  }
+});
+
+test('E87: the sync writes, rewrites and removes sections, keeps CRLF, and refuses a misread section', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e87-'));
+  try {
+    const tools = [{ ...TOOLBOX.find((t) => t.id === 'spec-kit'), usedBy: ['named', 'crlf', 'misread'] }];
+    const want = (s) => skillFallbackSection(s, tools);
+    const put = (s, text) => { fs.mkdirSync(path.join(dir, s), { recursive: true }); fs.writeFileSync(path.join(dir, s, 'SKILL.md'), text); };
+    const get = (s) => fs.readFileSync(path.join(dir, s, 'SKILL.md'), 'utf8');
+    put('named', '# Named\n\nintro\n\n## Steps\n\n- do it\n');
+    put('unnamed', `# Unnamed\n\n${SKILL_FALLBACK_HEADING}\n\nold words\n\n## Steps\n\n- do it\n`);
+    put('crlf', `# Crlf\r\n\r\n${SKILL_FALLBACK_HEADING}\r\n\r\nold\r\n\r\n## Steps\r\n`);
+    // A heading the finder does not know (setext: text over ===) would let a rewrite cut "## Steps"'s text.
+    const misread = `# Misread\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\nUsage\n=====\n\nkeep me\n`;
+    put('misread', misread);
+    const before = fs.readdirSync(dir).map(get);
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: [], refused: [] });
+    assert.deepEqual(fs.readdirSync(dir).map(get), before, 'check writes nothing');
+    assert.deepEqual(syncSkillFallbacks(dir, { tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: ['crlf', 'named', 'unnamed'], refused: ['misread'] });
+    assert.equal(get('named'), `# Named\n\nintro\n\n${want('named')}\n\n## Steps\n\n- do it\n`);
+    assert.equal(get('unnamed'), '# Unnamed\n\n## Steps\n\n- do it\n', 'a skill no tool names loses the section');
+    assert.equal(get('crlf'), `# Crlf\r\n\r\n${want('crlf').replace(/\n/g, '\r\n')}\r\n\r\n## Steps\r\n`, 'CRLF kept');
+    assert.equal(get('misread'), misread, 'a misread section is left alone');
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['misread'], wrote: [], refused: [] }, 'the rest is now clean');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // The generator's own text never looks misread, for any skill.
+  for (const s of fs.readdirSync(path.join(ROOT, 'skills'))) {
+    const section = skillFallbackSection(s);
+    if (section) assert.equal(sectionLooksMisread(section), false, s);
+  }
 });
 
 test('E84: the connectors are the adapters skills/sdlc/config.yaml names, with the same fallbacks', () => {

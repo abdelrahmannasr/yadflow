@@ -579,10 +579,11 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
   // skill must then ignore would only confuse it.
   if (core.length) {
     lines.push(
-      `For ${core.length === 1 ? 'the tool' : 'each tool'} without "a connector" beside ${core.length === 1 ? 'it' : 'its name'}, decide from yad's answer, not from a guess: run`,
-      '`yad toolbox list --json` and read, in its `tools` list, the entry with the tool\'s `id`. Run it where',
-      'the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed there',
-      'are found.',
+      // Name the tools: "the one without a connector" means nothing in a skill that has no connector.
+      `For ${core.map((t) => t.name).join(' and ')}${connectors.length ? ` (${core.length === 1 ? 'the one tool here that is not a connector' : 'the tools here that are not connectors'})` : ''}, decide from yad's answer, not from a guess:`,
+      'run `yad toolbox list --json` and read, in its `tools` list, the entry with the tool\'s `id`. Run it',
+      'where the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed',
+      'there are found.',
       '',
       '- **The team\'s choices.** They come from the Product. If the answer\'s `product` is null, yad found no',
       '  Product, so a tool the team chose not to use still shows `used: true`. Tell the person that.',
@@ -616,7 +617,9 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
 // Where the section is in a skill's text: from its heading to the next `#` or `##` heading. A line
 // inside a fenced code block is never a heading. A fence closes only with the same character, at least
 // as many times, and nothing after it (CommonMark), so a ```` fence holding ``` lines stays open.
-// The heading is matched without trailing spaces, as the test counts it.
+// A heading may be indented up to three spaces and end in spaces, as CommonMark allows. `first`, where a
+// new section goes, is the first `##` heading: a skill's `#` title is above it.
+const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+(.*?))?[ \t]*$/;
 function sectionBounds(lines) {
   let fence = null;
   const headings = [];
@@ -625,11 +628,44 @@ function sectionBounds(lines) {
     if (fence) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
     } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) fence = f[1];
-    else if (/^#{1,2} /.test(l)) headings.push(i);
+    else {
+      const h = HEADING.exec(l);
+      if (h) headings.push({ i, level: h[1].length, text: h[2] ?? '' });
+    }
   });
-  const at = headings.find((i) => lines[i].trimEnd() === SKILL_FALLBACK_HEADING);
-  const first = headings.find((i) => lines[i].startsWith('## '));
-  return { at, first, end: at === undefined ? undefined : headings.find((i) => i > at) ?? lines.length };
+  const title = SKILL_FALLBACK_HEADING.slice(3);
+  const at = headings.find((h) => h.level === 2 && h.text === title)?.i;
+  const first = headings.find((h) => h.level === 2)?.i;
+  return { at, first, end: at === undefined ? undefined : headings.find((h) => h.i > at)?.i ?? lines.length };
+}
+
+// True when a section read from a skill holds a line `skillFallbackSection` never writes: a heading, a
+// heading underline, or a code fence. Then the section finder ran past the real end of the section (a
+// heading it did not recognise, say), and a rewrite would cut part of the skill. The check reads the
+// text, not the bounds that produced it, so it catches the misread the bounds cannot see.
+export function sectionLooksMisread(section) {
+  return section.split('\n').slice(1).some((l) => /^ {0,3}(#{1,6}(\s|$)|=+\s*$|-{2,}\s*$|`{3,}|~{3,})/.test(l));
+}
+
+// Bring every skill under `skillsDir` in line with the toolbox: the section where a tool names the
+// skill, none where no tool does. `check` changes nothing. Returns what it did, per skill folder name.
+export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX } = {}) {
+  const out = { stale: [], wrote: [], refused: [] };
+  const skills = fs.readdirSync(skillsDir).filter((s) => fs.existsSync(path.join(skillsDir, s, 'SKILL.md'))).sort();
+  for (const skill of skills) {
+    const file = path.join(skillsDir, skill, 'SKILL.md');
+    const text = fs.readFileSync(file, 'utf8');
+    const want = skillFallbackSection(skill, tools); // null: no tool names this skill, so no section
+    const have = skillSectionOf(text);
+    // Compared as text, not bytes, so a CRLF checkout (Windows) is not stale for its line endings alone.
+    if (have === want) continue;
+    out.stale.push(skill);
+    if (check) continue;
+    if (have !== null && sectionLooksMisread(have)) { out.refused.push(skill); continue; }
+    fs.writeFileSync(file, withSkillSection(text, want));
+    out.wrote.push(skill);
+  }
+  return out;
 }
 
 // The section as the skill holds it (LF, trailing blank lines dropped), or null when it has none.
