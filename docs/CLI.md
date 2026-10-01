@@ -1304,10 +1304,11 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
   tool was not used, whatever the reason. The skill also tells you which tools it used and why.
 - **The toolbox owns the words.** To change a fallback, change `cli/toolbox.mjs` and run
   `node scripts/skill-fallbacks.mjs`, which rewrites every section and takes it out of a skill no tool
-  names any more. It refuses to rewrite a section that holds a heading, a heading underline or a code
-  fence, because then it may have misread where the section ends and could cut part of the skill; it
-  quotes the line, and the fix is to delete the old section and run it again. A test fails when a
-  section and the toolbox disagree, or when a skill has the section but no tool names it.
+  names any more. The section ends with the line `<!-- end: When a tool is missing -->`, and the script
+  replaces only the lines from the heading down to that marker, so nothing else in the skill is touched.
+  It refuses a section without the marker (one written by hand), or with two copies, and says why; the
+  fix is to delete the old section and run it again. A test fails when a section and the toolbox
+  disagree, or when a skill has the section but no tool names it.
 
 Not covered: CodeRabbit (the AI reviewer `yad-engineer-review` wires) and `gh` / `glab` (the GitHub
 and GitLab programs several skills call) are not in the toolbox, so no skill declares a fallback for
