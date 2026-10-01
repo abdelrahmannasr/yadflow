@@ -676,27 +676,37 @@ function sectionBounds(lines) {
 // of the section, and a rewrite would cut part of the skill. It reads the text, not the bounds that
 // produced it, so it catches the misread the bounds cannot see. A `---` after a blank line, a list item
 // or a heading is only a divider, and is allowed.
-const isHeading = (s) => /^ {0,3}#{1,6}([ \t]|$)/.test(s);
-const isItem = (s) => /^ {0,3}([-*+]|\d{1,9}[.)])[ \t]/.test(s);
-// Can an item interrupt a paragraph? Only a bullet or an ordered item starting at 1 (CommonMark).
-const interrupts = (s) => /^ {0,3}([-*+]|0*1[.)])[ \t]/.test(s);
+// A list item with something in it: marked reads an empty one (`- `) as text.
+const isItem = (s) => /^ {0,3}([-*+]|\d{1,9}[.)])[ \t]+\S/.test(s);
+// Can an item interrupt a paragraph? Only a bullet or an ordered item starting at 1 (CommonMark), and,
+// as marked reads it, only when it is not indented.
+const interrupts = (s) => /^([-*+]|0*1[.)])[ \t]+\S/.test(s);
+// A divider (thematic break): three or more of one of - * _, spaces allowed between. CommonMark reads it
+// before a list item, so `- - -` is a divider, not an item.
+const isDivider = (s) => /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/.test(s);
 
 export function sectionMisreadLine(section) {
   const lines = section.split('\n');
-  // The block a line belongs to runs from the last blank line or heading. `list` says whether that
-  // block is a list: its first item starts one if it is the block's first line, or if it can interrupt
-  // the paragraph above it — `2. a` and `3. b` under a line of text are still that paragraph's text.
-  // Kept as the loop goes, so each line is read once.
+  // Read line by line, once. `text` says whether paragraph text is open above (so a `---` or `===`
+  // under it would make a heading); `list` whether the current block is a list (where it would not).
+  // A list starts at an item that begins the block, or that can interrupt the text above it — `2. a`
+  // under a line of text is more of that text, while `- b` or `1. b` starts a list. When renderers
+  // disagree, the reading that finds a heading wins: marked, unlike CommonMark, keeps a `***` under text
+  // as part of the paragraph, so a divider ends the block only when no text is open; and marked ends a
+  // list at an unindented `#tag` line, so any unindented line that is not an item reopens text.
   let top = 1;
-  let list = null; // null: no item met in this block yet
+  let text = false;
+  let list = false;
   for (let i = 1; i < lines.length; i++) {
     const l = lines[i];
     if (/^ {0,3}(>\s*)*#{1,6}(\s|$)|^\s*<h[1-6][\s>]|^ {0,3}(`{3,}|~{3,})/i.test(l)) return l;
-    // An underline makes a heading only under paragraph text: under a heading or a list, `---` is a
-    // divider (CommonMark). `#hashtag` is text, not a heading.
-    const above = lines[i - 1];
-    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && above.trim() !== '' && !isHeading(above) && list !== true) return l;
-    if (l.trim() === '') { top = i + 1; list = null; } else if (list === null && isItem(l)) list = i === top || interrupts(l);
+    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && text && !list) return l;
+    if (l.trim() === '') { top = i + 1; text = false; list = false; } else if (isDivider(l)) {
+      // Never an item (`* * *`). Under open text it may be more of that text, so the text stays open.
+      if (!(text && !list)) { top = i + 1; text = false; list = false; }
+    } else if (isItem(l)) {
+      if (!list && (i === top || interrupts(l))) { list = true; text = false; } else if (!list) text = true;
+    } else if (!list || !/^[ \t]/.test(l)) { list = false; text = true; } // an unindented line may end a list (marked)
   }
   return null;
 }

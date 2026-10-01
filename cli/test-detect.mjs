@@ -628,6 +628,36 @@ test('E87: the section is found and written the same way in a CRLF file, and nev
   }
 });
 
+// The guard against a misread section, checked against a real Markdown parser (marked, a dev
+// dependency): whenever it calls a section safe, marked finds no heading in it but its own. The guard may
+// refuse a safe section — that only asks a person to delete it — but never pass an unsafe one. Rounds 5
+// to 8 each found a case by hand; this tries thousands built from the lines that caused them.
+test('E87: a section the guard calls safe holds no heading a Markdown parser sees', async () => {
+  const { default: fc } = await import('fast-check');
+  const { marked } = await import('marked');
+  const pieces = ['text', 'more text', '', '- a', '* a', '+ a', '1. a', '2. a', '3) a', '  more', '  - b', '    code',
+    '---', '===', '***', '___', '- - -', '-', '=', '#tag', '> q', '> ## q', '## X', '# X', '```', '~~~', '<h2>x</h2>', '| a | b |', '|---|---|',
+    '   1. c', '\ttab', '- ', '1.', '<div>', '</div>', '  ---', '   ===', '* * *', '_ _ _', '-  a', '10. a', '>', '[x]: /u'];
+  const headings = (md) => marked.lexer(md).filter((t) => t.type === 'heading').length;
+  fc.assert(fc.property(fc.array(fc.constantFrom(...pieces), { maxLength: 12 }), (body) => {
+    const section = `${SKILL_FALLBACK_HEADING}\n\n${body.join('\n')}`;
+    if (sectionMisreadLine(section) !== null) return true;
+    return headings(section) === 1;
+  }), { numRuns: 5000, seed: 87 });
+  // Where marked and CommonMark disagree, the guard takes the reading that finds a heading: these are
+  // marked's, each found by this test.
+  for (const body of ['text\n***\n===', '- a\n#tag\ntext\n---', 'text\n  - b\n---', 'text\n* * *\n  more\n-', '- \n  more\n-']) {
+    assert.notEqual(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n${body}`), null, JSON.stringify(body));
+  }
+  // The cases round 8 found, by name.
+  for (const body of ['- a\n---\ntext\n---', '- a\n***\ntext\n---', '- - -\ntext\n---']) {
+    assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n${body}`), '---', JSON.stringify(body));
+  }
+  // And two it no longer refuses: a list that starts after paragraph text, and one after a divider.
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. a\n- b\n---`), null);
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n---\n2. a\n---`), null);
+});
+
 // Every function that reads a skill's text, on long awkward input: a pattern that backtracks shows up
 // here as seconds, whichever function holds it. One test for the whole class, so a fix in one place
 // cannot leave its twin slow (rounds 5 to 7 found them one at a time).
@@ -639,6 +669,7 @@ test('E87: the section readers stay fast on long, awkward input', () => {
     `##${' '.repeat(N)}\u2028x`, `\`\`\`${'`'.repeat(N)}\rx`, `~~~${'~'.repeat(N)}\u2029x`, `x${'\n'.repeat(N)}x`,
     `${H}\n${'\n'.repeat(N)}x`, `${H}\n${'- a\n---\n'.repeat(N / 8)}`, `${H}\n${'x\n'.repeat(N / 2)}---`,
     `${H}\n${'2. a\n'.repeat(N / 5)}---`, `${'#'.repeat(N)}`, `${H}\n${'> '.repeat(N)}x`, `${H}\n<h${'2'.repeat(N)}`,
+    `${H}\n${'- '.repeat(N)}x`, `${H}\n1.${' '.repeat(N)}`, `${H}\n${'* '.repeat(N)}*`, `${H}\n${'text\n* * *\n'.repeat(N / 12)}-`,
   ];
   for (const input of inputs) {
     const t0 = Date.now();
