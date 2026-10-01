@@ -327,7 +327,7 @@ contract lock, story repo tags, and which approvals the active gate still needs.
   `.sdlc/contract-lock.json`. Architecture gate (contract, payments): approved by *alice*, *bob*, *carol*
   and *dave* — 4 people, so even the full count of 3 is met. (These approvals were recorded before E62
   and still carry the roles the roster gave them; nothing reads those fields now.)
-- `ui-design.md` + `DESIGN.md` authored (Impeccable not installed → graceful fallback). UI gate approved
+- `ui-design.md` + `DESIGN.md` authored (Impeccable not used → graceful fallback). UI gate approved
   by alice + bob.
 - Five repo-tagged stories `stories/EP-checkout-S01..S05.md`. Stories gate approved by alice, bob,
   carol and dave; the review PR is labelled with each touched repo (backend, mobile).

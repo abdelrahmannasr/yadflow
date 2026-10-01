@@ -1293,16 +1293,19 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
   by hand even on a machine where Spec Kit is installed. The commands do not read the choice yet:
   `yad setup` and `yad repo refresh` still pack with Repomix after `yad toolbox remove repomix`.
 - **A connector follows its Product file.** Figma, Playwright, DeepTutor and the rest are used when
-  `design.json`, `testing.json` or `learning.json` connects them, as before. `yad toolbox remove figma`
+  `design.json`, `testing.json` or `learning.json` connects them, as before, so a skill whose tools are
+  all connectors does not ask `yad toolbox list` at all. `yad toolbox remove figma`
   does not change that; `yad-connect-design` does.
 - **The skill records it.** Where a skill writes a line when the tool was not used, the line is the
   entry's `records`: `speckit: not-installed`, `impeccable: not-installed`, and
   `source: repomix-unavailable` (written by `yad-backfill` in a spec's frontmatter and by `yad-connect-repos`
-  in `repos.json`; `yad repo refresh` itself always writes `source: repomix`). It means the
+  in `repos.json`; `yad setup` writes `source: repomix` whether or not it packed, and `yad repo refresh`
+  never changes `source`). It means the
   tool was not used, whatever the reason. The skill also tells you which tools it used and why.
 - **The toolbox owns the words.** To change a fallback, change `cli/toolbox.mjs` and run
-  `node scripts/skill-fallbacks.mjs`, which rewrites every section. A test fails when a section and the
-  toolbox disagree, or when a skill has the section but no tool names it.
+  `node scripts/skill-fallbacks.mjs`, which rewrites every section and takes it out of a skill no tool
+  names any more. A test fails when a section and the toolbox disagree, or when a skill has the section
+  but no tool names it.
 
 Not covered: CodeRabbit (the AI reviewer `yad-engineer-review` wires) and `gh` / `glab` (the GitHub
 and GitLab programs several skills call) are not in the toolbox, so no skill declares a fallback for
