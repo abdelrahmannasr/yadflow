@@ -662,9 +662,10 @@ function sectionBounds(lines) {
   // block reads as metadata, as a YAML loader would read it, and is left alone. The block closes at `---`
   // or `...`, trailing spaces allowed, as common frontmatter readers accept.
   let skip = 0;
-  // Only when the next line is a YAML key (every SKILL.md opens `name:`): a `---` divider above a
-  // title is Markdown, and treating it as frontmatter could hide a section.
-  if (trimSpaces(lines[0]?.replace(/^\uFEFF/, '') ?? '') === '---' && /^[A-Za-z_][\w-]*[ \t]*:/.test(lines[1] ?? '')) {
+  // Only when the next line is a YAML key, quoted or not (every SKILL.md opens `name:`): a `---` divider
+  // above a title is Markdown, and treating it as frontmatter could hide a section. A YAML comment is not
+  // enough: `# T` is a title too.
+  if (trimSpaces(lines[0]?.replace(/^\uFEFF/, '') ?? '') === '---' && /^([A-Za-z_][\w-]*[ \t]*:|["'][^"']+["'][ \t]*:)/.test(lines[1] ?? '')) {
     const close = lines.findIndex((l, i) => i > 0 && (trimSpaces(l) === '---' || trimSpaces(l) === '...'));
     if (close > 0) skip = close + 1;
   }
@@ -717,20 +718,18 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
     // Compared as text, not bytes, so a CRLF checkout (Windows) is not stale for its line endings alone.
     if (!reason && skillSectionOf(text) === want) continue;
     out.stale.push(skill);
-    // One answer for both modes: `check` names what a write would refuse.
-    if (reason) out.refused.push({ skill, reason });
-    if (check || reason) continue;
-    const next = withSkillSection(text, want);
-    // A last check that reads no Markdown at all: after a write the file holds exactly one line that
-    // looks like the heading and one like the marker (none after a removal). A copy something above
-    // could not see — inside an odd fence, say — fails it, so a write never leaves two copies.
-    const seen = next.split(/\r?\n/).map((l) => l.replace(/^[ \t]+/, '')); // any indent, even in a list
-    const copies = [seen.filter(isFallbackHeading).length, seen.filter(isFallbackEnd).length];
+    const next = reason ? null : withSkillSection(text, want);
+    // A last check that ignores fences, frontmatter and indent: after a write the file holds exactly one
+    // `##` line that is the heading and one marker line (none after a removal), counted at any indent,
+    // fenced or not. So a copy the finder skipped (fenced, indented in a list) cannot be doubled. It does
+    // not catch a copy in another heading form — in a `>` quote, underlined with `---`, or as `<h2>`.
+    const seen = next === null ? [] : next.split(/\r?\n/).map((l) => l.replace(/^[ \t]+/, ''));
     const expect = want === null ? 0 : 1;
-    if (copies[0] !== expect || copies[1] !== expect) {
-      out.refused.push({ skill, reason: 'after the write the file would hold another line that looks like the section\'s heading or end marker (in a code block, or hidden from yad) — delete or reword it' });
-      continue;
-    }
+    const doubled = next !== null && (seen.filter(isFallbackHeading).length !== expect || seen.filter(isFallbackEnd).length !== expect);
+    const why = reason || (doubled ? 'after the write the file would hold another line that looks like the section\'s heading or end marker (in a code block, say) — delete or reword it' : null);
+    // One answer for both modes: `check` names what a write would refuse.
+    if (why) out.refused.push({ skill, reason: why });
+    if (check || why) continue;
     fs.writeFileSync(file, next);
     out.wrote.push(skill);
   }

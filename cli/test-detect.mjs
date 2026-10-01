@@ -591,6 +591,11 @@ test('E87: the section is exactly heading to end marker, found the same way in a
   const again = withSkillSection(withSkillSection(dots, null), section);
   assert.equal(skillSectionOf(again), section, 'removed, then added again: one copy, read back whole');
   assert.equal(again.split('\n').filter(isFallbackHeading).length, 1);
+  // A quoted key on the second line still opens frontmatter (a `# comment` does not: it is a title too).
+  for (const second of ['"name": x', "'name': x"]) {
+    const fm = `---\n${second}\n## c\n---\n`;
+    assert.equal(withSkillSection(`${fm}\n## Steps\n`, section), `${fm}\n${section}\n\n## Steps\n`, second);
+  }
   // A YAML value that quotes the heading is not the section: a write works, and with a stray marker in
   // the body it is refused — never a section running across the closing `---`.
   const quoted = '---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\n## Steps\n';
@@ -715,6 +720,8 @@ test('E87: the sync writes, rewrites and removes sections, keeps CRLF, and refus
     for (const hidden of ['```md\n## When a tool is missing\n```', `- item\n\n      ${SKILL_FALLBACK_END}`]) {
       const t = `# Hidden\n\n${hidden}\n\n## Steps\n`;
       put('named', t);
+      const c = syncSkillFallbacks(dir, { check: true, tools });
+      assert.match(c.refused.find((x) => x.skill === 'named').reason, /another line that looks like/, 'check names it too');
       const r = syncSkillFallbacks(dir, { tools });
       assert.deepEqual(r.wrote, [], JSON.stringify(hidden));
       assert.match(r.refused.find((x) => x.skill === 'named').reason, /another line that looks like/);
