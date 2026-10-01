@@ -7,8 +7,8 @@
 //
 // A skill without the section gets it just before its first `## ` heading, so the agent reads it early.
 // A skill that has it gets it replaced, up to the next heading. A section holding a line the toolbox
-// never writes (a heading, a fence) is refused: the section finder misread the file, and a rewrite
-// would cut part of the skill.
+// never writes (a heading, a heading underline, a fence) is refused: the section finder may have
+// misread the file, and a rewrite could cut part of the skill. The message quotes the line.
 //
 //   node scripts/skill-fallbacks.mjs           rewrite the sections; print each skill it changed
 //   node scripts/skill-fallbacks.mjs --check   change nothing; exit 1 when a section is missing or stale
@@ -21,5 +21,7 @@ const check = process.argv.includes('--check');
 const r = syncSkillFallbacks(path.join(ROOT, 'skills'), { check });
 if (check) for (const s of r.stale) console.log(`stale: skills/${s}/SKILL.md`);
 for (const s of r.wrote) console.log(`wrote: skills/${s}/SKILL.md`);
-for (const s of r.refused) console.error(`refused: skills/${s}/SKILL.md — its section holds a heading or a fence the toolbox never writes; fix it by hand`);
+for (const { skill, line } of r.refused) {
+  console.error(`${check ? 'will refuse' : 'refused'}: skills/${skill}/SKILL.md — the line ${JSON.stringify(line)} inside its section is not the toolbox's text, so the section's end may be misread and a rewrite could cut the skill. Delete the old section (from its heading down to the next heading), then run this script again.`);
+}
 if ((check && r.stale.length) || r.refused.length) process.exit(1);

@@ -44,7 +44,7 @@ there are found.
 Tell the person which tools you used and which fallbacks, and why.
 
 - **Impeccable** (`impeccable`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove impeccable`) — use the fallback.
-  - Fallback — Markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly.
+  - Fallback — markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly.
   - Record `impeccable: not-installed`. It means the tool was not used, whatever the reason.
 - **Figma** (`figma`, a connector). Used when `.sdlc/design.json` connects it. yad-connect-design writes that file; follow it, not yad's toolbox answer.
   - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.

@@ -481,7 +481,7 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
 // is tested here, on Linux, macOS and Windows.
 const { INSTALL_TYPES, TIERS, TOOLBOX, onPath, parseRange, parseVersion, toolProblems, toolStatus, toolboxLines, versionInRange } = await import('./toolbox.mjs');
 // E87: each skill's "When a tool is missing" section, built from the toolbox.
-const { SKILL_FALLBACK_HEADING, connectorFile, sectionLooksMisread, skillFallbackSection, skillSectionOf, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
+const { SKILL_FALLBACK_HEADING, connectorFile, isFallbackHeading, sectionMisreadLine, skillFallbackSection, skillSectionOf, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
 
 test('E84: every shipped toolbox entry is well formed, and every tier has entries', () => {
   for (const t of TOOLBOX) assert.deepEqual(toolProblems(t), [], t.id);
@@ -516,7 +516,7 @@ test('E87: every skill a tool names quotes its fallback word for word, and no ot
   for (const s of skills) {
     const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
     // One copy at most, in any spelling: a second, stale one would be read by the agent too.
-    assert.ok(text.split(/\r?\n/).filter((l) => /^##\s+when a tool is missing\s*$/i.test(l)).length <= 1, `skills/${s}/SKILL.md: one section`);
+    assert.ok(text.split(/\r?\n/).filter(isFallbackHeading).length <= 1, `skills/${s}/SKILL.md: one section`);
     const found = skillSectionOf(text);
     if (named.has(s)) assert.equal(found, skillFallbackSection(s), `skills/${s}/SKILL.md: the section matches the toolbox — run node scripts/skill-fallbacks.mjs`);
     else assert.equal(found, null, `skills/${s}/SKILL.md has the section, but no toolbox tool names ${s}`);
@@ -588,6 +588,16 @@ test('E87: the section is found and written the same way in a CRLF file, and nev
   const spaced = `# S\n\n${SKILL_FALLBACK_HEADING}  \n\nold\n\n# Appendix\n`;
   assert.equal(withSkillSection(spaced, section), `# S\n\n${section}\n\n# Appendix\n`);
   assert.equal(withSkillSection('', section), `${section}\n`, 'an empty file is the section alone');
+  // One rule for "is this the heading", shared with the test that counts copies: indent, case, trailing
+  // spaces and closing #s all count, so a hand-written copy is replaced, never kept beside a new one.
+  for (const l of ['## When a tool is missing', '   ## when a tool is missing  ', '## When a tool is missing ##', '## When a tool is missing\r']) assert.ok(isFallbackHeading(l), JSON.stringify(l));
+  for (const l of ['# When a tool is missing', '### When a tool is missing', '    ## When a tool is missing', '##When a tool is missing']) assert.ok(!isFallbackHeading(l), JSON.stringify(l));
+  assert.equal(withSkillSection(`# S\n\n## When a tool is missing ##\n\nold\n\n## Next\n`, section), `# S\n\n${section}\n\n## Next\n`, 'a closing-# copy is replaced');
+  // The guard: a line the toolbox never writes, quoted back; a divider after a blank line is fine.
+  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nnote\n\n---\n\nmore`), null, 'a --- divider is allowed');
+  for (const [body, line] of [['Usage\n-', '-'], ['Usage\n- ', '- '], ['Usage\n===', '==='], ['<h2>Usage</h2>', '<h2>Usage</h2>'], ['> ## Quoted', '> ## Quoted'], ['```\ncode', '```'], ['#### Deep', '#### Deep']]) {
+    assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n${body}`), line, JSON.stringify(body));
+  }
   // Indented up to three spaces, or a tab after the hashes: still a heading, so the section ends there.
   for (const next of ['   ## Usage', '##\tUsage', '  # Title']) {
     assert.equal(skillSectionOf(`# S\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n${next}\n\nkeep\n`), `${SKILL_FALLBACK_HEADING}\n\nold`, JSON.stringify(next));
@@ -608,19 +618,24 @@ test('E87: the sync writes, rewrites and removes sections, keeps CRLF, and refus
     const misread = `# Misread\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\nUsage\n=====\n\nkeep me\n`;
     put('misread', misread);
     const before = fs.readdirSync(dir).map(get);
-    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: [], refused: [] });
+    const refused = [{ skill: 'misread', line: '=====' }];
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: [], refused }, 'check names what a write would refuse');
     assert.deepEqual(fs.readdirSync(dir).map(get), before, 'check writes nothing');
-    assert.deepEqual(syncSkillFallbacks(dir, { tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: ['crlf', 'named', 'unnamed'], refused: ['misread'] });
+    assert.deepEqual(syncSkillFallbacks(dir, { tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: ['crlf', 'named', 'unnamed'], refused });
     assert.equal(get('named'), `# Named\n\nintro\n\n${want('named')}\n\n## Steps\n\n- do it\n`);
     assert.equal(get('unnamed'), '# Unnamed\n\n## Steps\n\n- do it\n', 'a skill no tool names loses the section');
     assert.equal(get('crlf'), `# Crlf\r\n\r\n${want('crlf').replace(/\n/g, '\r\n')}\r\n\r\n## Steps\r\n`, 'CRLF kept');
     assert.equal(get('misread'), misread, 'a misread section is left alone');
-    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['misread'], wrote: [], refused: [] }, 'the rest is now clean');
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['misread'], wrote: [], refused }, 'the rest is now clean');
+    // The fix the message gives: delete the old section, and the next run adds a fresh one.
+    put('misread', '# Misread\n\nUsage\n=====\n\nkeep me\n');
+    assert.deepEqual(syncSkillFallbacks(dir, { tools }).wrote, ['misread']);
+    assert.ok(get('misread').includes('keep me'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   // The generator's own text never looks misread, for any skill.
   for (const s of fs.readdirSync(path.join(ROOT, 'skills'))) {
     const section = skillFallbackSection(s);
-    if (section) assert.equal(sectionLooksMisread(section), false, s);
+    if (section) assert.equal(sectionMisreadLine(section), null, s);
   }
 });
 

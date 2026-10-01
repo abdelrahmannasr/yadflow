@@ -98,7 +98,7 @@ export const TOOLBOX = Object.freeze([
     manual: null,
     detect: { skills: ['impeccable'], plugins: ['impeccable'] },
     versions: null,
-    fallback: 'Markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly',
+    fallback: 'markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly',
     records: 'impeccable: not-installed', note: null,
     usedBy: ['yad-ui'],
   },
@@ -617,9 +617,23 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
 // Where the section is in a skill's text: from its heading to the next `#` or `##` heading. A line
 // inside a fenced code block is never a heading. A fence closes only with the same character, at least
 // as many times, and nothing after it (CommonMark), so a ```` fence holding ``` lines stays open.
-// A heading may be indented up to three spaces and end in spaces, as CommonMark allows. `first`, where a
-// new section goes, is the first `##` heading: a skill's `#` title is above it.
-const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+(.*?))?[ \t]*$/;
+// A heading may be indented up to three spaces and end in spaces or closing `#`s, as CommonMark allows.
+// `first`, where a new section goes, is the first `##` heading: a skill's `#` title is above it.
+// Known limit: a `##` line inside a list item reads as a heading here, which ends the section early —
+// the safe way round, since nothing outside the section is cut.
+const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
+const headingOf = (line) => {
+  const h = HEADING.exec(line);
+  return h ? { level: h[1].length, text: h[2] ?? '' } : null;
+};
+
+// Is this line the section's heading, in any spelling the finder accepts (indent, case, trailing spaces
+// or `#`s)? One rule, so the finder and the test that counts copies cannot disagree.
+export function isFallbackHeading(line) {
+  const h = headingOf(line.replace(/\r$/, ''));
+  return h?.level === 2 && h.text.toLowerCase() === SKILL_FALLBACK_HEADING.slice(3).toLowerCase();
+}
+
 function sectionBounds(lines) {
   let fence = null;
   const headings = [];
@@ -629,26 +643,34 @@ function sectionBounds(lines) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
     } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) fence = f[1];
     else {
-      const h = HEADING.exec(l);
-      if (h) headings.push({ i, level: h[1].length, text: h[2] ?? '' });
+      const h = headingOf(l);
+      if (h) headings.push({ i, level: h.level });
     }
   });
-  const title = SKILL_FALLBACK_HEADING.slice(3);
-  const at = headings.find((h) => h.level === 2 && h.text === title)?.i;
+  const at = headings.find((h) => isFallbackHeading(lines[h.i]))?.i;
   const first = headings.find((h) => h.level === 2)?.i;
   return { at, first, end: at === undefined ? undefined : headings.find((h) => h.i > at)?.i ?? lines.length };
 }
 
-// True when a section read from a skill holds a line `skillFallbackSection` never writes: a heading, a
-// heading underline, or a code fence. Then the section finder ran past the real end of the section (a
-// heading it did not recognise, say), and a rewrite would cut part of the skill. The check reads the
-// text, not the bounds that produced it, so it catches the misread the bounds cannot see.
-export function sectionLooksMisread(section) {
-  return section.split('\n').slice(1).some((l) => /^ {0,3}(#{1,6}(\s|$)|=+\s*$|-{2,}\s*$|`{3,}|~{3,})/.test(l));
+// The first line of a section read from a skill that `skillFallbackSection` never writes, or null: a
+// heading (`#`, `<h2>`, or one inside a `>` quote), a heading underline (`===` or `---` right under a
+// line of text), or a code fence. Such a line means the section finder may have run past the real end
+// of the section, and a rewrite would cut part of the skill. It reads the text, not the bounds that
+// produced it, so it catches the misread the bounds cannot see. A `---` after a blank line is only a
+// divider, and is allowed.
+export function sectionMisreadLine(section) {
+  const lines = section.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^ {0,3}(>\s*)*#{1,6}(\s|$)|^\s*<h[1-6][\s>]|^ {0,3}(`{3,}|~{3,})/i.test(l)) return l;
+    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && lines[i - 1].trim() !== '') return l;
+  }
+  return null;
 }
 
 // Bring every skill under `skillsDir` in line with the toolbox: the section where a tool names the
-// skill, none where no tool does. `check` changes nothing. Returns what it did, per skill folder name.
+// skill, none where no tool does. `check` changes nothing. Returns the skill folder names it found
+// stale and wrote, and `refused: [{ skill, line }]` — a section it will not rewrite, with the line why.
 export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX } = {}) {
   const out = { stale: [], wrote: [], refused: [] };
   const skills = fs.readdirSync(skillsDir).filter((s) => fs.existsSync(path.join(skillsDir, s, 'SKILL.md'))).sort();
@@ -660,8 +682,13 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
     // Compared as text, not bytes, so a CRLF checkout (Windows) is not stale for its line endings alone.
     if (have === want) continue;
     out.stale.push(skill);
-    if (check) continue;
-    if (have !== null && sectionLooksMisread(have)) { out.refused.push(skill); continue; }
+    if (check) {
+      const odd = have === null ? null : sectionMisreadLine(have);
+      if (odd !== null) out.refused.push({ skill, line: odd }); // what a write would refuse
+      continue;
+    }
+    const odd = have === null ? null : sectionMisreadLine(have);
+    if (odd !== null) { out.refused.push({ skill, line: odd }); continue; }
     fs.writeFileSync(file, withSkillSection(text, want));
     out.wrote.push(skill);
   }
