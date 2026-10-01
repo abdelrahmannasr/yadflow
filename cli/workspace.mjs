@@ -490,7 +490,9 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   log(c.bold('Toolbox'));
   const toolbox = offerToolbox(product, product, { canRemove: false });
 
+  // Under a heading of its own, so these lines do not read as part of the toolbox list above.
   log('');
+  log(c.bold('Next'));
   if (repos.failed.length) hand(`${repos.failed.length} repo(s) not cloned — fix what is named above and re-run \`yad join ${shown(url)}\`; it keeps what is already there`);
   hand(`start with: cd ${fromShell(product)} && yad next`);
   return {

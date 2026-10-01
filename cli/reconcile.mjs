@@ -31,7 +31,7 @@ const repoShown = (repo) => `product (the code repo at ${forTerminal(repo.path)}
 const shown = (a) => a.shownScope ?? a.scope;
 const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
-export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false, toolboxFrom = null } = {}) {
+export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
 
@@ -241,7 +241,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
     // After the --fix hint, never above it: --fix installs no tool, and must not read as if it did.
-    const toolbox = toolboxSection(root, toolboxFrom);
+    const toolbox = toolboxSection(root, toolboxAt);
     return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile, toolbox };
   }
 
@@ -317,16 +317,18 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       },
     });
   }
-  const toolbox = toolboxSection(root, toolboxFrom);
+  const toolbox = toolboxSection(root, toolboxAt);
   return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile, toolbox };
 }
 
 // E85: `yad check` and `yad update` end with the toolbox check — the tools this Product uses that are not
 // here. Report only: it never adds to what `--fix` applies, never changes the exit code, and installs
-// nothing. Both verbs, because both run here and a release can add a core tool. Tools are looked for in
-// the folder the person ran yad in (`from`), as `yad toolbox check` does; the choices are the Product's.
-function toolboxSection(root, from) {
+// nothing. Both verbs, because both run here and a release can add a core tool. `at` comes from the
+// command line: `from`, the top of the repo the person ran yad in, where tools are looked for (as
+// `yad toolbox check` does — a code repo's own skills count); `product`, the Product whose choices are
+// read, which is not `root` under `--dir <a code repo>`.
+function toolboxSection(root, at) {
   log('');
   log(c.bold('Toolbox'));
-  return offerToolbox(from || root, root);
+  return offerToolbox(at?.from || root, at?.product || root);
 }

@@ -1352,3 +1352,27 @@ test('E85 review 1: join\'s offer does not advise removing a tool the team chose
     assert.match(hints[1], /for the whole team/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E85 review 2: from a subfolder, tools are looked for at the top of its repo; --dir <code repo> reads that repo\'s Product', () => {
+  const { T, p, home } = product({
+    '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }] }),
+    '.sdlc/toolbox.json': JSON.stringify({ schemaVersion: 10, shipped: { 'spec-kit': 'skip' } }),
+  });
+  const repo = path.join(p, 'api');
+  try {
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(p, 'epics', 'sub'), { recursive: true });
+    skill(path.join(p, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    skill(path.join(repo, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    const findings = (r) => { assert.equal(r.status, 0, r.stdout + r.stderr); const o = JSON.parse(r.stdout); return (o.toolbox?.findings ?? o.findings).map((f) => f.id); };
+    for (const cwd of [path.join(p, 'epics', 'sub'), path.join(repo, 'src')]) {
+      for (const args of [['check', '--json'], ['update', '--json'], ['toolbox', 'check', '--json']]) {
+        assert.ok(!findings(yad(args, { cwd, home })).includes('impeccable'), `${args[0]} from ${path.relative(p, cwd)}: found at the repo's top`);
+      }
+    }
+    // --dir <a code repo>: the team's `skip` is read from that repo's Product, so Spec Kit is not offered.
+    const viaDir = findings(yad(['check', '--json', '--dir', repo], { cwd: T, home }));
+    assert.ok(!viaDir.includes('spec-kit') && !viaDir.includes('impeccable'), JSON.stringify(viaDir));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
