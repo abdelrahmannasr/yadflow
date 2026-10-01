@@ -2,7 +2,7 @@
 
 Step A (`yad-spec`) runs the **heavy Spec Kit ceremony once per story per repo** and writes the
 result into the story's code repo. This reference pins the exact commands, the files they produce, and
-how to hand-author the same files faithfully when Spec Kit is not installed — so Step B
+how to hand-author the same files faithfully when Spec Kit is not used — so Step B
 (`yad-implement`, not built yet) can read them unchanged.
 
 ## The ceremony (run once, in order)
@@ -39,7 +39,7 @@ demo-repos/<repo>/specs/<story-id>/
   link.md         # back-pointer to the story in the product repo (Step A adds this; not a Spec Kit file)
 ```
 
-## Degradation rules (when Spec Kit is not installed)
+## Degradation rules (when Spec Kit is not used)
 
 Author each file by hand so it is **indistinguishable in shape** from a real Spec Kit run. The content
 comes from the story's acceptance criteria and the **locked contract surface** — never invented.

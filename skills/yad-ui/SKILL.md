@@ -12,7 +12,7 @@ screens and/or web pages — inside that tool (e.g. Figma), linked back from the
 passes to `yad-review-gate` (base rule: 1 distinct approver, who should not be the author).
 
 UI work is shaped by **Impeccable**, invoked as **harness slash-commands** (not a subprocess CLI) per
-the Phase 0 deviation. If Impeccable is not installed, the `ux-designer` lens authors the same outputs
+the Phase 0 deviation. If Impeccable is not used (**When a tool is missing** below), the `ux-designer` lens authors the same outputs
 directly — the workflow does not block on the tool.
 
 The visual design is materialized in the **design tool connected via `yad-connect-design`**
@@ -26,11 +26,21 @@ like Impeccable.
 <!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
 
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
-beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read the
-entry with the tool's `id`. Run it where the tool will run: for work inside a code repo, add
-`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).
-If yad cannot answer (it is not installed here, or the command fails),
-use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.
+beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read, in its
+`tools` list, the entry with the tool's `id`. Run it where the tool will run: for work inside a code
+repo, add `--dir <that repo>`, so the tools installed there are found.
+
+- **The team's choices.** They come from the Product. If the answer's `product` is null, yad found no
+  Product, so a tool the team chose not to use still shows `used: true`: tell the person that.
+- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install
+  may be missed). If its entry says `missing` but the check in the steps below finds the tool, use
+  it — never when the entry says `used: false`.
+- **When yad cannot answer** (it is not installed here, or the command fails), use the check in the
+  steps below.
+
+- **A connector** is decided by its Product file, as its line says, not by these rules.
+
+Tell the person which tools you used and which fallbacks, and why.
 
 - **Impeccable** (`impeccable`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove impeccable`) — do this instead: Markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly. Record `impeccable: not-installed` — it means the tool was not used, whatever the reason.
 - **Figma** (`figma`, a connector). Used when `.sdlc/design.json` connects it: the connect skill writes that file, and the steps below follow it. Without it: markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
@@ -99,7 +109,7 @@ Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context
 `epic.repos`**, load the code-map `{project-root}/.sdlc/code-context/<repo>/code-map.md` so the UI
 **reuses existing components and conventions** rather than inventing parallel ones. This complements
 Impeccable's `/impeccable document` (Step 3), which reads code directly for the design system — when
-Impeccable is absent, the code-map is the brain's view of what UI/components already exist.
+Impeccable is not used, the code-map is the brain's view of what UI/components already exist.
 
 - **Greenfield-safe:** if `repos.json` is absent/empty, note "no repos connected" and proceed.
 - **Staleness:** if a repo's current HEAD ≠ its registry `syncedHead`, warn and suggest

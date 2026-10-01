@@ -24,11 +24,20 @@ is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
 <!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
 
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
-beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read the
-entry with the tool's `id`. Run it where the tool will run: for work inside a code repo, add
-`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).
-If yad cannot answer (it is not installed here, or the command fails),
-use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.
+beside it. Decide from yad's answer, not from a guess: run `yad toolbox list --json` and read, in its
+`tools` list, the entry with the tool's `id`. Run it where the tool will run: for work inside a code
+repo, add `--dir <that repo>`, so the tools installed there are found.
+
+- **The team's choices.** They come from the Product. If the answer's `product` is null, yad found no
+  Product, so a tool the team chose not to use still shows `used: true`: tell the person that.
+- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install
+  may be missed). If its entry says `missing` but the check in the steps below finds the tool, use
+  it — never when the entry says `used: false`.
+- **When yad cannot answer** (it is not installed here, or the command fails), use the check in the
+  steps below.
+
+
+Tell the person which tools you used and which fallbacks, and why.
 
 - **Spec Kit** (`spec-kit`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove spec-kit`) — do this instead: yad-spec writes the same spec files by hand, in Spec Kit's layout. Record `speckit: not-installed` — it means the tool was not used, whatever the reason.
 
@@ -95,13 +104,13 @@ missing** says. If yad cannot answer, check for `/speckit.*` slash-commands and/
 frontmatter (`speckit: installed | not-installed`).
 
 ### Step 5 — Run the heavy ceremony ONCE (or degrade)
-**Installed** — from inside `demo-repos/<repo>/`, drive, in order:
+**Used** — from inside `demo-repos/<repo>/`, drive, in order:
 `/speckit.specify` → `/speckit.clarify` → `/speckit.plan` → `/speckit.analyze` →
 `/speckit.checklist` → `/speckit.tasks`. **Pin the feature to `<story>`** (do not accept an
 auto-slug). Seed `specify` from the story's acceptance criteria and the contract elements from Step 3.
 `/speckit.constitution` and `/speckit.implement` are **out of scope for Step A** (implement is Step B).
 
-**Not installed (degrade)** — hand-author the identical files in Spec Kit's layout under
+**Not used (degrade)** — hand-author the identical files in Spec Kit's layout under
 `demo-repos/<repo>/specs/<story>/`: `spec.md`, `research.md`, `data-model.md`, `contracts/`,
 `plan.md`, `tasks.md`. The content is what a real Spec Kit run would produce, traceable to the story's
 acceptance criteria and the locked contract surface. `tasks.md` MUST be numbered atomic tasks (`T01…`),

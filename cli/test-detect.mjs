@@ -480,6 +480,8 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
 // The shipped list of external tools, and what this machine has of them. It builds on `yad detect`, so it
 // is tested here, on Linux, macOS and Windows.
 const { INSTALL_TYPES, TIERS, TOOLBOX, onPath, parseRange, parseVersion, toolProblems, toolStatus, toolboxLines, versionInRange } = await import('./toolbox.mjs');
+// E87: each skill's "When a tool is missing" section, built from the toolbox.
+const { SKILL_FALLBACK_HEADING, connectorFile, skillFallbackSection, skillSectionOf, skillsUsing, withSkillSection } = await import('./toolbox.mjs');
 
 test('E84: every shipped toolbox entry is well formed, and every tier has entries', () => {
   for (const t of TOOLBOX) assert.deepEqual(toolProblems(t), [], t.id);
@@ -496,29 +498,24 @@ test('E84: a fallback a skill records is written there word for word, so E87 ren
   for (const t of TOOLBOX.filter((x) => x.records)) {
     const skills = t.usedBy.filter((u) => fs.existsSync(path.join(ROOT, 'skills', u, 'SKILL.md')));
     assert.ok(skills.length, `${t.id}: names a skill that exists`);
-    for (const s of skills) assert.ok(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8').includes(t.records), `${s} writes "${t.records}"`);
+    // Outside the E87 section, which quotes every record: the skill's own steps must write the line.
+    for (const s of skills) assert.ok(withSkillSection(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8'), null).includes(t.records), `${s} writes "${t.records}"`);
   }
 });
 
 // E87: every skill a tool names says what it does without it, in the toolbox's own words. Held in both
 // directions: a skill the toolbox names has the section, word for word, and a skill with the section is
 // one the toolbox names. `node scripts/skill-fallbacks.mjs` rewrites the sections after a wording change.
-const { SKILL_FALLBACK_HEADING, connectorFile, skillFallbackSection, skillsUsing } = await import('./toolbox.mjs');
-const skillSection = (text) => {
-  const lines = text.split('\n');
-  const at = lines.indexOf(SKILL_FALLBACK_HEADING);
-  if (at < 0) return null;
-  const end = lines.findIndex((l, i) => i > at && l.startsWith('## '));
-  return lines.slice(at, end < 0 ? lines.length : end).join('\n').replace(/\n+$/, '');
-};
-
 test('E87: every skill a tool names quotes its fallback word for word, and no other skill has the section', () => {
   const skills = fs.readdirSync(path.join(ROOT, 'skills')).filter((s) => fs.existsSync(path.join(ROOT, 'skills', s, 'SKILL.md')));
   const named = new Set(TOOLBOX.filter((t) => t.tier !== 'recommended').flatMap(skillsUsing));
   assert.ok(named.size >= 9, 'the toolbox names the skills that use its tools');
   for (const t of TOOLBOX) for (const u of t.usedBy) assert.ok(u.startsWith('yad ') || skills.includes(u), `${t.id}: usedBy "${u}" is a yad command or a skill folder`);
   for (const s of skills) {
-    const found = skillSection(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8'));
+    const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
+    // One copy at most, in any spelling: a second, stale one would be read by the agent too.
+    assert.ok(text.split(/\r?\n/).filter((l) => /^##\s+when a tool is missing\s*$/i.test(l)).length <= 1, `skills/${s}/SKILL.md: one section`);
+    const found = skillSectionOf(text);
     if (named.has(s)) assert.equal(found, skillFallbackSection(s), `skills/${s}/SKILL.md: the section matches the toolbox — run node scripts/skill-fallbacks.mjs`);
     else assert.equal(found, null, `skills/${s}/SKILL.md has the section, but no toolbox tool names ${s}`);
   }
@@ -539,11 +536,38 @@ test('E87: the section says when to use each tool, its fallback, and what to rec
   const ui = skillFallbackSection('yad-ui');
   assert.match(ui, /\*\*Figma\*\* \(`figma`, a connector\)\. Used when `\.sdlc\/design\.json` connects it/);
   assert.doesNotMatch(ui, /yad toolbox remove figma/);
+  assert.match(ui, /A connector\*\* is decided by its Product file/);
+  assert.doesNotMatch(spec, /A connector\*\*/, 'only a skill with a connector says so');
+  assert.match(spec, /`product` is null/, 'no Product means the team choices were not read');
+  assert.match(spec, /never when the entry says `used: false`/, 'a tool yad cannot see is used, but never against a skip');
+  assert.match(skillFallbackSection('yad-connect-design'), /This skill connects it, by writing `\.sdlc\/design\.json`/, 'the connect skill does not follow its own file');
   assert.equal(connectorFile(TOOLBOX.find((t) => t.id === 'deeptutor')), '.sdlc/learning.json');
   assert.equal(connectorFile(TOOLBOX.find((t) => t.id === 'spec-kit')), null);
   // Recommended tools are bound with `yad skill bind`, never named by a skill.
   const fake = [{ ...TOOLBOX.find((t) => t.id === 'ecc'), usedBy: ['yad-epic'] }];
   assert.equal(skillFallbackSection('yad-epic', fake), null);
+});
+
+test('E87: the section is found and written the same way in a CRLF file, and never inside a code fence', () => {
+  const section = `${SKILL_FALLBACK_HEADING}\n\nbody`;
+  const lf = '# Skill\n\nintro\n\n```md\n## not a heading\n```\n\n## Conventions\n\n- x\n';
+  const added = withSkillSection(lf, section);
+  assert.equal(added, '# Skill\n\nintro\n\n```md\n## not a heading\n```\n\n## When a tool is missing\n\nbody\n\n## Conventions\n\n- x\n', 'before the first real heading');
+  assert.equal(skillSectionOf(added), section);
+  assert.equal(withSkillSection(added, section), added, 'writing it again changes nothing');
+  assert.equal(withSkillSection(added, null), lf, 'null takes it out again');
+  // A Windows checkout: the same answers, and the file keeps its CRLF endings.
+  const crlf = added.replace(/\n/g, '\r\n');
+  assert.equal(skillSectionOf(crlf), section);
+  assert.equal(withSkillSection(crlf, section), crlf);
+  assert.equal(withSkillSection(crlf, `${section} 2`), crlf.replace('body', 'body 2'));
+  // The last section of a file, and a file with no heading at all.
+  assert.equal(skillSectionOf(`# S\n\n${section}\n\n\n`), section);
+  assert.equal(withSkillSection('# S\n\nintro\n', section), `# S\n\nintro\n\n${section}\n`);
+  // A ## line inside a later fence does not end the section.
+  const fenced = `# S\n\n${SKILL_FALLBACK_HEADING}\n\n\`\`\`\n## inside\n\`\`\`\n\n## Next\n`;
+  assert.equal(skillSectionOf(fenced), `${SKILL_FALLBACK_HEADING}\n\n\`\`\`\n## inside\n\`\`\``);
+  assert.equal(skillSectionOf('# S\n\n```\n## When a tool is missing\n```\n'), null, 'a fenced heading is not the section');
 });
 
 test('E84: the connectors are the adapters skills/sdlc/config.yaml names, with the same fallbacks', () => {

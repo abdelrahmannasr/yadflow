@@ -67,7 +67,7 @@ export const TOOLBOX = Object.freeze([
     // yad runs it through `npx repomix@latest` (setup, `yad repo refresh`), so `npx` alone makes it usable.
     detect: { npx: true, bins: ['repomix'], plugins: ['repomix-mcp', 'repomix-commands', 'repomix-explorer'], mcp: ['repomix'], skills: ['repomix-explorer'] },
     versions: null,
-    fallback: 'no Repomix pack: yad setup and yad repo refresh skip it, yad-connect-repos and yad-backfill put the same context together by hand from the source tree and the recent git log, and the Shape steps read the code map',
+    fallback: 'no Repomix pack: yad-connect-repos and yad-backfill put the same context together by hand from the source tree and the recent git log, and the Shape steps read the code map (yad setup and yad repo refresh skip the pack only when npx is missing; they do not read the team\'s choice)',
     records: 'source: repomix-unavailable', note: null,
     usedBy: ['yad setup', 'yad repo refresh', 'yad-connect-repos', 'yad-backfill'],
   },
@@ -569,22 +569,71 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
     '<!-- Written from yadflow\'s cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->',
     '',
     'No tool below is required. When one is missing, this skill still finishes, using the fallback written',
-    'beside it. Decide from yad\'s answer, not from a guess: run `yad toolbox list --json` and read the',
-    'entry with the tool\'s `id`. Run it where the tool will run: for work inside a code repo, add',
-    '`--dir <that repo>`, so the tools installed there are found (the choices still come from its Product).',
-    'If yad cannot answer (it is not installed here, or the command fails),',
-    'use the check in the steps below. Tell the person which tools you used and which fallbacks, and why.',
+    'beside it. Decide from yad\'s answer, not from a guess: run `yad toolbox list --json` and read, in its',
+    '`tools` list, the entry with the tool\'s `id`. Run it where the tool will run: for work inside a code',
+    'repo, add `--dir <that repo>`, so the tools installed there are found.',
+    '',
+    '- **The team\'s choices.** They come from the Product. If the answer\'s `product` is null, yad found no',
+    '  Product, so a tool the team chose not to use still shows `used: true`: tell the person that.',
+    '- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install',
+    '  may be missed). If its entry says `missing` but the check in the steps below finds the tool, use',
+    '  it — never when the entry says `used: false`.',
+    '- **When yad cannot answer** (it is not installed here, or the command fails), use the check in the',
+    '  steps below.',
+    '',
+    ...(mine.some((t) => t.tier === 'connector') ? ['- **A connector** is decided by its Product file, as its line says, not by these rules.'] : []),
+    '',
+    'Tell the person which tools you used and which fallbacks, and why.',
     '',
   ];
   for (const t of mine) {
     const record = t.records ? ` Record \`${t.records}\` — it means the tool was not used, whatever the reason.` : '';
     if (t.tier === 'connector') {
-      lines.push(`- **${t.name}** (\`${t.id}\`, a connector). Used when \`${connectorFile(t)}\` connects it: the connect skill writes that file, and the steps below follow it. Without it: ${t.fallback}.${record}`);
+      // The connect skill is the one that decides and writes the file; every other skill follows it.
+      const how = CONNECT_FILES[skill]
+        ? `This skill connects it, by writing \`${connectorFile(t)}\` as the steps below say; the other skills follow that file.`
+        : `Used when \`${connectorFile(t)}\` connects it: the connect skill writes that file, and the steps below follow it.`;
+      lines.push(`- **${t.name}** (\`${t.id}\`, a connector). ${how} Without it: ${t.fallback}.${record}`);
     } else {
       lines.push(`- **${t.name}** (\`${t.id}\`). Use it when its entry has \`used: true\` and \`status.state\` is \`installed\` or \`available\`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (\`yad toolbox remove ${t.id}\`) — do this instead: ${t.fallback}.${record}`);
     }
   }
   return lines.join('\n');
+}
+
+// Where the section is in a skill's text: the heading line, up to the next `## ` heading. Lines inside a
+// ``` fence are never a heading, and a CRLF file (a Windows checkout) reads like an LF one.
+function sectionBounds(lines) {
+  let fence = false;
+  const headings = [];
+  lines.forEach((l, i) => {
+    if (/^\s*(```|~~~)/.test(l)) fence = !fence;
+    else if (!fence && l.startsWith('## ')) headings.push(i);
+  });
+  const at = headings.find((i) => lines[i] === SKILL_FALLBACK_HEADING);
+  return { at, first: headings[0], end: at === undefined ? undefined : headings.find((i) => i > at) ?? lines.length };
+}
+
+// The section as the skill holds it (LF, trailing blank lines dropped), or null when it has none.
+export function skillSectionOf(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const { at, end } = sectionBounds(lines);
+  return at === undefined ? null : lines.slice(at, end).join('\n').replace(/\n+$/, '');
+}
+
+// The skill's text with `section` in place of its old one, or, when it has none, just before its first
+// `## ` heading, so the agent reads it early. `null` removes it. The file keeps its own line ending.
+export function withSkillSection(text, section) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const { at, first, end } = sectionBounds(lines);
+  const add = section === null ? [] : [...section.split('\n'), ''];
+  let out;
+  if (at !== undefined) out = [...lines.slice(0, at), ...add, ...lines.slice(end)];
+  else if (section === null) out = lines;
+  else if (first === undefined) out = [...lines.join('\n').replace(/\n*$/, '').split('\n'), '', ...add];
+  else out = [...lines.slice(0, first), ...add, ...lines.slice(first)];
+  return out.join('\n').replace(/\n/g, eol);
 }
 
 // Every row — shipped, then the team's own — with what is found here and whether it is in use. Finding
