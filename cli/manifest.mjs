@@ -275,6 +275,9 @@ export const PROJECT_FILES = {
   // the normal case and means "every step uses the skill the catalogue names" — like design.json,
   // which is absent on a markdown-only project.
   skillsConfig: '.sdlc/skills.json',
+  // Which toolbox tools this project uses or skips, and its own tools (E86). Absent is the normal case:
+  // the core tools and the connected design, testing and learning tools are the ones in use.
+  toolboxConfig: '.sdlc/toolbox.json',
   // The kill switch and the Shape steps a team has set to `advance: auto` (E34). Absent is the normal
   // case: the switch is off and every Shape step is `human`. A project file, not the module config the
   // switch lived in before (`_bmad/sdlc/config.yaml` then, `.sdlc/config.yaml` since E3) — that one is
