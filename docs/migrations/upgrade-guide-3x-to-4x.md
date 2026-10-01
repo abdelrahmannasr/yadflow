@@ -30,7 +30,7 @@ the order to work in, and how to sort what `yad doctor` says afterwards.
 | Word | What it means |
 |---|---|
 | **yadflow / `yad`** | yadflow is the npm package. `yad` is the command it installs. |
-| **Product** | The git repo that holds your epics, their reviews and the project settings. **On 3.x it was called the "hub".** You run almost every command from here. |
+| **Product** | The git repo that holds your epics, their reviews and the project settings. **Its old name: `hub`.** You run almost every command from here. |
 | **Code repo** | A repo with your application code (for example `backend`, `pwa`, `admin`). It is connected to the Product. |
 | **Shape** | The layout of the files yadflow writes. Each file says its shape in a `"schemaVersion"` number. A file with no number counts as shape 1. 3.x writes shape 1. 4.x writes shape 10. |
 | **Migrate** | Rewriting your files from the old shape to the new one. `yad migrate --apply` does this. **One run goes from shape 1 to shape 10.** You do not run it once per shape. |
@@ -58,7 +58,7 @@ Go through this list first. Each item avoids a known problem.
 - [ ] **Pull the latest default branch** in the Product and every code repo.
 - [ ] **Find out which ledger you have.** Open `.sdlc/hub.json` (or `.sdlc/product.json`). If you see
       `"bridge_enabled": true` or `"ledger": "verified"`, you have a verified ledger. Section 4 is for you.
-- [ ] **Write down any CI files you wrote yourself** that mention `hub` (for example a workflow that
+- [ ] **Write down any CI files you wrote yourself** that use `hub`, the old name (for example a workflow that
       calls `yad-hub-checks.yml`). You will need to rename those by hand.
 - [ ] **Check for an old kill switch.** If `_bmad/sdlc/config.yaml` says `kill_switch: true`, note it.
       **4.x does not read that line, so the switch will be off after the upgrade** (see section 5).
@@ -76,7 +76,7 @@ Run every command **from inside the Product folder**, unless a step says otherwi
 | 3 | `npm install -g yadflow@latest` | Installs the new `yad` for all your projects. | — |
 | 4 | `yad --version` | Confirms the install. | A 4.x number. If you still see 3.x, see the note below this table. |
 | 5 | `yad migrate --apply` | Rewrites your files to shape 10. It saves each changed file as `<file>.yad-orig` first. | One line per file changed. |
-| 6 | `yad update` | Refreshes everything yadflow installed: the `yad-*` skills, the check scripts, the CI files and the agent hooks. It also renames old `hub` names to `product` names (for example `yad-hub-bridge` → `yad-product-bridge`). | — |
+| 6 | `yad update` | Refreshes everything yadflow installed: the `yad-*` skills, the check scripts, the CI files and the agent hooks. It also renames the old names (`hub` → `product`, for example `yad-hub-bridge` → `yad-product-bridge`). | — |
 | 7 | `yad check --fix` | Installs anything missing (for example `.sdlc/config.yaml`, the git pre-commit guard) and refreshes check scripts that nobody edited by hand. | — |
 | 8 | Commit | Commit everything, including `.claude/settings.json` and `.cursor/hooks.json`. Do **not** commit the `.yad-orig` files. | — |
 | 9 | `yad update` again, then commit | The old shell hooks (`hooks/*.sh`) are deleted only **after** the new hook settings are committed, so that a teammate who pulls never gets a setting that runs a deleted script. This second run removes them. | The old `hooks/*.sh` files are gone. |
@@ -115,12 +115,12 @@ These are not file-shape changes, so you must check them yourself. `yad doctor` 
 
 | Change | What it means for you | What to do |
 |---|---|---|
-| **"hub" is now "Product"** | 4.x reads `.sdlc/product.json` first. If `hub.json` and `product.json` both exist and disagree, **every command refuses** (`YAD-STATE-008`). | Run `yad migrate --apply` to bring the two files back in line. Rename any old `hub` names in CI files **you wrote yourself**. `yad update` renames only the files it installed. |
+| **`hub` → Product** | 4.x reads `.sdlc/product.json` first. If `hub.json` and `product.json` both exist and disagree, **every command refuses** (`YAD-STATE-008`). | Run `yad migrate --apply` to bring the two files back in line. Rename the old name (`hub` → Product) in any CI file **you wrote yourself**. `yad update` renames only the files it installed. |
 | **The kill switch moved** | The kill switch stops every step from moving forward on its own. It now lives in `.sdlc/automation.json`. **`kill_switch: true` in `_bmad/sdlc/config.yaml` is no longer read, so the switch is now off.** Doctor **fails** with `automation:legacy-kill`. | Run `yad kill --reason "<why>"`, then delete the old line. |
 | **The BMAD folder is no longer used** | BMAD is the agent framework that 3.x was packaged for. 4.x reads `.sdlc/config.yaml`, not `_bmad/sdlc/`. | Copy any value you changed into `.sdlc/config.yaml`, then delete `_bmad/sdlc/`. Fix the kill switch first if you have one. |
 | **The reviewer roster is removed** | `yad roster` is gone. One approval from anyone with access (not the author) passes a team gate. Reviewers are no longer added to PRs automatically. | Request reviewers on the PR yourself. **Do not delete the `roster` key until doctor says it is safe** (see section 6). |
 | **The author allowlist is removed** | The `verified-commits` check now looks only at signatures. ⚠️ **A signed commit from anyone with write access now passes CI.** | If you used the list to keep people out, use your GitHub or GitLab access settings instead. |
-| **`--json` output changed** | Every command prints one shared JSON format (`jsonVersion`, `version`, `command`, `ok`, `warnings`). Some names changed from `hub` to `product`. | Update any script that reads `yad … --json`. |
+| **`--json` output changed** | Every command prints one shared JSON format (`jsonVersion`, `version`, `command`, `ok`, `warnings`). Some names changed (`hub` → `product`). | Update any script that reads `yad … --json`. |
 | **Hooks are Node scripts now** | The agent hooks were `hooks/*.sh`. They are now `.mjs` files run with `node`, so they also work on Windows. | Handled by steps 6–9 in section 3. A hook you edited by hand is left in place. |
 | **A failed docs build now stops** | `yad docs build` and `yad docs deploy` exit with code 1 when the build fails. | Any script that ignored those failures will now stop. |
 | **Approvals are fingerprinted differently** | The fingerprint of an approval (the hash of what was approved) no longer includes the `status:` line. A 3.x `yad` sees new approvals as out of date. | Another reason to upgrade the whole team together. |
@@ -172,7 +172,7 @@ This table lists the codes that most often appear after a 3.x → 4.x upgrade.
 | `people:allowlist-gate-stale` | B | An old `verified-commits.sh` that still checks the author list. | `yad check --fix` |
 | `checks:rename-blind`, `checks:symlink-blind`, `checks:product-path-blind`, `checks:product-record-blind` | B | Old copies of the check scripts, with known gaps that let a PR pass when it should not. | `yad check --fix`. A copy you edited by hand is not touched: compare it with the template in `skills/yad-checks/templates/checks/`. |
 | `cli-version` | B | Your project is marked with an old version. | `yad update` |
-| `renamed:…yad-hub-bridge` | B | A skill under its old `hub` name. | `yad update` |
+| `renamed:…yad-hub-bridge` | B | A skill under its old name (`hub` → `product`). | `yad update` |
 | `hooks`, `git-hook`, `capture` | B | The agent hooks or the git pre-commit guard are missing or old. | `yad check --fix`, commit, then `yad check --fix` again. |
 | `repos:product-link-missing` | B | A code repo has no record of where the Product is. | `yad check --fix --push`, or commit the file through a PR. |
 | `repo:<name>` "stale" | B | The cached summary of a code repo is out of date. | `yad repo refresh <name>` |
@@ -277,7 +277,7 @@ If you are an AI agent helping with this upgrade, follow these rules.
 - [ ] Every person on the team runs `yad --version` and sees 4.x.
 - [ ] `yad doctor` shows no `fail`.
 - [ ] No bucket A or B warnings are left.
-- [ ] Your own CI files no longer mention old `hub` names.
+- [ ] Your own CI files no longer use `hub`, the old name.
 - [ ] The kill switch, if you used one, is set again with `yad kill`.
 - [ ] The old `hooks/*.sh` scripts are gone (or you knowingly kept an edited one).
 - [ ] Each code repo has `.sdlc/product-link.json` on its default branch.
