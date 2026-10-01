@@ -481,7 +481,7 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
 // is tested here, on Linux, macOS and Windows.
 const { INSTALL_TYPES, TIERS, TOOLBOX, onPath, parseRange, parseVersion, toolProblems, toolStatus, toolboxLines, versionInRange } = await import('./toolbox.mjs');
 // E87: each skill's "When a tool is missing" section, built from the toolbox.
-const { SKILL_FALLBACK_HEADING, connectorFile, countFallbackHeadings, isFallbackHeading, sectionMisreadLine, skillFallbackSection, skillSectionOf, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
+const { SKILL_FALLBACK_END, SKILL_FALLBACK_HEADING, connectorFile, isFallbackHeading, skillFallbackSection, skillSectionOf, skillSectionProblem, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
 
 test('E84: every shipped toolbox entry is well formed, and every tier has entries', () => {
   for (const t of TOOLBOX) assert.deepEqual(toolProblems(t), [], t.id);
@@ -515,8 +515,9 @@ test('E87: every skill a tool names quotes its fallback word for word, and no ot
   for (const t of TOOLBOX) for (const u of t.usedBy) assert.ok(u.startsWith('yad ') || skills.includes(u), `${t.id}: usedBy "${u}" is a yad command or a skill folder`);
   for (const s of skills) {
     const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
-    // One copy at most, in any spelling: a second, stale one would be read by the agent too.
-    assert.ok(countFallbackHeadings(text) <= 1, `skills/${s}/SKILL.md: one section`);
+    // One copy at most, in any spelling, closed by its end marker: a second, stale one would be read by
+    // the agent too, and a section without its marker cannot be rewritten.
+    assert.equal(skillSectionProblem(text), null, `skills/${s}/SKILL.md`);
     const found = skillSectionOf(text);
     if (named.has(s)) assert.equal(found, skillFallbackSection(s), `skills/${s}/SKILL.md: the section matches the toolbox — run node scripts/skill-fallbacks.mjs`);
     else assert.equal(found, null, `skills/${s}/SKILL.md has the section, but no toolbox tool names ${s}`);
@@ -556,106 +557,59 @@ test('E87: the section says when to use each tool, its fallback, and what to rec
   assert.equal(skillFallbackSection('yad-epic', fake), null);
 });
 
-test('E87: the section is found and written the same way in a CRLF file, and never inside a code fence', () => {
-  const section = `${SKILL_FALLBACK_HEADING}\n\nbody`;
+test('E87: the section is exactly heading to end marker, found the same way in a CRLF file and never in a fence', () => {
+  const section = `${SKILL_FALLBACK_HEADING}\n\nbody\n\n${SKILL_FALLBACK_END}`;
   const lf = '# Skill\n\nintro\n\n```md\n## not a heading\n```\n\n## Conventions\n\n- x\n';
   const added = withSkillSection(lf, section);
-  assert.equal(added, '# Skill\n\nintro\n\n```md\n## not a heading\n```\n\n## When a tool is missing\n\nbody\n\n## Conventions\n\n- x\n', 'before the first real heading');
+  assert.equal(added, `# Skill\n\nintro\n\n\`\`\`md\n## not a heading\n\`\`\`\n\n${section}\n\n## Conventions\n\n- x\n`, 'before the first real heading');
   assert.equal(skillSectionOf(added), section);
   assert.equal(withSkillSection(added, section), added, 'writing it again changes nothing');
-  assert.equal(withSkillSection(added, null), lf, 'null takes it out again');
+  assert.equal(withSkillSection(added, null), lf, 'null takes it out again, with its blank line');
   // A Windows checkout: the same answers, and the file keeps its CRLF endings.
   const crlf = added.replace(/\n/g, '\r\n');
   assert.equal(skillSectionOf(crlf), section);
   assert.equal(withSkillSection(crlf, section), crlf);
-  assert.equal(withSkillSection(crlf, `${section} 2`), crlf.replace('body', 'body 2'));
-  // The last section of a file, and a file with no heading at all.
+  assert.equal(withSkillSection(crlf, section.replace('body', 'body 2')), crlf.replace('body', 'body 2'));
+  // The last thing in a file, a file with no heading at all, and an empty file.
   assert.equal(skillSectionOf(`# S\n\n${section}\n\n\n`), section);
   assert.equal(withSkillSection('# S\n\nintro\n', section), `# S\n\nintro\n\n${section}\n`);
-  // A ## line inside a later fence does not end the section.
-  const fenced = `# S\n\n${SKILL_FALLBACK_HEADING}\n\n\`\`\`\n## inside\n\`\`\`\n\n## Next\n`;
-  assert.equal(skillSectionOf(fenced), `${SKILL_FALLBACK_HEADING}\n\n\`\`\`\n## inside\n\`\`\``);
-  assert.equal(skillSectionOf('# S\n\n```\n## When a tool is missing\n```\n'), null, 'a fenced heading is not the section');
-  // Fences close as CommonMark says: same character, at least as long, nothing after it.
-  for (const fence of ['~~~\n```\n~~~', '````\n```\n````', '```md\n## x\n```']) {
-    const t = `# S\n\n${fence}\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n## Next\n`;
-    assert.equal(skillSectionOf(t), `${SKILL_FALLBACK_HEADING}\n\nold`, JSON.stringify(fence));
+  assert.equal(withSkillSection('', section), `${section}\n`);
+  // THE POINT OF THE MARKER: whatever Markdown sits inside or after the section, a rewrite replaces
+  // only heading..marker. Headings the finder cannot see (setext, HTML, inside a list) are just text.
+  for (const inside of ['Usage\n=====', '- a\n  ---', '<h2>x</h2>', '> ## q', '```\n## fenced\n```', '## Not ours']) {
+    const t = `# S\n\n${SKILL_FALLBACK_HEADING}\n\n${inside}\n\n${SKILL_FALLBACK_END}\n\nUsage\n-----\n\nkeep me\n`;
+    assert.equal(withSkillSection(t, section), `# S\n\n${section}\n\nUsage\n-----\n\nkeep me\n`, JSON.stringify(inside));
   }
-  // ```js x``` on one line is inline code, not an opening fence: later headings still count.
-  assert.equal(skillSectionOf(`# S\n\n\`\`\`js x\`\`\`\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n## Next\n`), `${SKILL_FALLBACK_HEADING}\n\nold`);
-  // A heading with trailing spaces is the section (so a rewrite never adds a second copy), and a `#`
-  // heading after it ends it.
-  const spaced = `# S\n\n${SKILL_FALLBACK_HEADING}  \n\nold\n\n# Appendix\n`;
-  assert.equal(withSkillSection(spaced, section), `# S\n\n${section}\n\n# Appendix\n`);
-  assert.equal(withSkillSection('', section), `${section}\n`, 'an empty file is the section alone');
-  // One rule for "is this the heading", shared with the test that counts copies: indent, case, trailing
-  // spaces and closing #s all count, so a hand-written copy is replaced, never kept beside a new one.
+  // Only lines outside a fence count: a fenced example of the heading or the marker is not the section.
+  assert.equal(skillSectionOf(`# S\n\n\`\`\`\n${section}\n\`\`\`\n`), null);
+  for (const fence of ['~~~\n```\n~~~', '````\n```\n````', '```md\n## x\n```', '```js x```']) {
+    const t = `# S\n\n${fence}\n\n${section}\n\n## Next\n`;
+    assert.equal(skillSectionOf(t), section, JSON.stringify(fence));
+  }
+  // One rule for "is this the heading": indent, case, trailing spaces and closing #s all count, so a
+  // copy spelled differently is seen (and refused as a second copy), never kept beside a new one.
   for (const l of ['## When a tool is missing', '   ## when a tool is missing  ', '## When a tool is missing ##', '## When a tool is missing\r']) assert.ok(isFallbackHeading(l), JSON.stringify(l));
-  for (const l of ['# When a tool is missing', '### When a tool is missing', '    ## When a tool is missing', '##When a tool is missing']) assert.ok(!isFallbackHeading(l), JSON.stringify(l));
-  assert.equal(withSkillSection(`# S\n\n## When a tool is missing ##\n\nold\n\n## Next\n`, section), `# S\n\n${section}\n\n## Next\n`, 'a closing-# copy is replaced');
-  // The guard: a line the toolbox never writes, quoted back; a divider after a blank line is fine.
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nnote\n\n---\n\nmore`), null, 'a --- divider is allowed');
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n- last bullet\n---`), null, 'a divider under a list item');
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n---`), null, 'a divider under the heading');
-  // The copy count reads like the finder: a heading shown inside a code block is not a copy.
-  assert.equal(countFallbackHeadings(`# S\n\n${SKILL_FALLBACK_HEADING}\n\nx\n\n\`\`\`md\n${SKILL_FALLBACK_HEADING}\n\`\`\`\n`), 1);
-  assert.equal(countFallbackHeadings(`# S\n\n${SKILL_FALLBACK_HEADING}\n\n   ## when a tool is missing ##\n`), 2);
-  // A title that ends in # keeps it; a heading of only #s is empty; a long line of spaces is quick.
-  assert.ok(!isFallbackHeading('## When a tool is missing \\#'));
-  const t0 = Date.now();
-  assert.equal(isFallbackHeading(`## a${' '.repeat(50000)}x`), false);
-  assert.equal(isFallbackHeading(`## a ${'#'.repeat(50000)}x`), false);
-  assert.equal(isFallbackHeading(`## a ${'#'.repeat(50000)}x#`), false);
-  assert.ok(Date.now() - t0 < 500, 'linear on a long line, of spaces or of #s');
-  assert.ok(!isFallbackHeading('## When a tool is missing\u00a0'), 'only spaces and tabs are trimmed');
-  // Text that only looks like a heading or a list item still has its --- underline caught.
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n#hashtag\n---`), '---');
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. item\n---`), '---');
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n- one\n- two\n---`), null, 'a list, then a divider');
-  // A list is judged from its first item: a bullet or `1.` can follow a line of text and start one;
-  // `2.` cannot, so `2. a` / `3. b` under text stay paragraph text and a --- under them is caught.
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n- a\n---`), null);
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n1. a\n---`), null);
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n- a\n  more\n- b\n---`), null);
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. a\n3. b\n---`), '---');
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. a\n3. b\n===`), '===');
-  for (const [body, line] of [['Usage\n-', '-'], ['Usage\n- ', '- '], ['Usage\n===', '==='], ['<h2>Usage</h2>', '<h2>Usage</h2>'], ['> ## Quoted', '> ## Quoted'], ['```\ncode', '```'], ['#### Deep', '#### Deep']]) {
-    assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\nold\n\n${body}`), line, JSON.stringify(body));
-  }
-  // Indented up to three spaces, or a tab after the hashes: still a heading, so the section ends there.
-  for (const next of ['   ## Usage', '##\tUsage', '  # Title']) {
-    assert.equal(skillSectionOf(`# S\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\n${next}\n\nkeep\n`), `${SKILL_FALLBACK_HEADING}\n\nold`, JSON.stringify(next));
-  }
+  for (const l of ['# When a tool is missing', '### When a tool is missing', '    ## When a tool is missing', '##When a tool is missing', '## When a tool is missing \\#', '## When a tool is missing\u00a0']) assert.ok(!isFallbackHeading(l), JSON.stringify(l));
 });
 
-// The guard against a misread section, checked against a real Markdown parser (marked, a dev
-// dependency): whenever it calls a section safe, marked finds no heading in it but its own. The guard may
-// refuse a safe section — that only asks a person to delete it — but never pass an unsafe one. Rounds 5
-// to 8 each found a case by hand; this tries thousands built from the lines that caused them.
-test('E87: a section the guard calls safe holds no heading a Markdown parser sees', async () => {
-  const { default: fc } = await import('fast-check');
-  const { marked } = await import('marked');
-  const pieces = ['text', 'more text', '', '- a', '* a', '+ a', '1. a', '2. a', '3) a', '  more', '  - b', '    code',
-    '---', '===', '***', '___', '- - -', '-', '=', '#tag', '> q', '> ## q', '## X', '# X', '```', '~~~', '<h2>x</h2>', '| a | b |', '|---|---|',
-    '   1. c', '\ttab', '- ', '1.', '<div>', '</div>', '  ---', '   ===', '* * *', '_ _ _', '-  a', '10. a', '>', '[x]: /u'];
-  const headings = (md) => marked.lexer(md).filter((t) => t.type === 'heading').length;
-  fc.assert(fc.property(fc.array(fc.constantFrom(...pieces), { maxLength: 12 }), (body) => {
-    const section = `${SKILL_FALLBACK_HEADING}\n\n${body.join('\n')}`;
-    if (sectionMisreadLine(section) !== null) return true;
-    return headings(section) === 1;
-  }), { numRuns: 5000, seed: 87 });
-  // Where marked and CommonMark disagree, the guard takes the reading that finds a heading: these are
-  // marked's, each found by this test.
-  for (const body of ['text\n***\n===', '- a\n#tag\ntext\n---', 'text\n  - b\n---', 'text\n* * *\n  more\n-', '- \n  more\n-']) {
-    assert.notEqual(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n${body}`), null, JSON.stringify(body));
+test('E87: a section yad cannot read whole is never rewritten', () => {
+  const section = `${SKILL_FALLBACK_HEADING}\n\nbody\n\n${SKILL_FALLBACK_END}`;
+  const cases = [
+    [`# S\n\n${SKILL_FALLBACK_HEADING}\n\nhand-made, no marker\n\n## Next\n`, /no end marker/],
+    [`# S\n\n${section}\n\n## when a tool is missing ##\n\nold\n`, /heading is there more than once/],
+    [`# S\n\n${section}\n\n${SKILL_FALLBACK_END}\n`, /end marker is there more than once/],
+    [`# S\n\n${SKILL_FALLBACK_END}\n\n## Next\n`, /without the section's heading/],
+  ];
+  for (const [text, why] of cases) {
+    assert.match(skillSectionProblem(text), why);
+    assert.equal(skillSectionOf(text), null);
+    assert.equal(withSkillSection(text, section), text, 'left as it is');
+    assert.equal(withSkillSection(text, null), text, 'not removed either');
+    assert.equal(withSkillSection(text.replace(/\n/g, '\r\n'), section), text.replace(/\n/g, '\r\n'));
   }
-  // The cases round 8 found, by name.
-  for (const body of ['- a\n---\ntext\n---', '- a\n***\ntext\n---', '- - -\ntext\n---']) {
-    assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\n${body}`), '---', JSON.stringify(body));
-  }
-  // And two it no longer refuses: a list that starts after paragraph text, and one after a divider.
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n\npara\n2. a\n- b\n---`), null);
-  assert.equal(sectionMisreadLine(`${SKILL_FALLBACK_HEADING}\n---\n2. a\n---`), null);
+  assert.equal(skillSectionProblem(`# S\n\n${section}\n`), null);
+  assert.equal(skillSectionProblem('# S\n'), null, 'no section is no problem');
+  assert.equal(skillSectionProblem(`# S\n\n\`\`\`\n${SKILL_FALLBACK_END}\n\`\`\`\n`), null, 'a fenced marker is an example');
 });
 
 // Every function that reads a skill's text, on long awkward input: a pattern that backtracks shows up
@@ -665,56 +619,58 @@ test('E87: the section readers stay fast on long, awkward input', () => {
   const N = 40000;
   const H = SKILL_FALLBACK_HEADING;
   const inputs = [
-    `## a${' '.repeat(N)}x`, `## a${' \t'.repeat(N)}`, `## a ${'#'.repeat(N)}x`, `##${' '.repeat(N)}\rx`,
+    `## a${' '.repeat(N)}x`, `## a${' \t'.repeat(N)}`, `## a ${'#'.repeat(N)}x`, `## a ${'#'.repeat(N)}x#`, `##${' '.repeat(N)}\rx`,
     `##${' '.repeat(N)}\u2028x`, `\`\`\`${'`'.repeat(N)}\rx`, `~~~${'~'.repeat(N)}\u2029x`, `x${'\n'.repeat(N)}x`,
-    `${H}\n${'\n'.repeat(N)}x`, `${H}\n${'- a\n---\n'.repeat(N / 8)}`, `${H}\n${'x\n'.repeat(N / 2)}---`,
-    `${H}\n${'2. a\n'.repeat(N / 5)}---`, `${'#'.repeat(N)}`, `${H}\n${'> '.repeat(N)}x`, `${H}\n<h${'2'.repeat(N)}`,
-    `${H}\n${'- '.repeat(N)}x`, `${H}\n1.${' '.repeat(N)}`, `${H}\n${'* '.repeat(N)}*`, `${H}\n${'text\n* * *\n'.repeat(N / 12)}-`,
+    `${H}\n${'\n'.repeat(N)}x`, `${'#'.repeat(N)}`, `${SKILL_FALLBACK_END}${' '.repeat(N)}x`, `${H}\n${'```\n'.repeat(N / 4)}`,
   ];
   for (const input of inputs) {
     const t0 = Date.now();
     isFallbackHeading(input);
-    countFallbackHeadings(input);
+    skillSectionProblem(input);
     skillSectionOf(input);
-    withSkillSection(input, `${H}\n\nbody`);
+    withSkillSection(input, `${H}\n\nbody\n\n${SKILL_FALLBACK_END}`);
     withSkillSection(input, null);
-    sectionMisreadLine(input.startsWith(H) ? input : `${H}\n${input}`);
     assert.ok(Date.now() - t0 < 1000, `slow on ${JSON.stringify(input.slice(0, 30))}… (${Date.now() - t0} ms)`);
   }
 });
 
-test('E87: the sync writes, rewrites and removes sections, keeps CRLF, and refuses a misread section', () => {
+test('E87: the sync writes, rewrites and removes sections, keeps CRLF, and refuses one without its marker', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e87-'));
   try {
-    const tools = [{ ...TOOLBOX.find((t) => t.id === 'spec-kit'), usedBy: ['named', 'crlf', 'misread'] }];
+    const tools = [{ ...TOOLBOX.find((t) => t.id === 'spec-kit'), usedBy: ['named', 'crlf', 'stale', 'handmade'] }];
     const want = (s) => skillFallbackSection(s, tools);
+    const old = `${SKILL_FALLBACK_HEADING}\n\nold words\n\n${SKILL_FALLBACK_END}`;
     const put = (s, text) => { fs.mkdirSync(path.join(dir, s), { recursive: true }); fs.writeFileSync(path.join(dir, s, 'SKILL.md'), text); };
     const get = (s) => fs.readFileSync(path.join(dir, s, 'SKILL.md'), 'utf8');
     put('named', '# Named\n\nintro\n\n## Steps\n\n- do it\n');
-    put('unnamed', `# Unnamed\n\n${SKILL_FALLBACK_HEADING}\n\nold words\n\n## Steps\n\n- do it\n`);
-    put('crlf', `# Crlf\r\n\r\n${SKILL_FALLBACK_HEADING}\r\n\r\nold\r\n\r\n## Steps\r\n`);
-    // A heading the finder does not know (setext: text over ===) would let a rewrite cut "## Steps"'s text.
-    const misread = `# Misread\n\n${SKILL_FALLBACK_HEADING}\n\nold\n\nUsage\n=====\n\nkeep me\n`;
-    put('misread', misread);
+    put('unnamed', `# Unnamed\n\n${old}\n\n## Steps\n\n- do it\n`);
+    put('crlf', `# Crlf\n\n${old}\n\n## Steps\n`.replace(/\n/g, '\r\n'));
+    // After the marker, a heading no finder reads (setext) — kept, because nothing past the marker is touched.
+    put('stale', `# Stale\n\n${old}\n\nUsage\n=====\n\nkeep me\n`);
+    const handmade = `# Handmade\n\n${SKILL_FALLBACK_HEADING}\n\nno marker\n\nUsage\n=====\n\nkeep me\n`;
+    put('handmade', handmade);
     const before = fs.readdirSync(dir).map(get);
-    const refused = [{ skill: 'misread', line: '=====' }];
-    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: [], refused }, 'check names what a write would refuse');
+    const refused = [{ skill: 'handmade', reason: skillSectionProblem(handmade) }];
+    assert.match(refused[0].reason, /no end marker/);
+    const stale = ['crlf', 'handmade', 'named', 'stale', 'unnamed'];
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale, wrote: [], refused }, 'check names what a write would refuse');
     assert.deepEqual(fs.readdirSync(dir).map(get), before, 'check writes nothing');
-    assert.deepEqual(syncSkillFallbacks(dir, { tools }), { stale: ['crlf', 'misread', 'named', 'unnamed'], wrote: ['crlf', 'named', 'unnamed'], refused });
+    assert.deepEqual(syncSkillFallbacks(dir, { tools }), { stale, wrote: ['crlf', 'named', 'stale', 'unnamed'], refused });
     assert.equal(get('named'), `# Named\n\nintro\n\n${want('named')}\n\n## Steps\n\n- do it\n`);
     assert.equal(get('unnamed'), '# Unnamed\n\n## Steps\n\n- do it\n', 'a skill no tool names loses the section');
-    assert.equal(get('crlf'), `# Crlf\r\n\r\n${want('crlf').replace(/\n/g, '\r\n')}\r\n\r\n## Steps\r\n`, 'CRLF kept');
-    assert.equal(get('misread'), misread, 'a misread section is left alone');
-    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['misread'], wrote: [], refused }, 'the rest is now clean');
+    assert.equal(get('crlf'), `# Crlf\n\n${want('crlf')}\n\n## Steps\n`.replace(/\n/g, '\r\n'), 'CRLF kept');
+    assert.equal(get('stale'), `# Stale\n\n${want('stale')}\n\nUsage\n=====\n\nkeep me\n`, 'everything after the marker kept');
+    assert.equal(get('handmade'), handmade, 'a section without its marker is left alone');
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['handmade'], wrote: [], refused }, 'the rest is now clean');
     // The fix the message gives: delete the old section, and the next run adds a fresh one.
-    put('misread', '# Misread\n\nUsage\n=====\n\nkeep me\n');
-    assert.deepEqual(syncSkillFallbacks(dir, { tools }).wrote, ['misread']);
-    assert.ok(get('misread').includes('keep me'));
+    put('handmade', '# Handmade\n\nUsage\n=====\n\nkeep me\n');
+    assert.deepEqual(syncSkillFallbacks(dir, { tools }).wrote, ['handmade']);
+    assert.ok(get('handmade').includes('keep me'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  // The generator's own text never looks misread, for any skill.
+  // The generator's own text always ends with its marker, and is read back whole.
   for (const s of fs.readdirSync(path.join(ROOT, 'skills'))) {
     const section = skillFallbackSection(s);
-    if (section) assert.equal(sectionMisreadLine(section), null, s);
+    if (section) assert.equal(skillSectionOf(`# S\n\n${section}\n`), section, s);
   }
 });
 

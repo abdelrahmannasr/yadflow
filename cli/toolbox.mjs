@@ -550,6 +550,10 @@ export function toolUse(tool, { shipped, connected }) {
 //              writes that file and the step skill follows it, as before E87.
 // Recommended tools are bound with `yad skill bind`, so no skill names one.
 export const SKILL_FALLBACK_HEADING = '## When a tool is missing';
+// The section's last line. The section is exactly the lines from its heading to this marker, so a
+// rewrite never has to guess from the Markdown where the section ends (rounds 5 to 9 of the E87 review
+// each found one more way such a guess could cut part of a skill).
+export const SKILL_FALLBACK_END = '<!-- end: When a tool is missing -->';
 const CONNECT_FILES = { 'yad-connect-design': 'designConfig', 'yad-connect-testing': 'testingConfig', 'yad-connect-learning': 'learningConfig' };
 
 // The Product file that connects a connector: the one its `yad-connect-*` skill writes.
@@ -611,31 +615,28 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
     lines.push(`  - Fallback — ${t.fallback}.`);
     if (t.records) lines.push(`  - Record \`${t.records}\`. It means the tool was not used, whatever the reason.`);
   }
+  lines.push('', SKILL_FALLBACK_END);
   return lines.join('\n');
 }
 
-// Where the section is in a skill's text: from its heading to the next `#` or `##` heading. A line
-// inside a fenced code block is never a heading. A fence closes only with the same character, at least
-// as many times, and nothing after it (CommonMark), so a ```` fence holding ``` lines stays open.
+// Where the section is in a skill's text: from its heading down to its end marker, both included. A
+// line inside a fenced code block is never either, so an example that quotes them is skipped. A fence
+// closes only with the same character, at least as many times, and nothing after it (CommonMark).
 // A heading may be indented up to three spaces and end in spaces or closing `#`s, as CommonMark allows.
 // `first`, where a new section goes, is the first `##` heading: a skill's `#` title is above it.
-// Known limit: a `##` line inside a list item reads as a heading here, which ends the section early —
-// the safe way round, since nothing outside the section is cut.
-// The text is taken whole and its closing `#`s cut after, in two steps: one lazy pattern for both was
-// slow (square of the length) on a line with a long run of spaces.
 // `[^]*`, not `.*`: `.` stops at a lone \r or a Unicode line break, and `$` then forces a slow retry.
 const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+([^]*))?$/;
+// Only spaces and tabs are trimmed, as CommonMark does — by hand, since /[ \t]+$/ backtracks.
+const trimSpaces = (s) => { let k = s.length; while (k > 0 && (s[k - 1] === ' ' || s[k - 1] === '\t')) k--; return s.slice(0, k); };
 const headingOf = (line) => {
   const h = HEADING.exec(line);
   if (!h) return null;
   // Cut a closing run of `#`s only when a space or tab comes before it (`## C#` keeps its `#`).
   // Walked back by hand: a pattern for the run of `#`s restarts at each one, which is slow on a long run.
-  // Only spaces and tabs are trimmed, as CommonMark does — by hand too, since /[ \t]+$/ backtracks.
-  const trim = (s) => { let k = s.length; while (k > 0 && (s[k - 1] === ' ' || s[k - 1] === '\t')) k--; return s.slice(0, k); };
-  let text = trim(h[2] ?? '');
+  let text = trimSpaces(h[2] ?? '');
   let j = text.length;
   while (j > 0 && text[j - 1] === '#') j--;
-  if (j < text.length && (j === 0 || text[j - 1] === ' ' || text[j - 1] === '\t')) text = trim(text.slice(0, j));
+  if (j < text.length && (j === 0 || text[j - 1] === ' ' || text[j - 1] === '\t')) text = trimSpaces(text.slice(0, j));
   return { level: h[1].length, text };
 };
 
@@ -646,74 +647,42 @@ export function isFallbackHeading(line) {
   return h?.level === 2 && h.text.toLowerCase() === SKILL_FALLBACK_HEADING.slice(3).toLowerCase();
 }
 
-// How many lines of a skill are the section's heading, outside code fences, as the finder reads them.
-export function countFallbackHeadings(text) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  return sectionBounds(lines).headings.filter((h) => isFallbackHeading(lines[h.i])).length;
-}
+const isFallbackEnd = (line) => trimSpaces(line.replace(/\r$/, '')) === SKILL_FALLBACK_END;
 
 function sectionBounds(lines) {
   let fence = null;
   const headings = [];
+  const ends = [];
   lines.forEach((l, i) => {
     const f = /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
     if (fence) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
     } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) fence = f[1];
+    else if (isFallbackEnd(l)) ends.push(i);
     else {
       const h = headingOf(l);
-      if (h) headings.push({ i, level: h.level });
+      if (h) headings.push({ i, level: h.level, ours: isFallbackHeading(l) });
     }
   });
-  const at = headings.find((h) => isFallbackHeading(lines[h.i]))?.i;
-  const first = headings.find((h) => h.level === 2)?.i;
-  return { at, first, headings, end: at === undefined ? undefined : headings.find((h) => h.i > at)?.i ?? lines.length };
+  const ours = headings.filter((h) => h.ours).map((h) => h.i);
+  const at = ours[0];
+  const end = at === undefined ? undefined : ends.find((i) => i > at);
+  // Why a section cannot be rewritten safely, or null. Without its marker, where it ends is a guess.
+  const problem = ours.length > 1 ? 'the section\'s heading is there more than once'
+    : ends.length > 1 ? 'the section\'s end marker is there more than once'
+      : at === undefined ? (ends.length ? 'the end marker is there without the section\'s heading' : null)
+        : end === undefined ? 'the section has no end marker (a copy made by hand, or older than the marker)' : null;
+  return { at, end, problem, first: headings.find((h) => h.level === 2)?.i };
 }
 
-// The first line of a section read from a skill that `skillFallbackSection` never writes, or null: a
-// heading (`#`, `<h2>`, or one inside a `>` quote), a heading underline (`===` or `---` right under a
-// paragraph line), or a code fence. Such a line means the section finder may have run past the real end
-// of the section, and a rewrite would cut part of the skill. It reads the text, not the bounds that
-// produced it, so it catches the misread the bounds cannot see. A `---` after a blank line, a list item
-// or a heading is only a divider, and is allowed.
-// A list item with something in it: marked reads an empty one (`- `) as text.
-const isItem = (s) => /^ {0,3}([-*+]|\d{1,9}[.)])[ \t]+\S/.test(s);
-// Can an item interrupt a paragraph? Only a bullet or an ordered item starting at 1 (CommonMark), and,
-// as marked reads it, only when it is not indented.
-const interrupts = (s) => /^([-*+]|0*1[.)])[ \t]+\S/.test(s);
-// A divider (thematic break): three or more of one of - * _, spaces allowed between. CommonMark reads it
-// before a list item, so `- - -` is a divider, not an item.
-const isDivider = (s) => /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/.test(s);
-
-export function sectionMisreadLine(section) {
-  const lines = section.split('\n');
-  // Read line by line, once. `text` says whether paragraph text is open above (so a `---` or `===`
-  // under it would make a heading); `list` whether the current block is a list (where it would not).
-  // A list starts at an item that begins the block, or that can interrupt the text above it — `2. a`
-  // under a line of text is more of that text, while `- b` or `1. b` starts a list. When renderers
-  // disagree, the reading that finds a heading wins: marked, unlike CommonMark, keeps a `***` under text
-  // as part of the paragraph, so a divider ends the block only when no text is open; and marked ends a
-  // list at an unindented `#tag` line, so any unindented line that is not an item reopens text.
-  let top = 1;
-  let text = false;
-  let list = false;
-  for (let i = 1; i < lines.length; i++) {
-    const l = lines[i];
-    if (/^ {0,3}(>\s*)*#{1,6}(\s|$)|^\s*<h[1-6][\s>]|^ {0,3}(`{3,}|~{3,})/i.test(l)) return l;
-    if (/^ {0,3}(=+|-+)[ \t]*$/.test(l) && text && !list) return l;
-    if (l.trim() === '') { top = i + 1; text = false; list = false; } else if (isDivider(l)) {
-      // Never an item (`* * *`). Under open text it may be more of that text, so the text stays open.
-      if (!(text && !list)) { top = i + 1; text = false; list = false; }
-    } else if (isItem(l)) {
-      if (!list && (i === top || interrupts(l))) { list = true; text = false; } else if (!list) text = true;
-    } else if (!list || !/^[ \t]/.test(l)) { list = false; text = true; } // an unindented line may end a list (marked)
-  }
-  return null;
+// Why yad will not rewrite this skill's section, or null when it can (or there is none).
+export function skillSectionProblem(text) {
+  return sectionBounds(text.replace(/\r\n/g, '\n').split('\n')).problem;
 }
 
 // Bring every skill under `skillsDir` in line with the toolbox: the section where a tool names the
 // skill, none where no tool does. `check` changes nothing. Returns the skill folder names it found
-// stale and wrote, and `refused: [{ skill, line }]` — a section it will not rewrite, with the line why.
+// stale and wrote, and `refused: [{ skill, reason }]` — a section it will not touch, and why.
 export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX } = {}) {
   const out = { stale: [], wrote: [], refused: [] };
   const skills = fs.readdirSync(skillsDir).filter((s) => fs.existsSync(path.join(skillsDir, s, 'SKILL.md'))).sort();
@@ -721,14 +690,13 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
     const file = path.join(skillsDir, skill, 'SKILL.md');
     const text = fs.readFileSync(file, 'utf8');
     const want = skillFallbackSection(skill, tools); // null: no tool names this skill, so no section
-    const have = skillSectionOf(text);
+    const reason = skillSectionProblem(text);
     // Compared as text, not bytes, so a CRLF checkout (Windows) is not stale for its line endings alone.
-    if (have === want) continue;
+    if (!reason && skillSectionOf(text) === want) continue;
     out.stale.push(skill);
     // One answer for both modes: `check` names what a write would refuse.
-    const odd = have === null ? null : sectionMisreadLine(have);
-    if (odd !== null) out.refused.push({ skill, line: odd });
-    if (check || odd !== null) continue;
+    if (reason) out.refused.push({ skill, reason });
+    if (check || reason) continue;
     fs.writeFileSync(file, withSkillSection(text, want));
     out.wrote.push(skill);
   }
@@ -738,30 +706,34 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
 // By hand: /\n+$/ restarts at every newline of a long blank run in the middle of the text.
 const dropTrailingNewlines = (s) => { let k = s.length; while (k > 0 && s[k - 1] === '\n') k--; return s.slice(0, k); };
 
-// The section as the skill holds it (LF, trailing blank lines dropped), or null when it has none.
+// The section as the skill holds it (LF), heading to end marker, or null when it has none. With a
+// problem (no marker, two copies), null too: there is no section yad can read whole.
 export function skillSectionOf(text) {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const { at, end } = sectionBounds(lines);
-  return at === undefined ? null : dropTrailingNewlines(lines.slice(at, end).join('\n'));
+  const { at, end, problem } = sectionBounds(lines);
+  return at === undefined || problem ? null : lines.slice(at, end + 1).join('\n');
 }
 
 // The skill's text with `section` in place of its old one, or, when it has none, just before its first
-// `## ` heading, so the agent reads it early. `null` removes it. The file keeps its own line ending.
+// `## ` heading, so the agent reads it early. `null` removes it, with the blank line it was written
+// with. A section with a problem is left as it is. The file keeps its own line ending.
 export function withSkillSection(text, section) {
   // A file keeps the ending most of its lines have (a Windows checkout is all CRLF).
   const crlf = (text.match(/\r\n/g) || []).length;
   const eol = crlf > (text.match(/\n/g) || []).length - crlf ? '\r\n' : '\n';
   const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const { at, first, end } = sectionBounds(lines);
-  const add = section === null ? [] : [...section.split('\n'), ''];
+  const { at, end, first, problem } = sectionBounds(lines);
+  if (problem) return text;
   let out;
-  if (at !== undefined) out = [...lines.slice(0, at), ...add, ...lines.slice(end)];
-  else if (section === null) out = lines;
+  if (at !== undefined) {
+    let after = end + 1;
+    if (section === null && lines[after] === '') after++;
+    out = [...lines.slice(0, at), ...(section === null ? [] : section.split('\n')), ...lines.slice(after)];
+  } else if (section === null) out = lines;
   else if (first === undefined) {
     const body = dropTrailingNewlines(lines.join('\n'));
-    out = body ? [...body.split('\n'), '', ...add] : add;
-  }
-  else out = [...lines.slice(0, first), ...add, ...lines.slice(first)];
+    out = body ? [...body.split('\n'), '', ...section.split('\n'), ''] : [...section.split('\n'), ''];
+  } else out = [...lines.slice(0, first), ...section.split('\n'), '', ...lines.slice(first)];
   return out.join('\n').replace(/\n/g, eol);
 }
 

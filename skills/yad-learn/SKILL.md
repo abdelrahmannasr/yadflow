@@ -34,6 +34,8 @@ Tell the person which tools you used and which fallbacks, and why.
 - **DeepTutor** (`deeptutor`, a connector). Used when `.sdlc/learning.json` connects it. yad-connect-learning writes that file; follow it, not yad's toolbox answer.
   - Fallback — harness-native tutoring: yad-learn has your agent read the project files directly.
 
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).

@@ -40,6 +40,8 @@ Tell the person which tools you used and which fallbacks, and why.
   - Fallback — no Repomix pack. yad-connect-repos and yad-backfill put the same context together by hand, from the source tree and the recent git log, and the Shape steps read the code map.
   - Record `source: repomix-unavailable`. It means the tool was not used, whatever the reason.
 
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).

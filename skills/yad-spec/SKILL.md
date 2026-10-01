@@ -45,6 +45,8 @@ Tell the person which tools you used and which fallbacks, and why.
   - Fallback — yad-spec writes the same spec files by hand, in Spec Kit's layout.
   - Record `speckit: not-installed`. It means the tool was not used, whatever the reason.
 
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory — the **product** repo (epic

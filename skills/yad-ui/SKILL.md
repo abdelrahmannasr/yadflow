@@ -51,6 +51,8 @@ Tell the person which tools you used and which fallbacks, and why.
 - **Pencil (pen.dev)** (`pencil`, a connector). Used when `.sdlc/design.json` connects it. yad-connect-design writes that file; follow it, not yad's toolbox answer.
   - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
 
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory.

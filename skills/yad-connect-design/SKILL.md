@@ -30,6 +30,8 @@ Tell the person which tools you used and which fallbacks, and why.
 - **Pencil (pen.dev)** (`pencil`, a connector). This skill connects it, by writing `.sdlc/design.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
   - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
 
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).

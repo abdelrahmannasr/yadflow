@@ -41,6 +41,8 @@ Tell the person which tools you used and which fallbacks, and why.
 - **Maestro** (`maestro`, a connector). Used when `.sdlc/testing.json` connects it. yad-connect-testing writes that file; follow it, not yad's toolbox answer.
   - Fallback — artifacts-only: yad-test-cases writes test-cases.md only.
 
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory.

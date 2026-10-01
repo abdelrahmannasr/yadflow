@@ -34,6 +34,8 @@ Tell the person which tools you used and which fallbacks, and why.
 - **Maestro** (`maestro`, a connector). This skill connects it, by writing `.sdlc/testing.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
   - Fallback — artifacts-only: yad-test-cases writes test-cases.md only.
 
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).
