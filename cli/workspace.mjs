@@ -488,7 +488,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   // new teammate is the person most likely to miss one. Offered, never installed.
   log('');
   log(c.bold('Toolbox'));
-  const toolbox = offerToolbox(product, product);
+  const toolbox = offerToolbox(product, product, { canRemove: false });
 
   log('');
   if (repos.failed.length) hand(`${repos.failed.length} repo(s) not cloned — fix what is named above and re-run \`yad join ${shown(url)}\`; it keeps what is already there`);

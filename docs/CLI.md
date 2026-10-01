@@ -1259,8 +1259,10 @@ in use. `add` and `remove` write only a difference from that default, so the fil
 - **Setup, check, update and join offer the same check (E85).** `yad setup` has a Toolbox step after the
   optional-tools step, so a connector chosen there counts. `yad check` and `yad update` end with a
   Toolbox section, and `yad join` with one read from the Product it just cloned — a new teammate is the
-  one most likely to miss a tool. Each prints what `yad toolbox check` prints, then says that nothing is
-  installed for you. None of them runs a program, writes a file for it, or changes its exit code. Their
+  one most likely to miss a tool. Each prints what `yad toolbox check` prints — `check` and `update` look
+  for tools in the folder you run them in, so from a code repo its own skills count — then says that
+  nothing is installed for you. Join leaves out the advice to `yad toolbox remove` a tool: it writes the
+  team's file, and one machine lacking a tool is no reason to change what the whole team uses. None of them runs a program, writes a file for it, or changes its exit code. Their
   `--json` answer gains `toolbox: { used, findings, problems }` — the tool ids in use, the same
   `findings` as `yad toolbox check --json`, and any line of `toolbox.json` that does nothing. If the
   check itself cannot run, the command still finishes, warns, and answers `error: "could not check"`.

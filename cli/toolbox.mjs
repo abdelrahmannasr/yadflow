@@ -631,7 +631,7 @@ export function runToolboxCheck(root, { json = false, productRoot = null, ...opt
   if (json) return emitJSON({ ok: true, ...(productRoot ? where(productRoot) : { product: null, file: null }), used: used.map((r) => r.id), findings, problems });
   for (const p of problems) warn(p);
   for (const line of toolboxCheckLines(res)) log(line);
-  if (findings.length) info(productRoot ? 'stop using a tool here with `yad toolbox remove <id>`' : 'no Product here, so this checks the core tools only');
+  if (findings.length) info(productRoot ? 'stop using a tool, for the whole team, with `yad toolbox remove <id>`' : 'no Product here, so this checks the core tools only');
   return undefined;
 }
 
@@ -639,7 +639,9 @@ export function runToolboxCheck(root, { json = false, productRoot = null, ...opt
 // what the project uses that is not here and how to get it. It installs nothing, runs no program and
 // writes no file (decided with the row, as `yad toolbox add` is) — and it never fails the command it is
 // part of. Returns the part of the --json answer it adds: `{ used, findings, problems }`.
-export function offerToolbox(root, productRoot, opts = {}) {
+// `canRemove: false` leaves out the `remove` advice — for `yad join`, whose reader just cloned the team's
+// choices: one person's machine lacking a tool is no reason to change what the whole team uses.
+export function offerToolbox(root, productRoot, { canRemove = true, ...opts } = {}) {
   let res;
   // A step inside another command: if finding tools throws (a home folder that cannot be read), the
   // command it is part of still finishes, and says why the step is missing.
@@ -649,7 +651,11 @@ export function offerToolbox(root, productRoot, opts = {}) {
   }
   for (const p of res.problems) warn(p);
   for (const line of toolboxCheckLines(res)) log(line);
-  if (res.findings.length) info('nothing is installed for you: run the command you choose, or stop using a tool with `yad toolbox remove <id>`');
+  if (res.findings.length) {
+    info(canRemove
+      ? 'nothing is installed for you: follow the steps you choose, or, for the whole team, stop using a tool with `yad toolbox remove <id>`'
+      : 'nothing is installed for you: follow the steps you choose');
+  }
   return { used: res.used.map((r) => r.id), findings: res.findings, problems: res.problems };
 }
 

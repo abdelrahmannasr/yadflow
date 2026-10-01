@@ -1316,3 +1316,39 @@ test('E85: `yad setup` offers the tools in use after the tools step — a connec
     assert.ok(!fs.existsSync(path.join(p, '.sdlc/toolbox.json')));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E85 review 1: `yad check` from a code repo finds that repo\'s tools, as `yad toolbox check` does; the --fix hint comes before the section', () => {
+  const { T, p, home } = product({ '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }] }) });
+  const repo = path.join(p, 'api');
+  try {
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    skill(path.join(repo, '.claude/skills'), 'impeccable', 'name: impeccable\nversion: 3.7.1\n');
+    const missing = (r) => JSON.parse(r.stdout).toolbox.findings.map((f) => f.id);
+    for (const verb of ['check', 'update']) {
+      const fromRepo = yad([verb, '--json'], { cwd: repo, home });
+      assert.equal(fromRepo.status, 0, verb + fromRepo.stdout + fromRepo.stderr);
+      assert.ok(!missing(fromRepo).includes('impeccable'), `${verb}: found in the code repo`);
+      assert.ok(missing(yad([verb, '--json'], { cwd: p, home })).includes('impeccable'), `${verb}: not in the Product's own folder`);
+    }
+    const human = yad(['check'], { cwd: p, home });
+    assert.match(human.stdout, /yad check --fix[^\n]*\n\nToolbox\n/, 'the --fix hint is above the Toolbox section, not under it');
+    assert.match(human.stdout, /for the whole team, stop using a tool with `yad toolbox remove <id>`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E85 review 1: join\'s offer does not advise removing a tool the team chose', () => {
+  const { T, p } = product();
+  try {
+    const lines = [];
+    const orig = console.log;
+    console.log = (...a) => lines.push(a.join(' '));
+    try {
+      offerToolbox(p, p, { canRemove: false, items: [], has: () => false });
+      offerToolbox(p, p, { items: [], has: () => false });
+    } finally { console.log = orig; }
+    const hints = lines.filter((l) => l.includes('nothing is installed for you'));
+    assert.equal(hints.length, 2);
+    assert.ok(!hints[0].includes('yad toolbox remove'), 'join: no remove advice');
+    assert.match(hints[1], /for the whole team/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

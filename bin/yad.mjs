@@ -540,6 +540,9 @@ async function main() {
   // registers (through `.yad-workspace.json`) — and says where, on stderr. A code-repo command keeps acting
   // on the repo it runs in, and is handed the Product to read (its registry: name, platform, branch).
   const dirGiven = process.argv.slice(2).some((a) => a === '--dir' || a.startsWith('--dir='));
+  // The folder the person ran yad in (or named), before a Product command moves `o.dir` to the Product.
+  // `check` and `update` look for tools there, as `yad toolbox check` does: a code repo's own skills count.
+  const runFrom = dirGiven ? o.dir : shellCwd();
   if (PRODUCT_CMDS.has(cmd) || REPO_CMDS.has(cmd)) {
     const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
     const shown = (p) => path.relative(process.cwd(), p) || '.';
@@ -626,11 +629,11 @@ async function main() {
     }
     case 'check':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
+      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolboxFrom: runFrom });
       break;
     case 'update':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
+      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolboxFrom: runFrom });
       break;
     case 'doctor':
       result = await commands.runDoctor(o.dir, { json: o.json });

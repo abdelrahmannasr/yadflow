@@ -678,7 +678,7 @@ export async function runSetup(root, opts = {}) {
   // step, so a connector chosen there counts as in use. It offers and never installs: nothing is run and
   // no file is written, and a missing tool never fails setup (each has a fallback).
   S('Toolbox (external tools this project uses)');
-  guide(['Each tool is optional and has a fallback. yad installs nothing: it prints the command, and you choose.']);
+  guide(['Each tool is optional and has a fallback. yad installs nothing: it prints how to get each one, and you choose.']);
   const toolbox = offerToolbox(root, root);
 
   // Summary + version stamp
