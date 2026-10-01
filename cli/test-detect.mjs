@@ -841,7 +841,7 @@ test('E86: `yad toolbox add / remove` write only the difference from the default
 
     // A core tool and a connected one are skipped by writing `skip`; adding them back deletes the line.
     r = yad(['toolbox', 'remove', 'spec-kit'], { cwd: p, home });
-    assert.match(r.stdout, /Spec Kit is not used here now — yad-spec writes the same spec files by hand/);
+    assert.match(r.stdout, /Spec Kit is not used here now\. Without it: yad-spec writes the same spec files by hand/);
     r = yad(['toolbox', 'remove', 'figma'], { cwd: p, home });
     assert.match(r.stdout, /\.sdlc\/design\.json still connects it — `yad-connect-design` changes the connection/);
     assert.deepEqual(toolboxJSON(p).shipped, { 'bmad-method': 'use', 'spec-kit': 'skip', figma: 'skip' });
@@ -1246,4 +1246,15 @@ test('E86 review 4: each way to be out of remove\'s reach is flagged on its own;
       assert.equal(/fix it by hand\)/.test(checks[0].hint), flagged, JSON.stringify(doc));
     } finally { fs.rmSync(T, { recursive: true, force: true }); }
   }
+});
+
+// ---------- E86 small notes ----------
+
+test('E86: a removed tool\'s fallback reads as "without it", and a copy\'s reason names the id', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { ecc: 'use' }, custom: [{ id: 'ecc', role: 'r', fallback: 'f', detect: { bins: ['x'] } }] }) });
+  try {
+    const r = yad(['toolbox', 'remove', 'ecc'], { cwd: p, home });
+    assert.match(r.stdout, /ECC .* is not used here now\. Without it: nothing changes: yadflow's own skills run every step/);
+    assert.match(r.stdout, /also removed 1 custom entry under the id ecc, which was ignored \(the id is a shipped tool's\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

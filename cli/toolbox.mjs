@@ -682,7 +682,9 @@ function sayEdit(tool, was, now, changed) {
   const state = now.used ? 'used here' : 'not used here';
   if (!changed) info(`${tool.name} is already ${state} — nothing to change`);
   else if (was.used === now.used) info(`${tool.name} is already ${state} — removed a line in ${FILE} that did nothing`);
-  else ok(now.used ? `${tool.name} is used here now` : `${tool.name} is not used here now — ${clean(tool.fallback)}`);
+  // The fallback is printed as `list` prints it, after "without it:" — on its own, ECC's ("nothing
+  // changes: …") read as if the remove had done nothing.
+  else ok(now.used ? `${tool.name} is used here now` : `${tool.name} is not used here now. Without it: ${clean(tool.fallback)}`);
 }
 // The whole report of an edit to a SHIPPED tool, for both verbs — one function, so `add` and `remove`
 // cannot say it differently again. Two facts, each said once: the shipped part (`sayEdit`), and the
@@ -690,7 +692,10 @@ function sayEdit(tool, was, now, changed) {
 function sayShippedEdit(tool, was, now, shippedChanged, copies) {
   if (shippedChanged || !copies) sayEdit(tool, was, now, shippedChanged);
   if (copies) {
-    const what = `${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${tool.id}, which ${copies > 1 ? 'were' : 'was'} ignored (it is a shipped tool's id)`;
+    // When only copies went, the tool's use did not change: `customProblems` rejects every custom entry
+    // under a shipped tool's id, so no copy ever counted toward using it. If that rule ever changes,
+    // this branch must call `sayEdit` too.
+    const what = `${copies} custom entr${copies > 1 ? 'ies' : 'y'} under the id ${tool.id}, which ${copies > 1 ? 'were' : 'was'} ignored (the id is a shipped tool's)`;
     info(shippedChanged ? `also removed ${what}` : `removed ${what} — ${tool.name} is still ${now.used ? 'used' : 'not used'} here`);
   }
 }
