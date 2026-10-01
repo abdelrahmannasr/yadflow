@@ -654,9 +654,11 @@ function sectionBounds(lines) {
   const headings = [];
   const ends = [];
   // A YAML frontmatter block at the top (`---` … `---`, after any byte-order mark) is the skill's
-  // metadata, never Markdown: a `## comment` line there is never where a new section goes, and a fence
-  // there is not one. Our heading and marker are still looked for in it, so a copy there is seen (and
-  // refused as a second copy) rather than hidden.
+  // metadata, never Markdown: a heading-like line there (a `## comment`, a quoted heading in a YAML
+  // value) is neither our heading nor where a new section goes, and a fence there is not one. Only our
+  // exact end marker is looked for in it: a section that seems to sit inside (a file opening with a
+  // `---` divider) then shows as a marker with no heading, and is refused rather than hidden — so a
+  // write never runs a section across the block's closing `---`.
   let skip = 0;
   if (lines[0]?.replace(/^\uFEFF/, '') === '---') {
     const close = lines.indexOf('---', 1);
@@ -664,14 +666,18 @@ function sectionBounds(lines) {
   }
   let fenceAt = -1;
   lines.forEach((l, i) => {
-    const f = i < skip ? null : /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
+    if (i < skip) {
+      if (isFallbackEnd(l)) ends.push(i);
+      return;
+    }
+    const f = /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
     if (fence) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
     } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) { fence = f[1]; fenceAt = i; }
     else if (isFallbackEnd(l)) ends.push(i);
     else {
       const h = headingOf(l);
-      if (h) headings.push({ i, level: h.level, ours: isFallbackHeading(l), meta: i < skip });
+      if (h) headings.push({ i, level: h.level, ours: isFallbackHeading(l) });
     }
   });
   const ours = headings.filter((h) => h.ours).map((h) => h.i);
@@ -684,7 +690,7 @@ function sectionBounds(lines) {
       : ends.length > 1 ? 'the section\'s end marker is there more than once — delete the extra marker line'
         : at === undefined ? (ends.length ? 'the end marker is there without the section\'s heading — delete that marker line' : null)
           : end === undefined ? 'the section has no end marker (a copy made by hand, or older than the marker) — delete it, from its heading down to the end of its text' : null;
-  return { at, end, problem, first: headings.find((h) => h.level === 2 && !h.meta)?.i };
+  return { at, end, problem, first: headings.find((h) => h.level === 2)?.i };
 }
 
 // Why yad will not rewrite this skill's section and what to do about it, or null when it can (or there

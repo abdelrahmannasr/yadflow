@@ -578,12 +578,20 @@ test('E87: the section is exactly heading to end marker, found the same way in a
   for (const fm of ['---\nname: x\n## a yaml comment\n---\n', '---\ndescription: |\n  ## Usage\n---\n']) {
     assert.equal(withSkillSection(`${fm}\n# S\n\n## Steps\n`, section), `${fm}\n# S\n\n${section}\n\n## Steps\n`, JSON.stringify(fm));
   }
-  // With a byte-order mark too; and a section inside what looks like frontmatter is still found, so a
-  // write replaces it rather than adding a second copy.
+  // With a byte-order mark too. A section inside what looks like frontmatter (a file opening with a
+  // `---` divider) shows as a marker with no heading: refused, never hidden behind a second copy.
   assert.equal(withSkillSection('\uFEFF---\n## c\n---\n\n## Steps\n', section), `\uFEFF---\n## c\n---\n\n${section}\n\n## Steps\n`);
-  const divided = `---\n# T\n\n${section.replace('body', 'old')}\n\n## Steps\n\n---\n`;
-  assert.equal(skillSectionProblem(divided), null);
-  assert.equal(withSkillSection(divided, section), divided.replace('old', 'body'));
+  const divided = `---\n# T\n\n${section}\n\n## Steps\n\n---\n`;
+  assert.match(skillSectionProblem(divided), /without the section's heading/);
+  assert.equal(withSkillSection(divided, section), divided);
+  // A YAML value that quotes the heading is not the section: a write works, and with a stray marker in
+  // the body it is refused — never a section running across the closing `---`.
+  const quoted = '---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\n## Steps\n';
+  assert.equal(withSkillSection(quoted, section), quoted.replace('## Steps', `${section}\n\n## Steps`));
+  const stray = `---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\nintro\n\n${SKILL_FALLBACK_END}\n\n## Steps\n`;
+  assert.match(skillSectionProblem(stray), /without the section's heading/);
+  assert.equal(withSkillSection(stray, section), stray);
+  assert.equal(withSkillSection(stray, null), stray);
   // Insert then remove gives the file back, whatever sits above the insertion point.
   for (const t of ['# T\nintro\n## Steps\n', '---\nname: x\n---\n## Steps\n', '# T\n\nintro\n\n## Steps\n', '# S\n\nintro\n', '']) {
     assert.equal(withSkillSection(withSkillSection(t, section), null), t.endsWith('\n') || t === '' ? t : `${t}\n`, JSON.stringify(t));
