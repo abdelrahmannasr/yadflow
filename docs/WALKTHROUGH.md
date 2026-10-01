@@ -189,7 +189,8 @@ Build by hand"** below.
 - **`yad toolbox list`** — the external tools yadflow can use (core, recommended pools, connectors), whether
   each is found here, whether this Product uses it, and the fallback when it is not. None is required; it
   installs nothing. `yad toolbox add <id>` / `remove <id>` choose the tools this Product uses (saved in
-  `.sdlc/toolbox.json`), and `yad toolbox check` lists the chosen ones that are not ready here.
+  `.sdlc/toolbox.json`), and `yad toolbox check` lists the chosen ones that are not ready here. `yad setup`,
+  `yad check`, `yad update` and `yad join` print the same check; they offer, and never install.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.
