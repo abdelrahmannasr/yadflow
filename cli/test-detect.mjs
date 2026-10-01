@@ -580,15 +580,19 @@ test('E84: onPath reads the PATH folders and starts nothing', () => {
     put(path.join(T, 'a/plain'), 'not runnable');
     fs.chmodSync(path.join(T, 'a/plain'), 0o644);
     fs.mkdirSync(path.join(T, 'a/dir'), { recursive: true });
-    const env = { PATH: [path.join(T, 'none'), path.join(T, 'a')].join(':') };
-    assert.equal(onPath('tool', { env, platform: 'linux' }), true);
-    assert.equal(onPath('missing', { env, platform: 'linux' }), false);
-    assert.equal(onPath('dir', { env, platform: 'linux' }), false, 'a folder is not a program');
-    // An empty or relative entry is "the current folder": never where a tool is installed.
-    const rel = path.relative(process.cwd(), path.join(T, 'a'));
-    assert.equal(onPath('tool', { env: { PATH: `${rel}::` }, platform: 'linux' }), false, 'a relative entry is skipped');
-    assert.equal(onPath('tool', { env: { PATH: '', Path: path.join(T, 'a') }, platform: 'linux' }), true, 'an empty PATH falls back to Path');
-    if (process.platform !== 'win32') assert.equal(onPath('plain', { env, platform: 'linux' }), false, 'a file that cannot run is not a program');
+    // POSIX rules need POSIX folders: on the Windows runner a temp folder is `D:\…`, which those rules
+    // rightly call relative (and `:` splits it). The Windows block below covers that runner.
+    if (process.platform !== 'win32') {
+      const env = { PATH: [path.join(T, 'none'), path.join(T, 'a')].join(':') };
+      assert.equal(onPath('tool', { env, platform: 'linux' }), true);
+      assert.equal(onPath('missing', { env, platform: 'linux' }), false);
+      assert.equal(onPath('dir', { env, platform: 'linux' }), false, 'a folder is not a program');
+      // An empty or relative entry is "the current folder": never where a tool is installed.
+      const rel = path.relative(process.cwd(), path.join(T, 'a'));
+      assert.equal(onPath('tool', { env: { PATH: `${rel}::` }, platform: 'linux' }), false, 'a relative entry is skipped');
+      assert.equal(onPath('tool', { env: { PATH: '', Path: path.join(T, 'a') }, platform: 'linux' }), true, 'an empty PATH falls back to Path');
+      assert.equal(onPath('plain', { env, platform: 'linux' }), false, 'a file that cannot run is not a program');
+    }
     // Windows: a program is its name plus a PATHEXT ending.
     put(path.join(T, 'w/maestro.CMD'), '@echo off');
     // Under Windows' rule only a drive and a root, or a share, is absolute. On the Windows runner the
