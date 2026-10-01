@@ -17,6 +17,7 @@ const GROUPS = [
       'npx yadflow doctor [--json] — environment + state health (exit 1 on failure); its protection section says whether each repo\'s branch requires an approval on GitHub or GitLab, or that it is not known and why (E70) — a warning at most',
       'npx yadflow migrate [--apply] — move state files onto this release\'s file shape (previews by default, backs up before writing)',
       'yad skill list | bind <step> <skill>… | unbind <step> — choose which skill runs a lifecycle step (.sdlc/skills.json); several skills run as a chain, each costing another model run',
+      'yad detect [--json] — which skills, agents, MCP servers and plugins are installed here and in your home folder, and which agents read each place; read-only, MCP servers named only',
       'yad repo clone [name] — clone every registered repo missing on this machine, at its recorded path (the clone step of yad join); never touches a repo already there',
       'yad report [-m <text>] — file a bug in the yadflow repo with scrubbed diagnostics (no paths, hosts, repo names, logins or flag values); YAD_NO_REPORT=1 turns the offer off',
       'yad usage [--out <path>] [--since/--until <YYYY-MM-DD> | --all] [--member <name>] [--format html|json|md] [--repos] — per-member adoption report from git + the ledgers; read-only',

@@ -116,6 +116,10 @@ ${c.bold('Where am I / what next')}
                                        Bind a step to a skill of your own. Several skills run in
                                        the order given, one after another — each costs tokens
   yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
+  yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
+                                       for the agents that work here — in this folder and in your
+                                       home folder, and which agents read each place. Read-only;
+                                       MCP servers are named, never their commands or settings
   yad skip <epic> <step> --reason <text>   Mark an optional step N/A for this epic. Which steps
                                        those are comes from the epic's lifecycle route — on classic
                                        and analysis-first, ui-design: a backend/API/data epic with no
@@ -553,12 +557,12 @@ async function main() {
   // A project written by a newer yadflow is warned about before any command reads it (docs/migrations/
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
-  if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
+  if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'detect', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
   // E122: the Product's settings (or an epic's PR ledger) under two names that say different things.
   // Every command refuses rather than pick one — whichever it picked, somebody's edit would be silently
   // ignored. Not `doctor` (it reports the drift), `migrate` (it ends it) or `report` (it files a bug
   // about a broken flow, and reads nothing it could get wrong). `hook` returned above: it guards.
-  if (!['doctor', 'migrate', 'report'].includes(cmd)) {
+  if (!['doctor', 'migrate', 'report', 'detect'].includes(cmd)) {
     // Both the folder the command runs on and, for a code-repo command, the Product it reads.
     for (const root of new Set([o.dir || process.cwd(), o.product].filter(Boolean))) {
       const drift = commands.productDriftError(root);
@@ -619,6 +623,13 @@ async function main() {
     case 'migrate':
       result = await commands.runMigrate(o.dir, { apply: o.apply, json: o.json, keep: o.keep ?? null });
       break;
+    case 'detect': {
+      // E50. Reads the folder and the home folder; writes nothing.
+      const [, extra] = o._;
+      if (extra) { refuse(`yad detect takes no words (got: ${extra})`, 'usage: yad detect [--json] [--dir <folder>]'); break; }
+      result = commands.runDetect(o.dir || process.cwd(), { json: o.json });
+      break;
+    }
     case 'report':
       result = await commands.runReport(o.dir, { message: o.message });
       break;
@@ -990,7 +1001,8 @@ main()
       // block reason travels on — an update banner there would land in front of a model.
       // Resolved the way main() resolves it, NOT from argv[2]: that is the first raw argument, so
       // `yad --dir <path> hook ledger-guard` puts `--dir` there and the banner slips through.
-      if (parseArgs(process.argv.slice(2))._[0] !== 'hook') {
+      // Nor `detect` (E50): it promises no network and no file written, and the check does both.
+      if (!['hook', 'detect'].includes(parseArgs(process.argv.slice(2))._[0])) {
         const { maybeNotifyUpdate } = await import('./commands.mjs');
         await maybeNotifyUpdate();
       }
