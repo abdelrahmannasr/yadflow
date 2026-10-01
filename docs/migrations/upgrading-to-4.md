@@ -9,7 +9,9 @@ carries a `"schemaVersion"` number saying which layout it uses. A file with no n
 yadflow 4.0 writes **shape 10**.
 
 **What this page does:** it gives the order to run things in, one line for each shape page, and every
-other breaking change since 3.18.1 with the page that explains it. A **breaking change** is a change
+other breaking change since 3.18.1 with the page that explains it. For a hands-on walk-through — the
+order to work in, and how to sort the warnings `yad doctor` prints afterwards — see the
+[step-by-step upgrade guide](upgrade-guide-3x-to-4x.md). A **breaking change** is a change
 that can stop something that worked on 3.x — a script, a CI setting, a habit — from working the same
 way on 4.0.
 

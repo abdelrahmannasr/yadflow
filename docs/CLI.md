@@ -1759,7 +1759,9 @@ expects. Coming from 3.x, read [Upgrading to 4.0](migrations/upgrading-to-4.md) 
 4. `yad update` — re-sync the installed `yad-*` skills, gate scripts and CI files.
 5. `yad doctor` — check that everything is healthy.
 
-The full guide, with what changed in 4.0 and why, is [Upgrading to 4.0](migrations/upgrading-to-4.md).
+The full guide, with what changed in 4.0 and why, is [Upgrading to 4.0](migrations/upgrading-to-4.md). For a
+hands-on walk-through, including how to sort the warnings `yad doctor` prints after the upgrade, see the
+[step-by-step upgrade guide](migrations/upgrade-guide-3x-to-4x.md).
 
 Major versions are also published to a separate channel first. `npm install yadflow` always gives you
 the stable line; `npm install yadflow@next` opts you into the next major while it is being proven.

@@ -155,7 +155,8 @@ unless CI runs it), or `yad gate advance` with no platform, is the human decisio
 - `yad skip` and `yad defer` pass over optional steps, such as the UI design.
 
 **Already using Yadflow?** Follow [staying up to date](docs/CLI.md#staying-up-to-date). Coming from
-3.x, read [upgrading to 4.0](docs/migrations/upgrading-to-4.md) first.
+3.x, read [upgrading to 4.0](docs/migrations/upgrading-to-4.md) first, then follow the
+[step-by-step upgrade guide](docs/migrations/upgrade-guide-3x-to-4x.md).
 
 ## How the project record evolves
 
@@ -281,7 +282,8 @@ The record is worth trusting because people approve what goes into it.
   - [all 38 skills](docs/SKILLS.md)
   - [the by-hand walkthrough](docs/WALKTHROUGH.md)
 - **Upgrade:** [staying up to date](docs/CLI.md#staying-up-to-date) ·
-  [upgrading to 4.0](docs/migrations/upgrading-to-4.md)
+  [upgrading to 4.0](docs/migrations/upgrading-to-4.md) ·
+  [step-by-step upgrade guide](docs/migrations/upgrade-guide-3x-to-4x.md)
 - **Project:**
   - [CONTRIBUTING.md](CONTRIBUTING.md)
   - [SECURITY.md](SECURITY.md)
