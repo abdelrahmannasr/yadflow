@@ -588,6 +588,11 @@ test('E87: the section is exactly heading to end marker, found the same way in a
   // the body it is refused — never a section running across the closing `---`.
   const quoted = '---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\n## Steps\n';
   assert.equal(withSkillSection(quoted, section), quoted.replace('## Steps', `${section}\n\n## Steps`));
+  // The block may close with trailing spaces or `...`: the quoted heading stays inside it.
+  for (const close of ['--- ', '...']) {
+    const t = `---\nname: x\ndescription: |\n  ## Usage\n${close}\n\n# T\n\n## Steps\n`;
+    assert.equal(withSkillSection(t, section), t.replace('# T\n\n## Steps', `# T\n\n${section}\n\n## Steps`), JSON.stringify(close));
+  }
   const stray = `---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\nintro\n\n${SKILL_FALLBACK_END}\n\n## Steps\n`;
   assert.match(skillSectionProblem(stray), /without the section's heading/);
   assert.equal(withSkillSection(stray, section), stray);

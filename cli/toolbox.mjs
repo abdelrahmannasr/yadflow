@@ -658,10 +658,12 @@ function sectionBounds(lines) {
   // value) is neither our heading nor where a new section goes, and a fence there is not one. Only our
   // exact end marker is looked for in it: a section that seems to sit inside (a file opening with a
   // `---` divider) then shows as a marker with no heading, and is refused rather than hidden — so a
-  // write never runs a section across the block's closing `---`.
+  // write never runs a section across the block's closing `---`. A copy without a marker inside such a
+  // block reads as metadata, as a YAML loader would read it, and is left alone. The block closes at `---`
+  // or `...`, trailing spaces allowed, as common frontmatter readers accept.
   let skip = 0;
   if (lines[0]?.replace(/^\uFEFF/, '') === '---') {
-    const close = lines.indexOf('---', 1);
+    const close = lines.findIndex((l, i) => i > 0 && (trimSpaces(l) === '---' || trimSpaces(l) === '...'));
     if (close > 0) skip = close + 1;
   }
   let fenceAt = -1;
