@@ -116,7 +116,8 @@ ${c.bold('Where am I / what next')}
                                        Bind a step to a skill of your own. Several skills run in
                                        the order given, one after another — each costs tokens
   yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
-  yad toolbox list [--json]            The external tools yadflow can use — core (offered at setup),
+  yad toolbox list [--json] [--dir <folder>]
+                                       The external tools yadflow can use — core (offered at setup),
                                        recommended pools, and the design/testing/learning connectors —
                                        whether each is found here, and what yadflow does without it.
                                        Read-only; installs nothing (add/remove/check arrive in E86)

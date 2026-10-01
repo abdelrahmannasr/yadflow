@@ -79,7 +79,7 @@ export const TOOLBOX = Object.freeze([
     detect: { skillPrefixes: ['speckit-', 'speckit.'], bins: ['specify'] },
     versions: null,
     fallback: "yad-spec writes the same spec files by hand, in Spec Kit's layout",
-    records: 'speckit: not-installed', note: null,
+    records: 'speckit: not-installed', note: 'A program named specify on PATH also counts; another tool by that name would too.',
     usedBy: ['yad-spec'],
   },
   {
@@ -107,7 +107,8 @@ export const TOOLBOX = Object.freeze([
       { type: 'plugin', command: '/plugin marketplace add bmad-code-org/bmad-plugins, then install bmad-method from /plugin' },
     ],
     manual: null,
-    detect: { skillPrefixes: ['bmad-', 'bmod-'], plugins: ['bmad-method', 'bmad-toolbox'] },
+    // The README names a `bmad-core-tools` plugin; the marketplace lists `bmad-toolbox`. Both are kept.
+    detect: { skills: ['bmad'], skillPrefixes: ['bmad-', 'bmod-'], plugins: ['bmad-method', 'bmad-toolbox', 'bmad-core-tools'] },
     versions: null,
     fallback: "nothing changes: yadflow's own skills run every step",
     records: null, note: 'Left the engine in E3; returns only as an optional pool you bind with `yad skill bind`.',
@@ -272,27 +273,52 @@ export function toolProblems(t) {
 export function parseVersion(v) {
   const m = String(v ?? '').trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
   if (!m) return null;
-  return { parts: [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)], pre: !!m[4] };
+  // `full`: all three numbers were written. A range needs that (see parseRange); a found version does not.
+  return { parts: [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)], pre: m[4] ? m[4].slice(1) : null, full: m[2] !== undefined && m[3] !== undefined };
 }
 
+// The semantic-versioning order: numbers first; then a pre-release is below its release, and two
+// pre-releases compare label by label — a number below a word, numbers as numbers, a shorter list first.
 function compare(a, b) {
   for (let i = 0; i < 3; i++) if (a.parts[i] !== b.parts[i]) return a.parts[i] < b.parts[i] ? -1 : 1;
-  if (a.pre !== b.pre) return a.pre ? -1 : 1;
+  if (!a.pre || !b.pre) return a.pre === b.pre ? 0 : a.pre ? -1 : 1;
+  const x = a.pre.split('.');
+  const y = b.pre.split('.');
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if (x[i] === undefined) return -1;
+    if (y[i] === undefined) return 1;
+    const nx = /^\d+$/.test(x[i]);
+    const ny = /^\d+$/.test(y[i]);
+    if (nx && ny && Number(x[i]) !== Number(y[i])) return Number(x[i]) < Number(y[i]) ? -1 : 1;
+    if (nx !== ny) return nx ? -1 : 1;
+    if (!nx && x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  }
   return 0;
 }
 
-// A range is space-separated comparators, all of which must hold: `>=3.0.0 <4.0.0`, `^3.2`, `~1.4.0`,
+// A range is space-separated comparators, all of which must hold: `>=3.0.0 <4.0.0`, `^3.2.0`, `~1.4.0`,
 // `=2.0.0`. A small reader on purpose — the list sets a handful of simple bounds, and a dependency for
 // that is not worth its weight. Returns the comparator list, or null when it cannot read the range.
+//
+// EVERY VERSION IN A RANGE HAS ALL THREE NUMBERS. A partial one (`~1`, `^0`, `>1.2`) means something
+// different for each operator, and reading it as `.0` got four of them wrong; refusing it makes
+// `toolProblems` reject such a range instead of letting it give a silent wrong answer.
+//
+// ONE RULE FOR PRE-RELEASES: an upper bound `<X.Y.Z` also keeps out X.Y.Z's own pre-releases
+// (`4.0.0-beta` is outside `<4.0.0`), whether it was written or comes from `^` / `~`.
 export function parseRange(range) {
   const out = [];
+  // `<X.Y.Z-0` — below every pre-release of X.Y.Z, because `0` is the lowest label there is.
+  const below = (parts) => ['<', { parts, pre: '0', full: true }];
   for (const tok of String(range).trim().split(/\s+/)) {
     const m = tok.match(/^(>=|<=|>|<|=|\^|~)?(.+)$/);
     const v = m && parseVersion(m[2]);
-    if (!v) return null;
+    if (!v || !v.full) return null;
+    const [x, y, z] = v.parts;
     const op = m[1] || '=';
-    if (op === '^') out.push(['>=', v], ['<', { parts: v.parts[0] > 0 ? [v.parts[0] + 1, 0, 0] : [0, v.parts[1] + 1, 0], pre: true }]);
-    else if (op === '~') out.push(['>=', v], ['<', { parts: [v.parts[0], v.parts[1] + 1, 0], pre: true }]);
+    if (op === '^') out.push(['>=', v], below(x > 0 ? [x + 1, 0, 0] : y > 0 ? [0, y + 1, 0] : [0, 0, z + 1]));
+    else if (op === '~') out.push(['>=', v], below([x, y + 1, 0]));
+    else if (op === '<' && !v.pre) out.push(below(v.parts));
     else out.push([op, v]);
   }
   return out.length ? out : null;
@@ -314,7 +340,10 @@ export function versionInRange(version, range) {
 // Is a program on PATH — by reading the PATH folders, never by starting one. On Windows a program is
 // `name` plus one of PATHEXT's endings (`.EXE`, `.CMD`, …); elsewhere it must be an executable file.
 export function onPath(bin, { env = process.env, platform = process.platform } = {}) {
-  const dirs = String(env.PATH ?? env.Path ?? '').split(platform === 'win32' ? ';' : ':').filter(Boolean);
+  // Only absolute folders: an empty or relative entry means "the current folder", which is not where a
+  // tool is installed, and would make the answer depend on where `yad` happened to run.
+  const isAbs = platform === 'win32' ? path.win32.isAbsolute : path.posix.isAbsolute;
+  const dirs = String(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').filter((d) => d && isAbs(d));
   const exts = platform === 'win32' ? ['', ...String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
   for (const dir of dirs) {
     for (const ext of exts) {
@@ -334,21 +363,29 @@ const lower = (s) => String(s).toLowerCase();
 const pluginMatches = (id, names) => names.some((n) => lower(n) === lower(id) || lower(n) === lower(String(id).split('@')[0]));
 
 // What the toolbox knows about one tool here: `installed` (something it installs was found), `available`
-// (fetched on demand — `npx` is there), or `missing`. `found` lists where, as `yad detect` shows places;
+// (fetched on demand — `npx` is there), `disabled` (found only through a plugin that is turned off), or
+// `missing`. `found` lists where, as `yad detect` shows places;
 // `version` is the first one a found item records; `inRange` is true, false, or null (nothing to compare).
 export function toolStatus(tool, items, { has = onPath } = {}) {
   const d = tool.detect;
-  const hits = items.filter((it) => {
+  // A Claude Code plugin your settings turn off is not loaded, and neither is anything it brings (its
+  // skills, agents and MCP servers carry its id in `plugin`). `enabled: null` means no setting says, which
+  // is on. So a tool found ONLY through a plugin that is off is `disabled`, not installed.
+  const off = new Set(items.filter((it) => it.kind === 'plugin' && it.enabled === false).map((it) => it.name));
+  const isOff = (it) => off.has(it.kind === 'plugin' ? it.name : it.plugin);
+  const matches = items.filter((it) => {
     if (it.kind === 'skill') return (d.skills ?? []).some((n) => lower(n) === lower(it.name)) || (d.skillPrefixes ?? []).some((p) => lower(it.name).startsWith(lower(p)));
     if (it.kind === 'plugin') return pluginMatches(it.name, d.plugins ?? []);
     if (it.kind === 'mcp') return (d.mcp ?? []).some((n) => lower(n) === lower(it.name));
     return false;
   });
+  const hits = matches.filter((it) => !isOff(it));
   const bins = (d.bins ?? []).filter((b) => has(b));
   const found = [...new Set([...hits.map((h) => h.where), ...bins.map((b) => `${b} on PATH`)])];
   const version = hits.map((h) => h.version).find((v) => typeof v === 'string' && v) ?? null;
   const inRange = tool.versions === null ? null : versionInRange(version, tool.versions);
   if (found.length) return { state: 'installed', found, version, inRange };
+  if (matches.length) return { state: 'disabled', found: [...new Set(matches.map((h) => h.where))], version: null, inRange: null };
   if (d.npx && has('npx')) return { state: 'available', found: ['npx on PATH'], version: null, inRange: null };
   return { state: 'missing', found: [], version: null, inRange: null };
 }
@@ -367,11 +404,13 @@ export function toolboxLines(rows) {
     for (const r of mine) {
       const s = r.status;
       const version = s.version ? clean(s.version) : null;
-      const mark = s.state === 'missing' ? c.dim('–') : c.green('✓');
-      const state = s.state === 'installed' ? `installed${version ? ` ${version}` : ''}` : s.state === 'available' ? 'available (npx fetches it when needed)' : 'not found';
+      const mark = s.state === 'missing' || s.state === 'disabled' ? c.dim('–') : c.green('✓');
+      const state = s.state === 'installed' ? `installed${version ? ` ${version}` : ''}`
+        : s.state === 'available' ? 'available (npx fetches it when needed)'
+          : s.state === 'disabled' ? 'installed, but its plugin is turned off in your Claude Code settings' : 'not found';
       lines.push(`  ${mark} ${c.bold(r.name)} ${c.dim(`— ${r.role}`)}: ${state}`);
       if (s.inRange === false) lines.push(`      ${c.yellow('!')} version ${version} is outside the known-good range ${r.versions} — still used; if it misbehaves, install a version in range`);
-      if (s.state === 'missing') lines.push(`      ${c.dim(`without it: ${r.fallback}`)}`);
+      if (s.state === 'missing' || s.state === 'disabled') lines.push(`      ${c.dim(`without it: ${r.fallback}`)}`);
       if (r.note) lines.push(`      ${c.dim(r.note)}`);
     }
   }

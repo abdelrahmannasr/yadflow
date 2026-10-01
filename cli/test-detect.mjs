@@ -502,10 +502,12 @@ test('E84: a fallback a skill records is written there word for word, so E87 ren
 
 test('E84: the connectors are the adapters skills/sdlc/config.yaml names, with the same fallbacks', () => {
   const yaml = fs.readFileSync(path.join(ROOT, 'skills/sdlc/config.yaml'), 'utf8');
+  const named = [];
   for (const section of ['design', 'testing', 'learning']) {
     const block = yaml.slice(yaml.search(new RegExp(`^${section}:`, 'm')));
     const tools = block.match(/^\s+tools:\s*\[([^\]]*)\]/m)[1].split(',').map((x) => x.trim());
     const degrade = block.match(/^\s+degrade:\s*([\w-]+)/m)[1];
+    named.push(...tools);
     for (const id of tools) {
       const t = TOOLBOX.find((x) => x.id === id);
       assert.ok(t, `${section}: ${id} is in the toolbox`);
@@ -513,6 +515,8 @@ test('E84: the connectors are the adapters skills/sdlc/config.yaml names, with t
       assert.ok(t.fallback.startsWith(degrade), `${id}: the fallback is config.yaml's "${degrade}"`);
     }
   }
+  // And the other way: no connector that config.yaml does not name.
+  assert.deepEqual(TOOLBOX.filter((t) => t.tier === 'connector').map((t) => t.id).sort(), [...named].sort());
 });
 
 test('E84: toolProblems names each way an entry can be wrong', () => {
@@ -532,19 +536,33 @@ test('E84: toolProblems names each way an entry can be wrong', () => {
   assert.ok(bad({ fallback: '' }).some((p) => p.startsWith('fallback ')));
   assert.ok(bad({ usedBy: [] }).length === 0, 'an empty usedBy list is still a list');
   assert.ok(bad({ usedBy: 'yad-ui' }).some((p) => p.startsWith('usedBy ')));
+  for (const [patch, start] of [[{ name: '' }, 'name '], [{ role: '' }, 'role '], [{ licence: '' }, 'licence '], [{ records: '' }, 'records '],
+    [{ note: '' }, 'note '], [{ manual: 'ftp://x' }, 'manual '], [{ install: 'npm i x' }, 'install '], [{ detect: { npx: 'yes' } }, 'detect.npx']]) {
+    assert.ok(bad(patch).some((p) => p.startsWith(start)), JSON.stringify(patch));
+  }
+  assert.ok(bad({ install: [{ type: 'npm', command: '' }] }).some((p) => p.includes('has its command')));
   assert.ok(toolProblems(null).length > 5, 'nothing at all is many problems, not a crash');
 });
 
 test('E84: versions and ranges', () => {
-  assert.deepEqual(parseVersion('v1.2'), { parts: [1, 2, 0], pre: false });
-  assert.deepEqual(parseVersion('3.7.1-beta.2+build'), { parts: [3, 7, 1], pre: true });
+  assert.deepEqual(parseVersion('v1.2'), { parts: [1, 2, 0], pre: null, full: false });
+  assert.deepEqual(parseVersion('3.7.1-beta.2+build'), { parts: [3, 7, 1], pre: 'beta.2', full: true });
+  // A range needs all three numbers: each operator reads a partial version differently, and guessing
+  // got `~1`, `^0` and `>1.2` wrong. Refused, so toolProblems rejects the entry.
+  for (const r of ['~1', '^0', '>1.2', '^3.2', '<=2']) assert.equal(parseRange(r), null, r);
   assert.equal(parseVersion('aa5654b7acb7'), null, 'a git sha is not a version');
   assert.equal(parseVersion(null), null);
   assert.equal(parseRange('latest'), null);
   const cases = [
     ['3.7.1', '>=3.0.0 <4.0.0', true], ['4.0.0', '>=3.0.0 <4.0.0', false], ['2.9.9', '>=3.0.0', false],
-    ['4.0.0-beta', '^3.2', false], ['3.9.9', '^3.2', true], ['3.1.0', '^3.2', false],
+    ['4.0.0-beta', '^3.2.0', false], ['3.9.9', '^3.2.0', true], ['3.1.0', '^3.2.0', false],
     ['0.2.5', '^0.2.1', true], ['0.3.0', '^0.2.1', false],
+    ['0.0.3', '^0.0.3', true], ['0.0.9', '^0.0.3', false], ['0.0.4-rc.1', '^0.0.3', false],
+    // One rule for pre-releases: an upper bound keeps out its own pre-releases, written or derived.
+    ['4.0.0-beta', '>=3.0.0 <4.0.0', false], ['4.0.0-beta', '<4.0.0-rc.1', true],
+    // Pre-releases in order: alpha < alpha.1 < alpha.beta < beta < beta.2 < beta.11 < rc.1 < release.
+    ['1.0.0-alpha', '<1.0.0-alpha.1', true], ['1.0.0-alpha.1', '<1.0.0-alpha.beta', true], ['1.0.0-beta.2', '<1.0.0-beta.11', true],
+    ['1.0.0-beta.11', '<1.0.0-rc.1', true], ['1.0.0-rc.1', '>=1.0.0-rc.1 <=1.0.0-rc.1', true], ['1.0.0-1', '<1.0.0-alpha', true],
     ['1.4.9', '~1.4.0', true], ['1.5.0', '~1.4.0', false],
     ['2.0.0', '2.0.0', true], ['2.0.1', '=2.0.0', false], ['1.0.0', '>1.0.0', false], ['1.0.0', '<=1.0.0', true],
     ['3.0.0-rc.1', '>=3.0.0', false],
@@ -566,6 +584,10 @@ test('E84: onPath reads the PATH folders and starts nothing', () => {
     assert.equal(onPath('tool', { env, platform: 'linux' }), true);
     assert.equal(onPath('missing', { env, platform: 'linux' }), false);
     assert.equal(onPath('dir', { env, platform: 'linux' }), false, 'a folder is not a program');
+    // An empty or relative entry is "the current folder": never where a tool is installed.
+    const rel = path.relative(process.cwd(), path.join(T, 'a'));
+    assert.equal(onPath('tool', { env: { PATH: `${rel}::` }, platform: 'linux' }), false, 'a relative entry is skipped');
+    assert.equal(onPath('tool', { env: { PATH: '', Path: path.join(T, 'a') }, platform: 'linux' }), true, 'an empty PATH falls back to Path');
     if (process.platform !== 'win32') assert.equal(onPath('plain', { env, platform: 'linux' }), false, 'a file that cannot run is not a program');
     // Windows: a program is its name plus a PATHEXT ending.
     put(path.join(T, 'w/maestro.CMD'), '@echo off');
@@ -583,6 +605,10 @@ test('E84: toolStatus — installed, available through npx, missing; versions wa
   assert.deepEqual(toolStatus(tool({ skillPrefixes: ['speckit-'] }), [item('skill', 'speckit-plan', 'a'), item('skill', 'speckit-tasks', 'b'), item('skill', 'other', 'c')], { has: none }).found, ['a', 'b']);
   assert.equal(toolStatus(tool({ plugins: ['figma'] }), [item('plugin', 'figma@claude-plugins-official', 'p')], { has: none }).state, 'installed', 'a plugin by its name, without the marketplace');
   assert.equal(toolStatus(tool({ plugins: ['figma'] }), [item('plugin', 'figmatic@x', 'p')], { has: none }).state, 'missing', 'not by a prefix');
+  assert.equal(toolStatus(tool({ plugins: ['figma@claude-plugins-official'] }), [item('plugin', 'figma@claude-plugins-official', 'p')], { has: none }).state, 'installed', 'or by its full id');
+  assert.equal(toolStatus(tool({ plugins: ['figma@claude-plugins-official'] }), [item('plugin', 'figma@other', 'p')], { has: none }).state, 'missing', 'a full id is exact');
+  assert.equal(toolStatus(tool({ skillPrefixes: ['SpecKit-'] }), [item('skill', 'speckit-plan', 'a')], { has: none }).state, 'installed', 'a prefix compares without case');
+  assert.equal(toolStatus(tool({ skills: ['reviewer'] }), [item('agent', 'reviewer', 'a')], { has: none }).state, 'missing', 'an agent is not a skill');
   assert.equal(toolStatus(tool({ mcp: ['pencil'] }), [item('mcp', 'pencil', '~/.claude.json')], { has: none }).state, 'installed');
   assert.equal(toolStatus(tool({ mcp: ['pencil'] }), [item('skill', 'pencil', 'x')], { has: none }).state, 'missing', 'the kind must match');
   assert.deepEqual(toolStatus(tool({ bins: ['deeptutor'] }), [], { has: (b) => b === 'deeptutor' }), { state: 'installed', found: ['deeptutor on PATH'], version: null, inRange: null });
@@ -591,6 +617,21 @@ test('E84: toolStatus — installed, available through npx, missing; versions wa
   const old = toolStatus(tool({ skills: ['impeccable'] }, '>=4.0.0'), [item('skill', 'impeccable', 'x', '3.7.1')], { has: none });
   assert.deepEqual([old.state, old.version, old.inRange], ['installed', '3.7.1', false], 'out of range: still installed');
   assert.equal(toolStatus(tool({ skills: ['impeccable'] }, '>=4.0.0'), [item('skill', 'impeccable', 'x', 'aa5654b7acb7')], { has: none }).inRange, null);
+});
+
+test('E84: a tool found only through a plugin your settings turn off is `disabled`, not installed', () => {
+  const tool = { ...TOOLBOX.find((t) => t.id === 'figma') };
+  const plugin = (enabled) => ({ kind: 'plugin', name: 'figma@claude-plugins-official', where: '~/.claude/plugins/installed_plugins.json', version: '2.2.124', plugin: null, enabled });
+  const server = { kind: 'mcp', name: 'figma', where: 'figma@claude-plugins-official: .mcp.json', version: null, plugin: 'figma@claude-plugins-official' };
+  const off = toolStatus(tool, [plugin(false), server], { has: () => false });
+  assert.deepEqual([off.state, off.found.length], ['disabled', 2], 'the plugin AND the server it brings are off');
+  assert.equal(toolStatus(tool, [plugin(null), server], { has: () => false }).state, 'installed', 'no setting means on');
+  assert.equal(toolStatus(tool, [plugin(true), server], { has: () => false }).state, 'installed');
+  // The same server added by hand (no plugin) still counts while the plugin is off.
+  const own = { ...server, where: '~/.claude.json', plugin: null };
+  assert.deepEqual(toolStatus(tool, [plugin(false), server, own], { has: () => false }).found, ['~/.claude.json']);
+  const text = toolboxLines([{ ...tool, status: off }]).join('\n');
+  assert.match(text, /Figma .*: installed, but its plugin is turned off in your Claude Code settings\n\s+without it: markdown-only/);
 });
 
 test('E84: the printed list — a warning for a version out of range, the fallback for a missing tool', () => {
