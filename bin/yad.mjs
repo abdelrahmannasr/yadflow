@@ -645,27 +645,38 @@ async function main() {
       const usage = 'usage: yad toolbox list | check | add <id> [--custom …] | remove <id>   [--json] [--dir <folder>]';
       if (!['list', 'check', 'add', 'remove'].includes(action)) { refuse(`unknown toolbox action: ${action} (list, check, add, remove)`, usage); break; }
       const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
-      const productRoot = found?.root ?? null;
+      const rel = (p) => path.relative(process.cwd(), p) || '.';
       if (action === 'list' || action === 'check') {
         if (id) { refuse(`yad toolbox ${action} takes no more words (got: ${id})`, usage); break; }
+        // A reader may be pointed at a code repo with --dir: it finds tools there and reads the Product
+        // that repo belongs to. Why no Product was found is said, as every Product command says it —
+        // otherwise the team's choices would be missing from the answer without a word.
+        if (found?.problem) warn(`${found.problem} — showing the defaults`);
+        else if (found?.elsewhere) warn(`this folder is not in a repo the Product registers — the Product is ${rel(found.elsewhere)}: cd there, or pass --dir ${rel(found.elsewhere)}`);
+        const productRoot = found?.root ?? null;
         const run = action === 'list' ? commands.runToolboxList : commands.runToolboxCheck;
         result = run(o.dir || process.cwd(), { json: o.json, productRoot });
         break;
       }
       if (extra) { refuse(`yad toolbox ${action} takes one tool id (got also: ${extra})`, usage); break; }
-      // A writer: the Product's file, never a code repo's, and the same refusals every writer has.
+      // A writer: the Product's file, never a code repo's, and the same refusals every writer has. With
+      // --dir it is the Product itself, as for every other Product command (`yad skill bind --dir`) —
+      // never a folder a walk up from it happens to reach.
+      const productRoot = dirGiven ? (found?.via === 'here' ? found.root : null) : (found?.root ?? null);
       if (!productRoot) {
-        const where = found?.elsewhere ? `the Product is ${path.relative(process.cwd(), found.elsewhere) || '.'}: cd there, or pass --dir` : 'run it from the Product, from inside a repo it registers, or pass --dir <the Product>; `yad new` / `yad init` start one';
+        const where = dirGiven ? 'with --dir, name the Product folder itself (the one holding .sdlc/product.json)'
+          : found?.elsewhere ? `the Product is ${rel(found.elsewhere)}: cd there, or pass --dir ${rel(found.elsewhere)}`
+            : `${found?.problem ? `${found.problem}. ` : ''}run it from the Product, from inside a repo it registers, or pass --dir <the Product>; \`yad new\` / \`yad init\` start one`;
         refuse(`no Product here (${o.dir}) — yad toolbox ${action} writes the Product's .sdlc/toolbox.json`, where);
         break;
       }
-      if (found.via !== 'here') process.stderr.write(c.dim(`Product: ${path.relative(process.cwd(), productRoot) || '.'}\n`));
+      if (found.via !== 'here') process.stderr.write(c.dim(`Product: ${rel(productRoot)}\n`));
       commands.warnIfProjectAhead(productRoot);
       const drift = commands.productDriftError(productRoot);
       if (drift) throw drift;
       result = action === 'add'
         ? commands.runToolboxAdd(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json })
-        : commands.runToolboxRemove(productRoot, { id, json: o.json });
+        : commands.runToolboxRemove(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json });
       break;
     }
     case 'detect': {

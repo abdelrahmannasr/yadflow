@@ -30,7 +30,7 @@ export const CODES = {
   'YAD-CFG-004': 'learning.json names an unknown learning tool (expected one of config.yaml learning.tools, or none)',
   'YAD-CFG-005': 'the Product settings (product.json, or hub.json on a Product that has only that name) set a platform but are missing git_url (required to scope auth + open PRs)',
   'YAD-CFG-006': 'skills.json binds a step to something that is not a skill name (expected a string, or a non-empty list of strings)',
-  'YAD-CFG-007': 'toolbox.json has a line that does nothing — a tool this yadflow does not ship, a choice other than use or skip, or a custom tool missing what it needs',
+  'YAD-CFG-007': 'toolbox.json has a line that does nothing — a tool this yadflow does not ship, a choice other than use or skip, or a custom tool that is incomplete, malformed, listed twice or uses a shipped tool\'s id',
   'YAD-CLI-001': 'a --json run needed an answer that only a prompt could give',
 };
 

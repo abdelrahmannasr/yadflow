@@ -853,7 +853,7 @@ test('E86: `yad toolbox add / remove` write only the difference from the default
     assert.deepEqual(doc, { schemaVersion: 10 });
     fs.writeFileSync(file, JSON.stringify({ ...doc, later: { kept: true } }));
     r = yad(['toolbox', 'remove', 'ecc'], { cwd: p, home });
-    assert.match(r.stdout, /ECC .* is not used here already — nothing to change/);
+    assert.match(r.stdout, /ECC .* is already not used here — nothing to change/);
     yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
     assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, later: { kept: true }, shipped: { ecc: 'use' } });
 
@@ -1005,4 +1005,116 @@ test('E86: doctor reports a toolbox.json that does nothing, never a missing tool
   const [[s3, , m3]] = run(JSON.stringify({ shipped: { 'bmad-method': 'use' }, custom: [CUSTOM] }));
   assert.equal(s3, 'ok');
   assert.match(m3, /1 shipped tool choice\(s\), 1 tool\(s\) of this project's own/);
+});
+
+// ---------- E86 review 1 ----------
+
+test('E86 review 1: removing a line that did nothing is said as that, not as "nothing to change"', () => {
+  const { T, p, home } = product({ '.sdlc/toolbox.json': JSON.stringify({ shipped: { repomix: 'use', figma: 'bogus', ecc: 'yes' } }) });
+  try {
+    // repomix is core: its `use` repeats the default.
+    let r = yad(['toolbox', 'add', 'repomix', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).changed, JSON.parse(r.stdout).used], [true, true]);
+    assert.match(r.stderr, /Repomix is already used here — removed a line in \.sdlc\/toolbox\.json that did nothing/);
+    assert.doesNotMatch(r.stderr, /nothing to change/);
+    r = yad(['toolbox', 'remove', 'figma'], { cwd: p, home });
+    assert.match(r.stdout, /Figma is already not used here — removed a line in \.sdlc\/toolbox\.json that did nothing/);
+    // A bad value on a tool that is not used by default: `add` now really uses it.
+    r = yad(['toolbox', 'add', 'ecc'], { cwd: p, home });
+    assert.match(r.stdout, /ECC .* is used here now/);
+    assert.deepEqual(toolboxJSON(p).shipped, { ecc: 'use' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 1: an entry the list ignores is never answered as in use, and remove clears every kind of dead line', () => {
+  const { T, p, home } = product({
+    '.sdlc/toolbox.json': JSON.stringify({ shipped: { 'future-tool': 'use', ecc: 'use' }, custom: [{ id: 'half' }, { id: 'Doc Lint', role: 'r', fallback: 'f', detect: { bins: ['x'] } }, CUSTOM, CUSTOM] }),
+  });
+  try {
+    let r = yad(['toolbox', 'add', 'half', '--json'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual([out.ok, out.command], [false, 'toolbox add']);
+    assert.match(out.error, /half is in \.sdlc\/toolbox\.json but ignored: role says/);
+    for (const id of ['half', 'Doc Lint', 'future-tool']) {
+      r = yad(['toolbox', 'remove', id], { cwd: p, home });
+      assert.equal(r.status, 0, `${id}\n${r.stdout}${r.stderr}`);
+    }
+    r = yad(['toolbox', 'remove', 'doclint'], { cwd: p, home });
+    assert.match(r.stdout, /doclint removed — .*listed 2 times; every copy is gone/);
+    assert.deepEqual(toolboxJSON(p), { schemaVersion: 10, shipped: { ecc: 'use' } });
+    r = yad(['toolbox', 'remove', 'Doc Lint'], { cwd: p, home });
+    assert.match(r.stdout, /is not a tool id/, 'an id the file no longer holds is judged as an id again');
+    r = yad(['toolbox', 'remove', 'ecc', '--role', 'x'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /remove takes only the tool id \(got --role\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 1: a custom program is a name, never a path; a detect kind is one of the five', () => {
+  for (const bin of ['../x', 'a/b', 'a\\b', '..', '.']) assert.match(customProblems({ ...CUSTOM, detect: { bins: [bin] } }).join(), /names programs, not paths/, bin);
+  assert.match(parseDetect('constructor:x').error, /not <kind>:<name>/);
+  assert.match(parseDetect('toString:x').error, /not <kind>:<name>/);
+});
+
+test('E86 review 1: refusals answer in JSON; --dir names the Product itself for a writer, any folder for a reader', () => {
+  const { T, p, home } = product({ '.sdlc/repos.json': JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: 'api' }] }) });
+  const repo = path.join(p, 'api');
+  try {
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(p, 'specs'));
+    const before = snapshot(T);
+    for (const dir of [repo, path.join(p, 'specs'), path.join(p, 'typo')]) {
+      const r = yad(['toolbox', 'add', 'ecc', '--json', '--dir', dir], { cwd: T, home });
+      assert.equal(r.status, 1, dir);
+      const out = JSON.parse(r.stdout);
+      assert.deepEqual([out.ok, out.command], [false, 'toolbox add']);
+      assert.match(out.error, /no Product here/);
+      assert.match(out.hint, /name the Product folder itself/);
+    }
+    assert.deepEqual(snapshot(T), before, 'nothing written');
+    let r = yad(['toolbox', 'add', 'ecc', '--json', '--dir', p], { cwd: T, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual([JSON.parse(r.stdout).product, JSON.parse(r.stdout).file], ['p', '.sdlc/toolbox.json']);
+    // A reader pointed at the code repo reads the Product it belongs to.
+    r = yad(['toolbox', 'list', '--json', '--dir', repo], { cwd: T, home });
+    const list = JSON.parse(r.stdout);
+    assert.equal(list.product, 'p');
+    assert.equal(list.tools.find((t) => t.id === 'ecc').because, 'added');
+    // Drift refused under --json too.
+    put(path.join(p, '.sdlc/hub.json'), '{"schemaVersion":10,"platform":"github"}\n');
+    r = yad(['toolbox', 'remove', 'ecc', '--json'], { cwd: p, home });
+    assert.equal(r.status, 1);
+    assert.equal(JSON.parse(r.stdout).code, 'YAD-STATE-008');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E86 review 1: through a workspace — a repo beside the Product writes it; the workspace folder itself is told where it is', () => {
+  const T = tmp();
+  const ws = path.join(T, 'ws');
+  const p = path.join(ws, 'product');
+  const repo = path.join(ws, 'api');
+  const home = path.join(T, 'h');
+  try {
+    fs.mkdirSync(home, { recursive: true });
+    put(path.join(p, '.sdlc/product.json'), '{"schemaVersion":10,"platform":null}\n');
+    put(path.join(p, '.sdlc/repos.json'), JSON.stringify({ schemaVersion: 10, repos: [{ name: 'api', path: '../api' }] }));
+    put(path.join(ws, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'product' }));
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    let r = yad(['toolbox', 'add', 'ecc'], { cwd: repo, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(toolboxJSON(p).shipped, { ecc: 'use' });
+    r = yad(['toolbox', 'list'], { cwd: ws, home });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /not in a repo the Product registers — the Product is product/);
+    r = yad(['toolbox', 'add', 'bmad-method'], { cwd: ws, home });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /the Product is product: cd there/);
+    // A broken workspace file is named, not silently skipped.
+    put(path.join(ws, '.yad-workspace.json'), '{"version":9,"product":"product"}');
+    r = yad(['toolbox', 'check'], { cwd: repo, home });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /is version 9, .* — showing the defaults/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

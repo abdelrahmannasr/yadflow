@@ -2124,7 +2124,7 @@ export function toolboxFileChecks(checks, root) {
   const { problems, shipped, custom } = loadChoices(root);
   if (problems.length) {
     check(checks, 'toolbox', 'project', 'warn', `${rel}: ${problems.length} line(s) do nothing — ${problems.map((p) => p.replace(`${rel}: `, '')).join('; ')} [YAD-CFG-007]`,
-      'fix them by hand, or `yad toolbox remove <id>` and add the tool again');
+      'fix them by hand, or `yad toolbox remove <id>` — it clears whatever the file holds under that id — and add the tool again');
     return;
   }
   check(checks, 'toolbox', 'project', 'ok', `toolbox: ${shipped.size} shipped tool choice(s), ${custom.length} tool(s) of this project's own`);

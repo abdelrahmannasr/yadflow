@@ -854,7 +854,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | Check | What it means | What to do |
 |---|---|---|
 | `automation` | `.sdlc/automation.json` does not parse or has the wrong shape (**fail**). Every step is held at `advance: human` until it is fixed, and neither `yad dial` nor `yad kill` writes over it. | Fix the JSON, or delete the file to go back to the defaults (kill switch off, every Shape step human). |
-| `toolbox` | `.sdlc/toolbox.json` (E86) does not parse or has the wrong shape (**fail**), or has lines that do nothing — a tool this yadflow does not ship, a choice other than `use` or `skip`, a custom tool missing its role, fallback or `detect` (**warn**, `YAD-CFG-007`). `yad toolbox list` ignores those lines and shows the defaults; `add` and `remove` refuse a file that does not parse. **ok** names how many choices and custom tools the file holds. A missing tool is never reported here — that is `yad toolbox check`. | Fix the JSON or the line, or `yad toolbox remove <id>` and add the tool again. |
+| `toolbox` | `.sdlc/toolbox.json` (E86) does not parse or has the wrong shape (**fail**), or has lines that do nothing — a tool this yadflow does not ship, a choice other than `use` or `skip`, a custom tool that is incomplete, malformed, listed twice or uses a shipped tool's id (**warn**, `YAD-CFG-007`). `yad toolbox list` ignores those lines and shows the defaults; `add` and `remove` refuse a file that does not parse. **ok** names how many choices and custom tools the file holds. A missing tool is never reported here — that is `yad toolbox check`. | Fix the JSON or the line, or `yad toolbox remove <id>` (it clears whatever the file holds under that id) and add the tool again. |
 | `owners:ignored` | A step owner file (`.sdlc/owners/<step>.json`, E47) cannot be read, is named for a step that cannot be assigned, or names a step that is not on the epic's chain (**warn**). It is ignored everywhere else: no owner is shown and the edit-time warning is off. | For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them. |
 | `owners:rename-blind` | The wired `pr-title` / `pr-template` checks let a PR of step owner files alone through (E47), but a Product-checks workflow (`.github/workflows/yad-product-checks.yml` or `.gitlab/ci/yad-product-checks.yml`, or the same file under its pre-E123 name `yad-hub-checks.yml`) lists a PR's changes without `--no-renames` (**warn**). Then moving an artifact into `.sdlc/owners/` on a non-review branch passes both checks. It happens when `yad update` kept a workflow the team edited by hand. Each `git … diff … --name-only` (or `--raw`) command is checked on its own, read as bash reads it (a `#` line is prose; a line ending in `\` goes on to the next; `&&`, `\|\|`, `;` and `\|` separate commands). Only the shipped file names (new and old) are read: a Product that runs the checks from another workflow file, or from a GitLab `include:`, is not checked, so a clean doctor is not proof there. | Add `--no-renames` and `-c core.quotePath=false` to that workflow's `git diff --name-only` lines, as the shipped one has. |
 | `renamed:<old path>` | Something yad installed is still under a name 4.0 changed (E123): the `yad-hub-bridge` skill folder (or `.opencode/commands/yad-hub-bridge.md`), or the Product's `.github/workflows/yad-hub-checks.yml` / `.gitlab/ci/yad-hub-checks.yml` (**warn**). Pre-2.0 `sdlc-*` names are reported the same way. Silent when nothing old is left. | `yad update` — it installs the new name and removes the old one. An old CI file you edited is kept, and goes on running under its old name — the new name is not installed beside it, so nothing runs twice: `yad update --overwrite-local` replaces it with the new one (your copy is saved as `<file>.yad-orig`), then copy your edits into the new file. |
@@ -1234,19 +1234,23 @@ in use. `add` and `remove` write only a difference from that default, so the fil
 | `detect` | what shows the tool is here, as in a shipped entry: `skills`, `skillPrefixes`, `plugins`, `mcp`, `bins`. On the command line: `--detect skill:<name>,prefix:<start>,plugin:<name>,mcp:<server>,bin:<program>` |
 
 - **Where it runs.** `add` and `remove` write the Product's file. Run them from the Product, from inside
-  a code repo it registers, or with `--dir <the Product>`; anywhere else they refuse. `list` and `check`
-  look for tools in the folder you run them in (a code repo's own skills count) and read the choices
-  from the Product. With no Product, they show the defaults.
+  a code repo it registers, or with `--dir <the Product>` (the Product folder itself, as for every
+  Product command); anywhere else they refuse. `list` and `check` look for tools in the folder you run
+  them in, or the one `--dir` names (a code repo's own skills count), and read the choices from the
+  Product that folder belongs to. With no Product, they show the defaults and say why none was found.
+- **A program is a name.** `bins` holds program names looked up on `PATH`, never paths: a `/` or `\`
+  is refused, so the shared file cannot make a teammate's `check` look at a file it chose.
 - **`remove` does not disconnect.** Removing a connected tool such as Figma marks it unused in the
   toolbox; `design.json` still connects it, and `yad-connect-design` changes that.
 - **A broken file is never written over.** If `toolbox.json` does not parse, `add` and `remove` refuse
   and leave it as it is; `list` and `check` warn and show the defaults. A line that does nothing — a tool
-  this release does not ship, a choice other than `use` or `skip`, a custom tool missing a part — is
-  ignored, and `yad doctor` names it (`toolbox`, warn, `YAD-CFG-007`).
+  this release does not ship, a choice other than `use` or `skip`, a custom tool that is incomplete,
+  malformed, listed twice or uses a shipped tool's id — is ignored, and `yad doctor` names it (`toolbox`,
+  warn, `YAD-CFG-007`). `yad toolbox remove <id>` clears whatever the file holds under that id.
 - **`check` never fails.** It names each tool this Product uses that is missing, turned off in your
   Claude Code settings, or outside its known-good versions, with the install command and what yadflow
-  does without it, and exits 0. `yad doctor` does not report missing tools. Setup and update (E85) use
-  the same check.
+  does without it, and exits 0. `yad doctor` does not report missing tools. Setup and update will use
+  the same check (E85, not built yet).
 
 ## What is installed
 
@@ -2106,7 +2110,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-CFG-004` | `learning.json` names an unknown learning tool | expected one of `config.yaml` `learning.tools` (e.g. `deeptutor`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-005` | the Product settings (`product.json`, or `hub.json` on a Product that has only that name) set a platform but are missing `git_url` (needed to scope auth + open PRs) | add `git_url` to `.sdlc/product.json` (`.sdlc/hub.json` on a Product that has only that name; when both exist, then run `yad migrate --apply --keep product`), or re-run `yad setup` — it backfills it from the origin remote |
 | `YAD-CFG-006` | `.sdlc/skills.json` binds a step to something that is not a skill name | each value must be a skill name (a string) or a non-empty list of them. `yad doctor` warns and names the steps; the engine ignores those lines and runs its default skill. Fix the line, or `yad skill unbind <step>` |
-| `YAD-CFG-007` | `.sdlc/toolbox.json` has a line that does nothing: a tool this yadflow does not ship, a choice other than `use` or `skip`, or a custom tool missing its role, fallback or `detect` (E86) | `yad doctor` warns and names each line; `yad toolbox list` ignores those lines and shows the default. Fix the line by hand, or `yad toolbox remove <id>` and add the tool again |
+| `YAD-CFG-007` | `.sdlc/toolbox.json` has a line that does nothing: a tool this yadflow does not ship, a choice other than `use` or `skip`, or a custom tool that is incomplete (no role, fallback or `detect`), malformed (a bad id, `install` or `source`, a path in `bins`), listed twice, or uses a shipped tool's id (E86) | `yad doctor` warns and names each line; `yad toolbox list` ignores those lines and shows the default. Fix the line by hand, or `yad toolbox remove <id>` — it clears whatever the file holds under that id — and add the tool again |
 | `YAD-CLI-001` | a `--json` run needed an answer only a prompt could give (E1) | a `--json` run never asks a question. Pass the answer as a flag (`yad --help` lists them), set `SDLC_NONINTERACTIVE=1` to take the defaults, or run without `--json` |
 
 Filing a bug? The fastest path is **`yad report`** — it files the issue for you in the yadflow repo

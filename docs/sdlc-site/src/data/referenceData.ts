@@ -497,8 +497,8 @@ export const ERROR_CODES: ErrorCode[] = [
   },
   {
     code: 'YAD-CFG-007',
-    cause: '.sdlc/toolbox.json has a line that does nothing: a tool this yadflow does not ship, a choice other than use or skip, or a custom tool missing its role, fallback or detect.',
-    resolution: 'yad doctor warns and names each line; yad toolbox list ignores those lines and shows the default. Fix the line by hand, or run yad toolbox remove <id> and add the tool again.',
+    cause: '.sdlc/toolbox.json has a line that does nothing: a tool this yadflow does not ship, a choice other than use or skip, or a custom tool that is incomplete, malformed, listed twice or uses a shipped tool\'s id.',
+    resolution: 'yad doctor warns and names each line; yad toolbox list ignores those lines and shows the default. Fix the line by hand, or run yad toolbox remove <id> (it clears whatever the file holds under that id) and add the tool again.',
     severity: 'warn',
     visibleTo: BUILD,
   },

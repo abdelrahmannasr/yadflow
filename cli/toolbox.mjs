@@ -457,6 +457,10 @@ export function customProblems(t) {
   const kinds = Object.values(DETECT_KINDS);
   need(isObject(d) && Object.keys(d).every((k) => kinds.includes(k) && isStringList(d[k])) && kinds.some((k) => d[k]?.length),
     `detect names at least one thing to look for (${kinds.join(', ')}), each a list of names`);
+  // A program is a plain name looked up on PATH. A path (`../x`) would make every teammate's `check`
+  // look at a file the shared file chose, so it is refused.
+  need(!isObject(d) || !Array.isArray(d.bins) || d.bins.every((b) => typeof b !== 'string' || (!/[\\/]/.test(b) && b !== '.' && b !== '..')),
+    'detect.bins names programs, not paths (no / or \\)');
   need(t.install === undefined || (Array.isArray(t.install) && t.install.every((r) => INSTALL_TYPES.includes(r?.type) && typeof r?.command === 'string' && r.command.length > 0)),
     `install, when set, is a list of { type: ${INSTALL_TYPES.join(' | ')}, command }`);
   need(t.source === undefined || t.source === null || (typeof t.source === 'string' && /^https:\/\//.test(t.source)), 'source, when set, is an https URL');
@@ -567,7 +571,7 @@ export function toolboxLines(rows) {
 
 export function runToolboxList(root, { json = false, productRoot = null, tools = TOOLBOX, items = null, has = onPath } = {}) {
   const { rows, problems } = toolboxRows(root, productRoot, { tools, items, has });
-  if (json) return emitJSON({ ok: true, file: productRoot ? FILE : null, tools: rows, problems });
+  if (json) return emitJSON({ ok: true, ...(productRoot ? where(productRoot) : { product: null, file: null }), tools: rows, problems });
   for (const line of toolboxLines(rows)) log(line);
   for (const p of problems) warn(p);
   info(productRoot
@@ -598,7 +602,7 @@ export function toolboxCheck(root, productRoot, opts = {}) {
 // NEVER FAILS (decided with the row): no tool is required, so a missing one is news, not an error. Exit 0.
 export function runToolboxCheck(root, { json = false, productRoot = null, ...opts } = {}) {
   const { used, findings, problems } = toolboxCheck(root, productRoot, opts);
-  if (json) return emitJSON({ ok: true, file: productRoot ? FILE : null, used: used.map((r) => r.id), findings, problems });
+  if (json) return emitJSON({ ok: true, ...(productRoot ? where(productRoot) : { product: null, file: null }), used: used.map((r) => r.id), findings, problems });
   for (const p of problems) warn(p);
   if (!findings.length) {
     ok(`all ${used.length} tool(s) this project uses are here: ${used.map((r) => clean(r.name)).join(', ')}`);
@@ -624,7 +628,7 @@ export function parseDetect(text) {
   const out = {};
   for (const part of String(text ?? '').split(',').map((p) => p.trim()).filter(Boolean)) {
     const m = part.match(/^([a-z]+):(.+)$/);
-    const key = m && DETECT_KINDS[m[1]];
+    const key = m && Object.hasOwn(DETECT_KINDS, m[1]) ? DETECT_KINDS[m[1]] : null;
     if (!key) return { error: `\`${clean(part)}\` is not <kind>:<name> — the kinds are ${Object.keys(DETECT_KINDS).join(', ')}` };
     (out[key] ??= []).push(m[2].trim());
   }
@@ -660,6 +664,24 @@ function setShipped(doc, tool, want, connected) {
 }
 const sameJSON = (a, b) => JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
 
+// Where the file is, for an answer: the Product as a path from here, since run from a code repo nothing
+// else on stdout names it. Both sides as the disk has them: `process.cwd()` is already resolved, and a
+// Product reached through a link (macOS's /var is /private/var) would otherwise climb to the top and back.
+const onDisk = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+const where = (productRoot) => ({ product: path.relative(onDisk(process.cwd()), onDisk(productRoot)) || '.', file: FILE });
+
+// The edit to a shipped tool, said truthfully. Whether the FILE changed and whether the tool's USE changed
+// are two questions: removing a line that did nothing (`"figma": "bogus"`, or one that repeats the
+// default) changes the file and not the use.
+function sayEdit(tool, was, now, changed) {
+  const state = now.used ? 'used here' : 'not used here';
+  if (!changed) info(`${tool.name} is already ${state} — nothing to change`);
+  else if (was.used === now.used) info(`${tool.name} is already ${state} — removed a line in ${FILE} that did nothing`);
+  else ok(now.used ? `${tool.name} is used here now` : `${tool.name} is not used here now — ${clean(tool.fallback)}`);
+}
+const usedFrom = (shipped, connected) => ({ shipped: new Map(Object.entries(shipped).filter(([, v]) => CHOICES.includes(v))), connected });
+const sameId = (id) => (t) => isObject(t) && t.id === id;
+
 export function runToolboxAdd(productRoot, { id, custom = false, json = false, ...flags } = {}) {
   if (!id) return refuse('yad toolbox add needs a tool id', ADD_USAGE, { json });
   if (!TOOL_ID.test(id)) return refuse(`\`${clean(id)}\` is not a tool id`, 'an id is lower-case letters, digits and dashes — `yad toolbox list --json` shows each one', { json });
@@ -669,10 +691,11 @@ export function runToolboxAdd(productRoot, { id, custom = false, json = false, .
   if (error) return brokenFile(error, json);
   const list = Array.isArray(doc.custom) ? doc.custom : [];
   const tool = shippedTool(id);
+  const mine = list.find(sameId(id));
 
   if (custom) {
     if (tool) return refuse(`${id} is a shipped tool`, `\`yad toolbox add ${id}\` marks it as used here`, { json });
-    if (list.some((t) => isObject(t) && t.id === id)) return refuse(`${id} is already one of this project's tools`, `to change it, \`yad toolbox remove ${id}\` and add it again`, { json });
+    if (mine) return refuse(`${id} is already one of this project's tools`, `to change it, \`yad toolbox remove ${id}\` and add it again`, { json });
     const d = parseDetect(flags.detect);
     if (flags.detect === undefined || d.error) return refuse(d.error && flags.detect !== undefined ? d.error : 'a tool of your own needs --detect, so yadflow can tell whether it is here', ADD_USAGE, { json });
     const entry = { id, role: flags.role, fallback: flags.fallback, detect: d.detect };
@@ -687,56 +710,73 @@ export function runToolboxAdd(productRoot, { id, custom = false, json = false, .
     save(productRoot, doc, isObject(doc.shipped) ? doc.shipped : {}, [...list, entry]);
     ok(`${id} added — a tool of this project's own, in use here`);
     hand(`written to ${FILE} — commit it so the team shares it (undo with \`yad toolbox remove ${id}\`); \`yad toolbox check\` says whether it is found`);
-    return { id, used: true, because: 'custom', changed: true, file: FILE };
+    return { id, used: true, because: 'custom', changed: true, ...where(productRoot) };
   }
 
   if (!tool) {
-    if (list.some((t) => isObject(t) && t.id === id)) {
+    if (mine) {
+      // An entry `list` and `check` ignore is not in use, whatever the file says.
+      const problems = customProblems(mine);
+      if (problems.length) return refuse(`${id} is in ${FILE} but ignored: ${problems.join('; ')}`, `fix it by hand, or \`yad toolbox remove ${id}\` and add it again with --custom`, { json });
       info(`${id} is already one of this project's tools — nothing to change`);
-      return { id, used: true, because: 'custom', changed: false, file: FILE };
+      return { id, used: true, because: 'custom', changed: false, ...where(productRoot) };
     }
     return refuse(`${id} is not in the toolbox`, '`yad toolbox list --json` shows each id; add a tool of your own with `yad toolbox add <id> --custom …`', { json });
   }
   const connected = connectedTools(productRoot);
-  const shipped = setShipped(doc, tool, 'use', connected);
   const was = toolUse(tool, loadChoices(productRoot));
+  const shipped = setShipped(doc, tool, 'use', connected);
   const changed = !sameJSON(shipped, doc.shipped);
   if (changed) save(productRoot, doc, shipped, list);
-  const now = toolUse(tool, { shipped: new Map(Object.entries(shipped).filter(([, v]) => CHOICES.includes(v))), connected });
-  if (!changed || was.used) info(`${tool.name} is already used here — nothing to change`);
-  else ok(`${tool.name} is used here now`);
+  const now = toolUse(tool, usedFrom(shipped, connected));
+  sayEdit(tool, was, now, changed);
   // Records only: the person installs it.
   const how = howToGet(tool);
   if (how.length) hand(`to install it: ${how.join('   or   ')}`);
   if (changed) hand(`written to ${FILE} — commit it so the team shares it (undo with \`yad toolbox remove ${id}\`); \`yad toolbox check\` says whether it is found`);
-  return { id, ...now, changed, file: FILE };
+  return { id, ...now, changed, ...where(productRoot) };
 }
 
-export function runToolboxRemove(productRoot, { id, json = false } = {}) {
+// Removes what the file holds under `id` — so it also clears the lines `yad doctor` names as doing
+// nothing: a custom entry with a broken id, and a shipped line for a tool this release does not ship.
+export function runToolboxRemove(productRoot, { id, json = false, ...flags } = {}) {
   if (!id) return refuse('yad toolbox remove needs a tool id', 'usage: yad toolbox remove <id>', { json });
-  if (!TOOL_ID.test(id)) return refuse(`\`${clean(id)}\` is not a tool id`, 'an id is lower-case letters, digits and dashes — `yad toolbox list --json` shows each one', { json });
+  const given = CUSTOM_FLAGS.filter((k) => flags[k] !== undefined);
+  if (flags.custom || given.length) return refuse(`yad toolbox remove takes only the tool id (got ${flags.custom ? '--custom' : `--${given[0]}`})`, 'usage: yad toolbox remove <id>', { json });
   const { doc, error } = readToolboxFile(productRoot);
   if (error) return brokenFile(error, json);
   const list = Array.isArray(doc.custom) ? doc.custom : [];
   const shipped0 = isObject(doc.shipped) ? doc.shipped : {};
-  if (list.some((t) => isObject(t) && t.id === id)) {
-    save(productRoot, doc, shipped0, list.filter((t) => !(isObject(t) && t.id === id)));
-    ok(`${id} removed — it was one of this project's own tools`);
+  if (list.some(sameId(id))) {
+    const left = list.filter((t) => !sameId(id)(t));
+    save(productRoot, doc, shipped0, left);
+    const copies = list.length - left.length;
+    ok(`${clean(id)} removed — it was one of this project's own tools${copies > 1 ? ` (listed ${copies} times; every copy is gone)` : ''}`);
     hand(`written to ${FILE} — commit it so the team shares it`);
-    return { id, used: false, because: null, changed: true, file: FILE };
+    return { id, used: false, because: null, changed: true, ...where(productRoot) };
   }
   const tool = shippedTool(id);
-  if (!tool) return refuse(`${id} is not in the toolbox`, '`yad toolbox list --json` shows each id', { json });
+  if (!tool) {
+    if (Object.hasOwn(shipped0, id)) {
+      const shipped = { ...shipped0 };
+      delete shipped[id];
+      save(productRoot, doc, shipped, list);
+      ok(`removed the line for \`${clean(id)}\`, a tool this yadflow does not ship`);
+      hand(`written to ${FILE} — commit it so the team shares it`);
+      return { id, used: false, because: null, changed: true, ...where(productRoot) };
+    }
+    if (!TOOL_ID.test(id)) return refuse(`\`${clean(id)}\` is not a tool id`, 'an id is lower-case letters, digits and dashes — `yad toolbox list --json` shows each one', { json });
+    return refuse(`${id} is not in the toolbox`, '`yad toolbox list --json` shows each id', { json });
+  }
   const connected = connectedTools(productRoot);
   const was = toolUse(tool, loadChoices(productRoot));
   const shipped = setShipped(doc, tool, 'skip', connected);
   const changed = !sameJSON(shipped, doc.shipped);
   if (changed) save(productRoot, doc, shipped, list);
-  const now = toolUse(tool, { shipped: new Map(Object.entries(shipped).filter(([, v]) => CHOICES.includes(v))), connected });
-  if (!changed || !was.used) info(`${tool.name} is not used here already — nothing to change`);
-  else ok(`${tool.name} is not used here now — ${clean(tool.fallback)}`);
+  const now = toolUse(tool, usedFrom(shipped, connected));
+  sayEdit(tool, was, now, changed);
   // Removing it from the toolbox does not disconnect it: the connect skill owns that file.
   if (connected.has(id)) info(`${connected.get(id)} still connects it — \`${tool.usedBy[0]}\` changes the connection`);
   if (changed) hand(`written to ${FILE} — commit it so the team shares it (undo with \`yad toolbox add ${id}\`)`);
-  return { id, ...now, changed, file: FILE };
+  return { id, ...now, changed, ...where(productRoot) };
 }
