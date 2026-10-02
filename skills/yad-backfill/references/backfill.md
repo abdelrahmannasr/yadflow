@@ -6,10 +6,10 @@ the whole repo.
 
 ## Repomix (the one true CLI subprocess)
 
-`npx repomix@latest [flags]` (Phase 0 / RESEARCH-NOTES §3). For a single feature:
+`npx repomix@1.18.1 [flags]` (Phase 0 / RESEARCH-NOTES §3). For a single feature:
 
 ```
-npx repomix@latest --compress --include "src/<feature>/**" --include-logs --style markdown -o <out>.md
+npx repomix@1.18.1 --compress --include "src/<feature>/**" --include-logs --style markdown -o <out>.md
 ```
 
 - `--compress` — Tree-sitter structural compression (keeps the pack small and signal-dense).

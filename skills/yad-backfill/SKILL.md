@@ -1,6 +1,6 @@
 ---
 name: yad-backfill
-description: 'Build Step G of the gated SDLC — backfill: generate specs for already-built features in an existing repo so new work does not break them. Confirm Repomix (the one true CLI subprocess: npx repomix), pack ONE feature at a time (compress + git logs, secret-scan), feed it to AI with a "describe what exists, do not invent" prompt, and write a DRAFT spec marked unverified. Require human approval (reuse yad-review-gate) before the spec counts as real. Boundary is auto-proposed from the project convention and human-confirmed. A change is blocked only until the features IT touches have approved specs. The `promote` action flips a brownfield stub epic (minted by yad-stub, so defects could thread off it) to a real, verified feature epic once its backfill spec is approved. Use when the user says "backfill specs", "document an existing feature", "spec the legacy code", or "promote the stub epic".'
+description: 'Build Step G of the gated SDLC — backfill: generate specs for already-built features in an existing repo so new work does not break them. Confirm Repomix (the one true CLI subprocess: npx repomix@1.18.1), pack ONE feature at a time (compress + git logs, secret-scan), feed it to AI with a "describe what exists, do not invent" prompt, and write a DRAFT spec marked unverified. Require human approval (reuse yad-review-gate) before the spec counts as real. Boundary is auto-proposed from the project convention and human-confirmed. A change is blocked only until the features IT touches have approved specs. The `promote` action flips a brownfield stub epic (minted by yad-stub, so defects could thread off it) to a real, verified feature epic once its backfill spec is approved. Use when the user says "backfill specs", "document an existing feature", "spec the legacy code", or "promote the stub epic".'
 ---
 
 # SDLC — Backfill (existing-code specs)
@@ -43,8 +43,9 @@ Tell the person which tools you used and which fallbacks, and why.
 
 - `{project-root}` resolves from the project working directory; code repos are separate git repos under
   `{project-root}/demo-repos/<repo>/`.
-- **Repomix is a true CLI subprocess** (Phase 0 / RESEARCH-NOTES §3): `npx repomix@latest [flags]` —
-  NOT a slash-command. It secret-scans by default (Secretlint).
+- **Repomix is a true CLI subprocess** (Phase 0 / RESEARCH-NOTES §3): `npx repomix@1.18.1 [flags]` —
+  NOT a slash-command. Run exactly that version: it is the one yadflow vetted, and `@latest` would
+  take a release nobody checked. It secret-scans by default (Secretlint).
 - Backfilled specs live in the code repo at `specs/backfill/<feature>/spec.md`.
 - A **feature** is the project's natural unit from the constitution (e.g. a module / a `src/<feature>/`
   directory). Auto-propose the boundary from the convention; **a human confirms** it where the code
@@ -68,7 +69,7 @@ guess silently where the code breaks the convention.
 ### Step 2 — `pack` (Repomix, one feature)
 Run, from inside the repo, over **only this feature's files**:
 ```
-npx repomix@latest --compress --include "<feature globs>" --include-logs --style markdown -o <out>.md
+npx repomix@1.18.1 --compress --include "<feature globs>" --include-logs --style markdown -o <out>.md
 ```
 `--compress` (Tree-sitter structural compression) keeps it small; `--include-logs` adds the relevant
 git history (default 50; `--include-logs-count N` to change); Secretlint secret-scans by default. If a

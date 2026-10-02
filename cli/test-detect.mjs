@@ -494,6 +494,169 @@ test('E84: every shipped toolbox entry is well formed, and every tier has entrie
   for (const t of TOOLBOX) for (const r of t.install) assert.doesNotMatch(r.command, /\bnpx ecc(@|\s|$)|\bnpm (i|install) (-g )?ecc(\s|$)/, t.id);
 });
 
+// ---- E88: every toolbox tool is vetted (licence + source) before it ships ----------------------------
+const { REPOMIX_VERSION, VET_MAX_AGE_DAYS, isRepoLicenceFile, staleVettings, vettingAge, vettingProblems } = await import('./toolbox.mjs');
+
+test('E88: every shipped toolbox entry carries a complete vetting record', () => {
+  for (const t of TOOLBOX) assert.deepEqual(vettingProblems(t), [], t.id);
+  // The proof matches the answer: an open licence was read from the source's own LICENSE file, a closed
+  // one from the vendor's terms page — never a LICENSE file it does not have.
+  for (const t of TOOLBOX) {
+    if (t.licence === 'proprietary') assert.doesNotMatch(t.vetted.licenceFrom, /\/LICENSE$/, t.id);
+    else assert.ok(t.vetted.licenceFrom.startsWith(`${t.vetted.source}/blob/`) && t.vetted.licenceFrom.endsWith('/LICENSE'), `${t.id}: ${t.vetted.licenceFrom}`);
+  }
+  // Every registry package an install route names is in the record — so a package nobody vetted cannot
+  // ride in on an install line. The forms read: npx / npm exec / npm i|install [-g], with -y or --yes;
+  // uvx / uv tool install / pipx install / pip|pip3 install [-U|--upgrade]. A git URL is not a package.
+  const NPM = /\b(?:npx|npm (?:exec|i|install))(?: (?:-g|--global|-y|--yes))* (@?[A-Za-z0-9][\w./-]*?)(?:@[\w.+^~-]+)?(?=[\s,]|$)/g;
+  const PYPI = /\b(?:uvx|uv tool install|pipx install|pip3? install)(?: (?:-U|--upgrade))* ([A-Za-z0-9][\w.-]*)(?=[\s,]|$)/g;
+  // FAIL CLOSED (review 2): each installer word on a line must yield its package. A form the two readers
+  // do not know — `npm i -D x`, `pip install "x>=1"`, `bunx x`, `pnpm add x` — then fails here, loudly,
+  // instead of checking nothing. One package per installer word: a second bare package after the first
+  // (`npm install a b`) is not read, and no shipped line has one. Widen the readers when a new entry needs it.
+  const INSTALLERS = /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add)|uvx|uv tool install|pipx install|pip3? install)\b/g;
+  const GIT_URL = /\binstall (?:-\S+ )*git\+/;
+  const named = (cmd) => [...cmd.matchAll(NPM)].map((m) => `npm:${m[1].toLowerCase()}`)
+    .concat([...cmd.matchAll(PYPI)].map((m) => `pypi:${m[1].toLowerCase()}`));
+  // The reader itself, on the forms a future entry may use.
+  assert.deepEqual(named('npm install -g repomix@1.18.1'), ['npm:repomix']);
+  assert.deepEqual(named('npx -y foo@1.0.0-beta.1'), ['npm:foo']);
+  assert.deepEqual(named('claude mcp add playwright npx @playwright/mcp@latest'), ['npm:@playwright/mcp']);
+  assert.deepEqual(named('npm exec x, then pip3 install --upgrade Y'), ['npm:x', 'pypi:y']);
+  assert.deepEqual(named('uvx z'), ['pypi:z']);
+  assert.deepEqual(named('pipx install git+https://github.com/a/b.git'), [], 'a git URL is not a registry package');
+  assert.deepEqual(named('npx x@^1.2'), ['npm:x']);
+  const unread = (cmd) => (cmd.match(INSTALLERS) || []).length - (GIT_URL.test(cmd) ? 1 : 0) !== named(cmd).length;
+  for (const form of ['npm i -D evil', 'pip install "evil>=1"', 'bunx evil', 'pnpm dlx evil', 'uv tool install evil==1.0', 'npx -p evil x', 'npm add evil', 'yarn global add evil', 'pnpm add evil', 'yarn add evil', 'yarn dlx evil']) {
+    assert.ok(unread(form), `${form}: a form the readers do not know must be caught`);
+  }
+  for (const t of TOOLBOX) {
+    const vetted = new Set(t.vetted.packages.map((p) => `${p.registry}:${p.name}`));
+    for (const r of t.install) {
+      assert.ok(!unread(r.command), `${t.id}: \`${r.command}\` installs something these readers cannot name — widen them`);
+      for (const pkg of named(r.command)) assert.ok(vetted.has(pkg), `${t.id}: ${pkg} is installed but not vetted`);
+    }
+  }
+});
+
+test('E88: vettingProblems names each way a record is incomplete; a team\'s own tool needs none', () => {
+  const good = TOOLBOX.find((t) => t.id === 'repomix');
+  const bad = (vetted, extra = {}) => vettingProblems({ ...good, ...extra, vetted });
+  assert.match(bad(undefined).join(), /vetted is set/);
+  for (const on of ['2026-13-45', '2026-02-30', '2025-02-29', '2026-04-31', '26-1-1']) assert.match(bad({ ...good.vetted, on }).join(), /vetted\.on/, on);
+  assert.deepEqual(bad({ ...good.vetted, on: '2024-02-29' }), [], 'a real leap day');
+  assert.match(bad({ ...good.vetted, licenceFrom: 'https://' }).join(), /licenceFrom/);
+  assert.match(bad({ ...good.vetted, licenceFrom: 'https://github.com/x/y/blob/main/LICENSE.md' }, { licence: 'proprietary' }).join(), /terms page/);
+  assert.match(bad({ ...good.vetted, licenceFrom: 'https://github.com/x/y/blob/main/LICENSE-MIT' }, { licence: 'proprietary' }).join(), /terms page/);
+  // …but a terms PAGE whose address happens to say "license" is the right proof (review 3).
+  for (const page of ['https://vendor.com/license-agreement', 'https://vendor.com/legal/license_terms', 'https://vendor.com/license']) {
+    assert.deepEqual(bad({ ...good.vetted, licenceFrom: page }, { licence: 'proprietary' }), [], page);
+  }
+  // A repository file is told by where it lives, in any letter case, query or not (review 4).
+  for (const file of ['https://github.com/a/b/blob/main/license', 'https://github.com/a/b/blob/main/License.md',
+    'https://github.com/a/b/blob/main/LICENSE-Apache-2.0', 'https://github.com/a/b/blob/main/LICENSE?plain=1',
+    'https://raw.githubusercontent.com/a/b/main/COPYING', 'https://git.example.org/a/b/raw/main/LICENCE.txt',
+    'https://github.com/a/b/blob/main/LICEN%53E', 'https://codeberg.org/a/b/src/branch/main/LICENSE', 'https://gitlab.com/a/b/-/blob/main/LICENSE']) {
+    assert.equal(isRepoLicenceFile(file), true, file);
+  }
+  for (const page of ['https://www.figma.com/legal/tos/', 'https://vendor.com/license', 'https://github.com/a/b/blob/main/README.md', 'not a url',
+    'https://github.com/org/license-tool', 'https://github.com/org/repo?tab=License-1-ov-file']) {
+    assert.equal(isRepoLicenceFile(page), false, page);
+  }
+  // Every open tool's proof is a repository licence file; no closed tool's is.
+  for (const t of TOOLBOX) assert.equal(isRepoLicenceFile(t.vetted.licenceFrom), t.licence !== 'proprietary', t.id);
+  assert.match(bad({ ...good.vetted, licenceFrom: 'http://x' }).join(), /licenceFrom/);
+  assert.match(bad({ ...good.vetted, source: '' }).join(), /vetted\.source/);
+  assert.match(bad({ ...good.vetted, release: '' }).join(), /vetted\.release/);
+  assert.match(bad({ ...good.vetted, packages: [{ registry: 'cargo', name: 'x', version: '1.0.0' }] }).join(), /registry/);
+  assert.match(bad({ ...good.vetted, packages: [{ registry: 'npm', name: 'x', version: 'latest' }] }).join(), /full version/);
+  assert.match(bad({ ...good.vetted, note: '' }).join(), /note/);
+  assert.match(bad(good.vetted, { licence: 'proprietary' }).join(), /terms page/);
+  assert.deepEqual(bad({ ...good.vetted, release: null, packages: [] }), []);
+});
+
+test('E88: the age is checked against a day passed in, and only past the limit', () => {
+  const t = { ...TOOLBOX[0], id: 'x', name: 'X', vetted: { ...TOOLBOX[0].vetted, on: '2026-01-01' } };
+  assert.equal(vettingAge(t, new Date('2026-01-01T23:59:00Z')), 0);
+  assert.equal(vettingAge(t, new Date('2026-07-01T00:00:00Z')), 181);
+  const on = (d) => staleVettings(new Date(`${d}T12:00:00Z`), [t]);
+  const limit = new Date(Date.UTC(2026, 0, 1 + VET_MAX_AGE_DAYS)).toISOString().slice(0, 10);
+  const past = new Date(Date.UTC(2026, 0, 2 + VET_MAX_AGE_DAYS)).toISOString().slice(0, 10);
+  assert.deepEqual(on(limit), [], 'exactly the limit is still current');
+  assert.deepEqual(on(past), [{ id: 'x', name: 'X', on: '2026-01-01', age: VET_MAX_AGE_DAYS + 1, why: 'stale' }]);
+  // A date after today is refused too (review 1): a typo of 2027 for 2026 would keep the tool out of the
+  // gate for a year.
+  assert.deepEqual(on('2025-12-31'), [{ id: 'x', name: 'X', on: '2026-01-01', age: -1, why: 'future' }]);
+});
+
+test('E88: scripts/vet-check.mjs passes on a vetted list and names each stale tool with what to do', () => {
+  const run = (...a) => spawnSync(process.execPath, [path.join(ROOT, 'scripts/vet-check.mjs'), ...a], { encoding: 'utf8' });
+  const newest = TOOLBOX.map((x) => x.vetted.on).sort().at(-1);
+  const ok = run('--today', newest);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, new RegExp(`all ${TOOLBOX.length} toolbox tools are vetted`));
+  const later = new Date(Date.parse(`${newest}T00:00:00Z`) + (VET_MAX_AGE_DAYS + 1) * 86400000).toISOString().slice(0, 10);
+  const stale = run('--today', later);
+  assert.equal(stale.status, 1);
+  for (const t of TOOLBOX) assert.match(stale.stderr, new RegExp(`^${t.id} \\(`, 'm'));
+  assert.match(stale.stderr, /re-vet each one in cli\/toolbox\.mjs/);
+  for (const bad of ['soon', '2026-13-01', '2026-02-30']) assert.equal(run('--today', bad).status, 2, bad);
+  // A vetting date after today fails the release too.
+  const before = new Date(Date.parse(`${TOOLBOX.map((x) => x.vetted.on).sort()[0]}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const early = run('--today', before);
+  assert.equal(early.status, 1);
+  assert.match(early.stderr, /which is after today/);
+  assert.doesNotMatch(early.stderr, /re-vet each one/, 'a future date is a typo to fix, not a licence to re-read');
+  // The release check runs it, as step 8 of 8.
+  const rc = fs.readFileSync(path.join(ROOT, 'scripts/release-check.sh'), 'utf8');
+  assert.match(rc, /say "8\/8 {2}every toolbox tool was vetted recently"/);
+  assert.match(rc, /^node "\$ROOT\/scripts\/vet-check\.mjs" \|\| die/m);
+  assert.equal((rc.match(/say "\d\/7/g) || []).length, 0, 'a step still counts to 7');
+});
+
+test('E88: Repomix runs at its vetted version everywhere yad names it — never @latest', () => {
+  assert.equal(REPOMIX_VERSION, TOOLBOX.find((t) => t.id === 'repomix').vetted.packages.find((p) => p.name === 'repomix').version);
+  assert.ok(parseVersion(REPOMIX_VERSION)?.full);
+  // Every Repomix command in the code and in the skills (which write it out as text) is the vetted one.
+  // `/plugin install repomix-mcp@repomix` names a marketplace, not a version, and is not matched.
+  const files = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(mjs|md|ya?ml|csv)$/.test(e.name) && !/^test/.test(e.name)) files.push(p);
+    }
+  };
+  walk(path.join(ROOT, 'cli'));
+  walk(path.join(ROOT, 'skills'));
+  for (const doc of ['docs/CLI.md', 'docs/WALKTHROUGH.md', 'TEAM-GUIDE.md', 'docs/sdlc-site/public/report.html']) files.push(path.join(ROOT, doc));
+  let seen = 0;
+  const at = REPOMIX_VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const f of files) {
+    const text = fs.readFileSync(f, 'utf8');
+    const rel = path.relative(ROOT, f);
+    for (const m of text.matchAll(/\brepomix@([^\s`'",)<\]]+)/g)) {
+      seen += 1;
+      if (m[1] === '${REPOMIX_VERSION}') continue; // the code reads the constant itself
+      assert.equal(m[1], REPOMIX_VERSION, `${rel}: repomix@${m[1]}`);
+    }
+    // No version at all runs the newest, as `@latest` does: `npx repomix`, `npx -y repomix`, `npm exec repomix`.
+    assert.doesNotMatch(text, /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add))(?:\s+(?:-g|--global|-y|--yes|-D|--save-dev|-p|--package|--))*(?:\s+|=)repomix(?![@\w-])/, `${rel}: Repomix run or installed without the vetted version`);
+    assert.doesNotMatch(text, new RegExp(`\\brepomix@(?!${at}\\b)[\\w.-]`), `${rel}: another Repomix version`);
+  }
+  assert.ok(seen >= 10, `expected the pinned command in the skills and docs, found ${seen}`);
+  const setup = fs.readFileSync(path.join(ROOT, 'cli/setup.mjs'), 'utf8');
+  assert.match(setup, /`repomix@\$\{REPOMIX_VERSION\}`/, 'yad setup and yad repo refresh run the vetted version');
+  assert.doesNotMatch(setup, /repomix@latest/);
+});
+
+test('E88: yad toolbox list prints each shipped tool\'s licence and vetting day; a team\'s own tool has none', () => {
+  const rows = TOOLBOX.map((t) => ({ ...t, status: { state: 'missing' }, used: false }));
+  const out = toolboxLines([...rows, { ...rows[0], id: 'mine', name: 'Mine', tier: 'project', licence: null, vetted: null }]).join('\n');
+  assert.match(out, new RegExp(`licence MIT, vetted ${TOOLBOX[0].vetted.on}`));
+  assert.equal((out.match(/vetted \d{4}-/g) || []).length, TOOLBOX.length, 'one line per shipped tool, none for the team\'s');
+});
+
 test('E84: a fallback a skill records is written there word for word, so E87 renames nothing', () => {
   for (const t of TOOLBOX.filter((x) => x.records)) {
     const skills = t.usedBy.filter((u) => fs.existsSync(path.join(ROOT, 'skills', u, 'SKILL.md')));

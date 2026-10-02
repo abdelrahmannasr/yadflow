@@ -46,11 +46,38 @@ const TIER_TITLES = { core: 'Core — offered at setup', recommended: 'Recommend
 
 const CHECKED = '2026-10-01';
 
+// ---- vetting (E88) --------------------------------------------------------------------------------
+//
+// EVERY ENTRY IS VETTED BEFORE IT SHIPS, and the vetting is redone before it goes stale. `checked` above
+// is when an entry's INSTALL routes were read; `vetted` is the proof that the tool is what it claims:
+//
+//   on           the day the vetting was done. Per entry: they all start on VETTED_ON, and re-vetting ONE
+//                tool gives that entry its own date literal rather than moving the shared one
+//   licenceFrom  where the licence was read — the repository's LICENSE file, or, for a closed tool, the
+//                vendor's own terms page. `licence` on the entry is the answer; this is the proof
+//   source       the official home the tool comes from (its owner's repository or docs)
+//   release      the source's latest release tag on that day, or null where none is published. A tag is
+//                provenance, not a version: tags read `v1.18.1`, `skill-v4.5.0`, `cli-2.11.0`
+//   packages     each registry package an install route names, confirmed to point back to `source`
+//                (npm `repository`, or the source's own README naming it), with the version on that day
+//   note         anything a reader of the record has to know — a missing LICENSE, a rebrand
+//
+// Licence and source only, as decided with the row: no maintenance score, no security scan, and no
+// tested version range — `versions` stays null. A team's own tools (`yad toolbox add --custom`) are the
+// team's to vet; yad vets only the list it ships.
+//
+// TWO GATES. The unit suite holds every record complete (`vettingProblems`); the release check refuses
+// to publish while any record is older than VET_MAX_AGE_DAYS (`staleVettings`, `scripts/vet-check.mjs`).
+// The age is checked only at release, never in the unit suite, so `main` does not turn red by itself.
+const VETTED_ON = '2026-10-02';
+export const VET_MAX_AGE_DAYS = 180;
+const VET_REGISTRIES = Object.freeze(['npm', 'pypi']);
+
 // The list itself, checked against each tool's own repository and docs on CHECKED. `install` keeps only
 // the routes the roadmap's four types describe (plugin, npm, python, script); a tool's other routes
 // (Docker, Homebrew, a VS Code extension) are in its own README, which `source` links. `versions` is null
-// everywhere for now: no bound has been tested yet — E88 vets each default and is where a known-good
-// range is earned. `records` is the exact line a skill writes when the tool is absent. Each skill in
+// everywhere: no bound has been tested, and E88 vets licence and source, not a version range. `records`
+// is the exact line a skill writes when the tool is absent. Each skill in
 // `usedBy` quotes `fallback` and `records` word for word in its "When a tool is missing" section (E87):
 // change the words here, then rewrite the sections with `skillFallbackSection`.
 export const TOOLBOX = Object.freeze([
@@ -58,13 +85,20 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'repomix', name: 'Repomix', tier: 'core', role: 'packs each code repo into one file the Shape steps read',
     licence: 'MIT', source: 'https://github.com/yamadashy/repomix', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/yamadashy/repomix/blob/main/LICENSE',
+      source: 'https://github.com/yamadashy/repomix', release: 'v1.18.1',
+      packages: [{ registry: 'npm', name: 'repomix', version: '1.18.1' }],
+      note: null,
+    },
     install: [
-      { type: 'npm', command: 'npx repomix@latest' },
-      { type: 'npm', command: 'npm install -g repomix' },
+      { type: 'npm', command: 'npx repomix@1.18.1' },
+      { type: 'npm', command: 'npm install -g repomix@1.18.1' },
       { type: 'plugin', command: '/plugin marketplace add yamadashy/repomix, then /plugin install repomix-mcp@repomix' },
     ],
     manual: null,
-    // yad runs it through `npx repomix@latest` (setup, `yad repo refresh`), so `npx` alone makes it usable.
+    // yad runs it through npx, at the vetted version (setup, `yad repo refresh`; REPOMIX_VERSION below),
+    // so `npx` alone makes it usable.
     detect: { npx: true, bins: ['repomix'], plugins: ['repomix-mcp', 'repomix-commands', 'repomix-explorer'], mcp: ['repomix'], skills: ['repomix-explorer'] },
     versions: null,
     fallback: 'no Repomix pack. yad-connect-repos and yad-backfill put the same context together by hand, from the source tree and the recent git log, and the Shape steps read the code map',
@@ -75,6 +109,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'spec-kit', name: 'Spec Kit', tier: 'core', role: 'runs the spec ceremony (specify → plan → tasks) in a code repo',
     licence: 'MIT', source: 'https://github.com/github/spec-kit', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/github/spec-kit/blob/main/LICENSE',
+      source: 'https://github.com/github/spec-kit', release: 'v1.0.13',
+      packages: [{ registry: 'pypi', name: 'specify-cli', version: '1.0.13' }],
+      note: "PyPI's specify-cli lists no project links and no provenance; Spec Kit's own README names `uv tool install specify-cli`, which is the link to the source.",
+    },
     install: [
       { type: 'python', command: 'uv tool install specify-cli, then specify init <project> --integration claude' },
       { type: 'python', command: 'pipx install specify-cli' },
@@ -91,6 +131,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'impeccable', name: 'Impeccable', tier: 'core', role: 'drives the UI design step (document, extract, craft)',
     licence: 'Apache-2.0', source: 'https://github.com/pbakaus/impeccable', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/pbakaus/impeccable/blob/main/LICENSE',
+      source: 'https://github.com/pbakaus/impeccable', release: 'skill-v4.5.0',
+      packages: [{ registry: 'npm', name: 'impeccable', version: '4.1.0' }],
+      note: "The skill and the npm installer are versioned separately: the release tag is the skill, the npm version is the installer.",
+    },
     install: [
       { type: 'npm', command: 'npx impeccable install' },
       { type: 'plugin', command: '/plugin marketplace add pbakaus/impeccable, then /plugin install impeccable@impeccable' },
@@ -108,6 +154,12 @@ export const TOOLBOX = Object.freeze([
     id: 'bmad-method', name: 'BMAD-METHOD', tier: 'recommended', role: 'a pool of planning and building skills',
     // The LICENSE file is MIT text with attribution added (GitHub reads it as NOASSERTION); "BMad" is a trademark.
     licence: 'MIT', source: 'https://github.com/bmad-code-org/BMAD-METHOD', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/bmad-code-org/BMAD-METHOD/blob/main/LICENSE',
+      source: 'https://github.com/bmad-code-org/BMAD-METHOD', release: 'v6.12.0',
+      packages: [{ registry: 'npm', name: 'bmad-method', version: '6.12.0' }],
+      note: "GitHub reads the LICENSE as NOASSERTION: it is MIT text with an attribution clause added; npm declares MIT.",
+    },
     install: [
       { type: 'npm', command: 'npx bmad-method install' },
       { type: 'plugin', command: '/plugin marketplace add bmad-code-org/bmad-plugins, then install bmad-method from /plugin' },
@@ -123,6 +175,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'ecc', name: 'ECC (Everything Claude Code)', tier: 'recommended', role: 'a large pool of skills, agents and hooks',
     licence: 'MIT', source: 'https://github.com/affaan-m/ECC', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/affaan-m/ECC/blob/main/LICENSE',
+      source: 'https://github.com/affaan-m/ECC', release: 'v2.2.3',
+      packages: [{ registry: 'npm', name: 'ecc-universal', version: '2.2.3' }],
+      note: null,
+    },
     install: [
       { type: 'npm', command: 'npx ecc-universal install --guided' },
       { type: 'plugin', command: '/plugin marketplace add https://github.com/affaan-m/ECC, then /plugin install ecc@ecc' },
@@ -139,6 +197,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'mattpocock-skills', name: 'mattpocock/skills', tier: 'recommended', role: 'a small pool of engineering skills',
     licence: 'MIT', source: 'https://github.com/mattpocock/skills', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/mattpocock/skills/blob/main/LICENSE',
+      source: 'https://github.com/mattpocock/skills', release: 'v1.2.3',
+      packages: [],
+      note: null,
+    },
     install: [{ type: 'plugin', command: 'claude plugins install mattpocock-skills' }],
     manual: null,
     // Generic names (`tdd`, `code-review`) collide with other packs; this one is its own.
@@ -153,6 +217,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'figma', name: 'Figma', tier: 'connector', role: 'design tool: yad-ui generates and links screens in it',
     licence: 'proprietary', source: 'https://developers.figma.com/docs/figma-mcp-server/', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://www.figma.com/legal/tos/',
+      source: 'https://github.com/figma/mcp-server-guide', release: null,
+      packages: [],
+      note: "The plugin comes from Anthropic's official marketplace, which points at figma/mcp-server-guide; that repository has no LICENSE file, so the proof of terms is Figma's own.",
+    },
     install: [{ type: 'plugin', command: 'claude plugin install figma@claude-plugins-official' }],
     manual: 'https://developers.figma.com/docs/figma-mcp-server/',
     detect: { plugins: ['figma'], mcp: ['figma', 'figma-desktop', 'html-to-design'] },
@@ -164,6 +234,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'pencil', name: 'Pencil (pen.dev)', tier: 'connector', role: 'design tool: yad-ui writes .pen web and mobile screens',
     licence: 'proprietary', source: 'https://docs.pencil.dev/getting-started/installation', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://www.pen.dev/terms-of-use',
+      source: 'https://docs.pencil.dev/getting-started/installation', release: null,
+      packages: [],
+      note: "Pencil now publishes as pen.dev; its terms live there and the old docs address still answers.",
+    },
     install: [],
     manual: 'https://docs.pencil.dev/getting-started/installation',
     detect: { mcp: ['pencil'] },
@@ -175,6 +251,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'playwright', name: 'Playwright MCP', tier: 'connector', role: 'testing tool: generates and runs browser and API tests',
     licence: 'Apache-2.0', source: 'https://github.com/microsoft/playwright-mcp', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/microsoft/playwright-mcp/blob/main/LICENSE',
+      source: 'https://github.com/microsoft/playwright-mcp', release: 'v0.0.83',
+      packages: [{ registry: 'npm', name: '@playwright/mcp', version: '0.0.83' }],
+      note: null,
+    },
     install: [{ type: 'npm', command: 'claude mcp add playwright npx @playwright/mcp@latest' }],
     manual: null,
     detect: { mcp: ['playwright'], plugins: ['playwright'] },
@@ -187,6 +269,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'cypress', name: 'Cypress', tier: 'connector', role: 'testing tool: Cypress specs',
     licence: 'proprietary', source: 'https://docs.cypress.io/cloud/integrations/cloud-mcp', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://www.cypress.io/terms-of-use',
+      source: 'https://docs.cypress.io/cloud/integrations/cloud-mcp', release: null,
+      packages: [],
+      note: null,
+    },
     install: [],
     manual: 'https://docs.cypress.io/cloud/integrations/cloud-mcp',
     detect: { mcp: ['cypress', 'cypress-cloud'] },
@@ -199,6 +287,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'pytest', name: 'pytest', tier: 'connector', role: 'testing tool: service-layer tests',
     licence: 'MIT', source: 'https://github.com/pytest-dev/pytest', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/pytest-dev/pytest/blob/main/LICENSE',
+      source: 'https://github.com/pytest-dev/pytest', release: '9.1.1',
+      packages: [],
+      note: null,
+    },
     install: [],
     manual: 'https://docs.pytest.org/',
     detect: { mcp: ['pytest'] },
@@ -211,6 +305,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'maestro', name: 'Maestro', tier: 'connector', role: 'testing tool: mobile UI flows',
     licence: 'Apache-2.0', source: 'https://github.com/mobile-dev-inc/Maestro', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/mobile-dev-inc/Maestro/blob/main/LICENSE',
+      source: 'https://github.com/mobile-dev-inc/Maestro', release: 'cli-2.11.0',
+      packages: [],
+      note: null,
+    },
     install: [{ type: 'script', command: 'curl -fsSL "https://get.maestro.mobile.dev" | bash, then claude mcp add maestro -- maestro mcp' }],
     manual: 'https://docs.maestro.dev/get-started/maestro-mcp',
     detect: { bins: ['maestro'], mcp: ['maestro'] },
@@ -222,6 +322,12 @@ export const TOOLBOX = Object.freeze([
   {
     id: 'deeptutor', name: 'DeepTutor', tier: 'connector', role: 'learning tool: tutors a team member on what is being built',
     licence: 'Apache-2.0', source: 'https://github.com/HKUDS/DeepTutor', checked: CHECKED,
+    vetted: {
+      on: VETTED_ON, licenceFrom: 'https://github.com/HKUDS/DeepTutor/blob/main/LICENSE',
+      source: 'https://github.com/HKUDS/DeepTutor', release: 'v1.6.12',
+      packages: [{ registry: 'pypi', name: 'deeptutor', version: '1.6.12' }],
+      note: "PyPI's deeptutor lists no project links; DeepTutor's own README names `pip install -U deeptutor`, which is the link to the source.",
+    },
     install: [{ type: 'python', command: 'pip install -U deeptutor, then deeptutor init' }],
     manual: null,
     detect: { bins: ['deeptutor'] },
@@ -274,6 +380,79 @@ export function toolProblems(t) {
   need(t?.tier !== 'connector' || !isStringList(t?.usedBy) || connectorFile(t) !== null, 'a connector names the yad-connect-* skill that connects it');
   return out;
 }
+
+// Every way a SHIPPED entry's vetting record is incomplete, as sentences (E88). [] means vetted. Kept out of
+// `toolProblems` because a team's own tool is well formed without one: yad vets only what it ships.
+export function vettingProblems(t) {
+  const out = [];
+  const need = (ok, what) => { if (!ok) out.push(what); };
+  const v = t?.vetted;
+  need(v && typeof v === 'object' && !Array.isArray(v), 'vetted is set — a tool ships only once its licence and source are vetted');
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  need(isCalendarDay(v.on), 'vetted.on is a real YYYY-MM-DD date');
+  need(typeof v.licenceFrom === 'string' && HTTPS_URL.test(v.licenceFrom), 'vetted.licenceFrom is the https URL the licence was read from');
+  need(typeof v.source === 'string' && HTTPS_URL.test(v.source), 'vetted.source is the https URL of the official home');
+  need(v.release === null || (typeof v.release === 'string' && v.release.length > 0), 'vetted.release is null or the release tag on that day');
+  need(Array.isArray(v.packages), 'vetted.packages is a list');
+  for (const p of Array.isArray(v.packages) ? v.packages : []) {
+    need(VET_REGISTRIES.includes(p?.registry), `a vetted package's registry is one of ${VET_REGISTRIES.join(', ')}`);
+    need(typeof p?.name === 'string' && p.name.length > 0, 'a vetted package has its name');
+    need(parseVersion(p?.version)?.full === true, 'a vetted package has the full version that was vetted (1.2.3)');
+  }
+  need(v.note === null || (typeof v.note === 'string' && v.note.length > 0), 'vetted.note is null or a sentence');
+  // A closed tool has no LICENSE file to read, so its proof must be the vendor's terms, not a repo file.
+  need(t.licence !== 'proprietary' || !isRepoLicenceFile(v.licenceFrom), 'a proprietary tool\'s licence proof is its terms page');
+  return out;
+}
+
+// An https URL with a host, not just the scheme.
+const HTTPS_URL = /^https:\/\/[^/\s]+\.[^/\s]+/;
+// Is this URL a licence FILE in a code repository (LICENSE, license, LICENSE-MIT, License.md, COPYING)?
+// Decided by WHERE the URL points, not by its letter case (review 4): a repository file is shown under a
+// `/blob/` or `/raw/` path (GitHub, GitLab's `/-/blob/`, Bitbucket, Codeberg, most self-hosted forges) or
+// served from raw.githubusercontent.com. A repository's front page (`github.com/org/license-tool`) is not
+// a file, and a vendor's terms page at `/license` or `/license-agreement` is the right proof for a closed
+// tool. The query and fragment are not the file; a percent-encoded name is read decoded. `new URL`
+// already lowercases the host.
+const RAW_HOSTS = new Set(['raw.githubusercontent.com']);
+export function isRepoLicenceFile(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return false; }
+  let pathname = u.pathname;
+  try { pathname = decodeURIComponent(pathname); } catch { /* a stray % — read it as written */ }
+  const inRepo = RAW_HOSTS.has(u.hostname) || /\/(blob|raw|src)\//.test(pathname);
+  const file = pathname.split('/').filter(Boolean).at(-1) || '';
+  return inRepo && /^(licen[cs]e|copying)([-_.].*)?$/i.test(file);
+}
+
+// A YYYY-MM-DD string that names a real day. `Date.parse` rolls an impossible day forward (2026-02-30
+// becomes 2 March) instead of refusing it, so the day has to come back out unchanged.
+export const isCalendarDay = (s) => {
+  if (typeof s !== 'string' || !DATE.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+};
+
+// How many whole days old a vetting record is on `today` (a Date). A parameter, never `new Date()` here,
+// so a test can pass any day and the unit suite never ages by itself.
+export const vettingAge = (t, today) =>
+  Math.floor((Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) - Date.parse(`${t.vetted.on}T00:00:00Z`)) / 86400000);
+
+// The shipped entries whose vetting cannot be trusted on `today`: `[{ id, name, on, age, why }]`, where
+// `why` is 'stale' (older than VET_MAX_AGE_DAYS) or 'future' (a date after today — a typo like 2027 for
+// 2026 would otherwise keep a tool out of the gate for a year). The release check refuses to publish
+// while this is not empty (`scripts/vet-check.mjs`).
+export const staleVettings = (today, list = TOOLBOX) => list
+  .filter((t) => vettingProblems(t).length === 0)
+  .map((t) => ({ id: t.id, name: t.name, on: t.vetted.on, age: vettingAge(t, today) }))
+  .filter((s) => s.age > VET_MAX_AGE_DAYS || s.age < 0)
+  .map((s) => ({ ...s, why: s.age < 0 ? 'future' : 'stale' }));
+
+// The ONE Repomix version yad runs (E88): the npm package version its vetting confirmed. `yad setup`,
+// `yad repo refresh` and the install line use it; the skills write it out as text, and a test holds every
+// npx Repomix command in cli/ and skills/ to this value. Moving up is a re-vet and a yadflow release.
+export const REPOMIX_VERSION = TOOLBOX.find((t) => t.id === 'repomix').vetted.packages
+  .find((p) => p.registry === 'npm' && p.name === 'repomix').version;
 
 // ---- versions ---------------------------------------------------------------------------------------
 
@@ -476,6 +655,8 @@ export function customProblems(t) {
 const customRow = (t) => ({
   id: t.id, name: t.name || t.id, tier: 'project', role: t.role,
   licence: null, source: t.source ?? null, checked: null,
+  // A team's own tool is the team's to vet (E88): yad vets only the list it ships.
+  vetted: null,
   install: t.install ?? [], manual: null,
   detect: Object.fromEntries(Object.values(DETECT_KINDS).filter((k) => t.detect[k]?.length).map((k) => [k, t.detect[k]])),
   versions: null, fallback: t.fallback, records: null, note: null, usedBy: [],
@@ -808,6 +989,8 @@ export function toolboxLines(rows) {
       if (s.inRange === false) lines.push(`      ${c.yellow('!')} version ${version} is outside the known-good range ${r.versions} — still used; if it misbehaves, install a version in range`);
       if (s.state === 'missing' || s.state === 'disabled') lines.push(`      ${c.dim(`without it: ${clean(r.fallback)}`)}`);
       if (r.note) lines.push(`      ${c.dim(r.note)}`);
+      // E88: what was vetted and when — the licence, and the day its proof was read.
+      if (r.vetted) lines.push(`      ${c.dim(`licence ${clean(r.licence)}, vetted ${r.vetted.on}`)}`);
     }
   }
   return lines;
@@ -821,7 +1004,7 @@ export function runToolboxList(root, { json = false, productRoot = null, tools =
   info(productRoot
     ? '[used here] = in use in this Product; change it with `yad toolbox add <id>` / `yad toolbox remove <id>`'
     : 'no Product here, so this shows the defaults: the core tools are the ones in use');
-  info('`yad toolbox list --json` adds each tool\'s licence, source, install commands and where it was found');
+  info('`yad toolbox list --json` adds each tool\'s licence and its vetting record, source, install commands and where it was found');
   return undefined;
 }
 
