@@ -612,7 +612,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
 - **See the toolbox:** `yad toolbox list` shows the external tools yadflow can use — core tools offered
   at setup (Repomix, Spec Kit, Impeccable), optional skill pools, and the design, testing and learning
   tools a Product connects — whether each is found here, whether this Product uses it, and what
-  yadflow does without it. None is required. It installs nothing.
+  yadflow does without it. None is required. It installs nothing. Every tool listed was vetted before it
+  shipped: its licence read from its own licence file (or the vendor's terms) and its source confirmed
+  as the official one — the list prints the licence and the day. yadflow runs Repomix at that vetted
+  version, never `@latest`.
 - **Choose the team's tools:** `yad toolbox add <id>` marks a tool as used in this Product and prints
   how to install it; `yad toolbox remove <id>` stops using one. Your own tool: `yad toolbox add <id>
   --custom --role … --fallback … --detect bin:<program>`. The choices live in `.sdlc/toolbox.json` —

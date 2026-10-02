@@ -1239,7 +1239,8 @@ Each entry records:
 
 **How a tool is found.** The toolbox reads the same answer as `yad detect`, and looks for a program by
 reading the `PATH` folders. It starts no program, installs nothing and uses no network. Repomix counts
-as `available` whenever `npx` is there, because yadflow runs it through `npx repomix@latest`. An MCP
+as `available` whenever `npx` is there, because yadflow runs it through `npx repomix@1.18.1` — the vetted
+version, never `@latest` (see "Every tool is vetted" below). An MCP
 server is matched by its name only, because its settings are never read: a server another package
 registered under the same name (common for `playwright`) is counted as found. A tool found only
 through a Claude Code plugin your settings turn off shows as **installed, but its plugin is turned
@@ -1369,6 +1370,29 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
 Not covered: CodeRabbit (the AI reviewer `yad-engineer-review` wires) and `gh` / `glab` (the GitHub
 and GitLab programs several skills call) are not in the toolbox, so no skill declares a fallback for
 them yet.
+
+### Every tool is vetted
+
+Before a tool goes into the toolbox, yadflow checks two things and writes down the proof:
+
+- **The licence.** Read from the tool's own `LICENSE` file. A closed tool (Figma, Pencil, Cypress Cloud)
+  has no licence file, so the proof is the vendor's own terms page.
+- **The source.** The tool comes from its owner's official repository or docs, and each package an
+  install command names (an npm or PyPI package) points back to that source.
+
+Each tool's record — `vetted` in `yad toolbox list --json` — holds the day this was done
+(`vetted.on`), where the licence was read (`licenceFrom`), the source, the release on that day, and the
+packages with their versions. `yad toolbox list` prints `licence MIT, vetted 2026-10-02` under each tool.
+
+Vetting is redone before it goes stale. A test fails while any tool lacks a complete record, and the
+release check (step 8) refuses to publish while any record is older than **180 days**. It does not check
+maintenance, known vulnerabilities or which versions work: those are not part of a vetting record.
+
+A tool your team adds with `yad toolbox add --custom` is yours to vet; its `vetted` is `null`.
+
+**Repomix runs at the vetted version.** yadflow runs `npx repomix@1.18.1` — in `yad setup`,
+`yad repo refresh` and the skills that pack code — never `@latest`. A new Repomix release reaches you
+only after it is vetted and a yadflow release moves the version.
 
 ## What is installed
 
