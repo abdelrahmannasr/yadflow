@@ -121,8 +121,9 @@ It never rewrites the file.
 
 A line can also apply to **one route only** (E51): `"profiles": { "spike": { "steps": { "epic":
 "spike-skill" } } }`, written with `yad skill bind <step> <skill> --profile <route>`. The most specific
-line wins — the epic's route (the `profile` its `state.json` records, else the route its chain
-matches), then the project-wide `steps`, then the catalogue. `yad skill list --epic <id>` shows one
+line wins — the epic's route (the `profile` its `state.json` records, as written; an epic that records
+none uses the project-wide line, never a route guessed from its chain), then the project-wide `steps`,
+then the catalogue. `yad skill list --epic <id>` shows one
 epic's view; `yad doctor` also reports a route this release does not have (`skills:unknown-profile`)
 and a step the route never walks (`skills:off-route`).
 

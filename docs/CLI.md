@@ -1134,9 +1134,18 @@ epics on that route:
 
 **The most specific line wins:** the epic's route first, then the project-wide `steps`, then the
 engine's default. In this file a spike epic runs `our-spike-skill`, every other epic runs
-`our-epic-skill`, and a chore epic's Build lanes run `our-small-change-skill` for `implement`. An epic
-with no route that this release can tell uses the project-wide line. `yad next`, `yad epic new`,
-`yad skill list --epic <id>` and the `yad-run` skill all read the epic's own route.
+`our-epic-skill`, and a chore epic's Build lanes run `our-small-change-skill` for `implement`.
+`yad next`, `yad epic new`, `yad skill list --epic <id>` and the `yad-run` skill all read the route the
+epic **records** in its `state.json`, exactly as written:
+
+- An epic that records **no** route (an older or hand-written one) uses the project-wide line. Its route
+  is never guessed from its steps: a short chain like `[epic, epic-review]` fits `chore`, and guessing
+  would hand a chore-only skill to an ordinary classic epic.
+- An epic that records a route this release does not know (from a newer yadflow) still gets the lines
+  bound for that route.
+- Before any epic exists — `yad setup`, and `yad next` on an empty Product suggesting the first epic —
+  there is no route yet, so those lines name the project-wide skill. The Foundation hint uses the
+  `foundation` route, because `yad foundation new` always seeds that route.
 
 ```bash
 yad skill bind epic our-spike-skill --profile spike
