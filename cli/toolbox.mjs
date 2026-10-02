@@ -401,16 +401,24 @@ export function vettingProblems(t) {
   }
   need(v.note === null || (typeof v.note === 'string' && v.note.length > 0), 'vetted.note is null or a sentence');
   // A closed tool has no LICENSE file to read, so its proof must be the vendor's terms, not a repo file.
-  need(t.licence !== 'proprietary' || !LICENCE_FILE.test(String(v.licenceFrom)), 'a proprietary tool\'s licence proof is its terms page');
+  need(t.licence !== 'proprietary' || !isRepoLicenceFile(v.licenceFrom), 'a proprietary tool\'s licence proof is its terms page');
   return out;
 }
 
 // An https URL with a host, not just the scheme.
 const HTTPS_URL = /^https:\/\/[^/\s]+\.[^/\s]+/;
-// A licence FILE at the end of a URL: LICENSE, LICENCE, COPYING, LICENSE-MIT, LICENSE_APACHE, with or
-// without an extension. Upper case only, as repositories name the file: a vendor's terms page at
-// `/license` or `/license-agreement` is a page, not a file, and is the right proof for a closed tool.
-const LICENCE_FILE = /\/(LICEN[CS]E|COPYING)([-_][A-Z0-9][A-Z0-9.-]*)?(\.[A-Za-z]+)?$/;
+// Is this URL a licence FILE in a code repository (LICENSE, license, LICENSE-MIT, License.md, COPYING)?
+// Decided by WHERE the URL points, not by its letter case (review 4): a file lives on a code host, or under
+// a `/blob/` or `/raw/` path; a vendor's terms page at `/license` or `/license-agreement` lives on the
+// vendor's own site and is the right proof for a closed tool. The query and fragment are not the file.
+const CODE_HOSTS = new Set(['github.com', 'gitlab.com', 'raw.githubusercontent.com', 'bitbucket.org', 'codeberg.org']);
+export function isRepoLicenceFile(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return false; }
+  const inRepo = CODE_HOSTS.has(u.hostname.toLowerCase()) || /\/(blob|raw)\//.test(u.pathname);
+  const file = u.pathname.split('/').filter(Boolean).at(-1) || '';
+  return inRepo && /^(licen[cs]e|copying)([-_.].*)?$/i.test(file);
+}
 
 // A YYYY-MM-DD string that names a real day. `Date.parse` rolls an impossible day forward (2026-02-30
 // becomes 2 March) instead of refusing it, so the day has to come back out unchanged.

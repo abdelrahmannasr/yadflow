@@ -495,7 +495,7 @@ test('E84: every shipped toolbox entry is well formed, and every tier has entrie
 });
 
 // ---- E88: every toolbox tool is vetted (licence + source) before it ships ----------------------------
-const { REPOMIX_VERSION, VET_MAX_AGE_DAYS, staleVettings, vettingAge, vettingProblems } = await import('./toolbox.mjs');
+const { REPOMIX_VERSION, VET_MAX_AGE_DAYS, isRepoLicenceFile, staleVettings, vettingAge, vettingProblems } = await import('./toolbox.mjs');
 
 test('E88: every shipped toolbox entry carries a complete vetting record', () => {
   for (const t of TOOLBOX) assert.deepEqual(vettingProblems(t), [], t.id);
@@ -527,7 +527,7 @@ test('E88: every shipped toolbox entry carries a complete vetting record', () =>
   assert.deepEqual(named('pipx install git+https://github.com/a/b.git'), [], 'a git URL is not a registry package');
   assert.deepEqual(named('npx x@^1.2'), ['npm:x']);
   const unread = (cmd) => (cmd.match(INSTALLERS) || []).length - (GIT_URL.test(cmd) ? 1 : 0) !== named(cmd).length;
-  for (const form of ['npm i -D evil', 'pip install "evil>=1"', 'bunx evil', 'pnpm dlx evil', 'uv tool install evil==1.0', 'npx -p evil x', 'npm add evil', 'yarn global add evil', 'pnpm add evil']) {
+  for (const form of ['npm i -D evil', 'pip install "evil>=1"', 'bunx evil', 'pnpm dlx evil', 'uv tool install evil==1.0', 'npx -p evil x', 'npm add evil', 'yarn global add evil', 'pnpm add evil', 'yarn add evil', 'yarn dlx evil']) {
     assert.ok(unread(form), `${form}: a form the readers do not know must be caught`);
   }
   for (const t of TOOLBOX) {
@@ -546,12 +546,23 @@ test('E88: vettingProblems names each way a record is incomplete; a team\'s own 
   for (const on of ['2026-13-45', '2026-02-30', '2025-02-29', '2026-04-31', '26-1-1']) assert.match(bad({ ...good.vetted, on }).join(), /vetted\.on/, on);
   assert.deepEqual(bad({ ...good.vetted, on: '2024-02-29' }), [], 'a real leap day');
   assert.match(bad({ ...good.vetted, licenceFrom: 'https://' }).join(), /licenceFrom/);
-  assert.match(bad({ ...good.vetted, licenceFrom: 'https://x.dev/LICENSE.md' }, { licence: 'proprietary' }).join(), /terms page/);
-  assert.match(bad({ ...good.vetted, licenceFrom: 'https://x.dev/LICENSE-MIT' }, { licence: 'proprietary' }).join(), /terms page/);
+  assert.match(bad({ ...good.vetted, licenceFrom: 'https://github.com/x/y/blob/main/LICENSE.md' }, { licence: 'proprietary' }).join(), /terms page/);
+  assert.match(bad({ ...good.vetted, licenceFrom: 'https://github.com/x/y/blob/main/LICENSE-MIT' }, { licence: 'proprietary' }).join(), /terms page/);
   // …but a terms PAGE whose address happens to say "license" is the right proof (review 3).
   for (const page of ['https://vendor.com/license-agreement', 'https://vendor.com/legal/license_terms', 'https://vendor.com/license']) {
     assert.deepEqual(bad({ ...good.vetted, licenceFrom: page }, { licence: 'proprietary' }), [], page);
   }
+  // A repository file is told by where it lives, in any letter case, query or not (review 4).
+  for (const file of ['https://github.com/a/b/blob/main/license', 'https://github.com/a/b/blob/main/License.md',
+    'https://github.com/a/b/blob/main/LICENSE-Apache-2.0', 'https://github.com/a/b/blob/main/LICENSE?plain=1',
+    'https://raw.githubusercontent.com/a/b/main/COPYING', 'https://git.example.org/a/b/raw/main/LICENCE.txt']) {
+    assert.equal(isRepoLicenceFile(file), true, file);
+  }
+  for (const page of ['https://www.figma.com/legal/tos/', 'https://vendor.com/license', 'https://github.com/a/b/blob/main/README.md', 'not a url']) {
+    assert.equal(isRepoLicenceFile(page), false, page);
+  }
+  // Every open tool's proof is a repository licence file; no closed tool's is.
+  for (const t of TOOLBOX) assert.equal(isRepoLicenceFile(t.vetted.licenceFrom), t.licence !== 'proprietary', t.id);
   assert.match(bad({ ...good.vetted, licenceFrom: 'http://x' }).join(), /licenceFrom/);
   assert.match(bad({ ...good.vetted, source: '' }).join(), /vetted\.source/);
   assert.match(bad({ ...good.vetted, release: '' }).join(), /vetted\.release/);
@@ -628,7 +639,7 @@ test('E88: Repomix runs at its vetted version everywhere yad names it — never 
       assert.equal(m[1], REPOMIX_VERSION, `${rel}: repomix@${m[1]}`);
     }
     // No version at all runs the newest, as `@latest` does: `npx repomix`, `npx -y repomix`, `npm exec repomix`.
-    assert.doesNotMatch(text, /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add))(?: (?:-g|--global|-y|--yes|-D|--save-dev|-p|--package))* repomix(?![@\w-])/, `${rel}: Repomix run or installed without the vetted version`);
+    assert.doesNotMatch(text, /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add))(?: (?:-g|--global|-y|--yes|-D|--save-dev|-p|--package))*[ =]repomix(?![@\w-])/, `${rel}: Repomix run or installed without the vetted version`);
     assert.doesNotMatch(text, new RegExp(`\\brepomix@(?!${at}\\b)[\\w.-]`), `${rel}: another Repomix version`);
   }
   assert.ok(seen >= 10, `expected the pinned command in the skills and docs, found ${seen}`);
