@@ -1391,7 +1391,8 @@ maintenance, known vulnerabilities or which versions work: those are not part of
 A tool your team adds with `yad toolbox add --custom` is yours to vet; its `vetted` is `null`.
 
 **Repomix runs at the vetted version.** yadflow runs `npx repomix@1.18.1` — in `yad setup`,
-`yad repo refresh` and the skills that pack code — never `@latest`. A new Repomix release reaches you
+`yad repo refresh` and the skills that pack code — never `@latest`, and the global-install line
+`yad toolbox list` prints is pinned the same way (`npm install -g repomix@1.18.1`). A new Repomix release reaches you
 only after it is vetted and a yadflow release moves the version.
 
 ## What is installed

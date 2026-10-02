@@ -50,7 +50,7 @@ own yet, so that choice is recorded, not acted on.
    registered repo is missing (a teammate added it after you joined), `yad repo clone` clones every
    missing one at its recorded path; `yad repo list` marks them **not cloned**.
 3. **Optional tools** (the workflow degrades gracefully and records it if any are absent): **Spec Kit**
-   (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix`, used by
+   (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix@1.18.1`, the vetted version, used by
    `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review), **DeepTutor**
    (`deeptutor`, the learning layer's tutor — degrades to harness-native, used by `yad-connect-learning`
    and `yad-learn`).
@@ -390,7 +390,7 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
 **Multi-repo:** a story tagged `repos: [backend, mobile]` runs the above in each repo independently from
 the **one** locked contract; the contract-check blocks a surface bypass in either repo.
 
-**Backfill existing code:** `yad-backfill` packs one feature with **Repomix** (`npx repomix`, secret-scan
+**Backfill existing code:** `yad-backfill` packs one feature with **Repomix** (`npx repomix@1.18.1`, secret-scan
 by default), drafts an *unverified* spec ("describe what exists, do not invent"), a human approves it,
 and `backfill-check.sh` blocks a change to that feature until its spec is approved — gated per touched
 feature, never the whole repo. The approval is read from the base branch, so it merges before the

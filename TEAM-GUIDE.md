@@ -317,7 +317,7 @@ tokens). Greenfield with no code yet? Skip this — the brain just proceeds. Whe
 
 **f. Optional tools.** The workflow uses these if present and **degrades gracefully** (and records it)
 if they're missing: **Spec Kit** (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix**
-(`npx repomix`, used by `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review),
+(`npx repomix@1.18.1`, the vetted version, used by `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review),
 **DeepTutor** (`deeptutor`, the learning layer's tutor — used by `yad-connect-learning`/`yad-learn`,
 degrades to harness-native).
 You can start without any of them.
