@@ -407,8 +407,9 @@ export function vettingProblems(t) {
 
 // An https URL with a host, not just the scheme.
 const HTTPS_URL = /^https:\/\/[^/\s]+\.[^/\s]+/;
-// A licence FILE at the end of a URL: LICENSE, LICENCE, COPYING, with or without an extension.
-const LICENCE_FILE = /\/(LICEN[CS]E|COPYING)(\.[A-Za-z]+)?$/i;
+// A licence FILE at the end of a URL: LICENSE, LICENCE, COPYING, LICENSE-MIT, LICENSE_APACHE, with or
+// without an extension.
+const LICENCE_FILE = /\/(LICEN[CS]E|COPYING)([-_][\w.-]+)?(\.[A-Za-z]+)?$/i;
 
 // A YYYY-MM-DD string that names a real day. `Date.parse` rolls an impossible day forward (2026-02-30
 // becomes 2 March) instead of refusing it, so the day has to come back out unchanged.

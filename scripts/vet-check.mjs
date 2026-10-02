@@ -26,6 +26,7 @@ if (at !== -1 && !isCalendarDay(day)) {
   console.error('usage: node scripts/vet-check.mjs [--today YYYY-MM-DD]');
   process.exit(2);
 }
+// Days are counted in UTC, like the dates in the records.
 const today = day ? new Date(`${day}T00:00:00Z`) : new Date();
 
 const incomplete = TOOLBOX.map((t) => [t, vettingProblems(t)]).filter(([, p]) => p.length);
@@ -39,10 +40,14 @@ if (!incomplete.length && !stale.length) {
 for (const [t, problems] of incomplete) console.error(`${t.id}: not vetted — ${problems.join('; ')}`);
 for (const s of stale) {
   console.error(s.why === 'future'
-    ? `${s.id} (${s.name}): vetted on ${s.on}, which is after today — fix the date to the day the vetting was done`
+    ? `${s.id} (${s.name}): vetted on ${s.on}, which is after today (UTC) — fix the date to the day the vetting was done`
     : `${s.id} (${s.name}): vetted on ${s.on}, ${s.age} days ago — older than ${VET_MAX_AGE_DAYS} days`);
 }
-console.error(`\nre-vet each one in cli/toolbox.mjs: read its licence again (LICENSE file, or the vendor's terms),
+// The re-vet steps only when something is stale or incomplete: a future date is a typo to correct, and
+// telling someone to re-read a licence for it would send them the wrong way.
+if (incomplete.length || stale.some((s) => s.why === 'stale')) {
+  console.error(`\nre-vet each one in cli/toolbox.mjs: read its licence again (LICENSE file, or the vendor's terms),
 confirm its source and its packages still point to the official home, then update vetted.on, vetted.release
 and the package versions. The header of scripts/vet-check.mjs has the steps.`);
+}
 process.exit(1);
