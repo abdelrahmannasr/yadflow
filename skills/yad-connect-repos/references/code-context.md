@@ -10,7 +10,7 @@ Run from the Product, targeting the connected repo (flags from `config.yaml`
 `code_context.pack_flags`):
 
 ```
-npx repomix@latest --compress --include-logs --style markdown \
+npx repomix@1.18.1 --compress --include-logs --style markdown \
   -o {project-root}/.sdlc/code-context/<repo>/pack.md
 ```
 
@@ -73,7 +73,7 @@ When a Shape phase needs an area not captured in the code-map, it may re-pack th
 scoped to the area, without writing the cache:
 
 ```bash
-npx repomix@latest --compress --include "<area globs>" --style markdown -o -
+npx repomix@1.18.1 --compress --include "<area globs>" --style markdown -o -
 ```
 
 This is for a one-off look at a specific area. **Staleness is a human decision, not an automatic

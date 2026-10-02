@@ -49,8 +49,9 @@ Tell the person which tools you used and which fallbacks, and why.
   Impeccable, later) are installed/run **here** and target the connected code repos **by path**. The
   code repos themselves need no install for this. (The Build CI gates are the exception — they
   live inside each code repo; see `yad-checks`.)
-- **Repomix is a true CLI subprocess** (Phase 0 / RESEARCH-NOTES §3): `npx repomix@latest [flags]` —
-  NOT a slash-command. It secret-scans by default (Secretlint).
+- **Repomix is a true CLI subprocess** (Phase 0 / RESEARCH-NOTES §3): `npx repomix@1.18.1 [flags]` —
+  NOT a slash-command. Run exactly that version: it is the one yadflow vetted, and `@latest` would
+  take a release nobody checked. It secret-scans by default (Secretlint).
 - Registry: `{project-root}/.sdlc/repos.json` (project-wide, shared across all epics — NOT per-epic).
 - Per-repo cache: `{project-root}/.sdlc/code-context/<repo>/` holds `pack.md` + `code-map.md`.
 
@@ -112,7 +113,7 @@ Determine where the code is:
 ### Step 2 — Pack the repo (Repomix, the full cached context layer)
 From the code repo, run (flags from `config.yaml` `code_context.pack_flags`):
 ```
-npx repomix@latest --compress --include-logs --style markdown -o {project-root}/.sdlc/code-context/<repo>/pack.md
+npx repomix@1.18.1 --compress --include-logs --style markdown -o {project-root}/.sdlc/code-context/<repo>/pack.md
 ```
 `--compress` (Tree-sitter structural compression) keeps it small and signal-dense; `--include-logs`
 adds recent git history; Secretlint secret-scans by default. **If a secret is reported, STOP and have
@@ -259,7 +260,7 @@ the repo's default branch.
 The cached pack + map are the default. When a Shape phase needs an **area** not in the map, it may
 re-run Repomix **live**, scoped to that area:
 ```bash
-npx repomix@latest --compress --include "<area globs>" --style markdown -o -
+npx repomix@1.18.1 --compress --include "<area globs>" --style markdown -o -
 ```
 Same CLI, invoked ad hoc — no registry write. A **stale repo** (HEAD ≠ `syncedHead`) is different: the
 phase **flags it and stops**, pointing the human at `yad repo refresh <repo>` (or `yad check --fix`) —

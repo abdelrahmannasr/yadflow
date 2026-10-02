@@ -494,6 +494,110 @@ test('E84: every shipped toolbox entry is well formed, and every tier has entrie
   for (const t of TOOLBOX) for (const r of t.install) assert.doesNotMatch(r.command, /\bnpx ecc(@|\s|$)|\bnpm (i|install) (-g )?ecc(\s|$)/, t.id);
 });
 
+// ---- E88: every toolbox tool is vetted (licence + source) before it ships ----------------------------
+const { REPOMIX_VERSION, VET_MAX_AGE_DAYS, staleVettings, vettingAge, vettingProblems } = await import('./toolbox.mjs');
+
+test('E88: every shipped toolbox entry carries a complete vetting record', () => {
+  for (const t of TOOLBOX) assert.deepEqual(vettingProblems(t), [], t.id);
+  // The proof matches the answer: an open licence was read from the source's own LICENSE file, a closed
+  // one from the vendor's terms page — never a LICENSE file it does not have.
+  for (const t of TOOLBOX) {
+    if (t.licence === 'proprietary') assert.doesNotMatch(t.vetted.licenceFrom, /\/LICENSE$/, t.id);
+    else assert.ok(t.vetted.licenceFrom.startsWith(`${t.vetted.source}/blob/`) && t.vetted.licenceFrom.endsWith('/LICENSE'), `${t.id}: ${t.vetted.licenceFrom}`);
+  }
+  // Every registry package an install route names is in the record — so a package nobody vetted cannot
+  // ride in on an install line.
+  const named = (cmd) => [...cmd.matchAll(/\bnpx (@?[a-z0-9][\w./-]*?)(?:@[\w.]+)?(?=\s|,|$)/g)].map((m) => `npm:${m[1]}`)
+    .concat([...cmd.matchAll(/\b(?:uv tool install|pipx install|pip install(?: -U)?) ([a-z0-9][\w.-]*)/g)].map((m) => `pypi:${m[1]}`));
+  for (const t of TOOLBOX) {
+    const vetted = new Set(t.vetted.packages.map((p) => `${p.registry}:${p.name}`));
+    for (const r of t.install) for (const pkg of named(r.command)) assert.ok(vetted.has(pkg), `${t.id}: ${pkg} is installed but not vetted`);
+  }
+});
+
+test('E88: vettingProblems names each way a record is incomplete; a team\'s own tool needs none', () => {
+  const good = TOOLBOX.find((t) => t.id === 'repomix');
+  const bad = (vetted, extra = {}) => vettingProblems({ ...good, ...extra, vetted });
+  assert.match(bad(undefined).join(), /vetted is set/);
+  assert.match(bad({ ...good.vetted, on: '2026-13-45' }).join(), /vetted\.on/);
+  assert.match(bad({ ...good.vetted, licenceFrom: 'http://x' }).join(), /licenceFrom/);
+  assert.match(bad({ ...good.vetted, source: '' }).join(), /vetted\.source/);
+  assert.match(bad({ ...good.vetted, release: '' }).join(), /vetted\.release/);
+  assert.match(bad({ ...good.vetted, packages: [{ registry: 'cargo', name: 'x', version: '1.0.0' }] }).join(), /registry/);
+  assert.match(bad({ ...good.vetted, packages: [{ registry: 'npm', name: 'x', version: 'latest' }] }).join(), /full version/);
+  assert.match(bad({ ...good.vetted, note: '' }).join(), /note/);
+  assert.match(bad(good.vetted, { licence: 'proprietary' }).join(), /terms page/);
+  assert.deepEqual(bad({ ...good.vetted, release: null, packages: [] }), []);
+});
+
+test('E88: the age is checked against a day passed in, and only past the limit', () => {
+  const t = { id: 'x', name: 'X', ...TOOLBOX[0], vetted: { ...TOOLBOX[0].vetted, on: '2026-01-01' } };
+  assert.equal(vettingAge(t, new Date('2026-01-01T23:59:00Z')), 0);
+  assert.equal(vettingAge(t, new Date('2026-07-01T00:00:00Z')), 181);
+  const on = (d) => staleVettings(new Date(`${d}T12:00:00Z`), [t]);
+  const limit = new Date(Date.UTC(2026, 0, 1 + VET_MAX_AGE_DAYS)).toISOString().slice(0, 10);
+  const past = new Date(Date.UTC(2026, 0, 2 + VET_MAX_AGE_DAYS)).toISOString().slice(0, 10);
+  assert.deepEqual(on(limit), [], 'exactly the limit is still current');
+  assert.deepEqual(on(past), [{ id: t.id, name: t.name, on: '2026-01-01', age: VET_MAX_AGE_DAYS + 1 }]);
+  // The shipped list is current on the day it was vetted — the unit suite never checks age against today.
+  const newest = TOOLBOX.map((x) => x.vetted.on).sort().at(-1);
+  assert.deepEqual(staleVettings(new Date(`${newest}T00:00:00Z`)), []);
+});
+
+test('E88: scripts/vet-check.mjs passes on a vetted list and names each stale tool with what to do', () => {
+  const run = (...a) => spawnSync(process.execPath, [path.join(ROOT, 'scripts/vet-check.mjs'), ...a], { encoding: 'utf8' });
+  const newest = TOOLBOX.map((x) => x.vetted.on).sort().at(-1);
+  const ok = run('--today', newest);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, new RegExp(`all ${TOOLBOX.length} toolbox tools are vetted`));
+  const later = new Date(Date.parse(`${newest}T00:00:00Z`) + (VET_MAX_AGE_DAYS + 1) * 86400000).toISOString().slice(0, 10);
+  const stale = run('--today', later);
+  assert.equal(stale.status, 1);
+  for (const t of TOOLBOX) assert.match(stale.stderr, new RegExp(`^${t.id} \\(`, 'm'));
+  assert.match(stale.stderr, /re-vet each one in cli\/toolbox\.mjs/);
+  assert.equal(run('--today', 'soon').status, 2);
+  // The release check runs it, as step 8 of 8.
+  const rc = fs.readFileSync(path.join(ROOT, 'scripts/release-check.sh'), 'utf8');
+  assert.match(rc, /say "8\/8 {2}every toolbox tool was vetted recently"\nnode "\$ROOT\/scripts\/vet-check\.mjs"|node "\$ROOT\/scripts\/vet-check\.mjs"/);
+  assert.equal((rc.match(/say "\d\/7/g) || []).length, 0, 'a step still counts to 7');
+});
+
+test('E88: Repomix runs at its vetted version everywhere yad names it — never @latest', () => {
+  assert.equal(REPOMIX_VERSION, TOOLBOX.find((t) => t.id === 'repomix').vetted.packages.find((p) => p.name === 'repomix').version);
+  assert.ok(parseVersion(REPOMIX_VERSION)?.full);
+  // Every `npx repomix@…` in the code and in the skills (which write it out as text) is the vetted one.
+  // `/plugin install repomix-mcp@repomix` names a marketplace, not a version, and is not matched.
+  const files = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(mjs|md|ya?ml)$/.test(e.name) && !/^test/.test(e.name)) files.push(p);
+    }
+  };
+  walk(path.join(ROOT, 'cli'));
+  walk(path.join(ROOT, 'skills'));
+  files.push(path.join(ROOT, 'docs/CLI.md'));
+  let seen = 0;
+  for (const f of files) {
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/\bnpx repomix@([^\s`'"\]]+)/g)) {
+      seen += 1;
+      assert.equal(m[1], REPOMIX_VERSION, `${path.relative(ROOT, f)}: npx repomix@${m[1]}`);
+    }
+  }
+  assert.ok(seen >= 10, `expected the pinned command in the skills and docs, found ${seen}`);
+  const setup = fs.readFileSync(path.join(ROOT, 'cli/setup.mjs'), 'utf8');
+  assert.match(setup, /`repomix@\$\{REPOMIX_VERSION\}`/, 'yad setup and yad repo refresh run the vetted version');
+  assert.doesNotMatch(setup, /repomix@latest/);
+});
+
+test('E88: yad toolbox list prints each shipped tool\'s licence and vetting day; a team\'s own tool has none', () => {
+  const rows = TOOLBOX.map((t) => ({ ...t, status: { state: 'missing' }, used: false }));
+  const out = toolboxLines([...rows, { ...rows[0], id: 'mine', name: 'Mine', tier: 'project', licence: null, vetted: null }]).join('\n');
+  assert.match(out, new RegExp(`licence MIT, vetted ${TOOLBOX[0].vetted.on}`));
+  assert.equal((out.match(/vetted \d{4}-/g) || []).length, TOOLBOX.length, 'one line per shipped tool, none for the team\'s');
+});
+
 test('E84: a fallback a skill records is written there word for word, so E87 renames nothing', () => {
   for (const t of TOOLBOX.filter((x) => x.records)) {
     const skills = t.usedBy.filter((u) => fs.existsSync(path.join(ROOT, 'skills', u, 'SKILL.md')));

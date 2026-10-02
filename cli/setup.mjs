@@ -16,7 +16,7 @@ import {
 import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
-import { offerToolbox } from './toolbox.mjs';
+import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -769,7 +769,8 @@ export function packRepo(root, repo) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${nm}: packing with repomix …`);
-  const r = runLauncher('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
+  // The vetted version, never `@latest` (E88): a new Repomix release reaches users only once it is vetted.
+  const r = runLauncher('npx', [`repomix@${REPOMIX_VERSION}`, '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
   if (r.ok) { ok(`${nm}: cached ${forTerminal(repo.contextPack)}`); hand(`${nm}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
   fail(`${nm}: repomix failed — ${forTerminal(r.stderr.split('\n')[0]) || 'unknown error'}`);
   return false;
