@@ -6,7 +6,8 @@ directly. Each skill stops at a gate and never auto-advances unless the team set
 
 **These are the defaults, not a fixed wiring.** Which skill runs a lifecycle step is a project
 setting: `yad skill bind <step> <skill>` records your own in `.sdlc/skills.json`, and `yad next` names
-that one from then on. Several skills on one step run as a chain, in order. See
+that one from then on — for every epic, or with `--profile <route>` for epics on one route only.
+Several skills on one step run as a chain, in order. See
 [choosing the skill for a step](CLI.md#choosing-the-skill-for-a-step).
 
 For an introduction see the [README](../README.md); for the step-by-step path see

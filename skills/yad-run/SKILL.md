@@ -72,15 +72,18 @@ it**: stop, report the recorded `record.reason`, and point at `yad unskip <epic>
 the lane is owed after all. **Never write a Build step as `skipped` or `deferred`**: a lane is skipped
 whole or not at all, and `yad doctor` reports a single step set aside.
 
-Also read **which skill runs each step** — `yad skill list --json`, whose `steps[]` gives each step id
-its `skills` array. That is the project's choice (`.sdlc/skills.json`, E6) and the engine's default
-when it has made none. Read it once here; it does not change during a run.
+Also read **which skill runs each step** — `yad skill list --epic <epic> --json`, whose `steps[]` gives
+each step id its `skills` array. Always pass `--epic`: a project may bind a step for one route only
+(`profiles.<route>` in `.sdlc/skills.json`, E51), and that line wins for an epic on the route — the
+plain `yad skill list` shows the project-wide answer, which may be the wrong skill for this epic. That
+is the project's choice (`.sdlc/skills.json`, E6) and the engine's default when it has made none. Read
+it once here; it does not change during a run.
 
 ### `action: run` — drive the loop
 Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
 
 1. **Run the step's skill — use the list from Step 0, never a name written here.** Look the step id
-   up in `yad skill list --json` and run every entry of its `skills` **in order**, each one seeing what
+   up in `yad skill list --epic <epic> --json` and run every entry of its `skills` **in order**, each one seeing what
    the one before it produced; the last output is the result. (`yad next <epic> --json` gives the same
    answer per lane once `build-state/<story>.json` is on disk, if you already have it open.) Which
    skill runs a step is the project's setting, so a hardcoded name here would make this loop do one

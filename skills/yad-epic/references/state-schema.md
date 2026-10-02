@@ -119,6 +119,13 @@ binding that will never run: a value that is not a skill name (`YAD-CFG-006`), a
 does not know (`skills:unknown-step`) and a review gate, which `yad gate` drives (`skills:review-step`).
 It never rewrites the file.
 
+A line can also apply to **one route only** (E51): `"profiles": { "spike": { "steps": { "epic":
+"spike-skill" } } }`, written with `yad skill bind <step> <skill> --profile <route>`. The most specific
+line wins — the epic's route (the `profile` its `state.json` records, else the route its chain
+matches), then the project-wide `steps`, then the catalogue. `yad skill list --epic <id>` shows one
+epic's view; `yad doctor` also reports a route this release does not have (`skills:unknown-profile`)
+and a step the route never walks (`skills:off-route`).
+
 **The kill switch and the Shape dials live in `.sdlc/automation.json` (E34)**, also a Product-level file,
 also absent by default:
 
@@ -762,8 +769,8 @@ no `steps`, just the state and its record:
 `yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
 story/repo's `currentStep` into the next build sub-step and prints it with the remaining chain and the
 step's advance dial — so Build is guided, not just hinted at. The skill it names comes from
-`.sdlc/skills.json` when the project bound one (see "The one column a project overrides is the skill"
-above); unbound, the defaults are `spec`/`tasks` → `yad-spec`, `implement` → `yad-implement`,
+`.sdlc/skills.json` when the project bound one — for the epic's route first, then project-wide (see
+"The one column a project overrides is the skill" above); unbound, the defaults are `spec`/`tasks` → `yad-spec`, `implement` → `yad-implement`,
 `checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`.
 
 ## `trust-log.json` (shard-then-fold)

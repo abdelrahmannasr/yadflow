@@ -249,7 +249,7 @@ is paid (Shape artifacts updated **and** a regression test added, then `status: 
 Report: the new `EP-<slug>`, its thread + parent, the re-author-vs-inherit split, the seeded
 `currentStep`, and the next skill — run `yad next EP-<slug>` and name what it names, followed by
 `yad-review-gate`. Do NOT name a skill from memory: which skill runs a step is the project's setting
-(`.sdlc/skills.json`), so a team that bound its own would be sent to one this epic will never use
+(`.sdlc/skills.json`, for every epic or for this epic's route), so a team that bound its own would be sent to one this epic will never use
 again. Unbound, that command names `yad-architecture` for a contract-surface change and `yad-stories`
 / `yad-test-cases` otherwise, which is what this step used to say. Shape steps do not auto-advance. Suggest
 `yad thread <thread>` to see the evolution and `yad-timeline` / `yad-defects` to render it.

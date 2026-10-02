@@ -599,8 +599,11 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   `yad skill bind <step> <skill>` replaces it for this project (recorded in `.sdlc/skills.json`).
   `yad next` names your choice from then on. Pass several skills and they run as a **chain**, in the
   order given, each one seeing what the one before it produced — every extra one is another model run,
-  so the command tells you the cost. `yad skill list` shows what runs each step today and whose choice
-  it is; `yad skill unbind <step>` goes back to the default.
+  so the command tells you the cost. Add `--profile <route>` (for example `--profile spike`) and the
+  choice applies only to epics on that route; it wins over the project-wide one there. `yad skill list`
+  shows what runs each step today, whose choice it is, and whether each skill is installed on your
+  machine (it warns, never refuses — a teammate may have it); `yad skill unbind <step>` goes back to
+  the next layer.
 - **See what is installed:** `yad detect` lists the skills, agents (subagents), MCP servers and plugins
   that each AI agent can use here — in this folder and in your home folder — and which agents read
   each place (Claude Code, Codex CLI, Cursor, Gemini CLI and others). It only reads, and names an MCP
