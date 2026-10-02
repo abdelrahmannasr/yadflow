@@ -36,7 +36,7 @@ import {
   DISCOVERY_EPIC, epicIds, epicLineage, epicRel, epicRoot, epicStories, featureStatus, FOUNDATION_EPIC, FOUNDATION_SECTIONS,
   isGenesisType, isValidEpicId, lifecycleProfile, loadLedger, loadSkillBindings, PRODUCT_DONE, PRODUCT_EPICS,
   planThreadedSeed, readFrontmatter, roadmapFeatures, seedableProfiles, seedFoundationState,
-  seedState, staleFoundationGuards, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
+  seedState, staleFoundationGuards, stepSkills, bindingsForEpic, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
@@ -223,8 +223,9 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   // Everything else asks the PROJECT first (E6): a team that bound its own skill to `epic` must be
   // told to run that one, or this command would hand a brand-new epic straight to a skill their
   // `yad next` will never name again. `yad-backfill` is the one exception, because waking a stub is
-  // the engine's own `promote` verb rather than a step on any chain.
-  const skills = stub ? ['yad-backfill'] : stepSkills(first.id, loadSkillBindings(root));
+  // the engine's own `promote` verb rather than a step on any chain. The route is the one just seeded
+  // (E51), read off the state as `yad next` will read it, so the two name the same skill.
+  const skills = stub ? ['yad-backfill'] : stepSkills(first.id, bindingsForEpic(loadSkillBindings(root), state));
   const skill = skills[0] || null;
   // `nextSkills` appears only for a bound chain, the same rule `yad next --json` follows — a key that
   // showed up on every seed would be one more always-null field for every reader to ignore.
@@ -314,7 +315,8 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
 
   const { state } = plan;
   const first = state.steps.find((s) => s.id === state.currentStep);
-  const skills = stepSkills(first.id, loadSkillBindings(root));
+  // The route the change takes from its parent, which `planThreadedSeed` records on the new state.
+  const skills = stepSkills(first.id, bindingsForEpic(loadSkillBindings(root), state));
   const carried = state.steps.filter((s) => s.inherited);
   if (json) {
     return emitJSON({
@@ -389,7 +391,7 @@ export async function runFoundationNew(root, { today, json = false } = {}) {
   for (const f of [files.approvals, files.comments]) if (!fs.existsSync(f)) writeJSON(f, []);
   fs.mkdirSync(path.join(epicRoot(root, FOUNDATION_EPIC), 'reviews'), { recursive: true });
 
-  const skills = stepSkills(state.steps[0].id, loadSkillBindings(root));
+  const skills = stepSkills(state.steps[0].id, bindingsForEpic(loadSkillBindings(root), state));
   const skill = skills[0] || null;
   const required = FOUNDATION_SECTIONS.filter((s) => !s.optional).map((s) => s.file);
   const optional = FOUNDATION_SECTIONS.filter((s) => s.optional).map((s) => s.file);

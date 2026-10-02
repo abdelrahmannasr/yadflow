@@ -182,6 +182,8 @@ Build by hand"** below.
 - **`yad skill list`** — which skill runs which lifecycle step, and whether that answer is your
   project's choice or the engine's default. `yad skill bind <step> <skill>` records your own in
   `.sdlc/skills.json`; pass several and they run as a chain, in order, each costing another model run.
+  Add `--profile <route>` to bind a step for one route only (for example a lighter skill for `spike`
+  epics); the route's line wins on those epics.
   `yad skill unbind <step>` goes back to the default.
 - **`yad detect`** — which skills, agents, MCP servers and plugins are installed for the agents that work
   here, in this folder and in your home folder, and which agents read each place. Read-only; an MCP

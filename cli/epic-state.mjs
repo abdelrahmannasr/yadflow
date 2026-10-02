@@ -2297,8 +2297,8 @@ export function markInReview(state, step, close = null) {
 // E108 — is `gateRuleFor` and `gateCapFor` at the top of this file (E7, E62, E72), which read
 // the `risk_tags` a seed copies from the row below into the epic's own `state.json`;
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
-// project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default
-// between the two, once E50 can detect which skills are installed. Three of the five
+// project overrides it in `.sdlc/skills.json` (E6, below), for every epic or for one route only
+// (E51: `profiles.<id>.steps`, which wins over the project-wide line). Three of the five
 // skills that used to hand-write a seed now run `yad epic new` instead (E17b), `yad-discovery` runs
 // `yad foundation new` (E75), and `yad-change` runs `yad epic new --parent` for a threaded change-epic
 // (E42).
@@ -2443,9 +2443,9 @@ export const STEPS = [
 // `yad epic new` (E17, cli/epic.mjs); shape 6 is where an epic first RECORDS which profile it is on,
 // and an epic seeded before that field existed still has its route derived by matching its chain
 // (`matchLifecycleProfile`). Which steps are optional per route already lives here and is read per
-// EPIC (E35, `optionalStepsFor`); the short chore and spike lanes are E40. A PROJECT-wide skill
-// binding already exists (E6, below); E51 adds a per-profile one between it and the catalogue
-// default, so two routes can run different skills for the same step.
+// EPIC (E35, `optionalStepsFor`); the short chore and spike lanes are E40. Which skill runs a step
+// is bound per project (E6, below) and, more specifically, per route (E51) — both in
+// `.sdlc/skills.json`, never here, so two routes can run different skills for the same step.
 export const LIFECYCLE_PROFILES = [
   {
     id: 'classic',
@@ -2877,8 +2877,9 @@ const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.i
 // THE FILE WINS, AND THE DOCTOR ONLY REPORTS. Same discipline as `workItemType` and the lifecycle
 // profile: a project may bind a skill this engine has never heard of — that is the whole point, since
 // the engine cannot know what a team installed. So nothing here validates a skill NAME. `yad doctor`
-// reports a binding on a step id the catalogue does not know, and changes nothing. Detecting which
-// skills are actually installed is E50; per-profile defaults are E51.
+// reports a binding on a step id the catalogue does not know, and changes nothing. `yad skill list`
+// and `yad skill bind` ask `yad detect` (E50) whether a bound skill is installed on THIS machine, and
+// only ever warn: a teammate may have it, and the engine cannot see their home folder.
 //
 // SEVERAL SKILLS PER STEP IS A CHAIN, NEVER A PANEL (closed decision 7). They run in the order given,
 // each one seeing what the one before it produced, and the LAST output is the artifact. A panel — run
@@ -2897,8 +2898,19 @@ const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.i
 //   }
 //
 // A value may be one skill or a list of them; both are read back as a list, so nothing downstream has
-// to handle two shapes. The wrapper object exists so that E50 and E51 can add keys beside `steps`
-// without the file changing shape.
+// to handle two shapes. The wrapper object exists so that later rows can add keys beside `steps`
+// without the file changing shape — and E51 did:
+//
+//     "profiles": {
+//       "spike": { "steps": { "epic": "spike-epic" } }
+//     }
+//
+// A binding under `profiles.<id>` applies only to an epic that RECORDS that route (`recordedRoute`,
+// below — never a route guessed from its chain). THE MOST SPECIFIC LINE WINS: the route's
+// own line, then the project-wide `steps`, then the catalogue. A team that binds `epic` for `spike`
+// gets it on spike epics only, and its project-wide lines still cover every other route. No shape
+// moves: an older yadflow keeps the unknown key (`yad skill bind` writes the document it read) and
+// simply runs the project-wide answer for every route.
 
 // The catalogue's own answer for a step, Shape or Build. One lookup, because a step id belongs to
 // exactly one of the two tables (`catalogueSkills` splits them on the same `phase === 'build'` rule),
@@ -2908,7 +2920,8 @@ const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.i
 // chain carrying a step called `constructor` would otherwise resolve its "skill" to a function.
 const CATALOGUE_SKILL = { __proto__: null, ...STEP_SKILL, ...BUILD_STEP_SKILL };
 
-// Read a raw parsed `.sdlc/skills.json` into `{ steps: { <id>: [skill, …] } }`.
+// Read a raw parsed `.sdlc/skills.json` into
+// `{ steps: { <id>: [skill, …] }, profiles: { <profile>: { steps: { <id>: [skill, …] } } } }`.
 //
 // Junk is DROPPED here rather than rejected, and that is deliberate: this runs inside `yad next`,
 // which must keep working on a project whose config file someone mistyped. An empty string, an empty
@@ -2925,19 +2938,74 @@ const CATALOGUE_SKILL = { __proto__: null, ...STEP_SKILL, ...BUILD_STEP_SKILL };
 // and the two surfaces would disagree about it: the rendered Build chain folds them (that is what
 // `dedupeConsecutive` has always done for spec+tasks) while the cost note counted them, so a step
 // bound to `["a", "a"]` would be billed for two runs and shown as one.
-export function normalizeBindings(raw) {
+//
+// `profiles` gets the same treatment one level down (E51): a profile id is a key out of the same
+// hand-edited file, so `__proto__` there is added with `defineProperty` too, and a profile whose
+// `steps` binds nothing usable is left out — it would only route a lookup to an empty layer.
+const ownKey = (obj, key, value) => Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+
+function normalizeSteps(steps) {
   const out = {};
-  const steps = isPlainObject(raw) ? raw.steps : null;
   if (isPlainObject(steps)) {
     for (const [id, value] of Object.entries(steps)) {
       const list = dedupeConsecutive((Array.isArray(value) ? value : [value])
         .filter((s) => typeof s === 'string' && s.trim())
         .map((s) => s.trim()));
-      if (list.length) Object.defineProperty(out, id, { value: list, enumerable: true, writable: true, configurable: true });
+      if (list.length) ownKey(out, id, list);
     }
   }
-  return { steps: out };
+  return out;
 }
+
+export function normalizeBindings(raw) {
+  const profiles = {};
+  const rawProfiles = isPlainObject(raw) ? raw.profiles : null;
+  if (isPlainObject(rawProfiles)) {
+    for (const [id, value] of Object.entries(rawProfiles)) {
+      const steps = normalizeSteps(isPlainObject(value) ? value.steps : null);
+      if (Object.keys(steps).length) ownKey(profiles, id, { steps });
+    }
+  }
+  return { steps: normalizeSteps(isPlainObject(raw) ? raw.steps : null), profiles };
+}
+
+// The bindings as ONE epic sees them: the project's, plus which route the epic is on (E51).
+//
+// A view, not a merge. `stepSkills` reads the route's layer first and the project's after it, so a
+// line in either layer keeps saying where it came from — `yad skill list` needs that for `source`,
+// and a merged object would make a route's line indistinguishable from a project-wide one. The same
+// object goes to every reader of one epic (`nextAction` and the line `yad next` prints beside it), so
+// the JSON and the prose cannot name two different skills for one step.
+//
+// `profile` is null for "no route": no epic yet (`yad next` on an empty Product, `yad setup`), or an
+// epic whose route nothing can tell. Then only the project-wide layer applies — never a guessed route.
+export function bindingsForProfile(bindings, profile) {
+  const base = isPlainObject(bindings) ? bindings : { steps: {}, profiles: {} };
+  const id = typeof profile === 'string' && profile ? profile : null;
+  return { ...base, profile: id };
+}
+
+// The route an epic RECORDS, as written — or null when it records none.
+//
+// NOT `epicProfileId`, which falls back to matching the chain. That guess is fine for what a step may
+// skip, where a wrong answer is a refusal a person sees at once. Here it would be a silent claim that
+// is believed and acted on: `yad next` names the skill and `yad-run` runs it. Every hand-written and
+// pre-shape-6 ledger is a shortened `classic`, and the shortest route that fits `[epic, epic-review]`
+// is `chore` — so a `chore`-only line would reach every older classic epic. The E40 rule for
+// `routeLacksStep`, for the same reason.
+//
+// A route this release does not KNOW is still used as written (rule 3): an epic from a newer release
+// that records it gets the lines the team bound for it, which is what `yad skill bind` promises when it
+// records one. The lookup is `Object.hasOwn`, so an unknown id is safe.
+export const recordedRoute = (state) =>
+  (isPlainObject(state) && typeof state.profile === 'string' && state.profile ? state.profile : null);
+
+// The view for an epic's own `state.json` — its recorded route. A view that already names a route is
+// kept: a caller that resolved it once hands the same object on.
+export const bindingsForEpic = (bindings, state) =>
+  (isPlainObject(bindings) && Object.hasOwn(bindings, 'profile')
+    ? bindings
+    : bindingsForProfile(bindings, recordedRoute(state)));
 
 // The project's bindings, or the empty set when the file is absent or unreadable.
 export const loadSkillBindings = (root) =>
@@ -2955,21 +3023,47 @@ export function stepSkills(stepId, bindings = null) {
   // object `Object.prototype` answers for `constructor`, `toString` and friends — so a chain carrying
   // a step called `constructor` resolved its "skill" to a function, and `yad next` threw trying to
   // spread it. The catalogue map below is `__proto__: null` for the same reason.
-  const steps = bindings?.steps;
-  const boundTo = (id) => (isPlainObject(steps) && Object.hasOwn(steps, id) ? steps[id] : null);
-  const bound = boundTo(stepId);
-  if (Array.isArray(bound) && bound.length) return [...bound];
-  // A step that took over from an OLD id inherits the old id's binding until it is given one of its
-  // own (rule 3). A project that bound its own skill to `discovery` before E75 renamed the product
-  // step to `foundation` would otherwise be switched back to the default without anyone deciding it.
-  const legacy = Object.hasOwn(BINDING_SUCCEEDS, stepId) ? boundTo(BINDING_SUCCEEDS[stepId]) : null;
-  if (Array.isArray(legacy) && legacy.length) return [...legacy];
+  const found = boundSkills(stepId, bindings);
+  if (found) return [...found.skills];
   const fallback = CATALOGUE_SKILL[stepId];
   return typeof fallback === 'string' ? [fallback] : [];
 }
 
+// Which LAYER binds a step, and to what: `{ skills, source: 'profile' | 'project' }`, or null when
+// neither does (the step is on the catalogue's default). The most specific layer wins (E51): the
+// epic's route, then the project-wide `steps`.
+//
+// Inside each layer, a step that took over from an OLD id inherits the old id's binding until it is
+// given one of its own (rule 3). A project that bound its own skill to `discovery` before E75 renamed
+// the product step to `foundation` would otherwise be switched back to the default without anyone
+// deciding it. The layer order comes first: a route's `discovery` line beats a project-wide
+// `foundation` one, because it is the more specific CHOICE, whatever it is spelled.
+export function boundSkills(stepId, bindings = null) {
+  const lookup = (steps) => {
+    const boundTo = (id) => (isPlainObject(steps) && Object.hasOwn(steps, id) ? steps[id] : null);
+    const own = boundTo(stepId);
+    if (Array.isArray(own) && own.length) return own;
+    const legacy = Object.hasOwn(BINDING_SUCCEEDS, stepId) ? boundTo(BINDING_SUCCEEDS[stepId]) : null;
+    return Array.isArray(legacy) && legacy.length ? legacy : null;
+  };
+  const profiles = bindings?.profiles;
+  const profile = bindings?.profile;
+  const route = typeof profile === 'string' && isPlainObject(profiles) && Object.hasOwn(profiles, profile)
+    ? profiles[profile]?.steps : null;
+  const fromRoute = lookup(route);
+  if (fromRoute) return { skills: fromRoute, source: 'profile' };
+  const fromProject = lookup(bindings?.steps);
+  return fromProject ? { skills: fromProject, source: 'project' } : null;
+}
+
 // new step id -> the old step id whose binding it inherits while it has none of its own.
 const BINDING_SUCCEEDS = { __proto__: null, foundation: 'discovery' };
+
+// The step ids that read a line written under `id` — itself, and any step that took over from it. For
+// `yad doctor`: a `discovery` line on the `foundation` route is read for `foundation`, so it is not a
+// line no epic reaches.
+export const stepsReadingBinding = (id) =>
+  [id, ...Object.keys(BINDING_SUCCEEDS).filter((k) => BINDING_SUCCEEDS[k] === id)];
 
 // The two keys every action object carries for its skill, from one resolved list.
 //
@@ -3318,8 +3412,11 @@ export function repairState(state, close = null) {
 //   reopened — a lane per step re-opened behind finished work (E41), each shaped like an action
 //   debt     — the steps still owed as debt (`owedSteps`), the reminder that repeats until they are paid
 export function nextAction(ledger, opts = {}) {
-  const a = shapeNextAction(ledger, opts);
   const state = ledger?.state;
+  // E51: every skill this action names is the one for THIS epic's route. Resolved once, here, so the
+  // Shape step, the Build lanes and the re-opened lanes all read the same view.
+  opts = { ...opts, bindings: bindingsForEpic(opts.bindings ?? null, state) };
+  const a = shapeNextAction(ledger, opts);
   if (!state || !Array.isArray(state.steps) || isProductLevel(state) || backfillAnchorKind(state)) return a;
   const lanes = reopenedLanes(ledger, { epicId: a.epicId, currentStep: state.currentStep, bindings: opts.bindings ?? null });
   const debt = owedSteps(state).map((s) => ({ step: s.id, status: stepStatus(s) ?? s.status, record: s.record || null }));

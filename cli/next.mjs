@@ -15,7 +15,7 @@ import { c, log, ok, info, warn, hand, fail, readJSON, exists, emitJSON } from '
 import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { printTeamHint, soloTeamHint } from './people.mjs';
 import { OWNER_STEPS, liveOwner, readState as loadLedgerState } from './owners.mjs';
-import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { bindingsForEpic, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -46,10 +46,16 @@ function listEpics(root) {
 // `bindings` is passed in for the same reason `lin` is: every loop below renders many epics, and the
 // project's skill bindings are ONE file for all of them. The default keeps the single-epic callers a
 // one-liner; a loop reads the file once and hands the same object to every row.
-const actionFor = (root, id, lin = epicLineage(root, id), bindings = loadSkillBindings(root)) => {
+//
+// E51: the bindings are narrowed to THIS epic's route here, once, and `rowFor` hands that same view to
+// the printed line. `nextAction` would narrow them itself, but `actionLine` names skills the action
+// never carried (the Build fallback, the hand-off to the next epic) — a view built in two places is two
+// answers for one step.
+function epicAction(root, id, lin = epicLineage(root, id), bindings = loadSkillBindings(root)) {
   const ledger = loadLedger(epicRoot(root, id));
-  return {
-    ...nextAction(ledger, { epic: id, bindings }),
+  const view = bindingsForEpic(bindings, ledger?.state);
+  const action = {
+    ...nextAction(ledger, { epic: id, bindings: view }),
     lineageKind: lin.type,
     // Which ROUTE this epic RECORDED, carried so `phaseLine` can mark a phase that route never enters
     // (E40). The recorded key ONLY — never matched from the chain, which is the one place in this file
@@ -64,13 +70,19 @@ const actionFor = (root, id, lin = epicLineage(root, id), bindings = loadSkillBi
     // which route it is on simply gets the line it got before the short lanes existed.
     route: lifecycleProfile(ledger?.state?.profile) ? ledger.state.profile : null,
   };
-};
+  return { action, view };
+}
+
+const actionFor = (root, id, lin, bindings) => epicAction(root, id, lin, bindings).action;
 
 // One `epic.md` read, both things that come out of it: the action to print and the tag to print
 // beside it. Every printed path in this file goes through here.
+// `bindings` on the row is the epic's own view, and every printer spreads the row AFTER its own
+// `bindings`, so the row's wins.
 const rowFor = (root, id, bindings = loadSkillBindings(root)) => {
   const lin = epicLineage(root, id);
-  return { action: actionFor(root, id, lin, bindings), theme: lin.theme, owners: liveOwners(root, id) };
+  const { action, view } = epicAction(root, id, lin, bindings);
+  return { action, theme: lin.theme, owners: liveOwners(root, id), bindings: view };
 };
 
 // The live step owners of one epic (E47), by step. Beside the action, never in it: `yad next --json`'s
@@ -388,7 +400,7 @@ function generalNext(root, { all, headCount = null } = {}) {
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
     // Both name a STEP's skill, so both ask the project. `yad-backfill` above does not: waking a
     // brownfield anchor is the engine's own promote verb, not a step on any chain.
-    if (!productId) hand(`frame the whole product first (purpose, scope, MVP, roadmap, stack): run ${c.bold('yad foundation new')}, then invoke the ${c.bold(stepSkills('foundation', bindings)[0] || 'yad-discovery')} skill ${c.dim('(optional)')}`);
+    if (!productId) hand(`frame the whole product first (purpose, scope, MVP, roadmap, stack): run ${c.bold('yad foundation new')}, then invoke the ${c.bold(stepSkills('foundation', bindingsForProfile(bindings, 'foundation'))[0] || 'yad-discovery')} skill ${c.dim('(optional)')}`);
     hand(`start your first epic: invoke the ${c.bold(stepSkills('epic', bindings)[0] || 'yad-epic')} skill${productId ? c.dim(' (it reads the approved roadmap.md)') : ''}`);
     return;
   }
@@ -412,12 +424,12 @@ function generalNext(root, { all, headCount = null } = {}) {
   // The grouping theme rides this list too. This is the ONE `yad next` view that shows several epics
   // side by side, so it is where seeing which of them belong together is worth most — and leaving it
   // off would have meant bare `yad next`, the command people run by default, never showed the tag.
-  for (const { action: a, theme: tag } of rows) {
+  for (const { action: a, theme: tag, bindings: view } of rows) {
     const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
     // Debt is reminded here too (E41): the roll-up is the view people run most, and a reminder that only
     // appears once you already look at the one epic is not a reminder.
     const owed = a.debt?.length ? `  ${c.yellow(`· ${a.debt.length} owed as debt`)}` : '';
-    log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo, verified })}${owed}`);
+    log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo, bindings: view, verified })}${owed}`);
   }
   // Painted per segment, not dim-wrapping a bold: `paint` closes with a full reset, so the nested
   // form loses the dim from the first bold word to the end of the line.

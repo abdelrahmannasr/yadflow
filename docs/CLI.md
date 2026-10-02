@@ -74,7 +74,7 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
 | `yad foundation new` | **Start the Foundation — the Product level (E75).** Seeds `foundation/.sdlc/state.json` with the two-step `foundation` route (`foundation` → `foundation-review`), under the fixed id `EP-foundation`, plus an empty `approvals.json`, an empty `comments.json` and `foundation/reviews/`. Run once per product, before any epic; then the `yad-discovery` skill writes the sections — `purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md`, and the optional `market.md` and `risks.md` — and `yad gate open EP-foundation foundation/` opens its review. It writes **no section, no branch and no commit**. A section that still holds nothing but its template makes `yad gate open` and `yad gate sync` warn "Foundation not written yet", and `yad doctor` reports it as `foundation:unwritten` once the review has opened or passed (E76) — a warning, never a refusal. **Refuses a second Foundation**, and **refuses a product still on the old `epics/EP-discovery/`** — a product has one product level, and `yad migrate --apply` converts the old one on a local ledger ([shape 8](migrations/shape-8.md)). `--json` for a script: `next` names the skill to run, and `sections` lists the required and optional files. |
 | `yad foundation status [--json]` | **Which roadmap features are started — read, never written.** Reads the feature tables in the Foundation's `roadmap.md` (any table whose header has a `Proposed epic id` column, under its phase heading) and reports each feature from its epic's ledger: `planned` (no ledger — no `state.json` — for that id yet), `in-shape` (seeded, still in Shape), `in-build` (Shape done, not shipped yet) or `shipped` (every story in the epic's `stories/` has a Build state, every repo each story declares has a lane, and every lane is shipped — or the epic is a brownfield anchor). A table inside a code fence is an example and is not read; a heading ends a table. A row whose id is not a valid feature id, or whose ledger does not load, is named as a problem. It also lists feature epics no row proposes (folders with a ledger only; the type comes from `epic.md`, or from the ledger when there is none), since `yad-epic` may give an epic a different id. When both product levels exist it reads `foundation/` and warns. The roadmap's `Status` column is **no longer kept by hand** — editing that table after the Foundation is approved makes its approvals read as stale — so a written status is shown only where it disagrees with the ledgers (`epic-started`, the old word for a seeded epic, agrees with `in-shape` and `in-build`). Reads the old `epics/EP-discovery/` spelling too. Refuses when there is no Foundation or no `roadmap.md`. `--json`: `{ ok, epic, roadmap, approved, features: [{ phase, feature, epicId, status, written, disagrees?, problem? }], unlisted, warnings? }`. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. In solo mode the project view (no epic) first suggests `yad mode team` when more than one person may work on the Product (E74, see [When solo mode may be wrong](#the-pr-driven-review-gate)). |
-| `yad skill list` / `yad skill bind <step> <skill>…` / `yad skill unbind <step>` | **Choose which skill runs which step.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. `list` shows every step a skill runs — Shape review gates are excluded, since `yad gate` drives those — what runs each one, and where that answer came from: `project` (you bound it), `engine` (the default) or `ignored` (your file has a line for that step and the line names no skill, so the default still runs). `--json` for a script. `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A **Shape review gate** is refused (nothing would ever invoke the binding); `engineer-review` is a Build step in its own right and **is** bindable. A step this release does not know is recorded with a warning, because your file wins. `unbind` drops the line and the step goes back to the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
+| `yad skill list [--profile <p> \| --epic <id>]` / `yad skill bind <step> <skill>… [--profile <p>]` / `yad skill unbind <step> [--profile <p>]` | **Choose which skill runs which step — for every epic, or for one route.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. With `--profile <p>` the line applies only to epics on that route (`classic`, `spike`, `chore`…) and wins over the project-wide line on them. `list` shows every step a skill runs — Shape review gates are excluded, since `yad gate` drives those — what runs each one, and where that answer came from: `profile` (you bound it for this route), `project` (you bound it for every epic), `engine` (the default) or `ignored` (your file has a line for that step and the line names no skill, so the next layer still runs). `--profile` shows one route's view; `--epic <id>` shows the view of that epic's route. Each row says whether each skill is **installed here** (`installed`, from `yad detect`); a skill that is not found is marked `?`. `--json` for a script; it adds `profile`, `epic` (with `--epic`), `installedChecked` and `profiles` (every route's own lines). `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A **Shape review gate** is refused (nothing would ever invoke the binding); `engineer-review` is a Build step in its own right and **is** bindable. A step this release does not know is recorded with a warning, because your file wins. With `--profile`, a step the route never walks (`architecture` on `spike`) is refused, and a route this release does not know is recorded with a warning. `bind` warns when a skill is not installed here and writes it anyway — a teammate may have it. `unbind` drops the line and the step goes back to the next layer: the project-wide line, then the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
 | `yad detect` | **See what is installed for the agents that work here.** Lists the skills, agents (subagents), MCP servers and plugins found in this folder and in your home folder, and which agents read each place — Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder, opencode. Read-only: it writes nothing and uses no network. An MCP server is named, never described — its command, arguments and settings can hold a token. `--json` lists every item with its version and content hash (a sha256 of its `SKILL.md` or agent file, with Windows line ends counted as plain ones). See [what is installed](#what-is-installed). |
 | `yad toolbox list` | **See the external tools yadflow can use, and which you have.** Lists every tool in the toolbox in three groups — **core** (offered at setup: Repomix, Spec Kit, Impeccable), **recommended** (pools of skills you may choose: BMAD-METHOD, ECC, mattpocock/skills) and **connectors** (the design, testing and learning tools a Product connects: Figma, Pencil, Playwright, Cypress, pytest, Maestro, DeepTutor). For each: what it is for, whether it is found here, whether this Product uses it, and what yadflow does without it. Read-only; it installs nothing. `--json` adds each tool's licence, source, checked date, install commands and where it was found. `yad toolbox` alone is `list`. See [the toolbox](#the-toolbox). |
 | `yad toolbox add <id>` / `yad toolbox remove <id>` / `yad toolbox check` | **Choose the tools this Product uses (E86).** `add` marks a tool as used here and prints how to install it; `remove` stops using it. The choice is saved in the Product's `.sdlc/toolbox.json` — commit it so the team shares it. `add <id> --custom --role "<text>" --fallback "<text>" --detect <kind>:<name>[,…]` adds a tool of your own (`--install "<type>: <command>"` and `--source <https URL>` are optional). Neither installs anything. `check` lists the tools this Product uses that are not ready here, each with how to get it and its fallback; it never fails, because no tool is required. See [choosing the team's tools](#choosing-the-teams-tools). |
@@ -1117,6 +1117,55 @@ yad skill bind stories shape-the-stories yad-stories
 yad skill unbind architecture                    # back to the engine's default
 ```
 
+**A line can apply to one route only.** A route (also called a profile) is the chain of steps an epic
+follows — `classic`, `analysis-first`, `chore`, `spike`, and the Product's `foundation`. Each epic
+records its route in its `state.json`. Put a line under `profiles.<route>.steps` and it applies only to
+epics on that route:
+
+```jsonc
+{
+  "steps": { "epic": "our-epic-skill" },
+  "profiles": {
+    "spike": { "steps": { "epic": "our-spike-skill" } },
+    "chore": { "steps": { "implement": "our-small-change-skill" } }
+  }
+}
+```
+
+**The most specific line wins:** the epic's route first, then the project-wide `steps`, then the
+engine's default. In this file a spike epic runs `our-spike-skill`, every other epic runs
+`our-epic-skill`, and a chore epic's Build lanes run `our-small-change-skill` for `implement`.
+`yad next`, `yad epic new`, `yad skill list --epic <id>` and the `yad-run` skill all read the route the
+epic **records** in its `state.json`, exactly as written:
+
+- An epic that records **no** route (an older or hand-written one) uses the project-wide line. Its route
+  is never guessed from its steps: a short chain like `[epic, epic-review]` fits `chore`, and guessing
+  would hand a chore-only skill to an ordinary classic epic.
+- An epic that records a route this release does not know (from a newer yadflow) still gets the lines
+  bound for that route.
+- Before any epic exists — `yad setup`, and `yad next` on an empty Product suggesting the first epic —
+  there is no route yet, so those lines name the project-wide skill. The Foundation hint uses the
+  `foundation` route, because `yad foundation new` always seeds that route.
+
+```bash
+yad skill bind epic our-spike-skill --profile spike
+yad skill list --profile spike                   # what a spike epic runs, and from which layer
+yad skill list --epic EP-checkout                # the same, for that epic's route
+yad skill unbind epic --profile spike            # back to the project-wide line, then the default
+```
+
+A route's line must name a step the route walks. Build steps (`spec`, `tasks`, `implement`, `checks`,
+`engineer-review`) are on every feature route; the Product routes (`foundation`, `discovery`) have no
+Build steps. `bind` refuses a line no epic would ever reach — `architecture` on `spike`, say — for the
+same reason it refuses a review gate.
+
+**Is the skill installed?** `yad skill list` and `yad skill bind` ask `yad detect` (the command that
+lists what is installed) whether each skill is in this folder or your home folder. A plugin's skill
+counts under the name an agent calls it by, `<plugin>:<skill>`. A skill that is not found is a
+**warning, never a refusal**: the file is the team's and is committed, and a teammate may have a skill
+this machine lacks. "Found" means a skill by that name is installed; which copy an agent loads when
+there are several is the agent's own rule.
+
 **Several skills on one step are a chain, never a contest.** They run in the order you wrote them,
 each one seeing what the one before it produced, and the last output is the artifact. There is no
 "run three and pick the best": picking needs a judge, which is either a person reading three
@@ -1134,7 +1183,12 @@ it does report, in the `project` section, is a line that will never do anything:
 | `skills` (warn, `YAD-CFG-006`) | a value is not a skill name — an empty string, a number, an empty list |
 | `skills:unknown-step` | the step id is one this release does not run, so nothing will look the binding up |
 | `skills:review-step` | the step is a **Shape review gate**, which `yad gate` drives — no skill ever runs it |
-| `skills:bound` (ok) | the summary: how many steps are bound, and how many to more than one skill |
+| `skills:profiles` (fail) | `profiles` is not a JSON object, or a route's entry has no `steps` object |
+| `skills:profile-unusable` (warn, `YAD-CFG-006`) | a route's value is not a skill name |
+| `skills:unknown-profile` | the route is one this release does not have |
+| `skills:profile-unknown-step` / `skills:profile-review-step` | the same two checks as above, for a route's line |
+| `skills:off-route` | the route never walks that step (`architecture` on `spike`), so no epic reaches it |
+| `skills:bound` (ok) | the summary: how many steps are bound, how many to more than one skill, and how many for one route only |
 
 `yad skill list` marks the same lines with a red `!`, so a binding that does nothing is visible where
 you go to look at bindings rather than only in the health check.

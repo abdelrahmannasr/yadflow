@@ -790,7 +790,7 @@ export const MODULES: Module[] = [
             '`yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole chain and what is blocking. Start here when stuck.',
             '`yad next` — the single next action to take; in Build it names the next build sub-step (spec → tasks → implement → checks → engineer-review) per story/repo.',
             '`yad doctor` — environment + state health check; attach `--json` to a bug report. It also says whether each repo\'s branch requires an approval on GitHub or GitLab — or that it is not known, and why.',
-            '`yad skill list` — which skill runs which step. `yad skill bind <step> <skill>` records your own choice in `.sdlc/skills.json`; pass several and they run as a chain, each costing another model run.',
+            '`yad skill list` — which skill runs which step. `yad skill bind <step> <skill>` records your own choice in `.sdlc/skills.json`; pass several and they run as a chain, each costing another model run. Add `--profile <route>` to bind a step for one route only.',
             '`yad detect` — which skills, agents, MCP servers and plugins each AI agent can use here (this folder and your home folder). Read-only; MCP servers are named, never their settings.',
             '`yad toolbox list` — the external tools yadflow can use, which ones you have, and what yadflow does without each. None is required.',
             '`yad toolbox add <id>` / `yad toolbox remove <id>` — choose the tools this Product uses (saved in `.sdlc/toolbox.json`); `yad toolbox check` lists the chosen ones not ready here, with install commands.',

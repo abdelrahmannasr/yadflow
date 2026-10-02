@@ -1957,6 +1957,19 @@ test('yad epic new --parent: a carried step AFTER an authored one is walked past
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E51: a change epic is handed to the skill bound for the route it takes from its parent', async () => {
+  const T = productConfig();
+  approvedEpic(T, 'EP-checkout', { profile: 'classic' });
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/skills.json'), JSON.stringify({
+    steps: { epic: 'project-epic' }, profiles: { classic: { steps: { epic: 'classic-epic' } } } }));
+  try {
+    const { out, failed } = await seedOn(T, { slug: 'ui', type: 'change', parent: 'EP-checkout', inherits: 'ui-design', json: true });
+    assert.equal(failed, false, out);
+    assert.equal(JSON.parse(out).next, 'classic-epic');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('yad epic new --parent --inherits through the real command line, and a stray word is refused', async () => {
   const { execFileSync } = await import('node:child_process');
   const bin = new URL('../bin/yad.mjs', import.meta.url).pathname;
