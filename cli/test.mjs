@@ -17933,6 +17933,8 @@ test('E51: yad skill list shows a route\'s view, and marks what is not installed
     seedEpic(T, 'EP-o', { epicId: 'EP-o', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'todo' }, { id: 'epic-review', type: 'review', artifact: 'epic.md', status: 'todo' }] });
     assert.equal(list({ epic: 'EP-o' }).profile, null, 'no recorded route: the project-wide view, never a matched guess');
     assert.match(grabSync(() => runSkillList(T, { epic: 'EP-o', home: H })), /records no route/);
+    seedEpic(T, 'EP-n', { epicId: 'EP-n', profile: 'newer-route', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'todo' }] });
+    assert.match(grabSync(() => runSkillList(T, { epic: 'EP-n', home: H })), /on route newer-route — not a route this yadflow has/);
     for (const [opts, says] of [[{ epic: 'EP-s', profile: 'spike' }, /not both/], [{ epic: 'EP-none' }, /has no state.json/], [{ epic: 'bad' }, /not an epic id/], [{ profile: '__proto__' }, /not a profile id/]]) {
       const { out, failed } = grabFailing(() => runSkillList(T, { home: H, ...opts }));
       assert.equal(failed, true, JSON.stringify(opts));

@@ -212,7 +212,7 @@ export function runSkillList(root, { json = false, profile, epic, home = os.home
   if (error) warn(`${PROJECT_FILES.skillsConfig} ${error} — showing the engine's defaults`);
   if (route.epic) {
     info(route.profile
-      ? `${route.epic} is on route ${c.bold(route.profile)}`
+      ? `${route.epic} is on route ${c.bold(route.profile)}${lifecycleProfile(route.profile) ? '' : c.yellow(' — not a route this yadflow has')}`
       : `${route.epic} records no route — it runs the project-wide lines`);
   }
   else if (route.profile) info(`route ${c.bold(route.profile)}${lifecycleProfile(route.profile) ? '' : c.yellow(' — not a route this yadflow has')}`);

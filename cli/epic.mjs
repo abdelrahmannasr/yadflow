@@ -36,7 +36,7 @@ import {
   DISCOVERY_EPIC, epicIds, epicLineage, epicRel, epicRoot, epicStories, featureStatus, FOUNDATION_EPIC, FOUNDATION_SECTIONS,
   isGenesisType, isValidEpicId, lifecycleProfile, loadLedger, loadSkillBindings, PRODUCT_DONE, PRODUCT_EPICS,
   planThreadedSeed, readFrontmatter, roadmapFeatures, seedableProfiles, seedFoundationState,
-  seedState, staleFoundationGuards, stepSkills, bindingsForEpic, bindingsForProfile, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
+  seedState, staleFoundationGuards, stepSkills, bindingsForEpic, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
@@ -315,9 +315,8 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
 
   const { state } = plan;
   const first = state.steps.find((s) => s.id === state.currentStep);
-  // The route the change takes from its parent (`plan.profile`) — the one `writeState` stamps on disk,
-  // whether or not the in-memory seed carries it yet.
-  const skills = stepSkills(first.id, bindingsForProfile(loadSkillBindings(root), state.profile || plan.profile));
+  // The route the change takes from its parent, which `planThreadedSeed` records on the new state.
+  const skills = stepSkills(first.id, bindingsForEpic(loadSkillBindings(root), state));
   const carried = state.steps.filter((s) => s.inherited);
   if (json) {
     return emitJSON({
