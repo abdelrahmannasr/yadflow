@@ -111,12 +111,18 @@ ${c.bold('Where am I / what next')}
   yad next --all                       Every active epic's next action at once
   yad next [<epic>] --json             The same answer as a machine-readable action object (for
                                        agents/CI) — always every epic, so --all is implied
-  yad skill list [--json]              Which skill runs which step, and whether that is this
-                                       project's choice or the engine's default
-  yad skill bind <step> <skill> [<skill> ...]
-                                       Bind a step to a skill of your own. Several skills run in
-                                       the order given, one after another — each costs tokens
-  yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
+  yad skill list [--profile <p> | --epic <id>] [--json]
+                                       Which skill runs which step, whether that is one route's
+                                       choice, the project's or the engine's default, and whether
+                                       each skill is installed here (--epic: that epic's route)
+  yad skill bind <step> <skill> [<skill> ...] [--profile <p>]
+                                       Bind a step to a skill of your own — for every epic, or
+                                       with --profile for epics on that route only (it wins).
+                                       Several skills run in the order given — each costs tokens.
+                                       Warns when the skill is not installed here
+  yad skill unbind <step> [--profile <p>]
+                                       Drop the binding; the step goes back to the project-wide
+                                       binding, then the engine's default
   yad toolbox list [--json] [--dir <folder>]
                                        The external tools yadflow can use — core (offered at setup),
                                        recommended pools, the design/testing/learning connectors and
@@ -735,11 +741,11 @@ async function main() {
     }
     case 'skill': {
       const [, action, step, ...rest] = o._;
-      if (action === 'list' || action === undefined) { result = commands.runSkillList(o.dir, { json: o.json }); break; }
+      if (action === 'list' || action === undefined) { result = commands.runSkillList(o.dir, { json: o.json, profile: o.profile, epic: o.epic }); break; }
       if ((action === 'bind' || action === 'unbind') && noProduct()) break;
-      if (action === 'bind') { result = commands.runSkillBind(o.dir, { step, skills: rest }); break; }
-      if (action === 'unbind') { result = commands.runSkillUnbind(o.dir, { step }); break; }
-      refuse(`unknown skill action: ${action} (list, bind, unbind)`, 'usage: yad skill list [--json] | yad skill bind <step> <skill> [<skill> ...] | yad skill unbind <step>');
+      if (action === 'bind') { result = commands.runSkillBind(o.dir, { step, skills: rest, profile: o.profile }); break; }
+      if (action === 'unbind') { result = commands.runSkillUnbind(o.dir, { step, profile: o.profile }); break; }
+      refuse(`unknown skill action: ${action} (list, bind, unbind)`, 'usage: yad skill list [--profile <p> | --epic <id>] [--json] | yad skill bind <step> <skill> [<skill> ...] [--profile <p>] | yad skill unbind <step> [--profile <p>]');
       break;
     }
     case 'next': {

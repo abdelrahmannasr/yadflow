@@ -2099,14 +2099,85 @@ export function skillBindingChecks(checks, root) {
       `${rel} binds ${gates.join(', ')}, which no skill runs — review gates are driven by \`yad gate\``,
       'bind the author step instead (for example `architecture`, not `architecture-review`)');
   }
+  const routeBound = profileBindingChecks(checks, rel, raw.profiles);
+  if (routeBound === null) return;
   // Its OWN id, not `skills` again. A file with one good binding and one broken line fires both, and
   // two checks sharing an id put a green tick under the complaint in prose — and, worse, let a `--json`
   // consumer keying by id overwrite the warning with the tick.
-  if (bound.length) {
+  if (bound.length || routeBound) {
     const chained = bound.filter(([, list]) => list.length > 1).length;
     check(checks, 'skills:bound', 'project', 'ok',
-      `skills: ${bound.length} step(s) bound${chained ? `, ${chained} to more than one skill` : ''}`);
+      `skills: ${bound.length} step(s) bound${chained ? `, ${chained} to more than one skill` : ''}`
+        + (routeBound ? `; ${routeBound} more for one route only` : ''));
   }
+}
+
+// `profiles.<p>.steps` (E51): the same three "your line did nothing" warnings, each naming its route,
+// plus the two only a route can have — a route this release does not carry, and a step the route never
+// walks (`architecture` on `spike`: no epic on it ever reaches that step, which is why `yad skill bind`
+// refuses the same line). Returns how many lines bind something, or null after a fail.
+function profileBindingChecks(checks, rel, profiles) {
+  if (profiles === undefined) return 0;
+  if (!isPlainObject(profiles)) {
+    check(checks, 'skills:profiles', 'project', 'fail', `${rel}: \`profiles\` must be a JSON object [YAD-STATE-002]`,
+      'expected `"profiles": { "<profile>": { "steps": { "<step-id>": "<skill>" } } }`');
+    return null;
+  }
+  const broken = Object.entries(profiles)
+    .filter(([, v]) => !isPlainObject(v) || (v.steps !== undefined && !isPlainObject(v.steps)))
+    .map(([id]) => id);
+  if (broken.length) {
+    check(checks, 'skills:profiles', 'project', 'fail',
+      `${rel}: ${broken.map((id) => `\`profiles.${id}\``).join(', ')} must hold a \`steps\` object [YAD-STATE-002]`,
+      'expected `"<profile>": { "steps": { "<step-id>": "<skill>" } }`');
+    return null;
+  }
+  const bindings = normalizeBindings({ profiles });
+  const unusable = [];
+  const unknownStep = [];
+  const gates = [];
+  const offRoute = [];
+  const unknownRoute = [];
+  let bound = 0;
+  for (const [id, entry] of Object.entries(profiles)) {
+    const kept = bindings.profiles[id]?.steps || {};
+    const route = lifecycleProfile(id);
+    if (!route && Object.keys(kept).length) unknownRoute.push(id);
+    for (const step of Object.keys(entry.steps || {})) {
+      if (!Object.hasOwn(kept, step)) { unusable.push(`${id}: ${step}`); continue; }
+      bound += 1;
+      const def = stepDef(step);
+      if (!def) unknownStep.push(`${id}: ${step}`);
+      else if (!def.skill) gates.push(`${id}: ${step}`);
+      else if (route && (def.phase === 'build' ? route.level !== 'feature' : !route.rows.some((r) => r.id === step))) offRoute.push(`${id}: ${step}`);
+    }
+  }
+  if (unusable.length) {
+    check(checks, 'skills:profile-unusable', 'project', 'warn',
+      `${rel}: ${unusable.length} route binding(s) name no skill and are ignored — ${unusable.join(', ')} [YAD-CFG-006]`,
+      'each value must be a skill name or a non-empty list of them');
+  }
+  if (unknownRoute.length) {
+    check(checks, 'skills:unknown-profile', 'project', 'warn',
+      `${rel} binds skills for ${unknownRoute.length} route(s) this yadflow does not have: ${unknownRoute.join(', ')}`,
+      `check the spelling against the routes (${LIFECYCLE_PROFILES.map((p) => p.id).join(', ')}), or upgrade yadflow if the route is from a newer release`);
+  }
+  if (unknownStep.length) {
+    check(checks, 'skills:profile-unknown-step', 'project', 'warn',
+      `${rel} binds ${unknownStep.length} route step(s) this yadflow does not run: ${unknownStep.join(', ')}`,
+      'check the spelling against `yad skill list`, or upgrade yadflow if the step is from a newer release');
+  }
+  if (gates.length) {
+    check(checks, 'skills:profile-review-step', 'project', 'warn',
+      `${rel} binds ${gates.join(', ')}, which no skill runs — review gates are driven by \`yad gate\``,
+      'bind the author step instead (for example `architecture`, not `architecture-review`)');
+  }
+  if (offRoute.length) {
+    check(checks, 'skills:off-route', 'project', 'warn',
+      `${rel} binds ${offRoute.join(', ')}, a step that route never walks — no epic on it reaches the step`,
+      'bind it for a route that has the step, or project-wide under `steps`');
+  }
+  return bound;
 }
 
 // `.sdlc/toolbox.json`: which toolbox tools this Product uses or skips, and its own tools (E86). Absent is

@@ -4,8 +4,8 @@
 //   yad detect [--json] [--dir <folder>]
 //
 // Worked out fresh on every run and never saved: nothing reads it yet except a person, and a saved copy
-// would be a new file shape that goes stale the moment someone installs a skill. E51 (bind per profile)
-// and E85 (the toolbox check) are the readers this is built for.
+// would be a new file shape that goes stale the moment someone installs a skill. `yad skill list` /
+// `yad skill bind` (E51, "is this skill installed here?") and E85 (the toolbox check) read it too.
 //
 // TWO PLACES ARE LOOKED IN: the folder the command runs on (what a teammate who clones it also gets), and
 // the user's home folder (where most people install skills). Every item says which one, and which agents
