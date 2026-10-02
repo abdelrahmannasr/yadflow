@@ -16,6 +16,26 @@ tool is connected and its MCP is available, the `test architect` lens **generate
 into the connected repo(s) (or **links** an existing suite and reads it back); when nothing is
 connected, `yad-test-cases` runs artifacts-only exactly as before.
 
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it.
+
+Tell the person which tools you used and which fallbacks, and why.
+
+- **Playwright MCP** (`playwright`, a connector). This skill connects it, by writing `.sdlc/testing.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
+  - Fallback — artifacts-only: yad-test-cases writes test-cases.md only.
+- **Cypress** (`cypress`, a connector). This skill connects it, by writing `.sdlc/testing.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
+  - Fallback — artifacts-only: yad-test-cases writes test-cases.md only.
+- **pytest** (`pytest`, a connector). This skill connects it, by writing `.sdlc/testing.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
+  - Fallback — artifacts-only: yad-test-cases writes test-cases.md only.
+- **Maestro** (`maestro`, a connector). This skill connects it, by writing `.sdlc/testing.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
+  - Fallback — artifacts-only: yad-test-cases writes test-cases.md only.
+
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).

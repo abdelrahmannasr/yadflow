@@ -22,6 +22,20 @@ This is a **cross-cutting, opt-in** skill (like `yad-status`, it runs any time).
 it does not move `currentStep`, never records an approval, and never touches `.sdlc/state.json`, the
 approvals ledger, or the contract lock. It writes only the local learning ledger + tutorial artifacts.
 
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it.
+
+Tell the person which tools you used and which fallbacks, and why.
+
+- **DeepTutor** (`deeptutor`, a connector). Used when `.sdlc/learning.json` connects it. yad-connect-learning writes that file; follow it, not yad's toolbox answer.
+  - Fallback — harness-native tutoring: yad-learn has your agent read the project files directly.
+
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).

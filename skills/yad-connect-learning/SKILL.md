@@ -17,6 +17,20 @@ available it drives the CLI (grounded in the knowledge base); when nothing is co
 degrades to **harness-native** tutoring — the harness model reads the project artifacts directly and
 explains the concept. The learning layer is **purely opt-in and never blocks a gate**.
 
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it.
+
+Tell the person which tools you used and which fallbacks, and why.
+
+- **DeepTutor** (`deeptutor`, a connector). This skill connects it, by writing `.sdlc/learning.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
+  - Fallback — harness-native tutoring: yad-learn has your agent read the project files directly.
+
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).

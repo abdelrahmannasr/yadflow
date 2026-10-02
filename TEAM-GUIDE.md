@@ -615,6 +615,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   --custom --role … --fallback … --detect bin:<program>`. The choices live in `.sdlc/toolbox.json` —
   commit it so the team shares them. `yad toolbox check` lists the tools this Product uses that are
   not ready on your machine, each with its install command. It never fails: none is required.
+- **Skills follow the same answer:** every skill that uses a tool has a "When a tool is missing" section.
+  It asks `yad toolbox list --json` whether to use the tool, and says what it does instead when not.
+  So after `yad toolbox remove spec-kit`, `yad-spec` writes the spec files by hand, even where Spec Kit
+  is installed. A design, testing or learning tool still follows what its connect skill recorded.
 - **Something not working? Run the doctor first:** `npx yadflow doctor`. It checks your environment (git,
   Node, and whether `gh` or `glab` is installed and logged in — a warning if not), that the `.sdlc/` config
   parses and points at real repos, and that every epic ledger loads. It also asks GitHub or GitLab, with

@@ -14,6 +14,34 @@ This is **setup/maintenance**, not a gated Shape step — it never touches `.sdl
 epic's approvals. It writes the project-wide registry, the per-repo context cache, and — in the code
 repo itself — a draft of that repo's risk map (Step 3b), which the team commits there through a PR.
 
+## When a tool is missing
+
+<!-- Written from yadflow's cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->
+
+No tool below is required. When one is missing, this skill still finishes, using the fallback written
+beside it.
+
+For Repomix, decide from yad's answer, not from a guess:
+run `yad toolbox list --json` and read, in its `tools` list, the entry with the tool's `id`. Run it
+where the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed
+there are found.
+
+- **The team's choices.** They come from the Product. If the answer's `product` is null, yad found no
+  Product, so a tool the team chose not to use still shows `used: true`. Tell the person that.
+- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install
+  may be missed). If the entry says `missing` but the check in the steps below finds the tool, use
+  it — but never when the entry says `used: false`.
+- **When yad cannot answer** (yad is not installed here, or the command fails), use the check in the
+  steps below.
+
+Tell the person which tools you used and which fallbacks, and why.
+
+- **Repomix** (`repomix`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove repomix`) — use the fallback.
+  - Fallback — no Repomix pack. yad-connect-repos and yad-backfill put the same context together by hand, from the source tree and the recent git log, and the Shape steps read the code map.
+  - Record `source: repomix-unavailable`. It means the tool was not used, whatever the reason.
+
+<!-- end: When a tool is missing -->
+
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).
@@ -89,7 +117,7 @@ npx repomix@latest --compress --include-logs --style markdown -o {project-root}/
 `--compress` (Tree-sitter structural compression) keeps it small and signal-dense; `--include-logs`
 adds recent git history; Secretlint secret-scans by default. **If a secret is reported, STOP and have
 it redacted before any AI reads the pack.** Pack the whole repo, or the source boundary from the
-project's constitution if one is defined. (If `npx repomix` is unavailable, degrade: hand-assemble the
+project's constitution if one is defined. (If Repomix is not used — see **When a tool is missing** — degrade: hand-assemble the
 same context — the repo's source tree + recent git log — and record `source: repomix-unavailable`.)
 
 ### Step 3 — Build the code-map (the lightweight index layer)

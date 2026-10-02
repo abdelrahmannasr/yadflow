@@ -480,6 +480,8 @@ test('E50: `yad detect` prints each place once, caps long lists, and refuses ext
 // The shipped list of external tools, and what this machine has of them. It builds on `yad detect`, so it
 // is tested here, on Linux, macOS and Windows.
 const { INSTALL_TYPES, TIERS, TOOLBOX, onPath, parseRange, parseVersion, toolProblems, toolStatus, toolboxLines, versionInRange } = await import('./toolbox.mjs');
+// E87: each skill's "When a tool is missing" section, built from the toolbox.
+const { SKILL_FALLBACK_END, SKILL_FALLBACK_HEADING, connectorFile, isFallbackHeading, skillFallbackSection, skillSectionOf, skillSectionProblem, skillsUsing, syncSkillFallbacks, withSkillSection } = await import('./toolbox.mjs');
 
 test('E84: every shipped toolbox entry is well formed, and every tier has entries', () => {
   for (const t of TOOLBOX) assert.deepEqual(toolProblems(t), [], t.id);
@@ -496,7 +498,240 @@ test('E84: a fallback a skill records is written there word for word, so E87 ren
   for (const t of TOOLBOX.filter((x) => x.records)) {
     const skills = t.usedBy.filter((u) => fs.existsSync(path.join(ROOT, 'skills', u, 'SKILL.md')));
     assert.ok(skills.length, `${t.id}: names a skill that exists`);
-    for (const s of skills) assert.ok(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8').includes(t.records), `${s} writes "${t.records}"`);
+    // Only the body, and outside the E87 section, which quotes every record: the skill's own steps must
+    // write the line. The description is left out too (yad-spec's names the record).
+    const body = (s) => withSkillSection(fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8'), null).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+    for (const s of skills) assert.ok(body(s).includes(t.records), `${s} writes "${t.records}"`);
+  }
+});
+
+// E87: every skill a tool names says what it does without it, in the toolbox's own words. Held in both
+// directions: a skill the toolbox names has the section, word for word, and a skill with the section is
+// one the toolbox names. `node scripts/skill-fallbacks.mjs` rewrites the sections after a wording change.
+test('E87: every skill a tool names quotes its fallback word for word, and no other skill has the section', () => {
+  const skills = fs.readdirSync(path.join(ROOT, 'skills')).filter((s) => fs.existsSync(path.join(ROOT, 'skills', s, 'SKILL.md')));
+  const named = new Set(TOOLBOX.filter((t) => t.tier !== 'recommended').flatMap(skillsUsing));
+  assert.ok(named.size >= 9, 'the toolbox names the skills that use its tools');
+  for (const t of TOOLBOX) for (const u of t.usedBy) assert.ok(u.startsWith('yad ') || skills.includes(u), `${t.id}: usedBy "${u}" is a yad command or a skill folder`);
+  for (const s of skills) {
+    const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
+    // One copy at most, in any spelling, closed by its end marker: a second, stale one would be read by
+    // the agent too, and a section without its marker cannot be rewritten.
+    assert.equal(skillSectionProblem(text), null, `skills/${s}/SKILL.md`);
+    const found = skillSectionOf(text);
+    if (named.has(s)) assert.equal(found, skillFallbackSection(s), `skills/${s}/SKILL.md: the section matches the toolbox — run node scripts/skill-fallbacks.mjs`);
+    else assert.equal(found, null, `skills/${s}/SKILL.md has the section, but no toolbox tool names ${s}`);
+  }
+  // The rewriting script agrees: nothing to change.
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'skill-fallbacks.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test('E87: the section says when to use each tool, its fallback, and what to record', () => {
+  assert.equal(skillFallbackSection('yad-epic'), null, 'a skill no tool names gets no section');
+  const spec = skillFallbackSection('yad-spec');
+  assert.ok(spec.startsWith(`${SKILL_FALLBACK_HEADING}\n`));
+  assert.match(spec, /`yad toolbox list --json`/, 'decide from yad\'s answer');
+  assert.match(spec, /`used: true` and `status\.state` is `installed` or `available`/);
+  assert.match(spec, /`yad toolbox remove spec-kit`/, 'a team skip means the fallback');
+  assert.ok(spec.includes(`  - Fallback — ${TOOLBOX.find((t) => t.id === 'spec-kit').fallback}.\n  - Record \`speckit: not-installed\`.`));
+  // A connector follows the file its connect skill writes, not the toolbox's use flag.
+  const ui = skillFallbackSection('yad-ui');
+  assert.match(ui, /\*\*Figma\*\* \(`figma`, a connector\)\. Used when `\.sdlc\/design\.json` connects it/);
+  assert.doesNotMatch(ui, /yad toolbox remove figma/);
+  assert.match(ui, /For Impeccable \(the one tool here that is not a connector\), decide from yad's answer/, 'the rules are for the core tool');
+  assert.match(spec, /\nFor Spec Kit, decide from yad's answer/, 'with no connector, the tool is named plainly');
+  assert.match(ui, /yad-connect-design writes that file; follow it, not yad's toolbox answer/);
+  // A skill whose tools are all connectors is not told to ask yad, then to ignore the answer.
+  for (const s of ['yad-learn', 'yad-test-cases', 'yad-connect-design', 'yad-connect-testing', 'yad-connect-learning']) {
+    assert.doesNotMatch(skillFallbackSection(s), /yad toolbox list --json|used: false/, s);
+  }
+  assert.doesNotMatch(skillFallbackSection('yad-learn'), /\n\n\n/, 'no double blank line');
+  assert.match(spec, /`product` is null/, 'no Product means the team choices were not read');
+  assert.match(spec, /never when the entry says `used: false`/, 'a tool yad cannot see is used, but never against a skip');
+  assert.match(skillFallbackSection('yad-connect-design'), /This skill connects it, by writing `\.sdlc\/design\.json`/, 'the connect skill does not follow its own file');
+  assert.equal(connectorFile(TOOLBOX.find((t) => t.id === 'deeptutor')), '.sdlc/learning.json');
+  assert.equal(connectorFile(TOOLBOX.find((t) => t.id === 'spec-kit')), null);
+  // Recommended tools are bound with `yad skill bind`, never named by a skill.
+  const fake = [{ ...TOOLBOX.find((t) => t.id === 'ecc'), usedBy: ['yad-epic'] }];
+  assert.equal(skillFallbackSection('yad-epic', fake), null);
+});
+
+test('E87: the section is exactly heading to end marker, found the same way in a CRLF file and never in a fence', () => {
+  const section = `${SKILL_FALLBACK_HEADING}\n\nbody\n\n${SKILL_FALLBACK_END}`;
+  const lf = '# Skill\n\nintro\n\n```md\n## not a heading\n```\n\n## Conventions\n\n- x\n';
+  const added = withSkillSection(lf, section);
+  assert.equal(added, `# Skill\n\nintro\n\n\`\`\`md\n## not a heading\n\`\`\`\n\n${section}\n\n## Conventions\n\n- x\n`, 'before the first real heading');
+  assert.equal(skillSectionOf(added), section);
+  assert.equal(withSkillSection(added, section), added, 'writing it again changes nothing');
+  assert.equal(withSkillSection(added, null), lf, 'null takes it out again, with its blank line');
+  // A Windows checkout: the same answers, and the file keeps its CRLF endings.
+  const crlf = added.replace(/\n/g, '\r\n');
+  assert.equal(skillSectionOf(crlf), section);
+  assert.equal(withSkillSection(crlf, section), crlf);
+  assert.equal(withSkillSection(crlf, section.replace('body', 'body 2')), crlf.replace('body', 'body 2'));
+  // The last thing in a file, a file with no heading at all, and an empty file.
+  assert.equal(skillSectionOf(`# S\n\n${section}\n\n\n`), section);
+  assert.equal(withSkillSection('# S\n\nintro\n', section), `# S\n\nintro\n\n${section}\n`);
+  assert.equal(withSkillSection('', section), `${section}\n`);
+  // YAML frontmatter is metadata: a `## comment` line in it is not where a section goes.
+  for (const fm of ['---\nname: x\n## a yaml comment\n---\n', '---\ndescription: |\n  ## Usage\n---\n']) {
+    assert.equal(withSkillSection(`${fm}\n# S\n\n## Steps\n`, section), `${fm}\n# S\n\n${section}\n\n## Steps\n`, JSON.stringify(fm));
+  }
+  // With a byte-order mark too. A section inside what looks like frontmatter (a file opening with a
+  // `---` divider) shows as a marker with no heading: refused, never hidden behind a second copy.
+  assert.equal(withSkillSection('\uFEFF---\nname: x\n## c\n---\n\n## Steps\n', section), `\uFEFF---\nname: x\n## c\n---\n\n${section}\n\n## Steps\n`);
+  // Frontmatter needs a YAML key on its next line: a `---` divider above a title is Markdown, so a
+  // section after it is found and rewritten in place — even with a `...` line in a code sample.
+  const divided = `---\n# T\n\n${section.replace('body', 'old')}\n\n## Steps\n\n---\n`;
+  assert.equal(skillSectionProblem(divided), null);
+  assert.equal(withSkillSection(divided, section), divided.replace('old', 'body'));
+  const dots = `---\n\n# T\n\n\`\`\`js\nfoo(\n...\n)\n\`\`\`\n\n${section.replace('body', 'old')}\n\n\`\`\`bash\nyad x\n\`\`\`\n\n## Steps\n`;
+  assert.equal(withSkillSection(dots, section), dots.replace('old', 'body'));
+  const again = withSkillSection(withSkillSection(dots, null), section);
+  assert.equal(skillSectionOf(again), section, 'removed, then added again: one copy, read back whole');
+  assert.equal(again.split('\n').filter(isFallbackHeading).length, 1);
+  // A quoted key on the second line still opens frontmatter (a `# comment` does not: it is a title too).
+  for (const second of ['"name": x', "'name': x"]) {
+    const fm = `---\n${second}\n## c\n---\n`;
+    assert.equal(withSkillSection(`${fm}\n## Steps\n`, section), `${fm}\n${section}\n\n## Steps\n`, second);
+  }
+  // A YAML value that quotes the heading is not the section: a write works, and with a stray marker in
+  // the body it is refused — never a section running across the closing `---`.
+  const quoted = '---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\n## Steps\n';
+  assert.equal(withSkillSection(quoted, section), quoted.replace('## Steps', `${section}\n\n## Steps`));
+  // The block may close with trailing spaces or `...`: the quoted heading stays inside it.
+  for (const close of ['--- ', '...']) {
+    const t = `---\nname: x\ndescription: |\n  ## Usage\n${close}\n\n# T\n\n## Steps\n`;
+    assert.equal(withSkillSection(t, section), t.replace('# T\n\n## Steps', `# T\n\n${section}\n\n## Steps`), JSON.stringify(close));
+  }
+  const stray = `---\ndescription: |\n  ## When a tool is missing\n---\n\n# T\n\nintro\n\n${SKILL_FALLBACK_END}\n\n## Steps\n`;
+  assert.match(skillSectionProblem(stray), /without the section's heading/);
+  assert.equal(withSkillSection(stray, section), stray);
+  assert.equal(withSkillSection(stray, null), stray);
+  // Insert then remove gives the file back, whatever sits above the insertion point.
+  for (const t of ['# T\nintro\n## Steps\n', '---\nname: x\n---\n## Steps\n', '# T\n\nintro\n\n## Steps\n', '# S\n\nintro\n', '']) {
+    assert.equal(withSkillSection(withSkillSection(t, section), null), t.endsWith('\n') || t === '' ? t : `${t}\n`, JSON.stringify(t));
+  }
+  // A removal takes its blank line only when one sits above too: text either side never closes up.
+  assert.equal(withSkillSection(`para A\n${section}\n\npara B\n`, null), 'para A\n\npara B\n');
+  assert.equal(withSkillSection(`# T\n\nintro\n${section}\n`, null), '# T\n\nintro\n');
+  // THE POINT OF THE MARKER: whatever Markdown sits inside or after the section, a rewrite replaces
+  // only heading..marker. Headings the finder cannot see (setext, HTML, inside a list) are just text.
+  for (const inside of ['Usage\n=====', '- a\n  ---', '<h2>x</h2>', '> ## q', '```\n## fenced\n```', '## Not ours']) {
+    const t = `# S\n\n${SKILL_FALLBACK_HEADING}\n\n${inside}\n\n${SKILL_FALLBACK_END}\n\nUsage\n-----\n\nkeep me\n`;
+    assert.equal(withSkillSection(t, section), `# S\n\n${section}\n\nUsage\n-----\n\nkeep me\n`, JSON.stringify(inside));
+  }
+  // Only lines outside a fence count: a fenced example of the heading or the marker is not the section.
+  assert.equal(skillSectionOf(`# S\n\n\`\`\`\n${section}\n\`\`\`\n`), null);
+  for (const fence of ['~~~\n```\n~~~', '````\n```\n````', '```md\n## x\n```', '```js x```']) {
+    const t = `# S\n\n${fence}\n\n${section}\n\n## Next\n`;
+    assert.equal(skillSectionOf(t), section, JSON.stringify(fence));
+  }
+  // One rule for "is this the heading": indent, case, trailing spaces and closing #s all count, so a
+  // copy spelled differently is seen (and refused as a second copy), never kept beside a new one.
+  for (const l of ['## When a tool is missing', '   ## when a tool is missing  ', '## When a tool is missing ##', '## When a tool is missing\r']) assert.ok(isFallbackHeading(l), JSON.stringify(l));
+  for (const l of ['# When a tool is missing', '### When a tool is missing', '    ## When a tool is missing', '##When a tool is missing', '## When a tool is missing \\#', '## When a tool is missing\u00a0']) assert.ok(!isFallbackHeading(l), JSON.stringify(l));
+});
+
+test('E87: a section yad cannot read whole is never rewritten', () => {
+  const section = `${SKILL_FALLBACK_HEADING}\n\nbody\n\n${SKILL_FALLBACK_END}`;
+  const cases = [
+    [`# S\n\n${SKILL_FALLBACK_HEADING}\n\nhand-made, no marker\n\n## Next\n`, /no end marker/],
+    [`# S\n\n${section}\n\n## when a tool is missing ##\n\nold\n`, /heading is there more than once/],
+    [`# S\n\n${section}\n\n${SKILL_FALLBACK_END}\n`, /end marker is there more than once/],
+    [`# S\n\n${SKILL_FALLBACK_END}\n\n## Next\n`, /without the section's heading/],
+  ];
+  for (const [text, why] of cases) {
+    assert.match(skillSectionProblem(text), why);
+    assert.equal(skillSectionOf(text), null);
+    assert.equal(withSkillSection(text, section), text, 'left as it is');
+    assert.equal(withSkillSection(text, null), text, 'not removed either');
+    assert.equal(withSkillSection(text.replace(/\n/g, '\r\n'), section), text.replace(/\n/g, '\r\n'));
+  }
+  // A fence that never closes hides everything after it, so a write could never find what it wrote.
+  for (const text of ['# T\n\n```\ncode\n', `# T\n\n<!-- example:\n\`\`\`\n-->\n\n${section}\n\n## Steps\n`]) {
+    assert.match(skillSectionProblem(text), /never closed \(it opens on line \d+\)/);
+    assert.equal(withSkillSection(text, section), text);
+  }
+  // Each reason says what to do.
+  for (const [text] of cases) assert.match(skillSectionProblem(text), / — (delete|close) /);
+  assert.equal(skillSectionProblem(`# S\n\n${section}\n`), null);
+  assert.equal(skillSectionProblem('# S\n'), null, 'no section is no problem');
+  assert.equal(skillSectionProblem(`# S\n\n\`\`\`\n${SKILL_FALLBACK_END}\n\`\`\`\n`), null, 'a fenced marker is an example');
+});
+
+// Every function that reads a skill's text, on long awkward input: a pattern that backtracks shows up
+// here as seconds, whichever function holds it. One test for the whole class, so a fix in one place
+// cannot leave its twin slow (rounds 5 to 7 found them one at a time).
+test('E87: the section readers stay fast on long, awkward input', () => {
+  const N = 40000;
+  const H = SKILL_FALLBACK_HEADING;
+  const inputs = [
+    `## a${' '.repeat(N)}x`, `## a${' \t'.repeat(N)}`, `## a ${'#'.repeat(N)}x`, `## a ${'#'.repeat(N)}x#`, `##${' '.repeat(N)}\rx`,
+    `##${' '.repeat(N)}\u2028x`, `\`\`\`${'`'.repeat(N)}\rx`, `~~~${'~'.repeat(N)}\u2029x`, `x${'\n'.repeat(N)}x`,
+    `${H}\n${'\n'.repeat(N)}x`, `${'#'.repeat(N)}`, `${SKILL_FALLBACK_END}${' '.repeat(N)}x`, `${H}\n${'```\n'.repeat(N / 4)}`,
+  ];
+  for (const input of inputs) {
+    const t0 = Date.now();
+    isFallbackHeading(input);
+    skillSectionProblem(input);
+    skillSectionOf(input);
+    withSkillSection(input, `${H}\n\nbody\n\n${SKILL_FALLBACK_END}`);
+    withSkillSection(input, null);
+    assert.ok(Date.now() - t0 < 1000, `slow on ${JSON.stringify(input.slice(0, 30))}… (${Date.now() - t0} ms)`);
+  }
+});
+
+test('E87: the sync writes, rewrites and removes sections, keeps CRLF, and refuses one without its marker', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e87-'));
+  try {
+    const tools = [{ ...TOOLBOX.find((t) => t.id === 'spec-kit'), usedBy: ['named', 'crlf', 'stale', 'handmade'] }];
+    const want = (s) => skillFallbackSection(s, tools);
+    const old = `${SKILL_FALLBACK_HEADING}\n\nold words\n\n${SKILL_FALLBACK_END}`;
+    const put = (s, text) => { fs.mkdirSync(path.join(dir, s), { recursive: true }); fs.writeFileSync(path.join(dir, s, 'SKILL.md'), text); };
+    const get = (s) => fs.readFileSync(path.join(dir, s, 'SKILL.md'), 'utf8');
+    put('named', '# Named\n\nintro\n\n## Steps\n\n- do it\n');
+    put('unnamed', `# Unnamed\n\n${old}\n\n## Steps\n\n- do it\n`);
+    put('crlf', `# Crlf\n\n${old}\n\n## Steps\n`.replace(/\n/g, '\r\n'));
+    // After the marker, a heading no finder reads (setext) — kept, because nothing past the marker is touched.
+    put('stale', `# Stale\n\n${old}\n\nUsage\n=====\n\nkeep me\n`);
+    const handmade = `# Handmade\n\n${SKILL_FALLBACK_HEADING}\n\nno marker\n\nUsage\n=====\n\nkeep me\n`;
+    put('handmade', handmade);
+    const before = fs.readdirSync(dir).map(get);
+    const refused = [{ skill: 'handmade', reason: skillSectionProblem(handmade) }];
+    assert.match(refused[0].reason, /no end marker/);
+    const stale = ['crlf', 'handmade', 'named', 'stale', 'unnamed'];
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale, wrote: [], refused }, 'check names what a write would refuse');
+    assert.deepEqual(fs.readdirSync(dir).map(get), before, 'check writes nothing');
+    assert.deepEqual(syncSkillFallbacks(dir, { tools }), { stale, wrote: ['crlf', 'named', 'stale', 'unnamed'], refused });
+    assert.equal(get('named'), `# Named\n\nintro\n\n${want('named')}\n\n## Steps\n\n- do it\n`);
+    assert.equal(get('unnamed'), '# Unnamed\n\n## Steps\n\n- do it\n', 'a skill no tool names loses the section');
+    assert.equal(get('crlf'), `# Crlf\n\n${want('crlf')}\n\n## Steps\n`.replace(/\n/g, '\r\n'), 'CRLF kept');
+    assert.equal(get('stale'), `# Stale\n\n${want('stale')}\n\nUsage\n=====\n\nkeep me\n`, 'everything after the marker kept');
+    assert.equal(get('handmade'), handmade, 'a section without its marker is left alone');
+    assert.deepEqual(syncSkillFallbacks(dir, { check: true, tools }), { stale: ['handmade'], wrote: [], refused }, 'the rest is now clean');
+    // The fix the message gives: delete the old section, and the next run adds a fresh one.
+    put('handmade', '# Handmade\n\nUsage\n=====\n\nkeep me\n');
+    assert.deepEqual(syncSkillFallbacks(dir, { tools }).wrote, ['handmade']);
+    assert.ok(get('handmade').includes('keep me'));
+    // The last check reads no Markdown: a heading-like line yad cannot see as the section (in a code
+    // block, or indented in a list) would leave two copies after a write, so the write is refused.
+    for (const hidden of ['```md\n## When a tool is missing\n```', `- item\n\n      ${SKILL_FALLBACK_END}`]) {
+      const t = `# Hidden\n\n${hidden}\n\n## Steps\n`;
+      put('named', t);
+      const c = syncSkillFallbacks(dir, { check: true, tools });
+      assert.match(c.refused.find((x) => x.skill === 'named').reason, /another line that looks like/, 'check names it too');
+      const r = syncSkillFallbacks(dir, { tools });
+      assert.deepEqual(r.wrote, [], JSON.stringify(hidden));
+      assert.match(r.refused.find((x) => x.skill === 'named').reason, /another line that looks like/);
+      assert.equal(get('named'), t);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // The generator's own text always ends with its marker, and is read back whole.
+  for (const s of fs.readdirSync(path.join(ROOT, 'skills'))) {
+    const section = skillFallbackSection(s);
+    if (section) assert.equal(skillSectionOf(`# S\n\n${section}\n`), section, s);
   }
 });
 
@@ -542,6 +777,10 @@ test('E84: toolProblems names each way an entry can be wrong', () => {
   }
   assert.ok(bad({ install: [{ type: 'npm', command: '' }] }).some((p) => p.includes('has its command')));
   assert.ok(toolProblems(null).length > 5, 'nothing at all is many problems, not a crash');
+  // E87: a skill's section adds the full stop, and a connector says which file connects it.
+  assert.ok(bad({ fallback: 'writes it by hand.' }).some((p) => p.startsWith('fallback ends')));
+  assert.ok(bad({ tier: 'connector', usedBy: ['yad-ui'] }).some((p) => p.startsWith('a connector names')));
+  assert.deepEqual(bad({ tier: 'connector', usedBy: ['yad-connect-testing', 'yad-test-cases'] }), []);
 });
 
 test('E84: versions and ranges', () => {

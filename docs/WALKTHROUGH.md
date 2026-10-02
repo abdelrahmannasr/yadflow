@@ -190,7 +190,9 @@ Build by hand"** below.
   each is found here, whether this Product uses it, and the fallback when it is not. None is required; it
   installs nothing. `yad toolbox add <id>` / `remove <id>` choose the tools this Product uses (saved in
   `.sdlc/toolbox.json`), and `yad toolbox check` lists the chosen ones that are not ready here. `yad setup`,
-  `yad check`, `yad update` and `yad join` print the same check; they offer, and never install.
+  `yad check`, `yad update` and `yad join` print the same check; they offer, and never install. Each skill
+  that uses a tool reads the same answer, and its "When a tool is missing" section says what it does
+  without the tool.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.
@@ -325,7 +327,7 @@ contract lock, story repo tags, and which approvals the active gate still needs.
   `.sdlc/contract-lock.json`. Architecture gate (contract, payments): approved by *alice*, *bob*, *carol*
   and *dave* — 4 people, so even the full count of 3 is met. (These approvals were recorded before E62
   and still carry the roles the roster gave them; nothing reads those fields now.)
-- `ui-design.md` + `DESIGN.md` authored (Impeccable not installed → graceful fallback). UI gate approved
+- `ui-design.md` + `DESIGN.md` authored (Impeccable not used → graceful fallback). UI gate approved
   by alice + bob.
 - Five repo-tagged stories `stories/EP-checkout-S01..S05.md`. Stories gate approved by alice, bob,
   carol and dave; the review PR is labelled with each touched repo (backend, mobile).

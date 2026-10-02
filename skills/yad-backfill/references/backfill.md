@@ -18,8 +18,9 @@ npx repomix@latest --compress --include "src/<feature>/**" --include-logs --styl
 - `--style markdown` — human/AI-readable; default output is `repomix-output.xml`.
 - **Secretlint runs by default** — if a secret is reported, STOP and redact before any AI sees the code.
 
-If `npx repomix` is unavailable, degrade: hand-assemble the same feature context (the feature's files +
-recent git log for those paths) and record `repomix: unavailable` in the spec frontmatter.
+If Repomix is not used (the skill's "When a tool is missing" section says how to tell), degrade:
+hand-assemble the same feature context (the feature's files + recent git log for those paths) and record
+`source: repomix-unavailable` in the spec frontmatter.
 
 ## The "describe what exists, do not invent" prompt
 

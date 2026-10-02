@@ -50,8 +50,9 @@ const CHECKED = '2026-10-01';
 // the routes the roadmap's four types describe (plugin, npm, python, script); a tool's other routes
 // (Docker, Homebrew, a VS Code extension) are in its own README, which `source` links. `versions` is null
 // everywhere for now: no bound has been tested yet — E88 vets each default and is where a known-good
-// range is earned. `records` is the exact line a skill writes when the tool is absent, so E87 can point
-// the skill at this entry without renaming anything.
+// range is earned. `records` is the exact line a skill writes when the tool is absent. Each skill in
+// `usedBy` quotes `fallback` and `records` word for word in its "When a tool is missing" section (E87):
+// change the words here, then rewrite the sections with `skillFallbackSection`.
 export const TOOLBOX = Object.freeze([
   // ---- core: offered at setup --------------------------------------------------------------------
   {
@@ -66,9 +67,10 @@ export const TOOLBOX = Object.freeze([
     // yad runs it through `npx repomix@latest` (setup, `yad repo refresh`), so `npx` alone makes it usable.
     detect: { npx: true, bins: ['repomix'], plugins: ['repomix-mcp', 'repomix-commands', 'repomix-explorer'], mcp: ['repomix'], skills: ['repomix-explorer'] },
     versions: null,
-    fallback: 'no code pack: repos are not packed, and the Shape steps read the code map alone',
-    records: null, note: null,
-    usedBy: ['yad setup', 'yad repo refresh', 'yad-connect-repos'],
+    fallback: 'no Repomix pack. yad-connect-repos and yad-backfill put the same context together by hand, from the source tree and the recent git log, and the Shape steps read the code map',
+    records: 'source: repomix-unavailable',
+    note: 'yad setup and yad repo refresh skip the pack only when npx is missing. They do not follow a team skip.',
+    usedBy: ['yad setup', 'yad repo refresh', 'yad-connect-repos', 'yad-backfill'],
   },
   {
     id: 'spec-kit', name: 'Spec Kit', tier: 'core', role: 'runs the spec ceremony (specify → plan → tasks) in a code repo',
@@ -96,7 +98,7 @@ export const TOOLBOX = Object.freeze([
     manual: null,
     detect: { skills: ['impeccable'], plugins: ['impeccable'] },
     versions: null,
-    fallback: 'Markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly',
+    fallback: 'markdown-only UI design: yad-ui writes ui-design.md and DESIGN.md directly',
     records: 'impeccable: not-installed', note: null,
     usedBy: ['yad-ui'],
   },
@@ -263,10 +265,13 @@ export function toolProblems(t) {
   }
   need(t?.versions === null || (typeof t?.versions === 'string' && parseRange(t.versions) !== null), 'versions is null or a range this reader understands');
   need(typeof t?.fallback === 'string' && t.fallback.length > 0, 'fallback says what yadflow does without it');
+  // A skill's section adds the full stop (E87), so a fallback ending in one would print two.
+  need(typeof t?.fallback !== 'string' || !/[.\s]$/.test(t.fallback), 'fallback ends without a full stop or a space');
   need(t?.records === null || (typeof t?.records === 'string' && t.records.length > 0), 'records is null or the line a skill writes');
   need(t?.note === null || (typeof t?.note === 'string' && t.note.length > 0), 'note is null or a sentence');
   need(t?.manual === null || (typeof t?.manual === 'string' && /^https:\/\//.test(t.manual)), 'manual is null or an https URL');
   need(isStringList(t?.usedBy), 'usedBy lists the skills or commands that use it');
+  need(t?.tier !== 'connector' || !isStringList(t?.usedBy) || connectorFile(t) !== null, 'a connector names the yad-connect-* skill that connects it');
   return out;
 }
 
@@ -531,6 +536,240 @@ export function toolUse(tool, { shipped, connected }) {
   if (tool.tier === 'core') return { used: true, because: 'core' };
   if (connected.has(tool.id)) return { used: true, because: 'connected', connectedIn: connected.get(tool.id) };
   return { used: false, because: null };
+}
+
+// ---- what a skill does when its tool is missing (E87) ------------------------------------------------
+//
+// Every skill a shipped tool's `usedBy` names carries one section, built here, so its words are the
+// toolbox's words and a test can hold the two together. A skill decides from yad's own answer — one rule
+// for every skill, which already sees a plugin turned off in Claude Code — not from its own guess:
+//   core       used when `yad toolbox list --json` says `used: true` and the state is `installed` or
+//              `available`. A team's `skip` (`yad toolbox remove <id>`) means the fallback, even when the
+//              tool is installed.
+//   connector  used when the Product's design, testing or learning file connects it. The connect skill
+//              writes that file and the step skill follows it, as before E87.
+// Recommended tools are bound with `yad skill bind`, so no skill names one.
+export const SKILL_FALLBACK_HEADING = '## When a tool is missing';
+// The section's last line. The section is exactly the lines from its heading to this marker, so a
+// rewrite never has to guess from the Markdown where the section ends (rounds 5 to 9 of the E87 review
+// each found one more way such a guess could cut part of a skill).
+export const SKILL_FALLBACK_END = '<!-- end: When a tool is missing -->';
+const CONNECT_FILES = { 'yad-connect-design': 'designConfig', 'yad-connect-testing': 'testingConfig', 'yad-connect-learning': 'learningConfig' };
+
+// The Product file that connects a connector: the one its `yad-connect-*` skill writes.
+export function connectorFile(tool) {
+  const skill = tool.usedBy.find((u) => CONNECT_FILES[u]);
+  return skill ? PROJECT_FILES[CONNECT_FILES[skill]] : null;
+}
+
+// The skills (folders under skills/, not `yad <command>`s) that use a tool.
+export const skillsUsing = (tool) => tool.usedBy.filter((u) => !u.startsWith('yad '));
+
+export function skillFallbackSection(skill, tools = TOOLBOX) {
+  const mine = tools.filter((t) => t.tier !== 'recommended' && skillsUsing(t).includes(skill));
+  if (!mine.length) return null;
+  const core = mine.filter((t) => t.tier !== 'connector');
+  const connectors = mine.filter((t) => t.tier === 'connector');
+  const lines = [
+    SKILL_FALLBACK_HEADING,
+    '',
+    '<!-- Written from yadflow\'s cli/toolbox.mjs (E87). Change the words there: a test holds this section to it. -->',
+    '',
+    'No tool below is required. When one is missing, this skill still finishes, using the fallback written',
+    'beside it.',
+    '',
+  ];
+  // Only a skill with a core tool asks yad: a connector is decided by its Product file, and an answer the
+  // skill must then ignore would only confuse it.
+  if (core.length) {
+    lines.push(
+      // Name the tools: "the one without a connector" means nothing in a skill that has no connector.
+      `For ${core.map((t) => t.name).join(' and ')}${connectors.length ? ` (${core.length === 1 ? 'the one tool here that is not a connector' : 'the tools here that are not connectors'})` : ''}, decide from yad's answer, not from a guess:`,
+      'run `yad toolbox list --json` and read, in its `tools` list, the entry with the tool\'s `id`. Run it',
+      'where the tool will run: for work inside a code repo, add `--dir <that repo>`, so the tools installed',
+      'there are found.',
+      '',
+      '- **The team\'s choices.** They come from the Product. If the answer\'s `product` is null, yad found no',
+      '  Product, so a tool the team chose not to use still shows `used: true`. Tell the person that.',
+      '- **When yad cannot see the tool.** yad does not read every way a tool can be set up (an older install',
+      '  may be missed). If the entry says `missing` but the check in the steps below finds the tool, use',
+      '  it — but never when the entry says `used: false`.',
+      '- **When yad cannot answer** (yad is not installed here, or the command fails), use the check in the',
+      '  steps below.',
+      '',
+    );
+  }
+  lines.push('Tell the person which tools you used and which fallbacks, and why.', '');
+  for (const t of core) {
+    lines.push(`- **${t.name}** (\`${t.id}\`). Use it when its entry has \`used: true\` and \`status.state\` is \`installed\` or \`available\`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (\`yad toolbox remove ${t.id}\`) — use the fallback.`);
+    lines.push(`  - Fallback — ${t.fallback}.`);
+    if (t.records) lines.push(`  - Record \`${t.records}\`. It means the tool was not used, whatever the reason.`);
+  }
+  for (const t of connectors) {
+    const file = connectorFile(t);
+    const connect = t.usedBy.find((u) => CONNECT_FILES[u]);
+    // The connect skill is the one that decides and writes the file; every other skill follows it.
+    lines.push(CONNECT_FILES[skill]
+      ? `- **${t.name}** (\`${t.id}\`, a connector). This skill connects it, by writing \`${file}\` as the steps below say. The other skills follow that file, not yad's toolbox answer.`
+      : `- **${t.name}** (\`${t.id}\`, a connector). Used when \`${file}\` connects it. ${connect} writes that file; follow it, not yad's toolbox answer.`);
+    lines.push(`  - Fallback — ${t.fallback}.`);
+    if (t.records) lines.push(`  - Record \`${t.records}\`. It means the tool was not used, whatever the reason.`);
+  }
+  lines.push('', SKILL_FALLBACK_END);
+  return lines.join('\n');
+}
+
+// Where the section is in a skill's text: from its heading down to its end marker, both included. A
+// line inside a fenced code block is never either, so an example that quotes them is skipped. A fence
+// closes only with the same character, at least as many times, and nothing after it (CommonMark).
+// A heading may be indented up to three spaces and end in spaces or closing `#`s, as CommonMark allows.
+// `first`, where a new section goes, is the first `##` heading: a skill's `#` title is above it.
+// `[^]*`, not `.*`: `.` stops at a lone \r or a Unicode line break, and `$` then forces a slow retry.
+const HEADING = /^ {0,3}(#{1,2})(?:[ \t]+([^]*))?$/;
+// Only spaces and tabs are trimmed, as CommonMark does — by hand, since /[ \t]+$/ backtracks.
+const trimSpaces = (s) => { let k = s.length; while (k > 0 && (s[k - 1] === ' ' || s[k - 1] === '\t')) k--; return s.slice(0, k); };
+const headingOf = (line) => {
+  const h = HEADING.exec(line);
+  if (!h) return null;
+  // Cut a closing run of `#`s only when a space or tab comes before it (`## C#` keeps its `#`).
+  // Walked back by hand: a pattern for the run of `#`s restarts at each one, which is slow on a long run.
+  let text = trimSpaces(h[2] ?? '');
+  let j = text.length;
+  while (j > 0 && text[j - 1] === '#') j--;
+  if (j < text.length && (j === 0 || text[j - 1] === ' ' || text[j - 1] === '\t')) text = trimSpaces(text.slice(0, j));
+  return { level: h[1].length, text };
+};
+
+// Is this line the section's heading, in any spelling the finder accepts (indent, case, trailing spaces
+// or `#`s)? One rule, so the finder and the test that counts copies cannot disagree.
+export function isFallbackHeading(line) {
+  const h = headingOf(line.replace(/\r$/, ''));
+  return h?.level === 2 && h.text.toLowerCase() === SKILL_FALLBACK_HEADING.slice(3).toLowerCase();
+}
+
+const isFallbackEnd = (line) => trimSpaces(line.replace(/\r$/, '')) === SKILL_FALLBACK_END;
+
+function sectionBounds(lines) {
+  let fence = null;
+  const headings = [];
+  const ends = [];
+  // A YAML frontmatter block at the top (`---` … `---`, after any byte-order mark) is the skill's
+  // metadata, never Markdown: a heading-like line there (a `## comment`, a quoted heading in a YAML
+  // value) is neither our heading nor where a new section goes, and a fence there is not one. Only our
+  // exact end marker is looked for in it: a section that seems to sit inside (a file opening with a
+  // `---` divider) then shows as a marker with no heading, and is refused rather than hidden — so a
+  // write never runs a section across the block's closing `---`. A copy without a marker inside such a
+  // block reads as metadata, as a YAML loader would read it, and is left alone. The block closes at `---`
+  // or `...`, trailing spaces allowed, as common frontmatter readers accept.
+  let skip = 0;
+  // Only when the next line is a YAML key, quoted or not (every SKILL.md opens `name:`): a `---` divider
+  // above a title is Markdown, and treating it as frontmatter could hide a section. A YAML comment is not
+  // enough: `# T` is a title too.
+  if (trimSpaces(lines[0]?.replace(/^\uFEFF/, '') ?? '') === '---' && /^([A-Za-z_][\w-]*[ \t]*:|["'][^"']+["'][ \t]*:)/.test(lines[1] ?? '')) {
+    const close = lines.findIndex((l, i) => i > 0 && (trimSpaces(l) === '---' || trimSpaces(l) === '...'));
+    if (close > 0) skip = close + 1;
+  }
+  let fenceAt = -1;
+  lines.forEach((l, i) => {
+    if (i < skip) {
+      if (isFallbackEnd(l)) ends.push(i);
+      return;
+    }
+    const f = /^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(l);
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = null;
+    } else if (f && !(f[1][0] === '`' && f[2].includes('`'))) { fence = f[1]; fenceAt = i; }
+    else if (isFallbackEnd(l)) ends.push(i);
+    else {
+      const h = headingOf(l);
+      if (h) headings.push({ i, level: h.level, ours: isFallbackHeading(l) });
+    }
+  });
+  const ours = headings.filter((h) => h.ours).map((h) => h.i);
+  const at = ours[0];
+  const end = at === undefined ? undefined : ends.find((i) => i > at);
+  // Why a section cannot be rewritten safely, and what to do, or null. Without its marker, where the
+  // section ends is a guess; behind a fence that never closes, nothing after it can be seen at all.
+  const problem = fence !== null ? `a code fence is never closed (it opens on line ${fenceAt + 1}), so yad cannot see past it — close it`
+    : ours.length > 1 ? 'the section\'s heading is there more than once — delete one of the copies (one without an end marker, if there is one), from its heading down to the end of its text'
+      : ends.length > 1 ? 'the section\'s end marker is there more than once — delete the extra marker line'
+        : at === undefined ? (ends.length ? 'the end marker is there without the section\'s heading — delete that marker line' : null)
+          : end === undefined ? 'the section has no end marker (a copy made by hand, or older than the marker) — delete it, from its heading down to the end of its text' : null;
+  return { at, end, problem, first: headings.find((h) => h.level === 2)?.i };
+}
+
+// Why yad will not rewrite this skill's section and what to do about it, or null when it can (or there
+// is none).
+export function skillSectionProblem(text) {
+  return sectionBounds(text.replace(/\r\n/g, '\n').split('\n')).problem;
+}
+
+// Bring every skill under `skillsDir` in line with the toolbox: the section where a tool names the
+// skill, none where no tool does. `check` changes nothing. Returns the skill folder names it found
+// stale and wrote, and `refused: [{ skill, reason }]` — a section it will not touch, and why.
+export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX } = {}) {
+  const out = { stale: [], wrote: [], refused: [] };
+  const skills = fs.readdirSync(skillsDir).filter((s) => fs.existsSync(path.join(skillsDir, s, 'SKILL.md'))).sort();
+  for (const skill of skills) {
+    const file = path.join(skillsDir, skill, 'SKILL.md');
+    const text = fs.readFileSync(file, 'utf8');
+    const want = skillFallbackSection(skill, tools); // null: no tool names this skill, so no section
+    const reason = skillSectionProblem(text);
+    // Compared as text, not bytes, so a CRLF checkout (Windows) is not stale for its line endings alone.
+    if (!reason && skillSectionOf(text) === want) continue;
+    out.stale.push(skill);
+    const next = reason ? null : withSkillSection(text, want);
+    // A last check that ignores fences, frontmatter and indent: after a write the file holds exactly one
+    // `##` line that is the heading and one marker line (none after a removal), counted at any indent,
+    // fenced or not. So a copy the finder skipped (fenced, indented in a list) cannot be doubled. It does
+    // not catch a copy in another heading form — in a `>` quote, underlined with `---`, or as `<h2>`.
+    const seen = next === null ? [] : next.split(/\r?\n/).map((l) => l.replace(/^[ \t]+/, ''));
+    const expect = want === null ? 0 : 1;
+    const doubled = next !== null && (seen.filter(isFallbackHeading).length !== expect || seen.filter(isFallbackEnd).length !== expect);
+    const why = reason || (doubled ? 'after the write the file would hold another line that looks like the section\'s heading or end marker (in a code block, say) — delete or reword it' : null);
+    // One answer for both modes: `check` names what a write would refuse.
+    if (why) out.refused.push({ skill, reason: why });
+    if (check || why) continue;
+    fs.writeFileSync(file, next);
+    out.wrote.push(skill);
+  }
+  return out;
+}
+
+// By hand: /\n+$/ restarts at every newline of a long blank run in the middle of the text.
+const dropTrailingNewlines = (s) => { let k = s.length; while (k > 0 && s[k - 1] === '\n') k--; return s.slice(0, k); };
+
+// The section as the skill holds it (LF), heading to end marker, or null when it has none. With a
+// problem (no marker, two copies), null too: there is no section yad can read whole.
+export function skillSectionOf(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const { at, end, problem } = sectionBounds(lines);
+  return at === undefined || problem ? null : lines.slice(at, end + 1).join('\n');
+}
+
+// The skill's text with `section` in place of its old one, or, when it has none, just before its first
+// `## ` heading, so the agent reads it early. `null` removes it, with the blank line it was written
+// with. A section with a problem is left as it is. The file keeps its own line ending.
+export function withSkillSection(text, section) {
+  // A file keeps the ending most of its lines have (a Windows checkout is all CRLF).
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const eol = crlf > (text.match(/\n/g) || []).length - crlf ? '\r\n' : '\n';
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const { at, end, first, problem } = sectionBounds(lines);
+  if (problem) return text;
+  let out;
+  if (at !== undefined) {
+    // A removal also takes the blank line yad wrote below it — when a blank line sits above too, or a
+    // heading comes next (yad inserts just above one), so the text on either side never closes up.
+    let after = end + 1;
+    if (section === null && lines[after] === '' && (at === 0 || lines[at - 1] === '' || headingOf(lines[after + 1] ?? '') !== null)) after++;
+    out = [...lines.slice(0, at), ...(section === null ? [] : section.split('\n')), ...lines.slice(after)];
+  } else if (section === null) out = lines;
+  else if (first === undefined) {
+    const body = dropTrailingNewlines(lines.join('\n'));
+    out = body ? [...body.split('\n'), '', ...section.split('\n'), ''] : [...section.split('\n'), ''];
+  } else out = [...lines.slice(0, first), ...section.split('\n'), '', ...lines.slice(first)];
+  return out.join('\n').replace(/\n/g, eol);
 }
 
 // Every row — shipped, then the team's own — with what is found here and whether it is in use. Finding
