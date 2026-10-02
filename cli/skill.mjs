@@ -31,7 +31,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { c, exists, fail, hand, info, log, ok, readJSONStrict, warn, writeJSON, emitJSON } from './lib.mjs';
 import {
-  boundSkills, bindingsForProfile, epicProfileId, epicRoot, isValidEpicId, lifecycleProfile, loadLedger,
+  boundSkills, bindingsForProfile, recordedRoute, epicRoot, isValidEpicId, lifecycleProfile, loadLedger,
   loadSkillBindings, normalizeBindings, profileSteps, stepDef, stepSkills, STEPS,
 } from './epic-state.mjs';
 import { detectInstalled } from './detect.mjs';
@@ -162,8 +162,8 @@ function rowOf(id, bindings, written) {
   };
 }
 
-// Which route `list` shows: `--profile` as given, or the route of the epic `--epic` names (recorded,
-// else matched — what `yad next` uses for it). `{ profile }` or `{ error, hint }`.
+// Which route `list` shows: `--profile` as given, or the route the epic `--epic` names RECORDS — what
+// `yad next` uses for it; none recorded means the project-wide view. `{ profile }` or `{ error, hint }`.
 function routeFor(root, { profile, epic }) {
   if (profile && epic) return { error: 'give --profile or --epic, not both', hint: '--epic reads the route off that epic' };
   if (profile !== undefined && profile !== null) {
@@ -177,7 +177,7 @@ function routeFor(root, { profile, epic }) {
     return { error: `${epic}'s ledger could not be read${e.code ? ` [${e.code}]` : ''}`, hint: 'see `yad doctor`' };
   }
   if (!state) return { error: `${epic} has no state.json`, hint: 'see `yad next` for the epics in this Product' };
-  return { profile: epicProfileId(state), epic };
+  return { profile: recordedRoute(state), epic };
 }
 
 export function runSkillList(root, { json = false, profile, epic, home = os.homedir() } = {}) {
@@ -210,7 +210,11 @@ export function runSkillList(root, { json = false, profile, epic, home = os.home
   }
 
   if (error) warn(`${PROJECT_FILES.skillsConfig} ${error} — showing the engine's defaults`);
-  if (route.epic) info(`${route.epic} is on route ${c.bold(route.profile || '(none)')}`);
+  if (route.epic) {
+    info(route.profile
+      ? `${route.epic} is on route ${c.bold(route.profile)}`
+      : `${route.epic} records no route — it runs the project-wide lines`);
+  }
   else if (route.profile) info(`route ${c.bold(route.profile)}${lifecycleProfile(route.profile) ? '' : c.yellow(' — not a route this yadflow has')}`);
   log(`\n  ${c.bold('step')}                 ${c.bold('skill(s)')}`);
   for (const r of all) {
@@ -340,7 +344,10 @@ export function runSkillUnbind(root, { step, profile = null } = {}) {
   // or nothing at all if this engine does not know the step.
   const found = boundSkills(step, bindingsForProfile(normalizeBindings(next), route));
   const fallback = stepSkills(step, bindingsForProfile(normalizeBindings(next), route));
-  const where = found ? 'the project-wide binding' : "the engine's default";
+  // A route's line can still bind the step under its OLD id (`discovery` for `foundation`), so the
+  // layer is read off the answer, never assumed.
+  const where = !found ? "the engine's default"
+    : found.source === 'profile' ? `this route's line under the step's old name` : 'the project-wide binding';
   ok(`${route ? `${route}: ` : ''}${step} unbound${fallback.length ? ` — back to ${where} (${fallback.join(' → ')})` : ' — this yadflow runs no skill for it'}`);
   return { step, skills: fallback, profile: route, file: PROJECT_FILES.skillsConfig };
 }

@@ -15,7 +15,7 @@ import { c, log, ok, info, warn, hand, fail, readJSON, exists, emitJSON } from '
 import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { printTeamHint, soloTeamHint } from './people.mjs';
 import { OWNER_STEPS, liveOwner, readState as loadLedgerState } from './owners.mjs';
-import { bindingsForEpic, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { bindingsForEpic, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -400,7 +400,7 @@ function generalNext(root, { all, headCount = null } = {}) {
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
     // Both name a STEP's skill, so both ask the project. `yad-backfill` above does not: waking a
     // brownfield anchor is the engine's own promote verb, not a step on any chain.
-    if (!productId) hand(`frame the whole product first (purpose, scope, MVP, roadmap, stack): run ${c.bold('yad foundation new')}, then invoke the ${c.bold(stepSkills('foundation', bindings)[0] || 'yad-discovery')} skill ${c.dim('(optional)')}`);
+    if (!productId) hand(`frame the whole product first (purpose, scope, MVP, roadmap, stack): run ${c.bold('yad foundation new')}, then invoke the ${c.bold(stepSkills('foundation', bindingsForProfile(bindings, 'foundation'))[0] || 'yad-discovery')} skill ${c.dim('(optional)')}`);
     hand(`start your first epic: invoke the ${c.bold(stepSkills('epic', bindings)[0] || 'yad-epic')} skill${productId ? c.dim(' (it reads the approved roadmap.md)') : ''}`);
     return;
   }

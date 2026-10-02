@@ -1516,6 +1516,12 @@ const yadRun = (T, ...args) => {
   try { return { out: execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' }), code: 0 }; }
   catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status ?? 1 }; }
 };
+// The same, with the home folder pointed at T — for a command that reads it (`yad skill` asks `yad detect`
+// what is installed), so a test never depends on what the developer's own home folder holds.
+const yadRunHome = (T, ...args) => {
+  try { return { out: execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8', env: { ...process.env, HOME: T, USERPROFILE: T } }), code: 0 }; }
+  catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status ?? 1 }; }
+};
 
 test('CLI: `next <epic> --check <step>` reads the step; bare `--check` is a usage error', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-argp-'));
@@ -17405,7 +17411,7 @@ function grabFailing(fn) {
 test('yad skill bind writes a stamped file, and one skill stays one string', () => {
   const T = skillProject();
   try {
-    grabSync(() => runSkillBind(T, { step: 'architecture', skills: ['my-arch'] }));
+    grabSync(() => runSkillBind(T, { step: 'architecture', skills: ['my-arch'], home: T }));
     const file = readSkillsFile(T);
     // Written through `writeJSON`, so it carries its shape like every other engine-written file — the
     // reason this command exists at all rather than leaving the file to be hand-authored.
@@ -17414,7 +17420,7 @@ test('yad skill bind writes a stamped file, and one skill stays one string', () 
     assert.deepEqual(loadSkillBindings(T).steps, { architecture: ['my-arch'] });
 
     // A second bind adds beside the first rather than replacing the document.
-    grabSync(() => runSkillBind(T, { step: 'stories', skills: ['a', 'b'] }));
+    grabSync(() => runSkillBind(T, { step: 'stories', skills: ['a', 'b'], home: T }));
     assert.deepEqual(readSkillsFile(T).steps, { architecture: 'my-arch', stories: ['a', 'b'] });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -17426,7 +17432,7 @@ test('yad skill refuses to write over a file that does not parse', () => {
   const broken = '{\n  "schemaVersion": 6,\n  "steps": { "epic": "mine", "architecture": "our-arch", }\n}\n';
   const T = skillProject({ '.sdlc/skills.json': broken });
   try {
-    for (const run of [() => runSkillBind(T, { step: 'stories', skills: ['x'] }), () => runSkillUnbind(T, { step: 'epic' })]) {
+    for (const run of [() => runSkillBind(T, { step: 'stories', skills: ['x'], home: T }), () => runSkillUnbind(T, { step: 'epic' })]) {
       const { out, failed } = grabFailing(run);
       assert.equal(failed, true);
       assert.match(out, /does not parse/);
@@ -17435,7 +17441,7 @@ test('yad skill refuses to write over a file that does not parse', () => {
     }
     // `list` still answers — it only reads — but says the file is broken rather than quietly showing
     // the defaults as if the project had bound nothing.
-    const listed = grabSync(() => runSkillList(T, {}));
+    const listed = grabSync(() => runSkillList(T, { home: T }));
     assert.match(listed, /does not parse/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 
@@ -17444,7 +17450,7 @@ test('yad skill refuses to write over a file that does not parse', () => {
   // that is not missing.
   const A = skillProject({ '.sdlc/skills.json': '[1, 2]\n' });
   try {
-    const { out, failed } = grabFailing(() => runSkillBind(A, { step: 'stories', skills: ['x'] }));
+    const { out, failed } = grabFailing(() => runSkillBind(A, { step: 'stories', skills: ['x'], home: A }));
     assert.equal(failed, true);
     assert.match(out, /wrong shape \[YAD-STATE-002\]/);
     assert.equal(fs.readFileSync(path.join(A, '.sdlc/skills.json'), 'utf8'), '[1, 2]\n');
@@ -17459,7 +17465,7 @@ test('yad skill bind stamps this engine\'s shape onto a hand-authored file', asy
   const { planMigration } = await import('./migrate.mjs');
   const T = skillProject({ '.sdlc/skills.json': '{\n  "steps": { "epic": "mine" }\n}\n' });
   try {
-    grabSync(() => runSkillBind(T, { step: 'stories', skills: ['my-stories'] }));
+    grabSync(() => runSkillBind(T, { step: 'stories', skills: ['my-stories'], home: T }));
     const file = readSkillsFile(T);
     assert.equal(file.schemaVersion, ENGINE_SHAPE);
     assert.deepEqual(file.steps, { epic: 'mine', stories: 'my-stories' });
@@ -17472,10 +17478,10 @@ test('yad skill bind warns about the cost of a chain, and says nothing about it 
   const T = skillProject();
   try {
     // Closed decision 7: extras are opt-in WITH a cost warning, said where somebody is opting in.
-    const many = grabSync(() => runSkillBind(T, { step: 'stories', skills: ['a', 'b', 'c'] }));
+    const many = grabSync(() => runSkillBind(T, { step: 'stories', skills: ['a', 'b', 'c'], home: T }));
     assert.match(many, /3 skills run for this step/);
     assert.match(many, /costs tokens/);
-    const one = grabSync(() => runSkillBind(T, { step: 'architecture', skills: ['solo'] }));
+    const one = grabSync(() => runSkillBind(T, { step: 'architecture', skills: ['solo'], home: T }));
     assert.doesNotMatch(one, /costs tokens/, 'the common case gains no noise');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -17483,7 +17489,7 @@ test('yad skill bind warns about the cost of a chain, and says nothing about it 
 test('yad skill bind refuses a review gate and writes nothing', () => {
   const T = skillProject();
   try {
-    const { out, failed } = grabFailing(() => runSkillBind(T, { step: 'architecture-review', skills: ['x'] }));
+    const { out, failed } = grabFailing(() => runSkillBind(T, { step: 'architecture-review', skills: ['x'], home: T }));
     assert.equal(failed, true);
     assert.match(out, /review gate/);
     // The hint names the step it reviews, which is the thing the user actually meant.
@@ -17501,11 +17507,11 @@ test('yad skill bind refuses an id that is not a step id', () => {
     // never wrote. The guard is a SHAPE check, not an allowlist — an unknown but plausible id still
     // goes through, because the file wins.
     for (const bad of ['__proto__', 'Architecture', 'ui design', '../etc', '']) {
-      const { failed } = grabFailing(() => runSkillBind(T, { step: bad, skills: ['x'] }));
+      const { failed } = grabFailing(() => runSkillBind(T, { step: bad, skills: ['x'], home: T }));
       assert.equal(failed, true, `${JSON.stringify(bad)} was accepted`);
     }
     assert.equal(fs.existsSync(path.join(T, '.sdlc/skills.json')), false, 'a refused id must write nothing');
-    const okRun = grabFailing(() => runSkillBind(T, { step: 'release', skills: ['ship-it'] }));
+    const okRun = grabFailing(() => runSkillBind(T, { step: 'release', skills: ['ship-it'], home: T }));
     assert.equal(okRun.failed, false, 'a plausible unknown id must still be allowed');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -17515,7 +17521,7 @@ test('yad skill bind allows a step this engine does not know, and says so', () =
   try {
     // The file wins for this whole major (rule 3): a project may hold a step from a newer release, so
     // an unknown id is recorded with a warning rather than refused.
-    const { out, failed } = grabFailing(() => runSkillBind(T, { step: 'release', skills: ['ship-it'] }));
+    const { out, failed } = grabFailing(() => runSkillBind(T, { step: 'release', skills: ['ship-it'], home: T }));
     assert.equal(failed, false);
     assert.match(out, /not a step this yadflow runs/);
     assert.equal(readSkillsFile(T).steps.release, 'ship-it');
@@ -17527,7 +17533,7 @@ test('yad skill bind keeps keys it does not understand', () => {
   // delete a newer release's settings every time somebody bound a step with an older CLI.
   const T = skillProject({ '.sdlc/skills.json': { schemaVersion: ENGINE_SHAPE, profiles: { classic: {} }, steps: { epic: 'keep-me' } } });
   try {
-    grabSync(() => runSkillBind(T, { step: 'stories', skills: ['new'] }));
+    grabSync(() => runSkillBind(T, { step: 'stories', skills: ['new'], home: T }));
     const file = readSkillsFile(T);
     assert.deepEqual(file.profiles, { classic: {} }, 'an unknown key was dropped');
     assert.deepEqual(file.steps, { epic: 'keep-me', stories: 'new' });
@@ -17568,7 +17574,7 @@ test('yad skill list says which answers are the project\'s and which are the eng
     // Review gates are not offered, because binding one would promise something that never runs.
     assert.equal(rows.some((r) => r.step.endsWith('-review') && r.step !== 'engineer-review'), false);
 
-    const prose = grabSync(() => runSkillList(T, {}));
+    const prose = grabSync(() => runSkillList(T, { home: T }));
     assert.match(prose, /architecture/);
     assert.match(prose, /not a step this yadflow runs/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -17578,26 +17584,26 @@ test('yad skill list says which answers are the project\'s and which are the eng
   // what the listing exists to expose.
   const I = skillProject({ '.sdlc/skills.json': { steps: { epic: '', stories: 'mine' } } });
   try {
-    const rows = JSON.parse(grabSync(() => runSkillList(I, { json: true }))).steps;
+    const rows = JSON.parse(grabSync(() => runSkillList(I, { json: true, home: I }))).steps;
     const byId = Object.fromEntries(rows.map((r) => [r.step, r]));
     assert.equal(byId.epic.source, 'ignored');
     assert.deepEqual(byId.epic.skills, ['yad-epic'], 'the step still runs the engine default');
     assert.equal(byId.stories.source, 'project');
     assert.equal(byId.architecture.source, 'engine');
-    assert.match(grabSync(() => runSkillList(I, {})), /names no skill/);
+    assert.match(grabSync(() => runSkillList(I, { home: I })), /names no skill/);
   } finally { fs.rmSync(I, { recursive: true, force: true }); }
 });
 
 test('CLI: `yad skill` reaches the command through the arg parser', () => {
   const T = skillProject({ '.sdlc/hub.json': {} }); // a Product: `skill bind` refuses any other folder (E80)
   try {
-    assert.equal(yadRun(T, 'skill', 'bind', 'stories', 'a', 'b').code, 0);
-    const j = JSON.parse(yadRun(T, 'skill', 'list', '--json').out);
+    assert.equal(yadRunHome(T, 'skill', 'bind', 'stories', 'a', 'b').code, 0);
+    const j = JSON.parse(yadRunHome(T, 'skill', 'list', '--json').out);
     assert.deepEqual(j.steps.find((r) => r.step === 'stories').skills, ['a', 'b']);
     assert.equal(j.file, '.sdlc/skills.json');
     // A bare `yad skill` lists, and an unknown action is a usage error rather than a silent no-op.
-    assert.equal(yadRun(T, 'skill').code, 0);
-    const bad = yadRun(T, 'skill', 'rebind', 'stories', 'a');
+    assert.equal(yadRunHome(T, 'skill').code, 0);
+    const bad = yadRunHome(T, 'skill', 'rebind', 'stories', 'a');
     assert.equal(bad.code, 1);
     assert.match(bad.out, /unknown skill action/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -17678,7 +17684,7 @@ test('yad skill: a bind with no skill named is a usage error, not an empty bindi
   const T = skillProject();
   try {
     for (const args of [{ step: 'stories', skills: [] }, { step: 'stories', skills: ['  '] }, { skills: ['a'] }]) {
-      const { out, failed } = grabFailing(() => runSkillBind(T, args));
+      const { out, failed } = grabFailing(() => runSkillBind(T, { ...args, home: T }));
       assert.equal(failed, true, JSON.stringify(args));
       assert.match(out, /usage: yad skill bind/);
     }
@@ -17743,10 +17749,12 @@ test('E51: the most specific line wins — the route, then the project, then the
   assert.deepEqual(stepSkills('foundation', bindingsForProfile(b, 'foundation')), ['route-discovery']);
   // A route id reaching `Object.prototype` must not resolve.
   assert.deepEqual(stepSkills('epic', bindingsForProfile(b, 'constructor')), ['project-epic']);
-  // bindingsForEpic reads the epic's route, recorded first, then matched; a view already made is kept.
+  // bindingsForEpic reads the route the epic RECORDS, as written — never one guessed from its chain
+  // (review 1: `[epic, epic-review]` matches `chore`, and every pre-shape-6 epic is a shortened classic).
   assert.equal(bindingsForEpic(b, { profile: 'spike', steps: [] }).profile, 'spike');
-  assert.equal(bindingsForEpic(b, { steps: [{ id: 'analysis' }, { id: 'epic' }, { id: 'stories' }] }).profile, 'spike');
-  assert.equal(bindingsForEpic(b, null).profile, null);
+  assert.equal(bindingsForEpic(b, { steps: [{ id: 'analysis' }, { id: 'epic' }, { id: 'stories' }] }).profile, null);
+  assert.equal(bindingsForEpic(b, { profile: 'newer-route', steps: [] }).profile, 'newer-route', 'rule 3: an unknown route is used as written');
+  for (const junk of [null, 7, { profile: 7 }, { profile: '' }]) assert.equal(bindingsForEpic(b, junk).profile, null, JSON.stringify(junk));
   assert.equal(bindingsForEpic(spike, { profile: 'classic', steps: [] }), spike);
 });
 
@@ -17770,6 +17778,17 @@ test('E51: yad next names the route\'s skill — in the JSON, the single-epic vi
     assert.equal(by['EP-c'].skill, 'project-epic');
     assert.equal('profile' in by['EP-s'] || 'profiles' in by['EP-s'], false, 'the view leaked into the action');
     assert.match(await grab(() => runNext(T, { epic: 'EP-s' })), /invoke the spike-epic skill/);
+    // Review 1: an epic that records no route runs the project-wide line, even though its chain fits
+    // `chore`; and one that records a route from a newer release gets that route's line.
+    fs.writeFileSync(path.join(T, '.sdlc/skills.json'), JSON.stringify({
+      steps: { epic: 'project-epic', implement: 'project-implement' },
+      profiles: { spike: { steps: { epic: 'spike-epic' } }, chore: { steps: { epic: 'chore-epic', implement: 'chore-implement', spec: 'chore-spec' } },
+        'newer-route': { steps: { epic: 'newer-epic' } } } }));
+    seedEpic(T, 'EP-old', { epicId: 'EP-old', currentStep: 'epic', steps: [epicStep, { id: 'epic-review', type: 'review', artifact: 'epic.md', status: 'todo' }] });
+    seedEpic(T, 'EP-new', { epicId: 'EP-new', profile: 'newer-route', currentStep: 'epic', steps: [epicStep] });
+    const j2 = Object.fromEntries(JSON.parse(await grabStdout(() => runNext(T, { json: true }))).actions.map((a) => [a.epicId, a]));
+    assert.equal(j2['EP-old'].skill, 'project-epic');
+    assert.equal(j2['EP-new'].skill, 'newer-epic');
     const roll = await grab(() => runNext(T, {}));
     assert.match(roll, /EP-s.*spike-epic/);
     assert.match(roll, /EP-c.*project-epic/);
@@ -17870,6 +17889,11 @@ test('E51: yad skill unbind --profile falls back to the project-wide line, then 
     assert.equal(failed, true);
     assert.match(out, /not bound for route spike/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // A route's line under the step's OLD name still binds it, and the message names that layer (review 4).
+  const F = skillProject({ '.sdlc/skills.json': { profiles: { foundation: { steps: { foundation: 'a', discovery: 'b' } } } } });
+  try {
+    assert.match(grabSync(() => runSkillUnbind(F, { step: 'foundation', profile: 'foundation' })), /back to this route's line under the step's old name \(b\)/);
+  } finally { fs.rmSync(F, { recursive: true, force: true }); }
 });
 
 test('E51: yad skill list shows a route\'s view, and marks what is not installed here', () => {
@@ -17906,6 +17930,9 @@ test('E51: yad skill list shows a route\'s view, and marks what is not installed
     assert.equal(e.profile, 'spike');
     assert.equal(e.epic, 'EP-s');
     assert.equal(by(e).epic.skills[0], 'spike-epic');
+    seedEpic(T, 'EP-o', { epicId: 'EP-o', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'todo' }, { id: 'epic-review', type: 'review', artifact: 'epic.md', status: 'todo' }] });
+    assert.equal(list({ epic: 'EP-o' }).profile, null, 'no recorded route: the project-wide view, never a matched guess');
+    assert.match(grabSync(() => runSkillList(T, { epic: 'EP-o', home: H })), /records no route/);
     for (const [opts, says] of [[{ epic: 'EP-s', profile: 'spike' }, /not both/], [{ epic: 'EP-none' }, /has no state.json/], [{ epic: 'bad' }, /not an epic id/], [{ profile: '__proto__' }, /not a profile id/]]) {
       const { out, failed } = grabFailing(() => runSkillList(T, { home: H, ...opts }));
       assert.equal(failed, true, JSON.stringify(opts));
@@ -17974,6 +18001,8 @@ test('E51: doctor reports a route line that does nothing, and corrects none of t
   assert.match(r['skills:profile-review-step'].message, /spike: epic-review/);
   assert.match(r['skills:profile-unknown-step'].message, /spike: zzz/);
   assert.match(r['skills:unknown-profile'].message, /nope/);
+  // A line under a step's old name is read for the step that took over from it (review 3).
+  assert.equal(run({ profiles: { foundation: { steps: { discovery: 'd' } } } })['skills:off-route'], undefined);
   const good = run({ steps: { epic: 'e' }, profiles: { spike: { steps: { epic: 's' } }, chore: { steps: { implement: 'i' } } } });
   assert.equal(Object.values(good).filter((c) => c.status !== 'ok').length, 0, JSON.stringify(good));
   assert.match(good['skills:bound'].message, /1 step\(s\) bound; 2 more for one route only/);
@@ -17982,12 +18011,29 @@ test('E51: doctor reports a route line that does nothing, and corrects none of t
 
 test('E51 CLI: --profile and --epic reach yad skill through the arg parser', () => {
   const T = skillProject({ '.sdlc/hub.json': {} });
+  const run = (...args) => yadRunHome(T, ...args);
   try {
-    assert.equal(yadRun(T, 'skill', 'bind', 'epic', 'spike-epic', '--profile', 'spike').code, 0);
-    const j = JSON.parse(yadRun(T, 'skill', 'list', '--profile', 'spike', '--json').out);
+    assert.equal(run('skill', 'bind', 'epic', 'spike-epic', '--profile', 'spike').code, 0);
+    const j = JSON.parse(run('skill', 'list', '--profile', 'spike', '--json').out);
     assert.equal(j.steps.find((r) => r.step === 'epic').source, 'profile');
-    assert.equal(yadRun(T, 'skill', 'unbind', 'epic', '--profile', 'spike').code, 0);
+    seedEpic(T, 'EP-s', { epicId: 'EP-s', profile: 'spike', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'todo' }] });
+    const e = JSON.parse(run('skill', 'list', '--epic', 'EP-s', '--json').out);
+    assert.equal(e.profile, 'spike');
+    assert.equal(e.steps.find((r) => r.step === 'epic').skills[0], 'spike-epic');
+    assert.equal(run('skill', 'unbind', 'epic', '--profile', 'spike').code, 0);
     assert.deepEqual(readSkillsFile(T).profiles, { spike: { steps: {} } });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E51: the empty-Product hint names the skill bound for the Foundation\'s route, as `yad foundation new` does', async () => {
+  const { runFoundationNew } = await import('./epic.mjs');
+  const T = skillProject({
+    '.sdlc/cli-version.json': { version: '3.0.0' },
+    '.sdlc/skills.json': { steps: { foundation: 'project-found' }, profiles: { foundation: { steps: { foundation: 'route-found' } } } },
+  });
+  try {
+    assert.match(await grab(() => runNext(T, {})), /then invoke the route-found skill/);
+    assert.equal(JSON.parse(await grab(() => runFoundationNew(T, { today: '2026-01-02', json: true }))).next, 'route-found');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

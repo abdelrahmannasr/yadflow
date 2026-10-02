@@ -2905,8 +2905,8 @@ const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.i
 //       "spike": { "steps": { "epic": "spike-epic" } }
 //     }
 //
-// A binding under `profiles.<id>` applies only to an epic on that route (the route `epicProfileId`
-// gives: the recorded one, else the one its chain matches). THE MOST SPECIFIC LINE WINS: the route's
+// A binding under `profiles.<id>` applies only to an epic that RECORDS that route (`recordedRoute`,
+// below — never a route guessed from its chain). THE MOST SPECIFIC LINE WINS: the route's
 // own line, then the project-wide `steps`, then the catalogue. A team that binds `epic` for `spike`
 // gets it on spike epics only, and its project-wide lines still cover every other route. No shape
 // moves: an older yadflow keeps the unknown key (`yad skill bind` writes the document it read) and
@@ -2985,12 +2985,27 @@ export function bindingsForProfile(bindings, profile) {
   return { ...base, profile: id };
 }
 
-// The view for an epic's own `state.json` — its route by `epicProfileId` (recorded, else matched). A
-// view that already names a route is kept: a caller that resolved it once hands the same object on.
+// The route an epic RECORDS, as written — or null when it records none.
+//
+// NOT `epicProfileId`, which falls back to matching the chain. That guess is fine for what a step may
+// skip, where a wrong answer is a refusal a person sees at once. Here it would be a silent claim that
+// is believed and acted on: `yad next` names the skill and `yad-run` runs it. Every hand-written and
+// pre-shape-6 ledger is a shortened `classic`, and the shortest route that fits `[epic, epic-review]`
+// is `chore` — so a `chore`-only line would reach every older classic epic. The E40 rule for
+// `routeLacksStep`, for the same reason.
+//
+// A route this release does not KNOW is still used as written (rule 3): an epic from a newer release
+// that records it gets the lines the team bound for it, which is what `yad skill bind` promises when it
+// records one. The lookup is `Object.hasOwn`, so an unknown id is safe.
+export const recordedRoute = (state) =>
+  (isPlainObject(state) && typeof state.profile === 'string' && state.profile ? state.profile : null);
+
+// The view for an epic's own `state.json` — its recorded route. A view that already names a route is
+// kept: a caller that resolved it once hands the same object on.
 export const bindingsForEpic = (bindings, state) =>
   (isPlainObject(bindings) && Object.hasOwn(bindings, 'profile')
     ? bindings
-    : bindingsForProfile(bindings, state ? epicProfileId(state) : null));
+    : bindingsForProfile(bindings, recordedRoute(state)));
 
 // The project's bindings, or the empty set when the file is absent or unreadable.
 export const loadSkillBindings = (root) =>
@@ -3043,6 +3058,12 @@ export function boundSkills(stepId, bindings = null) {
 
 // new step id -> the old step id whose binding it inherits while it has none of its own.
 const BINDING_SUCCEEDS = { __proto__: null, foundation: 'discovery' };
+
+// The step ids that read a line written under `id` — itself, and any step that took over from it. For
+// `yad doctor`: a `discovery` line on the `foundation` route is read for `foundation`, so it is not a
+// line no epic reaches.
+export const stepsReadingBinding = (id) =>
+  [id, ...Object.keys(BINDING_SUCCEEDS).filter((k) => BINDING_SUCCEEDS[k] === id)];
 
 // The two keys every action object carries for its skill, from one resolved list.
 //
