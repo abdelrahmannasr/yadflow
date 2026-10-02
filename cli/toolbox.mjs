@@ -51,7 +51,8 @@ const CHECKED = '2026-10-01';
 // EVERY ENTRY IS VETTED BEFORE IT SHIPS, and the vetting is redone before it goes stale. `checked` above
 // is when an entry's INSTALL routes were read; `vetted` is the proof that the tool is what it claims:
 //
-//   on           the day the vetting was done (per entry, so re-vetting one tool re-dates only that one)
+//   on           the day the vetting was done. Per entry: they all start on VETTED_ON, and re-vetting ONE
+//                tool gives that entry its own date literal rather than moving the shared one
 //   licenceFrom  where the licence was read — the repository's LICENSE file, or, for a closed tool, the
 //                vendor's own terms page. `licence` on the entry is the answer; this is the proof
 //   source       the official home the tool comes from (its owner's repository or docs)
@@ -92,7 +93,7 @@ export const TOOLBOX = Object.freeze([
     },
     install: [
       { type: 'npm', command: 'npx repomix@1.18.1' },
-      { type: 'npm', command: 'npm install -g repomix' },
+      { type: 'npm', command: 'npm install -g repomix@1.18.1' },
       { type: 'plugin', command: '/plugin marketplace add yamadashy/repomix, then /plugin install repomix-mcp@repomix' },
     ],
     manual: null,
@@ -388,9 +389,9 @@ export function vettingProblems(t) {
   const v = t?.vetted;
   need(v && typeof v === 'object' && !Array.isArray(v), 'vetted is set — a tool ships only once its licence and source are vetted');
   if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
-  need(typeof v.on === 'string' && DATE.test(v.on) && !Number.isNaN(Date.parse(`${v.on}T00:00:00Z`)), 'vetted.on is a YYYY-MM-DD date');
-  need(typeof v.licenceFrom === 'string' && /^https:\/\//.test(v.licenceFrom), 'vetted.licenceFrom is the https URL the licence was read from');
-  need(typeof v.source === 'string' && /^https:\/\//.test(v.source), 'vetted.source is the https URL of the official home');
+  need(isCalendarDay(v.on), 'vetted.on is a real YYYY-MM-DD date');
+  need(typeof v.licenceFrom === 'string' && HTTPS_URL.test(v.licenceFrom), 'vetted.licenceFrom is the https URL the licence was read from');
+  need(typeof v.source === 'string' && HTTPS_URL.test(v.source), 'vetted.source is the https URL of the official home');
   need(v.release === null || (typeof v.release === 'string' && v.release.length > 0), 'vetted.release is null or the release tag on that day');
   need(Array.isArray(v.packages), 'vetted.packages is a list');
   for (const p of Array.isArray(v.packages) ? v.packages : []) {
@@ -400,20 +401,37 @@ export function vettingProblems(t) {
   }
   need(v.note === null || (typeof v.note === 'string' && v.note.length > 0), 'vetted.note is null or a sentence');
   // A closed tool has no LICENSE file to read, so its proof must be the vendor's terms, not a repo file.
-  need(t.licence !== 'proprietary' || !/\/LICENSE$/.test(String(v.licenceFrom)), 'a proprietary tool\'s licence proof is its terms page');
+  need(t.licence !== 'proprietary' || !LICENCE_FILE.test(String(v.licenceFrom)), 'a proprietary tool\'s licence proof is its terms page');
   return out;
 }
+
+// An https URL with a host, not just the scheme.
+const HTTPS_URL = /^https:\/\/[^/\s]+\.[^/\s]+/;
+// A licence FILE at the end of a URL: LICENSE, LICENCE, COPYING, with or without an extension.
+const LICENCE_FILE = /\/(LICEN[CS]E|COPYING)(\.[A-Za-z]+)?$/i;
+
+// A YYYY-MM-DD string that names a real day. `Date.parse` rolls an impossible day forward (2026-02-30
+// becomes 2 March) instead of refusing it, so the day has to come back out unchanged.
+export const isCalendarDay = (s) => {
+  if (typeof s !== 'string' || !DATE.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+};
 
 // How many whole days old a vetting record is on `today` (a Date). A parameter, never `new Date()` here,
 // so a test can pass any day and the unit suite never ages by itself.
 export const vettingAge = (t, today) =>
   Math.floor((Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) - Date.parse(`${t.vetted.on}T00:00:00Z`)) / 86400000);
 
-// The shipped entries whose vetting is older than VET_MAX_AGE_DAYS on `today`: `[{ id, name, on, age }]`.
-// The release check refuses to publish while this is not empty (`scripts/vet-check.mjs`).
+// The shipped entries whose vetting cannot be trusted on `today`: `[{ id, name, on, age, why }]`, where
+// `why` is 'stale' (older than VET_MAX_AGE_DAYS) or 'future' (a date after today — a typo like 2027 for
+// 2026 would otherwise keep a tool out of the gate for a year). The release check refuses to publish
+// while this is not empty (`scripts/vet-check.mjs`).
 export const staleVettings = (today, list = TOOLBOX) => list
-  .filter((t) => vettingProblems(t).length === 0 && vettingAge(t, today) > VET_MAX_AGE_DAYS)
-  .map((t) => ({ id: t.id, name: t.name, on: t.vetted.on, age: vettingAge(t, today) }));
+  .filter((t) => vettingProblems(t).length === 0)
+  .map((t) => ({ id: t.id, name: t.name, on: t.vetted.on, age: vettingAge(t, today) }))
+  .filter((s) => s.age > VET_MAX_AGE_DAYS || s.age < 0)
+  .map((s) => ({ ...s, why: s.age < 0 ? 'future' : 'stale' }));
 
 // The ONE Repomix version yad runs (E88): the npm package version its vetting confirmed. `yad setup`,
 // `yad repo refresh` and the install line use it; the skills write it out as text, and a test holds every
