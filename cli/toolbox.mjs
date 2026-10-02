@@ -408,8 +408,9 @@ export function vettingProblems(t) {
 // An https URL with a host, not just the scheme.
 const HTTPS_URL = /^https:\/\/[^/\s]+\.[^/\s]+/;
 // A licence FILE at the end of a URL: LICENSE, LICENCE, COPYING, LICENSE-MIT, LICENSE_APACHE, with or
-// without an extension.
-const LICENCE_FILE = /\/(LICEN[CS]E|COPYING)([-_][\w.-]+)?(\.[A-Za-z]+)?$/i;
+// without an extension. Upper case only, as repositories name the file: a vendor's terms page at
+// `/license` or `/license-agreement` is a page, not a file, and is the right proof for a closed tool.
+const LICENCE_FILE = /\/(LICEN[CS]E|COPYING)([-_][A-Z0-9][A-Z0-9.-]*)?(\.[A-Za-z]+)?$/;
 
 // A YYYY-MM-DD string that names a real day. `Date.parse` rolls an impossible day forward (2026-02-30
 // becomes 2 March) instead of refusing it, so the day has to come back out unchanged.

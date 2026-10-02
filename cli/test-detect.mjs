@@ -510,10 +510,11 @@ test('E88: every shipped toolbox entry carries a complete vetting record', () =>
   // uvx / uv tool install / pipx install / pip|pip3 install [-U|--upgrade]. A git URL is not a package.
   const NPM = /\b(?:npx|npm (?:exec|i|install))(?: (?:-g|--global|-y|--yes))* (@?[A-Za-z0-9][\w./-]*?)(?:@[\w.+^~-]+)?(?=[\s,]|$)/g;
   const PYPI = /\b(?:uvx|uv tool install|pipx install|pip3? install)(?: (?:-U|--upgrade))* ([A-Za-z0-9][\w.-]*)(?=[\s,]|$)/g;
-  // FAIL CLOSED (review 2): every installer word on a line must yield a package. A form the two readers
-  // do not know — `npm i -D x`, `pip install "x>=1"`, `bunx x`, `pnpm dlx x` — then fails here, loudly,
-  // instead of checking nothing. Widen the readers when a new entry needs a new form.
-  const INSTALLERS = /\b(?:npx|bunx|npm (?:exec|i|install)|pnpm dlx|yarn dlx|uvx|uv tool install|pipx install|pip3? install)\b/g;
+  // FAIL CLOSED (review 2): each installer word on a line must yield its package. A form the two readers
+  // do not know — `npm i -D x`, `pip install "x>=1"`, `bunx x`, `pnpm add x` — then fails here, loudly,
+  // instead of checking nothing. One package per installer word: a second bare package after the first
+  // (`npm install a b`) is not read, and no shipped line has one. Widen the readers when a new entry needs it.
+  const INSTALLERS = /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add)|uvx|uv tool install|pipx install|pip3? install)\b/g;
   const GIT_URL = /\binstall (?:-\S+ )*git\+/;
   const named = (cmd) => [...cmd.matchAll(NPM)].map((m) => `npm:${m[1].toLowerCase()}`)
     .concat([...cmd.matchAll(PYPI)].map((m) => `pypi:${m[1].toLowerCase()}`));
@@ -526,7 +527,7 @@ test('E88: every shipped toolbox entry carries a complete vetting record', () =>
   assert.deepEqual(named('pipx install git+https://github.com/a/b.git'), [], 'a git URL is not a registry package');
   assert.deepEqual(named('npx x@^1.2'), ['npm:x']);
   const unread = (cmd) => (cmd.match(INSTALLERS) || []).length - (GIT_URL.test(cmd) ? 1 : 0) !== named(cmd).length;
-  for (const form of ['npm i -D evil', 'pip install "evil>=1"', 'bunx evil', 'pnpm dlx evil', 'uv tool install evil==1.0', 'npx -p evil x']) {
+  for (const form of ['npm i -D evil', 'pip install "evil>=1"', 'bunx evil', 'pnpm dlx evil', 'uv tool install evil==1.0', 'npx -p evil x', 'npm add evil', 'yarn global add evil', 'pnpm add evil']) {
     assert.ok(unread(form), `${form}: a form the readers do not know must be caught`);
   }
   for (const t of TOOLBOX) {
@@ -547,6 +548,10 @@ test('E88: vettingProblems names each way a record is incomplete; a team\'s own 
   assert.match(bad({ ...good.vetted, licenceFrom: 'https://' }).join(), /licenceFrom/);
   assert.match(bad({ ...good.vetted, licenceFrom: 'https://x.dev/LICENSE.md' }, { licence: 'proprietary' }).join(), /terms page/);
   assert.match(bad({ ...good.vetted, licenceFrom: 'https://x.dev/LICENSE-MIT' }, { licence: 'proprietary' }).join(), /terms page/);
+  // …but a terms PAGE whose address happens to say "license" is the right proof (review 3).
+  for (const page of ['https://vendor.com/license-agreement', 'https://vendor.com/legal/license_terms', 'https://vendor.com/license']) {
+    assert.deepEqual(bad({ ...good.vetted, licenceFrom: page }, { licence: 'proprietary' }), [], page);
+  }
   assert.match(bad({ ...good.vetted, licenceFrom: 'http://x' }).join(), /licenceFrom/);
   assert.match(bad({ ...good.vetted, source: '' }).join(), /vetted\.source/);
   assert.match(bad({ ...good.vetted, release: '' }).join(), /vetted\.release/);
@@ -623,7 +628,7 @@ test('E88: Repomix runs at its vetted version everywhere yad names it — never 
       assert.equal(m[1], REPOMIX_VERSION, `${rel}: repomix@${m[1]}`);
     }
     // No version at all runs the newest, as `@latest` does: `npx repomix`, `npx -y repomix`, `npm exec repomix`.
-    assert.doesNotMatch(text, /\b(?:npx|bunx|npm (?:exec|i|install)|pnpm dlx|yarn dlx)(?: (?:-g|--global|-y|--yes))* repomix(?![@\w-])/, `${rel}: Repomix run or installed without the vetted version`);
+    assert.doesNotMatch(text, /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add))(?: (?:-g|--global|-y|--yes|-D|--save-dev|-p|--package))* repomix(?![@\w-])/, `${rel}: Repomix run or installed without the vetted version`);
     assert.doesNotMatch(text, new RegExp(`\\brepomix@(?!${at}\\b)[\\w.-]`), `${rel}: another Repomix version`);
   }
   assert.ok(seen >= 10, `expected the pinned command in the skills and docs, found ${seen}`);
