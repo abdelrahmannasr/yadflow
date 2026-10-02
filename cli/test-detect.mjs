@@ -555,10 +555,12 @@ test('E88: vettingProblems names each way a record is incomplete; a team\'s own 
   // A repository file is told by where it lives, in any letter case, query or not (review 4).
   for (const file of ['https://github.com/a/b/blob/main/license', 'https://github.com/a/b/blob/main/License.md',
     'https://github.com/a/b/blob/main/LICENSE-Apache-2.0', 'https://github.com/a/b/blob/main/LICENSE?plain=1',
-    'https://raw.githubusercontent.com/a/b/main/COPYING', 'https://git.example.org/a/b/raw/main/LICENCE.txt']) {
+    'https://raw.githubusercontent.com/a/b/main/COPYING', 'https://git.example.org/a/b/raw/main/LICENCE.txt',
+    'https://github.com/a/b/blob/main/LICEN%53E', 'https://codeberg.org/a/b/src/branch/main/LICENSE', 'https://gitlab.com/a/b/-/blob/main/LICENSE']) {
     assert.equal(isRepoLicenceFile(file), true, file);
   }
-  for (const page of ['https://www.figma.com/legal/tos/', 'https://vendor.com/license', 'https://github.com/a/b/blob/main/README.md', 'not a url']) {
+  for (const page of ['https://www.figma.com/legal/tos/', 'https://vendor.com/license', 'https://github.com/a/b/blob/main/README.md', 'not a url',
+    'https://github.com/org/license-tool', 'https://github.com/org/repo?tab=License-1-ov-file']) {
     assert.equal(isRepoLicenceFile(page), false, page);
   }
   // Every open tool's proof is a repository licence file; no closed tool's is.
@@ -639,7 +641,7 @@ test('E88: Repomix runs at its vetted version everywhere yad names it — never 
       assert.equal(m[1], REPOMIX_VERSION, `${rel}: repomix@${m[1]}`);
     }
     // No version at all runs the newest, as `@latest` does: `npx repomix`, `npx -y repomix`, `npm exec repomix`.
-    assert.doesNotMatch(text, /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add))(?: (?:-g|--global|-y|--yes|-D|--save-dev|-p|--package))*[ =]repomix(?![@\w-])/, `${rel}: Repomix run or installed without the vetted version`);
+    assert.doesNotMatch(text, /\b(?:npx|bunx|npm (?:exec|i|install|add)|pnpm (?:dlx|add)|yarn (?:dlx|add|global add))(?:\s+(?:-g|--global|-y|--yes|-D|--save-dev|-p|--package|--))*(?:\s+|=)repomix(?![@\w-])/, `${rel}: Repomix run or installed without the vetted version`);
     assert.doesNotMatch(text, new RegExp(`\\brepomix@(?!${at}\\b)[\\w.-]`), `${rel}: another Repomix version`);
   }
   assert.ok(seen >= 10, `expected the pinned command in the skills and docs, found ${seen}`);

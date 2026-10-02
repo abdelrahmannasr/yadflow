@@ -408,15 +408,20 @@ export function vettingProblems(t) {
 // An https URL with a host, not just the scheme.
 const HTTPS_URL = /^https:\/\/[^/\s]+\.[^/\s]+/;
 // Is this URL a licence FILE in a code repository (LICENSE, license, LICENSE-MIT, License.md, COPYING)?
-// Decided by WHERE the URL points, not by its letter case (review 4): a file lives on a code host, or under
-// a `/blob/` or `/raw/` path; a vendor's terms page at `/license` or `/license-agreement` lives on the
-// vendor's own site and is the right proof for a closed tool. The query and fragment are not the file.
-const CODE_HOSTS = new Set(['github.com', 'gitlab.com', 'raw.githubusercontent.com', 'bitbucket.org', 'codeberg.org']);
+// Decided by WHERE the URL points, not by its letter case (review 4): a repository file is shown under a
+// `/blob/` or `/raw/` path (GitHub, GitLab's `/-/blob/`, Bitbucket, Codeberg, most self-hosted forges) or
+// served from raw.githubusercontent.com. A repository's front page (`github.com/org/license-tool`) is not
+// a file, and a vendor's terms page at `/license` or `/license-agreement` is the right proof for a closed
+// tool. The query and fragment are not the file; a percent-encoded name is read decoded. `new URL`
+// already lowercases the host.
+const RAW_HOSTS = new Set(['raw.githubusercontent.com']);
 export function isRepoLicenceFile(url) {
   let u;
   try { u = new URL(String(url)); } catch { return false; }
-  const inRepo = CODE_HOSTS.has(u.hostname.toLowerCase()) || /\/(blob|raw)\//.test(u.pathname);
-  const file = u.pathname.split('/').filter(Boolean).at(-1) || '';
+  let pathname = u.pathname;
+  try { pathname = decodeURIComponent(pathname); } catch { /* a stray % — read it as written */ }
+  const inRepo = RAW_HOSTS.has(u.hostname) || /\/(blob|raw|src)\//.test(pathname);
+  const file = pathname.split('/').filter(Boolean).at(-1) || '';
   return inRepo && /^(licen[cs]e|copying)([-_.].*)?$/i.test(file);
 }
 
