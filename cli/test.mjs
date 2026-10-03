@@ -18057,6 +18057,15 @@ test('E52: yad skill recommend lists each step\'s picks, marks what is bound and
     grabSync(() => runSkillBind(T, { step: first.step, skills: [`some-plugin:${first.skill}`, E52.stepDef(first.step).skill], home: H }));
     assert.deepEqual(['bound', 'ownSkillDropped'].map((k) => json({ step: first.step }).recommendations.find((r) => r.skill === first.skill)[k]), [true, false]);
     grabSync(() => runSkillBind(T, { step: first.step, skills: suggestedChain(first), home: H }));
+    // The other way round is NOT the same skill: a pick the catalogue names with its plugin
+    // (`mattpocock-skills:tdd`) is not a team's own bare `tdd` (review 2).
+    const qualified = RECOMMENDATIONS.find((r) => r.skill.includes(':'));
+    const bareOnly = qualified.skill.split(':').at(-1);
+    grabSync(() => runSkillBind(T, { step: qualified.step, skills: [bareOnly], home: H }));
+    const own = json({ step: qualified.step }).recommendations.find((r) => r.skill === qualified.skill);
+    assert.deepEqual([own.bound, own.ownSkillDropped], [false, false]);
+    assert.ok(grabSync(() => runSkillRecommend(T, { step: qualified.step, home: H, today })).includes(bindCommand(qualified)), 'the bind command is still offered');
+    grabSync(() => runSkillUnbind(T, { step: qualified.step }));
 
     // A route: its commands carry --profile, and a line bound for the route counts as bound there only.
     const spike = json({ profile: 'spike' });

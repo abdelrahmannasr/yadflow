@@ -201,11 +201,13 @@ export function bindCommand(r, profile = null) {
 
 const poolName = (id) => TOOLBOX.find((t) => t.id === id)?.name ?? id;
 
-// The skill's own name, without the `<plugin>:` an agent calls a plugin's skill by. A team that installed
-// a pool as a plugin binds `ecc:contract-first`, and that IS the catalogue's `contract-first` — the same
-// two spellings `installedSkillNames` accepts, so "installed" and "bound" never disagree about one name.
+// Is the BOUND name this catalogue pick? A team that installed a pool as a plugin binds
+// `ecc:contract-first`, and that is the catalogue's bare `contract-first`. Only that direction: a pick the
+// catalogue names WITH its plugin (`mattpocock-skills:tdd`) is matched exactly, because a bare `tdd` is
+// just as likely a team's own skill (review 2) — matching it would hide the bind command from a team that
+// never ran the pool's skill. The same two spellings `installedSkillNames` accepts for a bare name.
 const bareName = (s) => String(s).split(':').at(-1);
-export const sameSkill = (a, b) => bareName(a) === bareName(b);
+export const sameSkill = (bound, pick) => bound === pick || (!pick.includes(':') && bareName(bound) === pick);
 
 // One row per recommendation: what it is, whether the step already runs it, whether it is installed here.
 // `bindings` is the view for the route shown; `names` is `installedSkillNames`' answer (null: unknown).
@@ -221,6 +223,7 @@ export function recommendRows({ step = null, bindings, names, list = RECOMMENDAT
       // Bound so that yadflow's own skill does not run LAST — in its place, or before it. Allowed (the
       // file wins), never quiet: the last output of a chain is the artifact (closed decision 7), so the
       // pool skill's output is then filed and yadflow's skill does not write it where the gate looks.
+      // yadflow's own skill is compared exactly: yadflow ships no plugin, so it has no `<plugin>:` spelling.
       ownSkillDropped: running.some((s) => sameSkill(s, r.skill)) && !!own && running.at(-1) !== own,
       installed: names ? names.has(r.skill) : null,
       bind: suggestedChain(r),
