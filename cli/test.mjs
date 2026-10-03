@@ -18062,9 +18062,13 @@ test('E52: yad skill recommend lists each step\'s picks, marks what is bound and
     const qualified = RECOMMENDATIONS.find((r) => r.skill.includes(':'));
     const bareOnly = qualified.skill.split(':').at(-1);
     grabSync(() => runSkillBind(T, { step: qualified.step, skills: [bareOnly], home: H }));
-    const own = json({ step: qualified.step }).recommendations.find((r) => r.skill === qualified.skill);
-    assert.deepEqual([own.bound, own.ownSkillDropped], [false, false]);
+    const pickRow = json({ step: qualified.step }).recommendations.find((r) => r.skill === qualified.skill);
+    assert.deepEqual([pickRow.bound, pickRow.ownSkillDropped], [false, false]);
     assert.ok(grabSync(() => runSkillRecommend(T, { step: qualified.step, home: H, today })).includes(bindCommand(qualified)), 'the bind command is still offered');
+    // Spelled with its marketplace (`<plugin>@<marketplace>:<skill>`), it IS the pick — as `installed` counts it.
+    const [plugin, skill] = qualified.skill.split(':');
+    grabSync(() => runSkillBind(T, { step: qualified.step, skills: [`${plugin}@somewhere:${skill}`, E52.stepDef(qualified.step).skill], home: H }));
+    assert.equal(json({ step: qualified.step }).recommendations.find((r) => r.skill === qualified.skill).bound, true);
     grabSync(() => runSkillUnbind(T, { step: qualified.step }));
 
     // A route: its commands carry --profile, and a line bound for the route counts as bound there only.

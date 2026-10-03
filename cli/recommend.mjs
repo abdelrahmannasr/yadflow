@@ -205,9 +205,11 @@ const poolName = (id) => TOOLBOX.find((t) => t.id === id)?.name ?? id;
 // `ecc:contract-first`, and that is the catalogue's bare `contract-first`. Only that direction: a pick the
 // catalogue names WITH its plugin (`mattpocock-skills:tdd`) is matched exactly, because a bare `tdd` is
 // just as likely a team's own skill (review 2) — matching it would hide the bind command from a team that
-// never ran the pool's skill. The same two spellings `installedSkillNames` accepts for a bare name.
+// never ran the pool's skill. These are the plugin spellings `installedSkillNames` also accepts — including
+// `<plugin>@<marketplace>:<skill>`, whose marketplace part is dropped before the exact comparison.
 const bareName = (s) => String(s).split(':').at(-1);
-export const sameSkill = (bound, pick) => bound === pick || (!pick.includes(':') && bareName(bound) === pick);
+const withoutMarketplace = (s) => String(s).replace(/^([^:@]+)@[^:]+:/, '$1:');
+export const sameSkill = (bound, pick) => withoutMarketplace(bound) === pick || (!pick.includes(':') && bareName(bound) === pick);
 
 // One row per recommendation: what it is, whether the step already runs it, whether it is installed here.
 // `bindings` is the view for the route shown; `names` is `installedSkillNames`' answer (null: unknown).
