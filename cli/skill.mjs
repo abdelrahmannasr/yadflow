@@ -39,7 +39,7 @@ import {
 } from './epic-state.mjs';
 import { detectInstalled } from './detect.mjs';
 import { PROJECT_FILES, SCHEMA_VERSION } from './manifest.mjs';
-import { CATALOGUE, recommendedSkills, showRecommendations } from './recommend.mjs';
+import { CATALOGUE, catalogueLabel, recommendedSkills, showRecommendations } from './recommend.mjs';
 
 const bail = (message, hint) => { fail(message); if (hint) hand(hint); process.exitCode = 1; };
 
@@ -248,7 +248,7 @@ export function runSkillList(root, { json = false, profile, epic, home = os.home
     info(`${c.yellow('?')} = \`yad detect\` found no skill by that name in this folder or the home folder — a teammate may still have it`);
   }
   if (all.some((r) => r.source === 'engine' && r.recommended.length)) {
-    info(`\`yad skill recommend <step>\` says why each recommended skill fits, and how to bind it`);
+    info(`\`yad skill recommend <step>\` says why each recommended skill fits, and how to bind it (${catalogueLabel()})`);
   }
   const others = routes.filter((r) => r.profile !== route.profile);
   if (others.length) {

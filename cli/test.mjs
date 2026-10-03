@@ -17953,7 +17953,7 @@ const E52 = { ...(await import('./epic-state.mjs')), ...(await import('./manifes
 // fails here; after moving it, add the new pair the failure prints. Old pairs stay, so a version is
 // never reused for other content.
 const CATALOGUE_VERSIONS = [
-  [1, 'b0b74b6b0cdea65d'],
+  [1, '812f9dfb98ecda14'],
 ];
 
 test('E52: every catalogue entry is well formed and vetted, and each version names one list', () => {
@@ -18042,6 +18042,12 @@ test('E52: yad skill recommend lists each step\'s picks, marks what is bound and
     assert.deepEqual(stepSkills(first.step, loadSkillBindings(T)), suggestedChain(first));
     assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).bound, true);
     assert.match(grabSync(() => runSkillRecommend(T, { step: first.step, home: H, today })), /already bound to this step/);
+    assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).ownSkillDropped, false);
+    // Bound IN PLACE of yadflow's own skill: allowed, but never quiet.
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [first.skill], home: H }));
+    assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).ownSkillDropped, true);
+    assert.match(grabSync(() => runSkillRecommend(T, { step: first.step, home: H, today })), /without .* after it — nothing then files the artifact/);
+    grabSync(() => runSkillBind(T, { step: first.step, skills: suggestedChain(first), home: H }));
 
     // A route: its commands carry --profile, and a line bound for the route counts as bound there only.
     const spike = json({ profile: 'spike' });
@@ -18093,6 +18099,7 @@ test('E52: yad skill list names the catalogue\'s picks on a step still on the de
     const other = RECOMMENDATIONS.find((r) => r.step !== first.step);
     assert.match(line(other.step), new RegExp(`recommended: ${recommendedSkills(other.step).join(', ')}`));
     assert.match(prose, /yad skill recommend <step>/);
+    assert.match(prose, new RegExp(`recommendation catalogue version ${CATALOGUE.version}, checked ${CATALOGUE.checked}`));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -18100,7 +18107,7 @@ test('E52: the catalogue changes no project file and no toolbox entry', () => {
   // Shipped data, read in place: no new E52.PROJECT_FILES key (a project file would be a shape change).
   assert.ok(!Object.values(E52.PROJECT_FILES).some((f) => /recommend|catalogue/i.test(f)));
   // The pools stay bound by `yad skill bind`, never named by a skill (E87's two-way test).
-  for (const t of E52.TOOLBOX.filter((x) => x.tier === 'recommended')) assert.deepEqual(t.usedBy, ['yad skill bind'], t.id);
+  for (const t of E52.TOOLBOX.filter((x) => x.tier === 'recommended')) assert.deepEqual(E52.skillsUsing(t), [], t.id);
   // Every pool a pick comes from is one the toolbox lists, so `yad toolbox list` shows how to install it.
   for (const r of RECOMMENDATIONS) assert.ok(E52.TOOLBOX.some((t) => t.id === r.pool && t.tier === 'recommended'), r.pool);
 });

@@ -15,7 +15,11 @@
 // confirm its source is still the official one and that each package in `vetted.packages` still points
 // back to it, then update `vetted.on`, `vetted.release` and the package versions in cli/toolbox.mjs.
 // Every entry starts on the shared VETTED_ON date: to re-vet ONE tool, give that entry its own date
-// literal instead of moving the shared one, which would re-date all thirteen.
+// literal instead of moving the shared one, which would re-date every tool.
+// A recommended skill (cli/recommend.mjs) shares its pool's record (BMAD, ECC, MATT there): re-vet the
+// pool the same way, then read each of its skills' SKILL.md again at the new release tag (the name must
+// still exist and still let an agent run it), update `file`, and move CATALOGUE.version — the test that
+// holds each version to one list prints the new digest to record.
 // Moving Repomix's npm version moves the version yad runs (REPOMIX_VERSION), so the skills that write
 // `npx repomix@…` out as text change with it — the test that holds them names each line.
 import { isCalendarDay, staleVettings, TOOLBOX, VET_MAX_AGE_DAYS, vettingProblems } from '../cli/toolbox.mjs';

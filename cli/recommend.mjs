@@ -68,7 +68,7 @@ const MATT = Object.freeze({
   on: VETTED_ON, licenceFrom: 'https://github.com/mattpocock/skills/blob/main/LICENSE',
   source: 'https://github.com/mattpocock/skills', release: 'v1.2.3',
   packages: [],
-  note: 'Named as the mattpocock-skills plugin calls it — the bare name of `code-review` clashes with a built-in command, so the plugin form is used for every one.',
+  note: 'Named as the mattpocock-skills plugin calls it (<plugin>:<name>): a plugin is the one install route the toolbox lists for this pool.',
 });
 const B = 'https://github.com/bmad-code-org/BMAD-METHOD/blob/v6.12.0/src';
 const E = 'https://github.com/affaan-m/ECC/blob/v2.2.3/skills';
@@ -208,9 +208,13 @@ const poolName = (id) => TOOLBOX.find((t) => t.id === id)?.name ?? id;
 export function recommendRows({ step = null, bindings, names, list = RECOMMENDATIONS, profile = null, onRoute = () => true }) {
   return list.filter((r) => (!step || r.step === step) && onRoute(r.step)).map((r) => {
     const running = stepSkills(r.step, bindings);
+    const own = stepDef(r.step)?.skill;
     return {
       step: r.step, skill: r.skill, pool: r.pool, reason: r.reason, caveat: r.caveat, file: r.file, licence: r.licence,
       bound: running.includes(r.skill),
+      // Bound IN PLACE of yadflow's own skill, not before it: allowed (the file wins), never quiet —
+      // nothing then writes the artifact where the gate looks.
+      ownSkillDropped: running.includes(r.skill) && !!own && !running.includes(own),
       installed: names ? names.has(r.skill) : null,
       bind: suggestedChain(r),
       command: bindCommand(r, profile),
@@ -265,6 +269,9 @@ export function showRecommendations(root, { step = null, json = false, route = {
     log(`      ${r.reason}`);
     if (r.caveat) log(`      ${c.yellow('note:')} ${r.caveat}`);
     log(`      ${r.bound ? c.dim('already bound to this step') : c.cyan(r.command)}`);
+    if (r.ownSkillDropped) {
+      warn(`${r.step} runs ${r.skill} without ${stepDef(r.step).skill} after it — nothing then files the artifact where the gate looks (\`${r.command}\` chains them)`);
+    }
   }
   log('');
   info('each one runs BEFORE yadflow\'s own skill, which still writes the artifact — every extra skill is another model run');
