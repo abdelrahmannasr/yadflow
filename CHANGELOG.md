@@ -1,3 +1,42 @@
+# [4.4.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.3.0...v4.4.0) (2026-10-03)
+
+
+### Bug Fixes
+
+* **skill:** E51 review 1 — read the route the epic records, never a guess ([cefdb21](https://github.com/abdelrahmannasr/yadflow/commit/cefdb216139e4608961b83a5ec61f1ca6cb318c7))
+* **skill:** E51 review 2 — say an epic's route is unknown; simplify the change-epic seed ([c5e6f0e](https://github.com/abdelrahmannasr/yadflow/commit/c5e6f0e12e56a768196088aff10d2eebd3f70293))
+* **skill:** E52 flag a pick bound in place of yadflow's skill; list prints the catalogue's age ([a0b76f3](https://github.com/abdelrahmannasr/yadflow/commit/a0b76f30fd1d9fb3123977532ab0ef055daf89bf))
+* **skill:** E52 review 1 — yadflow's skill must run last, plugin names, route view in list ([fcf675a](https://github.com/abdelrahmannasr/yadflow/commit/fcf675a6fe64788f3d0b2c12f8f7aad14eb6448c))
+* **skill:** E52 review 2 — a bare bound name never matches a plugin-qualified pick ([4199fd3](https://github.com/abdelrahmannasr/yadflow/commit/4199fd332f36eb532f9aa4bd2a4f05a77bfa6cec))
+* **skill:** E52 review 3 — a marketplace-spelled binding is the same pick ([04d7aaa](https://github.com/abdelrahmannasr/yadflow/commit/04d7aaafe640253dd0ecc48e922c993e0d7b3860))
+* **toolbox:** E87 review 1 — CRLF, unseen tools, no Product, honest Repomix fallback ([dc3bd75](https://github.com/abdelrahmannasr/yadflow/commit/dc3bd7577271c5fb71fe5522e8a6d1f2c1fff575))
+* **toolbox:** E87 review 10 — unclosed fence refused, frontmatter skipped ([577786c](https://github.com/abdelrahmannasr/yadflow/commit/577786c2ff939be1bf7565c9bc4f3b72d9569cd7))
+* **toolbox:** E87 review 11 notes — frontmatter hides nothing, exact round trip ([b8bb924](https://github.com/abdelrahmannasr/yadflow/commit/b8bb924c5320f3fdf531f03fa968f77dc970f8c8))
+* **toolbox:** E87 review 12 — a section can never cross the frontmatter ([cb1c111](https://github.com/abdelrahmannasr/yadflow/commit/cb1c11184fd2caea1e2f6b4c7082b65e5de462f3))
+* **toolbox:** E87 review 13 notes — frontmatter closes at '--- ' or '...' ([df6c644](https://github.com/abdelrahmannasr/yadflow/commit/df6c644f639eaeef04b36eb1da2116b472452f39))
+* **toolbox:** E87 review 14 — frontmatter needs a YAML key; no write leaves two copies ([20f3c75](https://github.com/abdelrahmannasr/yadflow/commit/20f3c75a231461d42566474d8be972e08edc59df))
+* **toolbox:** E87 review 15 — check names the two-copy refusal too ([88757ac](https://github.com/abdelrahmannasr/yadflow/commit/88757acf9015dc8a8b2adae7137fdf1b8a151959))
+* **toolbox:** E87 review 2 — connector-only sections, safer section finder ([00127ec](https://github.com/abdelrahmannasr/yadflow/commit/00127ecd4ae61c10cc5b34beaf32d42512d8ea05))
+* **toolbox:** E87 review 3 — a removal works, a misread is refused by content ([a42bc78](https://github.com/abdelrahmannasr/yadflow/commit/a42bc78bc5a53ba1e9c17073615f9313bab3b66e))
+* **toolbox:** E87 review 4 — one heading rule, a guard that quotes its line ([768b43a](https://github.com/abdelrahmannasr/yadflow/commit/768b43a7f8df84aeb1ca1d53818a421a1dca5ba2)), closes [#s](https://github.com/abdelrahmannasr/yadflow/issues/s)
+* **toolbox:** E87 review 5 notes — fence-aware copy count, dividers, linear heading read ([d9eb679](https://github.com/abdelrahmannasr/yadflow/commit/d9eb6793ead27dfa9f76f60bc301a45df727a832)), closes [#s](https://github.com/abdelrahmannasr/yadflow/issues/s)
+* **toolbox:** E87 review 6 — truly linear heading read, underline guard reads real headings ([83d0885](https://github.com/abdelrahmannasr/yadflow/commit/83d0885c9f8c6c216a35e740b365c6eebaca6b54)), closes [#s](https://github.com/abdelrahmannasr/yadflow/issues/s) [#hashtag](https://github.com/abdelrahmannasr/yadflow/issues/hashtag)
+* **toolbox:** E87 review 7 — no slow pattern left in the section readers ([7201076](https://github.com/abdelrahmannasr/yadflow/commit/72010765951c569ea0c0cbc52b67c13f96c9f248))
+* **toolbox:** E87 review 8 — a divider ends the block; the guard is checked against marked ([750187c](https://github.com/abdelrahmannasr/yadflow/commit/750187cecd34e8ff49c39e141424656781def287)), closes [#tag](https://github.com/abdelrahmannasr/yadflow/issues/tag)
+* **toolbox:** E88 review 1 — refuse future and impossible vetting dates; pin every Repomix line ([20048b5](https://github.com/abdelrahmannasr/yadflow/commit/20048b562129a3860a521dc8a159cc8641dc3d9a))
+* **toolbox:** E88 review 2 — install-line test fails closed; pin test covers npm install ([e955cbd](https://github.com/abdelrahmannasr/yadflow/commit/e955cbddc5d1d596c833dfb596b1536516b4d489))
+* **toolbox:** E88 review 3 — a terms page that says license is not a licence file ([34edaf8](https://github.com/abdelrahmannasr/yadflow/commit/34edaf84f0a4a3d7338de1aae61964f975c6e2e3))
+* **toolbox:** E88 review 4 — tell a licence file by where it lives, not its letter case ([4e9dbc0](https://github.com/abdelrahmannasr/yadflow/commit/4e9dbc0850ca9cba27ceba00e8b9dea777c1d1e6))
+* **toolbox:** E88 review 5 — a repository's front page is not a licence file ([3f9fe15](https://github.com/abdelrahmannasr/yadflow/commit/3f9fe15a54a259c7c784a18b4e52e69ce50a7104))
+
+
+### Features
+
+* **skill:** E51 bind a skill for one route only ([654488c](https://github.com/abdelrahmannasr/yadflow/commit/654488c7e7d876fbe29122959f2befe1122ebffe))
+* **skill:** E52 recommendation catalogue and yad skill recommend ([2b4fba0](https://github.com/abdelrahmannasr/yadflow/commit/2b4fba05a6e27af978dcaeb25fe61a0dc61c36b6))
+* **toolbox:** E88 vet every toolbox tool, and pin Repomix to the vetted version ([e4026f3](https://github.com/abdelrahmannasr/yadflow/commit/e4026f3140428a6b80c1842e410c8174f5ecb205))
+* **toolbox:** every skill that uses a tool declares its fallback (E87) ([8d4963e](https://github.com/abdelrahmannasr/yadflow/commit/8d4963e603e92be0fcbc616e98a5ea5939befbc4))
+
 # [4.3.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.2.0...v4.3.0) (2026-10-01)
 
 
