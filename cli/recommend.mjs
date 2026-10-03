@@ -201,6 +201,12 @@ export function bindCommand(r, profile = null) {
 
 const poolName = (id) => TOOLBOX.find((t) => t.id === id)?.name ?? id;
 
+// The skill's own name, without the `<plugin>:` an agent calls a plugin's skill by. A team that installed
+// a pool as a plugin binds `ecc:contract-first`, and that IS the catalogue's `contract-first` — the same
+// two spellings `installedSkillNames` accepts, so "installed" and "bound" never disagree about one name.
+const bareName = (s) => String(s).split(':').at(-1);
+export const sameSkill = (a, b) => bareName(a) === bareName(b);
+
 // One row per recommendation: what it is, whether the step already runs it, whether it is installed here.
 // `bindings` is the view for the route shown; `names` is `installedSkillNames`' answer (null: unknown).
 // `onRoute(step)` is false for a step the route never walks — `yad skill bind --profile` refuses those, so
@@ -211,10 +217,11 @@ export function recommendRows({ step = null, bindings, names, list = RECOMMENDAT
     const own = stepDef(r.step)?.skill;
     return {
       step: r.step, skill: r.skill, pool: r.pool, reason: r.reason, caveat: r.caveat, file: r.file, licence: r.licence,
-      bound: running.includes(r.skill),
-      // Bound IN PLACE of yadflow's own skill, not before it: allowed (the file wins), never quiet —
-      // nothing then writes the artifact where the gate looks.
-      ownSkillDropped: running.includes(r.skill) && !!own && !running.includes(own),
+      bound: running.some((s) => sameSkill(s, r.skill)),
+      // Bound so that yadflow's own skill does not run LAST — in its place, or before it. Allowed (the
+      // file wins), never quiet: the last output of a chain is the artifact (closed decision 7), so the
+      // pool skill's output is then filed and yadflow's skill does not write it where the gate looks.
+      ownSkillDropped: running.some((s) => sameSkill(s, r.skill)) && !!own && running.at(-1) !== own,
       installed: names ? names.has(r.skill) : null,
       bind: suggestedChain(r),
       command: bindCommand(r, profile),
@@ -270,7 +277,7 @@ export function showRecommendations(root, { step = null, json = false, route = {
     if (r.caveat) log(`      ${c.yellow('note:')} ${r.caveat}`);
     log(`      ${r.bound ? c.dim('already bound to this step') : c.cyan(r.command)}`);
     if (r.ownSkillDropped) {
-      warn(`${r.step} runs ${r.skill} without ${stepDef(r.step).skill} after it — nothing then files the artifact where the gate looks (\`${r.command}\` chains them)`);
+      warn(`${r.step} runs ${r.skill} without ${stepDef(r.step).skill} last — the last skill's output is the artifact, so yadflow's skill does not file it where the gate looks (\`${r.command}\` chains them)`);
     }
   }
   log('');
@@ -284,5 +291,6 @@ export function showRecommendations(root, { step = null, json = false, route = {
   return { rows };
 }
 
-// Exported for `yad skill list`: the skills the catalogue recommends for a step (names only).
-export const recommendedSkills = (step) => recommendationsFor(step).map((r) => r.skill);
+// Exported for `yad skill list`: the skills the catalogue recommends for a step (names only). Empty for a
+// step the route never walks — `recommend` hides those too, and a bind for one is refused.
+export const recommendedSkills = (step, onRoute = () => true) => (onRoute(step) ? recommendationsFor(step).map((r) => r.skill) : []);

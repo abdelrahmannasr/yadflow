@@ -39,7 +39,7 @@ import {
 } from './epic-state.mjs';
 import { detectInstalled } from './detect.mjs';
 import { PROJECT_FILES, SCHEMA_VERSION } from './manifest.mjs';
-import { CATALOGUE, catalogueLabel, recommendedSkills, showRecommendations } from './recommend.mjs';
+import { CATALOGUE, catalogueAge, catalogueLabel, recommendedSkills, showRecommendations } from './recommend.mjs';
 
 const bail = (message, hint) => { fail(message); if (hint) hand(hint); process.exitCode = 1; };
 
@@ -144,6 +144,10 @@ const installedMap = (skills, names) => (names ? Object.fromEntries(skills.map((
 
 // ---- list ----------------------------------------------------------------------------------------------
 
+// A row still running the engine's default: nothing bound, or a line that binds nothing (`ignored`). The
+// two places that offer the catalogue's picks (E52) read this, so they agree on which rows get one.
+const onDefault = (r) => r.source === 'engine' || r.source === 'ignored';
+
 // One row per step the engine can run a skill for: what runs it now, and whether that is this route's
 // choice, the project's, or the engine's. `source` is the field worth having — "yad-stories" alone
 // never says whether someone chose it.
@@ -184,7 +188,7 @@ function routeFor(root, { profile, epic }) {
   return { profile: recordedRoute(state), epic };
 }
 
-export function runSkillList(root, { json = false, profile, epic, home = os.homedir() } = {}) {
+export function runSkillList(root, { json = false, profile, epic, home = os.homedir(), today = new Date() } = {}) {
   const route = routeFor(root, { profile, epic });
   if (route.error) return bail(route.error, route.hint);
   const view = bindingsForProfile(loadSkillBindings(root), route.profile);
@@ -201,7 +205,8 @@ export function runSkillList(root, { json = false, profile, epic, home = os.home
   const extra = [...written].filter((id) => !stepDef(id)).map((id) => rowOf(id, view, written));
   // E52: what the recommendation catalogue offers for each step, by name. Shown in prose only where the
   // step still runs the engine's default — a step the team already chose needs no nudge.
-  const all = [...rows, ...extra].map((r) => ({ ...r, installed: installedMap(r.skills, names), recommended: recommendedSkills(r.step) }));
+  const onRoute = (s) => !route.profile || !routeLacks(route.profile, s);
+  const all = [...rows, ...extra].map((r) => ({ ...r, installed: installedMap(r.skills, names), recommended: recommendedSkills(r.step, onRoute) }));
   // Every route's own lines, whichever route is shown — so a line bound for `spike` is never invisible
   // from the plain `yad skill list`.
   const routes = Object.entries(view.profiles || {}).map(([id, { steps }]) => ({
@@ -212,7 +217,7 @@ export function runSkillList(root, { json = false, profile, epic, home = os.home
     return emitJSON({
       ok: true, file: PROJECT_FILES.skillsConfig, profile: route.profile, ...(route.epic ? { epic: route.epic } : {}),
       installedChecked: !!names, steps: all, profiles: routes,
-      catalogue: { version: CATALOGUE.version, checked: CATALOGUE.checked },
+      catalogue: { version: CATALOGUE.version, checked: CATALOGUE.checked, age: catalogueAge(today) },
     });
   }
 
@@ -231,7 +236,7 @@ export function runSkillList(root, { json = false, profile, epic, home = os.home
     if (r.source === 'ignored') notes.push('the file has a line for this step that names no skill');
     const missing = r.installed ? r.skills.filter((s) => !r.installed[s]) : [];
     if (missing.length) notes.push(`not found here: ${missing.join(', ')}`);
-    if (r.source === 'engine' && r.recommended.length) notes.push(`recommended: ${r.recommended.join(', ')}`);
+    if (onDefault(r) && r.recommended.length) notes.push(`recommended: ${r.recommended.join(', ')}`);
     const note = notes.length ? c.dim(`   (${notes.join('; ')})`) : '';
     const shown = r.skills.map((s) => (r.installed && !r.installed[s] ? `${s}${c.yellow('?')}` : s));
     log(`  ${mark} ${r.step.padEnd(18)} ${shown.join(c.dim(' → ')) || c.dim('(none)')}${note}`);
@@ -247,8 +252,8 @@ export function runSkillList(root, { json = false, profile, epic, home = os.home
   else if (all.some((r) => r.installed && r.skills.some((s) => !r.installed[s]))) {
     info(`${c.yellow('?')} = \`yad detect\` found no skill by that name in this folder or the home folder — a teammate may still have it`);
   }
-  if (all.some((r) => r.source === 'engine' && r.recommended.length)) {
-    info(`\`yad skill recommend <step>\` says why each recommended skill fits, and how to bind it (${catalogueLabel()})`);
+  if (all.some((r) => onDefault(r) && r.recommended.length)) {
+    info(`\`yad skill recommend <step>${route.profile ? ` --profile ${route.profile}` : ''}\` says why each recommended skill fits, and how to bind it — ${catalogueLabel(today)}`);
   }
   const others = routes.filter((r) => r.profile !== route.profile);
   if (others.length) {

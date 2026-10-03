@@ -18046,7 +18046,16 @@ test('E52: yad skill recommend lists each step\'s picks, marks what is bound and
     // Bound IN PLACE of yadflow's own skill: allowed, but never quiet.
     grabSync(() => runSkillBind(T, { step: first.step, skills: [first.skill], home: H }));
     assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).ownSkillDropped, true);
-    assert.match(grabSync(() => runSkillRecommend(T, { step: first.step, home: H, today })), /without .* after it — nothing then files the artifact/);
+    assert.match(grabSync(() => runSkillRecommend(T, { step: first.step, home: H, today })), /without .* last — the last skill's output is the artifact/);
+    // In the chain but not LAST: the pick's output is still the artifact — the same failure.
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [...suggestedChain(first)].reverse(), home: H }));
+    assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).ownSkillDropped, true);
+    // Bound under its plugin name (`<plugin>:<skill>`) it is the same skill: bound, and still flagged alone.
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [`some-plugin:${first.skill}`], home: H }));
+    const plugged = json({ step: first.step }).recommendations.find((r) => r.skill === first.skill);
+    assert.deepEqual([plugged.bound, plugged.ownSkillDropped], [true, true]);
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [`some-plugin:${first.skill}`, E52.stepDef(first.step).skill], home: H }));
+    assert.deepEqual(['bound', 'ownSkillDropped'].map((k) => json({ step: first.step }).recommendations.find((r) => r.skill === first.skill)[k]), [true, false]);
     grabSync(() => runSkillBind(T, { step: first.step, skills: suggestedChain(first), home: H }));
 
     // A route: its commands carry --profile, and a line bound for the route counts as bound there only.
@@ -18061,6 +18070,11 @@ test('E52: yad skill recommend lists each step\'s picks, marks what is bound and
       assert.equal(failed, false, r.command);
     }
     assert.match(grabSync(() => runSkillRecommend(T, { profile: 'spike', home: H, today })), /yad skill unbind <step> --profile spike/);
+    // --epic reads the route the epic records, and names the epic.
+    seedEpic(T, 'EP-sp', { epicId: 'EP-sp', profile: 'spike', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'todo' }] });
+    const byEpic = json({ epic: 'EP-sp' });
+    assert.deepEqual([byEpic.epic, byEpic.profile], ['EP-sp', 'spike']);
+    assert.deepEqual(byEpic.recommendations.map((r) => r.command), spike.recommendations.map((r) => r.command));
     const offRoute = grabFailing(() => runSkillRecommend(T, { step: 'architecture', profile: 'spike', home: H, today }));
     assert.equal(offRoute.failed, true);
     assert.match(offRoute.out, /route `spike` has no `architecture` step/);
@@ -18087,19 +18101,32 @@ test('E52: yad skill recommend lists each step\'s picks, marks what is bound and
 
 test('E52: yad skill list names the catalogue\'s picks on a step still on the default, and only there', () => {
   const first = RECOMMENDATIONS[0];
-  const T = skillProject({ '.sdlc/skills.json': { steps: { [first.step]: 'our-own' } } });
+  const other = RECOMMENDATIONS.find((r) => r.step !== first.step);
+  // `other`'s line names no skill (`ignored`): the default still runs there, so it gets the picks too.
+  const T = skillProject({ '.sdlc/skills.json': { steps: { [first.step]: 'our-own', [other.step]: '' } } });
   try {
-    const j = JSON.parse(grabSync(() => runSkillList(T, { json: true, home: T })));
-    assert.deepEqual(j.catalogue, { version: CATALOGUE.version, checked: CATALOGUE.checked });
+    const today = new Date(Date.parse(`${CATALOGUE.checked}T00:00:00Z`) + 3 * 86400000);
+    const j = JSON.parse(grabSync(() => runSkillList(T, { json: true, home: T, today })));
+    assert.deepEqual(j.catalogue, { version: CATALOGUE.version, checked: CATALOGUE.checked, age: 3 });
     for (const r of j.steps) assert.deepEqual(r.recommended, recommendedSkills(r.step), r.step);
-    const prose = grabSync(() => runSkillList(T, { home: T }));
+    assert.equal(j.steps.find((r) => r.step === other.step).source, 'ignored');
+    const prose = grabSync(() => runSkillList(T, { home: T, today }));
     // A row is the step id as its first or second word (after the mark); the steps after it are later words.
     const line = (step) => prose.split('\n').find((l) => l.trim().split(/\s+/).slice(0, 2).includes(step));
     assert.doesNotMatch(line(first.step), /recommended:/, 'the team chose this step — no nudge');
-    const other = RECOMMENDATIONS.find((r) => r.step !== first.step);
     assert.match(line(other.step), new RegExp(`recommended: ${recommendedSkills(other.step).join(', ')}`));
-    assert.match(prose, /yad skill recommend <step>/);
-    assert.match(prose, new RegExp(`recommendation catalogue version ${CATALOGUE.version}, checked ${CATALOGUE.checked}`));
+    assert.match(prose, /yad skill recommend <step>`/);
+    assert.match(prose, new RegExp(`— recommendation catalogue version ${CATALOGUE.version}, checked ${CATALOGUE.checked} \\(3 days ago\\)`));
+    assert.doesNotMatch(prose, /\(recommendation catalogue/, 'no brackets inside brackets');
+
+    // A route's view offers only the steps it walks, and the hint carries the route.
+    const spike = JSON.parse(grabSync(() => runSkillList(T, { json: true, home: T, profile: 'spike' })));
+    assert.deepEqual(spike.steps.find((r) => r.step === 'architecture').recommended, []);
+    assert.ok(spike.steps.some((r) => r.recommended.length), 'spike still walks steps with picks');
+    const spikeProse = grabSync(() => runSkillList(T, { home: T, profile: 'spike' }));
+    const spikeRow = spikeProse.split('\n').find((l) => l.trim().split(/\s+/).slice(0, 2).includes('architecture')) || '';
+    assert.doesNotMatch(spikeRow, /recommended:/);
+    assert.match(spikeProse, /yad skill recommend <step> --profile spike/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
