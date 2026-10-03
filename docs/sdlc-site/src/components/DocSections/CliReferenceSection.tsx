@@ -17,6 +17,7 @@ const GROUPS = [
       'npx yadflow doctor [--json] — environment + state health (exit 1 on failure); its protection section says whether each repo\'s branch requires an approval on GitHub or GitLab, or that it is not known and why (E70) — a warning at most',
       'npx yadflow migrate [--apply] — move state files onto this release\'s file shape (previews by default, backs up before writing)',
       'yad skill list | bind <step> <skill>… | unbind <step> — choose which skill runs a lifecycle step (.sdlc/skills.json); several skills run as a chain, each costing another model run',
+      'yad skill recommend [<step>] — hand-picked skills from the recommended pools for each step, why each fits, and the bind command (pool skill first, yadflow\'s skill last); binds nothing',
       'yad detect [--json] — which skills, agents, MCP servers and plugins are installed here and in your home folder, and which agents read each place; read-only, MCP servers named only',
       'yad toolbox list [--json] — the external tools yadflow can use (core, recommended, connectors, your own), whether each is found here, whether this Product uses it, and the fallback when it is not; installs nothing',
       'yad toolbox check [--json] — the tools this Product uses that are not ready here, each with its install command and fallback; never fails',
