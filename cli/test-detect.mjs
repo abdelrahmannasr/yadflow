@@ -589,17 +589,20 @@ test('E88: the age is checked against a day passed in, and only past the limit',
   assert.deepEqual(on('2025-12-31'), [{ id: 'x', name: 'X', on: '2026-01-01', age: -1, why: 'future' }]);
 });
 
-test('E88: scripts/vet-check.mjs passes on a vetted list and names each stale tool with what to do', () => {
+test('E88: scripts/vet-check.mjs passes on a vetted list and names each stale tool with what to do', async () => {
   const run = (...a) => spawnSync(process.execPath, [path.join(ROOT, 'scripts/vet-check.mjs'), ...a], { encoding: 'utf8' });
-  const newest = TOOLBOX.map((x) => x.vetted.on).sort().at(-1);
+  const { RECOMMENDATIONS, asVetted } = await import('./recommend.mjs');
+  const newest = [...TOOLBOX, ...RECOMMENDATIONS].map((x) => x.vetted.on).sort().at(-1);
   const ok = run('--today', newest);
   assert.equal(ok.status, 0, ok.stderr);
-  assert.match(ok.stdout, new RegExp(`all ${TOOLBOX.length} toolbox tools are vetted`));
+  assert.match(ok.stdout, new RegExp(`all ${TOOLBOX.length} toolbox tools and ${RECOMMENDATIONS.length} recommended skills are vetted`));
   const later = new Date(Date.parse(`${newest}T00:00:00Z`) + (VET_MAX_AGE_DAYS + 1) * 86400000).toISOString().slice(0, 10);
   const stale = run('--today', later);
   assert.equal(stale.status, 1);
-  for (const t of TOOLBOX) assert.match(stale.stderr, new RegExp(`^${t.id} \\(`, 'm'));
-  assert.match(stale.stderr, /re-vet each one in cli\/toolbox\.mjs/);
+  for (const t of TOOLBOX) assert.match(stale.stderr, new RegExp(`^${t.id} \\(.*cli/toolbox\\.mjs\\)`, 'm'));
+  // E52: every recommended skill carries the same record and is held to the same age.
+  for (const r of RECOMMENDATIONS.map(asVetted)) assert.ok(stale.stderr.split('\n').some((l) => l.startsWith(`${r.id} (`) && l.includes('cli/recommend.mjs')), r.id);
+  assert.match(stale.stderr, /re-vet each one in the file named/);
   for (const bad of ['soon', '2026-13-01', '2026-02-30']) assert.equal(run('--today', bad).status, 2, bad);
   // A vetting date after today fails the release too.
   const before = new Date(Date.parse(`${TOOLBOX.map((x) => x.vetted.on).sort()[0]}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
@@ -609,7 +612,7 @@ test('E88: scripts/vet-check.mjs passes on a vetted list and names each stale to
   assert.doesNotMatch(early.stderr, /re-vet each one/, 'a future date is a typo to fix, not a licence to re-read');
   // The release check runs it, as step 8 of 8.
   const rc = fs.readFileSync(path.join(ROOT, 'scripts/release-check.sh'), 'utf8');
-  assert.match(rc, /say "8\/8 {2}every toolbox tool was vetted recently"/);
+  assert.match(rc, /say "8\/8 {2}every toolbox tool and recommended skill was vetted recently"/);
   assert.match(rc, /^node "\$ROOT\/scripts\/vet-check\.mjs" \|\| die/m);
   assert.equal((rc.match(/say "\d\/7/g) || []).length, 0, 'a step still counts to 7');
 });

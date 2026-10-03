@@ -123,6 +123,10 @@ ${c.bold('Where am I / what next')}
   yad skill unbind <step> [--profile <p>]
                                        Drop the binding; the step goes back to the project-wide
                                        binding, then the engine's default
+  yad skill recommend [<step>] [--profile <p> | --epic <id>] [--json]
+                                       Hand-picked skills from the recommended pools for each step,
+                                       why each fits, whether it is installed here, and the bind
+                                       command (pool skill first, yadflow's skill last). Binds nothing
   yad toolbox list [--json] [--dir <folder>]
                                        The external tools yadflow can use — core (offered at setup),
                                        recommended pools, the design/testing/learning connectors and
@@ -431,7 +435,7 @@ let runningCmd = null;
 const ACTIONS = {
   epic: { known: ['new'] },
   foundation: { known: ['new', 'status'] },
-  skill: { known: ['list', 'bind', 'unbind'], default: 'list' },
+  skill: { known: ['list', 'bind', 'unbind', 'recommend'], default: 'list' },
   gate: { known: ['open', 'sync', 'comments', 'status', 'repair', 'review', 'walkthrough', 'trailer', 'ci', 'approve', 'comment', 'advance'] },
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
   tidy: { known: ['up'] },
@@ -745,7 +749,8 @@ async function main() {
       if ((action === 'bind' || action === 'unbind') && noProduct()) break;
       if (action === 'bind') { result = commands.runSkillBind(o.dir, { step, skills: rest, profile: o.profile }); break; }
       if (action === 'unbind') { result = commands.runSkillUnbind(o.dir, { step, profile: o.profile }); break; }
-      refuse(`unknown skill action: ${action} (list, bind, unbind)`, 'usage: yad skill list [--profile <p> | --epic <id>] [--json] | yad skill bind <step> <skill> [<skill> ...] [--profile <p>] | yad skill unbind <step> [--profile <p>]');
+      if (action === 'recommend') { result = commands.runSkillRecommend(o.dir, { step: step ?? null, json: o.json, profile: o.profile, epic: o.epic }); break; }
+      refuse(`unknown skill action: ${action} (list, bind, unbind, recommend)`, 'usage: yad skill list [--profile <p> | --epic <id>] [--json] | yad skill bind <step> <skill> [<skill> ...] [--profile <p>] | yad skill unbind <step> [--profile <p>] | yad skill recommend [<step>] [--profile <p> | --epic <id>] [--json]');
       break;
     }
     case 'next': {
