@@ -17396,7 +17396,8 @@ test('doctor reports a skill binding that does nothing, and corrects none of the
 });
 
 // ---- `yad skill` — binding a step from the command line (E6) -------------------------------------
-const { runSkillBind, runSkillList, runSkillUnbind } = await import('./skill.mjs');
+const { runSkillBind, runSkillList, runSkillRecommend, runSkillUnbind } = await import('./skill.mjs');
+const { CATALOGUE, RECOMMENDATIONS, asVetted, bindCommand, catalogueAge, catalogueDigest, catalogueLabel, recommendationProblems, recommendedSkills, suggestedChain } = await import('./recommend.mjs');
 const readSkillsFile = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/skills.json'), 'utf8'));
 // Run a command that reports failure through process.exitCode without leaking it into the test run.
 function grabFailing(fn) {
@@ -17562,9 +17563,10 @@ test('yad skill unbind drops one line and leaves the file', () => {
 test('yad skill list says which answers are the project\'s and which are the engine\'s', () => {
   const T = skillProject({ '.sdlc/skills.json': { steps: { architecture: ['a', 'b'], release: 'ship-it' } } });
   try {
-    // `installed` (E51) is checked in its own test; here the home folder is the empty project itself.
+    // `installed` (E51) and `recommended` (E52) are checked in their own tests; here the home folder is
+    // the empty project itself.
     const rows = JSON.parse(grabSync(() => runSkillList(T, { json: true, home: T }))).steps
-      .map(({ installed: _installed, ...r }) => r);
+      .map(({ installed: _installed, recommended: _recommended, ...r }) => r);
     const byId = Object.fromEntries(rows.map((r) => [r.step, r]));
     assert.deepEqual(byId.architecture, { step: 'architecture', phase: 'design', skills: ['a', 'b'], source: 'project', default: 'yad-architecture' });
     assert.deepEqual(byId.stories, { step: 'stories', phase: 'plan', skills: ['yad-stories'], source: 'engine', default: 'yad-stories' });
@@ -17918,7 +17920,7 @@ test('E51: yad skill list shows a route\'s view, and marks what is not installed
     const spike = list({ profile: 'spike' });
     assert.equal(spike.profile, 'spike');
     assert.deepEqual(by(spike).epic, { step: 'epic', phase: 'discover', skills: ['spike-epic'], source: 'profile',
-      default: 'yad-epic', installed: { 'spike-epic': false } });
+      default: 'yad-epic', installed: { 'spike-epic': false }, recommended: recommendedSkills('epic') });
     assert.equal(by(spike).stories.source, 'project');
     const prose = grabSync(() => runSkillList(T, { profile: 'spike', home: H }));
     assert.match(prose, /bound for route spike only/);
@@ -17941,6 +17943,213 @@ test('E51: yad skill list shows a route\'s view, and marks what is not installed
       assert.match(out, says);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(H, { recursive: true, force: true }); }
+});
+
+// ---- E52: the recommendation catalogue ---------------------------------------------------------------
+
+const E52 = { ...(await import('./epic-state.mjs')), ...(await import('./manifest.mjs')), ...(await import('./toolbox.mjs')) };
+
+// Each catalogue version names exactly one list. Changing an entry without moving CATALOGUE.version
+// fails here; after moving it, add the new pair the failure prints. Old pairs stay, so a version is
+// never reused for other content.
+const CATALOGUE_VERSIONS = [
+  [1, '812f9dfb98ecda14'],
+];
+
+test('E52: every catalogue entry is well formed and vetted, and each version names one list', () => {
+  assert.ok(RECOMMENDATIONS.length >= 6, 'the catalogue recommends skills for several steps');
+  for (const r of RECOMMENDATIONS) assert.deepEqual(recommendationProblems(r), [], `${r.step}:${r.skill}`);
+  const keys = RECOMMENDATIONS.map((r) => `${r.step}:${r.skill}`);
+  assert.equal(new Set(keys).size, keys.length, 'no skill is listed twice for one step');
+  for (const step of new Set(RECOMMENDATIONS.map((r) => r.step))) {
+    assert.ok(RECOMMENDATIONS.filter((r) => r.step === step).length <= 3, `${step}: a short list, three at most`);
+  }
+  assert.ok(Number.isInteger(CATALOGUE.version) && CATALOGUE.version >= 1);
+  assert.equal(isCalendarDayE52(CATALOGUE.checked), true);
+  const pair = [CATALOGUE.version, catalogueDigest()];
+  const same = CATALOGUE_VERSIONS.find(([v]) => v === CATALOGUE.version);
+  assert.ok(same, `catalogue version ${CATALOGUE.version} is not recorded — add ${JSON.stringify(pair)} to CATALOGUE_VERSIONS`);
+  assert.equal(same[1], pair[1], `the catalogue changed but its version did not — move CATALOGUE.version in cli/recommend.mjs, then add [${CATALOGUE.version + 1}, '…'] to CATALOGUE_VERSIONS`);
+  assert.equal(CATALOGUE_VERSIONS.at(-1)[0], CATALOGUE.version, 'the newest recorded version is the shipped one');
+  // A record is never newer than the day the list was read through.
+  for (const r of RECOMMENDATIONS) assert.ok(r.vetted.on <= CATALOGUE.checked, `${r.step}:${r.skill} vetted after the catalogue's checked day`);
+});
+
+const isCalendarDayE52 = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+
+test('E52: a malformed entry is named, sentence by sentence', () => {
+  const good = RECOMMENDATIONS[0];
+  const says = (patch, re) => assert.ok(recommendationProblems({ ...good, ...patch }).some((p) => re.test(p)), JSON.stringify(patch));
+  says({ step: 'epic-review' }, /not a review gate/);
+  says({ step: 'release' }, /step a skill runs/);
+  says({ pool: 'repomix' }, /recommended pools/);
+  says({ reason: 'no full stop' }, /full stop/);
+  says({ caveat: '' }, /caveat is null/);
+  says({ file: 'https://example.com/README.md' }, /SKILL\.md/);
+  says({ file: good.file.replace(`/${good.vetted.release}/`, '/main/') }, /vetted\.release/);
+  says({ vetted: undefined }, /vetted is set/);
+  says({ vetted: { ...good.vetted, on: '2026-02-30' } }, /real YYYY-MM-DD/);
+  assert.equal(asVetted(good).id, `${good.step}:${good.skill}`);
+});
+
+test('E52: a suggestion is a chain — the pool skill first, yadflow\'s own skill last', () => {
+  for (const r of RECOMMENDATIONS) {
+    const chain = suggestedChain(r);
+    assert.equal(chain[0], r.skill);
+    assert.equal(chain.at(-1), E52.stepDef(r.step).skill, `${r.step}: yadflow's skill still writes the artifact`);
+    assert.match(bindCommand(r), new RegExp(`^yad skill bind ${r.step} ${chain.join(' ')}$`));
+    assert.match(bindCommand(r, 'spike'), / --profile spike$/);
+  }
+});
+
+test('E52: the catalogue states its age', () => {
+  const day = (s) => new Date(`${s}T00:00:00Z`);
+  assert.equal(catalogueAge(day(CATALOGUE.checked)), 0);
+  assert.match(catalogueLabel(day(CATALOGUE.checked)), new RegExp(`version ${CATALOGUE.version}, checked ${CATALOGUE.checked} \\(today\\)`));
+  const later = new Date(Date.parse(`${CATALOGUE.checked}T00:00:00Z`) + 40 * 86400000);
+  assert.equal(catalogueAge(later), 40);
+  assert.match(catalogueLabel(later), /\(40 days ago\)/);
+  assert.equal(catalogueAge(later, 'soon'), null);
+});
+
+test('E52: yad skill recommend lists each step\'s picks, marks what is bound and installed, and binds nothing', () => {
+  const T = skillProject();
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e52-home-'));
+  try {
+    const first = RECOMMENDATIONS[0];
+    installSkill(H, first.skill);
+    const today = new Date(`${CATALOGUE.checked}T00:00:00Z`);
+    const json = (opts = {}) => JSON.parse(grabSync(() => runSkillRecommend(T, { json: true, home: H, today, ...opts })));
+    const all = json();
+    assert.deepEqual(all.catalogue, { version: CATALOGUE.version, checked: CATALOGUE.checked, age: 0 });
+    assert.equal(all.recommendations.length, RECOMMENDATIONS.length);
+    assert.equal(all.installedChecked, true);
+    const row = all.recommendations.find((r) => r.step === first.step && r.skill === first.skill);
+    assert.deepEqual([row.installed, row.bound, row.bind, row.command], [true, false, suggestedChain(first), bindCommand(first)]);
+    assert.ok(all.recommendations.filter((r) => r !== row && r.skill !== first.skill).every((r) => r.installed === false));
+    assert.ok(all.recommendations.every((r) => r.vetted && r.licence && r.file && r.reason));
+
+    // One step only.
+    const one = json({ step: first.step });
+    assert.ok(one.recommendations.length >= 1 && one.recommendations.every((r) => r.step === first.step));
+    assert.equal(one.step, first.step);
+
+    // It wrote nothing — `bind` is the one writer.
+    assert.equal(fs.existsSync(path.join(T, '.sdlc/skills.json')), false);
+
+    // Running the printed command binds the chain, and the row then says so.
+    grabSync(() => runSkillBind(T, { step: first.step, skills: suggestedChain(first), home: H }));
+    assert.deepEqual(stepSkills(first.step, loadSkillBindings(T)), suggestedChain(first));
+    assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).bound, true);
+    assert.match(grabSync(() => runSkillRecommend(T, { step: first.step, home: H, today })), /already bound to this step/);
+    assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).ownSkillDropped, false);
+    // Bound IN PLACE of yadflow's own skill: allowed, but never quiet.
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [first.skill], home: H }));
+    assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).ownSkillDropped, true);
+    assert.match(grabSync(() => runSkillRecommend(T, { step: first.step, home: H, today })), /without .* last — the last skill's output is the artifact/);
+    // In the chain but not LAST: the pick's output is still the artifact — the same failure.
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [...suggestedChain(first)].reverse(), home: H }));
+    assert.equal(json({ step: first.step }).recommendations.find((r) => r.skill === first.skill).ownSkillDropped, true);
+    // Bound under its plugin name (`<plugin>:<skill>`) it is the same skill: bound, and still flagged alone.
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [`some-plugin:${first.skill}`], home: H }));
+    const plugged = json({ step: first.step }).recommendations.find((r) => r.skill === first.skill);
+    assert.deepEqual([plugged.bound, plugged.ownSkillDropped], [true, true]);
+    grabSync(() => runSkillBind(T, { step: first.step, skills: [`some-plugin:${first.skill}`, E52.stepDef(first.step).skill], home: H }));
+    assert.deepEqual(['bound', 'ownSkillDropped'].map((k) => json({ step: first.step }).recommendations.find((r) => r.skill === first.skill)[k]), [true, false]);
+    grabSync(() => runSkillBind(T, { step: first.step, skills: suggestedChain(first), home: H }));
+    // The other way round is NOT the same skill: a pick the catalogue names with its plugin
+    // (`mattpocock-skills:tdd`) is not a team's own bare `tdd` (review 2).
+    const qualified = RECOMMENDATIONS.find((r) => r.skill.includes(':'));
+    const bareOnly = qualified.skill.split(':').at(-1);
+    grabSync(() => runSkillBind(T, { step: qualified.step, skills: [bareOnly], home: H }));
+    const pickRow = json({ step: qualified.step }).recommendations.find((r) => r.skill === qualified.skill);
+    assert.deepEqual([pickRow.bound, pickRow.ownSkillDropped], [false, false]);
+    assert.ok(grabSync(() => runSkillRecommend(T, { step: qualified.step, home: H, today })).includes(bindCommand(qualified)), 'the bind command is still offered');
+    // Spelled with its marketplace (`<plugin>@<marketplace>:<skill>`), it IS the pick — as `installed` counts it.
+    const [plugin, skill] = qualified.skill.split(':');
+    grabSync(() => runSkillBind(T, { step: qualified.step, skills: [`${plugin}@somewhere:${skill}`, E52.stepDef(qualified.step).skill], home: H }));
+    assert.equal(json({ step: qualified.step }).recommendations.find((r) => r.skill === qualified.skill).bound, true);
+    grabSync(() => runSkillUnbind(T, { step: qualified.step }));
+
+    // A route: its commands carry --profile, and a line bound for the route counts as bound there only.
+    const spike = json({ profile: 'spike' });
+    assert.equal(spike.profile, 'spike');
+    assert.ok(spike.recommendations.length > 0);
+    assert.ok(spike.recommendations.every((r) => r.command.endsWith(' --profile spike')));
+    // Only the steps spike walks: a command for `architecture --profile spike` is one `bind` refuses.
+    assert.ok(!spike.recommendations.some((r) => r.step === 'architecture'));
+    for (const r of spike.recommendations) {
+      const { failed } = grabFailing(() => runSkillBind(T, { step: r.step, skills: r.bind, profile: 'spike', home: H }));
+      assert.equal(failed, false, r.command);
+    }
+    assert.match(grabSync(() => runSkillRecommend(T, { profile: 'spike', home: H, today })), /yad skill unbind <step> --profile spike/);
+    // --epic reads the route the epic records, and names the epic.
+    seedEpic(T, 'EP-sp', { epicId: 'EP-sp', profile: 'spike', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'todo' }] });
+    const byEpic = json({ epic: 'EP-sp' });
+    assert.deepEqual([byEpic.epic, byEpic.profile], ['EP-sp', 'spike']);
+    assert.deepEqual(byEpic.recommendations.map((r) => r.command), spike.recommendations.map((r) => r.command));
+    const offRoute = grabFailing(() => runSkillRecommend(T, { step: 'architecture', profile: 'spike', home: H, today }));
+    assert.equal(offRoute.failed, true);
+    assert.match(offRoute.out, /route `spike` has no `architecture` step/);
+
+    // The prose names the pool, the reason, the command, and the catalogue's version and age.
+    const prose = grabSync(() => runSkillRecommend(T, { home: H, today }));
+    assert.match(prose, new RegExp(`recommendation catalogue version ${CATALOGUE.version}, checked ${CATALOGUE.checked} \\(today\\)`));
+    for (const r of RECOMMENDATIONS) assert.ok(prose.includes(r.reason), r.skill);
+    assert.match(prose, /nothing is bound for you/);
+    assert.match(prose, /not installed here — install its pool first/);
+
+    // Refusals: not a step, a review gate, and the route rules `list` has.
+    for (const [opts, says] of [[{ step: 'release' }, /not a step this yadflow runs/], [{ step: 'epic-review' }, /is a review gate/],
+      [{ epic: 'EP-x', profile: 'spike' }, /not both/], [{ profile: '__proto__' }, /not a profile id/]]) {
+      const { out, failed } = grabFailing(() => runSkillRecommend(T, { home: H, today, ...opts }));
+      assert.equal(failed, true, JSON.stringify(opts));
+      assert.match(out, says);
+    }
+    // A step with no pick says yadflow's own skill is the one to run.
+    const bare = E52.STEPS.find((s) => s.skill && !RECOMMENDATIONS.some((r) => r.step === s.id));
+    if (bare) assert.match(grabSync(() => runSkillRecommend(T, { step: bare.id, home: H, today })), /no recommendation for/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(H, { recursive: true, force: true }); }
+});
+
+test('E52: yad skill list names the catalogue\'s picks on a step still on the default, and only there', () => {
+  const first = RECOMMENDATIONS[0];
+  const other = RECOMMENDATIONS.find((r) => r.step !== first.step);
+  // `other`'s line names no skill (`ignored`): the default still runs there, so it gets the picks too.
+  const T = skillProject({ '.sdlc/skills.json': { steps: { [first.step]: 'our-own', [other.step]: '' } } });
+  try {
+    const today = new Date(Date.parse(`${CATALOGUE.checked}T00:00:00Z`) + 3 * 86400000);
+    const j = JSON.parse(grabSync(() => runSkillList(T, { json: true, home: T, today })));
+    assert.deepEqual(j.catalogue, { version: CATALOGUE.version, checked: CATALOGUE.checked, age: 3 });
+    for (const r of j.steps) assert.deepEqual(r.recommended, recommendedSkills(r.step), r.step);
+    assert.equal(j.steps.find((r) => r.step === other.step).source, 'ignored');
+    const prose = grabSync(() => runSkillList(T, { home: T, today }));
+    // A row is the step id as its first or second word (after the mark); the steps after it are later words.
+    const line = (step) => prose.split('\n').find((l) => l.trim().split(/\s+/).slice(0, 2).includes(step));
+    assert.doesNotMatch(line(first.step), /recommended:/, 'the team chose this step — no nudge');
+    assert.match(line(other.step), new RegExp(`recommended: ${recommendedSkills(other.step).join(', ')}`));
+    assert.match(prose, /yad skill recommend <step>`/);
+    assert.match(prose, new RegExp(`— recommendation catalogue version ${CATALOGUE.version}, checked ${CATALOGUE.checked} \\(3 days ago\\)`));
+    assert.doesNotMatch(prose, /\(recommendation catalogue/, 'no brackets inside brackets');
+
+    // A route's view offers only the steps it walks, and the hint carries the route.
+    const spike = JSON.parse(grabSync(() => runSkillList(T, { json: true, home: T, profile: 'spike' })));
+    assert.deepEqual(spike.steps.find((r) => r.step === 'architecture').recommended, []);
+    assert.ok(spike.steps.some((r) => r.recommended.length), 'spike still walks steps with picks');
+    const spikeProse = grabSync(() => runSkillList(T, { home: T, profile: 'spike' }));
+    const spikeRow = spikeProse.split('\n').find((l) => l.trim().split(/\s+/).slice(0, 2).includes('architecture')) || '';
+    assert.doesNotMatch(spikeRow, /recommended:/);
+    assert.match(spikeProse, /yad skill recommend <step> --profile spike/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E52: the catalogue changes no project file and no toolbox entry', () => {
+  // Shipped data, read in place: no new E52.PROJECT_FILES key (a project file would be a shape change).
+  assert.ok(!Object.values(E52.PROJECT_FILES).some((f) => /recommend|catalogue/i.test(f)));
+  // The pools stay bound by `yad skill bind`, never named by a skill (E87's two-way test).
+  for (const t of E52.TOOLBOX.filter((x) => x.tier === 'recommended')) assert.deepEqual(E52.skillsUsing(t), [], t.id);
+  // Every pool a pick comes from is one the toolbox lists, so `yad toolbox list` shows how to install it.
+  for (const r of RECOMMENDATIONS) assert.ok(E52.TOOLBOX.some((t) => t.id === r.pool && t.tier === 'recommended'), r.pool);
 });
 
 test('E51: yad skill bind warns when the skill is not installed here, and writes it anyway', () => {
@@ -24724,7 +24933,7 @@ test('E1 bin/yad.mjs: every refusal and odd case is one envelope on stdout, pros
 
     // A usage refusal inside the switch is JSON too, with the usage as the hint.
     r = yad('skill', 'frob', '--json');
-    assert.deepEqual([r.status, answer(r).error, /^usage: yad skill list/.test(answer(r).hint)], [1, 'unknown skill action: frob (list, bind, unbind)', true]);
+    assert.deepEqual([r.status, answer(r).error, /^usage: yad skill list/.test(answer(r).hint)], [1, 'unknown skill action: frob (list, bind, unbind, recommend)', true]);
 
     // --help is an answer, not prose on stdout.
     r = yad('--help', '--json');

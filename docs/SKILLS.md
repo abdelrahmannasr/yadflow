@@ -8,7 +8,9 @@ directly. Each skill stops at a gate and never auto-advances unless the team set
 setting: `yad skill bind <step> <skill>` records your own in `.sdlc/skills.json`, and `yad next` names
 that one from then on — for every epic, or with `--profile <route>` for epics on one route only.
 Several skills on one step run as a chain, in order. See
-[choosing the skill for a step](CLI.md#choosing-the-skill-for-a-step).
+[choosing the skill for a step](CLI.md#choosing-the-skill-for-a-step). For skills worth binding,
+`yad skill recommend` lists hand-picked ones from the recommended pools, with the reason and the bind
+command for each ([the catalogue](CLI.md#recommended-skills-the-catalogue)).
 
 For an introduction see the [README](../README.md); for the step-by-step path see
 [`WALKTHROUGH.md`](WALKTHROUGH.md) or the [team guide](../TEAM-GUIDE.md). A condensed "when do I reach

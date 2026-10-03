@@ -171,7 +171,7 @@ say "7/8  the gate-sync fragments ship the major this release publishes"
 bash "$ROOT/scripts/pin-major-check.sh"
 
 # ---------------------------------------------------------------------------------------------
-say "8/8  every toolbox tool was vetted recently"
+say "8/8  every toolbox tool and recommended skill was vetted recently"
 # E88: each tool yadflow names or runs carries a vetting record — where its licence was read and its
 # official source. The unit suite holds the records complete; only here is their AGE checked, so main
 # never fails by itself but a release cannot ship a record older than the limit. The script says what to
