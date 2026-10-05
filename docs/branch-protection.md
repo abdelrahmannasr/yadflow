@@ -59,9 +59,12 @@ them from the list it offers.
 
 | Repo | Workflow file | Checks |
 |---|---|---|
-| Product | `.github/workflows/yad-product-checks.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard` |
+| Product | `.github/workflows/yad-product-checks.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard`, `member-check` |
 | Product, when the file is there | `.github/workflows/yad-verified-commits.yml` | `verified-commits` |
 | Each code repo | `.github/workflows/yad-checks.yml` | `spec-link`, `contract-check`, `risk-map`, `build-test-lint`, `lineage-check`, `epic-open`, `reconcile-debt`, `commit-message`, `pr-title`, `pr-template`, `verified-commits` |
+
+`member-check` (E131) must be required too: the active-people count trusts a member file only because
+this check judged it, and a check that is not required lets a refused file merge with a red cross.
 
 Some of these jobs skip themselves on a bare title or description edit. GitHub counts a skipped job as
 passed, so requiring them does not block that edit.
@@ -115,7 +118,7 @@ retries every 15 minutes and fails the same way until the token is there.
 | Remove all approvals when commits are added to the source branch | on | Safe with yad, for the same reason as on GitHub |
 
 The checks run as jobs in the merge request pipeline: on the Product `yad-product-commit-message`,
-`yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard` and, when that file is there,
+`yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard`, `yad-product-member-check` and, when that file is there,
 `yad-product-verified-commits`; in a code repo `yad-spec-link`, `yad-contract-check`, `yad-risk-map`,
 `yad-build-test-lint`, `yad-lineage-check`, `yad-epic-open`, `yad-reconcile-debt`,
 `yad-commit-message`, `yad-pr-title`, `yad-pr-template` and `yad-verified-commits`. "Pipelines must
