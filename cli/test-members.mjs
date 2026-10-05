@@ -50,8 +50,12 @@ function liveGate(T) {
   fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/checks/member-check.mjs'), path.join(T, 'checks/member-check.mjs'));
   fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-product-checks.yml'), path.join(T, '.github/workflows/yad-product-checks.yml'));
+  git(T, 'add', '--', '.sdlc/product.json', 'checks', '.github');
+  git(T, 'commit', '-q', '--allow-empty', '-m', 'chore(product): install the member-check gate');
 }
 const member = (T, file, rec) => put(path.join(T, M.MEMBERS_DIR, file), rec);
+// A member file merged AFTER the gate arrived — the only kind the count trusts (review 3).
+const memberC = (T, file, rec) => { member(T, file, rec); git(T, 'add', '-A', '--', M.MEMBERS_DIR); git(T, 'commit', '-q', '--allow-empty', '-m', `member ${file}`); };
 const alice = (over = {}) => ({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 1 }], emails: [M.hashEmail('alice@work.com')], names: ['Alice Smith'], joined: TODAY, ...over });
 
 test('E131 readMembers: a members folder reached through a link is never read (review 1)', () => {
@@ -70,8 +74,8 @@ test('E131 readMembers: an OTHER account two files claim is matched by nobody; o
   const T = product();
   try {
     liveGate(T);
-    member(T, 'github-alice.json', alice({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }] }));
-    member(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }, { platform: 'github', host: 'ghe.io', login: 'alice' }] });
+    memberC(T, 'github-alice.json', alice({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }] }));
+    memberC(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }, { platform: 'github', host: 'ghe.io', login: 'alice' }] });
     const got = M.readMembers(T);
     const [a, b] = got.members;
     assert.equal(M.memberMatches(a, { login: 'al' }), false, 'disputed: nobody');
@@ -113,24 +117,24 @@ test('E131 readMembers + gateMemberMap: a shared account or email joins nothing'
   const T = product();
   try {
     liveGate(T);
-    member(T, 'github-alice.json', alice());
-    member(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }], emails: [M.hashEmail('bob@work.com')], names: ['Bob'] });
+    memberC(T, 'github-alice.json', alice());
+    memberC(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }], emails: [M.hashEmail('bob@work.com')], names: ['Bob'] });
     let map = M.gateMemberMap(T);
     assert.equal(map.get(M.hashEmail('alice@work.com')), 'alice');
     assert.equal(map.get(M.hashEmail('bob@work.com')), 'bob');
     // Bob claims Alice's email: neither file joins it any more.
-    member(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }], emails: [M.hashEmail('bob@work.com'), M.hashEmail('alice@work.com')] });
+    memberC(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }], emails: [M.hashEmail('bob@work.com'), M.hashEmail('alice@work.com')] });
     const got = M.readMembers(T);
     assert.equal(got.duplicates.length, 1);
     map = M.gateMemberMap(T);
     assert.equal(map.has(M.hashEmail('alice@work.com')), false, 'a shared email is dropped from every pairing');
     assert.equal(map.get(M.hashEmail('bob@work.com')), 'bob', 'the rest of the file still pairs');
     // Bob lists Alice's GitLab account too: a shared account is reported.
-    member(T, 'github-alice.json', alice({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }] }));
-    member(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }, { platform: 'gitlab', host: 'gitlab.com', login: 'AL' }] });
+    memberC(T, 'github-alice.json', alice({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }] }));
+    memberC(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }, { platform: 'gitlab', host: 'gitlab.com', login: 'AL' }] });
     assert.match(M.readMembers(T).duplicates.join('\n'), /GitLab al account is claimed by/);
     // An unreadable file is listed, never dropped, and adds no pairing.
-    member(T, 'github-carol.json', '{');
+    memberC(T, 'github-carol.json', '{');
     assert.equal(M.readMembers(T).errors.length, 1);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -144,13 +148,18 @@ test('E131 gateMemberMap: a GitLab Product pairs nothing for the gate count (dec
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E131 gateMemberMap: no pairing unless the member-check gate is live (review 2)', () => {
+test('E131 gateMemberMap: no pairing unless the member-check gate is live (review 2) and judged the file (review 3)', () => {
   const T = product();
   try {
-    member(T, 'github-alice.json', alice());
+    memberC(T, 'github-alice.json', alice());
     assert.equal(M.gateMemberMap(T).size, 0, 'a local-ledger Product: a file is only its owner\'s statement');
     liveGate(T);
-    assert.equal(M.gateMemberMap(T).size, 1);
+    assert.equal(M.gateMemberMap(T).size, 0, 'merged BEFORE the gate arrived: no gate judged it');
+    memberC(T, 'github-alice.json', alice({ names: ['Alice Smith', 'alice'] }));
+    assert.equal(M.gateMemberMap(T).size, 1, 'changed again after it: judged, trusted');
+    member(T, 'github-alice.json', alice({ emails: [M.hashEmail('bob@work.com')] }));
+    assert.equal(M.gateMemberMap(T).size, 0, 'an edit not committed is nobody\'s proof');
+    memberC(T, 'github-alice.json', alice({ names: ['Alice Smith', 'alice'] }));
     fs.appendFileSync(path.join(T, 'checks/member-check.mjs'), '\n// edited\n');
     assert.equal(M.gateMemberMap(T).size, 0, 'an edited or outdated gate is not trusted');
     liveGate(T);
@@ -178,15 +187,15 @@ test('E131 THE COUNT: a work-email committer who approves by login is ONE person
     const before = activePeople(T, { today: TODAY });
     assert.deepEqual(before.unknown, []);
     assert.equal(before.capacity.active, 4, 'two people read as four: E108 blocker (a)');
-    member(T, 'github-alice.json', alice());
+    memberC(T, 'github-alice.json', alice());
     assert.equal(activePeople(T, { today: TODAY }).capacity.active, 3, 'Alice is one person now; Bob, with no file, still counts twice');
-    member(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }], emails: [M.hashEmail('bob@work.com')] });
+    memberC(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }], emails: [M.hashEmail('bob@work.com')] });
     assert.equal(activePeople(T, { today: TODAY }).capacity.active, 2);
     // A file that does not parse adds no pairing: the count goes back UP, never down.
-    member(T, 'github-bob.json', '{');
+    memberC(T, 'github-bob.json', '{');
     assert.equal(activePeople(T, { today: TODAY }).capacity.active, 3);
     // A member who never committed or approved adds nobody: a file is never a person by itself.
-    member(T, 'github-carol.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'carol' }], emails: [M.hashEmail('carol@x.io')] });
+    memberC(T, 'github-carol.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'carol' }], emails: [M.hashEmail('carol@x.io')] });
     assert.equal(activePeople(T, { today: TODAY }).capacity.active, 3);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -375,6 +384,28 @@ test('E131 runMemberAdd end to end with fake platforms: writes, commits per emai
     assert.deepEqual(file.emails, [M.hashEmail('alice@work.com')]);
     assert.equal(JSON.stringify(file).includes('alice@work.com'), false, 'the address itself is never written');
     assert.deepEqual(git(T, 'log', '--format=%s', 'origin/main..yad/member/alice').split('\n'), ['chore(product): add team member alice'], 'built on origin\'s main, not on the checkout');
+    // Someone listed Alice's known address in their own file on origin (review 3): it is left out of hers,
+    // never a refusal of her whole join — unless it was her only email.
+    const code = process.exitCode;
+    const other = tmp();
+    try {
+      git(other, 'clone', '-q', origin, '.');
+      put(path.join(other, M.MEMBERS_DIR, 'github-bob.json'), { accounts: [{ platform: 'github', host: 'github.com', login: 'bob', id: 2 }], emails: [M.hashEmail('alice@work.com')] });
+      git(other, 'add', '-A');
+      execFileSync('git', ['-c', 'user.name=Bob', '-c', 'user.email=bob@x.io', 'commit', '-q', '-m', 'bob'], { cwd: other, stdio: 'pipe' });
+      git(other, 'push', '-q', 'origin', 'HEAD:main');
+      await M.runMemberAdd(T, { runner, env: {}, noPush: true, repos: { dirs: [], hosts: [] }, today: TODAY });
+      assert.equal(process.exitCode, 1, 'her only email is taken: said, with what to do');
+      // A file on origin for the login "alice" but another account id: a reused login takes nothing over.
+      process.exitCode = code;
+      fs.rmSync(path.join(other, M.MEMBERS_DIR, 'github-bob.json'));
+      put(path.join(other, M.MEMBERS_DIR, 'github-alice.json'), { accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 99 }], emails: [] });
+      git(other, 'add', '-A');
+      execFileSync('git', ['-c', 'user.name=Old', '-c', 'user.email=old@x.io', 'commit', '-q', '-m', 'old alice'], { cwd: other, stdio: 'pipe' });
+      git(other, 'push', '-q', 'origin', 'HEAD:main');
+      await M.runMemberAdd(T, { runner, env: {}, noPush: true, repos: { dirs: [], hosts: [] }, today: TODAY });
+      assert.equal(process.exitCode, 1, 'id 99 is not account 3');
+    } finally { process.exitCode = code; fs.rmSync(other, { recursive: true, force: true }); }
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(origin, { recursive: true, force: true }); }
 });
 

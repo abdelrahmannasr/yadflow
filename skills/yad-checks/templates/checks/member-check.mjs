@@ -63,7 +63,8 @@ function hostOf(url) {
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return scp[1].toLowerCase();
   try { return new URL(u).hostname.toLowerCase() || null; } catch { return null; }
 }
-const productHost = hostOf(settings?.git_url) || (platform === 'gitlab' ? 'gitlab.com' : 'github.com');
+// The same order the CLI reads it in: the settings' `git_url`, then the clone's origin (review 3).
+const productHost = hostOf(settings?.git_url) || hostOf(git('remote', 'get-url', 'origin').out) || (platform === 'gitlab' ? 'gitlab.com' : 'github.com');
 const onProduct = (a) => a?.platform === platform && String(a?.host || '').toLowerCase() === productHost;
 
 const base = process.argv[2];
@@ -162,7 +163,7 @@ for (const { status, path } of changed) {
   if (here[0].id !== authorId) { fail(`${path}: the account id in the file (${here[0].id ?? 'none'}) is not the author's (${authorId})`); continue; }
   const was = fileAt(base, path);
   const wasHere = Array.isArray(was?.accounts) ? was.accounts.filter(onProduct) : [];
-  if (wasHere.length && wasHere[0].id !== undefined && wasHere[0].id !== authorId) { fail(`${path}: belonged to account id ${wasHere[0].id}, not ${author}'s (${authorId}) — a reused login does not take over a member file; remove it first`); continue; }
+  if (wasHere.length && wasHere[0].id !== authorId) { fail(`${path}: belonged to account id ${wasHere[0].id}, not ${author}'s (${authorId}) — a reused login does not take over a member file; remove it first`); continue; }
   if (platform !== 'github') { say(`PASS [member-check]: ${path} belongs to ${author} (on GitLab its emails feed the team list only)`); continue; }
   const before = emailsOf(fileAt(base, path));
   const added = [...emailsOf(rec)].filter((h) => !before.has(h));
@@ -187,6 +188,9 @@ for (const p of files) {
   for (const h of emailsOf(rec)) emails.set(h, [...(emails.get(h) || []), p]);
 }
 for (const [k, list] of accounts) if (list.length > 1) fail(`the account ${k} is in ${list.join(' and ')} — one account belongs to one member`);
-for (const [, list] of emails) if (list.length > 1) fail(`one email is in ${list.join(' and ')} — one email belongs to one member`);
+// On GitLab an email is never proven and never used by the count, so a shared one is not refused: refusing it
+// would let whoever listed someone's known address first block that person (review 3). The CLI pairs it
+// with nobody.
+if (platform === 'github') for (const [, list] of emails) if (list.length > 1) fail(`one email is in ${list.join(' and ')} — one email belongs to one member`);
 
 process.exit(rc);

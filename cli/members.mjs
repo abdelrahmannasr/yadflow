@@ -189,8 +189,10 @@ export function gateMemberMap(root, { read = null, anyPlatform = false } = {}) {
   // verified Product with the shipped gate installed and run by its checks workflow. Anywhere else a file
   // is its owner's statement, and a statement must never make the count smaller.
   if (!anyPlatform && !memberGateLive(root, got.identity)) return map;
+  const since = anyPlatform ? null : gateSince(root, got.identity);
   for (const m of got.members) {
     if (got.dupAccounts.has(accountKey(m.primary))) continue;
+    if (!anyPlatform && !judgedByGate(root, m.rel, since)) continue;
     for (const h of m.emails) if (!got.dupEmails.has(h)) map.set(h, m.primary.login);
   }
   return map;
@@ -204,8 +206,36 @@ export function memberGateLive(root, identity) {
     const shipped = fs.readFileSync(asset('skills/yad-checks/templates/checks/member-check.mjs'), 'utf8');
     if (fs.readFileSync(path.join(root, 'checks/member-check.mjs'), 'utf8') !== shipped) return false;
   } catch { return false; }
-  const workflows = identity.platform === 'gitlab' ? ['.gitlab/ci/yad-product-checks.yml'] : ['.github/workflows/yad-product-checks.yml'];
-  return workflows.some((w) => { try { return /node checks\/member-check\.mjs/.test(fs.readFileSync(path.join(root, w), 'utf8')); } catch { return false; } });
+  // The workflow that runs it, exactly as shipped too (review 3): a commented-out line or an `if: false`
+  // job would mention the gate without running it.
+  const [src, dest] = identity.platform === 'gitlab'
+    ? ['skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml', '.gitlab/ci/yad-product-checks.yml']
+    : ['skills/yad-checks/templates/github/yad-product-checks.yml', '.github/workflows/yad-product-checks.yml'];
+  try { return fs.readFileSync(path.join(root, dest), 'utf8') === fs.readFileSync(asset(src), 'utf8'); } catch { return false; }
+}
+
+// The commit, on the current branch's first-parent line, from which the member-check job has been in the
+// Product's checks workflow — and so from which every member file that reached the branch was judged by
+// it. Null when it cannot be told (no git, a shallow clone, never added): then no file is trusted.
+export function gateSince(root, identity) {
+  const dest = identity?.platform === 'gitlab' ? '.gitlab/ci/yad-product-checks.yml' : '.github/workflows/yad-product-checks.yml';
+  // The LAST commit that changed how often the job's command appears: with the gate live now, that is when
+  // it was last (re)added — so a removed-then-restored gate does not vouch for the gap between.
+  const r = gitAt(root)(['log', '--first-parent', '-1', '--format=%H', '-S', 'node checks/member-check.mjs', '--', dest]);
+  return r.ok ? r.out.trim() || null : null;
+}
+
+// Was this member file last changed AFTER the gate arrived (review 3)? The commit that brought its last
+// change onto the first-parent line must come strictly after `since`. A file merged while the gate was
+// missing, outdated or not yet installed was never judged, so the count does not trust it — its owner runs
+// `yad member add` again, and that change is judged.
+export function judgedByGate(root, rel, since) {
+  if (!since) return false;
+  const g = gitAt(root);
+  const last = g(['log', '--first-parent', '-1', '--format=%H', '--', rel]).out.trim();
+  if (!last || last === since) return false;
+  if (g(['status', '--porcelain', '--', rel]).out.trim()) return false;   // edited here, not committed
+  return g(['merge-base', '--is-ancestor', since, last]).ok;
 }
 
 // Does this piece of evidence (a commit, an approval, a ship) belong to this member? By any of their
@@ -610,23 +640,34 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   const mine = existingAll.members.find((m) => proofs.some((p) => p.account.platform === identity.platform && p.account.host === identity.host && p.account.login.toLowerCase() === m.primary.login.toLowerCase()));
   const built = buildRecord({ identity, proofs, git, today, existing: mine || null });
   if (built.problem) return refuse(built.problem, built.hint || (built.login ? `run \`${cli} auth login --hostname ${identity.host}\`, then \`yad member add\`` : null));
-  const { record, primary, newEmails } = built;
+  const { record, primary } = built;
+  let { newEmails } = built;
   if (!Number.isSafeInteger(primary.id)) return refuse(`the platform did not give the numeric id of ${accountLabel(primary)} — the member-check gate needs it`, 'run `yad member add` again; if it keeps failing, report it with `yad report`');
   // A login renamed away and registered again by someone else is another account: the old file is not theirs.
-  if (mine && mine.primary.id !== undefined && mine.primary.id !== primary.id) return refuse(`${mine.rel} belongs to another account with the login ${forTerminal(primary.login)} (id ${mine.primary.id}, yours is ${primary.id})`, 'that file is someone else\'s — ask the team to remove it (`yad member remove <login> --reason …`), then run `yad member add`');
+  if (mine && mine.primary.id !== primary.id) return refuse(`${mine.rel} belongs to another account with the login ${forTerminal(primary.login)} (id ${mine.primary.id}, yours is ${primary.id})`, 'that file is someone else\'s — ask the team to remove it (`yad member remove <login> --reason …`), then run `yad member add`');
   // An account or email another member file already holds is not added here: CI would refuse the PR.
   // A clash that CI refuses: your Product account as someone's primary, or an email another file holds. An
   // OTHER account someone else also claims is not refused — your file is the truth about you, and the
   // claims are reported (`yad member list`, `yad doctor`) until one is dropped.
   const taken = existingAll.members.filter((m) => m !== mine);
-  const clash = taken.some((m) => accountKey(m.primary) === accountKey(primary)) ? `the ${accountLabel(primary)} account`
-    : record.emails.some((h) => taken.some((m) => m.emails.includes(h))) ? 'an email of yours' : null;
-  if (clash) return refuse(`${clash} is already in another member file`, 'one account or email belongs to one member — if that file is yours from another login, remove it first (`yad member remove <login> --reason …`)');
+  if (taken.some((m) => accountKey(m.primary) === accountKey(primary))) return refuse(`the ${accountLabel(primary)} account is already in another member file`, 'one account belongs to one member — if that file is yours from another login, remove it first (`yad member remove <login> --reason …`)');
+  // An email another file lists is left out of yours, with a warning — never a refusal of the whole add
+  // (review 3): on GitLab anyone can list a known address, and that must not block its owner from joining.
+  const shared = record.emails.filter((h) => taken.some((m) => m.emails.includes(h)));
+  if (shared.length) {
+    warn(`${shared.length} of your emails ${shared.length === 1 ? 'is' : 'are'} already in another member file — left out of yours; \`yad member list\` names the file`);
+    record.emails = record.emails.filter((h) => !shared.includes(h));
+    newEmails = newEmails.filter((h) => !shared.includes(h));
+    if (!record.emails.length) return refuse('every email of yours is already in another member file', 'ask the team to remove the file that lists them (`yad member remove <login> --reason …`), then run `yad member add`');
+  }
   for (const a of record.accounts.slice(1)) {
     const other = taken.find((m) => m.accounts.some((b) => accountKey(b) === accountKey(a)));
     if (other) warn(`the ${accountLabel(a)} account is also claimed by ${other.rel} — neither claim is matched until one file drops it`);
   }
   const rel = memberRel(identity.platform, primary.login);
+  if (identity.platform === 'github' && identity.verified && !memberGateLive(root, identity)) {
+    warn('the member-check gate is missing or not the shipped copy here — until `yad update` installs it, the active-people count does not use member files, and a file merged before it is not trusted later either (run `yad member add` again then)');
+  }
   const same = !!mine && memberJSON({ accounts: mine.accounts, emails: mine.emails, names: mine.names, joined: mine.joined }) === memberJSON(record);
   for (const s of built.skipped) info(`${s}: logged in here, but shares no verified email with ${accountLabel(primary)} — not added`);
   if (built.unproven) info(`${built.unproven} git email(s) here are not verified on the account — not added (they stay counted as their own person)`);
