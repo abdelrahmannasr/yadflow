@@ -48,6 +48,7 @@ import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.
 import { LOGIN_RE, hostFromGitUrl, plainHost } from './platform.mjs';
 import { repoPathFromGitUrl, httpStatus } from './protection.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
+import { resolveDefaultBranch } from './productcommit.mjs';
 
 export const MEMBERS_DIR = '.sdlc/members';
 export const DEFAULT_TTL_DAYS = 90;
@@ -57,6 +58,7 @@ const DEFAULT_HOST = { github: 'github.com', gitlab: 'gitlab.com' };
 const HASH_RE = /^sha256:[0-9a-f]{64}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIMEOUT = 15_000;
+const BRANCH_RE = /^\w[\w./-]*$/;
 
 // ---- the record ---------------------------------------------------------------------------------
 
@@ -129,30 +131,49 @@ export function readMemberFile(file, { platform, host } = {}) {
 export function readMembers(root, { identity = null } = {}) {
   const id = identity || productIdentity(root);
   const dir = path.join(root, MEMBERS_DIR);
+  const none = (errors) => ({ members: [], errors, duplicates: [], dupAccounts: new Set(), dupEmails: new Set(), identity: id });
+  // A LINK is never followed (E131 review 1): the member-check gate judges `.sdlc/members/` by the paths a
+  // PR changes, so a folder or file reached through a link would hold pairings no gate ever saw. The same
+  // refusal E115 makes for links under specs/.
+  const linked = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+  if (linked(path.join(root, '.sdlc')) || linked(dir)) return none([{ rel: MEMBERS_DIR, error: `${MEMBERS_DIR} is reached through a link, so no member file is read` }]);
   let names;
   try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort(); }
-  catch (e) { return { members: [], errors: e.code === 'ENOENT' ? [] : [{ rel: MEMBERS_DIR, error: `cannot be listed (${e.code || e.message})` }], duplicates: [], dupAccounts: new Set(), dupEmails: new Set(), identity: id }; }
+  catch (e) { return none(e.code === 'ENOENT' ? [] : [{ rel: MEMBERS_DIR, error: `${MEMBERS_DIR} cannot be listed (${e.code || e.message})` }]); }
   const members = [];
   const errors = [];
   for (const n of names) {
     const rel = `${MEMBERS_DIR}/${n}`;
+    if (linked(path.join(dir, n))) { errors.push({ rel, error: `${rel} is a link — a member file is never read through one` }); continue; }
     const { record, error } = readMemberFile(path.join(dir, n), id);
     if (error) errors.push({ rel, error: `${rel} ${error}` });
     else members.push({ rel, ...record });
   }
+  // WHO WINS when two files name one account (E131 review 6). A member's account on the Product's own
+  // platform is proven by CI (it is the PR's author); their OTHER accounts are not. So:
+  //   - one primary account, or one email, in two files: a real conflict — neither file joins it;
+  //   - an other account that is someone's PRIMARY: the primary's owner keeps it, the claim is ignored;
+  //   - an other account two files claim: disputed — matched by nobody until one file drops it.
+  // A claim that is ignored never blocks the person it names: their own file is still read in full.
   const seenAcc = new Map();
+  const seenPrimary = new Map();
   const seenMail = new Map();
   for (const m of members) {
-    for (const a of m.accounts) seenAcc.set(accountKey(a), [...(seenAcc.get(accountKey(a)) || []), m.rel]);
+    seenPrimary.set(accountKey(m.primary), [...(seenPrimary.get(accountKey(m.primary)) || []), m.rel]);
+    for (const a of m.accounts) if (accountKey(a) !== accountKey(m.primary)) seenAcc.set(accountKey(a), [...(seenAcc.get(accountKey(a)) || []), m.rel]);
     for (const h of m.emails) seenMail.set(h, [...(seenMail.get(h) || []), m.rel]);
   }
-  const dupAccounts = new Set([...seenAcc].filter(([, rels]) => rels.length > 1).map(([k]) => k));
+  const dupAccounts = new Set([...seenPrimary].filter(([, rels]) => rels.length > 1).map(([k]) => k));
+  const disputed = new Set([...seenAcc].filter(([k, rels]) => rels.length > 1 || seenPrimary.has(k)).map(([k]) => k));
   const dupEmails = new Set([...seenMail].filter(([, rels]) => rels.length > 1).map(([h]) => h));
+  const label = (k) => { const [p, h, l] = k.split('\0'); return accountLabel({ platform: p, host: h, login: l }); };
   const duplicates = [
-    ...[...seenAcc].filter(([k]) => dupAccounts.has(k)).map(([k, rels]) => { const [p, h, l] = k.split('\0'); return `the ${accountLabel({ platform: p, host: h, login: l })} account is in ${rels.join(' and ')}`; }),
+    ...[...seenPrimary].filter(([k]) => dupAccounts.has(k)).map(([k, rels]) => `the ${label(k)} account is in ${rels.join(' and ')}`),
     ...[...seenMail].filter(([h]) => dupEmails.has(h)).map(([, rels]) => `one email is in ${rels.join(' and ')}`),
+    ...[...disputed].map((k) => `the ${label(k)} account is claimed by ${[...(seenPrimary.get(k) || []), ...seenAcc.get(k)].join(' and ')}${seenPrimary.has(k) ? ` — it is ${seenPrimary.get(k)[0]}'s own, so the other claim is ignored` : ' — neither is matched until one file drops it'}`),
   ];
-  return { members, errors, duplicates, dupAccounts, dupEmails, identity: id };
+  for (const m of members) m.matchLogins = m.accounts.filter((a) => accountKey(a) === accountKey(m.primary) || !disputed.has(accountKey(a))).map((a) => a.login.toLowerCase());
+  return { members, errors, duplicates, dupAccounts, dupEmails, disputed, identity: id };
 }
 
 // The pairings the GATE COUNT may use: a commit email's hash → the login that approves on the Product.
@@ -176,7 +197,8 @@ export function gateMemberMap(root, { read = null, anyPlatform = false } = {}) {
 // does (names prove nothing, and other accounts are not proven on the PR).
 export function memberMatches(member, e) {
   const login = String(e?.login || '').toLowerCase();
-  if (login && member.accounts.some((a) => a.login.toLowerCase() === login)) return true;
+  const logins = member.matchLogins || member.accounts.map((a) => a.login.toLowerCase());
+  if (login && logins.includes(login)) return true;
   if (e?.emailHash && member.emails.includes(e.emailHash)) return true;
   const name = String(e?.name || '').trim().toLowerCase();
   return !!name && member.names.some((n) => n.toLowerCase() === name);
@@ -190,10 +212,15 @@ export function ghAccounts({ runner = run, env = process.env } = {}) {
   const r = runner('gh', ['auth', 'status'], { env, timeout: TIMEOUT });
   const text = `${r.stdout || ''}\n${r.stderr || ''}`;
   const out = [];
-  for (const m of text.matchAll(/Logged in to (\S+) (?:account|as) (\S+)/g)) {
+  // Each account's block may say `- Active account: true|false` (gh 2.40+); before that there was one per host.
+  const blocks = text.split(/(?=Logged in to )/);
+  for (const b of blocks) {
+    const m = b.match(/^Logged in to (\S+) (?:account|as) (\S+)/);
+    if (!m) continue;
     const host = plainHost(m[1]?.toLowerCase());
     const login = m[2]?.replace(/[()]/g, '');
-    if (host && validLogin(login) && !out.some((a) => a.host === host && a.login === login)) out.push({ platform: 'github', host, login });
+    const active = !/Active account:\s*false/i.test(b);
+    if (host && validLogin(login) && !out.some((a) => a.host === host && a.login === login)) out.push({ platform: 'github', host, login, active });
   }
   return out;
 }
@@ -219,16 +246,19 @@ export function accountProof(account, { runner = run, env = process.env } = {}) 
     const user = u.ok ? parse(u.stdout) : null;
     if (!user?.login || !validLogin(user.login)) return { account, emails: [], problem: `${accountLabel(account)}: the platform did not say who this token belongs to (a GitHub App token has no user)` };
     const proved = { platform: 'github', host: account.host, login: user.login, ...(Number.isSafeInteger(user.id) ? { id: user.id } : {}) };
-    const e = runner('gh', ['api', '--hostname', account.host, 'user/emails', '--paginate'], { env: genv, timeout: TIMEOUT });
+    const e = runner('gh', ['api', '--hostname', account.host, 'user/emails', '--paginate', '--jq', '.[] | select(.verified == true) | .email'], { env: genv, timeout: TIMEOUT });
     if (!e.ok) {
       const code = httpStatus(e);
       return { account: proved, emails: [], problem: code === 404 || code === 403
         ? `${accountLabel(proved)}: the token cannot read its email addresses — run \`gh auth refresh -h ${account.host} -s user:email\` (a fine-grained token needs "Email addresses: read")`
         : `${accountLabel(proved)}: its email addresses could not be read${code ? ` (HTTP ${code})` : ''}` };
     }
-    // `--paginate` joins pages as `][`; read every array in the answer.
-    const list = parse(`[${(e.stdout || '').replace(/\]\s*\[/g, ',').replace(/^\s*\[|\]\s*$/g, '')}]`) || [];
-    return { account: proved, emails: list.filter((x) => x && x.verified === true && typeof x.email === 'string').map((x) => x.email) };
+    // One verified address per line, across every page. GitHub does not list the account's own noreply
+    // address (E131 review 8), yet it attributes a commit authored by it to the account — so it is proof.
+    const emails = (e.stdout || '').split('\n').map((l) => l.trim()).filter((l) => l.includes('@'));
+    const noreply = `users.noreply.${account.host === 'github.com' ? 'github.com' : account.host}`;
+    emails.push(`${proved.login}@${noreply}`, ...(proved.id ? [`${proved.id}+${proved.login}@${noreply}`] : []));
+    return { account: proved, emails };
   }
   // GitLab: one account per host, asked through glab's own login for that host.
   const u = runner('glab', ['api', '--hostname', account.host, 'user'], { env, timeout: TIMEOUT });
@@ -284,7 +314,9 @@ export function buildRecord({ identity, proofs, git, today, existing = null }) {
   // Other accounts: those that share a verified email with the ones above.
   const others = proofs.filter((p) => p !== primary && !(p.account.platform === identity.platform && p.account.host === host)
     && [...verifiedOn(p)].some((h) => emails.has(h)));
-  for (const p of others) for (const h of verifiedOn(p)) if (gitHashes.has(h)) emails.add(h);
+  // Emails come from the PRIMARY account only (E131 review 3): CI proves an email by the commit GitHub gives
+  // to the PR's author, and an email only another account verified would be given to nobody — the PR yad
+  // opened would fail its own gate. Another account joins through an email the primary verified too.
   const skipped = proofs.filter((p) => p !== primary && !others.includes(p)).map((p) => accountLabel(p.account));
   const unproven = [...gitHashes].filter(([h]) => !emails.has(h)).length;
   const keep = existing && existing.primary.login.toLowerCase() === primary.account.login.toLowerCase() ? existing : null;
@@ -374,12 +406,20 @@ Risk level: low
 // Push the branch and open the PR/MR. Never prompts (a clone that needs a password says so instead).
 export function publishMember(root, { branch, base, login, platform, host, title, emails, runner = run }) {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-  const push = runner('git', ['push', '--no-verify', '--quiet', '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { cwd: root, env, timeout: 60_000 });
+  // The branch is yad's own and is rebuilt from the default branch on every run (E131 review 4), so a run
+  // after an earlier one replaces it — with a lease on what origin held when it was read, never blindly.
+  runner('git', ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { cwd: root, env, timeout: 60_000 });
+  const push = runner('git', ['push', '--no-verify', '--quiet', `--force-with-lease=refs/heads/${branch}`, '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { cwd: root, env, timeout: 60_000 });
   if (!push.ok) return { pushed: false, error: `could not push ${branch}: ${forTerminal(push.stderr || 'git push failed')}` };
   const body = PR_BODY(login, emails);
   const r = platform === 'github'
     ? runner('gh', ['pr', 'create', '--head', branch, '--base', base, '--title', title, '--body', body], { cwd: root, env: { ...process.env, ...(host && host !== 'github.com' ? { GH_HOST: host } : {}) }, timeout: 60_000 })
     : runner('glab', ['mr', 'create', '--source-branch', branch, '--target-branch', base, '--title', title, '--description', body, '--yes'], { cwd: root, timeout: 60_000 });
+  // One already open for the branch is the one this push updated.
+  if (!r.ok && /already exists/i.test(`${r.stderr} ${r.stdout}`)) {
+    const url = `${r.stderr} ${r.stdout}`.match(/https?:\/\/\S+/)?.[0] || null;
+    return { pushed: true, url, existing: true };
+  }
   if (!r.ok) return { pushed: true, error: `pushed ${branch}, but could not open the ${platform === 'github' ? 'PR' : 'MR'}: ${forTerminal(r.stderr || 'failed')}` };
   const url = (r.stdout || '').split('\n').map((l) => l.trim()).find((l) => /^https?:\/\//.test(l)) || null;
   return { pushed: true, url };
@@ -403,7 +443,12 @@ export function accessCheck(identity, member, { runner = run } = {}) {
   if (!identity?.repo) return 'unknown';
   if (a.platform === 'github') {
     const r = runner('gh', ['api', '--hostname', a.host, `repos/${identity.repo}/collaborators/${a.login}/permission`, '--jq', '.permission'], { timeout: TIMEOUT });
-    if (r.ok) return ['admin', 'maintain', 'write', 'triage', 'read'].includes(r.stdout.trim()) ? 'yes' : r.stdout.trim() === 'none' ? 'no' : 'unknown';
+    if (!r.ok) return 'unknown';
+    const perm = r.stdout.trim();
+    if (perm === 'none') return 'no';
+    if (['admin', 'maintain', 'write', 'triage'].includes(perm)) return 'yes';
+    // `read` on a PUBLIC repo is everyone's (E131 review 7): it says nothing about this person.
+    if (perm === 'read') return runner('gh', ['api', '--hostname', a.host, `repos/${identity.repo}`, '--jq', '.private'], { timeout: TIMEOUT }).stdout?.trim() === 'true' ? 'yes' : 'unknown';
     return 'unknown';
   }
   if (!Number.isSafeInteger(a.id)) return 'unknown';
@@ -436,7 +481,8 @@ export function memberStatuses(root, members, { events, today, ttl = DEFAULT_TTL
     if (last && last >= cutoff) return { ...m, status: 'active', lastActive: last };
     const key = accountKey(m.primary);
     let answer = offline ? 'unknown' : cache[key];
-    if (!answer) { answer = access(identity, m); cache[key] = answer; wrote = true; }
+    // An `unknown` is not kept: one network failure must not hide the answer for a day (review 7).
+    if (!answer) { answer = access(identity, m); if (answer !== 'unknown') { cache[key] = answer; wrote = true; } }
     return { ...m, status: answer === 'yes' ? 'idle' : answer === 'no' ? 'left' : 'unknown', lastActive: last };
   });
   if (wrote && file) { try { fs.writeFileSync(file, `${JSON.stringify({ date: today, answers: cache })}\n`); } catch { /* a cache, nothing more */ } }
@@ -512,10 +558,17 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   if (built.problem) return refuse(built.problem, built.hint || (built.login ? `run \`${cli} auth login --hostname ${identity.host}\`, then \`yad member add\`` : null));
   const { record, primary, newEmails } = built;
   // An account or email another member file already holds is not added here: CI would refuse the PR.
+  // A clash that CI refuses: your Product account as someone's primary, or an email another file holds. An
+  // OTHER account someone else also claims is not refused — your file is the truth about you, and the
+  // claims are reported (`yad member list`, `yad doctor`) until one is dropped.
   const taken = existingAll.members.filter((m) => m !== mine);
-  const clash = record.accounts.find((a) => taken.some((m) => m.accounts.some((b) => accountKey(b) === accountKey(a))))
-    || (record.emails.find((h) => taken.some((m) => m.emails.includes(h))) ? 'an email' : null);
-  if (clash) return refuse(`${typeof clash === 'string' ? clash : `the ${accountLabel(clash)} account`} is already in another member file`, 'one account or email belongs to one member — if that file is yours from another login, remove it first (`yad member remove <login> --reason …`)');
+  const clash = taken.some((m) => accountKey(m.primary) === accountKey(primary)) ? `the ${accountLabel(primary)} account`
+    : record.emails.some((h) => taken.some((m) => m.emails.includes(h))) ? 'an email of yours' : null;
+  if (clash) return refuse(`${clash} is already in another member file`, 'one account or email belongs to one member — if that file is yours from another login, remove it first (`yad member remove <login> --reason …`)');
+  for (const a of record.accounts.slice(1)) {
+    const other = taken.find((m) => m.accounts.some((b) => accountKey(b) === accountKey(a)));
+    if (other) warn(`the ${accountLabel(a)} account is also claimed by ${other.rel} — neither claim is matched until one file drops it`);
+  }
   const rel = memberRel(identity.platform, primary.login);
   const same = !!mine && memberJSON({ accounts: mine.accounts, emails: mine.emails, names: mine.names, joined: mine.joined }) === memberJSON(record);
   for (const s of built.skipped) info(`${s}: logged in here, but shares no verified email with ${accountLabel(primary)} — not added`);
@@ -524,12 +577,15 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
     ok(`${rel} is up to date — ${accountLabel(primary)}`);
     return { login: primary.login, path: rel, changed: false };
   }
-  // Built on the default branch as origin has it, so the PR holds only this change.
-  const base = identity.defaultBranch || 'main';
+  // Built on the default branch AS ORIGIN HAS IT, so the PR holds only this change — never on whatever the
+  // checkout is on (E131 review 5). The name comes from the shared settings, so only a plain branch name is
+  // used, and it reaches git inside a full refspec, never where it could be read as an option.
   const g = gitAt(root);
-  g(['fetch', '--quiet', 'origin', base]);
-  const baseRef = g(['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}^{commit}`]).ok ? `refs/remotes/origin/${base}` : g(['rev-parse', '--verify', '-q', 'HEAD^{commit}']).ok ? 'HEAD' : null;
-  if (!baseRef) return refuse(`no commit to build on: origin/${base} is not here and the clone has no HEAD`, 'commit the Product once, then run `yad member add`');
+  const base = resolveDefaultBranch((...a) => { const r = g(a); return { ok: r.ok, stdout: r.out }; }, readJSON(productConfigPath(root), null));
+  if (!BRANCH_RE.test(base) || base.includes('..')) return refuse(`the Product's default branch is not a plain branch name: ${forTerminal(base)}`, 'fix default_branch in the Product settings');
+  g(['fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`]);
+  if (!g(['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}^{commit}`]).ok) return refuse(`could not read origin's ${base} — the member file is built on it`, 'check the clone can fetch from origin, then run `yad member add` again');
+  const baseRef = `refs/remotes/origin/${base}`;
   const plainEmails = git.emails.filter((e) => record.emails.includes(hashEmail(e)));
   const subject = mine ? `chore(product): update team member ${primary.login}` : `chore(product): add team member ${primary.login}`;
   const made = commitMember(root, { rel, record, newEmails, plainEmails, base: baseRef, name: git.names[0], login: primary.login, subject });
@@ -590,7 +646,7 @@ export async function runMemberRemove(root, { login = null, reason = null, runne
   const identity = productIdentity(root, { runner });
   if (!identity.platform) return refuse('the Product names no platform, so it has no member files');
   const me = identity.platform === 'github'
-    ? (ghAccounts({ runner, env }).find((a) => a.host === identity.host)?.login || null)
+    ? ((ghAccounts({ runner, env }).filter((a) => a.host === identity.host).find((a) => a.active) || {}).login || null)
     : null;
   const who = login || me;
   if (!who) return refuse('whose member file? (not logged in here, so yad cannot tell who you are)', 'usage: yad member remove [<login>] [--reason "<why>"]');

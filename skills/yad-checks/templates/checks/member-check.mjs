@@ -13,7 +13,15 @@
 //      decision, 2026-10-05) — this gate checks the owner rule alone.
 //   3. A PR may DELETE anyone's file (removing a person can only make the count larger). `yad member remove
 //      <login> --reason` puts the reason in the commit.
-//   4. No account and no email may be in two member files.
+//   4. No account on the Product's platform, and no email, may be in two member files. (An OTHER account
+//      two files claim is not refused: the CLI matches it to nobody until one file drops it, and refusing
+//      it here would let whoever claimed it first block its real owner from joining.)
+//   5. `.sdlc` and `.sdlc/members` are real folders and nothing under them is a link, and no path is a
+//      case or Unicode twin of `.sdlc/members/` — a macOS or Windows checkout would read either as a member
+//      file this gate never judged (E131 review 1–2; the E115 and E121 lessons).
+//
+// LIMIT: like every Product gate, this file and the workflow that runs it come from the PR's own checkout,
+// so a PR can change the gate it is judged by; branch protection on the default branch is the backstop.
 //
 // A Node script, not bash: it reads JSON and hashes, and both CI images already have Node (E113's hooks are
 // Node for the same reason). Usage: node checks/member-check.mjs <base-ref>
@@ -50,13 +58,38 @@ const base = process.argv[2];
 if (!base) { say('FAIL [member-check]: usage: node checks/member-check.mjs <base-ref>'); process.exit(1); }
 if (!git('rev-parse', '--verify', '-q', `${base}^{commit}`).ok) { say(`FAIL [member-check]: cannot resolve the base ref ${base} (fetch-depth: 0?)`); process.exit(1); }
 
-// Every path under .sdlc/members/ the PR touches, with its status. NUL-separated, no renames (a rename is a
-// delete plus an add, and each is judged).
-const diff = git('diff', '--no-renames', '--name-status', '-z', `${base}...HEAD`, '--', DIR);
-if (!diff.ok) { say('FAIL [member-check]: git could not list the changed member files'); process.exit(1); }
+// Every path the PR touches, with its status. NUL-separated, no renames (a rename is a delete plus an add,
+// and each is judged).
+const diff = git('diff', '--no-renames', '--name-status', '-z', `${base}...HEAD`);
+if (!diff.ok) { say('FAIL [member-check]: git could not list the changed files'); process.exit(1); }
 const parts = diff.out.split('\0').filter(Boolean);
-const changed = [];
-for (let i = 0; i + 1 < parts.length; i += 2) changed.push({ status: parts[i][0], path: parts[i + 1] });
+const all = [];
+for (let i = 0; i + 1 < parts.length; i += 2) all.push({ status: parts[i][0], path: parts[i + 1] });
+
+// A path as a case-insensitive, Unicode-folding file system sees it: `.sdlc/Members/x` and `.ſdlc/members/x`
+// land in `.sdlc/members/` on macOS and Windows.
+const fold = (p) => p.normalize('NFKC').toLowerCase();
+for (const { path } of all) {
+  const f = fold(path);
+  if ((f === '.sdlc/members' || f.startsWith(DIR)) && !path.startsWith(DIR)) fail(`${JSON.stringify(path)} is another spelling of ${DIR} — a macOS or Windows checkout reads it as a member file this gate does not judge`);
+}
+// The folders themselves must be folders at HEAD, and nothing under them a link.
+for (const p of ['.sdlc', '.sdlc/members']) {
+  const t = git('ls-tree', 'HEAD', '--', p).out.trim();
+  if (t && !t.startsWith('040000 ')) fail(`${p} is not a folder at HEAD (a link?) — member files are read only from a real ${DIR}`);
+}
+const tree = git('ls-tree', '-r', '-z', 'HEAD', '--', DIR).out.split('\0').filter(Boolean);
+const folded = new Map();
+for (const line of tree) {
+  const [meta, p] = line.split('\t');
+  if (!meta.startsWith('100644 ') && !meta.startsWith('100755 ')) fail(`${p} is not a plain file (a link?) — a member file is never read through one`);
+  const k = fold(p);
+  if (folded.has(k)) fail(`${p} and ${folded.get(k)} are one file on macOS and Windows — keep one`);
+  folded.set(k, p);
+}
+if (rc) process.exit(rc);
+
+const changed = all.filter((c) => c.path.startsWith(DIR));
 if (!changed.length) { say('PASS [member-check]: no member file changed'); process.exit(0); }
 if (!platform) { say('FAIL [member-check]: member files changed, but the Product names no platform — nothing can be proven'); process.exit(1); }
 
@@ -114,19 +147,20 @@ for (const { status, path } of changed) {
   if (!rc) say(`PASS [member-check]: ${path} belongs to ${author}${added.length ? `; ${added.length} new email(s), each proven by a commit GitHub attributes to them` : ''}`);
 }
 
-// No account and no email in two files, across every member file at HEAD.
-const all = git('ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', DIR).out.split('\0').filter((p) => p.endsWith('.json'));
+// No account on the Product's platform and no email in two files, across every member file at HEAD.
+const files = tree.map((l) => l.split('\t')[1]).filter((p) => p.endsWith('.json'));
 const accounts = new Map();
 const emails = new Map();
-for (const p of all) {
+for (const p of files) {
   const rec = fileAt('HEAD', p);
   for (const a of Array.isArray(rec?.accounts) ? rec.accounts : []) {
-    const k = `${a?.platform}:${String(a?.host || '').toLowerCase()}:${String(a?.login || '').toLowerCase()}`;
-    accounts.set(k, [...(accounts.get(k) || []), p]);
+    if (a?.platform !== platform) continue;
+    const k = `${a.platform}:${String(a?.host || '').toLowerCase()}:${String(a?.login || '').toLowerCase()}`;
+    accounts.set(k, [...new Set([...(accounts.get(k) || []), p])]);
   }
   for (const h of emailsOf(rec)) emails.set(h, [...(emails.get(h) || []), p]);
 }
-for (const [k, files] of accounts) if (files.length > 1) fail(`the account ${k} is in ${files.join(' and ')} — one account belongs to one member`);
-for (const [, files] of emails) if (files.length > 1) fail(`one email is in ${files.join(' and ')} — one email belongs to one member`);
+for (const [k, list] of accounts) if (list.length > 1) fail(`the account ${k} is in ${list.join(' and ')} — one account belongs to one member`);
+for (const [, list] of emails) if (list.length > 1) fail(`one email is in ${list.join(' and ')} — one email belongs to one member`);
 
 process.exit(rc);
