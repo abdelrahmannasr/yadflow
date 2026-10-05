@@ -43,7 +43,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
-import { c, log, ok, info, warn, fail, hand, run, readJSON, forTerminal, isPlainObject } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, readJSON, forTerminal, isPlainObject, asset } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { LOGIN_RE, hostFromGitUrl, plainHost } from './platform.mjs';
 import { repoPathFromGitUrl, httpStatus } from './protection.mjs';
@@ -185,11 +185,27 @@ export function gateMemberMap(root, { read = null, anyPlatform = false } = {}) {
   let got;
   try { got = read || readMembers(root); } catch { return map; }
   if (got.identity?.platform !== 'github' && !(anyPlatform && got.identity?.platform)) return map;
+  // The GATE COUNT trusts a pairing only where the member-check gate judged it (review 2, finding 2): a
+  // verified Product with the shipped gate installed and run by its checks workflow. Anywhere else a file
+  // is its owner's statement, and a statement must never make the count smaller.
+  if (!anyPlatform && !memberGateLive(root, got.identity)) return map;
   for (const m of got.members) {
     if (got.dupAccounts.has(accountKey(m.primary))) continue;
     for (const h of m.emails) if (!got.dupEmails.has(h)) map.set(h, m.primary.login);
   }
   return map;
+}
+
+// Is the member-check gate live on this Product: verified ledger, `checks/member-check.mjs` exactly as this
+// yadflow ships it, and a Product checks workflow that runs it? An edited or outdated copy is not trusted.
+export function memberGateLive(root, identity) {
+  if (!identity?.verified) return false;
+  try {
+    const shipped = fs.readFileSync(asset('skills/yad-checks/templates/checks/member-check.mjs'), 'utf8');
+    if (fs.readFileSync(path.join(root, 'checks/member-check.mjs'), 'utf8') !== shipped) return false;
+  } catch { return false; }
+  const workflows = identity.platform === 'gitlab' ? ['.gitlab/ci/yad-product-checks.yml'] : ['.github/workflows/yad-product-checks.yml'];
+  return workflows.some((w) => { try { return /node checks\/member-check\.mjs/.test(fs.readFileSync(path.join(root, w), 'utf8')); } catch { return false; } });
 }
 
 // Does this piece of evidence (a commit, an approval, a ship) belong to this member? By any of their
@@ -408,8 +424,12 @@ export function publishMember(root, { branch, base, login, platform, host, title
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
   // The branch is yad's own and is rebuilt from the default branch on every run (E131 review 4), so a run
   // after an earlier one replaces it — with a lease on what origin held when it was read, never blindly.
-  runner('git', ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { cwd: root, env, timeout: 60_000 });
-  const push = runner('git', ['push', '--no-verify', '--quiet', `--force-with-lease=refs/heads/${branch}`, '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { cwd: root, env, timeout: 60_000 });
+  // The lease names the exact commit origin holds (empty: the branch must not exist yet), read just now from
+  // origin itself — a single-branch clone has no remote-tracking ref for git to find on its own.
+  const remote = runner('git', ['ls-remote', 'origin', `refs/heads/${branch}`], { cwd: root, env, timeout: 60_000 });
+  if (!remote.ok) return { pushed: false, error: `could not read origin: ${forTerminal(remote.stderr || 'git ls-remote failed')}` };
+  const held = (remote.stdout || '').split(/\s/)[0] || '';
+  const push = runner('git', ['push', '--no-verify', '--quiet', `--force-with-lease=refs/heads/${branch}:${held}`, '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { cwd: root, env, timeout: 60_000 });
   if (!push.ok) return { pushed: false, error: `could not push ${branch}: ${forTerminal(push.stderr || 'git push failed')}` };
   const body = PR_BODY(login, emails);
   const r = platform === 'github'
@@ -506,6 +526,29 @@ export function registeredRepos(root, { runner = run } = {}) {
   return { dirs, hosts: [...hosts] };
 }
 
+// The member files as a git ref holds them, read with the same rules as the folder on disk: each plain file
+// is written into a scratch Product and `readMembers` judges it. A link or a folder in its place is skipped,
+// as `readMembers` would refuse it.
+export function membersAt(root, ref, identity) {
+  const git = gitAt(root);
+  const prefix = git(['rev-parse', '--show-prefix']).out;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-members-at-'));
+  try {
+    const dir = path.join(tmp, MEMBERS_DIR);
+    fs.mkdirSync(dir, { recursive: true });
+    const ls = gitAt(root)(['ls-tree', '-z', `${ref}:${prefix}${MEMBERS_DIR}`]);
+    for (const line of ls.ok ? ls.out.split('\0').filter(Boolean) : []) {
+      const [meta, name] = line.split('\t');
+      if (!/^100(644|755) blob /.test(meta) || !name.endsWith('.json') || name.includes('/')) continue;
+      const blob = git(['cat-file', 'blob', meta.split(' ')[2]]);
+      if (blob.ok) fs.writeFileSync(path.join(dir, name), blob.out);
+    }
+    return readMembers(tmp, { identity });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 // ---- the commands -------------------------------------------------------------------------------
 
 const refuser = () => (msg, hint) => { fail(msg); if (hint) hand(hint); process.exitCode = 1; };
@@ -552,11 +595,25 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   }
   proofs = proofs.filter((p) => validLogin(p.account.login));
   const git = gitIdentities(root, { runner, repos: repos?.dirs || [] });
-  const existingAll = readMembers(root, { identity });
+  // Built on the default branch AS ORIGIN HAS IT, so the PR holds only this change — never on whatever the
+  // checkout is on (E131 review 5). The name comes from the shared settings, so only a plain branch name is
+  // used, and it reaches git inside a full refspec, never where it could be read as an option.
+  const g = gitAt(root);
+  const base = resolveDefaultBranch((...a) => { const r = g(a); return { ok: r.ok, stdout: r.out }; }, readJSON(productConfigPath(root), null));
+  if (!BRANCH_RE.test(base) || base.includes('..')) return refuse(`the Product's default branch is not a plain branch name: ${forTerminal(base)}`, 'fix default_branch in the Product settings');
+  g(['fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`]);
+  if (!g(['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}^{commit}`]).ok) return refuse(`could not read origin's ${base} — the member file is built on it`, 'check the clone can fetch from origin, then run `yad member add` again');
+  const baseRef = `refs/remotes/origin/${base}`;
+  // The member files AS THEY ARE ON THAT BRANCH (review 2, finding 3): the checkout may be behind — still
+  // holding a file someone removed, or missing one someone added — and the PR is judged against the branch.
+  const existingAll = membersAt(root, baseRef, identity);
   const mine = existingAll.members.find((m) => proofs.some((p) => p.account.platform === identity.platform && p.account.host === identity.host && p.account.login.toLowerCase() === m.primary.login.toLowerCase()));
   const built = buildRecord({ identity, proofs, git, today, existing: mine || null });
   if (built.problem) return refuse(built.problem, built.hint || (built.login ? `run \`${cli} auth login --hostname ${identity.host}\`, then \`yad member add\`` : null));
   const { record, primary, newEmails } = built;
+  if (!Number.isSafeInteger(primary.id)) return refuse(`the platform did not give the numeric id of ${accountLabel(primary)} — the member-check gate needs it`, 'run `yad member add` again; if it keeps failing, report it with `yad report`');
+  // A login renamed away and registered again by someone else is another account: the old file is not theirs.
+  if (mine && mine.primary.id !== undefined && mine.primary.id !== primary.id) return refuse(`${mine.rel} belongs to another account with the login ${forTerminal(primary.login)} (id ${mine.primary.id}, yours is ${primary.id})`, 'that file is someone else\'s — ask the team to remove it (`yad member remove <login> --reason …`), then run `yad member add`');
   // An account or email another member file already holds is not added here: CI would refuse the PR.
   // A clash that CI refuses: your Product account as someone's primary, or an email another file holds. An
   // OTHER account someone else also claims is not refused — your file is the truth about you, and the
@@ -577,15 +634,6 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
     ok(`${rel} is up to date — ${accountLabel(primary)}`);
     return { login: primary.login, path: rel, changed: false };
   }
-  // Built on the default branch AS ORIGIN HAS IT, so the PR holds only this change — never on whatever the
-  // checkout is on (E131 review 5). The name comes from the shared settings, so only a plain branch name is
-  // used, and it reaches git inside a full refspec, never where it could be read as an option.
-  const g = gitAt(root);
-  const base = resolveDefaultBranch((...a) => { const r = g(a); return { ok: r.ok, stdout: r.out }; }, readJSON(productConfigPath(root), null));
-  if (!BRANCH_RE.test(base) || base.includes('..')) return refuse(`the Product's default branch is not a plain branch name: ${forTerminal(base)}`, 'fix default_branch in the Product settings');
-  g(['fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`]);
-  if (!g(['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}^{commit}`]).ok) return refuse(`could not read origin's ${base} — the member file is built on it`, 'check the clone can fetch from origin, then run `yad member add` again');
-  const baseRef = `refs/remotes/origin/${base}`;
   const plainEmails = git.emails.filter((e) => record.emails.includes(hashEmail(e)));
   const subject = mine ? `chore(product): update team member ${primary.login}` : `chore(product): add team member ${primary.login}`;
   const made = commitMember(root, { rel, record, newEmails, plainEmails, base: baseRef, name: git.names[0], login: primary.login, subject });
@@ -647,7 +695,7 @@ export async function runMemberRemove(root, { login = null, reason = null, runne
   if (!identity.platform) return refuse('the Product names no platform, so it has no member files');
   const me = identity.platform === 'github'
     ? ((ghAccounts({ runner, env }).filter((a) => a.host === identity.host).find((a) => a.active) || {}).login || null)
-    : null;
+    : (() => { const r = runner('glab', ['api', '--hostname', identity.host, 'user'], { env, timeout: TIMEOUT }); const u = r.ok ? parse(r.stdout) : null; return validLogin(u?.username) ? u.username : null; })();
   const who = login || me;
   if (!who) return refuse('whose member file? (not logged in here, so yad cannot tell who you are)', 'usage: yad member remove [<login>] [--reason "<why>"]');
   if (!validLogin(who)) return refuse(`not a login: ${forTerminal(who)}`);

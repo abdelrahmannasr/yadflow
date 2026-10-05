@@ -40,6 +40,17 @@ function product({ platform = 'github', gitUrl = 'git@github.com:acme/product.gi
   put(path.join(T, '.sdlc/product.json'), { platform, git_url: gitUrl, default_branch: 'main', ...extra });
   return T;
 }
+// A verified GitHub Product with the member-check gate installed and run: the only place the gate count
+// trusts a member file (review 2).
+const ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
+function liveGate(T) {
+  const cfg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'));
+  put(path.join(T, '.sdlc/product.json'), { ...cfg, ledger: 'verified' });
+  fs.mkdirSync(path.join(T, 'checks'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/checks/member-check.mjs'), path.join(T, 'checks/member-check.mjs'));
+  fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-product-checks.yml'), path.join(T, '.github/workflows/yad-product-checks.yml'));
+}
 const member = (T, file, rec) => put(path.join(T, M.MEMBERS_DIR, file), rec);
 const alice = (over = {}) => ({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 1 }], emails: [M.hashEmail('alice@work.com')], names: ['Alice Smith'], joined: TODAY, ...over });
 
@@ -58,6 +69,7 @@ test('E131 readMembers: a members folder reached through a link is never read (r
 test('E131 readMembers: an OTHER account two files claim is matched by nobody; one that is someone\'s own stays theirs (review 6)', () => {
   const T = product();
   try {
+    liveGate(T);
     member(T, 'github-alice.json', alice({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }] }));
     member(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }, { platform: 'gitlab', host: 'gitlab.com', login: 'al' }, { platform: 'github', host: 'ghe.io', login: 'alice' }] });
     const got = M.readMembers(T);
@@ -100,6 +112,7 @@ test('E131 readMemberFile: a usable file, and every way one is refused', () => {
 test('E131 readMembers + gateMemberMap: a shared account or email joins nothing', () => {
   const T = product();
   try {
+    liveGate(T);
     member(T, 'github-alice.json', alice());
     member(T, 'github-bob.json', { accounts: [{ platform: 'github', host: 'github.com', login: 'bob' }], emails: [M.hashEmail('bob@work.com')], names: ['Bob'] });
     let map = M.gateMemberMap(T);
@@ -131,9 +144,26 @@ test('E131 gateMemberMap: a GitLab Product pairs nothing for the gate count (dec
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E131 gateMemberMap: no pairing unless the member-check gate is live (review 2)', () => {
+  const T = product();
+  try {
+    member(T, 'github-alice.json', alice());
+    assert.equal(M.gateMemberMap(T).size, 0, 'a local-ledger Product: a file is only its owner\'s statement');
+    liveGate(T);
+    assert.equal(M.gateMemberMap(T).size, 1);
+    fs.appendFileSync(path.join(T, 'checks/member-check.mjs'), '\n// edited\n');
+    assert.equal(M.gateMemberMap(T).size, 0, 'an edited or outdated gate is not trusted');
+    liveGate(T);
+    fs.writeFileSync(path.join(T, '.github/workflows/yad-product-checks.yml'), 'name: x\n');
+    assert.equal(M.gateMemberMap(T).size, 0, 'a gate no workflow runs is not trusted');
+    assert.equal(M.gateMemberMap(T, { anyPlatform: true }).size, 1, 'a report still reads it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E131 THE COUNT: a work-email committer who approves by login is ONE person with a member file, two without', () => {
   const T = product();
   try {
+    liveGate(T);
     put(path.join(T, 'epics/EP-x/.sdlc/state.json'), { currentStep: 'epic-review', steps: [] });
     put(path.join(T, 'epics/EP-x/.sdlc/approvals.json'), [
       { approver: 'alice', date: daysBefore(TODAY, 2), source: 'bridge' },
@@ -398,13 +428,15 @@ function gateRepo(platform = 'github') {
 import { spawnSync as spawnSyncNode0 } from 'node:child_process';
 const spawnSyncNode = (file, args, opts) => spawnSyncNode0(process.execPath, [file, ...args], { encoding: 'utf8', ...opts });
 const FILE = (login) => `${M.MEMBERS_DIR}/github-${login}.json`;
-const rec = (login, emails) => ({ accounts: [{ platform: 'github', host: 'github.com', login }], emails: emails.map(M.hashEmail).sort() });
+const IDS = { alice: 1, bob: 2, mallory: 3 };
+const rec = (login, emails) => ({ accounts: [{ platform: 'github', host: 'github.com', login, id: IDS[login] }], emails: emails.map(M.hashEmail).sort() });
+const as = (login) => ({ PR_AUTHOR: login, PR_AUTHOR_ID: String(IDS[login.toLowerCase()] ?? '') });
 
 test('E131 member-check: no member file changed is a pass', () => {
   const g = gateRepo();
   try {
     g.commitAs('x@y.z', { 'other.txt': 'x' });
-    const r = g.check({ PR_AUTHOR: 'alice' });
+    const r = g.check(as('alice'));
     assert.equal(r.code, 0);
     assert.match(r.out, /no member file changed/);
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
@@ -415,7 +447,7 @@ test('E131 member-check: your own file, each email proven by a commit GitHub giv
   try {
     const sha = g.commitAs('alice@work.com', { [FILE('alice')]: rec('alice', ['alice@work.com']) });
     g.attribute(sha, 'alice');
-    const r = g.check({ PR_AUTHOR: 'Alice' });
+    const r = g.check(as('Alice'));
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /1 new email\(s\), each proven/);
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
@@ -427,14 +459,14 @@ test('E131 member-check: an email no commit proves is refused (the forgery case)
     // Alice adds Bob's email to her file. The commit is authored by Bob's email, but GitHub gives it to Bob.
     const sha = g.commitAs('bob@work.com', { [FILE('alice')]: rec('alice', ['bob@work.com']) });
     g.attribute(sha, 'bob');
-    const r = g.check({ PR_AUTHOR: 'alice' });
+    const r = g.check(as('alice'));
     assert.equal(r.code, 1);
     assert.match(r.out, /adds an email no commit in this PR proves/);
     // And a commit GitHub cannot attribute at all proves nothing either.
     const g2 = gateRepo();
     try {
       g2.commitAs('alice@work.com', { [FILE('alice')]: rec('alice', ['alice@work.com']) });
-      assert.equal(g2.check({ PR_AUTHOR: 'alice' }).code, 1);
+      assert.equal(g2.check(as('alice')).code, 1);
     } finally { fs.rmSync(g2.T, { recursive: true, force: true }); }
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
@@ -449,12 +481,20 @@ test('E131 member-check: someone else\'s file is refused; a deletion is allowed;
     git(g.T, 'checkout', '-q', 'pr');
     git(g.T, 'rebase', '-q', 'main');
     g.commitAs('alice@work.com', { [FILE('bob')]: rec('bob', ['alice@work.com']) });
-    let r = g.check({ PR_AUTHOR: 'alice' });
+    let r = g.check(as('alice'));
     assert.equal(r.code, 1);
     assert.match(r.out, /only its author's own member file/);
+    // A reused login: the file was account 2's; someone else now called bob (id 9) cannot take it over.
+    git(g.T, 'reset', '-q', '--hard', 'main');
+    const shaB = g.commitAs('bob@new.io', { [FILE('bob')]: { accounts: [{ platform: 'github', host: 'github.com', login: 'bob', id: 9 }], emails: [M.hashEmail('bob@new.io')] } });
+    g.attribute(shaB, 'bob');
+    r = g.check({ PR_AUTHOR: 'bob', PR_AUTHOR_ID: '9' });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /belonged to account id 2/);
+    assert.match(g.check({ PR_AUTHOR: 'bob', PR_AUTHOR_ID: '2' }).out, /account id in the file \(9\) is not the author's \(2\)/);
     git(g.T, 'reset', '-q', '--hard', 'main');
     g.commitAs('alice@work.com', { [FILE('bob')]: null }, 'chore(product): remove team member bob');
-    r = g.check({ PR_AUTHOR: 'alice' });
+    r = g.check(as('alice'));
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /removed/);
     assert.equal(g.check({ PR_AUTHOR: 'dependabot[bot]' }).code, 1, 'a bot opened it: refused');
@@ -472,16 +512,21 @@ test('E131 member-check: someone\'s Product account in another file is refused; 
     git(g.T, 'checkout', '-q', 'pr');
     git(g.T, 'rebase', '-q', 'main');
     // Bob claimed Alice's GitLab account first. Alice's own claim must not be blocked by it.
-    const sha = g.commitAs('alice@work.com', { [FILE('alice')]: { accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'AL' }], emails: [M.hashEmail('alice@work.com')] } });
+    const sha = g.commitAs('alice@work.com', { [FILE('alice')]: { accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 1 }, { platform: 'gitlab', host: 'gitlab.com', login: 'AL' }], emails: [M.hashEmail('alice@work.com')] } });
     g.attribute(sha, 'alice');
-    let r = g.check({ PR_AUTHOR: 'alice' });
+    let r = g.check(as('alice'));
     assert.equal(r.code, 0, r.out);
-    // But naming Bob's own GitHub account in Alice's file is refused.
-    const sha2 = g.commitAs('alice@work.com', { [FILE('alice')]: { accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'github', host: 'github.com', login: 'Bob' }], emails: [M.hashEmail('alice@work.com')] } });
+    // But naming Bob's own GitHub account in Alice's file is refused: one account on the Product's host.
+    const sha2 = g.commitAs('alice@work.com', { [FILE('alice')]: { accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 1 }, { platform: 'github', host: 'github.com', login: 'Bob' }], emails: [M.hashEmail('alice@work.com')] } });
     g.attribute(sha2, 'alice');
-    r = g.check({ PR_AUTHOR: 'alice' });
+    r = g.check(as('alice'));
     assert.equal(r.code, 1);
-    assert.match(r.out, /github:github\.com:bob is in/);
+    assert.match(r.out, /exactly one github account on github\.com/);
+    // And Bob's own PR is never blocked by an other-account claim Alice made on his GitHub Enterprise login.
+    git(g.T, 'reset', '-q', '--hard', 'main');
+    const sha3 = g.commitAs('alice@work.com', { [FILE('alice')]: { accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 1 }, { platform: 'github', host: 'ghe.io', login: 'bob' }], emails: [M.hashEmail('alice@work.com')] } });
+    g.attribute(sha3, 'alice');
+    assert.equal(g.check(as('alice')).code, 0);
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 
@@ -494,7 +539,7 @@ test('E131 member-check: a linked members folder, a link inside it, and a case t
     fs.symlinkSync('../other', path.join(link.T, M.MEMBERS_DIR));
     git(link.T, 'add', '-A');
     git(link.T, 'commit', '-q', '-m', 'link');
-    const r = link.check({ PR_AUTHOR: 'mallory' });
+    const r = link.check(as('mallory'));
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /\.sdlc\/members is not a folder at HEAD/);
   } finally { fs.rmSync(link.T, { recursive: true, force: true }); }
@@ -505,14 +550,19 @@ test('E131 member-check: a linked members folder, a link inside it, and a case t
     fs.symlinkSync('../../elsewhere.json', path.join(inner.T, M.MEMBERS_DIR, 'github-mallory.json'));
     git(inner.T, 'add', '-A');
     git(inner.T, 'commit', '-q', '-m', 'inner link');
-    assert.match(inner.check({ PR_AUTHOR: 'mallory' }).out, /not a plain file/);
+    assert.match(inner.check(as('mallory')).out, /not a plain file/);
   } finally { fs.rmSync(inner.T, { recursive: true, force: true }); }
   const twin = gateRepo();
   try {
     twin.commitAs('m@x.io', { '.sdlc/Members/github-mallory.json': rec('mallory', ['victim@x.io']) });
-    const r = twin.check({ PR_AUTHOR: 'mallory' });
+    const r = twin.check(as('mallory'));
     assert.equal(r.code, 1);
     assert.match(r.out, /another spelling of \.sdlc\/members/);
+    // Merged anyway (an older gate): the PR that DELETES it must pass — it is the clean-up (review 2).
+    git(twin.T, 'branch', '-f', 'main', 'HEAD');
+    twin.commitAs('m@x.io', { '.sdlc/Members/github-mallory.json': null }, 'chore(product): remove a twin');
+    const clean = twin.check(as('mallory'));
+    assert.equal(clean.code, 0, clean.out);
   } finally { fs.rmSync(twin.T, { recursive: true, force: true }); }
 });
 
@@ -551,5 +601,22 @@ test('E131 yad usage: a member file makes one person one row', async () => {
     assert.deepEqual([...new Set(deriveEvents(T, {}).map((e) => e.actor))], ['Alice Smith']);
     member(T, 'gitlab-alice.json', { accounts: [{ platform: 'gitlab', host: 'gitlab.com', login: 'alice' }], emails: [M.hashEmail('alice@work.com')] });
     assert.deepEqual([...new Set(deriveEvents(T, {}).map((e) => e.actor))], ['alice'], 'a report joins GitLab pairings too');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E131 membersAt: the files as a branch holds them, not as the checkout does (review 2, finding 3)', () => {
+  const T = product();
+  try {
+    member(T, 'github-alice.json', alice());
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', 'alice joined');
+    const joined = git(T, 'rev-parse', 'HEAD');
+    git(T, 'rm', '-q', M.memberRel('github', 'alice'));
+    git(T, 'commit', '-q', '-m', 'alice removed');
+    const removed = git(T, 'rev-parse', 'HEAD');
+    git(T, 'checkout', '-q', joined);   // a checkout that is behind still holds the file
+    assert.equal(M.readMembers(T).members.length, 1);
+    assert.equal(M.membersAt(T, removed, { platform: 'github', host: 'github.com' }).members.length, 0, 'on the branch it is gone');
+    assert.equal(M.membersAt(T, joined, { platform: 'github', host: 'github.com' }).members[0].primary.login, 'alice');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
