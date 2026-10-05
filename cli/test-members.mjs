@@ -277,7 +277,7 @@ test('E131 buildRecord: an update keeps an email only while the account still ve
   // home@x.io is not this machine's git email, but the account still verifies it: kept, provable from here.
   const r = M.buildRecord({ identity: ID, today: TODAY, existing, git: { emails: ['alice@work.com'], names: ['Alice Smith'] }, proofs: [proof('github', 'github.com', 'alice', ['alice@work.com', 'home@x.io'])] });
   assert.equal(r.record.joined, '2026-01-01');
-  assert.equal(r.record.proved, TODAY);
+  assert.equal(r.record.proved, `${TODAY}T00:00:00Z`, 'a moment, so a same-day re-run still changes the file (review 6)');
   assert.ok(r.record.accounts.some((a) => a.login === 'old'));
   assert.deepEqual(r.record.emails, [M.hashEmail('alice@work.com'), M.hashEmail('home@x.io')].sort());
   assert.equal(r.dropped, 1, 'gone@x.io is no longer verified: dropped');
@@ -721,5 +721,26 @@ test('E131 judgedMemberFiles: an untracked or ignored local copy is not what ori
     git(T, 'fetch', '-q', 'origin');
     put(path.join(T, '.sdlc/product.json'), { ...cfg, default_branch: 'fake' });
     assert.equal(M.originDefault(T), null, 'origin\'s own settings on that branch do not name it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E131 buildRecord: a partial email list never drops an email as "no longer verified" (review 6)', () => {
+  const existing = { primary: { platform: 'gitlab', host: 'gitlab.com', login: 'al' }, accounts: [{ platform: 'gitlab', host: 'gitlab.com', login: 'al' }], emails: [M.hashEmail('second@x.io')], names: [], joined: '2026-01-01' };
+  const p = { ...proof('gitlab', 'gitlab.com', 'al', ['al@x.io']), problem: 'GitLab al: its other email addresses could not be read — the token needs the read_user scope' };
+  const r = M.buildRecord({ identity: { platform: 'gitlab', host: 'gitlab.com' }, today: TODAY, existing, git: { emails: ['al@x.io'], names: [] }, proofs: [p] });
+  assert.match(r.problem, /could not be checked: .*read_user/);
+});
+
+test('E131 originDefault: origin/HEAD and the settings disagreeing trusts nothing (review 6)', () => {
+  const T = product();
+  try {
+    liveGate(T);
+    assert.equal(M.originDefault(T), 'main');
+    git(T, 'push', '-q', 'origin', 'HEAD:refs/heads/master');
+    git(T, 'fetch', '-q', 'origin');
+    git(T, 'remote', 'set-head', 'origin', 'master');   // an old clone's record
+    assert.equal(M.originDefault(T), null);
+    git(T, 'remote', 'set-head', 'origin', 'main');
+    assert.equal(M.originDefault(T), 'main');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

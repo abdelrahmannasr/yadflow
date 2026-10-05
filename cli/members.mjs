@@ -116,7 +116,7 @@ export function readMemberFile(file, { platform, host } = {}) {
   const names = Array.isArray(r.names) ? r.names : [];
   if (!names.every((n) => typeof n === 'string' && n.trim() && n.length <= 200)) return { error: 'holds a name that is not a short, non-empty text' };
   if (r.joined !== undefined && !(typeof r.joined === 'string' && DATE_RE.test(r.joined))) return { error: 'has a "joined" date that is not YYYY-MM-DD' };
-  if (r.proved !== undefined && !(typeof r.proved === 'string' && DATE_RE.test(r.proved))) return { error: 'has a "proved" date that is not YYYY-MM-DD' };
+  if (r.proved !== undefined && !(typeof r.proved === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(r.proved))) return { error: 'has a "proved" time that is not an ISO time in UTC' };
   if (!platform) return { error: 'cannot be checked: the Product names no platform' };
   const primary = accounts.find((a) => a.platform === platform && a.host === String(host).toLowerCase());
   if (!primary) return { error: `has no ${platform} account on ${forTerminal(host)}, the Product's own platform` };
@@ -207,8 +207,11 @@ export function originDefault(root) {
   const g = gitAt(root);
   const head = g(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
   const fromHead = head.ok ? head.out.replace(/^origin\//, '') : '';
-  if (fromHead && BRANCH_RE.test(fromHead) && !fromHead.includes('..')) return fromHead;
   const local = readJSON(productConfigPath(root), null)?.default_branch;
+  // origin/HEAD is recorded at clone time and never follows a rename (review 6): when it and the settings
+  // both name a branch and disagree, nothing is trusted — the count goes up, never down.
+  if (fromHead && typeof local === 'string' && local && local !== fromHead) return null;
+  if (fromHead && BRANCH_RE.test(fromHead) && !fromHead.includes('..')) return fromHead;
   const name = typeof local === 'string' && local ? local : 'main';
   if (!BRANCH_RE.test(name) || name.includes('..')) return null;
   const read = (f) => { const r = g(['show', `refs/remotes/origin/${name}:./${f}`]); return r.ok ? parse(r.out) : undefined; };
@@ -271,10 +274,11 @@ export function judgedMemberFiles(root, identity) {
     if (nl < 0) break;
     const header = out.subarray(at, nl).toString();
     at = nl + 1;
-    const m = header.match(/^[0-9a-f]+ blob (\d+)$/);
-    if (!m) continue;   // missing at origin: deleted there
-    const blob = out.subarray(at, at + Number(m[1]));
-    at += Number(m[1]) + 1;
+    const m = header.match(/^[0-9a-f]+ (\w+) (\d+)$/);
+    if (!m) continue;   // `<name> missing`: deleted at origin, and no body follows
+    const blob = out.subarray(at, at + Number(m[2]));
+    at += Number(m[2]) + 1;   // every body is skipped, whatever its type (review 6)
+    if (m[1] !== 'blob') continue;
     let disk;
     try { if (fs.lstatSync(path.join(root, f)).isSymbolicLink()) continue; disk = fs.readFileSync(path.join(root, f)); } catch { continue; }
     if (sameText(disk.toString('utf8'), blob.toString('utf8'))) files.add(f);
@@ -385,7 +389,7 @@ export function gitIdentities(root, { runner = run, repos = [] } = {}) {
 //   identity  the Product's platform and host
 //   proofs    accountProof() of every account this machine is logged in to
 //   git       gitIdentities()
-export function buildRecord({ identity, proofs, git, today, existing = null }) {
+export function buildRecord({ identity, proofs, git, today, existing = null, proved = `${today}T00:00:00Z` }) {
   if (!identity?.platform) return { problem: 'the Product names no platform, so no account can be proven — a member file needs one' };
   const host = String(identity.host).toLowerCase();
   const onProduct = proofs.filter((p) => p.account.platform === identity.platform && p.account.host === host);
@@ -420,13 +424,19 @@ export function buildRecord({ identity, proofs, git, today, existing = null }) {
   // only while the account still verifies it — its address comes from the platform's answer, so it can be
   // proven again from any machine — and dropped once it is not.
   const plain = new Map(primary.emails.map((e) => [hashEmail(e), e]).filter(([h]) => h));
+  // A partial answer is not "no longer verified" (review 6): when the platform could not list every email,
+  // an email the file holds is not dropped on that guess — the run stops and says what to fix.
+  const unlisted = (keep?.emails || []).filter((h) => !plain.has(h));
+  if (primary.problem && unlisted.length) return { problem: `${unlisted.length} email(s) in your member file could not be checked: ${primary.problem}`, hint: 'fix that, then run `yad member add` again — nothing was changed' };
   for (const h of keep?.emails || []) if (plain.has(h)) emails.add(h);
   const record = {
     accounts,
     emails: [...emails].sort(),
     names: [...new Set([...(keep?.names || []), ...git.names])].sort(),
     joined: keep?.joined || today,
-    proved: today,
+    // A moment, not a day (review 6): a second run on the same day must still change the file, or its PR
+    // would hold no change for the gate to judge.
+    proved,
   };
   const dropped = (keep?.emails || []).filter((h) => !emails.has(h)).length;
   return { record, primary: primary.account, skipped, unproven, dropped, plainByHash: new Map(record.emails.map((h) => [h, plain.get(h)])), newEmails: record.emails };
@@ -640,7 +650,7 @@ const interactive = (env) => process.stdin.isTTY && process.stdout.isTTY && !env
 
 // `yad member add` — prove who is on this machine and write their member file on a branch with a PR/MR.
 // `soft`: called by `yad join` — a problem is a warning and the next step, never a failure.
-export async function runMemberAdd(root, { soft = false, noPush = false, runner = run, env = process.env, repos = undefined, today = new Date().toISOString().slice(0, 10), noLogin = false } = {}) {
+export async function runMemberAdd(root, { soft = false, noPush = false, runner = run, env = process.env, repos = undefined, today = new Date().toISOString().slice(0, 10), now = new Date().toISOString(), noLogin = false } = {}) {
   const refuse = soft ? (msg, hint) => { warn(msg); if (hint) hand(hint); } : refuser();
   log(c.bold(soft ? 'Team member' : '\nyad member add'));
   if (!fs.existsSync(productConfigPath(root))) return refuse('not a Product (no .sdlc/product.json here)', 'run it from the Product, or pass --dir');
@@ -683,16 +693,19 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   // checkout is on (E131 review 5). The name comes from the shared settings, so only a plain branch name is
   // used, and it reaches git inside a full refspec, never where it could be read as an option.
   const g = gitAt(root);
-  const base = resolveDefaultBranch((...a) => { const r = g(a); return { ok: r.ok, stdout: r.out }; }, readJSON(productConfigPath(root), null));
-  if (!BRANCH_RE.test(base) || base.includes('..')) return refuse(`the Product's default branch is not a plain branch name: ${forTerminal(base)}`, 'fix default_branch in the Product settings');
-  g(['fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`]);
+  // The same name the count reads trust from (review 6), after a fetch so origin's copy is current.
+  const wanted = resolveDefaultBranch((...a) => { const r = g(a); return { ok: r.ok, stdout: r.out }; }, readJSON(productConfigPath(root), null));
+  if (!BRANCH_RE.test(wanted) || wanted.includes('..')) return refuse(`the Product's default branch is not a plain branch name: ${forTerminal(wanted)}`, 'fix default_branch in the Product settings');
+  g(['fetch', '--quiet', 'origin', `+refs/heads/${wanted}:refs/remotes/origin/${wanted}`]);
+  const base = originDefault(root);
+  if (!base) return refuse(`origin's default branch cannot be told: this clone's origin/HEAD, the settings' default_branch (${forTerminal(wanted)}) and origin's own copy of the settings do not agree`, 'run `git remote set-head origin --auto`, pull, then run `yad member add` again');
   if (!g(['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}^{commit}`]).ok) return refuse(`could not read origin's ${base} — the member file is built on it`, 'check the clone can fetch from origin, then run `yad member add` again');
   const baseRef = `refs/remotes/origin/${base}`;
   // The member files AS THEY ARE ON THAT BRANCH (review 2, finding 3): the checkout may be behind — still
   // holding a file someone removed, or missing one someone added — and the PR is judged against the branch.
   const existingAll = membersAt(root, baseRef, identity);
   const mine = existingAll.members.find((m) => proofs.some((p) => p.account.platform === identity.platform && p.account.host === identity.host && p.account.login.toLowerCase() === m.primary.login.toLowerCase()));
-  const built = buildRecord({ identity, proofs, git, today, existing: mine || null });
+  const built = buildRecord({ identity, proofs, git, today, existing: mine || null, proved: now.replace(/\.\d+Z$/, 'Z') });
   if (built.problem) return refuse(built.problem, built.hint || (built.login ? `run \`${cli} auth login --hostname ${identity.host}\`, then \`yad member add\`` : null));
   const { record, primary, plainByHash } = built;
   if (!Number.isSafeInteger(primary.id)) return refuse(`the platform did not give the numeric id of ${accountLabel(primary)} — the member-check gate needs it`, 'run `yad member add` again; if it keeps failing, report it with `yad report`');
@@ -724,7 +737,9 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   // Up to date only when nothing but the day changed AND the gate as shipped has judged the file — else a
   // fresh change re-proves every email (review 5).
   const strip = (r) => memberJSON({ accounts: r.accounts, emails: r.emails, names: r.names, joined: r.joined });
-  const judged = identity.platform === 'github' && identity.verified ? judgedMemberFiles(root, identity).files.has(rel) : true;
+  // Not live: re-proving cannot make the file trusted, so a re-run opens nothing (review 6).
+  const jf = identity.platform === 'github' && identity.verified ? judgedMemberFiles(root, identity) : null;
+  const judged = !jf || !jf.live || jf.files.has(rel);
   const same = !!mine && judged && strip(mine) === strip(record);
   for (const s of built.skipped) info(`${s}: logged in here, but shares no verified email with ${accountLabel(primary)} — not added`);
   if (built.unproven) info(`${built.unproven} git email(s) here are not verified on the account — not added (they stay counted as their own person)`);
