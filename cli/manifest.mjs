@@ -539,6 +539,9 @@ export const PRODUCT_WIRING = {
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-template.sh', dest: 'checks/pr-template.sh', exec: true },
+    // E131: a member file is changed only by its own person, and each email it adds is proven on the PR.
+    // A Node script (`node checks/member-check.mjs`), so it needs no execute bit.
+    { src: 'skills/yad-checks/templates/checks/member-check.mjs', dest: 'checks/member-check.mjs' },
   ],
   github: [
     { src: 'skills/yad-product-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },

@@ -21,7 +21,8 @@ ${c.bold('Start a workspace')} ${c.dim('(the folder holding product/ and the cod
                        Clone the Product into [folder]/product/ (default: the URL's last name) and
                        every repo it registers; a failed repo clone is reported, never fatal. Then
                        only per-machine steps: git-ignored skill copies + the git pre-commit hook.
-                       Never commits, pushes, or changes a shared file
+                       Last, \`yad member add\` (below): your member file, on a branch with its own
+                       PR/MR — the only shared change join makes. A problem there never fails join
 
 ${c.bold('Setup & maintenance')}
   yad setup            Guided first-run setup (profile interview, install, connect & wire repos,
@@ -67,6 +68,18 @@ ${c.bold('Setup & maintenance')}
                        about to record instead — the git pre-commit hook check --fix
                        installs in this clone refuses a person's hand commit to the ledger.
                        YAD_HOOK_DISABLE=1 skips.
+
+${c.bold('Team members')} ${c.dim('(identity only — no roles, no reviewers, no allowlist)')}
+  yad member add [--no-push]           Prove who you are and write .sdlc/members/<platform>-<login>.json:
+                                       your account on the Product's platform (logs you in if needed),
+                                       your other GitHub/GitLab accounts and git emails that the platform
+                                       says are VERIFIED (stored hashed). One commit per email on
+                                       yad/member/<login>, pushed, with a PR/MR. Never your checkout
+  yad member list [--json]             Every member: active (committed or approved within the TTL,
+                                       default 90 days), idle (quiet, still has access), left (the
+                                       platform says no access — off the team list) or unknown
+  yad member remove [<login>] [--reason <why>]
+                                       Delete a member file — your own, or anyone's with --reason
 
 ${c.bold('Team usage (EM adoption & behavior report)')}
   yad usage                            Build a per-member report (HTML) from git + the SDLC ledgers
@@ -447,6 +460,7 @@ const ACTIONS = {
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove'], default: 'list' },
+  member: { known: ['add', 'list', 'remove'], default: 'list' },
 };
 // E80 — how each command finds its folder. A PRODUCT command works on the Product; a REPO command works
 // on the code repo it runs in and reads the Product beside it. The rest take their folder as given:
@@ -455,7 +469,7 @@ const PRODUCT_CMDS = new Set([
   'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
-  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile',
+  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member',
 ]);
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review']);
 // The Product commands that WRITE its files without first checking it is one. Run from a code repo they
@@ -468,6 +482,7 @@ function writesProduct(cmd, o) {
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   if (cmd === 'dial') return o.to !== undefined;
+  if (cmd === 'member') return o._[1] === 'add' || o._[1] === 'remove';
   // `--wire` writes a CI workflow; `--refresh` only rebuilds sites the folder already holds.
   if (cmd === 'docs') return action === 'sync' && !!o.wire;
   return false;
@@ -885,6 +900,18 @@ async function main() {
       if (o._[1]) { refuse(`yad capture takes no word (got ${o._[1]})`, 'usage: yad capture [--no-push]'); break; }
       result = await commands.runCapture(o.dir, { hook: !!o.hook, noPush: !!o.noPush });
       if (o.hook) process.exitCode = 0;
+      break;
+    }
+    case 'member': {
+      // E131. One file per person, identity only.
+      const [, action = 'list', who, extra] = o._;
+      const usage = 'usage: yad member add [--no-push] | yad member list [--json] | yad member remove [<login>] [--reason "<why>"]';
+      if (!['add', 'list', 'remove'].includes(action)) { refuse(`unknown member action: ${action} (add, list, remove)`, usage); break; }
+      if ((action !== 'remove' && who) || extra) { refuse(`unexpected word: ${extra || who}`, usage); break; }
+      if (noProduct()) break;
+      if (action === 'add') result = await commands.runMemberAdd(o.dir, { noPush: !!o.noPush, today });
+      else if (action === 'list') result = await commands.runMemberList(o.dir, { today });
+      else result = await commands.runMemberRemove(o.dir, { login: who ?? null, reason: o.reason ?? null });
       break;
     }
     case 'claims': {

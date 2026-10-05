@@ -67,6 +67,7 @@ const ARTIFACT_FILES = new Set([
 // has to derive the same login and the rule is compared between the two; this export stays (rule 3 —
 // add the new name beside the old) and is the one every older reader here still calls.
 import { loginFromEmail } from './riskmap.mjs';
+import { gateMemberMap, hashEmail } from './members.mjs';
 export { loginFromEmail };
 
 // ---- epic enumeration --------------------------------------------------------------------------
@@ -143,12 +144,12 @@ const GIT_PRETTY = '--pretty=format:\x01%an%x00%ae%x00%ad';
 
 // git-sourced "authored" events: who committed which epic artifact, when. Degrades to [] when the Product
 // is not a git repo (e.g. a test fixture dir), so the command never depends on git being present.
-function gitAuthoredEvents(root) {
+function gitAuthoredEvents(root, pairs = new Map()) {
   const r = run('git', ['-C', root, 'log', '--no-merges', '--date=short', GIT_PRETTY, '--name-only', '--', 'epics', FOUNDATION_DIR]);
   if (!r.ok || !r.stdout) return [];
   const events = [];
   for (const cm of parseGitLog(r.stdout)) {
-    const login = loginFromEmail(cm.ae);
+    const login = loginFromEmail(cm.ae) || pairs.get(hashEmail(cm.ae)) || null;
     for (const rel of cm.files) {
       if (!isArtifactPath(rel)) continue;
       events.push({
@@ -163,7 +164,7 @@ function gitAuthoredEvents(root) {
 
 // Optional (`--repos`): code commits in each connected code repo, attributed to the git author (or the
 // login a noreply address carries).
-function repoCommitEvents(root) {
+function repoCommitEvents(root, pairs = new Map()) {
   const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const events = [];
   for (const repo of reg?.repos || []) {
@@ -172,7 +173,7 @@ function repoCommitEvents(root) {
     const r = run('git', ['-C', abs, 'log', '--no-merges', '--date=short', GIT_PRETTY]);
     if (!r.ok || !r.stdout) continue;
     for (const cm of parseGitLog(r.stdout)) {
-      const login = loginFromEmail(cm.ae);
+      const login = loginFromEmail(cm.ae) || pairs.get(hashEmail(cm.ae)) || null;
       events.push({ ts: cm.ad, actor: login || cm.an, login, action: 'committed', repo: repo.name });
     }
   }
@@ -181,11 +182,15 @@ function repoCommitEvents(root) {
 
 // The full, window-filtered event stream. Deterministic: sorted by (date, action, epic/repo, actor).
 export function deriveEvents(root, { since, until, repos = false } = {}) {
-  const events = [...gitAuthoredEvents(root)];
+  // E131: a member file joins a commit's email to the person's login, so one person is one row. A report,
+  // so GitLab's pairings count here too (the gate count reads GitHub's only).
+  let pairs = new Map();
+  try { pairs = gateMemberMap(root, { anyPlatform: true }); } catch { /* no members — rows stay as git names them */ }
+  const events = [...gitAuthoredEvents(root, pairs)];
   let aliases = new Map();
   try { aliases = legacyLogins(readJSON(productConfigPath(root), null)); } catch { /* no Product — nothing to translate */ }
   for (const epic of listEpics(root)) events.push(...ledgerEvents(root, epic, aliases));
-  if (repos) events.push(...repoCommitEvents(root));
+  if (repos) events.push(...repoCommitEvents(root, pairs));
   return events
     .filter((e) => inWindow(e.ts, since, until))
     .sort((a, b) =>

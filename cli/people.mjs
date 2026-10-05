@@ -40,6 +40,7 @@ import { PROJECT_FILES, epicFiles } from './manifest.mjs';
 import { epicIds, epicRoot, unlistedLedgerDirs, FOUNDATION_EPIC, FOUNDATION_DIR, ledgerPersonLogin, legacyLogins, capLimit, capSeat, smallestTeam } from './epic-state.mjs';
 import { corruptShards, readShips } from './ledger.mjs';
 import { isBot, loginFromEmail } from './riskmap.mjs';
+import { gateMemberMap, hashEmail } from './members.mjs';
 
 // yadflow's OWN gate bot on GitLab. The GitHub workflow commits as `yad-gate-sync[bot]`, which `isBot`
 // already skips; the GitLab one commits as `yad-gate-sync` <yad-gate-sync@noreply.<host>> (the wired
@@ -354,7 +355,8 @@ function gitAuthors(dir, since) {
     const secs = Number(ct);
     const ts = Number.isFinite(secs) && ct !== '' ? dayString(Math.floor(secs / 86400)) : null;
     if (ts === null) return { unknown: `${repoRoot}: a commit carries a date git cannot express as a calendar day` };
-    out.push({ ts, name: String(name || '').trim(), login: loginFromEmail(email), how: 'committed' });
+    // The email itself is never kept — only its hash, which a member file (E131) can match.
+    out.push({ ts, name: String(name || '').trim(), login: loginFromEmail(email), emailHash: hashEmail(email), how: 'committed' });
   }
   return { events: out };
 }
@@ -393,7 +395,11 @@ function connectedRepos(root) {
 }
 
 // Every piece of evidence, from every source, with one list of the reasons any of it is missing.
-export function peopleEvidence(root, { today = todayString(), aliases = new Map(), sinceDays = CAPACITY_MAX_DAYS * WALK_PAD } = {}) {
+// E131: a commit whose author email a member file pairs with a login is that login's — one person, not a
+// name and a login counted twice. `members` is that pairing (`gateMemberMap`): only proven pairs on a GitHub
+// Product, never one two files share. It can only JOIN two keys, so it never removes anyone from the count;
+// a member file that cannot be read adds no pairing, and the count stays as it was (over, not under).
+export function peopleEvidence(root, { today = todayString(), aliases = new Map(), sinceDays = CAPACITY_MAX_DAYS * WALK_PAD, members = null } = {}) {
   const led = ledgerEvidence(root, aliases);
   const events = [...led.events];
   const unknown = [...led.unknown];
@@ -426,6 +432,8 @@ export function peopleEvidence(root, { today = todayString(), aliases = new Map(
       else events.push(...got.events);
     }
   }
+  const pairs = members || gateMemberMap(root);
+  if (pairs.size) for (const e of events) if (!e.login && e.emailHash && pairs.has(e.emailHash)) e.login = pairs.get(e.emailHash);
   return { events, merges: led.merges, unknown };
 }
 

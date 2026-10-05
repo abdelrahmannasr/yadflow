@@ -67,7 +67,7 @@ export function platformReady(platform) {
 // both github.com and a GitHub Enterprise server would be recorded under the wrong account. `host` is the
 // caller's (the Product's `git_url`), else the directory's origin remote. `glab api` already resolves the
 // host from the repo.
-const LOGIN_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]*(\[bot\])?$/; // GitLab allows a leading underscore
+export const LOGIN_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]*(\[bot\])?$/; // GitLab allows a leading underscore
 const loginCache = new Map();
 export function platformLogin(cwd, platform, { runner = run, env = process.env, host } = {}) {
   if (env.YAD_PLATFORM_LOGIN === '0') return null;

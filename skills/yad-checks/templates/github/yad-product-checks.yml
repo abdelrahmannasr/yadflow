@@ -69,3 +69,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/ledger-guard.sh "origin/${{ github.base_ref }}"
+
+  # E131: a member file (.sdlc/members/) is changed only by its own person, and every email it adds must be
+  # the author of a commit in this PR that GitHub attributes to that person. Needs a read token to ask
+  # GitHub who a commit belongs to; the PR author comes from the event, never from the PR's own files.
+  member-check:
+    runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
+    env:
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+      - run: node checks/member-check.mjs "origin/${{ github.base_ref }}"
