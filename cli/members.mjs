@@ -188,55 +188,66 @@ export function gateMemberMap(root, { read = null, anyPlatform = false } = {}) {
   // The GATE COUNT trusts a pairing only where the member-check gate judged it (review 2, finding 2): a
   // verified Product with the shipped gate installed and run by its checks workflow. Anywhere else a file
   // is its owner's statement, and a statement must never make the count smaller.
-  if (!anyPlatform && !memberGateLive(root, got.identity)) return map;
-  const since = anyPlatform ? null : gateSince(root, got.identity);
+  const judged = anyPlatform ? null : judgedMemberFiles(root, got.identity);
+  if (judged && !judged.files.size) return map;
   for (const m of got.members) {
     if (got.dupAccounts.has(accountKey(m.primary))) continue;
-    if (!anyPlatform && !judgedByGate(root, m.rel, since)) continue;
+    if (judged && !judged.files.has(m.rel)) continue;
     for (const h of m.emails) if (!got.dupEmails.has(h)) map.set(h, m.primary.login);
   }
   return map;
 }
 
-// Is the member-check gate live on this Product: verified ledger, `checks/member-check.mjs` exactly as this
-// yadflow ships it, and a Product checks workflow that runs it? An edited or outdated copy is not trusted.
-export function memberGateLive(root, identity) {
-  if (!identity?.verified) return false;
-  try {
-    const shipped = fs.readFileSync(asset('skills/yad-checks/templates/checks/member-check.mjs'), 'utf8');
-    if (fs.readFileSync(path.join(root, 'checks/member-check.mjs'), 'utf8') !== shipped) return false;
-  } catch { return false; }
-  // The workflow that runs it, exactly as shipped too (review 3): a commented-out line or an `if: false`
-  // job would mention the gate without running it.
-  const [src, dest] = identity.platform === 'gitlab'
+// The member-check gate and its workflow, per platform: the shipped copy and where it is installed.
+const GATE_FILES = (platform) => [
+  ['skills/yad-checks/templates/checks/member-check.mjs', 'checks/member-check.mjs'],
+  platform === 'gitlab'
     ? ['skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml', '.gitlab/ci/yad-product-checks.yml']
-    : ['skills/yad-checks/templates/github/yad-product-checks.yml', '.github/workflows/yad-product-checks.yml'];
-  try { return fs.readFileSync(path.join(root, dest), 'utf8') === fs.readFileSync(asset(src), 'utf8'); } catch { return false; }
-}
+    : ['skills/yad-checks/templates/github/yad-product-checks.yml', '.github/workflows/yad-product-checks.yml'],
+];
+// Line endings never decide (a Windows checkout writes CRLF): only the text.
+const sameText = (a, b) => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
 
-// The commit, on the current branch's first-parent line, from which the member-check job has been in the
-// Product's checks workflow — and so from which every member file that reached the branch was judged by
-// it. Null when it cannot be told (no git, a shallow clone, never added): then no file is trusted.
-export function gateSince(root, identity) {
-  const dest = identity?.platform === 'gitlab' ? '.gitlab/ci/yad-product-checks.yml' : '.github/workflows/yad-product-checks.yml';
-  // The LAST commit that changed how often the job's command appears: with the gate live now, that is when
-  // it was last (re)added — so a removed-then-restored gate does not vouch for the gap between.
-  const r = gitAt(root)(['log', '--first-parent', '-1', '--format=%H', '-S', 'node checks/member-check.mjs', '--', dest]);
-  return r.ok ? r.out.trim() || null : null;
-}
-
-// Was this member file last changed AFTER the gate arrived (review 3)? The commit that brought its last
-// change onto the first-parent line must come strictly after `since`. A file merged while the gate was
-// missing, outdated or not yet installed was never judged, so the count does not trust it — its owner runs
-// `yad member add` again, and that change is judged.
-export function judgedByGate(root, rel, since) {
-  if (!since) return false;
+// Which member files the GATE COUNT may trust: the set of their paths, or an empty set. Read entirely from
+// the default branch AS ORIGIN HAS IT (review 4) — never the files on disk or a commit nobody pushed.
+//   1. LIVE: the Product is verified, and at origin/<default> both the gate script and the workflow that runs
+//      it are exactly the copies this yadflow ships (review 3: a commented-out line or `if: false` job would
+//      mention the gate without running it).
+//   2. SINCE: the last first-parent commit on origin/<default> that changed EITHER file in any way (review 4:
+//      one PR could switch the gate off and add a forged file, judged by its own disabled gate, and a later
+//      PR restore it). From that commit on, every change that reached the branch was judged by the gate as
+//      shipped. So every `yad update` that changes either file resets trust — each member runs `yad member
+//      add` again. That only ever makes the count higher, the direction E71 allows.
+//   3. JUDGED: a member file changed on the first-parent line strictly after SINCE, and the same on disk as
+//      on origin/<default> (an edit or a local commit is nobody's proof).
+// Anything that cannot be read — no origin branch, a shallow clone, git missing — trusts nothing.
+export function judgedMemberFiles(root, identity) {
+  const none = { live: false, files: new Set(), since: null };
+  if (!identity?.verified || !PLATFORMS.includes(identity.platform)) return none;
   const g = gitAt(root);
-  const last = g(['log', '--first-parent', '-1', '--format=%H', '--', rel]).out.trim();
-  if (!last || last === since) return false;
-  if (g(['status', '--porcelain', '--', rel]).out.trim()) return false;   // edited here, not committed
-  return g(['merge-base', '--is-ancestor', since, last]).ok;
+  const branch = resolveDefaultBranch((...a) => { const r = g(a); return { ok: r.ok, stdout: r.out }; }, readJSON(productConfigPath(root), null));
+  if (!BRANCH_RE.test(branch) || branch.includes('..')) return none;
+  const base = `refs/remotes/origin/${branch}`;
+  if (!g(['rev-parse', '--verify', '-q', `${base}^{commit}`]).ok) return none;
+  for (const [src, dest] of GATE_FILES(identity.platform)) {
+    const at = g(['show', `${base}:./${dest}`]);
+    let shipped;
+    try { shipped = fs.readFileSync(asset(src), 'utf8'); } catch { return none; }
+    if (!at.ok || !sameText(at.out, shipped.trim())) return none;
+  }
+  const since = g(['log', '--first-parent', '-1', '--format=%H', base, '--', ...GATE_FILES(identity.platform).map(([, d]) => d)]).out.trim();
+  if (!since) return { ...none, live: true };
+  // One walk for every member file (review 4: not three git runs per file on every gate command).
+  const changed = g(['log', '--first-parent', '--relative', '--name-only', '--format=', `${since}..${base}`, '--', MEMBERS_DIR]);
+  const dirty = g(['diff', '--relative', '--name-only', base, '--', MEMBERS_DIR]);
+  if (!changed.ok || !dirty.ok) return { ...none, live: true };
+  const files = new Set(changed.out.split('\n').filter(Boolean));
+  for (const f of dirty.out.split('\n').filter(Boolean)) files.delete(f);
+  return { live: true, files, since };
 }
+
+// Is the gate live at origin's default branch? (doctor and `yad member add` say so when it is not.)
+export const memberGateLive = (root, identity) => judgedMemberFiles(root, identity).live;
 
 // Does this piece of evidence (a commit, an approval, a ship) belong to this member? By any of their
 // accounts' logins, any email, or any git name. The standup and the status read it; the gate count never

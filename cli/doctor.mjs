@@ -25,7 +25,7 @@ import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { readOwners } from './owners.mjs';
-import { readMembers, memberGateLive, gateSince, judgedByGate } from './members.mjs';
+import { readMembers, judgedMemberFiles } from './members.mjs';
 import { loadChoices, readToolboxFile } from './toolbox.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
@@ -1907,12 +1907,12 @@ export function memberChecks(checks, root) {
   }
   // Which files the gate COUNT leaves out, and why (review 3): no live gate, or a file the gate never judged.
   if (got.members.length && got.identity.verified && got.identity.platform === 'github') {
-    const live = memberGateLive(root, got.identity);
-    const since = live ? gateSince(root, got.identity) : null;
-    const left = live ? got.members.filter((m) => !judgedByGate(root, m.rel, since)).map((m) => m.rel) : got.members.map((m) => m.rel);
+    const judged = judgedMemberFiles(root, got.identity);
+    const left = got.members.filter((m) => !judged.files.has(m.rel)).map((m) => m.rel);
     if (left.length) {
       check(checks, 'members:untrusted', 'project', 'warn', `${left.length} member file(s) are not used by the active-people count: ${left.slice(0, 3).join('; ')}${left.length > 3 ? ` (+${left.length - 3} more)` : ''}`,
-        live ? 'each was last changed before the member-check gate ran on this Product, so no gate judged it — its owner runs `yad member add` again, and that change is judged' : 'the member-check gate is missing, edited or outdated here — `yad update` installs the shipped copy; files merged before then still need `yad member add` again');
+        judged.live ? 'no gate as shipped judged them: each was last changed before the member-check gate or its workflow last changed on origin\'s default branch (every `yad update` that changes either resets this), or differs here from origin — its owner runs `yad member add` again, and that change is judged'
+          : 'the member-check gate or its workflow on origin\'s default branch is missing, edited, or from another yadflow version than this one — `yad update` installs the shipped copies, then each member runs `yad member add` again');
     }
   }
   if (got.members.length && !got.identity.verified) {

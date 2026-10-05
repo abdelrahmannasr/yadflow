@@ -52,10 +52,22 @@ function liveGate(T) {
   fs.copyFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-product-checks.yml'), path.join(T, '.github/workflows/yad-product-checks.yml'));
   git(T, 'add', '--', '.sdlc/product.json', 'checks', '.github');
   git(T, 'commit', '-q', '--allow-empty', '-m', 'chore(product): install the member-check gate');
+  // The count reads what origin's default branch holds (review 4): give the Product an origin, and push.
+  if (!fs.existsSync(path.join(T, '.git', 'test-origin'))) {
+    git(T, 'init', '-q', '--bare', path.join(T, '.git', 'test-origin'));
+    git(T, 'remote', 'add', 'origin', path.join(T, '.git', 'test-origin'));
+  }
+  git(T, 'push', '-q', '-f', 'origin', 'HEAD:refs/heads/main');
+  git(T, 'fetch', '-q', 'origin');
 }
 const member = (T, file, rec) => put(path.join(T, M.MEMBERS_DIR, file), rec);
-// A member file merged AFTER the gate arrived — the only kind the count trusts (review 3).
-const memberC = (T, file, rec) => { member(T, file, rec); git(T, 'add', '-A', '--', M.MEMBERS_DIR); git(T, 'commit', '-q', '--allow-empty', '-m', `member ${file}`); };
+// A member file merged AFTER the gate arrived, and pushed — the only kind the count trusts (reviews 3–4).
+const memberC = (T, file, rec, { push = true } = {}) => {
+  member(T, file, rec);
+  git(T, 'add', '-A', '--', M.MEMBERS_DIR);
+  git(T, 'commit', '-q', '--allow-empty', '-m', `member ${file}`);
+  if (push && fs.existsSync(path.join(T, '.git', 'test-origin'))) { git(T, 'push', '-q', '-f', 'origin', 'HEAD:refs/heads/main'); git(T, 'fetch', '-q', 'origin'); }
+};
 const alice = (over = {}) => ({ accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 1 }], emails: [M.hashEmail('alice@work.com')], names: ['Alice Smith'], joined: TODAY, ...over });
 
 test('E131 readMembers: a members folder reached through a link is never read (review 1)', () => {
@@ -160,11 +172,28 @@ test('E131 gateMemberMap: no pairing unless the member-check gate is live (revie
     member(T, 'github-alice.json', alice({ emails: [M.hashEmail('bob@work.com')] }));
     assert.equal(M.gateMemberMap(T).size, 0, 'an edit not committed is nobody\'s proof');
     memberC(T, 'github-alice.json', alice({ names: ['Alice Smith', 'alice'] }));
-    fs.appendFileSync(path.join(T, 'checks/member-check.mjs'), '\n// edited\n');
-    assert.equal(M.gateMemberMap(T).size, 0, 'an edited or outdated gate is not trusted');
-    liveGate(T);
-    fs.writeFileSync(path.join(T, '.github/workflows/yad-product-checks.yml'), 'name: x\n');
-    assert.equal(M.gateMemberMap(T).size, 0, 'a gate no workflow runs is not trusted');
+    assert.equal(M.gateMemberMap(T).size, 1);
+    // Committed but never pushed: nobody's proof (review 4).
+    memberC(T, 'github-alice.json', alice({ names: ['A'] }), { push: false });
+    assert.equal(M.gateMemberMap(T).size, 0, 'a local commit is not what origin judged');
+    git(T, 'push', '-q', '-f', 'origin', 'HEAD:refs/heads/main');
+    git(T, 'fetch', '-q', 'origin');
+    assert.equal(M.gateMemberMap(T).size, 1);
+    // An edit to the gate that origin holds: not live. Restored: live again, but every file needs a new
+    // judged change (review 4 — one PR could disable it, add a forged file, and a later PR restore it).
+    const edit = (rel, text) => { fs.writeFileSync(path.join(T, rel), text); git(T, 'commit', '-q', '-am', `edit ${rel}`); git(T, 'push', '-q', '-f', 'origin', 'HEAD:refs/heads/main'); git(T, 'fetch', '-q', 'origin'); };
+    const gate = fs.readFileSync(path.join(T, 'checks/member-check.mjs'), 'utf8');
+    edit('checks/member-check.mjs', 'process.exit(0)\n');
+    assert.equal(M.gateMemberMap(T).size, 0, 'a gutted gate is not live');
+    edit('checks/member-check.mjs', gate);
+    assert.equal(M.gateMemberMap(T).size, 0, 'restored: the file was judged by the gutted gate, so not trusted');
+    memberC(T, 'github-alice.json', alice({ names: ['Alice Smith'] }));
+    assert.equal(M.gateMemberMap(T).size, 1, 'a new judged change: trusted');
+    const wf = fs.readFileSync(path.join(T, '.github/workflows/yad-product-checks.yml'), 'utf8');
+    edit('.github/workflows/yad-product-checks.yml', wf.replace('  member-check:\n    runs-on: ubuntu-latest\n    if: github.event.action != \'edited\'', '  member-check:\n    runs-on: ubuntu-latest\n    if: false'));
+    assert.equal(M.gateMemberMap(T).size, 0, 'an `if: false` job is not live');
+    edit('.github/workflows/yad-product-checks.yml', wf);
+    assert.equal(M.gateMemberMap(T).size, 0, 'restored: trust starts again from here');
     assert.equal(M.gateMemberMap(T, { anyPlatform: true }).size, 1, 'a report still reads it');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
