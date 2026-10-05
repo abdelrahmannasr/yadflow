@@ -7,7 +7,7 @@
 //      one account on the Product's platform and host — the author's, with the author's numeric account id
 //      (so a login someone renamed away from, and another person registered, cannot take over the old file).
 //      Never a bot's.
-//   2. On GitHub, every email the PR adds must be the author email of a commit in the PR that GitHub itself
+//   2. On GitHub, every email in a file the PR adds or changes must be the author email of a commit in the PR that GitHub itself
 //      attributes to the PR's author (`commits/<sha>` → `author.login`). GitHub links a commit to an account
 //      only through an email that account has verified, so this is the platform's proof, not the file's
 //      claim. `yad member add` writes one commit per email for exactly this. On GitLab the API says no such
@@ -165,13 +165,14 @@ for (const { status, path } of changed) {
   const wasHere = Array.isArray(was?.accounts) ? was.accounts.filter(onProduct) : [];
   if (wasHere.length && wasHere[0].id !== authorId) { fail(`${path}: belonged to account id ${wasHere[0].id}, not ${author}'s (${authorId}) — a reused login does not take over a member file; remove it first`); continue; }
   if (platform !== 'github') { say(`PASS [member-check]: ${path} belongs to ${author} (on GitLab its emails feed the team list only)`); continue; }
-  const before = emailsOf(fileAt(base, path));
-  const added = [...emailsOf(rec)].filter((h) => !before.has(h));
+  // EVERY email in a changed file is proven, not only the new ones (review 5): an email that reached the
+  // branch while this gate was off or edited would otherwise ride along on any later change.
+  const added = [...emailsOf(rec)];
   for (const h of added) {
     const proof = prCommits.filter((c) => c.hash === h).find((c) => String(githubLogin(c.sha) || '').toLowerCase() === author.toLowerCase());
-    if (!proof) fail(`${path}: adds an email no commit in this PR proves — GitHub must attribute a commit authored by that email to ${author} (\`yad member add\` writes one such commit per email; verify the email on the account)`);
+    if (!proof) fail(`${path}: holds an email no commit in this PR proves — GitHub must attribute a commit authored by that email to ${author} (\`yad member add\` writes one such commit per email; verify the email on the account)`);
   }
-  if (!rc) say(`PASS [member-check]: ${path} belongs to ${author}${added.length ? `; ${added.length} new email(s), each proven by a commit GitHub attributes to them` : ''}`);
+  if (!rc) say(`PASS [member-check]: ${path} belongs to ${author}${added.length ? `; ${added.length} email(s), each proven by a commit GitHub attributes to them` : ''}`);
 }
 
 // No account on the Product's platform and no email in two files, across every member file at HEAD.

@@ -116,12 +116,13 @@ export function readMemberFile(file, { platform, host } = {}) {
   const names = Array.isArray(r.names) ? r.names : [];
   if (!names.every((n) => typeof n === 'string' && n.trim() && n.length <= 200)) return { error: 'holds a name that is not a short, non-empty text' };
   if (r.joined !== undefined && !(typeof r.joined === 'string' && DATE_RE.test(r.joined))) return { error: 'has a "joined" date that is not YYYY-MM-DD' };
+  if (r.proved !== undefined && !(typeof r.proved === 'string' && DATE_RE.test(r.proved))) return { error: 'has a "proved" date that is not YYYY-MM-DD' };
   if (!platform) return { error: 'cannot be checked: the Product names no platform' };
   const primary = accounts.find((a) => a.platform === platform && a.host === String(host).toLowerCase());
   if (!primary) return { error: `has no ${platform} account on ${forTerminal(host)}, the Product's own platform` };
   if (accounts.filter((a) => a.platform === platform && a.host === String(host).toLowerCase()).length > 1) return { error: `lists two accounts on ${forTerminal(host)} — one person has one account on the Product's own platform` };
   if (path.basename(file) !== memberFileName(platform, primary.login)) return { error: `names ${forTerminal(primary.login)}, so it must be called ${memberFileName(platform, primary.login)}` };
-  return { record: { primary, accounts, emails: [...new Set(emails)], names: [...new Set(names.map((n) => n.trim()))], joined: r.joined ?? null } };
+  return { record: { primary, accounts, emails: [...new Set(emails)], names: [...new Set(names.map((n) => n.trim()))], joined: r.joined ?? null, proved: r.proved ?? null } };
 }
 
 // Every member file. Returns { members, errors, duplicates }: `errors` are files that cannot be used (listed,
@@ -198,6 +199,24 @@ export function gateMemberMap(root, { read = null, anyPlatform = false } = {}) {
   return map;
 }
 
+// The default branch AS ORIGIN SAYS IT (review 5): origin's own HEAD when the clone knows it; otherwise the
+// name in the settings, but only when origin's copy of those settings, on that branch, names it too — a
+// local edit to the settings must not point the count at a branch someone pushed with a made-up history.
+// Null when it cannot be told. Returns the plain branch name.
+export function originDefault(root) {
+  const g = gitAt(root);
+  const head = g(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  const fromHead = head.ok ? head.out.replace(/^origin\//, '') : '';
+  if (fromHead && BRANCH_RE.test(fromHead) && !fromHead.includes('..')) return fromHead;
+  const local = readJSON(productConfigPath(root), null)?.default_branch;
+  const name = typeof local === 'string' && local ? local : 'main';
+  if (!BRANCH_RE.test(name) || name.includes('..')) return null;
+  const read = (f) => { const r = g(['show', `refs/remotes/origin/${name}:./${f}`]); return r.ok ? parse(r.out) : undefined; };
+  const there = read('.sdlc/product.json') ?? read('.sdlc/hub.json');
+  if (there === undefined) return null;
+  return (typeof there?.default_branch === 'string' && there.default_branch ? there.default_branch : 'main') === name ? name : null;
+}
+
 // The member-check gate and its workflow, per platform: the shipped copy and where it is installed.
 const GATE_FILES = (platform) => [
   ['skills/yad-checks/templates/checks/member-check.mjs', 'checks/member-check.mjs'],
@@ -225,8 +244,8 @@ export function judgedMemberFiles(root, identity) {
   const none = { live: false, files: new Set(), since: null };
   if (!identity?.verified || !PLATFORMS.includes(identity.platform)) return none;
   const g = gitAt(root);
-  const branch = resolveDefaultBranch((...a) => { const r = g(a); return { ok: r.ok, stdout: r.out }; }, readJSON(productConfigPath(root), null));
-  if (!BRANCH_RE.test(branch) || branch.includes('..')) return none;
+  const branch = originDefault(root);
+  if (!branch) return none;
   const base = `refs/remotes/origin/${branch}`;
   if (!g(['rev-parse', '--verify', '-q', `${base}^{commit}`]).ok) return none;
   for (const [src, dest] of GATE_FILES(identity.platform)) {
@@ -239,10 +258,27 @@ export function judgedMemberFiles(root, identity) {
   if (!since) return { ...none, live: true };
   // One walk for every member file (review 4: not three git runs per file on every gate command).
   const changed = g(['log', '--first-parent', '--relative', '--name-only', '--format=', `${since}..${base}`, '--', MEMBERS_DIR]);
-  const dirty = g(['diff', '--relative', '--name-only', base, '--', MEMBERS_DIR]);
-  if (!changed.ok || !dirty.ok) return { ...none, live: true };
-  const files = new Set(changed.out.split('\n').filter(Boolean));
-  for (const f of dirty.out.split('\n').filter(Boolean)) files.delete(f);
+  if (!changed.ok) return { ...none, live: true };
+  // Each candidate must be on disk byte for byte as origin holds it (review 5): an untracked copy, or an edit
+  // git was told to ignore (`--assume-unchanged`), is not what the gate judged. One git run for them all.
+  const cands = [...new Set(changed.out.split('\n').filter(Boolean))];
+  const batch = spawnSync('git', ['cat-file', '--batch'], { cwd: root, input: cands.map((f) => `${base}:./${f}\n`).join(''), maxBuffer: 1 << 28 });
+  const out = batch.status === 0 ? batch.stdout : Buffer.alloc(0);
+  const files = new Set();
+  let at = 0;
+  for (const f of cands) {
+    const nl = out.indexOf(10, at);
+    if (nl < 0) break;
+    const header = out.subarray(at, nl).toString();
+    at = nl + 1;
+    const m = header.match(/^[0-9a-f]+ blob (\d+)$/);
+    if (!m) continue;   // missing at origin: deleted there
+    const blob = out.subarray(at, at + Number(m[1]));
+    at += Number(m[1]) + 1;
+    let disk;
+    try { if (fs.lstatSync(path.join(root, f)).isSymbolicLink()) continue; disk = fs.readFileSync(path.join(root, f)); } catch { continue; }
+    if (sameText(disk.toString('utf8'), blob.toString('utf8'))) files.add(f);
+  }
   return { live: true, files, since };
 }
 
@@ -379,13 +415,21 @@ export function buildRecord({ identity, proofs, git, today, existing = null }) {
   const keep = existing && existing.primary.login.toLowerCase() === primary.account.login.toLowerCase() ? existing : null;
   const accounts = [primary.account, ...others.map((p) => p.account)];
   for (const a of keep?.accounts || []) if (!accounts.some((b) => accountKey(b) === accountKey(a))) accounts.push(a);
+  // EVERY change re-proves EVERY email (E131 review 5): the gate proves each email in a changed file, so a
+  // file cannot carry an email in from a time the gate was off. An email the file already holds is kept
+  // only while the account still verifies it — its address comes from the platform's answer, so it can be
+  // proven again from any machine — and dropped once it is not.
+  const plain = new Map(primary.emails.map((e) => [hashEmail(e), e]).filter(([h]) => h));
+  for (const h of keep?.emails || []) if (plain.has(h)) emails.add(h);
   const record = {
     accounts,
-    emails: [...new Set([...(keep?.emails || []), ...emails])].sort(),
+    emails: [...emails].sort(),
     names: [...new Set([...(keep?.names || []), ...git.names])].sort(),
     joined: keep?.joined || today,
+    proved: today,
   };
-  return { record, primary: primary.account, skipped, unproven, newEmails: [...emails].filter((h) => !(keep?.emails || []).includes(h)).sort() };
+  const dropped = (keep?.emails || []).filter((h) => !emails.has(h)).length;
+  return { record, primary: primary.account, skipped, unproven, dropped, plainByHash: new Map(record.emails.map((h) => [h, plain.get(h)])), newEmails: record.emails };
 }
 
 // The bytes of a member file, as `writeJSON` would write them: the shape stamp first, two-space JSON.
@@ -400,11 +444,12 @@ function gitAt(root, extra = null) {
   };
 }
 
-// One commit per email (CI's proof: GitHub attributes each to the account that verified that email). The
-// first commit writes the file with the accounts, names and the first email; each later one adds one email.
+// One commit per email, for EVERY email in the file (CI's proof: GitHub attributes each to the account that
+// verified that email, and the gate asks it of every email in a changed file). The first commit writes the
+// file with the first email, each later one adds the next; the last holds them all.
 // Built on `base` with a private index. Signed when git signs (`commit.gpgsign`), as a person's commit is.
 // Returns { branch, head, commits } or { error }.
-export function commitMember(root, { rel, record, newEmails, plainEmails, base, name, login, subject }) {
+export function commitMember(root, { rel, record, plainByHash, base, name, login, subject }) {
   const git = gitAt(root);
   const prefix = git(['rev-parse', '--show-prefix']).out;
   const target = `${prefix}${rel}`;
@@ -413,10 +458,8 @@ export function commitMember(root, { rel, record, newEmails, plainEmails, base, 
   const idx = gitAt(root, { GIT_INDEX_FILE: path.join(tmp, 'index') });
   try {
     if (!idx(['read-tree', base]).ok) return { error: `could not read ${base}` };
-    const steps = [];
-    const before = record.emails.filter((h) => !newEmails.includes(h));
-    if (!newEmails.length) steps.push({ emails: record.emails, email: plainEmails[0] });
-    else newEmails.forEach((h, i) => steps.push({ emails: [...before, ...newEmails.slice(0, i + 1)].sort(), email: plainEmails.find((e) => hashEmail(e) === h) }));
+    const steps = record.emails.map((h, i) => ({ emails: record.emails.slice(0, i + 1), email: plainByHash.get(h) }));
+    if (!steps.length || steps.some((x) => !x.email)) return { error: 'every email needs its own address to author its proof commit' };
     let parent = base;
     const commits = [];
     for (const [i, s] of steps.entries()) {
@@ -651,8 +694,7 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   const mine = existingAll.members.find((m) => proofs.some((p) => p.account.platform === identity.platform && p.account.host === identity.host && p.account.login.toLowerCase() === m.primary.login.toLowerCase()));
   const built = buildRecord({ identity, proofs, git, today, existing: mine || null });
   if (built.problem) return refuse(built.problem, built.hint || (built.login ? `run \`${cli} auth login --hostname ${identity.host}\`, then \`yad member add\`` : null));
-  const { record, primary } = built;
-  let { newEmails } = built;
+  const { record, primary, plainByHash } = built;
   if (!Number.isSafeInteger(primary.id)) return refuse(`the platform did not give the numeric id of ${accountLabel(primary)} — the member-check gate needs it`, 'run `yad member add` again; if it keeps failing, report it with `yad report`');
   // A login renamed away and registered again by someone else is another account: the old file is not theirs.
   if (mine && mine.primary.id !== primary.id) return refuse(`${mine.rel} belongs to another account with the login ${forTerminal(primary.login)} (id ${mine.primary.id}, yours is ${primary.id})`, 'that file is someone else\'s — ask the team to remove it (`yad member remove <login> --reason …`), then run `yad member add`');
@@ -668,7 +710,6 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   if (shared.length) {
     warn(`${shared.length} of your emails ${shared.length === 1 ? 'is' : 'are'} already in another member file — left out of yours; \`yad member list\` names the file`);
     record.emails = record.emails.filter((h) => !shared.includes(h));
-    newEmails = newEmails.filter((h) => !shared.includes(h));
     if (!record.emails.length) return refuse('every email of yours is already in another member file', 'ask the team to remove the file that lists them (`yad member remove <login> --reason …`), then run `yad member add`');
   }
   for (const a of record.accounts.slice(1)) {
@@ -679,23 +720,27 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   if (identity.platform === 'github' && identity.verified && !memberGateLive(root, identity)) {
     warn('the member-check gate is missing or not the shipped copy here — until `yad update` installs it, the active-people count does not use member files, and a file merged before it is not trusted later either (run `yad member add` again then)');
   }
-  const same = !!mine && memberJSON({ accounts: mine.accounts, emails: mine.emails, names: mine.names, joined: mine.joined }) === memberJSON(record);
+  if (built.dropped) info(`${built.dropped} email(s) in your file are no longer verified on the account — dropped`);
+  // Up to date only when nothing but the day changed AND the gate as shipped has judged the file — else a
+  // fresh change re-proves every email (review 5).
+  const strip = (r) => memberJSON({ accounts: r.accounts, emails: r.emails, names: r.names, joined: r.joined });
+  const judged = identity.platform === 'github' && identity.verified ? judgedMemberFiles(root, identity).files.has(rel) : true;
+  const same = !!mine && judged && strip(mine) === strip(record);
   for (const s of built.skipped) info(`${s}: logged in here, but shares no verified email with ${accountLabel(primary)} — not added`);
   if (built.unproven) info(`${built.unproven} git email(s) here are not verified on the account — not added (they stay counted as their own person)`);
   if (same) {
     ok(`${rel} is up to date — ${accountLabel(primary)}`);
     return { login: primary.login, path: rel, changed: false };
   }
-  const plainEmails = git.emails.filter((e) => record.emails.includes(hashEmail(e)));
   const subject = mine ? `chore(product): update team member ${primary.login}` : `chore(product): add team member ${primary.login}`;
-  const made = commitMember(root, { rel, record, newEmails, plainEmails, base: baseRef, name: git.names[0], login: primary.login, subject });
+  const made = commitMember(root, { rel, record, plainByHash, base: baseRef, name: git.names[0], login: primary.login, subject });
   if (made.error) return refuse(made.error, 'nothing was pushed; fix it and run `yad member add` again');
   ok(`wrote ${rel} on ${made.branch} (${made.commits.length} commit(s)) — ${accountLabel(primary)}${record.accounts.length > 1 ? ` + ${record.accounts.length - 1} other account(s)` : ''}, ${record.emails.length} email(s), stored hashed`);
   if (noPush) {
     hand(`push it and open a ${identity.platform === 'github' ? 'PR' : 'MR'}: git push -u origin ${made.branch}`);
     return { login: primary.login, path: rel, changed: true, branch: made.branch, pushed: false };
   }
-  const pub = publishMember(root, { branch: made.branch, base, login: primary.login, platform: identity.platform, host: identity.host, title: subject, emails: newEmails.length || record.emails.length, runner });
+  const pub = publishMember(root, { branch: made.branch, base, login: primary.login, platform: identity.platform, host: identity.host, title: subject, emails: record.emails.length, runner });
   if (pub.error) {
     warn(pub.error);
     hand(pub.pushed ? `open it yourself from ${made.branch} into ${base}` : `when you can push: git push -u origin ${made.branch}, then open a ${identity.platform === 'github' ? 'PR' : 'MR'} into ${base} (or run \`yad member add\` again)`);

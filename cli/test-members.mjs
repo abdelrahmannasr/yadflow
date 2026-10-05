@@ -272,13 +272,17 @@ test('E131 buildRecord: another account joins only through a shared verified ema
   assert.match(two.problem, /more than one github account/);
 });
 
-test('E131 buildRecord: an update keeps what the file already holds and says which emails are new', () => {
-  const existing = { primary: { platform: 'github', host: 'github.com', login: 'alice' }, accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'old' }], emails: [M.hashEmail('old@x.io')], names: ['Al'], joined: '2026-01-01' };
-  const r = M.buildRecord({ identity: ID, today: TODAY, existing, git: { emails: ['alice@work.com'], names: ['Alice Smith'] }, proofs: [proof('github', 'github.com', 'alice', ['alice@work.com'])] });
+test('E131 buildRecord: an update keeps an email only while the account still verifies it, and re-proves them all (review 5)', () => {
+  const existing = { primary: { platform: 'github', host: 'github.com', login: 'alice' }, accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }, { platform: 'gitlab', host: 'gitlab.com', login: 'old' }], emails: [M.hashEmail('home@x.io'), M.hashEmail('gone@x.io')], names: ['Al'], joined: '2026-01-01' };
+  // home@x.io is not this machine's git email, but the account still verifies it: kept, provable from here.
+  const r = M.buildRecord({ identity: ID, today: TODAY, existing, git: { emails: ['alice@work.com'], names: ['Alice Smith'] }, proofs: [proof('github', 'github.com', 'alice', ['alice@work.com', 'home@x.io'])] });
   assert.equal(r.record.joined, '2026-01-01');
+  assert.equal(r.record.proved, TODAY);
   assert.ok(r.record.accounts.some((a) => a.login === 'old'));
-  assert.deepEqual(r.newEmails, [M.hashEmail('alice@work.com')]);
-  assert.equal(r.record.emails.length, 2);
+  assert.deepEqual(r.record.emails, [M.hashEmail('alice@work.com'), M.hashEmail('home@x.io')].sort());
+  assert.equal(r.dropped, 1, 'gone@x.io is no longer verified: dropped');
+  assert.deepEqual(r.newEmails, r.record.emails, 'every email is proven again');
+  assert.equal(r.plainByHash.get(M.hashEmail('home@x.io')), 'home@x.io');
 });
 
 test('E131 ghAccounts: both spellings of `gh auth status`, and never a bot or a bad host', () => {
@@ -352,7 +356,7 @@ test('E131 commitMember: one commit per email, each authored by it, on a branch 
     git(T, 'commit', '-q', '-m', 'init');
     put(path.join(T, 'dirty.txt'), 'mine');   // the person's own work in progress
     const record = { accounts: [{ platform: 'github', host: 'github.com', login: 'alice' }], emails: [M.hashEmail('alice@work.com'), M.hashEmail('a@home.io')].sort(), names: ['Alice Smith'], joined: TODAY };
-    const made = M.commitMember(T, { rel: M.memberRel('github', 'alice'), record, newEmails: record.emails, plainEmails: ['alice@work.com', 'a@home.io'], base: 'HEAD', name: 'Alice Smith', login: 'alice', subject: 'chore(product): add team member alice' });
+    const made = M.commitMember(T, { rel: M.memberRel('github', 'alice'), record, plainByHash: new Map([['alice@work.com', 'a@home.io'].map((e) => [M.hashEmail(e), e])].flat()), base: 'HEAD', name: 'Alice Smith', login: 'alice', subject: 'chore(product): add team member alice' });
     assert.equal(made.error, undefined);
     assert.equal(made.branch, 'yad/member/alice');
     assert.equal(made.commits.length, 2);
@@ -509,7 +513,7 @@ test('E131 member-check: your own file, each email proven by a commit GitHub giv
     g.attribute(sha, 'alice');
     const r = g.check(as('Alice'));
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /1 new email\(s\), each proven/);
+    assert.match(r.out, /1 email\(s\), each proven/);
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 
@@ -521,7 +525,7 @@ test('E131 member-check: an email no commit proves is refused (the forgery case)
     g.attribute(sha, 'bob');
     const r = g.check(as('alice'));
     assert.equal(r.code, 1);
-    assert.match(r.out, /adds an email no commit in this PR proves/);
+    assert.match(r.out, /holds an email no commit in this PR proves/);
     // And a commit GitHub cannot attribute at all proves nothing either.
     const g2 = gateRepo();
     try {
@@ -678,5 +682,44 @@ test('E131 membersAt: the files as a branch holds them, not as the checkout does
     assert.equal(M.readMembers(T).members.length, 1);
     assert.equal(M.membersAt(T, removed, { platform: 'github', host: 'github.com' }).members.length, 0, 'on the branch it is gone');
     assert.equal(M.membersAt(T, joined, { platform: 'github', host: 'github.com' }).members[0].primary.login, 'alice');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E131 member-check: a small edit to a file carrying an unproven email is refused (review 5)', () => {
+  const g = gateRepo();
+  try {
+    // A file holding the victim's email reached main while the gate was off.
+    git(g.T, 'checkout', '-q', 'main');
+    put(path.join(g.T, FILE('mallory')), rec('mallory', ['victim@x.io']));
+    git(g.T, 'add', '-A');
+    git(g.T, 'commit', '-q', '-m', 'merged while the gate was off');
+    git(g.T, 'checkout', '-q', 'pr');
+    git(g.T, 'rebase', '-q', 'main');
+    // Now a harmless-looking change: a name. Every email in the file must be proven again.
+    const sha = g.commitAs('mallory@x.io', { [FILE('mallory')]: { ...rec('mallory', ['victim@x.io']), names: ['Mal'] } });
+    g.attribute(sha, 'mallory');
+    const r = g.check(as('mallory'));
+    assert.equal(r.code, 1);
+    assert.match(r.out, /holds an email no commit in this PR proves/);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+test('E131 judgedMemberFiles: an untracked or ignored local copy is not what origin holds (review 5)', () => {
+  const T = product();
+  try {
+    liveGate(T);
+    memberC(T, 'github-alice.json', alice());
+    assert.equal(M.gateMemberMap(T).size, 1);
+    git(T, 'update-index', '--assume-unchanged', M.memberRel('github', 'alice'));
+    fs.writeFileSync(path.join(T, M.memberRel('github', 'alice')), JSON.stringify(alice({ emails: [M.hashEmail('victim@x.io')] })));
+    assert.equal(M.gateMemberMap(T).size, 0, 'an edit git was told to ignore is still an edit');
+    // A local settings edit cannot point the count at another branch on origin.
+    git(T, 'update-index', '--no-assume-unchanged', M.memberRel('github', 'alice'));
+    git(T, 'checkout', '-q', '--', M.memberRel('github', 'alice'));
+    const cfg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'));
+    git(T, 'push', '-q', 'origin', 'HEAD:refs/heads/fake');
+    git(T, 'fetch', '-q', 'origin');
+    put(path.join(T, '.sdlc/product.json'), { ...cfg, default_branch: 'fake' });
+    assert.equal(M.originDefault(T), null, 'origin\'s own settings on that branch do not name it');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
