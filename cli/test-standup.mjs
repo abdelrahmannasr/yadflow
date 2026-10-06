@@ -647,3 +647,14 @@ test('E132 review 3: a clock that goes back more than an hour, or half an hour, 
   assert.equal(S.zoneStamp(S.zoneMidnight(2006, 4, 15, 'Asia/Colombo') - 60000, 'Asia/Colombo'), '2006-04-14 23:59');
   assert.equal(S.zoneMidnight(2006, 4, 15, 'Asia/Colombo'), Date.parse('2006-04-14T18:00:00Z'));
 });
+
+// ---- review round 4 ---------------------------------------------------------------------------------
+
+test('E132 review 4: a Windows path is cut at a backslash, in any case; a name is put in as plain text', () => {
+  const places = [['C:\\Users\\ada\\work\\product', '<Product>'], ['C:\\Users\\ada\\work\\product\\apps\\api', '<api>'], ['/Users/x/api', '<$&>']];
+  assert.equal(S.scrubPaths('corrupt JSON in c:\\users\\ada\\work\\product\\epics\\EP-x\\.sdlc\\approvals.json: bad', places),
+    'corrupt JSON in <Product>\\epics\\EP-x\\.sdlc\\approvals.json: bad');
+  assert.equal(S.scrubPaths('C:\\Users\\ada\\work\\product\\apps\\api is a shallow clone', places), '<api> is a shallow clone');
+  assert.equal(S.scrubPaths('C:\\Users\\ada\\work\\productive stays', places), 'C:\\Users\\ada\\work\\productive stays', 'a longer folder name is not cut');
+  assert.equal(S.scrubPaths('/Users/x/api is a shallow clone', places), '<$&> is a shallow clone', 'a repo named `$&` never writes the path back');
+});

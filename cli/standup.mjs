@@ -87,10 +87,12 @@ export function zoneMidnight(y, m, d, tz) {
     if (Date.UTC(p.y, p.m - 1, p.d) >= guess) break;
     t += 3_600_000 - ((p.mi * 60 + p.s) * 1000);
   }
-  // A clock that goes BACK at midnight (Asia/Gaza, Asia/Amman before 2022; Antarctica/Casey by three hours,
-  // Asia/Colombo once by thirty minutes) shows 00:00 twice: the day starts at the first one. Stepped back a
-  // quarter-hour at a time — every zone's offset is a whole number of quarter-hours — while the instant
-  // before still reads as the same day; four hours at most.
+  // A clock that goes BACK at midnight (Asia/Gaza, Asia/Amman before 2022; Asia/Colombo once by thirty
+  // minutes) shows 00:00 twice: the day starts at the first one. Stepped back a quarter-hour at a time —
+  // today's zones all change by whole quarter-hours — while the instant before still reads as the same day;
+  // four hours at most. A clock that goes back LATER in the day (Antarctica/Casey, 2010: at 02:00) is not
+  // this case and can start an hour or more late; a day a zone skipped (Pacific/Apia, 2011-12-30) gets the
+  // next day's start.
   for (let i = 0; i < 16; i++) {
     const p = zoneParts(t - 900_000, tz);
     if (Date.UTC(p.y, p.m - 1, p.d) !== guess) break;
@@ -227,12 +229,16 @@ const safe = (v) => forTerminal(String(v ?? ''));
 // An error's message, safe to print and to share: no control character (a JSON parse error quotes the bad
 // bytes) and no absolute path of this machine (the report may be written to a file and shared).
 const reEsc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-function scrubPaths(text, places) {
+export function scrubPaths(text, places) {
   let out = String(text ?? '');
   // Longest first, so a registered repo inside the Product is named before the Product is. A path is cut only
-  // where it ends — `/a/b` never rewrites `/a/bc`.
+  // where it ends — `/a/b` never rewrites `/a/bc` — and a Windows path ends at `\` as well as `/`; a drive
+  // path is matched in any case (`C:\` and `c:\` are one folder). The name is put in as plain text: a repo
+  // named `$&` must not write the matched path back (a replacement string reads `$` patterns).
   for (const [abs, name] of [...places].sort((x, y) => y[0].length - x[0].length)) {
-    if (abs && abs !== path.sep) out = out.replace(new RegExp(`${reEsc(abs)}(?=$|[\\/\\s:'"),;])`, 'g'), name);
+    if (!abs || abs === '/' || abs === '\\') continue;
+    const flags = /^[A-Za-z]:[\\/]/.test(abs) ? 'gi' : 'g';
+    out = out.replace(new RegExp(`${reEsc(abs)}(?=$|[\\\\/\\s:'"),;])`, flags), () => name);
   }
   return out;
 }
