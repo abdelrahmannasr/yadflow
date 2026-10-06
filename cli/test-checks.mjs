@@ -4323,6 +4323,7 @@ test('#327 gate-sync on GitLab: fetches a pinned git-lfs before checkout, only f
   }
   const bad = runLfsBlock({ hook: true, badSum: true });
   assert.notEqual(bad.status, 0, 'a checksum that does not match fails the job');
+  assert.match(bad.did, /^sha256sum /m, 'and it is the checksum that failed it');
   assert.doesNotMatch(bad.did, /^(tar|install) /m, 'and nothing is unpacked or installed');
   assert.deepEqual(runLfsBlock({ hook: true, filter: true, hasLfs: true }), none, 'an image that has git-lfs downloads nothing');
 });
