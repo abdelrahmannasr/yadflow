@@ -1,3 +1,27 @@
+# [4.5.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.4.0...v4.5.0) (2026-10-06)
+
+
+### Bug Fixes
+
+* **member:** E131 review 1 — links, twins, proof and pushes ([1179a97](https://github.com/abdelrahmannasr/yadflow/commit/1179a9731e4ff9f8d6b80f5aed82d5809bde5ed2))
+* **member:** E131 review 2 — gate-live trust, account ids, clean-ups ([74d41f6](https://github.com/abdelrahmannasr/yadflow/commit/74d41f65a585fdf06639be87688f69353eb61916))
+* **member:** E131 review 3 — trust only files the gate judged ([2f9af14](https://github.com/abdelrahmannasr/yadflow/commit/2f9af141e524ca7daacbce8c2799f56c72c6d75e))
+* **member:** E131 review 4 — trust is read from origin's default branch ([43af9c4](https://github.com/abdelrahmannasr/yadflow/commit/43af9c4565c3bbfae7042d7765df62150fa64447))
+* **member:** E131 review 5 — every change re-proves every email ([041937c](https://github.com/abdelrahmannasr/yadflow/commit/041937c936f5d9f29683ef6f9d4cc6fb93ad83bd))
+* **member:** E131 review 6 — re-runs, origin/HEAD, partial lists ([e9bad00](https://github.com/abdelrahmannasr/yadflow/commit/e9bad002eff766705d193b1515baa3d39ae0c360))
+* **standup:** E132 review 1 — gate rule, malformed ledgers, terminal safety ([a0e7d47](https://github.com/abdelrahmannasr/yadflow/commit/a0e7d4750e7b485582cded4b55dfcc212013a101))
+* **standup:** E132 review 2 — missed twins of round 1 ([ba1ce61](https://github.com/abdelrahmannasr/yadflow/commit/ba1ce61b961decbea46298b714fd33f811fb264a))
+* **standup:** E132 review 3 — paths, disputed accounts, left members ([add86cc](https://github.com/abdelrahmannasr/yadflow/commit/add86cca821ab29afa79838734a3b83621dd2330))
+* **standup:** E132 review 4 — Windows paths, a name is plain text ([435225f](https://github.com/abdelrahmannasr/yadflow/commit/435225f48a21fe8a850ba65c0c7f1315df6bbb1e))
+* **standup:** E132 review 5 — path names in square brackets ([7ac3cb2](https://github.com/abdelrahmannasr/yadflow/commit/7ac3cb265c309f0e707e6dae32076796a5e2c240))
+
+
+### Features
+
+* **join:** E131 join ends with yad member add ([3295429](https://github.com/abdelrahmannasr/yadflow/commit/3295429092b549707a03eecacddc50d15d1df77a))
+* **member:** E131 team member files, proven by the platform ([3e60bb6](https://github.com/abdelrahmannasr/yadflow/commit/3e60bb62bb2edb467be4d5f8562b9fe1bac6ca0a))
+* **standup:** yad standup — a daily status per team member (E132) ([00f32ce](https://github.com/abdelrahmannasr/yadflow/commit/00f32ce742166e8b82e796b3eef85b379edd4cee))
+
 # [4.4.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.3.0...v4.4.0) (2026-10-03)
 
 
