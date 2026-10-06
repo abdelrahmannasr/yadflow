@@ -357,7 +357,7 @@ export function run(cmd, args = [], opts = {}) {
 export const has = (cmd) => run(process.platform === 'win32' ? 'where' : 'which', [cmd]).ok;
 
 // An npm launcher (`npm`, `npx`) is a `.cmd` file on Windows, which Node will not start without a shell
-// (since 18.20.2) — a plain spawn fails with EINVAL there. So on Windows it runs through one, each word in
+// (since 18.20.2) — a plain spawn fails with EINVAL there. So on Windows it runs through one, each argument in
 // double quotes (a Windows path cannot hold a `"`); everywhere else it is spawned directly (E113).
 // The launcher name itself stays bare: a `.cmd` found on PATH through a QUOTED name reads `%~dp0` as the
 // current folder, so `"npx"` looked for npx-cli.js inside the repo being packed (#326). Callers pass a
