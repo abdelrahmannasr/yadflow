@@ -601,6 +601,14 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   `--since/--until`, `--member <name>`, `--format json|md`). No emails or comment bodies are ever
   included. People are listed as the ledgers and git name them, so someone whose git name differs from
   their platform login may appear twice — unless they commit with their GitHub/GitLab noreply address.
+- **The daily standup:** `yad standup` shows each person on the team list (`yad member list`): what
+  they did since the previous working day (Monday reads back to Friday), what they are working on now,
+  and what is waiting — a gate on a step they own, a next move that is theirs, a PR/MR of theirs whose
+  checks fail or that has no approving review. People seen in the record who are on no member file get a
+  section of their own. It is rebuilt live each time and stores nothing; facts only, no scores. The
+  window is in UTC unless `--tz` names a zone; `--member <login>` or `--me` narrows it to one person, and
+  `--format md|html --out <file>` writes it as a report. A repo the platform cannot be asked about says
+  "platform not read", never "nothing".
 - **Start an epic from the CLI:** `yad epic new <slug>` seeds its lifecycle — the step chain from a
   profile, plus empty approval and comment ledgers and the `reviews/` folder. `--type feature|chore`; a
   change, defect or hotfix threads off an existing epic, so `yad-change` seeds those instead.
@@ -665,6 +673,7 @@ Short notes on the commands a team uses every day. Each one is covered in full i
 | `yad claims [<epic>]` | Lists who else is editing which file right now, read from everyone's capture branches. It is advice, not a lock: nothing is blocked. |
 | `yad fold <epic> <step>` | Ends an authoring step with one clean commit, `docs(<epic>): author <step>`, holding only that step's files. The authoring skills run it for you. |
 | `yad member add` / `yad member list` / `yad member remove` | Records who is on the team: one file per person with their GitHub and GitLab accounts and verified emails (as fingerprints). `list` shows each member as active, idle (quiet, still has access), left (no access any more) or unknown. A member who comes back with a commit is active again. |
+| `yad standup` | Today's standup: for each member, what they did since the previous working day, what they are on now, and what is waiting. Read-only and rebuilt each time; facts only. |
 | `yad assign <epic> <step> [--to <name>]` / `yad unassign` / `yad owners` | Names one person as the owner of an authoring step (for example "Bob writes the architecture"). Advice only: it never blocks an edit or a review. |
 
 **Reviews with no GitHub or GitLab.** When the Product has no platform, the review is recorded on your
