@@ -144,11 +144,15 @@ export function docsStale(manifest, { artifactHash, repoHeads = {}, shellVersion
 // mounts under `app/`, and every per-epic site nests under `epics/<id>/` — matching siteBasePath
 // (overview at `<base>/app/`, epics at `<base>/epics/EP-<slug>/`). A concurrency group prevents the
 // deploy from retriggering. The shared shell script keeps the two platforms byte-for-byte aligned.
+// Every build chain ends in `|| exit 1`: CI runs the script under `set -e`, which does not stop on a
+// failure inside an `&&` chain, so a site that failed to build was silently left out and the deploy
+// still went green — yadflow's own site lost its root page that way for days. A red run keeps the
+// last good deployment live instead.
 const BUILD_PUBLIC = [
   'mkdir -p public',
-  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html; fi',
-  'if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/; fi',
-  'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/"; done',
+  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html || exit 1; fi',
+  'if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/ || exit 1; fi',
+  'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/" || exit 1; done',
 ];
 export function pagesWorkflow(platform) {
   if (platform === 'gitlab') {

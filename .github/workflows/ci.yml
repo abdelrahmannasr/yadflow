@@ -104,6 +104,27 @@ jobs:
       - name: E2E against the packed tarball
         run: npm run test:e2e
 
+  # The Pages deploy (yad-docs.yml) builds these sites only after a merge, so a pull request that
+  # breaks one was found only when the live site lost its page. Same Node as the deploy.
+  docs-sites:
+    name: docs sites (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Build the overview site
+        working-directory: docs/sdlc-site
+        run: npm ci && npm run build
+
+      - name: Build the tutorial site
+        working-directory: docs/tutorial-site
+        run: npm ci && npm run build
+
   audit:
     name: audit (dependencies)
     runs-on: ubuntu-latest

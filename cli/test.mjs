@@ -12054,6 +12054,32 @@ test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop
   assert.equal(pagesWorkflowPath('gitlab'), '.gitlab/ci/yad-docs.yml');
 });
 
+// yadflow's own Pages site lost its root page for days: the overview build failed (a stray quote in its
+// data), and `set -e` does not stop inside an `&&` chain, so the deploy went green with the tutorial only.
+// This runs the generated script under `sh -e` with a fake npm, as CI does.
+test('pagesWorkflow: a site that fails to build fails the deploy, on both platforms', () => {
+  const script = pagesWorkflow('github').match(/run: \|\n((?: {10}.*\n)+)/)[1].replace(/^ {10}/gm, '');
+  const gitlab = [...pagesWorkflow('gitlab').matchAll(/^ {4}- '(.*)'$/gm)].map((m) => m[1].replace(/'\\''/g, "'"));
+  assert.equal(gitlab.join('\n'), script.trimEnd(), 'GitLab runs the same lines');
+  const run = (failIn) => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-pages-'));
+    try {
+      for (const site of ['docs/sdlc-site', 'docs/tutorial-site', 'epics/EP-a/docs-site']) fs.mkdirSync(path.join(T, site, 'public'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'docs/sdlc-site/public/report.html'), 'report');
+      const bin = path.join(T, '.bin');
+      fs.mkdirSync(bin);
+      // `npm run build` writes dist/, except in the one site told to fail.
+      fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\n[ "$1" = run ] || exit 0\ncase "$PWD" in */${failIn || 'none'}) exit 1 ;; esac\nmkdir -p dist && echo built > dist/index.html\n`, { mode: 0o755 });
+      const r = spawnSync('sh', ['-e', '-c', script], { cwd: T, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` }, stdio: 'pipe' });
+      return { status: r.status, root: fs.existsSync(path.join(T, 'public/index.html')) };
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  };
+  assert.deepEqual(run(), { status: 0, root: true }, 'every site builds: the root page is published');
+  assert.deepEqual(run('sdlc-site'), { status: 1, root: false }, 'the overview fails: the deploy fails, no rootless site');
+  assert.equal(run('tutorial-site').status, 1, 'the tutorial fails: the deploy fails');
+  assert.equal(run('docs-site').status, 1, 'an epic site fails: the deploy fails');
+});
+
 // A tag such as `@v4` can be moved to other code; a commit hash cannot. The `# vX.Y.Z` after the hash
 // is what Dependabot reads to keep the pin current. And a workflow with no top-level `permissions:`
 // gets the repository's default token, which may be able to write. OpenSSF Scorecard flags both.
