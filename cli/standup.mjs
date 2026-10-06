@@ -87,6 +87,13 @@ export function zoneMidnight(y, m, d, tz) {
     if (Date.UTC(p.y, p.m - 1, p.d) >= guess) break;
     t += 3_600_000 - ((p.mi * 60 + p.s) * 1000);
   }
+  // A clock that goes BACK at midnight (Asia/Gaza, Asia/Amman before 2022) shows 00:00 twice: the day starts
+  // at the first one, an hour earlier, which still reads as the same day.
+  for (let i = 0; i < 2; i++) {
+    const p = zoneParts(t - 3_600_000, tz);
+    if (Date.UTC(p.y, p.m - 1, p.d) !== guess) break;
+    t -= 3_600_000;
+  }
   return t;
 }
 
@@ -162,7 +169,7 @@ function repoSources(root, identity, productConfig, notRead, env) {
     : (gitIn(root, env)(['remote', 'get-url', 'origin']).out.trim() || '');
   const out = [{ label: 'Product', dir: root, gitUrl: productUrl, platform: identity.platform }];
   const { registry, problem } = readRegistry(root);
-  if (problem) notRead.push(`${problem} — the code repos are not read`);
+  if (problem) notRead.push(`${safe(problem)} — the code repos are not read`);
   for (const r of registry.repos) {
     if (!r || typeof r.name !== 'string' || !r.name) continue;
     const label = forTerminal(r.name);
@@ -170,7 +177,7 @@ function repoSources(root, identity, productConfig, notRead, env) {
     if (typeof r.path === 'string' && r.path) {
       const j = judgeRepo(root, r);
       if (runnable(j)) dir = path.resolve(root, r.path);
-      else notRead.push(`${label}: ${j.state === 'missing' ? 'not cloned on this machine' : j.linked ? "reached through a link inside a repo's tree" : j.reason} — its commits are not read`);
+      else notRead.push(`${label}: ${j.state === 'missing' ? 'not cloned on this machine' : j.linked ? "reached through a link inside a repo's tree" : safe(j.reason)} — its commits are not read`);
     } else notRead.push(`${label}: no local path — its commits are not read`);
     out.push({ label, dir, gitUrl: typeof r.git_url === 'string' ? r.git_url : '', platform: ['github', 'gitlab'].includes(r.platform) ? r.platform : null });
   }
@@ -197,10 +204,11 @@ function whoseWip(members, w) {
 // The member whose account on this platform and host has this login — a PR/MR author. A login on GitHub
 // and the same login on GitLab can be two people, so the platform and host must match too; an account two
 // files claim (`matchLogins` leaves it out) matches nobody.
-function whoseAccount(members, { platform, host, login }) {
-  const want = String(login || '').toLowerCase();
-  const hit = members.filter((m) => m.accounts.some((a) => a.platform === platform && String(a.host).toLowerCase() === String(host || '').toLowerCase()
-    && a.login.toLowerCase() === want && (m.matchLogins || []).includes(want)));
+const keyOf = (a) => `${a.platform}\0${String(a.host).toLowerCase()}\0${String(a.login).toLowerCase()}`;   // members.mjs's accountKey
+function whoseAccount(members, { platform, host, login }, disputed = new Set()) {
+  const want = keyOf({ platform, host: host || '', login: login || '' });
+  // An account two files claim is matched by nobody — unless it is a member's own primary (E131's rule).
+  const hit = members.filter((m) => m.accounts.some((a) => keyOf(a) === want && (keyOf(a) === keyOf(m.primary) || !disputed.has(want))));
   if (hit.length === 1) return { member: hit[0] };
   return hit.length ? { ambiguous: hit } : {};
 }
@@ -211,6 +219,9 @@ function whoseAccount(members, { platform, host, login }) {
 // character reaches the terminal), and a name is shown only when it is not an email address (`shown`).
 // The text is built once and shared by the terminal, Markdown and HTML outputs.
 const safe = (v) => forTerminal(String(v ?? ''));
+// An error's message, safe to print and to share: no control character (a JSON parse error quotes the bad
+// bytes) and no absolute path of this machine (the report may be written to a file and shared).
+const why = (e, root) => safe(String(e?.message ?? e).split(root).join('<Product>'));
 const nameOf = (v) => shown(String(v ?? '').trim() || 'someone');
 const isDay = (d) => typeof d === 'string' && DATE_RE.test(d);
 // A ledger list's records: only plain objects (a `null` or a number in a shared file is skipped, not a crash).
@@ -270,19 +281,19 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
       seenGit.set(real, s.label);
     }
     const g = gitAuthors(s.dir, readFrom);
-    if (g.unknown) { notRead.push(`${s.label}: ${g.unknown} — its commits are not read`); continue; }
+    if (g.unknown) { notRead.push(`${s.label}: ${safe(g.unknown)} — its commits are not read`); continue; }
     for (const e of g.events) commits.push({ ...e, repo: s.label });
   }
 
   // The ledgers: approvals, comments, ships (attributed as `yad usage` attributes them), and closed steps.
   const aliases = legacyLogins(productConfig);
   let epics = [];
-  try { epics = epicIds(root); } catch (e) { notRead.push(`the epic list could not be read: ${e.message}`); }
+  try { epics = epicIds(root); } catch (e) { notRead.push(`the epic list could not be read: ${why(e, root)}`); }
   const ledgerEv = [];
   const ledgers = new Map();
   for (const epic of epics) {
-    try { ledgers.set(epic, loadLedger(epicRoot(root, epic))); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${e.message})`); continue; }
-    try { ledgerEv.push(...ledgerEvents(root, epic, aliases)); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${e.message})`); }
+    try { ledgers.set(epic, loadLedger(epicRoot(root, epic))); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${why(e, root)})`); continue; }
+    try { ledgerEv.push(...ledgerEvents(root, epic, aliases)); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${why(e, root)})`); }
   }
 
   // Status (E131): active / idle / left / unknown, from commits, approvals and ships. When the Product's own
@@ -304,7 +315,7 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   };
   const byEvent = (e, display, section, item) => place(whose(members, e), display, personKey({ login: e.login, name: e.name }) || `name:${display}`, section, item);
   const byWip = (w, display, section, item) => place(whoseWip(members, w), display, `wip:${w}`, section, item);
-  const byAccount = (acct, section, item) => place(whoseAccount(members, acct), acct.login, `login:${String(acct.login).toLowerCase()}`, section, item);
+  const byAccount = (acct, section, item) => place(whoseAccount(members, acct, got.disputed), acct.login, `login:${String(acct.login).toLowerCase()}`, section, item);
 
   // DONE — commits, one line per person and repo.
   const commitGroups = new Map();
@@ -438,7 +449,7 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
         }
       }
     } catch (e) {
-      notRead.push(`${epic}: its gates could not be read (${safe(e.message)}) — nothing is said about what waits there`);
+      notRead.push(`${epic}: its gates could not be read (${why(e, root)}) — nothing is said about what waits there`);
     }
   }
   // WAITING / WORKING — their own open PRs/MRs.
@@ -454,6 +465,7 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
     }
   }
 
+  const prPartial = prRead.some((p) => p.openPartial || p.mergedPartial);
   const prNote = prMissing.length ? `platform not read for ${prMissing.map((p) => p.label).join(', ')} — PR/MR facts there are unknown, not none` : null;
   const shape = (m) => ({
     login: m.primary.login, logins: m.accounts.map((a) => a.login), account: accountLabel(m.primary), accounts: m.accounts.map(accountLabel), status: m.status, lastActive: isDay(m.lastActive) ? m.lastActive : null, ...blocks.get(m),
@@ -470,10 +482,11 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
     ownerless,
     platform: prs.map((p) => ({ repo: p.label, read: !!p.ok, ...(p.ok ? {} : { why: p.why }) })),
     prNote,
+    prPartial,
     notRead,
     notes,
-    memberErrors: got.errors.map((e) => e.error),
-    duplicates: got.duplicates,
+    memberErrors: got.errors.map((e) => safe(e.error)),
+    duplicates: got.duplicates.map(safe),
   };
 }
 
@@ -489,6 +502,27 @@ export function onlyMember(model, login) {
 const SECTIONS = [['done', 'Done'], ['working', 'Working on'], ['waiting', 'Waiting']];
 const FOOTER = 'Derived, read-only — rebuilt from git, the Product ledgers, the capture branches and the platform each time it runs. Facts only: no score, no ranking, and no emails, commit messages, PR titles or comment bodies.';
 
+// Everything that was not read or not used, for the end of every format — the same list the terminal prints.
+export function gapLines(model) {
+  return [
+    ...(model.fetched === 'failed' ? ['could not fetch the capture branches — claims and drafts are as last fetched'] : []),
+    ...model.platform.filter((p) => !p.read).map((p) => `${p.repo}: platform not read — ${p.why}`),
+    ...model.notRead,
+    ...model.notes,
+    ...model.memberErrors,
+    ...model.duplicates.map((d) => `${d} — one account or email belongs to one member; neither file joins it until one is fixed`),
+  ];
+}
+
+// The line said when no member block prints, the same in every format.
+export function noTeamLine(model) {
+  if (model.team.length) return null;
+  if (model.member) return `no member ${forTerminal(model.member)} on the team list`;
+  if (model.left.length) return 'everyone on the team list has left';
+  if (model.memberErrors.length) return 'no member file could be read — the reasons are listed at the end';
+  return 'no team list yet — each person runs `yad member add` (or `yad join` does it)';
+}
+
 export function headerLines(model) {
   const w = model.window;
   const start = Date.parse(w.start);
@@ -501,7 +535,7 @@ export function headerLines(model) {
 
 // "nothing" only when every source answered; otherwise the empty section says what may be missing.
 const emptyLine = (model) => {
-  const gaps = [model.prNote ? 'the platform was not read for every repo' : null, model.notRead.length ? 'some git history or ledgers were not read' : null,
+  const gaps = [model.prNote ? 'the platform was not read for every repo' : null, model.prPartial ? 'not every PR/MR fitted on one page' : null, model.notRead.length ? 'some git history or ledgers were not read' : null,
     model.fetched === 'failed' ? 'the capture branches could not be fetched' : null].filter(Boolean);
   return gaps.length ? `nothing recorded here — but ${gaps.join(', and ')}, so something may be missing (see the end)` : 'nothing';
 };
@@ -521,13 +555,9 @@ const unlistedTitle = (u) => `${forTerminal(u.who)}${u.ambiguous ? c.dim(` — m
 export function renderText(model) {
   log(c.bold('\nyad standup'));
   for (const l of headerLines(model)) info(l);
-  if (model.fetched === 'failed') warn('could not fetch the capture branches — claims and drafts are as last fetched');
   if (model.fetched === 'local') info('no remote named origin — only your own capture branches are read');
-  if (!model.team.length && !model.left.length) {
-    info(model.member ? `no member ${forTerminal(model.member)} on the team list`
-      : model.memberErrors.length ? 'no member file could be read — the reasons are listed at the end'
-        : 'no team list yet — each person runs `yad member add` (or `yad join` does it)');
-  }
+  const none = noTeamLine(model);
+  if (none) info(none);
   for (const m of model.team) blockText(model, m, memberTitle(m));
   if (model.unlisted.length) {
     log(`\n  ${c.bold('Seen, not on the team list')} ${c.dim('— people in the record who match no member file')}`);
@@ -542,11 +572,8 @@ export function renderText(model) {
     for (const m of model.left) log(`      • ${forTerminal(m.login)}${m.lastActive ? c.dim(` (last active ${m.lastActive})`) : ''}`);
   }
   log('');
-  for (const p of model.platform) if (!p.read) warn(`${p.repo}: platform not read — ${p.why}`);
-  for (const n of model.notRead) warn(n);
-  for (const n of model.notes) info(n);
-  for (const e of model.memberErrors) warn(e);
-  for (const d of model.duplicates) warn(`${d} — one account or email belongs to one member; neither file joins it until one is fixed`);
+  const notes = new Set(model.notes);
+  for (const l of gapLines(model)) (notes.has(l) ? info : warn)(l);
   note(c.dim(FOOTER));
 }
 
@@ -561,6 +588,8 @@ export function renderMarkdown(model) {
       L.push('');
     }
   };
+  const none = noTeamLine(model);
+  if (none) L.push(`_${mdText(none)}_`, '');
   for (const m of model.team) block(m, `${m.login} — ${m.status}${m.lastActive ? `, last active ${m.lastActive}` : ''}`);
   if (model.unlisted.length) {
     L.push('# Seen, not on the team list', '');
@@ -568,7 +597,7 @@ export function renderMarkdown(model) {
   }
   if (model.ownerless.length) { L.push('# Open gates nobody owns', ''); for (const it of model.ownerless) L.push(`- ${mdText(it.text)}`); L.push(''); }
   if (model.left.length) { L.push('# Left', ''); for (const m of model.left) L.push(`- ${mdText(m.login)}${m.lastActive ? ` (last active ${m.lastActive})` : ''}`); L.push(''); }
-  const missing = [...model.platform.filter((p) => !p.read).map((p) => `${p.repo}: platform not read — ${p.why}`), ...model.notRead, ...model.notes];
+  const missing = gapLines(model);
   if (missing.length) { L.push('# Not read', ''); for (const n of missing) L.push(`- ${mdText(n)}`); L.push(''); }
   L.push(`_${FOOTER}_`, '');
   return L.join('\n');
@@ -577,7 +606,7 @@ export function renderMarkdown(model) {
 export function renderHtml(model) {
   const list = (items, empty) => (items.length ? `<ul>${items.map((it) => `<li>${esc(it.text)}</li>`).join('')}</ul>` : `<p class="none">${esc(empty)}</p>`);
   const block = (b, title, sub = '') => `<section class="member"><h2>${esc(title)}${sub ? ` <span>${esc(sub)}</span>` : ''}</h2>${SECTIONS.map(([k, label]) => `<h3>${label}</h3>${list(b[k], emptyLine(model))}`).join('')}</section>`;
-  const missing = [...model.platform.filter((p) => !p.read).map((p) => `${p.repo}: platform not read — ${p.why}`), ...model.notRead, ...model.notes];
+  const missing = gapLines(model);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>yadflow — standup</title><style>
 :root{--bg:#fff;--fg:#1d2026;--dim:#5d6470;--card:#f6f7f9;--line:#e1e4ea}
@@ -590,7 +619,7 @@ ul{margin:0;padding-left:18px}.none{color:var(--dim);margin:0}.group{font-size:1
 footer{color:var(--dim);font-size:12px;margin-top:24px;border-top:1px solid var(--line);padding-top:12px}
 </style></head><body><div class="wrap">
 <h1>Standup</h1><ul class="sub">${headerLines(model).map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
-${model.team.length ? model.team.map((m) => block(m, m.login, `${m.status}${m.lastActive ? `, last active ${m.lastActive}` : ''}`)).join('') : '<p class="none">No team list yet.</p>'}
+${model.team.length ? model.team.map((m) => block(m, m.login, `${m.status}${m.lastActive ? `, last active ${m.lastActive}` : ''}`)).join('') : `<p class="none">${esc(noTeamLine(model))}</p>`}
 ${model.unlisted.length ? `<h2 class="group">Seen, not on the team list</h2>${model.unlisted.map((u) => block(u, u.who, u.ambiguous ? `matches ${u.ambiguous.join(', ')}` : '')).join('')}` : ''}
 ${model.ownerless.length ? `<h2 class="group">Open gates nobody owns</h2>${list(model.ownerless, '')}` : ''}
 ${model.left.length ? `<h2 class="group">Left</h2><ul>${model.left.map((m) => `<li>${esc(m.login)}${m.lastActive ? ` (last active ${esc(m.lastActive)})` : ''}</li>`).join('')}</ul>` : ''}

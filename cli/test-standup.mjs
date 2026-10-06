@@ -528,3 +528,65 @@ test('E132 review 1: commits by one name, one ambiguous and one unmatched, stay 
     ]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- review round 2 ---------------------------------------------------------------------------------
+
+test('E132 review 2: a parse error quoting raw bytes is cleaned, and names no path of this machine', async () => {
+  const T = await teamFixture();
+  try {
+    fs.writeFileSync(path.join(T, 'epics/EP-checkout/.sdlc/approvals.json'), '[{"a":\u001b]0;PWNED\u0007 }]');
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    const line = m.notRead.find((n) => n.startsWith('EP-checkout: its ledger cannot be read'));
+    assert.ok(line, m.notRead.join(' | '));
+    assert.ok(![...line].some((ch) => ch.charCodeAt(0) < 32), JSON.stringify(line));
+    assert.ok(!line.includes(T) && !line.includes(fs.realpathSync(T)), 'no absolute path');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 2: another account two files claim is matched by neither, on any platform', async () => {
+  const T = await teamFixture();
+  try {
+    const gl = { platform: 'gitlab', host: 'gitlab.com', login: 'alice' };
+    memberFile(T, 'alice', { names: ['Alice Smith'], emails: ['alice@work.com'], others: [gl] });
+    memberFile(T, 'bob', { names: ['Bob Chen'], emails: ['bob@work.com'], others: [gl] });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'api', git_url: 'git@gitlab.com:acme/api.git', platform: 'gitlab' }] });
+    const runner = (cmd, args) => {
+      if (cmd === 'which' || cmd === 'where' || args[0] === 'auth') return { ok: true, stdout: '' };
+      if (args.includes('graphql')) return { ok: true, stdout: JSON.stringify({ data: { repository: { open: { totalCount: 0, nodes: [] }, merged: { nodes: [] } } } }) };
+      if (args.at(-1).includes('state=opened')) return { ok: true, stdout: '[]' };
+      if (args.at(-1).includes('state=merged')) return { ok: true, stdout: JSON.stringify([{ iid: 7, author: { username: 'alice' }, merged_at: iso(START + 60000) }]) };
+      return { ok: false, stderr: 'HTTP 404' };
+    };
+    const m = S.buildStandup(T, { now: NOW, fetch: false, runner, env: ON, access: () => 'yes' });
+    for (const who of ['alice', 'bob']) assert.ok(!texts(m.team.find((x) => x.login === who).done).some((t) => /MR !7/.test(t)), who);
+    assert.deepEqual(m.unlisted.find((u) => u.who === 'alice')?.done.map((i) => i.text), ['MR !7 merged in api (2026-10-02 00:01)']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 2: every format ends with the same gaps; a partial page counts as one; the empty-team line is shared', async () => {
+  const T = await teamFixture();
+  try {
+    const many = Array.from({ length: 100 }, (_, i) => ({ number: 100 + i, author: 'zed', at: iso(START + 1000 + i) }));
+    put(path.join(T, MEMBERS_DIR, 'github-zz.json'), '{ broken');
+    const m = { ...S.buildStandup(T, { now: NOW, fetch: false, runner: ghRunner({ merged: many }), env: ON, access: () => 'yes' }), fetched: 'failed' };
+    assert.equal(m.prPartial, true);
+    const md = S.renderMarkdown(m);
+    const html = S.renderHtml(m);
+    for (const out of [md, html]) {
+      assert.match(out, /could not fetch the capture branches/);
+      assert.match(out, /github-zz\.json/);
+      assert.match(out, /more PRs were merged in the window than one page holds/);
+    }
+    assert.match(md, /not every PR\/MR fitted on one page/);
+    const none = { ...m, team: [], left: [], member: null };
+    assert.match(S.renderHtml(none), /no member file could be read/);
+    assert.match(S.renderMarkdown(none), /no member file could be read/);
+    assert.match(S.renderHtml({ ...none, memberErrors: [], left: [{ login: 'x', status: 'left', lastActive: null, logins: ['x'] }] }), /everyone on the team list has left/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 2: a clock that goes back at midnight starts the day at the first 00:00', () => {
+  // Asia/Amman, 2020-10-30: 01:00 went back to 00:00, so midnight came twice — UTC+3, then UTC+2.
+  assert.equal(S.zoneMidnight(2020, 10, 30, 'Asia/Amman'), Date.parse('2020-10-29T21:00:00Z'));
+  assert.equal(S.zoneMidnight(2020, 10, 31, 'Asia/Amman'), Date.parse('2020-10-30T22:00:00Z'));
+});
