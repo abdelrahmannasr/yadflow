@@ -150,4 +150,4 @@ under `<base>/app/` and cross-linked. Never touches any epic state.
   `yad-*` skill in pipeline order + its phase + outputs: `references/pipeline-model.md`.
 - The per-epic counterpart (shell, determinism, theming): `../yad-docs/SKILL.md`.
 - The connected docs target + base-path resolution: `../yad-connect-docs/SKILL.md`.
-- The staleness/CI reconciler that enforces overview regeneration: `../yad-docs-sync/SKILL.md`.
+- The staleness reconciler (reports stale sites, refreshes on request, wires the Pages build): `../yad-docs-sync/SKILL.md`.
