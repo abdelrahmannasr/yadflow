@@ -77,7 +77,11 @@ function listGitHub(t, sinceMs, runner) {
   const fail = (res) => ({ ...t, ok: false, kind: 'other', why: whyFailed(res, { platform: 'github', host: t.host, what: `the pull requests of ${shown(t.repo)}`, plural: true }) });
   if (parts.length !== 2) return { ...t, ok: false, kind: 'no-url', why: `${shown(t.repo)} is not an owner/name GitHub repo path` };
   const r = runner('gh', ['api', '--hostname', t.host, 'graphql', '-f', `query=${GH_QUERY}`, '-f', `owner=${parts[0]}`, '-f', `name=${parts[1]}`], { timeout: TIMEOUT });
-  // gh exits non-zero when the answer carries GraphQL `errors`: a partial answer is not an answer.
+  // gh exits non-zero when the answer carries GraphQL `errors`: a partial answer is not an answer. Such an
+  // error comes with no HTTP status (`GraphQL: Could not resolve to a Repository …`), and is not "offline".
+  if (!r.ok && httpStatus(r) == null && /\bGraphQL:/.test(`${r.stderr || ''}${r.stdout || ''}`)) {
+    return { ...t, ok: false, kind: 'other', why: `GitHub answered the pull-request query for ${shown(t.repo)} with an error (the repo may not exist, or your login may not see it)` };
+  }
   if (!r.ok) return fail({ ok: false, status: httpStatus(r) });
   let body;
   try { body = JSON.parse(r.stdout); } catch { return fail({ unreadable: true }); }

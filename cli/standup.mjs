@@ -34,8 +34,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, info, warn, fail, hand, note, readJSON, forTerminal } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
-import { STEPS, epicIds, epicRoot, loadLedger, isPassed, stepStatus, authorStepFor, acceptedHashes, isStaleHash, gateRuleFor, gateRuleSum, readFrontmatter, legacyLogins } from './epic-state.mjs';
-import { isSolo } from './gate.mjs';
+import { STEPS, epicIds, epicRoot, loadLedger, isPassed, stepStatus, authorStepFor, acceptedHashes, gatePredicate, gateRuleFor, gateRuleSum, optionalStepsFor, readFrontmatter, legacyLogins } from './epic-state.mjs';
+import { isSolo, requireEngagement } from './gate.mjs';
 import { readOwners } from './owners.mjs';
 import { readClaims, fetchCaptures } from './claims.mjs';
 import { gitIn, wipName, WIP_PREFIX } from './capture.mjs';
@@ -44,7 +44,8 @@ import { isBot } from './riskmap.mjs';
 import { readMembers, memberStatuses, memberMatches, productIdentity, ttlDays, accountLabel, accessCheck } from './members.mjs';
 import { ledgerEvents, esc, mdText, writeReport } from './usage.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
-import { listPrs } from './pr-list.mjs';
+import { listPrs, prTarget } from './pr-list.mjs';
+import { shown } from './protection.mjs';
 import { platformLogin } from './platform.mjs';
 
 const DAY_MS = 86_400_000;
@@ -74,10 +75,19 @@ const zoneOffset = (ms, tz) => {
 
 // The instant of midnight starting a calendar day in a zone. Twice, so a day whose offset differs from the
 // guess's (a daylight-saving change) still lands on its own midnight.
+// A zone whose clock jumps over midnight (America/Santiago, America/Havana on their change days) has no
+// 00:00 that day: the answer then lands an hour early, on the day before, so it is moved forward an hour
+// at a time to the day's first instant.
 export function zoneMidnight(y, m, d, tz) {
   const guess = Date.UTC(y, m - 1, d);
   const first = guess - zoneOffset(guess, tz);
-  return guess - zoneOffset(first, tz);
+  let t = guess - zoneOffset(first, tz);
+  for (let i = 0; i < 3; i++) {
+    const p = zoneParts(t, tz);
+    if (Date.UTC(p.y, p.m - 1, p.d) >= guess) break;
+    t += 3_600_000 - ((p.mi * 60 + p.s) * 1000);
+  }
+  return t;
 }
 
 // `YYYY-MM-DD HH:MM` on the zone's wall clock.
@@ -184,8 +194,27 @@ function whoseWip(members, w) {
   return hit.length ? { ambiguous: hit } : {};
 }
 
+// The member whose account on this platform and host has this login — a PR/MR author. A login on GitHub
+// and the same login on GitLab can be two people, so the platform and host must match too; an account two
+// files claim (`matchLogins` leaves it out) matches nobody.
+function whoseAccount(members, { platform, host, login }) {
+  const want = String(login || '').toLowerCase();
+  const hit = members.filter((m) => m.accounts.some((a) => a.platform === platform && String(a.host).toLowerCase() === String(host || '').toLowerCase()
+    && a.login.toLowerCase() === want && (m.matchLogins || []).includes(want)));
+  if (hit.length === 1) return { member: hit[0] };
+  return hit.length ? { ambiguous: hit } : {};
+}
+
 // ---- the model -----------------------------------------------------------------------------------
 
+// Every value a shared file holds is made safe before it joins a line (`forTerminal`: no control
+// character reaches the terminal), and a name is shown only when it is not an email address (`shown`).
+// The text is built once and shared by the terminal, Markdown and HTML outputs.
+const safe = (v) => forTerminal(String(v ?? ''));
+const nameOf = (v) => shown(String(v ?? '').trim() || 'someone');
+const isDay = (d) => typeof d === 'string' && DATE_RE.test(d);
+// A ledger list's records: only plain objects (a `null` or a number in a shared file is skipped, not a crash).
+const records = (list) => (Array.isArray(list) ? list.filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : []);
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const prWord = (platform) => (platform === 'gitlab' ? 'MR !' : 'PR #');
 
@@ -201,18 +230,21 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   const got = readMembers(root, { identity });
   const ttl = ttlDays(productConfig);
   const today = utcDay(now);
-  const inDay = (d) => typeof d === 'string' && d >= win.startUtcDay;
+  const inDay = (d) => isDay(d) && d >= win.startUtcDay;
   const inTime = (ms) => Number.isFinite(ms) && ms >= win.startMs && ms <= now;
 
   // Platform first: whether the Product's platform answered decides whether a member's access may be asked.
   const sources = repoSources(root, identity, productConfig, notRead, env);
   const seenRepo = new Set();
   const prs = [];
+  const authCache = new Map();
   for (const s of sources) {
-    const t = listPrs({ platform: s.platform, gitUrl: s.gitUrl }, { sinceMs: win.startMs, env, ...(runner ? { runner } : {}) });
-    const key = t.host && t.repo ? `${t.host}/${t.repo}`.toLowerCase() : null;
+    const target = prTarget({ platform: s.platform, gitUrl: s.gitUrl }, { env, authCache, ...(runner ? { runner } : {}) });
+    // One repo, one call: a registered repo that is the Product itself (a monorepo) is not asked twice.
+    const key = target.host && target.repo ? `${target.host}/${target.repo}`.toLowerCase() : null;
     if (key && seenRepo.has(key)) continue;
     if (key) seenRepo.add(key);
+    const t = target.ok ? listPrs(target, { sinceMs: win.startMs, env, ...(runner ? { runner } : {}) }) : target;
     prs.push({ label: s.label, ...t });
   }
   const prRead = prs.filter((p) => p.ok);
@@ -225,8 +257,18 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   // Commits: exact times, over the window and the TTL look-back the status needs.
   const readFrom = utcDay(Math.min(win.startMs - DAY_MS, Date.parse(`${today}T00:00:00Z`) - (ttl + 1) * DAY_MS));
   const commits = [];
+  // One repository, read once: `git log --all` in a monorepo's registered folder (`path: .`, or `apps/web`)
+  // reads the very history the Product's read did, and would count each commit again.
+  const seenGit = new Map();
   for (const s of sources) {
     if (!s.dir) continue;
+    const common = gitIn(s.dir, env)(['rev-parse', '--git-common-dir']);
+    if (common.ok) {
+      let real = path.resolve(s.dir, common.out.trim());
+      try { real = fs.realpathSync(real); } catch { /* the path as git gave it */ }
+      if (seenGit.has(real)) { notes.push(`${s.label}: the same git repository as ${seenGit.get(real)} — its commits are counted once, under ${seenGit.get(real)}`); continue; }
+      seenGit.set(real, s.label);
+    }
     const g = gitAuthors(s.dir, readFrom);
     if (g.unknown) { notRead.push(`${s.label}: ${g.unknown} — its commits are not read`); continue; }
     for (const e of g.events) commits.push({ ...e, repo: s.label });
@@ -245,8 +287,10 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
 
   // Status (E131): active / idle / left / unknown, from commits, approvals and ships. When the Product's own
   // platform was not read, nobody's access is asked — a bad network never makes anyone `left`.
+  // Only a real calendar date is activity: a date in a shared file is checked before the status reads it.
   const activity = [...commits.map((e) => ({ ts: e.ts, login: e.login, emailHash: e.emailHash, name: e.name })),
-    ...ledgerEv.filter((e) => e.action === 'approved' || e.action === 'shipped').map((e) => ({ ts: e.ts, login: e.login || e.actor, name: e.actor }))];
+    ...ledgerEv.filter((e) => (e.action === 'approved' || e.action === 'shipped') && isDay(e.ts) && typeof e.actor === 'string')
+      .map((e) => ({ ts: e.ts, login: e.login || e.actor, name: e.actor }))];
   const offline = !prs[0]?.ok;
   const members = memberStatuses(root, got.members, { events: activity, today, ttl, identity, access, offline });
 
@@ -255,18 +299,19 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   const place = (owner, display, key, section, item) => {
     if (owner.member) { blocks.get(owner.member)[section].push(item); return; }
     const k = owner.ambiguous ? `ambiguous:${key}` : key;
-    if (!unlisted.has(k)) unlisted.set(k, { who: display, ambiguous: owner.ambiguous ? owner.ambiguous.map((m) => m.primary.login) : null, done: [], working: [], waiting: [] });
+    if (!unlisted.has(k)) unlisted.set(k, { who: nameOf(display), ambiguous: owner.ambiguous ? owner.ambiguous.map((m) => m.primary.login) : null, done: [], working: [], waiting: [] });
     unlisted.get(k)[section].push(item);
   };
   const byEvent = (e, display, section, item) => place(whose(members, e), display, personKey({ login: e.login, name: e.name }) || `name:${display}`, section, item);
   const byWip = (w, display, section, item) => place(whoseWip(members, w), display, `wip:${w}`, section, item);
+  const byAccount = (acct, section, item) => place(whoseAccount(members, acct), acct.login, `login:${String(acct.login).toLowerCase()}`, section, item);
 
   // DONE — commits, one line per person and repo.
   const commitGroups = new Map();
   for (const e of commits) {
     if (!inTime(e.at * 1000)) continue;
     const owner = whose(members, e);
-    const who = owner.member ? `m:${owner.member.rel}` : personKey({ login: e.login, name: e.name });
+    const who = owner.member ? `m:${owner.member.rel}` : `${owner.ambiguous ? 'amb:' : ''}${personKey({ login: e.login, name: e.name })}`;
     const k = `${who}\0${e.repo}`;
     if (!commitGroups.has(k)) commitGroups.set(k, { e, count: 0, last: 0 });
     const g = commitGroups.get(k);
@@ -274,16 +319,16 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
     g.last = Math.max(g.last, e.at * 1000);
   }
   for (const { e, count, last } of commitGroups.values()) {
-    byEvent(e, e.login || e.name || 'someone', 'done', { kind: 'commits', repo: e.repo, count, last: new Date(last).toISOString(), text: `${plural(count, 'commit')} in ${e.repo} (last ${zoneStamp(last, tz)})` });
+    byEvent(e, e.login || e.name || 'someone', 'done', { kind: 'commits', repo: e.repo, count, last: new Date(last).toISOString(), text: `${plural(count, 'commit')} in ${safe(e.repo)} (last ${zoneStamp(last, tz)})` });
   }
   // DONE — approvals, comments, ships (the ledger's date only).
   // A ledger names people by platform login: a `[bot]` login is a robot, not a person seen.
   for (const e of ledgerEv) {
-    if (!inDay(e.ts) || isBot(e.actor)) continue;
-    const what = e.artifact ? `${e.epic} ${e.artifact}` : e.epic;
+    if (!inDay(e.ts) || typeof e.actor !== 'string' || isBot(e.actor)) continue;
+    const what = e.artifact ? `${e.epic} ${safe(e.artifact)}` : e.epic;
     const item = e.action === 'approved' ? { kind: 'approved', epic: e.epic, artifact: e.artifact || null, date: e.ts, text: `approved ${what} (${e.ts})` }
       : e.action === 'commented' ? { kind: 'commented', epic: e.epic, artifact: e.artifact || null, date: e.ts, text: `commented on ${what} (${e.ts})` }
-        : { kind: 'shipped', epic: e.epic, story: e.story || null, task: e.task || null, repo: e.repo || null, date: e.ts, text: `engineer review of ${[e.story, e.task].filter(Boolean).join('/') || e.epic}${e.repo ? ` in ${e.repo}` : ''}, shipped ${e.ts}` };
+        : { kind: 'shipped', epic: e.epic, story: e.story || null, task: e.task || null, repo: e.repo || null, date: e.ts, text: `engineer review of ${[e.story, e.task].filter(Boolean).map(safe).join('/') || e.epic}${e.repo ? ` in ${safe(e.repo)}` : ''}, shipped ${e.ts}` };
     // A report, not the count: the name a ledger records is the platform login since E62, so it is matched
     // against members' logins too. The gate count never reads this (E64: only a stamped record proves it).
     byEvent({ login: e.login || e.actor, name: e.actor }, e.actor, 'done', item);
@@ -293,19 +338,19 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
     for (const s of led.state?.steps || []) {
       const cl = s?.closed;
       if (!cl || typeof cl !== 'object' || !inDay(cl.date)) continue;
-      const who = cl.via === 'merge' && cl.mergedBy ? cl.mergedBy : cl.by;
+      const who = cl.via === 'merge' && typeof cl.mergedBy === 'string' && cl.mergedBy.trim() ? cl.mergedBy : cl.by;
       // On CI the closing record's `by` is the job's git name — `yad-gate-sync` in the shipped workflow, or a
       // `[bot]` name. A closing record carries no email, so the exact name is the evidence here (`isGateBot`
       // needs the address too, which a commit has and this record does not).
       if (typeof who !== 'string' || !who.trim() || isBot(who) || who.trim() === 'yad-gate-sync') continue;
-      byEvent({ login: who, name: who }, who, 'done', { kind: 'closed', epic, step: s.id, via: cl.via || null, date: cl.date, text: `closed ${epic} ${s.id}${cl.via ? ` (${cl.via})` : ''}, ${cl.date}` });
+      byEvent({ login: who, name: who }, who, 'done', { kind: 'closed', epic, step: s.id, via: cl.via || null, date: cl.date, text: `closed ${epic} ${safe(s.id)}${cl.via ? ` (${safe(cl.via)})` : ''}, ${cl.date}` });
     }
   }
   // DONE — merged PRs/MRs, by their author.
   for (const p of prRead) {
     for (const pr of p.merged) {
-      if (!pr.author) continue;
-      byEvent({ login: pr.author }, pr.author, 'done', { kind: 'merged', repo: p.label, number: pr.number, at: pr.mergedAt, text: `${prWord(p.platform)}${pr.number} merged in ${p.label} (${zoneStamp(Date.parse(pr.mergedAt), tz)})` });
+      if (!pr.author || !Number.isSafeInteger(pr.number)) continue;
+      byAccount({ platform: p.platform, host: p.host, login: pr.author }, 'done', { kind: 'merged', repo: p.label, number: pr.number, at: pr.mergedAt, text: `${prWord(p.platform)}${pr.number} merged in ${p.label} (${zoneStamp(Date.parse(pr.mergedAt), tz)})` });
     }
   }
 
@@ -313,7 +358,7 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   for (const epic of epics) {
     for (const o of readOwners(root, epic)) {
       if (o.error || !o.live) continue;
-      byWip(o.owner, o.name || o.owner, 'working', { kind: 'owns', epic, step: o.step, state: o.stepState || null, text: `owns ${epic} ${o.step}${o.stepState ? ` (${o.stepState})` : ''}` });
+      byWip(o.owner, o.name || o.owner, 'working', { kind: 'owns', epic, step: o.step, state: o.stepState || null, text: `owns ${epic} ${safe(o.step)}${o.stepState ? ` (${safe(o.stepState)})` : ''}` });
     }
   }
   const claimed = new Set();
@@ -327,79 +372,91 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
     claimed.add(k);
   }
   for (const { cl, files, last } of claimGroups.values()) {
-    byWip(cl.name, cl.person || cl.name, 'working', { kind: 'editing', epic: cl.epic, files, last: new Date(last).toISOString(), text: `editing ${files.map(forTerminal).join(', ')} (last saved ${zoneStamp(last, tz)})` });
+    byWip(cl.name, cl.person || cl.name, 'working', { kind: 'editing', epic: cl.epic, files, last: new Date(last).toISOString(), text: `editing ${files.map(safe).join(', ')} (last saved ${zoneStamp(last, tz)})` });
   }
   for (const w of wipSaves(root, env, win.startMs)) {
     if (claimed.has(`${w.name}\0${w.epic}`)) continue;
-    byWip(w.name, w.name, 'working', { kind: 'drafts', epic: w.epic, last: new Date(w.at).toISOString(), text: `saved drafts on ${w.epic} (${zoneStamp(w.at, tz)}; nothing unmerged is open now)` });
+    byWip(w.name, w.name, 'working', { kind: 'drafts', epic: w.epic, last: new Date(w.at).toISOString(), text: `saved drafts on ${safe(w.epic)} (${zoneStamp(w.at, tz)}; nothing unmerged is open now)` });
   }
 
   // WAITING — gates, by the owner of the step they review: the live E47 owner, else the epic's `owner`.
+  // Each epic on its own: a shared file that is not what yad writes stops that epic's lines, said in
+  // "not read", never the whole report.
   const solo = isSolo(productConfig);
+  const engagement = requireEngagement(productConfig);
   const ownerless = [];
+  const mergeWord = identity.platform ? `its review ${identity.platform === 'gitlab' ? 'MR' : 'PR'} to merge` : '`yad gate advance` (no platform: the gate moves on when it is advanced)';
   for (const [epic, led] of ledgers) {
-    const state = led.state;
-    if (!state?.steps) continue;
-    const owners = new Map(readOwners(root, epic).filter((o) => !o.error && o.live).map((o) => [o.step, o]));
-    const front = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md')).owner || readFrontmatter(path.join(epicRoot(root, epic), 'roadmap.md')).owner;
-    const epicOwner = typeof front === 'string' && front.trim() ? front.trim() : null;
-    const ownerOf = (stepId) => {
-      const o = owners.get(stepId);
-      if (o) return { at: whoseWip(members, o.owner), display: o.name || o.owner, key: `wip:${o.owner}` };
-      if (epicOwner) return { at: whose(members, { login: epicOwner, name: epicOwner }), display: epicOwner, key: personKey({ login: epicOwner }) };
-      return null;
-    };
-    const put = (stepId, item) => {
-      const o = ownerOf(stepId);
-      if (!o) { ownerless.push(item); return; }
-      place(o.at, o.display, o.key, 'waiting', item);
-    };
-    // (b) the current step is an author step someone owns, and it is not done.
-    const cur = state.steps.find((s) => s?.id === state.currentStep);
-    const curDef = STEPS.find((d) => d.id === cur?.id);
-    if (cur && !isPassed(cur) && curDef && curDef.kind !== 'review' && cur.type !== 'review+approve' && ownerOf(cur.id)) {
-      put(cur.id, { kind: 'next-move', epic, step: cur.id, state: stepStatus(cur), text: `${epic} ${cur.id} is the current step and theirs to author (${stepStatus(cur) || 'unknown state'})` });
-    }
-    // (a) an open gate: its author step passed, the review not yet.
-    for (const s of state.steps.filter((x) => x?.type === 'review+approve' && !isPassed(x))) {
-      const a = authorStepFor(state, s);
-      if (!a || !isPassed(a)) continue;
-      const accepted = acceptedHashes(epicRoot(root, epic), s.artifact);
-      const approvers = new Set(led.approvals.filter((x) => x.step === s.id && x.status === 'approved' && !isStaleHash(x.artifactHash, accepted) && typeof x.approver === 'string' && x.approver.trim()).map((x) => x.approver));
-      const rule = gateRuleFor(s);
-      const pr = led.productPrs.find((p) => p.step === s.id || p.artifact === s.artifact);
-      const prNo = pr && Number.isInteger(pr.number) ? pr.number : null;
-      const via = prNo != null ? `${prWord(identity.platform)}${prNo}` : null;
-      const waitsFor = solo
-        ? `waits for its review ${via || (identity.platform === 'gitlab' ? 'MR' : 'PR')} to merge (solo mode: approvals waived)`
-        : approvers.size >= rule.base
-          ? `has the ${plural(approvers.size, 'approval')} it needs to pass (${approvers.size} of ${rule.base}); waits for its review ${via || (identity.platform === 'gitlab' ? 'MR' : 'PR')} to merge${rule.riskStep ? `; the count asks ${gateRuleSum(rule)} (risk step advisory)` : ''}`
-          : `waits for approval — ${approvers.size} of ${rule.base} needed to pass${rule.riskStep ? `; the count asks ${gateRuleSum(rule)} (risk step advisory)` : ''}${via ? `; review ${via}` : ''}`;
-      put(a.id, { kind: 'gate', epic, step: s.id, approvals: approvers.size, needed: rule.base, asks: rule.needed, pr: prNo, text: `${epic} ${s.id} ${waitsFor}` });
-      const rounds = led.comments.filter((x) => x.step === s.id && Number.isInteger(x.round));
-      if (rounds.length) {
-        const round = Math.max(...rounds.map((x) => x.round));
-        const count = rounds.filter((x) => x.round === round).reduce((n, x) => n + (Number.isInteger(x.count) ? x.count : 1), 0);
-        put(a.id, { kind: 'comments', epic, step: s.id, round, count, text: `${epic} ${s.id}: ${plural(count, 'comment')} recorded in review round ${round} (yad does not know which are answered)` });
+    try {
+      const state = led.state;
+      if (!state?.steps) continue;
+      const owners = new Map(readOwners(root, epic).filter((o) => !o.error && o.live).map((o) => [o.step, o]));
+      const front = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md')).owner || readFrontmatter(path.join(epicRoot(root, epic), 'roadmap.md')).owner;
+      const epicOwner = typeof front === 'string' && front.trim() ? front.trim() : null;
+      const ownerOf = (stepId) => {
+        const o = owners.get(stepId);
+        if (o) return { at: whoseWip(members, o.owner), display: o.name || o.owner, key: `wip:${o.owner}` };
+        if (epicOwner) return { at: whose(members, { login: epicOwner, name: epicOwner }), display: epicOwner, key: personKey({ login: epicOwner }) };
+        return null;
+      };
+      const put = (stepId, item) => {
+        const o = ownerOf(stepId);
+        if (!o) { ownerless.push(item); return; }
+        place(o.at, o.display, o.key, 'waiting', item);
+      };
+      const approvals = records(led.approvals);
+      const comments = records(led.comments);
+      const reviewPrs = records(led.productPrs);
+      // (b) the current step is an author step someone owns, and it is not done.
+      const cur = state.steps.find((s) => s?.id === state.currentStep);
+      const curDef = STEPS.find((d) => d.id === cur?.id);
+      if (cur && !isPassed(cur) && curDef && curDef.kind !== 'review' && cur.type !== 'review+approve' && ownerOf(cur.id)) {
+        put(cur.id, { kind: 'next-move', epic, step: cur.id, state: stepStatus(cur), text: `${epic} ${safe(cur.id)} is the current step and theirs to author (${stepStatus(cur) || 'unknown state'})` });
       }
+      // (a) an open gate: its author step passed, the review not yet. Read through the gate's own predicate,
+      // so this line never says more than `yad gate status` would (engagement, revoked approvals, solo).
+      for (const s of state.steps.filter((x) => x?.type === 'review+approve' && !isPassed(x))) {
+        const a = authorStepFor(state, s);
+        if (!a || !isPassed(a)) continue;
+        const verdict = gatePredicate({ step: s, approvals, acceptedHashes: acceptedHashes(epicRoot(root, epic), s.artifact), solo, requireEngagement: engagement, optional: optionalStepsFor(state) });
+        const rule = gateRuleFor(s);
+        const pr = reviewPrs.find((p) => (typeof p.step === 'string' && p.step === s.id) || (typeof p.artifact === 'string' && p.artifact === s.artifact));
+        const prNo = pr && Number.isSafeInteger(pr.number) ? pr.number : null;
+        const via = prNo != null ? `${prWord(identity.platform)}${prNo}` : null;
+        const asks = rule.riskStep ? `; the count asks ${gateRuleSum(rule)} (risk step advisory)` : '';
+        const waitsFor = solo
+          ? `waits for ${via ? `review ${via} to merge` : mergeWord} (solo mode: approvals waived)`
+          : verdict.approvalsSatisfied
+            ? `has the ${plural(verdict.have ?? 0, 'approval')} it needs to pass; waits for ${via ? `review ${via} to merge` : mergeWord}${asks}`
+            : `waits for approval — missing: ${verdict.missing.map(safe).join('; ')}${asks}${via ? `; review ${via}` : ''}`;
+        put(a.id, { kind: 'gate', epic, step: s.id, approvals: verdict.have ?? null, needed: rule.base, asks: rule.needed, missing: verdict.missing, pr: prNo, text: `${epic} ${safe(s.id)} ${waitsFor}` });
+        const rounds = comments.filter((x) => x.step === s.id && Number.isSafeInteger(x.round) && x.round >= 0);
+        if (rounds.length) {
+          const round = Math.max(...rounds.map((x) => x.round));
+          const count = rounds.filter((x) => x.round === round).reduce((n, x) => n + (Number.isSafeInteger(x.count) && x.count >= 0 && x.count <= 100_000 ? x.count : 1), 0);
+          put(a.id, { kind: 'comments', epic, step: s.id, round, count, text: `${epic} ${safe(s.id)}: ${plural(count, 'comment')} recorded in review round ${round} (yad does not know which are answered)` });
+        }
+      }
+    } catch (e) {
+      notRead.push(`${epic}: its gates could not be read (${safe(e.message)}) — nothing is said about what waits there`);
     }
   }
   // WAITING / WORKING — their own open PRs/MRs.
   for (const p of prRead) {
     for (const pr of p.open) {
-      if (!pr.author) continue;
+      if (!pr.author || !Number.isSafeInteger(pr.number)) continue;
       const facts = [pr.draft ? 'draft' : null,
         pr.checks === 'failing' ? 'checks failing' : pr.checks === 'running' ? 'checks running' : pr.checks === 'passing' ? 'checks passing' : null,
         pr.review === 'none' ? 'no review yet' : pr.review === 'changes-requested' ? 'changes requested' : pr.review === 'reviewed' ? 'reviewed, not approved' : pr.review === 'approved' ? 'approved' : null,
         pr.status ? `merge status ${forTerminal(pr.status)}` : null].filter(Boolean);
       const waits = !pr.draft && (pr.waits || pr.checks === 'failing' || pr.checks === 'running' || ['none', 'changes-requested', 'reviewed'].includes(pr.review));
-      byEvent({ login: pr.author }, pr.author, waits ? 'waiting' : 'working', { kind: 'open-pr', repo: p.label, number: pr.number, draft: pr.draft, checks: pr.checks, review: pr.review, text: `${prWord(p.platform)}${pr.number} open in ${p.label}${facts.length ? ` — ${facts.join(', ')}` : ''}` });
+      byAccount({ platform: p.platform, host: p.host, login: pr.author }, waits ? 'waiting' : 'working', { kind: 'open-pr', repo: p.label, number: pr.number, draft: pr.draft, checks: pr.checks, review: pr.review, text: `${prWord(p.platform)}${pr.number} open in ${p.label}${facts.length ? ` — ${facts.join(', ')}` : ''}` });
     }
   }
 
   const prNote = prMissing.length ? `platform not read for ${prMissing.map((p) => p.label).join(', ')} — PR/MR facts there are unknown, not none` : null;
   const shape = (m) => ({
-    login: m.primary.login, logins: m.accounts.map((a) => a.login), account: accountLabel(m.primary), accounts: m.accounts.map(accountLabel), status: m.status, lastActive: m.lastActive || null, ...blocks.get(m),
+    login: m.primary.login, logins: m.accounts.map((a) => a.login), account: accountLabel(m.primary), accounts: m.accounts.map(accountLabel), status: m.status, lastActive: isDay(m.lastActive) ? m.lastActive : null, ...blocks.get(m),
   });
   const team = members.filter((m) => m.status !== 'left').map(shape);
   const left = members.filter((m) => m.status === 'left').map(shape);
@@ -442,7 +499,12 @@ export function headerLines(model) {
   ];
 }
 
-const emptyLine = (model) => (model.prNote ? 'nothing recorded here (the platform was not read for every repo — PRs/MRs may be missing)' : 'nothing');
+// "nothing" only when every source answered; otherwise the empty section says what may be missing.
+const emptyLine = (model) => {
+  const gaps = [model.prNote ? 'the platform was not read for every repo' : null, model.notRead.length ? 'some git history or ledgers were not read' : null,
+    model.fetched === 'failed' ? 'the capture branches could not be fetched' : null].filter(Boolean);
+  return gaps.length ? `nothing recorded here — but ${gaps.join(', and ')}, so something may be missing (see the end)` : 'nothing';
+};
 
 function blockText(model, b, title) {
   log(`\n  ${c.bold(title)}`);
@@ -461,7 +523,11 @@ export function renderText(model) {
   for (const l of headerLines(model)) info(l);
   if (model.fetched === 'failed') warn('could not fetch the capture branches — claims and drafts are as last fetched');
   if (model.fetched === 'local') info('no remote named origin — only your own capture branches are read');
-  if (!model.team.length && !model.left.length) info(model.member ? `no member ${forTerminal(model.member)} on the team list` : 'no team list yet — each person runs `yad member add` (or `yad join` does it)');
+  if (!model.team.length && !model.left.length) {
+    info(model.member ? `no member ${forTerminal(model.member)} on the team list`
+      : model.memberErrors.length ? 'no member file could be read — the reasons are listed at the end'
+        : 'no team list yet — each person runs `yad member add` (or `yad join` does it)');
+  }
   for (const m of model.team) blockText(model, m, memberTitle(m));
   if (model.unlisted.length) {
     log(`\n  ${c.bold('Seen, not on the team list')} ${c.dim('— people in the record who match no member file')}`);

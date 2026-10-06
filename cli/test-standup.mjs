@@ -224,7 +224,7 @@ test('E132 buildStandup: one block per member, exact commit times, date-only led
     assert.deepEqual(texts(alice.done), ['2 commits in Product (last 2026-10-02 02:00)', 'closed EP-checkout epic (human), 2026-10-02'], 'the commit one second before the window is out; a second git name joins by email');
     assert.deepEqual(texts(alice.working), ['owns EP-checkout epic (done)']);
     assert.deepEqual(texts(alice.waiting), [
-      'EP-checkout epic-review has the 1 approval it needs to pass (1 of 1); waits for its review PR to merge',
+      'EP-checkout epic-review has the 1 approval it needs to pass; waits for its review PR to merge',
       'EP-checkout epic-review: 2 comments recorded in review round 2 (yad does not know which are answered)',
       'PR #7 open in Product — checks failing, no review yet',
     ]);
@@ -311,7 +311,7 @@ test('E132 buildStandup: the current author step an owner holds is their next mo
     put(f, st);
     const m = S.buildStandup(T, { now: NOW, fetch: false });
     assert.deepEqual(texts(m.team[0].waiting), ['EP-pay epic is the current step and theirs to author (in_progress)']);
-    assert.deepEqual(texts(m.ownerless), ['EP-ship epic-review waits for approval — 0 of 1 needed to pass; the count asks 3 approvers = base 1 + contract risk 2 (risk step advisory)']);
+    assert.deepEqual(texts(m.ownerless), ['EP-ship epic-review waits for approval — missing: 1 approval(s); the count asks 3 approvers = base 1 + contract risk 2 (risk step advisory)']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -383,7 +383,7 @@ test('E132 renderText: every section prints — the people seen, gates nobody ow
     const out = lines.join('\n');
     for (const re of [/window: Fri 2026-10-02 00:00 → Mon 2026-10-05 09:00 \(UTC\)/, /Seen, not on the team list/, /Open gates nobody owns/,
       /EP-checkout epic-review has the 1 approval it needs/, /could not fetch the capture branches/, /Product: platform not read — GitHub refused/,
-      /nothing recorded here \(the platform was not read/, /a note/, /no emails, commit messages, PR titles or comment bodies/]) assert.match(out, re);
+      /nothing recorded here — but the platform was not read for every repo, and the capture branches could not be fetched/, /a note/, /no emails, commit messages, PR titles or comment bodies/]) assert.match(out, re);
     assert.equal(m.left.length, 0, 'the platform refused, so nobody is `left`');
     assert.ok(!/@/.test(out), 'no email address anywhere');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -400,5 +400,131 @@ test('E132 buildStandup: a robot that closed a step or recorded a review is not 
     const m = S.buildStandup(T, { now: NOW, fetch: false });
     assert.deepEqual(m.unlisted.map((u) => u.who), ['Carol']);
     assert.ok(!texts(m.team.find((x) => x.login === 'alice').done).some((t) => t.startsWith('closed')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- review round 1 ---------------------------------------------------------------------------------
+
+test('E132 review 1: a malformed ledger is "not read" for that epic, never a crash of the whole report', async () => {
+  const T = await teamFixture();
+  try {
+    const sdlc = path.join(T, 'epics/EP-checkout/.sdlc');
+    put(path.join(sdlc, 'approvals.json'), [null, 5, { step: 'epic-review', approver: 'bob', status: 'approved', date: '2026-10-02' }]);
+    put(path.join(sdlc, 'comments.json'), [null]);
+    put(path.join(sdlc, 'product-prs.json'), [null, { step: 'other', number: 9 }, { artifact: 'epic.md', step: 'epic-review', number: 4 }]);
+    put(path.join(sdlc, 'hub-prs.json'), [null, { step: 'other', number: 9 }, { artifact: 'epic.md', step: 'epic-review', number: 4 }]);
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    const alice = m.team.find((x) => x.login === 'alice');
+    assert.ok(texts(alice.waiting).includes('EP-checkout epic-review has the 1 approval it needs to pass; waits for review PR #4 to merge'), texts(alice.waiting).join(' | '));
+    assert.ok(m.notRead.some((n) => /EP-checkout: its ledger cannot be read/.test(n)), 'the report reader (yad usage\'s) stops on the null and says so');
+    assert.match(S.renderMarkdown(m), /nothing recorded here — but the platform was not read for every repo, and some git history or ledgers were not read/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 1: a control character in a shared file never reaches the text; an email-shaped name is hidden', async () => {
+  const T = await teamFixture();
+  try {
+    const sdlc = path.join(T, 'epics/EP-checkout/.sdlc');
+    const st = JSON.parse(fs.readFileSync(path.join(sdlc, 'state.json'), 'utf8'));
+    st.steps[0].closed = { by: 'alice', date: '2026-10-02', via: 'hu\u001b[2Jman' };
+    put(path.join(sdlc, 'state.json'), st);
+    put(path.join(sdlc, 'comments.json'), [{ artifact: 'epic\u001b]0;pwned\u0007.md', step: 'epic-review', commenter: 'bob', round: 1, count: 1, date: '2026-10-02' },
+      { artifact: 'epic.md', step: 'epic-review', commenter: 'bob', round: 1, count: 1, date: '2026-10-0\u001b' }]);
+    put(path.join(sdlc, 'build-log.json'), { ships: [{ story: 'S\u001b[31m', task: 'T01', repo: 'a\u0007pi', shippedAt: '2026-10-03', engineer_review: [{ approver: 'bob' }] }] });
+    commitAs(T, 'eve@corp.example', 'eve@corp.example', START + 60000);
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    const all = JSON.stringify([m.team, m.unlisted, m.ownerless].flat().flatMap((b) => [b.who, ...(b.done || []), ...(b.working || []), ...(b.waiting || [])].map((x) => x?.text ?? x)));
+    assert.ok(!/\\u00[01][0-9a-f]|\\u007f|\\[bfrt]/i.test(all), all);   // JSON writes any control character as an escape
+    assert.ok(!/eve@corp/.test(all), 'an email used as a git name is never printed');
+    assert.ok(m.unlisted.some((u) => u.who === 'a name with an @ in it'));
+    assert.ok(!texts(m.team.find((x) => x.login === 'bob').done).some((t) => /2026-10-0\b/.test(t)), 'a date that is not a date is not in the window');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 1: a monorepo\'s registered folders are one git history, counted once', async () => {
+  const T = await teamFixture();
+  try {
+    fs.mkdirSync(path.join(T, 'apps/web'), { recursive: true });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'self', path: '.' }, { name: 'web', path: 'apps/web' }] });
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    assert.deepEqual(texts(m.team.find((x) => x.login === 'alice').done).filter((t) => /commit/.test(t)), ['2 commits in Product (last 2026-10-02 02:00)']);
+    assert.ok(m.notes.some((n) => /^self: the same git repository as Product/.test(n)));
+    assert.ok(m.notes.some((n) => /^web: the same git repository as Product/.test(n)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 1: the gate line follows the gate\'s own rule — an approval without engagement does not count', async () => {
+  const T = await teamFixture();
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'));
+    put(path.join(T, '.sdlc/product.json'), { ...cfg, review: { requireEngagement: true } });
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    const gate = m.team.find((x) => x.login === 'alice').waiting.find((i) => i.kind === 'gate');
+    assert.match(gate.text, /^EP-checkout epic-review waits for approval — missing: 1 approval\(s\); 1 approval\(s\) without verified engagement/);
+    // No platform: nothing merges; the gate moves on when it is advanced.
+    put(path.join(T, '.sdlc/product.json'), { ...cfg, platform: null, git_url: '' });
+    const local = S.buildStandup(T, { now: NOW, fetch: false });
+    // (With no platform no member file is readable, so the owner is a person seen.)
+    assert.match([...local.team, ...local.unlisted].flatMap((b) => b.waiting).find((i) => i.kind === 'gate').text, /waits for `yad gate advance`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 1: a PR author is matched on the PR\'s own platform and host only', async () => {
+  const T = await teamFixture();
+  try {
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'api', git_url: 'git@gitlab.com:acme/api.git', platform: 'gitlab' }] });
+    const runner = (cmd, args) => {
+      if (cmd === 'which' || cmd === 'where' || args[0] === 'auth') return { ok: true, stdout: '' };
+      if (args.includes('graphql')) return { ok: true, stdout: JSON.stringify({ data: { repository: { open: { totalCount: 0, nodes: [] }, merged: { nodes: [] } } } }) };
+      if (args.at(-1).includes('state=opened')) return { ok: true, stdout: JSON.stringify([{ iid: 3, author: { username: 'alice' }, detailed_merge_status: 'mergeable' }]) };
+      if (args.at(-1).includes('state=merged')) return { ok: true, stdout: '[]' };
+      return { ok: false, stderr: 'HTTP 404' };
+    };
+    const m = S.buildStandup(T, { now: NOW, fetch: false, runner, env: ON, access: () => 'yes' });
+    assert.ok(!texts(m.team.find((x) => x.login === 'alice').working).some((t) => /MR !3/.test(t)), 'GitLab alice is not GitHub alice');
+    assert.deepEqual(m.unlisted.find((u) => u.who === 'alice')?.working.map((i) => i.text), ['MR !3 open in api — merge status mergeable']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 1: smaller fixes — a GraphQL error is not "offline", a merger that is not text falls back, a file-less team, a zone with no midnight', async () => {
+  const t = { platform: 'github', gitUrl: 'git@github.com:acme/gone.git' };
+  const gql = listPrs(t, { sinceMs: START, env: ON, runner: ghRunner({ fail: "GraphQL: Could not resolve to a Repository with the name 'acme/gone'. (repository)" }) });
+  assert.match(gql.why, /answered the pull-request query for acme\/gone with an error/);
+  const T = await teamFixture();
+  try {
+    const f = path.join(T, 'epics/EP-checkout/.sdlc/state.json');
+    const st = JSON.parse(fs.readFileSync(f, 'utf8'));
+    st.steps[0].closed = { by: 'alice', date: '2026-10-02', via: 'merge', mergedBy: 5 };
+    put(f, st);
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    assert.ok(texts(m.team.find((x) => x.login === 'alice').done).includes('closed EP-checkout epic (merge), 2026-10-02'));
+    // Every member file refused: the first line says so, not "no team list yet".
+    put(path.join(T, MEMBERS_DIR, 'github-alice.json'), '{ broken');
+    put(path.join(T, MEMBERS_DIR, 'github-bob.json'), '{ broken');
+    const lines = [];
+    const [log, err] = [console.log, console.error];
+    console.log = (...a) => lines.push(a.join(' '));
+    console.error = (...a) => lines.push(a.join(' '));
+    try { S.renderText(S.buildStandup(T, { now: NOW, fetch: false })); } finally { console.log = log; console.error = err; }
+    assert.match(lines.join('\n'), /no member file could be read — the reasons are listed at the end/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // America/Santiago skips 00:00 on 2026-09-06: that day starts at 01:00 local, never the evening before.
+  const santiago = S.zoneMidnight(2026, 9, 6, 'America/Santiago');
+  assert.equal(S.zoneStamp(santiago, 'America/Santiago'), '2026-09-06 01:00');
+  assert.equal(S.zoneStamp(S.zoneMidnight(2026, 9, 7, 'America/Santiago'), 'America/Santiago'), '2026-09-07 00:00');
+});
+
+test('E132 review 1: commits by one name, one ambiguous and one unmatched, stay two lines', async () => {
+  const T = product();
+  try {
+    memberFile(T, 'sam1', { names: ['Sam One'], emails: ['shared@x.io'] });
+    memberFile(T, 'sam2', { names: ['Sam Two'], emails: ['shared@x.io'] });
+    commitAs(T, 'Sam', 'shared@x.io', START + 60000);
+    commitAs(T, 'Sam', 'other@x.io', START + 120000);
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    assert.deepEqual(m.unlisted.map((u) => [u.who, u.ambiguous, texts(u.done)]).sort((a, b) => (a[1] ? -1 : 1) - (b[1] ? -1 : 1)), [
+      ['Sam', ['sam1', 'sam2'], ['1 commit in Product (last 2026-10-02 00:01)']],
+      ['Sam', null, ['1 commit in Product (last 2026-10-02 00:02)']],
+    ]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
