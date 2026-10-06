@@ -144,12 +144,28 @@ export function docsStale(manifest, { artifactHash, repoHeads = {}, shellVersion
 // mounts under `app/`, and every per-epic site nests under `epics/<id>/` — matching siteBasePath
 // (overview at `<base>/app/`, epics at `<base>/epics/EP-<slug>/`). A concurrency group prevents the
 // deploy from retriggering. The shared shell script keeps the two platforms byte-for-byte aligned.
+// A site that fails to build fails the run: CI runs the script under `set -e`, which does not stop on a
+// failure inside an `&&` chain, so a failed site used to be silently left out while the deploy still went
+// green — yadflow's own site lost its root page that way for days. Each chain ends in `|| failed=…`, so
+// every site is still tried (as `yad docs build` does) and the last line fails the run, naming them all.
+// A red run uploads nothing, so the last good deployment stays live.
+// A YAML single-quoted scalar: a quote inside is written twice, and nothing else is escaped (a backslash
+// is literal). The shell's '\'' is not YAML — it would make GitLab reject the whole pipeline.
+export const yamlQuoted = (s) => `'${String(s).replace(/'/g, "''")}'`;
+const PAGES_FAIL_LINE = 'yad-docs: these sites did not build, so nothing is deployed:';
 const BUILD_PUBLIC = [
   'mkdir -p public',
-  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html; fi',
-  'if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/; fi',
-  'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/"; done',
+  'failed=',
+  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html || failed="$failed docs/sdlc-site"; fi',
+  'if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/ || failed="$failed docs/tutorial-site"; fi',
+  'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/" || failed="$failed $d"; done',
+  `if [ -n "$failed" ]; then echo "${PAGES_FAIL_LINE}$failed" >&2; exit 1; fi`,
 ];
+// The platform `--wire` writes for: the Product's docs target, GitHub unless it says GitLab.
+export const wiredPagesPlatform = (docs) => (docs?.target === 'gitlab-pages' ? 'gitlab' : 'github');
+// Does a wired Pages workflow fail its deploy when a site fails to build? Read by `yad doctor`. Only this
+// line is looked for — not the whole file — so a Dependabot pin bump or an edit elsewhere is not news.
+export const pagesWorkflowFailsOnBuild = (text) => text.includes(PAGES_FAIL_LINE);
 export function pagesWorkflow(platform) {
   if (platform === 'gitlab') {
     return `# yad-managed — built by \`yad docs sync --wire\`. include it from .gitlab-ci.yml:
@@ -161,7 +177,7 @@ pages:
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
-${BUILD_PUBLIC.map((l) => `    - '${l.replace(/'/g, "'\\''")}'`).join('\n')}
+${BUILD_PUBLIC.map((l) => `    - ${yamlQuoted(l)}`).join('\n')}
   artifacts:
     paths: [public]
   resource_group: pages
@@ -347,7 +363,7 @@ function reportFreshness(root, t) {
 }
 
 function wirePages(root, docs) {
-  const platform = docs?.target === 'gitlab-pages' ? 'gitlab' : 'github';
+  const platform = wiredPagesPlatform(docs);
   const rel = pagesWorkflowPath(platform);
   const dest = path.join(root, rel);
   fs.mkdirSync(path.dirname(dest), { recursive: true });

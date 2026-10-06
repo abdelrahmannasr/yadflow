@@ -816,7 +816,7 @@ each code repo/
     <tr><td><a href="#sk-stub"><code>yad-stub</code></a></td><td>Phase 6</td><td>Make a stub epic for an already-built feature, so a defect can thread off it now.</td></tr>
     <tr><td><a href="#sk-docs"><code>yad-docs</code></a></td><td>Docs</td><td>Generate an epic's interactive documentation site.</td></tr>
     <tr><td><a href="#sk-docs-overview"><code>yad-docs-overview</code></a></td><td>Docs</td><td>Generate the project-level SDLC overview site.</td></tr>
-    <tr><td><a href="#sk-docs-sync"><code>yad-docs-sync</code></a></td><td>Docs</td><td>Report which docs sites are stale, refresh them, or wire the CI check.</td></tr>
+    <tr><td><a href="#sk-docs-sync"><code>yad-docs-sync</code></a></td><td>Docs</td><td>Report which docs sites are stale, refresh them, or wire the CI build and deploy.</td></tr>
   </table>
 
   <h3>Setup &amp; code-awareness</h3>
@@ -1180,8 +1180,8 @@ yad-docs-overview action: deploy    # runs `yad docs deploy --overview`</code></
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-docs-sync                      # action: check (the default, read-only) — every epic plus the overview
 yad-docs-sync action: refresh      # regenerate and redeploy each stale site
-yad-docs-sync action: wire         # commit the CI workflow that runs the check on push</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Periodically, or in CI, so the published sites never quietly drift from the artifacts.</div>
+yad-docs-sync action: wire         # commit the CI workflow that builds and deploys the sites on push</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Periodically, or after artifacts change. The wired CI only builds what is committed, so a stale site stays stale until someone refreshes it.</div>
   </div>
 </section>
 

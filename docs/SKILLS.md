@@ -67,9 +67,10 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   the Pages root (served as both `report.html` and `index.html`); the interactive site mounts under
   `app/`, is reached from the report, and links back to it. Deploys with `yad docs deploy --overview`.
 - **`yad-docs-sync`** — Keeps the sites fresh: detects staleness (a content hash of the authored
-  artifacts + the connected repos' HEAD shas vs each site's build manifest), regenerates + redeploys, and
-  can wire a CI job that rebuilds on push. Generalizes the rule that feature work must hand-update the
-  docs — the overview now regenerates whenever the skill set / pipeline changes.
+  artifacts + the connected repos' HEAD shas vs each site's build manifest), regenerates + redeploys on
+  request, and can wire a CI job that builds and deploys every site on push. That job builds only what is
+  committed, so regenerating a stale site stays a person's `refresh`. Generalizes the rule that feature
+  work must hand-update the docs.
 
 ## The learning layer (cross-cutting — any member, any stage)
 

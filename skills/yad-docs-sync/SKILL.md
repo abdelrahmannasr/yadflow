@@ -1,6 +1,6 @@
 ---
 name: yad-docs-sync
-description: 'The maintenance/CI reconciler for the generated docs sites — mirroring the `yad check` / `yad gate ci` drift pattern. Recomputes each site''s freshness hashes (per-epic: the artifact hash + repo HEADs; overview: config.yaml + module-help.csv + the overview diagram + skill count) and compares them to each docs-build.json baseline: a site is stale when any hash differs or its shell template is out of date. `--check` (default, read-only) reports which sites are stale and WHY; `--refresh` regenerates + redeploys each stale site; `--wire` commits the CI workflow that runs the check on push and rebuilds on staleness. Refresh is always a human/CI decision, never silent; docs are never a gate. Use when the user says "sync the docs", "check docs staleness", "refresh stale docs sites", or "wire the docs CI".'
+description: 'The maintenance/CI reconciler for the generated docs sites — mirroring the `yad check` / `yad gate ci` drift pattern. Recomputes each site''s freshness hashes (per-epic: the artifact hash + repo HEADs; overview: config.yaml + module-help.csv + the overview diagram + skill count) and compares them to each docs-build.json baseline: a site is stale when any hash differs or its shell template is out of date. `--check` (default, read-only) reports which sites are stale and WHY; `--refresh` regenerates + redeploys each stale site; `--wire` commits the CI workflow that builds and deploys every site on push. Refresh is always a human/CI decision, never silent; docs are never a gate. Use when the user says "sync the docs", "check docs staleness", "refresh stale docs sites", or "wire the docs CI".'
 ---
 
 # SDLC — Sync the Docs Sites (the staleness reconciler)
@@ -67,17 +67,17 @@ A missing `docs-build.json` (a site never generated) counts as **stale → needs
   rebuild failed: `yad docs sync --refresh` exits 1 when a stale site's npm install or build fails, and
   its `--json` `sites` rows say which (`built: false` with an `error`). **Never silent** — refresh
   is a deliberate human/CI act, surfaced exactly like `yad repo refresh`.
-- **`wire`** — commit the CI workflow (Step 4) that automates the check + rebuild.
+- **`wire`** — commit the CI workflow (Step 4) that builds and deploys every site on push.
 
 ### Step 4 — `wire`: the CI auto-rebuild workflow
 Commit the platform-matched workflow (GitHub `.github/workflows/yad-docs.yml`, or a GitLab `pages` job at
 `.gitlab/ci/yad-docs.yml` that must be `include:`d from the root `.gitlab-ci.yml` —
 `include: { local: .gitlab/ci/yad-docs.yml }`, the same fragment+include shape as the `yad-checks` gates):
-- on push, run **`yad docs sync --check`**; on detected staleness, **rebuild + deploy** the affected
-  site(s);
-- carry **`[skip ci]`** on any commit the workflow itself makes (the regenerated source / manifest) and
-  a **concurrency group** (one docs deploy at a time) — both to **prevent deploy loops** (a rebuild must
-  not retrigger the workflow). See `references/staleness.md`.
+- on a push to the default branch, **build every committed site and deploy them**; it commits nothing,
+  so it cannot retrigger itself, and a **concurrency group** keeps one docs deploy at a time;
+- a site that fails to build **fails the run** (every failed site is named) and nothing is deployed, so
+  the last good site stays live. `yad doctor` warns (`docs-workflow`) when the wired file still deploys after a failed site build (as yadflow 4.5.0 and older wrote it) — re-run
+  `yad docs sync --wire`. See `references/staleness.md`.
 
 ### Step 5 — Report
 Report per target: **fresh** or **stale (why)**; for `refresh`, what was regenerated + the deploy URL or
@@ -91,14 +91,15 @@ Report per target: **fresh** or **stale (why)**; for `refresh`, what was regener
   `contract-lock.json`. Staleness blocks nothing in the SDLC; it only flags out-of-date docs.
 - **HEAD-sha staleness, reused.** Repo drift uses the exact `repos.json` `syncedHead`-vs-current-HEAD
   rule. The overview uses config + manifest + diagram + skill-count.
-- **Loop-prevention is mandatory in CI.** The wired workflow must carry `[skip ci]` on its own commits
-  and a concurrency group so a deploy never retriggers a deploy.
+- **CI builds and deploys; it never commits.** The wired workflow builds every committed site on push
+  and deploys them, under one concurrency group; it makes no commit, so it cannot retrigger itself. A
+  site that fails to build fails the run, and nothing is deployed.
 - **Reconcile, don't re-author.** This skill detects drift and delegates regeneration to `yad-docs` /
   `yad-docs-overview`; it does not generate `src/data/*.ts` itself.
 
 ## Reference
 - The manifest schema (per-epic + overview), the exact hash inputs, the head-sha staleness rule, and the
-  CI loop-prevention note: `references/staleness.md`.
+  CI note: `references/staleness.md`.
 - The generators this delegates to: `../yad-docs/SKILL.md`, `../yad-docs-overview/SKILL.md`.
 - The docs target it deploys to: `../yad-connect-docs/SKILL.md`.
 - The drift / refresh discipline this mirrors: `../yad-connect-repos/SKILL.md` (HEAD-sha staleness).

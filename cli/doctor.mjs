@@ -22,6 +22,7 @@ import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses } from './protection.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
+import { pagesWorkflowPath, pagesWorkflowFailsOnBuild, wiredPagesPlatform } from './docs.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { readOwners } from './owners.mjs';
@@ -379,6 +380,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // Background capture (E43), on any Product in either ledger mode: is the post-edit hook wired, and will
   // a push to the `yad/wip/*` branches start the team's own CI?
   if (exists(productPath)) captureChecks(root, checks, readJSON(productPath, null));
+  docsWorkflowChecks(root, checks);
   if (exists(productPath)) lineEndingChecks(root, checks);
 
   // design.json: parse + shape + tool + MCP confirmation (absent is the normal markdown-only default —
@@ -2695,6 +2697,21 @@ export function captureChecks(root, checks, cfg) {
     check(checks, 'capture', 'project', 'warn', `${noisy.join(', ')} ${noisy.length > 1 ? 'run' : 'runs'} on a push to ANY branch, so every \`yad capture\` push to yad/wip/* starts ${noisy.length > 1 ? 'them' : 'it'}`,
       'add `branches-ignore: ["yad/wip/**"]` under its `push:` trigger (yadflow\'s own workflows already do)');
   }
+}
+
+// The Pages workflow `yad docs sync --wire` wrote. Nothing else rewrites it, so a Product wired by yadflow
+// 4.5.0 or older keeps a script that deploys a site with a page missing when a site fails to build. Only
+// that one behaviour is judged — not the whole file, which Dependabot bumps and a team may edit — and only
+// in the file `--wire` writes for this Product's platform (it never touches the other one). A file
+// without our header is the team's own.
+export function docsWorkflowChecks(root, checks) {
+  const rel = pagesWorkflowPath(wiredPagesPlatform(readJSON(path.join(root, PROJECT_FILES.docsConfig), null)));
+  let text;
+  try { text = fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return; }
+  if (!text.startsWith('# yad-managed — built by `yad docs sync --wire`')) return;
+  if (pagesWorkflowFailsOnBuild(text)) check(checks, 'docs-workflow', 'project', 'ok', `${rel} fails the deploy when a site fails to build`);
+  else check(checks, 'docs-workflow', 'project', 'warn', `${rel} still deploys when a site fails to build — the site then goes out with a page missing`,
+    'run `yad docs sync --wire` and commit the file; it rewrites the whole file, so re-apply any change your team made to it');
 }
 
 // The team's own GitHub workflow files that a push to a `yad/wip/*` branch would start. A line reader, not

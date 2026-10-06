@@ -65,18 +65,16 @@ A site is **stale** when ANY holds:
 `check` reports which of these tripped and why; `refresh` regenerates + redeploys; neither blocks any
 SDLC step (docs are never a gate).
 
-## CI loop-prevention note
+## CI note
 
 The `wire` workflow (`.github/workflows/yad-docs.yml`, or the GitLab `pages` job at
-`.gitlab/ci/yad-docs.yml` included from the root `.gitlab-ci.yml`) runs
-`yad docs sync --check` on push and rebuilds + deploys on staleness. Because the rebuild **commits** the
-regenerated `src/data/*.ts` + refreshed `docs-build.json`, that commit would re-trigger the same workflow
-— a deploy loop. Two guards, both mandatory:
+`.gitlab/ci/yad-docs.yml` included from the root `.gitlab-ci.yml`) builds every committed site and
+deploys them on each push to the default branch. It does not check staleness and commits nothing:
+regenerating a site's `src/data/*.ts` stays a local `yad docs sync --refresh` that a person commits.
+So it cannot start itself again; a **concurrency group** (`yad-docs-pages`, cancel-in-progress) keeps
+it to one deploy at a time.
 
-- **`[skip ci]`** in the message of any commit the workflow itself makes (the regenerated source +
-  manifest), so the workflow does not re-fire on its own output;
-- a **concurrency group** (e.g. `concurrency: { group: yad-docs-deploy, cancel-in-progress: true }`) so
-  at most one docs build/deploy runs at a time, and a queued one is superseded rather than stacking.
-
-Together these make the CI rebuild idempotent: a push that moves an artifact deploys exactly one fresh
-site, and the resulting bot commit does not start another round.
+A site that fails to build fails the run, and the run names every site that failed. A red run uploads
+nothing, so the last good deployment stays live. (Before this, a failed site was silently left out and
+the run went green — that is how a site could lose a page.) `yad doctor` warns (`docs-workflow`) when the wired file still deploys after a failed site build (as yadflow 4.5.0 and older wrote it); run
+`yad docs sync --wire` again and commit it.

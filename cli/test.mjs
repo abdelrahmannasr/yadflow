@@ -11906,7 +11906,7 @@ test('gate loadProduct: an existing hub.json holding literal null is rejected (n
 // ---- docs (interactive documentation sites) -----------------------------------------------------
 const {
   deployTargetFromProduct, siteBasePath, siteDir, manifestPath,
-  docsArtifactHash, docsArtifactFiles, docsStale, pagesWorkflow, pagesWorkflowPath, shellVersion, LEGACY_SHELL_VERSION,
+  docsArtifactHash, docsArtifactFiles, docsStale, pagesWorkflow, pagesWorkflowPath, yamlQuoted, shellVersion, LEGACY_SHELL_VERSION,
   runDocs: runDocsFresh,
 } = await import('./docs.mjs');
 
@@ -12052,6 +12052,72 @@ test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop
   assert.match(gl, /artifacts:/);
   assert.match(gl, /epics\/\*\/docs-site/);         // GitLab publishes per-epic sites too
   assert.equal(pagesWorkflowPath('gitlab'), '.gitlab/ci/yad-docs.yml');
+});
+
+// yadflow's own Pages site lost its root page for days: the overview build failed (a stray quote in its
+// data), and `set -e` does not stop inside an `&&` chain, so the deploy went green with the tutorial only.
+// This runs the generated script under `sh -e` with a fake npm, as CI does.
+test('pagesWorkflow: a site that fails to build fails the deploy, on both platforms', () => {
+  const script = pagesWorkflow('github').match(/run: \|\n((?: {10}.*\n)+)/)[1].replace(/^ {10}/gm, '');
+  // GitLab's lines are YAML single-quoted scalars: a quote inside one is written twice, nothing else is
+  // escaped. Read them by that rule — not the shell's '\'' — and they must be GitHub's lines exactly.
+  const gitlab = [...pagesWorkflow('gitlab').matchAll(/^ {4}- '((?:[^']|'')*)'$/gm)].map((m) => m[1].replace(/''/g, "'"));
+  assert.equal(gitlab.join('\n'), script.trimEnd(), 'GitLab runs the same lines');
+  assert.equal(yamlQuoted("echo 'it' \\ ok"), "'echo ''it'' \\ ok'", 'a quote is doubled, a backslash left alone');
+  const run = (failIn) => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-pages-'));
+    try {
+      for (const site of ['docs/sdlc-site', 'docs/tutorial-site', 'epics/EP-a/docs-site']) fs.mkdirSync(path.join(T, site, 'public'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'docs/sdlc-site/public/report.html'), 'report');
+      const bin = path.join(T, '.bin');
+      fs.mkdirSync(bin);
+      // `npm run build` writes dist/, except in the one site told to fail.
+      fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\n[ "$1" = run ] || exit 0\ncase "$PWD" in */${failIn || 'none'}) exit 1 ;; esac\nmkdir -p dist && echo built > dist/index.html\n`, { mode: 0o755 });
+      const r = spawnSync('sh', ['-e', '-c', script], { cwd: T, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` }, stdio: 'pipe' });
+      return { status: r.status, root: fs.existsSync(path.join(T, 'public/index.html')), tutorial: fs.existsSync(path.join(T, 'public/tutorial/index.html')), stderr: r.stderr.toString() };
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  };
+  const ok = run();
+  assert.deepEqual([ok.status, ok.root, ok.stderr], [0, true, ''], 'every site builds: the root page is published');
+  const overview = run('sdlc-site');
+  assert.deepEqual([overview.status, overview.root], [1, false], 'the overview fails: the deploy fails, no rootless site');
+  assert.ok(overview.tutorial, 'the other sites are still tried');
+  assert.match(overview.stderr, /did not build, so nothing is deployed: docs\/sdlc-site$/m);
+  assert.equal(run('tutorial-site').status, 1, 'the tutorial fails: the deploy fails');
+  const epic = run('docs-site');
+  assert.equal(epic.status, 1, 'an epic site fails: the deploy fails');
+  assert.match(epic.stderr, /: epics\/EP-a\/docs-site$/m, 'and the failed site is named');
+});
+
+test('doctor: a wired Pages workflow that still deploys a failed site is said; pin bumps, the other platform and a team file are not', async () => {
+  const { docsWorkflowChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-docs-wf-'));
+  try {
+    const judge = () => { const checks = []; docsWorkflowChecks(T, checks); return checks.map((c) => [c.status, c.message]); };
+    const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
+    // The script as yadflow 4.5.0 wrote it: each build in an && chain, no failure handling.
+    const old = (platform) => pagesWorkflow(platform).replace(/ \|\| failed="[^"]*"/g, '').replace(/^.*(failed=|did not build).*\n/gm, '');
+    assert.deepEqual(judge(), [], 'nothing wired, nothing said');
+    // No docs.json: --wire writes the GitHub file, so that is the one judged. Windows line endings do not matter.
+    write(pagesWorkflowPath('github'), pagesWorkflow('github').replace(/\n/g, '\r\n'));
+    assert.deepEqual(judge(), [['ok', '.github/workflows/yad-docs.yml fails the deploy when a site fails to build']], 'no docs.json, CRLF');
+    fs.rmSync(path.join(T, pagesWorkflowPath('github')));
+    for (const [platform, target] of [['github', 'github-pages'], ['gitlab', 'gitlab-pages']]) {
+      const rel = pagesWorkflowPath(platform);
+      const other = pagesWorkflowPath(platform === 'github' ? 'gitlab' : 'github');
+      write('.sdlc/docs.json', JSON.stringify({ target }));
+      write(other, old(platform === 'github' ? 'gitlab' : 'github'));
+      assert.deepEqual(judge(), [], `${platform}: the other platform's file is not what --wire writes, so it is not judged`);
+      write(rel, pagesWorkflow(platform).replace(/@[0-9a-f]{40} # v\d+\.\d+\.\d+/g, '@0123456789abcdef0123456789abcdef01234567 # v9.9.9'));
+      assert.deepEqual(judge(), [['ok', `${rel} fails the deploy when a site fails to build`]], `${platform}: a Dependabot pin bump is not news`);
+      write(rel, old(platform));
+      assert.equal(old(platform).includes('failed'), false, 'the stand-in really is the old script');
+      assert.deepEqual(judge(), [['warn', `${rel} still deploys when a site fails to build — the site then goes out with a page missing`]], `${platform}: the old script`);
+      write(rel, 'name: our own pages\n');
+      assert.deepEqual(judge(), [], `${platform}: a file without our header is the team's`);
+      fs.rmSync(path.join(T, other));
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 // A tag such as `@v4` can be moved to other code; a commit hash cannot. The `# vX.Y.Z` after the hash

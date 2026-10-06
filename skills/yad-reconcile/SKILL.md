@@ -1,6 +1,6 @@
 ---
 name: yad-reconcile
-description: 'Phase 6 maintenance/CI — the change reconciler (mirrors yad-docs-sync; NEVER a gate). Detects post-lock DRIFT and ORPHANS across feature threads: shipped code or a repo HEAD advance (the repos.json syncedHead-vs-current-HEAD rule) with NO owning change-epic in any thread, a broken lineage (cycle, missing parent, or a thread cache that disagrees with the computed root), and open hotfix reconcile debt — reporting which thread drifted and WHY. `check` (default, read-only) reports; `refresh` points the human at opening a reconcile change-epic with yad-change (never silent); `wire` commits an advisory CI job ([skip ci] + concurrency, like yad-docs-sync) that runs the check on push. The hard merge BLOCK is the lineage-check / epic-open / reconcile-debt CI gates — this only DISCOVERS. Use when the user says "reconcile the changes", "check for thread drift", "is anything shipped without an epic", or "find open hotfix debt".'
+description: 'Phase 6 maintenance/CI — the change reconciler (mirrors yad-docs-sync; NEVER a gate). Detects post-lock DRIFT and ORPHANS across feature threads: shipped code or a repo HEAD advance (the repos.json syncedHead-vs-current-HEAD rule) with NO owning change-epic in any thread, a broken lineage (cycle, missing parent, or a thread cache that disagrees with the computed root), and open hotfix reconcile debt — reporting which thread drifted and WHY. `check` (default, read-only) reports; `refresh` points the human at opening a reconcile change-epic with yad-change (never silent); `wire` commits an advisory CI job ([skip ci] + concurrency) that runs the check on push. The hard merge BLOCK is the lineage-check / epic-open / reconcile-debt CI gates — this only DISCOVERS. Use when the user says "reconcile the changes", "check for thread drift", "is anything shipped without an epic", or "find open hotfix debt".'
 ---
 
 # SDLC — Change Reconciler (Phase 6, the drift/orphan sweep)
@@ -65,7 +65,7 @@ that feature — then thread the reconcile change off that stub (and run `yad-ba
 
 ### Step 3 — `wire` (advisory CI, no block)
 Commit an advisory CI job that runs `yad reconcile --check` on push, carrying `[skip ci]` on any commit
-it makes and a concurrency group — the same loop-prevention `yad-docs-sync` uses. The job **reports**;
+it makes and a concurrency group, so it never retriggers itself. The job **reports**;
 it never blocks. The blocking enforcement is the `yad-checks` gates, not this.
 
 ### Step 4 — Report
