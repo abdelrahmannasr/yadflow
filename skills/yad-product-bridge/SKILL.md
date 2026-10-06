@@ -146,6 +146,10 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
      case set the variable to a real tag. The variable lives in project settings, so it survives
      every `yad` sync. Single value only — `tags: [$VAR]` is one tag equal to the whole variable,
      not a comma-split.
+   - **Git LFS needs nothing extra.** For a Product that uses Git LFS, the runner installs LFS git
+     hooks that fail without `git-lfs`, and the job's `node:20` image has none — so the job downloads a
+     pinned `git-lfs` itself before its checkout (#327; a Product without LFS skips it). A
+     `before_script` added by hand to install `git-lfs` can be removed after `yad update`.
 3. Commit the workflow to the Product. GitHub needs nothing else — the ephemeral `github.token` reads the
    PR and pushes the merge advance to the default branch, and the workflow's reconcile **schedule**
    runs automatically (no setup) as the safety net that recovers a merge whose run failed transiently.

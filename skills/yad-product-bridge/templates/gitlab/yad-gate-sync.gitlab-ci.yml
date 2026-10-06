@@ -81,6 +81,17 @@ yad-gate-sync:
     # jq streams glab's concatenated per-page --paginate arrays natively.
     - JQ_VERSION=1.7.1
     - curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64" -o /usr/local/bin/jq && chmod +x /usr/local/bin/jq
+    # Pinned git-lfs, ONLY for a Product that uses Git LFS (issue #327). The runner clones an LFS repo
+    # with its own git-lfs and installs LFS git hooks (post-checkout, pre-push, …) that exit with an
+    # error when git-lfs is missing — and node:20 has none. So the `git checkout` below failed, and so
+    # would the push of the advance. A Product without LFS skips the download. Only the clone's own
+    # signs count (its hooks, its .git/config, its .gitattributes) — never a global git setting.
+    - |
+      GIT_LFS_VERSION=3.8.0
+      if ! command -v git-lfs >/dev/null 2>&1 && { grep -qs git-lfs "$(git rev-parse --git-path hooks)"/* || git config --local --get-regexp '^filter\.lfs\.' >/dev/null 2>&1 || grep -qs 'filter=lfs' .gitattributes; }; then
+        curl -fsSL "https://github.com/git-lfs/git-lfs/releases/download/v${GIT_LFS_VERSION}/git-lfs-linux-amd64-v${GIT_LFS_VERSION}.tar.gz" | tar -xzf - -C /tmp "git-lfs-${GIT_LFS_VERSION}/git-lfs"
+        install -m 0755 "/tmp/git-lfs-${GIT_LFS_VERSION}/git-lfs" /usr/local/bin/git-lfs
+      fi
     - git config user.name "yad-gate-sync" && git config user.email "yad-gate-sync@noreply.${CI_SERVER_HOST}"
     - git remote set-url origin "https://oauth2:${SDLC_GATE_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
     - export GITLAB_TOKEN="$SDLC_GATE_TOKEN" GITLAB_HOST="$CI_SERVER_URL"

@@ -4256,6 +4256,65 @@ test('gate-sync pin: every wired fragment carries the same resolver, and none fl
   }
 });
 
+// Issue #327: on GitLab the runner installs LFS git hooks into an LFS Product's clone, and node:20 has
+// no git-lfs, so the job's own `git checkout` (and the push of the advance) failed. The job now fetches
+// a pinned git-lfs first — only for a Product that uses LFS. This runs the real block from the fragment,
+// with stand-in curl/tar/install on a PATH holding only them plus git and grep, so a developer's own
+// git-lfs cannot hide the check.
+const lfsBlock = () => {
+  const lines = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8').split('\n');
+  const at = lines.findIndex((l) => /^\s+GIT_LFS_VERSION=/.test(l));
+  assert.ok(at > 0 && /^\s+- \|$/.test(lines[at - 1]), 'the git-lfs step is its own `- |` block');
+  const indent = lines[at].match(/^ */)[0];
+  const body = [];
+  for (let i = at; i < lines.length && (lines[i].startsWith(indent) || !lines[i].trim()); i++) body.push(lines[i].slice(indent.length));
+  return body.join('\n');
+};
+const runLfsBlock = ({ hook, filter, attributes, globalFilter, hasLfs } = {}) => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-lfs-'));
+  try {
+    const repo = path.join(T, 'repo');
+    const bin = path.join(T, 'bin');
+    const mark = path.join(T, 'mark');
+    fs.mkdirSync(bin);
+    git(T, 'init', '-q', repo);
+    if (hook) fs.writeFileSync(path.join(repo, '.git/hooks/post-checkout'), '#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo "git-lfs was not found on your path" >&2; exit 2; }\ngit lfs post-checkout "$@"\n');
+    if (filter) git(repo, 'config', 'filter.lfs.process', 'git-lfs filter-process');
+    if (attributes) fs.writeFileSync(path.join(repo, '.gitattributes'), '*.png filter=lfs diff=lfs merge=lfs -text\n');
+    // A global git config of its own, so a developer's `git lfs install` cannot leak in — or, when asked,
+    // so one that has LFS set globally proves it does not count.
+    const globalConfig = path.join(T, 'gitconfig');
+    fs.writeFileSync(globalConfig, globalFilter ? '[filter "lfs"]\n\tprocess = git-lfs filter-process\n\trequired = true\n' : '');
+    for (const tool of ['git', 'grep']) {
+      const real = execFileSync('sh', ['-c', `command -v ${tool}`]).toString().trim();
+      fs.symlinkSync(fs.realpathSync(real), path.join(bin, tool));
+    }
+    const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    stub('curl', `echo "curl $*" >> "${mark}"`);
+    stub('tar', `cat >/dev/null; echo "tar $*" >> "${mark}"`);
+    stub('install', `echo "install $*" >> "${mark}"`);
+    if (hasLfs) stub('git-lfs', 'exit 0');
+    execFileSync('/bin/sh', ['-c', lfsBlock()], { cwd: repo, env: { ...GIT_ENV, PATH: bin, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'pipe' });
+    return fs.existsSync(mark) ? fs.readFileSync(mark, 'utf8') : '';
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+};
+
+test('#327 gate-sync on GitLab: fetches a pinned git-lfs before checkout, only for an LFS Product', () => {
+  const text = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8');
+  const version = text.match(/^\s+GIT_LFS_VERSION=(\d+\.\d+\.\d+)$/m);
+  assert.ok(version, 'git-lfs is pinned to an exact release');
+  assert.ok(text.indexOf('GIT_LFS_VERSION=') < text.search(/^\s+- git checkout /m), 'installed before the first checkout');
+
+  assert.equal(runLfsBlock(), '', 'a Product without LFS downloads nothing');
+  assert.equal(runLfsBlock({ globalFilter: true }), '', 'a global LFS setting is not the Product using LFS');
+  for (const lfs of [{ hook: true }, { filter: true }, { attributes: true }]) {
+    const did = runLfsBlock(lfs);
+    assert.match(did, new RegExp(`curl -fsSL https://github\\.com/git-lfs/git-lfs/releases/download/v${version[1]}/git-lfs-linux-amd64-v${version[1]}\\.tar\\.gz`), JSON.stringify(lfs));
+    assert.match(did, /^install -m 0755 .*\/git-lfs \/usr\/local\/bin\/git-lfs$/m, JSON.stringify(lfs));
+  }
+  assert.equal(runLfsBlock({ hook: true, filter: true, hasLfs: true }), '', 'an image that has git-lfs downloads nothing');
+});
+
 // The major a fragment ships with: the one `YAD_MAJOR=<n>` literal in its pin block. Read from the
 // block, never written into these tests, so they hold at every major rather than being edited at each.
 const pinMajor = (block) => {
