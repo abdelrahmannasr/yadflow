@@ -76,5 +76,5 @@ it to one deploy at a time.
 
 A site that fails to build fails the run, and the run names every site that failed. A red run uploads
 nothing, so the last good deployment stays live. (Before this, a failed site was silently left out and
-the run went green — that is how a site could lose a page.) `yad doctor` warns when the wired file is an
-older version (`docs-workflow`); run `yad docs sync --wire` again and commit it.
+the run went green — that is how a site could lose a page.) `yad doctor` warns (`docs-workflow`) when the wired file still deploys after a failed site build (as yadflow 4.5.0 and older wrote it); run
+`yad docs sync --wire` again and commit it.

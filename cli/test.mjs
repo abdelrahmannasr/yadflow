@@ -12098,6 +12098,10 @@ test('doctor: a wired Pages workflow that still deploys a failed site is said; p
     // The script as yadflow 4.5.0 wrote it: each build in an && chain, no failure handling.
     const old = (platform) => pagesWorkflow(platform).replace(/ \|\| failed="[^"]*"/g, '').replace(/^.*(failed=|did not build).*\n/gm, '');
     assert.deepEqual(judge(), [], 'nothing wired, nothing said');
+    // No docs.json: --wire writes the GitHub file, so that is the one judged. Windows line endings do not matter.
+    write(pagesWorkflowPath('github'), pagesWorkflow('github').replace(/\n/g, '\r\n'));
+    assert.deepEqual(judge(), [['ok', '.github/workflows/yad-docs.yml fails the deploy when a site fails to build']], 'no docs.json, CRLF');
+    fs.rmSync(path.join(T, pagesWorkflowPath('github')));
     for (const [platform, target] of [['github', 'github-pages'], ['gitlab', 'gitlab-pages']]) {
       const rel = pagesWorkflowPath(platform);
       const other = pagesWorkflowPath(platform === 'github' ? 'gitlab' : 'github');

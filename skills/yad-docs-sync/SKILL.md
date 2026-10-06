@@ -67,7 +67,7 @@ A missing `docs-build.json` (a site never generated) counts as **stale → needs
   rebuild failed: `yad docs sync --refresh` exits 1 when a stale site's npm install or build fails, and
   its `--json` `sites` rows say which (`built: false` with an `error`). **Never silent** — refresh
   is a deliberate human/CI act, surfaced exactly like `yad repo refresh`.
-- **`wire`** — commit the CI workflow (Step 4) that automates the check + rebuild.
+- **`wire`** — commit the CI workflow (Step 4) that builds and deploys every site on push.
 
 ### Step 4 — `wire`: the CI auto-rebuild workflow
 Commit the platform-matched workflow (GitHub `.github/workflows/yad-docs.yml`, or a GitLab `pages` job at
@@ -76,8 +76,8 @@ Commit the platform-matched workflow (GitHub `.github/workflows/yad-docs.yml`, o
 - on a push to the default branch, **build every committed site and deploy them**; it commits nothing,
   so it cannot retrigger itself, and a **concurrency group** keeps one docs deploy at a time;
 - a site that fails to build **fails the run** (every failed site is named) and nothing is deployed, so
-  the last good site stays live. `yad doctor` warns (`docs-workflow`) on a file wired by an older
-  yadflow — re-run `yad docs sync --wire`. See `references/staleness.md`.
+  the last good site stays live. `yad doctor` warns (`docs-workflow`) when the wired file still deploys after a failed site build (as yadflow 4.5.0 and older wrote it) — re-run
+  `yad docs sync --wire`. See `references/staleness.md`.
 
 ### Step 5 — Report
 Report per target: **fresh** or **stale (why)**; for `refresh`, what was regenerated + the deploy URL or
