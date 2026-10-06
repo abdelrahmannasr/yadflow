@@ -27,9 +27,11 @@ jobs:
       - name: Build the overview + per-epic sites into ./public
         run: |
           mkdir -p public
-          if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html || exit 1; fi
-          if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/ || exit 1; fi
-          for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/" || exit 1; done
+          failed=
+          if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html || failed="$failed docs/sdlc-site"; fi
+          if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/ || failed="$failed docs/tutorial-site"; fi
+          for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/" || failed="$failed $d"; done
+          if [ -n "$failed" ]; then echo "yad-docs: these sites did not build, so nothing is deployed:$failed" >&2; exit 1; fi
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

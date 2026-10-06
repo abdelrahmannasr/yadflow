@@ -144,15 +144,21 @@ export function docsStale(manifest, { artifactHash, repoHeads = {}, shellVersion
 // mounts under `app/`, and every per-epic site nests under `epics/<id>/` — matching siteBasePath
 // (overview at `<base>/app/`, epics at `<base>/epics/EP-<slug>/`). A concurrency group prevents the
 // deploy from retriggering. The shared shell script keeps the two platforms byte-for-byte aligned.
-// Every build chain ends in `|| exit 1`: CI runs the script under `set -e`, which does not stop on a
-// failure inside an `&&` chain, so a site that failed to build was silently left out and the deploy
-// still went green — yadflow's own site lost its root page that way for days. A red run keeps the
-// last good deployment live instead.
+// A site that fails to build fails the run: CI runs the script under `set -e`, which does not stop on a
+// failure inside an `&&` chain, so a failed site used to be silently left out while the deploy still went
+// green — yadflow's own site lost its root page that way for days. Each chain ends in `|| failed=…`, so
+// every site is still tried (as `yad docs build` does) and the last line fails the run, naming them all.
+// A red run uploads nothing, so the last good deployment stays live.
+// A YAML single-quoted scalar: a quote inside is written twice, and nothing else is escaped (a backslash
+// is literal). The shell's '\'' is not YAML — it would make GitLab reject the whole pipeline.
+export const yamlQuoted = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const BUILD_PUBLIC = [
   'mkdir -p public',
-  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html || exit 1; fi',
-  'if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/ || exit 1; fi',
-  'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/" || exit 1; done',
+  'failed=',
+  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html || failed="$failed docs/sdlc-site"; fi',
+  'if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/ || failed="$failed docs/tutorial-site"; fi',
+  'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/" || failed="$failed $d"; done',
+  'if [ -n "$failed" ]; then echo "yad-docs: these sites did not build, so nothing is deployed:$failed" >&2; exit 1; fi',
 ];
 export function pagesWorkflow(platform) {
   if (platform === 'gitlab') {
@@ -165,7 +171,7 @@ pages:
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
-${BUILD_PUBLIC.map((l) => `    - '${l.replace(/'/g, "'\\''")}'`).join('\n')}
+${BUILD_PUBLIC.map((l) => `    - ${yamlQuoted(l)}`).join('\n')}
   artifacts:
     paths: [public]
   resource_group: pages
