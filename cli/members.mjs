@@ -77,7 +77,7 @@ export const memberFileName = (platform, login) => `${platform}-${String(login).
 export const memberRel = (platform, login) => `${MEMBERS_DIR}/${memberFileName(platform, login)}`;
 export const memberBranch = (login) => `${MEMBER_BRANCH_PREFIX}/${String(login).toLowerCase()}`;
 const accountKey = (a) => `${a.platform}\0${String(a.host).toLowerCase()}\0${String(a.login).toLowerCase()}`;
-const accountLabel = (a) => `${a.platform === 'github' ? 'GitHub' : 'GitLab'} ${forTerminal(a.login)}${a.host !== DEFAULT_HOST[a.platform] ? ` on ${forTerminal(a.host)}` : ''}`;
+export const accountLabel = (a) => `${a.platform === 'github' ? 'GitHub' : 'GitLab'} ${forTerminal(a.login)}${a.host !== DEFAULT_HOST[a.platform] ? ` on ${forTerminal(a.host)}` : ''}`;
 
 // The Product's own platform, host and repo path, from its settings (`platform`, `git_url`), else from the
 // clone's `origin`. `platform` is null on a Product with no platform: then nothing can be proven.

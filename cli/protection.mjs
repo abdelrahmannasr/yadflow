@@ -28,7 +28,7 @@ import { SETTINGS_EDIT_HINT } from './manifest.mjs';
 import { cliFor, hostFromGitUrl, detectPlatform, plainHost } from './platform.mjs';
 
 export const PLATFORM_NAME = { github: 'GitHub', gitlab: 'GitLab' };
-const TIMEOUT = 10_000;
+export const TIMEOUT = 10_000;
 
 // A word with an `@` after its first character may be an e-mail address, and no address is ever printed
 // (E67). A branch or a repo path is printed as written otherwise.
@@ -67,7 +67,7 @@ export function httpStatus(r) {
 // A failed call keeps its body too (E109): both CLIs print the platform's answer on stdout, so a caller
 // can read WHY it failed. A body that is not JSON is null, never an error. Only the GitLab branch read
 // looks at it today — see `gitlabBranchCause`.
-function api(runner, cli, host, pathname) {
+export function api(runner, cli, host, pathname) {
   const r = runner(cli, ['api', '--hostname', host, pathname], { timeout: TIMEOUT });
   if (r.ok) {
     try { return { ok: true, body: JSON.parse(r.stdout) }; } catch { return { ok: false, status: null, unreadable: true }; }
@@ -96,7 +96,7 @@ const gitlabBranchCause = (res) => (res.status === 404 && typeof res.body?.messa
 export const PAGE = 100;
 
 // Why a call gave no answer, as a clause that finishes "not known — ".
-function whyFailed(res, { platform, host, what, plural = false }) {
+export function whyFailed(res, { platform, host, what, plural = false }) {
   const name = PLATFORM_NAME[platform];
   if (res.unreadable) return `${name} answered ${what} with something yad could not read`;
   if (res.status == null) return `yad could not reach ${host} to read ${what} (offline, or the host did not answer)`;
@@ -134,7 +134,7 @@ const count = (v) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v
 // `gh auth status` is asked once per CLI and host per doctor run (`authCache`, which the caller makes
 // fresh for each run): on a network that drops packets each ask can take the full timeout, and a Product
 // with many repos on one host would pay it once per repo. Never kept longer — a login can change.
-function loggedIn(runner, cli, host, authCache) {
+export function loggedIn(runner, cli, host, authCache) {
   const key = `${cli}\0${host}`;
   if (!authCache.has(key)) authCache.set(key, runner(cli, ['auth', 'status', '--hostname', host], { timeout: TIMEOUT }).ok);
   return authCache.get(key);

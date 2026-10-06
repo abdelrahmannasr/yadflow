@@ -314,7 +314,9 @@ export function gitHas(repoRoot, sha) {
   return r.status === 0;
 }
 
-function gitAuthors(dir, since) {
+// Exported for `yad standup` (E132), which reads the same authors over its own window: `at` is the commit's
+// exact time in epoch seconds, beside the UTC day in `ts` the count reads.
+export function gitAuthors(dir, since) {
   const git = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', maxBuffer: 1 << 30 });
   // Every reason below is printed: the folder is built from the shared registry (E81 review 15).
   const repoRoot = forTerminal(dir);
@@ -356,7 +358,7 @@ function gitAuthors(dir, since) {
     const ts = Number.isFinite(secs) && ct !== '' ? dayString(Math.floor(secs / 86400)) : null;
     if (ts === null) return { unknown: `${repoRoot}: a commit carries a date git cannot express as a calendar day` };
     // The email itself is never kept — only its hash, which a member file (E131) can match.
-    out.push({ ts, name: String(name || '').trim(), login: loginFromEmail(email), emailHash: hashEmail(email), how: 'committed' });
+    out.push({ ts, at: Math.floor(secs), name: String(name || '').trim(), login: loginFromEmail(email), emailHash: hashEmail(email), how: 'committed' });
   }
   return { events: out };
 }
