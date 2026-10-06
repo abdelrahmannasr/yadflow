@@ -1,3 +1,16 @@
+## [4.5.1](https://github.com/abdelrahmannasr/yadflow/compare/v4.5.0...v4.5.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **docs:** a failed site build fails the Pages deploy ([32dd88f](https://github.com/abdelrahmannasr/yadflow/commit/32dd88f69dc1140977e1a2c126f94078aaa5f2ea))
+* **docs:** doctor judges only the failure handling, on the wired platform (review 2) ([987a753](https://github.com/abdelrahmannasr/yadflow/commit/987a7532951f61aec530550e2a9cab9aa4e0795f))
+* **docs:** escape the apostrophe that broke the overview site build ([fe7dcc8](https://github.com/abdelrahmannasr/yadflow/commit/fe7dcc81b2772dc577659e4afd2b85bec2bff81a))
+* **docs:** name every failed site, quote GitLab lines as YAML, doctor warns on an old wired workflow (review 1) ([d525e87](https://github.com/abdelrahmannasr/yadflow/commit/d525e87961413a10ba16122dfc3811ac3d5361a7))
+* **gitlab:** check the git-lfs download against its SHA-256 ([#327](https://github.com/abdelrahmannasr/yadflow/issues/327) review 1) ([01763a2](https://github.com/abdelrahmannasr/yadflow/commit/01763a25fdc47eea298592f3ab453341c2c14196))
+* **gitlab:** install git-lfs in yad-gate-sync when the Product uses LFS ([#327](https://github.com/abdelrahmannasr/yadflow/issues/327)) ([fcb55fb](https://github.com/abdelrahmannasr/yadflow/commit/fcb55fb6a3c2d96be067cb7c027644424784181d))
+* **windows:** leave the npm launcher name unquoted so npx finds itself ([#326](https://github.com/abdelrahmannasr/yadflow/issues/326)) ([b042848](https://github.com/abdelrahmannasr/yadflow/commit/b0428484f371a03cc5e722158481faf51004b519))
+
 # [4.5.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.4.0...v4.5.0) (2026-10-06)
 
 
