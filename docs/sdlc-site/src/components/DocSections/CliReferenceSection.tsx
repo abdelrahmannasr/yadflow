@@ -25,6 +25,7 @@ const GROUPS = [
       'yad repo clone [name] — clone every registered repo missing on this machine, at its recorded path (the clone step of yad join); never touches a repo already there',
       'yad report [-m <text>] — file a bug in the yadflow repo with scrubbed diagnostics (no paths, hosts, repo names, logins or flag values); YAD_NO_REPORT=1 turns the offer off',
       'yad usage [--out <path>] [--since/--until <YYYY-MM-DD> | --all] [--member <name>] [--format html|json|md] [--repos] — per-member adoption report from git + the ledgers; read-only',
+      'yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json] — each team member\'s done / working on / waiting since the previous working day; derived live, facts only; a repo the platform cannot be asked about says "platform not read"',
     ],
   },
   {

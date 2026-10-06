@@ -81,6 +81,19 @@ ${c.bold('Team members')} ${c.dim('(identity only — no roles, no reviewers, no
   yad member remove [<login>] [--reason <why>]
                                        Delete a member file — your own, or anyone's with --reason
 
+${c.bold('Daily standup')} ${c.dim('(derived live, read-only, facts only — no score, no ranking)')}
+  yad standup                          Each member on the team list: done since the last standup
+                                       (commits, approvals, comments, closed steps, ships, merged
+                                       PRs/MRs), working on now (owned steps, open claims, drafts, open
+                                       PRs/MRs) and waiting (gates on their steps, their next move, their
+                                       PRs/MRs with failing checks or no approving review). Then the
+                                       people seen who are not on the list, and who has left.
+                                       Window: from midnight of the previous working day (Monday reads
+                                       back to Friday). Asks the platform about the Product and every
+                                       registered repo; one it cannot read says "platform not read"
+                                       flags: --since <YYYY-MM-DD>|<N>h|<N>d, --tz <zone> (default UTC),
+                                       --member <login> | --me, --format md|html, --out <file>, --json
+
 ${c.bold('Team usage (EM adoption & behavior report)')}
   yad usage                            Build a per-member report (HTML) from git + the SDLC ledgers
                                        (derived, read-only — writes no tracked state)
@@ -362,7 +375,9 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source']);
+const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
+
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source', '--tz']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -373,6 +388,7 @@ function parseArgs(argv) {
     else if (a === '--force') o.force = true;
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--manual') o.manual = true;
+    else if (a === '--me') o.me = true;
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--no-fetch') o.noFetch = true;
     else if (a === '--push') o.push = true;
@@ -469,7 +485,7 @@ const PRODUCT_CMDS = new Set([
   'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
-  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member',
+  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup',
 ]);
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review']);
 // The Product commands that WRITE its files without first checking it is one. Run from a code repo they
@@ -912,6 +928,18 @@ async function main() {
       if (action === 'add') result = await commands.runMemberAdd(o.dir, { noPush: !!o.noPush, today });
       else if (action === 'list') result = await commands.runMemberList(o.dir, { today });
       else result = await commands.runMemberRemove(o.dir, { login: who ?? null, reason: o.reason ?? null });
+      break;
+    }
+    case 'standup': {
+      // E132. Read-only; every flag that is not standup's own is refused, as history refuses them.
+      const foreign = commands.standupForeignFlags(process.argv.slice(2));
+      if (foreign.length) { refuse(`yad standup does not take ${foreign.join(', ')}`, STANDUP_USAGE); break; }
+      if (o._[1]) { refuse(`yad standup takes no words (got: ${o._[1]})`, STANDUP_USAGE); break; }
+      if (noProduct()) break;
+      result = await commands.runStandup(o.dir, {
+        since: o.since ?? null, tz: o.tz ?? 'UTC', member: o.member ?? null, me: !!o.me,
+        format: o.format ?? null, out: o.out ?? null, json: !!o.json,
+      });
       break;
     }
     case 'claims': {

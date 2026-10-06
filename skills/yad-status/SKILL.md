@@ -15,6 +15,9 @@ reads `.sdlc/` and `reviews/` and reports.
 
 ## On Activation
 
+This skill reports on epics. For people — what each team member did since the previous working day,
+what they are working on and what is waiting — point to `yad standup` (E132) instead of rebuilding it.
+
 ### Step 1 — Resolve the epic
 If no `EP-<slug>` was given, list the epics under `{project-root}/epics/` and ask which one (or
 report all if the user asked for an overview).

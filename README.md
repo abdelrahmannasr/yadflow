@@ -256,6 +256,7 @@ The record is worth trusting because people approve what goes into it.
 - the Shape and Build steps with review gates
 - linked changes and `yad thread`
 - `yad history`, `yad next` and `yad usage`
+- `yad standup`, a daily status for each team member — what they did since the last working day, what they are on now, and what is waiting — rebuilt live from git, the ledgers and the platform, facts only
 - `yad detect`, which lists the skills, agents, MCP servers and plugins installed for each AI agent
 - `yad toolbox list`, which shows the external tools yadflow can use, which ones you have, and what happens without each; `yad toolbox add` / `remove` record the tools your team uses, and `yad toolbox check` lists the ones not ready on your machine (`yad setup`, `check`, `update` and `join` print the same list, and never install anything); each skill that uses a tool reads the same answer and says what it does without it
 - `yad skill recommend`, which lists hand-picked skills from the recommended skill collections for each step, why each fits, and the command to bind one; it binds nothing, and every pick was checked against its source

@@ -93,7 +93,7 @@ const inWindow = (date, since, until) => !!date && (!since || date >= since) && 
 
 // Ledger-sourced events for one epic: approvals, comments, and ship engineer-reviews, attributed to the
 // name the ledger records — as recorded, with nothing to translate it through.
-function ledgerEvents(root, epic, aliases = new Map()) {
+export function ledgerEvents(root, epic, aliases = new Map()) {
   const f = epicFiles(epicRoot(root, epic));
   const events = [];
   const emit = (rec, rawName, action, date, extra = {}) => {
@@ -271,7 +271,7 @@ export function shipHygiene(root, { since, until } = {}) {
 
 // ---- rendering ---------------------------------------------------------------------------------
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const rangeLabel = (w) => (!w.since && !w.until ? 'all time' : `${w.since || '…'} → ${w.until || '…'}`);
 
 // A single self-contained HTML file — inline CSS + inline SVG bars, no build step, no external assets —
@@ -332,11 +332,13 @@ ${hygiene}
 </div></body></html>\n`;
 }
 
+// Markdown cell and line text: a `|` or a newline in a name or repo can't corrupt a table or a list.
+export const mdCell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+export const mdText = (s) => String(s ?? '').replace(/\r?\n/g, ' ');
+
 // A compact Markdown variant for quick reads / pasting into a PR. Dynamic values are sanitized so a
 // name/repo containing `|` or a newline can't corrupt the table or list structure.
 export function renderMarkdown(model, today = '') {
-  const mdCell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
-  const mdText = (s) => String(s ?? '').replace(/\r?\n/g, ' ');
   const L = [`# Team usage & behavior report`, ``, `- Range: **${rangeLabel(model.window)}**${today ? ` · generated ${today}` : ''}`, `- Members: ${model.members.length}`, `- Totals: ${ACTIONS.map((a) => `${a} ${model.totals[a]}`).join(' · ')}`, ``, `| member | ${ACTIONS.join(' | ')} | total | flags |`, `|---|${ACTIONS.map(() => '--:').join('|')}|--:|---|`];
   for (const m of model.members) {
     L.push(`| ${mdCell(`${m.name}${m.login && m.login !== m.name ? ` (@${m.login})` : ''}`)} | ${ACTIONS.map((a) => m.counts[a]).join(' | ')} | ${m.total} | ${mdCell(m.flags.join(', ') || '—')} |`);
@@ -369,7 +371,7 @@ export function buildModel(root, { since, until, repos = false, member } = {}) {
 
 // Ensure a report's parent directory exists, then write it (mirrors copyFile/writeJSON in lib.mjs,
 // which always mkdir the dirname first) so `--out sub/dir/report.html` never throws a raw ENOENT.
-function writeReport(dest, content) {
+export function writeReport(dest, content) {
   fs.mkdirSync(path.dirname(path.resolve(dest)), { recursive: true });
   fs.writeFileSync(dest, content);
 }

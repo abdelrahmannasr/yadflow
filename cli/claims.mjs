@@ -135,6 +135,21 @@ export function claimWarnings(root, changed, { env = process.env, now = Date.now
 }
 export const warningText = (hits, now) => `yad claims: ${hits.length === 1 ? 'this file is' : 'these files are'} also being edited by someone else — advice, not a lock; talk to them before you go further:\n${hits.map((c) => `  • ${claimLine(c, now)}`).join('\n')}`;
 
+// Fetch everyone's capture branches and the default branch: 'done' | 'failed' | 'local' (no origin). One
+// fetch, 30 seconds at most. `yad claims` and `yad standup` (E132) both read what it brings.
+export function fetchCaptures(root, env = process.env) {
+  const git = gitIn(root, env);
+  if (!git(['remote', 'get-url', 'origin']).ok) return 'local';
+  const opts = { cwd: root, encoding: 'utf8', timeout: 30_000, env: { ...env, ...pushEnv(env) } };
+  const r = spawnSync('git', fetchAllArgs({ prune: true }), opts);
+  const fetched = r.status === 0 ? 'done' : 'failed';
+  // The default branch, for the "landed" rule — on its own: a name guessed wrong (no Product default, no
+  // origin/HEAD) must not stop the capture branches from arriving. Its failure changes nothing.
+  const def = defaultRef(root, git).name;
+  if (fetched === 'done') spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${def}:refs/remotes/origin/${def}`], opts);
+  return fetched;
+}
+
 // `yad claims [<epic>] [--no-fetch]`. Returns a plain object (E1 makes it the `--json` answer).
 export async function runClaims(root, { epic = null, noFetch = false, env = process.env, now = Date.now() } = {}) {
   const refuse = (msg, hint) => { fail(msg); if (hint) hand(hint); process.exitCode = 1; };
@@ -142,19 +157,7 @@ export async function runClaims(root, { epic = null, noFetch = false, env = proc
   if (!git(['rev-parse', '--show-toplevel']).ok) return refuse('not a git repository — there are no capture branches to read');
   if (!fs.existsSync(productConfigPath(root))) return refuse('not a Product (no .sdlc/hub.json or product.json here)', 'run it from the Product root, or pass --dir');
   if (epic && !/^EP-[a-z0-9-]+$/.test(epic)) return refuse(`not an epic id: ${epic}`);
-  let fetched = 'skipped';
-  if (!noFetch) {
-    if (!git(['remote', 'get-url', 'origin']).ok) fetched = 'local';
-    else {
-      const opts = { cwd: root, encoding: 'utf8', timeout: 30_000, env: { ...env, ...pushEnv(env) } };
-      const r = spawnSync('git', fetchAllArgs({ prune: true }), opts);
-      fetched = r.status === 0 ? 'done' : 'failed';
-      // The default branch, for the "landed" rule — on its own: a name guessed wrong (no Product default, no
-      // origin/HEAD) must not stop the capture branches from arriving. Its failure changes nothing.
-      const def = defaultRef(root, git).name;
-      if (fetched === 'done') spawnSync('git', ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20', 'fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${def}:refs/remotes/origin/${def}`], opts);
-    }
-  }
+  const fetched = noFetch ? 'skipped' : fetchCaptures(root, env);
   if (fetched === 'local') info('no remote named origin — only your own captures can be read here');
   if (fetched === 'failed') warn('could not fetch the capture branches — showing what was last fetched, which may be old');
   const { claims, defaultBranch } = readClaims(root, { env, now, epics: epic ? new Set([epic]) : null });
