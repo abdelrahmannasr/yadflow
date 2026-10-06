@@ -513,7 +513,9 @@ The other way round, a second person who has neither committed nor approved insi
 
 **Merge-time sync (verified ledger).** A **verified** ledger is one CI owns: people never commit the
 gate files by hand. On such a Product, `yad check --fix` installs `.github/workflows/yad-gate-sync.yml`
-(or, on GitLab, the `.gitlab/ci/yad-gate-sync.yml` fragment plus a pipeline schedule you create once).
+(or, on GitLab, the `.gitlab/ci/yad-gate-sync.yml` fragment plus a pipeline schedule you create once;
+on a Product that uses Git LFS, the GitLab job downloads a pinned `git-lfs` before it checks out, because
+the runner's LFS hooks fail without it — #327).
 It runs `yad gate ci --merged` in the Product's own CI at **two moments only**:
 
 | When | What runs |
