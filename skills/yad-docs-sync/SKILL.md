@@ -91,14 +91,15 @@ Report per target: **fresh** or **stale (why)**; for `refresh`, what was regener
   `contract-lock.json`. Staleness blocks nothing in the SDLC; it only flags out-of-date docs.
 - **HEAD-sha staleness, reused.** Repo drift uses the exact `repos.json` `syncedHead`-vs-current-HEAD
   rule. The overview uses config + manifest + diagram + skill-count.
-- **Loop-prevention is mandatory in CI.** The wired workflow must carry `[skip ci]` on its own commits
-  and a concurrency group so a deploy never retriggers a deploy.
+- **CI builds and deploys; it never commits.** The wired workflow builds every committed site on push
+  and deploys them, under one concurrency group; it makes no commit, so it cannot retrigger itself. A
+  site that fails to build fails the run, and nothing is deployed.
 - **Reconcile, don't re-author.** This skill detects drift and delegates regeneration to `yad-docs` /
   `yad-docs-overview`; it does not generate `src/data/*.ts` itself.
 
 ## Reference
 - The manifest schema (per-epic + overview), the exact hash inputs, the head-sha staleness rule, and the
-  CI loop-prevention note: `references/staleness.md`.
+  CI note: `references/staleness.md`.
 - The generators this delegates to: `../yad-docs/SKILL.md`, `../yad-docs-overview/SKILL.md`.
 - The docs target it deploys to: `../yad-connect-docs/SKILL.md`.
 - The drift / refresh discipline this mirrors: `../yad-connect-repos/SKILL.md` (HEAD-sha staleness).

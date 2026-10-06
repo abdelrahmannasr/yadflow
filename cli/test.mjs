@@ -12089,21 +12089,29 @@ test('pagesWorkflow: a site that fails to build fails the deploy, on both platfo
   assert.match(epic.stderr, /: epics\/EP-a\/docs-site$/m, 'and the failed site is named');
 });
 
-test('doctor: a Pages workflow written by an older yadflow is out of date; a current or hand-made one is not judged wrong', async () => {
+test('doctor: a wired Pages workflow that still deploys a failed site is said; pin bumps, the other platform and a team file are not', async () => {
   const { docsWorkflowChecks } = await import('./doctor.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-docs-wf-'));
   try {
     const judge = () => { const checks = []; docsWorkflowChecks(T, checks); return checks.map((c) => [c.status, c.message]); };
+    const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
+    // The script as yadflow 4.5.0 wrote it: each build in an && chain, no failure handling.
+    const old = (platform) => pagesWorkflow(platform).replace(/ \|\| failed="[^"]*"/g, '').replace(/^.*(failed=|did not build).*\n/gm, '');
     assert.deepEqual(judge(), [], 'nothing wired, nothing said');
-    for (const platform of ['github', 'gitlab']) {
+    for (const [platform, target] of [['github', 'github-pages'], ['gitlab', 'gitlab-pages']]) {
       const rel = pagesWorkflowPath(platform);
-      fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
-      fs.writeFileSync(path.join(T, rel), pagesWorkflow(platform).replace(/\n/g, '\r\n'));
-      assert.deepEqual(judge().at(-1), ['ok', `${rel} is current`], `${platform}: current, even with CRLF`);
-      fs.writeFileSync(path.join(T, rel), pagesWorkflow(platform).replace(/ \|\| failed="[^"]*"/g, ''));
-      assert.deepEqual(judge().at(-1), ['warn', `${rel} was written by an older yadflow`], `${platform}: the old script`);
-      fs.writeFileSync(path.join(T, rel), 'name: our own pages\n');
-      assert.equal(judge().filter((c) => c[1].startsWith(rel)).length, 0, `${platform}: a file without our header is the team's`);
+      const other = pagesWorkflowPath(platform === 'github' ? 'gitlab' : 'github');
+      write('.sdlc/docs.json', JSON.stringify({ target }));
+      write(other, old(platform === 'github' ? 'gitlab' : 'github'));
+      assert.deepEqual(judge(), [], `${platform}: the other platform's file is not what --wire writes, so it is not judged`);
+      write(rel, pagesWorkflow(platform).replace(/@[0-9a-f]{40} # v\d+\.\d+\.\d+/g, '@0123456789abcdef0123456789abcdef01234567 # v9.9.9'));
+      assert.deepEqual(judge(), [['ok', `${rel} fails the deploy when a site fails to build`]], `${platform}: a Dependabot pin bump is not news`);
+      write(rel, old(platform));
+      assert.equal(old(platform).includes('failed'), false, 'the stand-in really is the old script');
+      assert.deepEqual(judge(), [['warn', `${rel} still deploys when a site fails to build — the site then goes out with a page missing`]], `${platform}: the old script`);
+      write(rel, 'name: our own pages\n');
+      assert.deepEqual(judge(), [], `${platform}: a file without our header is the team's`);
+      fs.rmSync(path.join(T, other));
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

@@ -22,7 +22,7 @@ import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses } from './protection.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
-import { pagesWorkflow, pagesWorkflowPath } from './docs.mjs';
+import { pagesWorkflowPath, pagesWorkflowFailsOnBuild, wiredPagesPlatform } from './docs.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { readOwners } from './owners.mjs';
@@ -2699,19 +2699,19 @@ export function captureChecks(root, checks, cfg) {
   }
 }
 
-// The Pages workflow `yad docs sync --wire` wrote. Nothing else rewrites it, so a Product wired by an
-// older yadflow keeps that version's script — up to 4.5.0 one that deployed a site with a page missing
-// when a site failed to build. Only a file still carrying our header is judged; a hand-edited one is
-// the team's. Line endings do not count (a Windows checkout).
+// The Pages workflow `yad docs sync --wire` wrote. Nothing else rewrites it, so a Product wired by yadflow
+// 4.5.0 or older keeps a script that deploys a site with a page missing when a site fails to build. Only
+// that one behaviour is judged — not the whole file, which Dependabot bumps and a team may edit — and only
+// in the file `--wire` writes for this Product's platform (it never touches the other one). A file
+// without our header is the team's own.
 export function docsWorkflowChecks(root, checks) {
-  for (const platform of ['github', 'gitlab']) {
-    const rel = pagesWorkflowPath(platform);
-    let text;
-    try { text = fs.readFileSync(path.join(root, rel), 'utf8'); } catch { continue; }
-    if (!text.startsWith('# yad-managed — built by `yad docs sync --wire`')) continue;
-    if (text.replace(/\r\n/g, '\n') === pagesWorkflow(platform)) check(checks, 'docs-workflow', 'project', 'ok', `${rel} is current`);
-    else check(checks, 'docs-workflow', 'project', 'warn', `${rel} was written by an older yadflow`, 'run `yad docs sync --wire` and commit the file — older versions deploy a site with a page missing when a site fails to build');
-  }
+  const rel = pagesWorkflowPath(wiredPagesPlatform(readJSON(path.join(root, PROJECT_FILES.docsConfig), null)));
+  let text;
+  try { text = fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return; }
+  if (!text.startsWith('# yad-managed — built by `yad docs sync --wire`')) return;
+  if (pagesWorkflowFailsOnBuild(text)) check(checks, 'docs-workflow', 'project', 'ok', `${rel} fails the deploy when a site fails to build`);
+  else check(checks, 'docs-workflow', 'project', 'warn', `${rel} still deploys when a site fails to build — the site then goes out with a page missing`,
+    'run `yad docs sync --wire` and commit the file; it rewrites the whole file, so re-apply any change your team made to it');
 }
 
 // The team's own GitHub workflow files that a push to a `yad/wip/*` branch would start. A line reader, not
