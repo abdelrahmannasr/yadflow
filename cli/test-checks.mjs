@@ -4270,32 +4270,35 @@ const lfsBlock = () => {
   for (let i = at; i < lines.length && (lines[i].startsWith(indent) || !lines[i].trim()); i++) body.push(lines[i].slice(indent.length));
   return body.join('\n');
 };
-const runLfsBlock = ({ hook, filter, attributes, globalFilter, hasLfs } = {}) => {
+const runLfsBlock = ({ hook, filter, attributes, globalFilter, hasLfs, badSum } = {}) => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-lfs-'));
   try {
     const repo = path.join(T, 'repo');
     const bin = path.join(T, 'bin');
     const mark = path.join(T, 'mark');
     fs.mkdirSync(bin);
-    git(T, 'init', '-q', repo);
+    // A global git config of its own, so a developer's `git lfs install` (or an init template holding LFS
+    // hooks) cannot leak in — or, when asked, so one that has LFS set globally proves it does not count.
+    const globalConfig = path.join(T, 'gitconfig');
+    fs.writeFileSync(globalConfig, globalFilter ? '[filter "lfs"]\n\tprocess = git-lfs filter-process\n\trequired = true\n' : '');
+    const env = { ...GIT_ENV, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: '1' };
+    execFileSync('git', ['init', '-q', repo], { stdio: 'pipe', env });
     if (hook) fs.writeFileSync(path.join(repo, '.git/hooks/post-checkout'), '#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo "git-lfs was not found on your path" >&2; exit 2; }\ngit lfs post-checkout "$@"\n');
     if (filter) git(repo, 'config', 'filter.lfs.process', 'git-lfs filter-process');
     if (attributes) fs.writeFileSync(path.join(repo, '.gitattributes'), '*.png filter=lfs diff=lfs merge=lfs -text\n');
-    // A global git config of its own, so a developer's `git lfs install` cannot leak in — or, when asked,
-    // so one that has LFS set globally proves it does not count.
-    const globalConfig = path.join(T, 'gitconfig');
-    fs.writeFileSync(globalConfig, globalFilter ? '[filter "lfs"]\n\tprocess = git-lfs filter-process\n\trequired = true\n' : '');
     for (const tool of ['git', 'grep']) {
       const real = execFileSync('sh', ['-c', `command -v ${tool}`]).toString().trim();
       fs.symlinkSync(fs.realpathSync(real), path.join(bin, tool));
     }
     const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
     stub('curl', `echo "curl $*" >> "${mark}"`);
-    stub('tar', `cat >/dev/null; echo "tar $*" >> "${mark}"`);
+    stub('sha256sum', `IFS= read -r line; echo "sha256sum $* $line" >> "${mark}"${badSum ? '; exit 1' : ''}`);
+    stub('tar', `echo "tar $*" >> "${mark}"`);
     stub('install', `echo "install $*" >> "${mark}"`);
     if (hasLfs) stub('git-lfs', 'exit 0');
-    execFileSync('/bin/sh', ['-c', lfsBlock()], { cwd: repo, env: { ...GIT_ENV, PATH: bin, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'pipe' });
-    return fs.existsSync(mark) ? fs.readFileSync(mark, 'utf8') : '';
+    // `set -e`, as GitLab runs every script: a failed checksum must stop the job.
+    const r = spawnSync('/bin/sh', ['-c', `set -e\n${lfsBlock()}`], { cwd: repo, env: { ...env, PATH: bin }, stdio: 'pipe' });
+    return { status: r.status, did: fs.existsSync(mark) ? fs.readFileSync(mark, 'utf8') : '' };
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 };
 
@@ -4305,14 +4308,23 @@ test('#327 gate-sync on GitLab: fetches a pinned git-lfs before checkout, only f
   assert.ok(version, 'git-lfs is pinned to an exact release');
   assert.ok(text.indexOf('GIT_LFS_VERSION=') < text.search(/^\s+- git checkout /m), 'installed before the first checkout');
 
-  assert.equal(runLfsBlock(), '', 'a Product without LFS downloads nothing');
-  assert.equal(runLfsBlock({ globalFilter: true }), '', 'a global LFS setting is not the Product using LFS');
+  const sum = text.match(/^\s+GIT_LFS_SHA256=([0-9a-f]{64})$/m);
+  assert.ok(sum, 'the download is checked against a pinned SHA-256');
+  const none = { status: 0, did: '' };
+  assert.deepEqual(runLfsBlock(), none, 'a Product without LFS downloads nothing');
+  assert.deepEqual(runLfsBlock({ globalFilter: true }), none, 'a global LFS setting is not the Product using LFS');
   for (const lfs of [{ hook: true }, { filter: true }, { attributes: true }]) {
-    const did = runLfsBlock(lfs);
+    const { status, did } = runLfsBlock(lfs);
+    assert.equal(status, 0, JSON.stringify(lfs));
+    assert.deepEqual(did.trim().split('\n').map((l) => l.split(' ')[0]), ['curl', 'sha256sum', 'tar', 'install'], 'checked before it is unpacked');
     assert.match(did, new RegExp(`curl -fsSL https://github\\.com/git-lfs/git-lfs/releases/download/v${version[1]}/git-lfs-linux-amd64-v${version[1]}\\.tar\\.gz`), JSON.stringify(lfs));
+    assert.match(did, new RegExp(`^sha256sum -c - ${sum[1]}  /tmp/git-lfs\\.tar\\.gz$`, 'm'), JSON.stringify(lfs));
     assert.match(did, /^install -m 0755 .*\/git-lfs \/usr\/local\/bin\/git-lfs$/m, JSON.stringify(lfs));
   }
-  assert.equal(runLfsBlock({ hook: true, filter: true, hasLfs: true }), '', 'an image that has git-lfs downloads nothing');
+  const bad = runLfsBlock({ hook: true, badSum: true });
+  assert.notEqual(bad.status, 0, 'a checksum that does not match fails the job');
+  assert.doesNotMatch(bad.did, /^(tar|install) /m, 'and nothing is unpacked or installed');
+  assert.deepEqual(runLfsBlock({ hook: true, filter: true, hasLfs: true }), none, 'an image that has git-lfs downloads nothing');
 });
 
 // The major a fragment ships with: the one `YAD_MAJOR=<n>` literal in its pin block. Read from the
