@@ -24991,7 +24991,7 @@ test('E1 every command answers --json with one envelope, ok matching its exit co
     ['commit', '-m', 'x'], ['open-pr'], ['ship', '-m', 'x', '--dry-run'], ['checkpoint'], ['tidy', 'up'], ['tidy'], ['index'],
     ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'sync'], ['repo', 'clone'],
     ['risk-map', 'check'], ['codeowners', 'check'], ['roster'], ['docs', 'list'], ['docs', 'sync'], ['thread'], ['thread', 'EP-demo'],
-    ['reconcile'], ['hook', 'ledger-guard'], ['setup', '--solo', '--greenfield', '--monorepo'],
+    ['reconcile'], ['hook', 'ledger-guard'], ['standup'], ['setup', '--solo', '--greenfield', '--monorepo'],
   ];
   const env = {
     ...process.env, SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1', NO_COLOR: '1', YAD_NO_UPDATE_NOTIFIER: '1', YAD_PLATFORM_LOGIN: '0',

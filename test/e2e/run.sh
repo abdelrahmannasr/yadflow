@@ -187,6 +187,12 @@ yad next --dir "$PRODUCT" >/dev/null || die "general yad next failed"
 say "yad doctor is healthy on the fresh project"
 yad doctor --dir "$PRODUCT" >/dev/null || die "doctor must pass on a healthy project"
 
+say "yad standup reads the record and says what it could not read"
+yad standup --json --dir "$PRODUCT" > "$WORK/standup.json" || die "yad standup failed"
+jassert "$WORK/standup.json" 'j.command === "standup" && j.ok === true && Array.isArray(j.team) && Array.isArray(j.unlisted)'
+# The fake gh answers no `auth status`: the Product's platform is "not read" with a reason, never "no PRs".
+jassert "$WORK/standup.json" 'j.platform[0].repo === "Product" && j.platform[0].read === false && typeof j.platform[0].why === "string" && /not read/.test(j.prNote)'
+
 say "a corrupt ledger fails loudly (never silently defaulted)"
 cp "$EPIC/.sdlc/approvals.json" "$WORK/approvals.bak"
 echo '{ corrupt' > "$EPIC/.sdlc/approvals.json"

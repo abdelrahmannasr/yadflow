@@ -30,6 +30,7 @@ export { runFold } from '../cli/fold.mjs';
 export { runClaims } from '../cli/claims.mjs';
 export { runAssign, runUnassign, runOwners } from '../cli/owners.mjs';
 export { runMemberAdd, runMemberList, runMemberRemove } from '../cli/members.mjs';
+export { runStandup, foreignFlags as standupForeignFlags } from '../cli/standup.mjs';
 export { runIndex } from '../cli/index-command.mjs';
 export { runHistory, HISTORY_FLAGS } from '../cli/history.mjs';
 export { runRepo } from '../cli/repo.mjs';
