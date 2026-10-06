@@ -144,7 +144,7 @@ unless CI runs it), or `yad gate advance` with no platform, is the human decisio
 | --- | --- | --- |
 | Existing repositories | `yad init`, in the folder that holds them | Run the `yad-backfill` skill first. It records what already exists. |
 | One existing repository with all the code | `yad setup --brownfield --monorepo`, inside it | The same: run `yad-backfill` first. |
-| A team that already uses Yadflow | `yad join <Product clone URL>` | It clones the Product and every repository it lists. It sets up only this machine and never commits. |
+| A team that already uses Yadflow | `yad join <Product clone URL>` | It clones the Product and every repository it lists and sets up this machine. Last, it records you as a team member (`yad member add`): your accounts and verified emails, on a branch of its own with its own pull request. |
 
 **Small changes.** Not every change needs the full route:
 

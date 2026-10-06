@@ -52,3 +52,12 @@ yad-product-ledger-guard:
   needs: []
   script:
     - bash checks/ledger-guard.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+# E131: a member file (.sdlc/members/) is changed only by the MR's own author. GitLab's predefined
+# variables do not name the MR author, so the check reads it from the API with GITLAB_TOKEN or SDLC_API_TOKEN
+# (a masked CI/CD variable) — and FAILS when a member file changed and no token is set.
+yad-product-member-check:
+  extends: .yad_product_mr_only
+  needs: []
+  script:
+    - node checks/member-check.mjs "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

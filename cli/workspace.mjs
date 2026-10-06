@@ -19,10 +19,12 @@
 //
 // `yad setup` is unchanged: new and init are front doors over it, not a replacement.
 //
-// NOTHING HERE WRITES OUTSIDE THIS MACHINE. `new` never creates a remote — it prints the exact
-// `gh repo create` / `glab repo create` line. `join` never commits, never pushes, and never changes a
-// file the team shares: it installs only what git ignores in the Product (the per-machine skill copies)
-// and the git pre-commit hook, which git never shares (E48).
+// `new` never creates a remote — it prints the exact `gh repo create` / `glab repo create` line. `join`
+// installs only what git ignores in the Product (the per-machine skill copies) and the git pre-commit
+// hook, which git never shares (E48). ONE EXCEPTION, since E131 (the user's decision, 2026-10-05): join
+// ends with `yad member add`, which writes the person's member file on a branch of its own
+// (`yad/member/<login>`), pushes it and opens a PR/MR — never in the checkout, never on the default
+// branch. Any problem there is a warning and the command to run later; it never fails join.
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -33,6 +35,7 @@ import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './se
 import { moduleActions, gitHookActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
+import { runMemberAdd } from './members.mjs';
 
 // E80: the file that lets yad find the Product from inside the repos it registers. Written by all three.
 function noteWorkspaceFile(product) {
@@ -490,6 +493,12 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   log(c.bold('Toolbox'));
   const toolbox = offerToolbox(product, product, { canRemove: false });
 
+  // E131: the person's member file — proven by the platform, on its own branch and PR/MR. Never fatal.
+  log('');
+  let member = null;
+  try { member = await runMemberAdd(product, { soft: true, noPush: !!opts.noPush }) ?? null; }
+  catch (e) { warn(`member file not written: ${shown(e.message)} — run \`yad member add\` from the Product later`); }
+
   // Under a heading of its own, so these lines do not read as part of the toolbox list above.
   log('');
   log(c.bold('Next'));
@@ -498,6 +507,6 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   return {
     workspace, product,
     repos, skills: { installed: skills.installed, stale: skills.stale.length, shared: skills.shared.length },
-    hook: hook.length ? 'installed' : 'unchanged', toolbox,
+    hook: hook.length ? 'installed' : 'unchanged', toolbox, member,
   };
 }

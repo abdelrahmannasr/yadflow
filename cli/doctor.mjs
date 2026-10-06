@@ -25,6 +25,7 @@ import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { readOwners } from './owners.mjs';
+import { readMembers, judgedMemberFiles } from './members.mjs';
 import { loadChoices, readToolboxFile } from './toolbox.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
@@ -1889,6 +1890,37 @@ export function ownerChecks(checks, root) {
     'such a file is ignored — no owner is shown and the edit-time warning is off. For a step on the chain, `yad assign <epic> <step> --force` replaces it and `yad unassign <epic> <step> --force` removes it; for any other, delete it (`git rm <path>`). `yad owners` lists them all');
 }
 
+// `members:*` (E131). A member file that cannot be used, or an account or email two files share, pairs
+// nothing — the person it was meant to join counts twice, and nobody is told anywhere else. And where no
+// CI runs (a local ledger, no platform), nothing checks a member file: say that it is its owner's statement.
+export function memberChecks(checks, root) {
+  let got;
+  try { got = readMembers(root); } catch { return; }
+  const some = (list) => `${list.slice(0, 3).join('; ')}${list.length > 3 ? ` (+${list.length - 3} more)` : ''}`;
+  if (got.errors.length) {
+    check(checks, 'members:unreadable', 'project', 'warn', `${got.errors.length} member file(s) pair nothing: ${some(got.errors.map((e) => e.error))}`,
+      'such a file joins no email to any login, so its person counts twice and is not on the team list. Its owner runs `yad member add` to write it again; otherwise delete it (`yad member remove <login> --reason …`)');
+  }
+  if (got.duplicates.length) {
+    check(checks, 'members:duplicate', 'project', 'warn', `an account or email is in two member files: ${some(got.duplicates)}`,
+      'one account and one email belong to one member. Until one file is fixed, neither file joins it. On a verified Product the member-check gate refuses the PR that adds the second');
+  }
+  // Which files the gate COUNT leaves out, and why (review 3): no live gate, or a file the gate never judged.
+  if (got.members.length && got.identity.verified && got.identity.platform === 'github') {
+    const judged = judgedMemberFiles(root, got.identity);
+    const left = got.members.filter((m) => !judged.files.has(m.rel)).map((m) => m.rel);
+    if (left.length) {
+      check(checks, 'members:untrusted', 'project', 'warn', `${left.length} member file(s) are not used by the active-people count: ${left.slice(0, 3).join('; ')}${left.length > 3 ? ` (+${left.length - 3} more)` : ''}`,
+        judged.live ? 'no gate as shipped judged them: each was last changed before the member-check gate or its workflow last changed on origin\'s default branch (every `yad update` that changes either resets this), or differs here from origin — its owner runs `yad member add` again, and that change is judged'
+          : 'the member-check gate or its workflow on origin\'s default branch is missing, edited, or from another yadflow version than this one — `yad update` installs the shipped copies, then each member runs `yad member add` again');
+    }
+  }
+  if (got.members.length && !got.identity.verified) {
+    check(checks, 'members:unchecked', 'project', 'ok', `${got.members.length} member file(s), and no CI checks them on this Product`,
+      'with a local ledger or no platform, no member-check gate runs, so each member file is its owner\'s own statement');
+  }
+}
+
 // The installed gates whose changed list must name a rename by both paths (E114), and the test for one
 // that does not. Read as bash reads it, one command at a time, so one fixed command never hides its blind
 // twin: a `#` line is prose and is dropped FIRST (a `\` at its end does not go on); then a line ending in
@@ -2563,6 +2595,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   skipChecks(checks, root);
   stepStateChecks(checks, root);
   ownerChecks(checks, root);
+  memberChecks(checks, root);
   ownerGuardChecks(checks, root);
   renamedChecks(checks, root);
   productProfileChecks(checks, root);

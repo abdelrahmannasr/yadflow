@@ -334,9 +334,18 @@ You can start without any of them.
 
    It clones the Product into `<folder>/product/`, then every code repo the Product registers, beside it.
    Then it does only the per-machine steps: the skill copies the Product's git ignores, and a git
-   **pre-commit hook** (a small script git runs before each commit) in your clone. It never commits,
-   never pushes, and never changes a file the team shares. A repo that fails to clone is named and
-   skipped; run `yad join <url>` again to fetch what is still missing.
+   **pre-commit hook** (a small script git runs before each commit) in your clone. A repo that fails to
+   clone is named and skipped; run `yad join <url>` again to fetch what is still missing.
+
+   Last, it records you as a **team member** (`yad member add`). It logs you in to GitHub or GitLab if
+   you are not logged in yet. Then it asks the platform which of your emails are **verified** (confirmed
+   as yours by the platform), and writes `.sdlc/members/<platform>-<your login>.json` with your accounts
+   and those emails — stored as one-way fingerprints (hashes) in the file. The proof commits on that branch
+   are authored by each email, the same way your normal commits show it, and anyone who already knows an
+   address can check it against a fingerprint. It puts this file on a branch of its own and opens a pull
+   request for it, so it never touches your checkout. If anything goes
+   wrong there, join still finishes and tells you to run `yad member add` later. The file only says
+   "these accounts and emails are one person"; it gives no access and no role.
 2. **A repo added after you joined?** Run `yad repo clone` in the Product. It clones every registered
    repo that is missing on this machine. `yad repo list` shows which ones are **not cloned**.
 3. That's it. Open your agent **in the Product** to work on epics; open it **in a code repo** to
@@ -655,6 +664,7 @@ Short notes on the commands a team uses every day. Each one is covered in full i
 | `yad capture` | Saves your changed Shape drafts onto a private branch, `yad/wip/<your git name>/<epic>`, without touching your checkout. A hook runs it after every agent edit (Claude Code and Cursor), so you rarely type it. |
 | `yad claims [<epic>]` | Lists who else is editing which file right now, read from everyone's capture branches. It is advice, not a lock: nothing is blocked. |
 | `yad fold <epic> <step>` | Ends an authoring step with one clean commit, `docs(<epic>): author <step>`, holding only that step's files. The authoring skills run it for you. |
+| `yad member add` / `yad member list` / `yad member remove` | Records who is on the team: one file per person with their GitHub and GitLab accounts and verified emails (as fingerprints). `list` shows each member as active, idle (quiet, still has access), left (no access any more) or unknown. A member who comes back with a commit is active again. |
 | `yad assign <epic> <step> [--to <name>]` / `yad unassign` / `yad owners` | Names one person as the owner of an authoring step (for example "Bob writes the architecture"). Advice only: it never blocks an edit or a review. |
 
 **Reviews with no GitHub or GitLab.** When the Product has no platform, the review is recorded on your
