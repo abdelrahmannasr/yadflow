@@ -87,12 +87,14 @@ export function zoneMidnight(y, m, d, tz) {
     if (Date.UTC(p.y, p.m - 1, p.d) >= guess) break;
     t += 3_600_000 - ((p.mi * 60 + p.s) * 1000);
   }
-  // A clock that goes BACK at midnight (Asia/Gaza, Asia/Amman before 2022) shows 00:00 twice: the day starts
-  // at the first one, an hour earlier, which still reads as the same day.
-  for (let i = 0; i < 2; i++) {
-    const p = zoneParts(t - 3_600_000, tz);
+  // A clock that goes BACK at midnight (Asia/Gaza, Asia/Amman before 2022; Antarctica/Casey by three hours,
+  // Asia/Colombo once by thirty minutes) shows 00:00 twice: the day starts at the first one. Stepped back a
+  // quarter-hour at a time — every zone's offset is a whole number of quarter-hours — while the instant
+  // before still reads as the same day; four hours at most.
+  for (let i = 0; i < 16; i++) {
+    const p = zoneParts(t - 900_000, tz);
     if (Date.UTC(p.y, p.m - 1, p.d) !== guess) break;
-    t -= 3_600_000;
+    t -= 900_000;
   }
   return t;
 }
@@ -210,7 +212,10 @@ function whoseAccount(members, { platform, host, login }, disputed = new Set()) 
   // An account two files claim is matched by nobody — unless it is a member's own primary (E131's rule).
   const hit = members.filter((m) => m.accounts.some((a) => keyOf(a) === want && (keyOf(a) === keyOf(m.primary) || !disputed.has(want))));
   if (hit.length === 1) return { member: hit[0] };
-  return hit.length ? { ambiguous: hit } : {};
+  if (hit.length) return { ambiguous: hit };
+  // Disputed and nobody's own: it is listed with the people seen, and says which files claim it.
+  const claimants = disputed.has(want) ? members.filter((m) => m.accounts.some((a) => keyOf(a) === want)) : [];
+  return claimants.length ? { ambiguous: claimants } : {};
 }
 
 // ---- the model -----------------------------------------------------------------------------------
@@ -221,7 +226,27 @@ function whoseAccount(members, { platform, host, login }, disputed = new Set()) 
 const safe = (v) => forTerminal(String(v ?? ''));
 // An error's message, safe to print and to share: no control character (a JSON parse error quotes the bad
 // bytes) and no absolute path of this machine (the report may be written to a file and shared).
-const why = (e, root) => safe(String(e?.message ?? e).split(root).join('<Product>'));
+const reEsc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function scrubPaths(text, places) {
+  let out = String(text ?? '');
+  // Longest first, so a registered repo inside the Product is named before the Product is. A path is cut only
+  // where it ends — `/a/b` never rewrites `/a/bc`.
+  for (const [abs, name] of [...places].sort((x, y) => y[0].length - x[0].length)) {
+    if (abs && abs !== path.sep) out = out.replace(new RegExp(`${reEsc(abs)}(?=$|[\\/\\s:'"),;])`, 'g'), name);
+  }
+  return out;
+}
+// Each folder's absolute path, as given and as the disk resolves it (macOS: /var is /private/var).
+function placesFor(list) {
+  const out = [];
+  for (const [dir, name] of list) {
+    const abs = path.resolve(dir);
+    out.push([abs, name]);
+    try { const real = fs.realpathSync(abs); if (real !== abs) out.push([real, name]); } catch { /* not on disk */ }
+  }
+  return out;
+}
+const why = (e, places) => safe(scrubPaths(e?.message ?? e, places));
 const nameOf = (v) => shown(String(v ?? '').trim() || 'someone');
 const isDay = (d) => typeof d === 'string' && DATE_RE.test(d);
 // A ledger list's records: only plain objects (a `null` or a number in a shared file is skipped, not a crash).
@@ -246,6 +271,8 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
 
   // Platform first: whether the Product's platform answered decides whether a member's access may be asked.
   const sources = repoSources(root, identity, productConfig, notRead, env);
+  // Paths of this machine never reach the report: each folder is named by its label instead.
+  const places = placesFor([[root, '<Product>'], ...sources.filter((x) => x.dir && path.resolve(x.dir) !== path.resolve(root)).map((x) => [x.dir, `<${x.label}>`])]);
   const seenRepo = new Set();
   const prs = [];
   const authCache = new Map();
@@ -281,19 +308,19 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
       seenGit.set(real, s.label);
     }
     const g = gitAuthors(s.dir, readFrom);
-    if (g.unknown) { notRead.push(`${s.label}: ${safe(g.unknown)} — its commits are not read`); continue; }
+    if (g.unknown) { notRead.push(`${s.label}: ${why(g.unknown, places)} — its commits are not read`); continue; }
     for (const e of g.events) commits.push({ ...e, repo: s.label });
   }
 
   // The ledgers: approvals, comments, ships (attributed as `yad usage` attributes them), and closed steps.
   const aliases = legacyLogins(productConfig);
   let epics = [];
-  try { epics = epicIds(root); } catch (e) { notRead.push(`the epic list could not be read: ${why(e, root)}`); }
+  try { epics = epicIds(root); } catch (e) { notRead.push(`the epic list could not be read: ${why(e, places)}`); }
   const ledgerEv = [];
   const ledgers = new Map();
   for (const epic of epics) {
-    try { ledgers.set(epic, loadLedger(epicRoot(root, epic))); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${why(e, root)})`); continue; }
-    try { ledgerEv.push(...ledgerEvents(root, epic, aliases)); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${why(e, root)})`); }
+    try { ledgers.set(epic, loadLedger(epicRoot(root, epic))); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${why(e, places)})`); continue; }
+    try { ledgerEv.push(...ledgerEvents(root, epic, aliases)); } catch (e) { notRead.push(`${epic}: its ledger cannot be read (${why(e, places)})`); }
   }
 
   // Status (E131): active / idle / left / unknown, from commits, approvals and ships. When the Product's own
@@ -315,7 +342,7 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   };
   const byEvent = (e, display, section, item) => place(whose(members, e), display, personKey({ login: e.login, name: e.name }) || `name:${display}`, section, item);
   const byWip = (w, display, section, item) => place(whoseWip(members, w), display, `wip:${w}`, section, item);
-  const byAccount = (acct, section, item) => place(whoseAccount(members, acct, got.disputed), acct.login, `login:${String(acct.login).toLowerCase()}`, section, item);
+  const byAccount = (acct, section, item) => place(whoseAccount(members, acct, got.disputed), acct.login, `acct:${keyOf(acct)}`, section, item);
 
   // DONE — commits, one line per person and repo.
   const commitGroups = new Map();
@@ -449,7 +476,7 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
         }
       }
     } catch (e) {
-      notRead.push(`${epic}: its gates could not be read (${why(e, root)}) — nothing is said about what waits there`);
+      notRead.push(`${epic}: its gates could not be read (${why(e, places)}) — nothing is said about what waits there`);
     }
   }
   // WAITING / WORKING — their own open PRs/MRs.
@@ -502,6 +529,8 @@ export function onlyMember(model, login) {
 const SECTIONS = [['done', 'Done'], ['working', 'Working on'], ['waiting', 'Waiting']];
 const FOOTER = 'Derived, read-only — rebuilt from git, the Product ledgers, the capture branches and the platform each time it runs. Facts only: no score, no ranking, and no emails, commit messages, PR titles or comment bodies.';
 
+const LOCAL_ONLY = 'no remote named origin — only your own capture branches are read';
+
 // Everything that was not read or not used, for the end of every format — the same list the terminal prints.
 export function gapLines(model) {
   return [
@@ -509,6 +538,7 @@ export function gapLines(model) {
     ...model.platform.filter((p) => !p.read).map((p) => `${p.repo}: platform not read — ${p.why}`),
     ...model.notRead,
     ...model.notes,
+    ...(model.fetched === 'local' ? [LOCAL_ONLY] : []),
     ...model.memberErrors,
     ...model.duplicates.map((d) => `${d} — one account or email belongs to one member; neither file joins it until one is fixed`),
   ];
@@ -517,7 +547,7 @@ export function gapLines(model) {
 // The line said when no member block prints, the same in every format.
 export function noTeamLine(model) {
   if (model.team.length) return null;
-  if (model.member) return `no member ${forTerminal(model.member)} on the team list`;
+  if (model.member) return model.left.length ? `${forTerminal(model.member)} has left — listed under Left` : `no member ${forTerminal(model.member)} on the team list`;
   if (model.left.length) return 'everyone on the team list has left';
   if (model.memberErrors.length) return 'no member file could be read — the reasons are listed at the end';
   return 'no team list yet — each person runs `yad member add` (or `yad join` does it)';
@@ -555,7 +585,6 @@ const unlistedTitle = (u) => `${forTerminal(u.who)}${u.ambiguous ? c.dim(` — m
 export function renderText(model) {
   log(c.bold('\nyad standup'));
   for (const l of headerLines(model)) info(l);
-  if (model.fetched === 'local') info('no remote named origin — only your own capture branches are read');
   const none = noTeamLine(model);
   if (none) info(none);
   for (const m of model.team) blockText(model, m, memberTitle(m));
@@ -572,7 +601,7 @@ export function renderText(model) {
     for (const m of model.left) log(`      • ${forTerminal(m.login)}${m.lastActive ? c.dim(` (last active ${m.lastActive})`) : ''}`);
   }
   log('');
-  const notes = new Set(model.notes);
+  const notes = new Set([...model.notes, LOCAL_ONLY]);
   for (const l of gapLines(model)) (notes.has(l) ? info : warn)(l);
   note(c.dim(FOOTER));
 }

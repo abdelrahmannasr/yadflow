@@ -559,7 +559,8 @@ test('E132 review 2: another account two files claim is matched by neither, on a
     };
     const m = S.buildStandup(T, { now: NOW, fetch: false, runner, env: ON, access: () => 'yes' });
     for (const who of ['alice', 'bob']) assert.ok(!texts(m.team.find((x) => x.login === who).done).some((t) => /MR !7/.test(t)), who);
-    assert.deepEqual(m.unlisted.find((u) => u.who === 'alice')?.done.map((i) => i.text), ['MR !7 merged in api (2026-10-02 00:01)']);
+    // Listed with the people seen, and naming the two files that claim it (review 3).
+    assert.deepEqual(m.unlisted.filter((u) => u.who === 'alice').map((u) => [u.ambiguous, u.done.map((i) => i.text)]), [[['alice', 'bob'], ['MR !7 merged in api (2026-10-02 00:01)']]]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -589,4 +590,60 @@ test('E132 review 2: a clock that goes back at midnight starts the day at the fi
   // Asia/Amman, 2020-10-30: 01:00 went back to 00:00, so midnight came twice — UTC+3, then UTC+2.
   assert.equal(S.zoneMidnight(2020, 10, 30, 'Asia/Amman'), Date.parse('2020-10-29T21:00:00Z'));
   assert.equal(S.zoneMidnight(2020, 10, 31, 'Asia/Amman'), Date.parse('2020-10-30T22:00:00Z'));
+});
+
+// ---- review round 3 ---------------------------------------------------------------------------------
+
+test('E132 review 3: no path of this machine reaches the report — not from git, not from a relative --dir', async () => {
+  const T = await teamFixture();
+  const api = tmp();
+  try {
+    // A registered clone that is shallow: people.mjs names it by its absolute path.
+    git(api, ['init', '-q', '-b', 'main']);
+    commitAs(api, 'Alice Smith', 'alice@work.com', START - 86400000);
+    commitAs(api, 'Alice Smith', 'alice@work.com', START + 1000);
+    const shallow = path.join(T, '..', `${path.basename(T)}-api`);
+    git(path.dirname(shallow), ['clone', '-q', '--depth', '1', `file://${api}`, shallow]);
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'api', path: `../${path.basename(shallow)}` }] });
+    fs.writeFileSync(path.join(T, 'epics/EP-checkout/.sdlc/approvals.json'), '{ broken');
+    const cwd = process.cwd();
+    process.chdir(T);
+    let m;
+    try { m = S.buildStandup('.', { now: NOW, fetch: false }); } finally { process.chdir(cwd); }
+    const all = [...m.notRead, ...m.notes].join('\n');
+    assert.match(all, /api: <api> is a shallow clone/);
+    assert.match(all, /EP-checkout: its ledger cannot be read \(corrupt JSON in epics\/EP-checkout\/\.sdlc\/approvals\.json/, 'a relative root: nothing to cut, and no dot rewritten');
+    for (const p of [T, fs.realpathSync(T), shallow, fs.realpathSync(shallow), os.tmpdir()]) assert.ok(!all.includes(p), p);
+    // An absolute root: the Product's own path is named <Product>.
+    const abs = S.buildStandup(T, { now: NOW, fetch: false });
+    assert.ok(abs.notRead.some((n) => /corrupt JSON in <Product>\/epics\/EP-checkout\/\.sdlc\/approvals\.json/.test(n)), abs.notRead.join(' | '));
+    assert.ok(!abs.notRead.join('\n').includes(T));
+    fs.rmSync(shallow, { recursive: true, force: true });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(api, { recursive: true, force: true }); }
+});
+
+test('E132 review 3: --member for someone who left says so; an unmatched login is kept apart per platform; no origin is said in every format', async () => {
+  const T = await teamFixture();
+  try {
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'api', git_url: 'git@gitlab.com:acme/api.git', platform: 'gitlab' }] });
+    const runner = (cmd, args) => {
+      if (cmd === 'which' || cmd === 'where' || args[0] === 'auth') return { ok: true, stdout: '' };
+      if (args.includes('graphql')) return { ok: true, stdout: JSON.stringify({ data: { repository: { open: { totalCount: 1, nodes: [{ number: 1, isDraft: true, author: { __typename: 'User', login: 'sam' }, reviewDecision: null, reviews: { totalCount: 0 }, latestOpinionatedReviews: { nodes: [] }, commits: { nodes: [] } }] }, merged: { nodes: [] } } } }) };
+      if (args.at(-1).includes('state=opened')) return { ok: true, stdout: JSON.stringify([{ iid: 2, author: { username: 'sam' }, draft: true }]) };
+      if (args.at(-1).includes('state=merged')) return { ok: true, stdout: '[]' };
+      if (args.includes('/permission') || String(args.at(-1)).includes('/permission')) return { ok: true, stdout: 'none' };
+      return { ok: false, stderr: 'HTTP 404' };
+    };
+    memberFile(T, 'gone', { names: ['Gone Person'] });
+    const m = S.buildStandup(T, { now: NOW, fetch: false, runner, env: ON, access: (_i, mm) => (mm.primary.login === 'gone' ? 'no' : 'yes') });
+    assert.deepEqual(m.unlisted.filter((u) => u.who === 'sam').map((u) => u.working.map((i) => i.text)), [['PR #1 open in Product — draft, no review yet'], ['MR !2 open in api — draft']]);
+    assert.equal(S.noTeamLine(S.onlyMember(m, 'gone')), 'gone has left — listed under Left');
+    const local = { ...m, fetched: 'local' };
+    for (const out of [S.renderMarkdown(local), S.renderHtml(local)]) assert.match(out, /no remote named origin — only your own capture branches are read/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E132 review 3: a clock that goes back more than an hour, or half an hour, at midnight', () => {
+  assert.equal(S.zoneStamp(S.zoneMidnight(2006, 4, 15, 'Asia/Colombo') - 60000, 'Asia/Colombo'), '2006-04-14 23:59');
+  assert.equal(S.zoneMidnight(2006, 4, 15, 'Asia/Colombo'), Date.parse('2006-04-14T18:00:00Z'));
 });
