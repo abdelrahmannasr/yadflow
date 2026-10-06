@@ -611,12 +611,12 @@ test('E132 review 3: no path of this machine reaches the report — not from git
     let m;
     try { m = S.buildStandup('.', { now: NOW, fetch: false }); } finally { process.chdir(cwd); }
     const all = [...m.notRead, ...m.notes].join('\n');
-    assert.match(all, /api: <api> is a shallow clone/);
+    assert.match(all, /api: \[api\] is a shallow clone/);
     assert.match(all, /EP-checkout: its ledger cannot be read \(corrupt JSON in epics\/EP-checkout\/\.sdlc\/approvals\.json/, 'a relative root: nothing to cut, and no dot rewritten');
     for (const p of [T, fs.realpathSync(T), shallow, fs.realpathSync(shallow), os.tmpdir()]) assert.ok(!all.includes(p), p);
-    // An absolute root: the Product's own path is named <Product>.
+    // An absolute root: the Product's own path is named [Product] (square brackets: Markdown keeps them).
     const abs = S.buildStandup(T, { now: NOW, fetch: false });
-    assert.ok(abs.notRead.some((n) => /corrupt JSON in <Product>\/epics\/EP-checkout\/\.sdlc\/approvals\.json/.test(n)), abs.notRead.join(' | '));
+    assert.ok(abs.notRead.some((n) => /corrupt JSON in \[Product\]\/epics\/EP-checkout\/\.sdlc\/approvals\.json/.test(n)), abs.notRead.join(' | '));
     assert.ok(!abs.notRead.join('\n').includes(T));
     fs.rmSync(shallow, { recursive: true, force: true });
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(api, { recursive: true, force: true }); }

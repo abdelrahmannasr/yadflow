@@ -277,8 +277,9 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
 
   // Platform first: whether the Product's platform answered decides whether a member's access may be asked.
   const sources = repoSources(root, identity, productConfig, notRead, env);
-  // Paths of this machine never reach the report: each folder is named by its label instead.
-  const places = placesFor([[root, '<Product>'], ...sources.filter((x) => x.dir && path.resolve(x.dir) !== path.resolve(root)).map((x) => [x.dir, `<${x.label}>`])]);
+  // Paths of this machine never reach the report: each folder is named by its label instead — in square
+  // brackets, never angle ones, which a Markdown viewer would read as an HTML tag and drop.
+  const places = placesFor([[root, '[Product]'], ...sources.filter((x) => x.dir && path.resolve(x.dir) !== path.resolve(root)).map((x) => [x.dir, `[${x.label}]`])]);
   const seenRepo = new Set();
   const prs = [];
   const authCache = new Map();
