@@ -609,16 +609,34 @@ test('E113: the ledger guard refuses a CI-owned write sent as a native path of t
   } finally { cleanup(T); }
 });
 
-test('E113: an npm launcher runs through a shell on Windows, each word quoted, and directly elsewhere', async () => {
+test('E113: an npm launcher runs through a shell on Windows, each argument quoted, and directly elsewhere', async () => {
   const { launcherInvocation } = await import('./lib.mjs');
   assert.deepEqual(launcherInvocation('npx', ['repomix@latest', '-o', '/a b/out.md'], 'linux'), { cmd: 'npx', args: ['repomix@latest', '-o', '/a b/out.md'], shell: false });
-  assert.deepEqual(launcherInvocation('npx', ['repomix@latest', '-o', 'C:\\a b\\out.md'], 'win32'), { cmd: '"npx" "repomix@latest" "-o" "C:\\a b\\out.md"', args: [], shell: true });
-  assert.deepEqual(launcherInvocation('npm', ['run', 'build'], 'win32'), { cmd: '"npm" "run" "build"', args: [], shell: true });
+  // The launcher name stays bare (#326) — see the `%~dp0` test below.
+  assert.deepEqual(launcherInvocation('npx', ['repomix@latest', '-o', 'C:\\a b\\out.md'], 'win32'), { cmd: 'npx "repomix@latest" "-o" "C:\\a b\\out.md"', args: [], shell: true });
+  assert.deepEqual(launcherInvocation('npm', ['run', 'build'], 'win32'), { cmd: 'npm "run" "build"', args: [], shell: true });
   // Both callers go through it — the twin of the repomix fix is `yad docs build`.
   for (const f of ['cli/setup.mjs', 'cli/docs.mjs']) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     assert.doesNotMatch(src, /\brun\('np[mx]'/, `${f} spawns an npm launcher directly`);
   }
+});
+
+// #326: npx.cmd finds npx-cli.js through `%~dp0` (its own folder). Reached on PATH by a quoted name,
+// cmd.exe hands it the current folder instead, and repomix failed with "Cannot find module".
+test('#326: a launcher found on PATH sees its own folder as %~dp0, not the caller\'s', { skip: !IS_WINDOWS && 'Windows only' }, async () => {
+  const { runLauncher } = await import('./lib.mjs');
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-launcher-bin-'));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-launcher-cwd-'));
+  try {
+    fs.writeFileSync(path.join(bin, 'yadfake.cmd'), '@echo %~dp0\r\n');
+    const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+    const env = { ...process.env, [pathKey]: `${bin}${path.delimiter}${process.env[pathKey] || ''}` };
+    const r = runLauncher('yadfake', ['x'], { cwd, env });
+    assert.ok(r.ok, r.stderr);
+    const norm = (p) => fs.realpathSync.native(p).replace(/[\\/]+$/, '').toLowerCase();
+    assert.equal(norm(r.stdout), norm(bin), `%~dp0 was ${r.stdout}`);
+  } finally { cleanup(bin); cleanup(cwd); }
 });
 
 test('E113: doctor finds Git Bash beside git on Windows, and says what its absence costs', async () => {
