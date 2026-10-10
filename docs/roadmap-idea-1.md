@@ -6,7 +6,8 @@
 > cut line. 4.0.0 is published on `latest` (2026-09-30). E126–E129 are proposals from
 > the README rewrite, not decided yet. Wave 3.5 started 2026-09-30 with E50; E131 (team members)
 > and E132 (the standup report) were added to it on 2026-10-05, and both are built;
-> Waves 4 and 5 are not started.
+> Waves 4 and 5 are not started; E133 (a branching strategy per repo) was added to Wave 5
+> on 2026-10-10 as a proposal.
 > This is the outcome of a product brainstorming session. Everything here is a
 > decision we made together, or a task that follows from one.
 
@@ -674,6 +675,7 @@ versions that holds an open gate — and only a newer shape number makes it warn
 |---|---|---|---|
 | E32 | Release phase | L | E22 |
 | E33 | Operate phase | L | E32 |
+| E133 | A branching strategy for each repo. **Proposed by the user (2026-10-10); not decided.** **The rule:** the Product repo is always **trunk-based** — one default branch, short-lived review branches (`review/<epic>/<artifact>`) merged back through the gate — and that is fixed, not a choice. Each **code repo** uses the strategy its team prefers for that project: trunk-based (the default), GitHub Flow, GitFlow, GitLab Flow (environment branches) or release branches. **Problem:** today every code repo is treated as trunk-based without saying so — `yad-implement` branches from the repo's default branch, `yad open-pr` targets the platform's default branch unless `--base` is typed each time, and `yad-sync-repos` pulls the registry's `default_branch` — so a team on GitFlow (work merges into `develop`, `main` holds releases only) gets task branches cut from, and PRs aimed at, the wrong branch. **Proposal:** record the choice per repo in `.sdlc/repos.json` (asked at `yad setup` and `yad-connect-repos`, trunk-based when unset), and have the readers follow it: the branch a task starts from and its PR targets, the branch sync pulls, the branches the gates run on, and the release and hotfix branch names. `yad doctor` warns when a repo's platform settings disagree with its recorded strategy. **Open questions:** whether feature flags are named for trunk-based repos; how a hotfix under GitFlow threads into `yad-change`; whether forking is in scope. | M | — |
 
 ## The estimate — Claude Code implementing, a human reviewing
 
