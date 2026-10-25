@@ -20,7 +20,7 @@ import { c, ok, info, fail, hand, exists, pushWithRebase, forTerminal } from './
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness, branchToCommitOn } from './productcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
 import { codeContextPathOk } from './workspace.mjs';
@@ -152,8 +152,8 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   const registry = { repos: repos || [] };
   const git = productGit(root);
 
-  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, productConfig);
+  const branch = branchToCommitOn(root, git, defaultBranch);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad repo refresh --push', root })) return;
 
   // Stage the EXPLICIT allowlist (code-maps + registry), scoped so an unrelated pre-staged file is never

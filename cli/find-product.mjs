@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { exists, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
+import { worktreeAt, sameDir } from './worktree-record.mjs';
 
 export const WORKSPACE_FILE = '.yad-workspace.json';
 export const WORKSPACE_VERSION = 1;
@@ -94,7 +95,12 @@ export function findProduct(start) {
       if (ws.problem) return { problem: ws.problem };
       // Only for a repo this Product registers — never for any folder that happens to sit beside it.
       const repo = registeredRepoHolding(ws.product, from);
-      return repo ? { root: ws.product, via: 'workspace', workspace: d, repo } : { elsewhere: ws.product };
+      if (repo) return { root: ws.product, via: 'workspace', workspace: d, repo };
+      // An epic's worktree of a registered repo (#115), beside it: that repo — and the Product commands go
+      // to the same epic's Product worktree when there is one, so its Build records stay in its own tree.
+      const wt = codeWorktreeOf(ws.product, from);
+      if (wt) return { root: epicProductWorktree(ws.product, wt.epic) ?? ws.product, via: 'workspace', workspace: d, repo: wt.meta, worktree: wt.epic };
+      return { elsewhere: ws.product };
     }
     if (fs.existsSync(path.join(d, '.git'))) crossedRepo = true;
     if (path.dirname(d) === d) return null;
@@ -119,6 +125,27 @@ export function registeredRepoHolding(productRoot, dir) {
     bestAt = repoAt;
   }
   return best;
+}
+
+// The registered repo whose epic worktree (#115) holds `dir`: yad made it (its record names the repo), and
+// its common git folder IS that repo's — a record copied into some other clone maps nothing.
+// → { meta, epic, top } or null.
+export function codeWorktreeOf(productRoot, dir) {
+  const top = gitTopOf(dir);
+  const rec = worktreeAt(top);
+  if (!rec || typeof rec.repo !== 'string') return null;
+  const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), null);
+  const meta = (Array.isArray(reg?.repos) ? reg.repos : []).find((r) => r?.name === rec.repo && typeof r.path === 'string');
+  if (!meta || !sameDir(rec.main, path.resolve(productRoot, meta.path))) return null;
+  return { meta, epic: rec.epic, top };
+}
+
+// The epic's Product worktree beside the Product, when yad made one; else null.
+export function epicProductWorktree(productRoot, epic) {
+  const root = path.resolve(productRoot);
+  const at = path.join(path.dirname(root), `${path.basename(root)}--${epic}`);
+  const rec = worktreeAt(at);
+  return rec && rec.repo === null && rec.epic === epic && sameDir(rec.main, root) && hasProduct(at) ? at : null;
 }
 
 // Folders a workspace file is never written into: the home folder, the temp folder and the top of a disk.
@@ -214,7 +241,11 @@ export function registryEntryFor(productRoot, dir) {
   const top = gitTopOf(dir);
   if (!top) return null;
   const meta = registeredRepoHolding(productRoot, top);
-  if (!meta) return null;
+  if (!meta) {
+    // The one worktree that IS the registered repo's: an epic worktree yad made of it (#115).
+    const wt = codeWorktreeOf(productRoot, dir);
+    return wt && sameDir(wt.top, top) ? { meta: wt.meta, top } : null;
+  }
   const at = real(path.resolve(productRoot, meta.path));
   const topAt = real(top);
   return at && topAt && fold(at) === fold(topAt) ? { meta, top } : null;

@@ -4,6 +4,7 @@
 // strand required checks and fail verified-commits). This module is the single home of that guard.
 import { warn, fail, hand, run, forTerminal } from './lib.mjs';
 import { SETTINGS_EDIT_HINT, settingsEditHint } from './manifest.mjs';
+import { worktreeAt } from './worktree-record.mjs';
 
 export const productGit = (root) => (...args) => run('git', args, { cwd: root });
 
@@ -30,6 +31,18 @@ export function resolveDefaultBranch(git, productConfig) {
     || 'main';
 }
 
+// The branch a default-branch command commits on: the current one — or, in an epic's Product worktree
+// (#115), which sits DETACHED because the default branch is checked out in the main tree, the default
+// branch itself, so the commit is pushed as HEAD:<default>. Only when HEAD holds nothing the default branch
+// lacks (fetched first): a detached HEAD on a step branch's unreviewed commits must never reach it. A
+// detached HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
+export function branchToCommitOn(root, git, defaultBranch) {
+  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+  if (branch !== 'HEAD' || worktreeAt(root)?.repo !== null) return branch;
+  if (!git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return branch;
+  return git('merge-base', '--is-ancestor', 'HEAD', `origin/${defaultBranch}`).ok ? defaultBranch : branch;
+}
+
 // Guard: only commit on the default branch. Returns true when OK; on a non-default branch it prints the
 // refusal + sets a non-zero exit code, unless `allowBranch` overrides (with a warning). `--allow-branch`
 // is the SINGLE documented override — never `--force` (which elsewhere only waives the atomic guard).
@@ -43,6 +56,12 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
     return true;
   }
   fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
+  // An epic worktree (#115) refused here holds commits origin/<default> lacks, or could not fetch it.
+  if (branch === 'HEAD' && root && worktreeAt(root)?.repo === null) {
+    hand(`this epic worktree's HEAD has commits origin/${d} does not (or the fetch failed): push them where they belong, then \`git fetch origin ${d}\` and \`git switch --detach origin/${d}\``);
+    process.exitCode = 1;
+    return false;
+  }
   hand(`switch to '${d}' and re-run, or pass --allow-branch to override (if '${d}' is wrong, set default_branch in ${root ? settingsEditHint(root) : SETTINGS_EDIT_HINT})`);
   process.exitCode = 1;
   return false;

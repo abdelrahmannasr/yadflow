@@ -26,7 +26,7 @@ import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWit
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn } from './productcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter, declaredRepos } from './epic-state.mjs';
 
@@ -314,8 +314,8 @@ export async function runCheckpoint(root, opts = {}) {
 
   const { productConfig } = loadProduct(root);
   const git = productGit(root);
-  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, productConfig);
+  const branch = branchToCommitOn(root, git, defaultBranch);
 
   // Default-branch guard (invariant 2) — shared with `yad tidy up`.
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad checkpoint', root })) return;

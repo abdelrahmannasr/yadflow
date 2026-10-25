@@ -27207,6 +27207,10 @@ test('E79 review 1: yad init never turns someone\'s code into the Product', () =
       e79Git(T, path.join(ws, n), 'init', '-q', '-b', 'main');
       fs.writeFileSync(path.join(ws, n, 'f'), 'x');
     }
+    // An epic's worktree of api beside it (#115) is a second folder of api, never a repo of its own.
+    e79Git(T, path.join(ws, 'api'), 'add', '-A');
+    e79Git(T, path.join(ws, 'api'), 'commit', '-q', '-m', 'seed');
+    e79Git(T, path.join(ws, 'api'), 'worktree', 'add', '-q', '--detach', path.join(ws, 'api--EP-x'));
     const r = e79Yad(T, ws, ['init', '--solo', '--greenfield']);
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stdout + r.stderr, /product\/ already holds files and is not a Product — name a new folder for the Product with --path <folder>/);

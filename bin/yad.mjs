@@ -69,6 +69,20 @@ ${c.bold('Setup & maintenance')}
                        installs in this clone refuses a person's hand commit to the ledger.
                        YAD_HOOK_DISABLE=1 skips.
 
+${c.bold('Parallel agents')} ${c.dim('(one git worktree per epic — #115)')}
+  yad worktree add <epic> [--repo <name>|--all] [--dry-run]
+                                       Make the epic's own worktree beside the Product (or beside a code
+                                       repo with --repo; the Product and every repo the epic names with
+                                       --all), detached at origin/<default>. A code repo's ignored
+                                       node_modules are linked, not reinstalled. Open the agent's session
+                                       in that folder, and make the step's usual branch there
+  yad worktree list [<epic>] [--json] The yad worktrees of the Product and every repo: branch, changes,
+                                       commits on no remote, locked, folder gone
+  yad worktree remove <epic> [--repo <name>|--all]
+                                       Remove them — refused, removing nothing, while one holds
+                                       uncommitted or untracked files, commits on no remote, a lock or an
+                                       operation half done, or you are inside it. No override
+
 ${c.bold('Team members')} ${c.dim('(identity only — no roles, no reviewers, no allowlist)')}
   yad member add [--no-push]           Prove who you are and write .sdlc/members/<platform>-<login>.json:
                                        your account on the Product's platform (logs you in if needed),
@@ -542,6 +556,7 @@ const ACTIONS = {
   hook: { known: ['ledger-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove'], default: 'list' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
+  worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
   build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
 };
@@ -552,7 +567,7 @@ const PRODUCT_CMDS = new Set([
   'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
-  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build',
+  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build', 'worktree',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status']);
@@ -569,6 +584,7 @@ function writesProduct(cmd, o) {
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   if (cmd === 'dial') return o.to !== undefined;
   if (cmd === 'member') return o._[1] === 'add' || o._[1] === 'remove';
+  if (cmd === 'worktree') return o._[1] === 'add' || o._[1] === 'remove';
   // `--wire` writes a CI workflow; `--refresh` only rebuilds sites the folder already holds.
   if (cmd === 'docs') return action === 'sync' && !!o.wire;
   return false;
@@ -667,7 +683,7 @@ async function main() {
     } else if (found?.root && REPO_CMDS.has(cmd)) o.product = found.root;
     else if (found?.root && !dirGiven && found.via !== 'here') {
       o.dir = found.root;
-      process.stderr.write(c.dim(`Product: ${shown(found.root)} (${found.via === 'workspace' ? `from ${commands.WORKSPACE_FILE}` : 'above this folder'})\n`));
+      process.stderr.write(c.dim(`Product: ${shown(found.root)} (${found.worktree ? `${found.worktree}'s worktree` : found.via === 'workspace' ? `from ${commands.WORKSPACE_FILE}` : 'above this folder'})\n`));
       // Run from inside one code repo, the per-repo commands work on THAT repo, not on every one the
       // Product registers (they take the repo's name as their second word).
       // The CHECKOUT must be the registered repo (a worktree or nested repo inside it is another one).
@@ -1052,6 +1068,21 @@ async function main() {
       if (action === 'add') result = await commands.runMemberAdd(o.dir, { noPush: !!o.noPush, today });
       else if (action === 'list') result = await commands.runMemberList(o.dir, { today });
       else result = await commands.runMemberRemove(o.dir, { login: who ?? null, reason: o.reason ?? null });
+      break;
+    }
+    case 'worktree': {
+      // #115. One git worktree per epic, beside the Product and each code repo.
+      const [, action = 'list', epic, extra] = o._;
+      const usage = 'usage: yad worktree add <epic> [--repo <name>|--all] [--dry-run] | yad worktree list [<epic>] [--json] | yad worktree remove <epic> [--repo <name>|--all]';
+      if (!['add', 'list', 'remove'].includes(action)) { refuse(`unknown worktree action: ${action} (add, list, remove)`, usage); break; }
+      if (extra) { refuse(`unexpected word: ${extra}`, usage); break; }
+      if (action !== 'list' && !epic) { refuse(`yad worktree ${action} needs an epic`, usage); break; }
+      if (o.repo !== undefined && o.all) { refuse('--repo and --all name different targets — pass one', usage); break; }
+      if (action === 'list' && (o.repo !== undefined || o.all)) { refuse('yad worktree list lists every repo; it takes no --repo or --all', usage); break; }
+      if (noProduct()) break;
+      if (action === 'add') result = await commands.runWorktreeAdd(o.dir, { epic, repo: o.repo ?? null, all: !!o.all, dryRun: !!o.dryRun, today });
+      else if (action === 'list') result = await commands.runWorktreeList(o.dir, { epic: epic ?? null });
+      else result = await commands.runWorktreeRemove(o.dir, { epic, repo: o.repo ?? null, all: !!o.all, cwd: shellCwd() });
       break;
     }
     case 'standup': {

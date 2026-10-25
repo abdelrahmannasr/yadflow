@@ -36,6 +36,7 @@ import { moduleActions, gitHookActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
 import { runMemberAdd } from './members.mjs';
+import { linkedGitDir } from './worktree-record.mjs';
 
 // E80: the file that lets yad find the Product from inside the repos it registers. Written by all three.
 function noteWorkspaceFile(product) {
@@ -415,7 +416,9 @@ export async function runInit(cwd, opts = {}) {
     ok(`created ${productName}/ (git, branch main)`);
   } else info(`Product folder: ${productName}/`);
 
-  const repos = children.filter((n) => n !== productName && exists(path.join(cwd, n, '.git')));
+  // A linked worktree (an epic's, #115: `.git` is a file pointing into another repo's `worktrees/`) is a
+  // second folder of a repo already here, never a repo of its own.
+  const repos = children.filter((n) => n !== productName && exists(path.join(cwd, n, '.git')) && !linkedGitDir(path.join(cwd, n)));
   const found = repos.filter(validFolderName);
   const odd = repos.filter((n) => !validFolderName(n));
   if (odd.length) warn(`not offered (a repo name must be letters, digits, ".", "_" or "-"): ${odd.map(shown).join(', ')} — connect them with \`yad setup\` under another name`);
