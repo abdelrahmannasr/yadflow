@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES } from './worktree.mjs';
 import { worktreeAt } from './worktree-record.mjs';
 import { registryEntryFor, findProduct } from './find-product.mjs';
-import { branchToCommitOn } from './productcommit.mjs';
+import { branchToCommitOn, YAD_COMMIT_SUBJECT } from './productcommit.mjs';
 import { run } from './lib.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -355,5 +355,22 @@ test('yad worktree remove says which ignored files go with it (#115 review 1)', 
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /removed with it, as git ignores them: \.env/);
     assert.doesNotMatch(r.out, /removed with it, as git ignores them: .*node_modules/, 'yad\'s own link is not listed');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad\'s own commit is the exact subject yad writes — a revert of one, or a step\'s commit with the marker, is not (#115 review 2)', () => {
+  for (const ok of ['chore(product): sync Build state — EP-x/EP-x-S01 by bob [skip ci]', 'chore(gate): repair epic state — close stranded author step(s) [skip ci]'])
+    assert.ok(YAD_COMMIT_SUBJECT.test(ok), ok);
+  for (const no of ['Revert "chore(product): sync Build state — x by y [skip ci]"', 'docs(EP-x): author epic [skip ci]', 'chore(product): sync Build state'])
+    assert.equal(YAD_COMMIT_SUBJECT.test(no), false, no);
+  const { W, P, pwt } = workspace();
+  try {
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x').code, 0);
+    git(pwt, 'config', 'user.name', 'bob');
+    git(pwt, 'config', 'user.email', 'bob@corp.io');
+    write(pwt, { 'notes.md': 'x\n' });
+    git(pwt, 'add', 'notes.md');
+    git(pwt, 'commit', '-qm', 'docs(EP-x): author epic [skip ci]');
+    assert.equal(branchToCommitOn(pwt, (...a) => run('git', a, { cwd: pwt }), 'main'), 'HEAD');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });

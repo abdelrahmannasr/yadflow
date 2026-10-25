@@ -1078,6 +1078,7 @@ async function main() {
       if (extra) { refuse(`unexpected word: ${extra}`, usage); break; }
       if (action !== 'list' && !epic) { refuse(`yad worktree ${action} needs an epic`, usage); break; }
       if (o.repo !== undefined && o.all) { refuse('--repo and --all name different targets — pass one', usage); break; }
+      if (o.repo === true || o.repo === '') { refuse('--repo needs a repo name', usage); break; }
       if (action === 'list' && (o.repo !== undefined || o.all)) { refuse('yad worktree list lists every repo; it takes no --repo or --all', usage); break; }
       if (noProduct()) break;
       if (action === 'add') result = await commands.runWorktreeAdd(o.dir, { epic, repo: o.repo ?? null, all: !!o.all, dryRun: !!o.dryRun, today });

@@ -1351,8 +1351,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // back to the current branch when hub.json names none, and a person may run this from any checkout
   // (E19 review). `stageIndexIfClean` keeps it out of a commit that does not hold what it read.
   const onDefault = (() => {
-    const head = git('rev-parse', '--abbrev-ref', 'HEAD');
-    return head.ok && head.stdout === resolveDefaultBranch(git, productConfig);
+    const trunk = resolveDefaultBranch(git, productConfig);
+    return branchToCommitOn(root, git, trunk) === trunk; // an epic Product worktree's detached HEAD too (#115)
   })();
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);

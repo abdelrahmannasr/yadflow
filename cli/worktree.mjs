@@ -26,7 +26,11 @@ import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir } from './worktree-r
 const CODE = 'YAD-STATE-010';
 const git = (cwd, ...args) => run('git', args, { cwd });
 // Untrimmed: `run` trims, which eats the leading space of a porcelain entry (` M file`).
-const gitRaw = (cwd, ...args) => String(spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } }).stdout || '');
+const gitRawResult = (cwd, ...args) => {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
+  return { ok: r.status === 0, stdout: String(r.stdout || '') };
+};
+const gitRaw = (cwd, ...args) => gitRawResult(cwd, ...args).stdout;
 // Files yad itself writes into a checkout as local working state: named apart when they keep a worktree
 // from being removed, so a finished epic does not look dirty for a reason nobody can see.
 export const YAD_LOCAL_FILES = ['.specify/feature.json', '.gitmessage'];
@@ -56,10 +60,11 @@ export function planAdd({ main, epic, repo, hasOrigin, pathTaken, existing, main
 
 // PURE: why `remove` must not remove one worktree; [] means it may.
 //   facts: { path, missing, inside, locked, busy, changes: [paths], unpushed: n }
-export function planRemove({ path: where, missing, inside, locked, busy, changes = [], unpushed = 0 }) {
+export function planRemove({ path: where, missing, inside, locked, busy, changes = [], unpushed = 0, readable = true, product = false }) {
   const why = [];
   if (missing) return [{ reason: `${where} is gone, but git still lists it`, fix: 'run `git worktree prune` in the main checkout' }];
   if (inside) why.push({ reason: 'you are inside it', fix: `cd out of ${where} first` });
+  if (!readable) why.push({ reason: 'git could not read its status', fix: `check \`git -C ${where} status\`` });
   if (locked) why.push({ reason: `it is locked${locked === true ? '' : ` (${locked})`}`, fix: `git worktree unlock ${where}, once whoever locked it is done` });
   if (busy) why.push({ reason: `a ${busy} is half done in it`, fix: `finish or abort it in ${where}` });
   const own = changes.filter((f) => YAD_LOCAL_FILES.includes(f));
@@ -69,7 +74,7 @@ export function planRemove({ path: where, missing, inside, locked, busy, changes
   }
   if (own.length) why.push({ reason: `yad's own working file(s) are there: ${own.join(', ')}`, fix: `they are local state, safe to delete: ${own.map((f) => `rm ${path.join(where, f)}`).join('; ')}` });
   if (unpushed === null) why.push({ reason: 'git could not count its commits that are on no remote', fix: `check \`git -C ${where} log --not --remotes\`` });
-  else if (unpushed) why.push({ reason: `${unpushed} commit(s) are on no remote`, fix: `push them (\`git -C ${where} push origin HEAD:<branch>\`), or \`yad capture\`` });
+  else if (unpushed) why.push({ reason: `${unpushed} commit(s) are on no remote`, fix: product ? `yad's own commits: \`yad checkpoint --push\` there; a step's: push its branch (\`git -C ${where} push origin HEAD:<branch>\`)` : `push them (\`git -C ${where} push origin HEAD:<branch>\`), or \`yad capture\`` });
   return why;
 }
 
@@ -92,7 +97,7 @@ function targetsOf(productRoot) {
     const at = path.resolve(main, r.path);
     if (sameDir(at, main)) continue; // the Product's own entry (a monorepo): its worktree is the Product's
     const named = typeof r.default_branch === 'string' && r.default_branch ? r.default_branch : null;
-    const nested = path.resolve(at).startsWith(path.resolve(main) + path.sep);
+    const nested = within(at, main) && !sameDir(at, main); // on disk, as the disk spells it
     out.push({ repo: r.name, main: at, defaultBranch: named, missing: !fs.existsSync(path.join(at, '.git')), nested });
   }
   return out;
@@ -118,15 +123,15 @@ export function yadWorktrees(main) {
   return out;
 }
 
-function stateOf(w) {
-  if (w.missing) return { branch: null, changes: [], ignored: [], unpushed: 0 };
+function stateOf(w, { ignored: wantIgnored = false } = {}) {
+  if (w.missing) return { branch: null, changes: [], ignored: [], unpushed: 0, readable: true };
   const head = git(w.path, 'rev-parse', '--abbrev-ref', 'HEAD');
   // As capture reads it: no rename pairs to unpick, and no index refresh in a tree an agent may be using.
-  const status = gitRaw(w.path, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored', '--no-renames');
+  const status = gitRawResult(w.path, 'status', '--porcelain=v1', '-z', '--untracked-files=all', ...(wantIgnored ? ['--ignored'] : []), '--no-renames');
   const links = new Set(Array.isArray(w.links) ? w.links : []);
   const changes = [];
   const ignored = [];
-  for (const e of status.split('\0')) {
+  for (const e of status.stdout.split('\0')) {
     if (e.length < 4) continue;
     const file = e.slice(3);
     const bare = file.replace(/\/$/, '');
@@ -136,7 +141,7 @@ function stateOf(w) {
   const count = git(w.path, 'rev-list', '--count', 'HEAD', '--not', '--remotes');
   const unpushed = count.ok && /^\d+$/.test(count.stdout) ? Number(count.stdout) : null; // unknown is not 0
   const busy = BUSY.find((f) => fs.existsSync(path.join(w.gitDir, f))) || null;
-  return { branch: head.ok && head.stdout !== 'HEAD' ? head.stdout : null, changes, ignored, unpushed, busy };
+  return { branch: head.ok && head.stdout !== 'HEAD' ? head.stdout : null, changes, ignored, unpushed, busy, readable: status.ok };
 }
 const isLinkTo = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
 // Is `dir` the folder `top`, or inside it — compared on disk, as the disk spells it (find-product's rule).
@@ -315,9 +320,9 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
   // Every one is checked before any is removed: with --all, one refusal removes nothing.
   const refused = [];
   for (const f of found) {
-    const s = stateOf(f.w);
+    const s = stateOf(f.w, { ignored: true });
     const inside = !f.w.missing && within(cwd, f.w.path);
-    const why = planRemove({ path: f.w.path, missing: f.w.missing, inside, locked: f.w.locked, busy: s.busy, changes: s.changes, unpushed: s.unpushed });
+    const why = planRemove({ path: f.w.path, missing: f.w.missing, inside, locked: f.w.locked, busy: s.busy, changes: s.changes, unpushed: s.unpushed, readable: s.readable, product: f.t.repo === null });
     if (why.length) refused.push({ repo: f.t.repo, path: f.w.path, why });
     f.ignored = s.ignored;
   }

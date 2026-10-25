@@ -34,8 +34,8 @@ export function resolveDefaultBranch(git, productConfig) {
 // The branch a default-branch command commits on: the current one — or, in an epic's Product worktree
 // (#115), which sits DETACHED because the default branch is checked out in the main tree, the default
 // branch itself, so the commit is pushed as HEAD:<default>. Only when every commit HEAD holds that the
-// default branch lacks (fetched first) is one of yad's own default-branch commits — each says `[skip ci]`
-// in its subject: one a run made without --push, or whose push failed, is pushed by the next run, as in the
+// default branch lacks (fetched first) is one of yad's own default-branch commits — each subject is
+// `chore(product|gate): … [skip ci]`, so a `Revert "…"` of one, or a step's commit, is not: one a run made without --push, or whose push failed, is pushed by the next run, as in the
 // main checkout. Anything else (a step's unreviewed work) must never reach the default branch. A detached
 // HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
 export function branchToCommitOn(root, git, defaultBranch) {
@@ -43,13 +43,15 @@ export function branchToCommitOn(root, git, defaultBranch) {
   return branch === 'HEAD' && worktreeAt(root)?.repo === null && onlyYadCommitsAhead(git, defaultBranch) ? defaultBranch : branch;
 }
 
+// The subject every yad default-branch commit has (checkpoint, tidy, repo refresh, gate ci/repair/reopen).
+export const YAD_COMMIT_SUBJECT = /^chore\((product|gate)\): .* \[skip ci\]$/;
 // HEAD holds nothing origin/<default> lacks but yad's own `[skip ci]` commits. False when the fetch or the
 // read fails: unknown is not safe.
 export function onlyYadCommitsAhead(git, defaultBranch) {
   if (!git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return false;
   const ahead = git('log', '--format=%s', `origin/${defaultBranch}..HEAD`);
   if (!ahead.ok) return false;
-  return ahead.stdout.split('\n').filter(Boolean).every((s) => /\[skip ci\]/.test(s));
+  return ahead.stdout.split('\n').filter(Boolean).every((s) => YAD_COMMIT_SUBJECT.test(s));
 }
 
 // Guard: only commit on the default branch. Returns true when OK; on a non-default branch it prints the
