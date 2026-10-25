@@ -611,9 +611,15 @@ while IFS= read -r sha; do
   blockers="$(open_debt_on_thread "$prod" "$thread" "$epic")"
   if [ -n "$blockers" ]; then
     echo "FAIL [reconcile-debt]: thread ${thread} carries OPEN hotfix debt:"
-    printf '%s\n' "$blockers" | sed 's/^/    /'
-    echo "  -> Pay it first: update the Shape artifacts + add the regression test, then mark the"
-    echo "     reconcile-debt.json entry status: paid. The thread is frozen for new changes until then."
+    # Each owning epic with the full path of its ledger in the Product, so the entry is found at once (#386).
+    while IFS= read -r _owner; do
+      [ -n "$_owner" ] && echo "    ${_owner} — epics/${_owner}/.sdlc/reconcile-debt.json"
+    done <<DEBT_OWNERS
+$blockers
+DEBT_OWNERS
+    echo "  -> Pay it first: update the Shape artifacts + add the regression test, then set the open entry's"
+    echo "     \"status\" to \"paid\" in that file in the Product (\`yad reconcile check\` there lists every open entry)."
+    echo "     The thread is frozen for new changes until then."
     rc=1
     continue
   fi

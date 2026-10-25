@@ -478,7 +478,7 @@ another epic, no other change may ship on that thread.
 | `<link.md> says epic: <x>, but <story> is a story of <epic>. … Fix epic: in <link.md>.` | Set `epic:` to the story id's prefix. |
 | [Where the Product is read from](#where-the-product-is-read-from) messages | See that table. |
 | `-> epic <epic> does not exist in the product repo (orphan story link). …` | Fix the story id, or merge the epic's Shape review PRs into the Product first. |
-| `thread <thread> carries OPEN hotfix debt:` (the epics follow) | Do the owed work first: update the planning documents and add the regression test, then set that entry's `status` to `paid` in `epics/<epic>/.sdlc/reconcile-debt.json`. `yad reconcile check` lists open debt. |
+| `thread <thread> carries OPEN hotfix debt:` (then each epic with its ledger, `<epic> — epics/<epic>/.sdlc/reconcile-debt.json`, and how to pay it) | Do the owed work first: update the planning documents and add the regression test, then set that entry's `status` to `paid` in `epics/<epic>/.sdlc/reconcile-debt.json` in the Product. `yad reconcile check`, run in the Product, lists every open entry. |
 
 ## risk-map (advice only)
 
