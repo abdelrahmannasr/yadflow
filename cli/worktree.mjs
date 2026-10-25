@@ -236,16 +236,18 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
       if (!added.ok) throw err(CODE, `git could not add ${p.path}: ${added.stderr || added.stdout}`, 'fix what git says, then run this again — the worktrees this run made were taken back');
       made.push(p);
       const linked = linkNodeModules(p);
-      p.linked = linked;
       writeJSON(path.join(linkedGitDir(p.path), WORKTREE_RECORD), { epic, repo: p.repo, base: p.branch, created: today, by, links: linked });
       done.push({ repo: p.repo, path: p.path, base: p.branch, links: linked, added: true, existing: false });
     }
   } catch (e) {
     // Take back what this run made, so a re-run starts clean: each is fresh, holding only checked-out files.
-    // Every PLANNED link: a link made just before a failure is not in `linked` yet, and a fresh worktree had
-    // none of its own there.
+    // Only the links yad made (`p.linked`, filled as each is made): a planned path can hold a symlink git
+    // tracks at origin/<default>. Every planned path's exclude pair, though — only yad's marked pairs go.
     for (const p of made.reverse()) {
-      for (const rel of p.links) { const at = path.join(p.path, rel); if (isLinkTo(at)) fs.unlinkSync(at); }
+      for (const rel of p.linked || []) {
+        const at = path.join(p.path, rel);
+        try { if (isLinkTo(at)) fs.unlinkSync(at); } catch (u) { warn(`could not unlink ${at}: ${u.message}`); }
+      }
       if (git(p.main, 'worktree', 'remove', p.path).ok) dropExcludeLines(p.main, p.links);
       else warn(`could not take back ${p.path} — remove it with \`git worktree remove ${p.path}\``);
     }
@@ -265,12 +267,14 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
 // Link each planned node_modules into the new worktree. A `node_modules/` ignore line matches folders only,
 // and git sees a link as a file — so a link it would not ignore is excluded in the repo's own
 // `info/exclude` (local, never committed), or taken back: it must never be staged by a `git add -A`.
+// `p.linked` holds each link the moment it is made, so a rollback takes back exactly yad's own. Never throws.
 function linkNodeModules(p) {
-  const linked = [];
+  const linked = (p.linked = []);
   for (const rel of p.links) {
     const dst = path.join(p.path, rel);
     if (fs.existsSync(dst)) continue;
     try { fs.symlinkSync(path.join(p.main, rel), dst, process.platform === 'win32' ? 'junction' : 'dir'); } catch (e) { warn(`could not link ${rel}: ${e.message}`); continue; }
+    linked.push(rel);
     if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
       const file = excludeFile(p.path);
       try {
@@ -279,12 +283,11 @@ function linkNodeModules(p) {
         if (!had.split(/\r?\n/).includes(`/${rel}`)) fs.appendFileSync(file, `${had && !had.endsWith('\n') ? '\n' : ''}${EXCLUDE_MARK}\n/${rel}\n`);
       } catch { /* checked below */ }
       if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
-        fs.unlinkSync(dst);
+        try { fs.unlinkSync(dst); } catch (e) { warn(`${p.name}: could not take back the link ${dst}: ${e.message} — delete it before any \`git add -A\``); continue; }
+        linked.pop();
         warn(`${p.name}: ${rel} was not linked — git would not ignore the link, so a \`git add -A\` would commit it`);
-        continue;
       }
     }
-    linked.push(rel);
   }
   return linked;
 }

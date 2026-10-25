@@ -491,3 +491,30 @@ test('yad worktree remove puts the node_modules link back when git cannot remove
     assert.equal(fs.existsSync(awt), false);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+test('the add rollback never unlinks a node_modules symlink git tracks at origin/<default> (#115 follow-ups review 2)', { skip: process.platform === 'win32' && 'a sh hook and a tracked symlink' }, () => {
+  const { W, P, api, awt } = workspace();
+  try {
+    // origin/main now tracks a node_modules symlink; the main checkout, not yet merged, has its ignored folder.
+    const other = path.join(W, 'other');
+    git(W, 'clone', '-q', path.join(W, 'api.git'), other);
+    git(other, 'config', 'user.name', 'bob');
+    git(other, 'config', 'user.email', 'bob@corp.io');
+    fs.symlinkSync('src', path.join(other, 'node_modules'));
+    git(other, 'add', 'node_modules');
+    git(other, 'commit', '-qm', 'a tracked link');
+    git(other, 'push', '-q', 'origin', 'main');
+    const web = repoWithOrigin(W, 'web', { f: 'x\n' });
+    write(P, {
+      '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'web', path: '../web' }] }),
+      'epics/EP-x/epic.md': '---\nid: EP-x\ntype: chore\nstatus: draft\nrepos: [api, web]\n---\n# EP-x\n',
+    });
+    write(web, { '.git/hooks/post-checkout': '#!/bin/sh\nexit 1\n' });
+    fs.chmodSync(path.join(web, '.git/hooks/post-checkout'), 0o755);
+    const r = yad(P, 'worktree', 'add', 'EP-x', '--all');
+    assert.equal(r.code, 1, r.out);
+    assert.doesNotMatch(r.out, /could not take back/);
+    assert.equal(fs.existsSync(awt), false, 'api\'s worktree was taken back: its tracked link was left for git');
+    for (const at of [P, api, web]) assert.equal(git(at, 'worktree', 'list').split('\n').length, 1);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
