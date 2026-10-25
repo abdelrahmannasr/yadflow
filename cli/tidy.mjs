@@ -13,7 +13,7 @@ import { productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn } from './productcommit.mjs';
 import { foldTrust, foldBuild } from './ledger.mjs';
 import { epicRoot, isValidEpicId, readFrontmatter } from './epic-state.mjs';
 
@@ -47,8 +47,8 @@ export async function runTidy(root, opts = {}) {
 
   const { productConfig } = loadProduct(root);
   const git = productGit(root);
-  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, productConfig);
+  const branch = branchToCommitOn(root, git, defaultBranch);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad tidy up', root })) return;
 
   if (opts.epic && !isValidEpicId(opts.epic)) { fail(`invalid epic id '${opts.epic}'`); process.exitCode = 1; return; }

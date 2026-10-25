@@ -28,6 +28,7 @@ import { repoPathFromGitUrl } from './protection.mjs';
 import { readCommit, tasksOfCommit, prOfCommit, shipDrift } from './ship-drift.mjs';
 import { recordActor } from './skip.mjs';
 import { sealedEpic } from './thread.mjs';
+import { worktreeAt, sameDir } from './worktree-record.mjs';
 
 const CODE = 'YAD-STATE-009';
 const STORY_RE = /^EP-[a-z0-9-]+-S\d+$/;
@@ -382,33 +383,43 @@ export async function buildStep(root, { story, repo, step, to, reason, via = 'hu
 // here fails it: a problem is a warning with the fix. The file is the clone's working state, as Spec Kit's
 // own writes are — it is not committed.
 const SPEC_KIT_STEPS = new Set(['spec', 'tasks']);
+// A registered checkout's worktree for an epic, when yad made one beside it (#115); else null.
+function epicWorktreeOf(checkout, epic, repo) {
+  const at = path.join(path.dirname(checkout), `${path.basename(checkout)}--${epic}`);
+  const rec = worktreeAt(at);
+  return rec && rec.repo === repo && rec.epic === epic && sameDir(rec.main, checkout) ? at : null;
+}
+
 export function pinSpecKit(root, repo, story, step = 'spec') {
   let checkout;
   try { ({ checkout } = registeredRepo(root, repo)); } catch (e) { warn(`Spec Kit folder not pinned: ${e.message}${e.hint ? ` — ${e.hint}` : ''}`); return null; }
   if (!checkout) { info(`${repo} is not checked out here, so Spec Kit's feature folder was not pinned`); return null; }
-  const dir = path.join(checkout, '.specify');
+  // The story's epic has its own worktree of this repo (#115): the agent specs there, so the pin goes there.
+  const wt = epicWorktreeOf(checkout, storyEpic(story), repo);
+  const where = wt ? path.basename(wt) : repo;
+  const dir = path.join(wt ?? checkout, '.specify');
   const featureDirectory = `specs/${story}`;
-  const fix = `set it by hand: {"feature_directory":"${featureDirectory}"} in ${repo}/.specify/feature.json`;
+  const fix = `set it by hand: {"feature_directory":"${featureDirectory}"} in ${where}/.specify/feature.json`;
   let dirStat;
-  try { dirStat = fs.lstatSync(dir, { throwIfNoEntry: false }); } catch (e) { warn(`could not read ${repo}/.specify: ${e.message} — ${fix}`); return null; }
+  try { dirStat = fs.lstatSync(dir, { throwIfNoEntry: false }); } catch (e) { warn(`could not read ${where}/.specify: ${e.message} — ${fix}`); return null; }
   if (!dirStat) return null; // no .specify/: the repo does not use Spec Kit
   // A link is not followed: yad never writes through one.
-  if (!dirStat.isDirectory()) { info(`${repo}/.specify is not a plain folder, so Spec Kit's feature folder was not pinned — ${fix}`); return null; }
+  if (!dirStat.isDirectory()) { info(`${where}/.specify is not a plain folder, so Spec Kit's feature folder was not pinned — ${fix}`); return null; }
   const file = path.join(dir, 'feature.json');
   let have = {};
   try {
     const st = fs.lstatSync(file, { throwIfNoEntry: false });
-    if (st && !st.isFile()) { warn(`${repo}/.specify/feature.json is not a plain file, so it was left alone — ${fix}`); return null; }
+    if (st && !st.isFile()) { warn(`${where}/.specify/feature.json is not a plain file, so it was left alone — ${fix}`); return null; }
     if (st) have = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch { warn(`${repo}/.specify/feature.json cannot be read, so it was left alone — ${fix}`); return null; }
-  if (!isPlainObject(have)) { warn(`${repo}/.specify/feature.json is not a JSON object, so it was left alone — ${fix}`); return null; }
+  } catch { warn(`${where}/.specify/feature.json cannot be read, so it was left alone — ${fix}`); return null; }
+  if (!isPlainObject(have)) { warn(`${where}/.specify/feature.json is not a JSON object, so it was left alone — ${fix}`); return null; }
   const changed = have.feature_directory !== featureDirectory;
   if (changed) {
-    try { writeFileAtomic(file, JSON.stringify({ ...have, feature_directory: featureDirectory }) + '\n'); } catch (e) { warn(`could not write ${repo}/.specify/feature.json: ${e.message} — ${fix}`); return null; }
+    try { writeFileAtomic(file, JSON.stringify({ ...have, feature_directory: featureDirectory }) + '\n'); } catch (e) { warn(`could not write ${where}/.specify/feature.json: ${e.message} — ${fix}`); return null; }
   }
-  ok(`Spec Kit's feature folder in ${repo} ${changed ? 'is now' : 'is already'} ${featureDirectory}`);
+  ok(`Spec Kit's feature folder in ${where} ${changed ? 'is now' : 'is already'} ${featureDirectory}`);
   if (step === 'spec') hand(`when /speckit.specify runs, give it \`SPECIFY_FEATURE_DIRECTORY=${featureDirectory}\` — it makes a numbered folder of its own without it`);
-  return { file: `${repo}/.specify/feature.json`, featureDirectory, changed };
+  return { file: `${where}/.specify/feature.json`, featureDirectory, changed };
 }
 
 export async function buildTrust(root, { story, repo, step, verdict, signals = {}, ranBy = 'human', note = null, uid = null, task = null, today } = {}) {

@@ -20,7 +20,8 @@ import {
 import { readShips } from './ledger.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
-import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './productcommit.mjs';
+import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead } from './productcommit.mjs';
+import { worktreeAt } from './worktree-record.mjs';
 import {
   readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists, newestPrNumber,
@@ -1026,6 +1027,26 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = productConfig.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
+  // #115: a run that pushes (a merge, or the sweep) pushes HEAD to the default branch. From an epic's
+  // worktree on a step branch that would publish the step's unreviewed commits, so a NAMED branch other
+  // than the default is refused. A detached HEAD is allowed: some CI checks out that way (the shipped
+  // workflows check out the default branch by name). Compared with the configured default or origin/HEAD —
+  // never the current-branch fallback above, which always matches.
+  if (push && (merged || !branch)) {
+    const head = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+    const originHead = git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
+    const trunk = productConfig.default_branch || (originHead.ok && originHead.stdout ? originHead.stdout.replace(/^origin\//, '') : null);
+    // An epic's Product worktree sits detached: there, the same rule as the other default-branch commands.
+    // In a worktree the default branch is never left unknown: a missing setting must not skip this check.
+    const wtTrunk = trunk || resolveDefaultBranch(git, productConfig);
+    const detachedWorktree = head === 'HEAD' && worktreeAt(root)?.repo === null && !onlyYadCommitsAhead(git, wtTrunk);
+    if ((head && head !== 'HEAD' && trunk && head !== trunk) || detachedWorktree) {
+      fail(`on '${forTerminal(head === 'HEAD' ? 'a detached HEAD with commits of its own' : head)}', not the default branch '${forTerminal(trunk || wtTrunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
+      hand(`run it from the default branch: \`git switch ${forTerminal(trunk || wtTrunk)}\` (in an epic worktree, \`git fetch origin ${forTerminal(trunk || wtTrunk)}\` then \`git switch --detach origin/${forTerminal(trunk || wtTrunk)}\`)`);
+      process.exitCode = 1;
+      return { synced: 0, committed: false, pushed: false };
+    }
+  }
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
   // not merged) is read-only and pushes nothing; an advance lands on the default branch (see below).
 
@@ -1332,8 +1353,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // back to the current branch when hub.json names none, and a person may run this from any checkout
   // (E19 review). `stageIndexIfClean` keeps it out of a commit that does not hold what it read.
   const onDefault = (() => {
-    const head = git('rev-parse', '--abbrev-ref', 'HEAD');
-    return head.ok && head.stdout === resolveDefaultBranch(git, productConfig);
+    const trunk = resolveDefaultBranch(git, productConfig);
+    return branchToCommitOn(root, git, trunk) === trunk; // an epic Product worktree's detached HEAD too (#115)
   })();
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
@@ -1568,8 +1589,8 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   // --- publish: narrow, default-branch-only commit of the one repaired file ---
   preflightGuardReadiness(root);
   const git = productGit(root);
-  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, loadProduct(root).productConfig);
+  const branch = branchToCommitOn(root, git, defaultBranch);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair', root })) return did(true);
 
   const spec = path.relative(root, ledger.files.state);
@@ -1739,8 +1760,8 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
   }
   preflightGuardReadiness(root);
   const git = productGit(root);
-  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, loadProduct(root).productConfig);
+  const branch = branchToCommitOn(root, git, defaultBranch);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate reopen', root })) return answer({ written });
   // Only the files this run wrote, and only those git sees (a legacy mirror never committed is left out).
   const specs = written.filter((f) => git('add', '--', f).ok);

@@ -175,6 +175,9 @@ nothing reads it, and `yad doctor` fails on one left `true`.
   and the kill switch holds every step at human.
 - **The orchestrator never changes what a step does** — it calls the existing skills and owns only the
   advance decision and the trust record.
+- **One epic per folder when agents run in parallel (#115).** Each orchestrator runs in its epic's own
+  worktrees (`yad worktree add <epic> --all`), never in a checkout another agent is using; `yad build`
+  and `yad checkpoint` run from there reach that epic's Product worktree.
 
 ## Reference
 - The loop and the trust-verdict derivation: `references/run-loop.md`.

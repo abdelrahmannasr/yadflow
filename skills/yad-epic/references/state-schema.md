@@ -624,6 +624,16 @@ The shared procedure (run once the `EP-<slug>` is known):
    its new person-written `.sdlc/` files such as a change-epic's `change.json`. The verified ledger's `review/…` branch is created
    separately at review time and is untouched by this step.
 
+**Parallel agents: one worktree per epic (#115).** When several agents work at once, each on its own
+epic, none of them branches in the shared checkout: `yad worktree add EP-<slug> --all` makes the epic's own
+folder beside the Product (`<product>--EP-<slug>/`) and beside each code repo the epic names
+(`<repo>--EP-<slug>/`), detached at `origin/<default>`. The agent's session starts IN that folder, and the
+procedure above runs there unchanged (step 2 creates the branch from `origin/<default>`, since the default
+branch itself is checked out in the main tree). To get back to the trunk there, `git fetch origin <default>`
+then `git switch --detach origin/<default>`; `yad checkpoint` and the other default-branch commands work
+from that detached HEAD. When the epic's work is merged and pushed, `yad worktree remove EP-<slug> --all`;
+it refuses while anything there is not saved.
+
 **How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once — by `yad epic new`
 (or `yad foundation new` for the Product level) — on the **entry** step's authoring branch (`analysis/…`,
 `epic/…`, `change/…`, `foundation/…`, or `discovery/…` for a product level still in its old spelling).
