@@ -186,7 +186,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   (≤3 files) on its own branch. The diff stays inside the files the task declared (flag and STOP if it
   would grow). Commit ends with the task ID; `Contract-Change: yes` only if it touches the locked
   contract surface. Before any code, it asks in one batch the human-only decisions `spec.md` has not
-  answered yet (#357). On a light spec it reads the task from the marked tasks block of `spec.md` (#348).
+  answered yet (#357). On a light spec it reads the task from the marked tasks block of `spec.md` (#348). When agents work in parallel, it works in the epic's own worktree of the repo (`yad worktree add <epic> --repo <repo>`, #115).
 - **`yad-checks`** — Step C, the production-safety gates. Wire and run the CI gates: **spec-link**
   (every change links a real story/spec), **contract-check** (a contract-surface diff without a
   re-locked contract FAILS), **build/test/lint**, **verified-commits** (every commit platform-signed),

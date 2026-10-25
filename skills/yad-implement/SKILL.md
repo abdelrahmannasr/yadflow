@@ -90,7 +90,10 @@ STOP and point at `yad-spec`.
 
 ### Step 2 — Resolve the code repo and branch
 Confirm `demo-repos/<repo>/` is its own git repo (`.git` present). From its default branch, create the
-task branch `feat/<story>-<task>-<short-slug>`. If a branch for this task already exists, reuse it
+task branch `feat/<story>-<task>-<short-slug>`. When agents work in parallel, work in the epic's own
+worktree of the repo instead (`yad worktree add <epic> --repo <repo>` makes `<repo>--<epic>/` beside it,
+#115): create the task branch there from `origin/<default>`, since the default branch is checked out in
+the main tree. If a branch for this task already exists, reuse it
 rather than forking a second one (one task = one branch).
 
 **On the first implement in a repo, install the commit template** (idempotent): copy this skill's
