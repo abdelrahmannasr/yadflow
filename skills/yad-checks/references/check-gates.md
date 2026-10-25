@@ -78,6 +78,18 @@ Every gate stops on its failure except **risk-map**, which is advisory: there a 
   A maintenance commit that *does* carry a `Task:` trailer is resolved like any other: a malformed id
   or a missing `specs/<story>/link.md` **FAILS**. Otherwise the trailer is decorative on exempt
   commits and an unlinked `chore:` is indistinguishable from one naming a story that never existed.
+- **SHA exemption** (shared with lineage-check, epic-open and reconcile-debt — one byte-identical block).
+  A commit listed in `.sdlc/gate-exempt` (or `SDLC_GATE_EXEMPT`; one full hex SHA per line — 40
+  characters, 64 in a SHA-256 repo, `#` comments; a short SHA is refused, as a tag of that name would stand in for it) **PASSes** before anything else is judged,
+  so it skips every check of the four gates, not only the trailer's. `SDLC_GATE_EXEMPT` comes from the
+  pipeline config, which a PR may edit; it still names a file on the base, so it cannot list the PR's
+  own commits, and guarding the pipeline itself is branch protection's job. It is for history already on a shared
+  branch whose trailer cannot be reworded — otherwise every later range that holds it, a release PR
+  above all, fails again. The list is read **from the base**, never from the PR, so a PR cannot waive
+  its own commits. An entry exempts nothing, and is said as a note, when it is a branch or tag name, a
+  short SHA, a SHA of the wrong length for this repo (64 characters in a SHA-1 repo, 40 in a SHA-256
+  one — git would look it up as a ref name), an annotated tag's or a tree's SHA, or a SHA that names no
+  object here.
 - For every other commit, requires a `Task: <story>-<task>` trailer. **FAIL** if absent.
 - The trailer must be a well-formed `<story>-T<NN>` id. **FAIL** on a malformed trailer (e.g.
   `EP-demo-S01` with no `-T<NN>`) rather than letting it slip through the suffix-strip.
@@ -429,7 +441,10 @@ resolve the owning epic the same way: `Task:` trailer → `specs/<story>/link.md
 → the Product epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test`
 commits **with no `Task:` trailer** are exempt — like spec-link, the exemption waives the requirement
 for an owning epic, never the validity of one that is claimed, so a maintenance subject cannot buy a
-pass past the sealed-epic / orphan-thread / frozen-thread checks. When the **Product is not reachable** from CI (the usual case for a code-repo
+pass past the sealed-epic / orphan-thread / frozen-thread checks. The one deliberate exception is the
+SHA exemption (§1): a commit listed in the base's `.sdlc/gate-exempt` skips all three gates, those checks
+included, before anything else is judged — a reviewed waiver of one named commit, which no subject line
+can buy. When the **Product is not reachable** from CI (the usual case for a code-repo
 PR), each degrades to a **PASS-with-note** — the Product-side check (`yad doctor` / `yad reconcile`) covers
 that path, and spec-link still proves the story link.
 

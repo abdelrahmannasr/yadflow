@@ -456,6 +456,61 @@ resolve_product() {
   esac
 }
 
+# --- shared SHA exemption (byte-identical in spec-link / lineage-check / epic-open / reconcile-debt-check;
+# --- the gates are deliberately standalone, so it is duplicated, not sourced) ---
+# A commit already on a shared branch cannot be reworded without rewriting that branch, so one bad trailer
+# would fail every later PR whose range still holds it — and a release PR to the default branch walks the
+# whole release, so it fails again on every release until that commit reaches the base. `.sdlc/gate-exempt`
+# names such commits, one full SHA per line, `#` comments allowed; every per-commit gate passes
+# them, so a commit is waived once, in a reviewed change, instead of on every pipeline. A listed commit
+# skips EVERY check of the gate, not only its trailer's — a sealed epic or a frozen thread included. SDLC_GATE_EXEMPT
+# names another path in the repo. It comes from the pipeline config, which a PR may change where the PR's
+# own pipeline runs; it still names a file on the BASE whose every entry must be a full SHA, so it cannot
+# list the PR's own commits — and a PR that changes the pipeline could drop the gates anyway, which
+# required checks and branch protection, not this script, prevent. The list is read from the BASE, never from this PR — a PR that could
+# list its own commits would wave itself past every gate; an entry counts once it merges. An entry must be
+# a FULL hex SHA: git reads 40 hex characters (64 in a SHA-256 repo) as a commit, but looks a short one up as a tag or branch name
+# first — so a tag named like a listed short SHA would stand in for another commit, and a short SHA also
+# grows ambiguous as the repo grows. An entry that is not one, or names no commit here, exempts nothing;
+# both are said as notes, so a typo is visible.
+GATE_EXEMPT_FILE="${SDLC_GATE_EXEMPT:-.sdlc/gate-exempt}"
+exempt_shas=''
+load_exempt_shas() {
+  # Three dots: against the merge base, so a base that moved on is not mistaken for this PR's change.
+  # Only exit 1 means "it changed"; an error (no merge base) says nothing about the file.
+  _ex_rc=0
+  git diff --quiet "${BASE}...HEAD" -- "$GATE_EXEMPT_FILE" 2>/dev/null || _ex_rc=$?
+  if [ "$_ex_rc" -eq 1 ]; then
+    echo "note [$1]: ${GATE_EXEMPT_FILE} changes in this PR — the list is read from ${BASE}, not from this PR; the new one counts once it merges."
+  fi
+  git cat-file -e "${BASE}:${GATE_EXEMPT_FILE}" 2>/dev/null || return 0
+  _ex_list="$(git show "${BASE}:${GATE_EXEMPT_FILE}" 2>/dev/null | sed -E 's/#.*//; s/^[[:space:]]+//; s/[[:space:]]+$//')" || _ex_list=""
+  while IFS= read -r _ex; do
+    [ -z "$_ex" ] && continue
+    case "$_ex" in
+      *[!0123456789abcdef]*) echo "note [$1]: ${GATE_EXEMPT_FILE} entry '${_ex}' is not a lowercase hex SHA — it exempts nothing." ; continue ;;
+    esac
+    if [ "${#_ex}" -ne 40 ] && [ "${#_ex}" -ne 64 ]; then
+      echo "note [$1]: ${GATE_EXEMPT_FILE} entry '${_ex}' is not a full SHA (40 characters, or 64 in a SHA-256 repo) — it exempts nothing (a short one could be taken over by a tag or branch of that name)."
+      continue
+    fi
+    _ex_full="$(git rev-parse --verify --quiet "${_ex}^{commit}" 2>/dev/null)" || _ex_full=""
+    # Only an entry git reads back as exactly itself: hex of the other hash's length (64 in a SHA-1 repo,
+    # 40 in a SHA-256 one) is looked up as a tag or branch name first, so a ref of that name would stand in;
+    # and an annotated tag's own SHA peels to its commit's — the list names commits, as rev-list walks them.
+    if [ -z "$_ex_full" ] || [ "$_ex_full" != "$_ex" ]; then
+      echo "note [$1]: ${GATE_EXEMPT_FILE} entry '${_ex}' is not the full SHA of a commit here — it exempts nothing."
+      continue
+    fi
+    exempt_shas="${exempt_shas}${_ex_full}
+"
+  done <<EXEMPT_LIST
+$_ex_list
+EXEMPT_LIST
+}
+is_exempt_sha() { [ -n "$exempt_shas" ] && printf '%s' "$exempt_shas" | grep -qxF "$1"; }
+load_exempt_shas lineage-check
+
 commits="$(git rev-list --no-merges "$RANGE")"
 if [ -z "$commits" ]; then
   echo "PASS [lineage-check]: no non-merge commits in ${RANGE}"
@@ -468,6 +523,10 @@ while IFS= read -r sha; do
   short="$(git log -1 --format=%h "$sha")"
   subject="$(git log -1 --format=%s "$sha")"
   task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | awk '!f && length($0) { print; f = 1 }')"
+  if is_exempt_sha "$sha"; then
+    echo "PASS [lineage-check]: ${short} '${subject}' — SHA exemption (${GATE_EXEMPT_FILE} on ${BASE})"
+    continue
+  fi
   # The type exemption waives the REQUIREMENT for an owning epic, not the VALIDITY of one that is
   # claimed — same rule spec-link applies. Exempting on the subject alone would let `chore(x): …` plus
   # a Task trailer pointing at an orphaned/sealed epic bypass this gate entirely.
