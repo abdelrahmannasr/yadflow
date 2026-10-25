@@ -142,4 +142,10 @@ done <<EOF
 $commits
 EOF
 
+# Every failure above is fixed the same way: the commit is reworded, which rewrites it, so the branch is
+# force-pushed. Said once, with the real base, after the list (#386).
+if [ "$rc" -ne 0 ]; then
+  echo "  -> Reword each commit listed above: \`git commit --amend\` for the last one, or \`git rebase -i ${BASE}\` (mark it 'reword') for an older one; then force-push the branch (\`git push --force-with-lease\`)."
+fi
+
 exit "$rc"

@@ -4868,6 +4868,8 @@ test('commit-message gate: unknown type fails', () => {
   const r = runGate(COMMIT_MSG, T, ['main']);
   assert.equal(r.code, 1);
   assert.match(r.out, /is not '<type>/);
+  // What to change: reword it, with the real base, then force-push (#386).
+  assert.match(r.out, /-> Reword each commit listed above: `git commit --amend` for the last one, or `git rebase -i main` \(mark it 'reword'\) for an older one; then force-push the branch \(`git push --force-with-lease`\)\./);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

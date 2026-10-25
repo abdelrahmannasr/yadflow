@@ -530,6 +530,7 @@ is the same).
 | `<sha> subject '<subject>' is not '<type>(<scope>)?!?: <description>' (type one of: …).` | Reword the commit (`git commit --amend`, or `git rebase -i <base>`) and force-push. |
 | `<sha> subject '<subject>' must not end with a period.` | Remove the full stop the same way. |
 | `<sha> trailers out of order — expected Task -> Contract-Change -> Co-Authored-By.` | Reorder the trailers the same way. |
+| `-> Reword each commit listed above: git commit --amend for the last one, or git rebase -i <base> (mark it 'reword') for an older one; then force-push the branch (git push --force-with-lease).` | Printed once after any of the three above: it is the fix for all of them. |
 | `unknown --profile '<x>' …` | A wiring problem: use `code` or `product`. |
 
 ## pr-title
