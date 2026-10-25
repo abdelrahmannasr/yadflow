@@ -292,7 +292,7 @@ export function guardConfig(productRoot) {
 }
 
 const driftLine = (productRoot) =>
-  `note: ${path.join(productRoot, PROJECT_FILES.productConfig)} and ${PROJECT_FILES.productConfigLegacy} say different things, and one of them is verified, so this edit is guarded — run \`yad migrate\` to choose the copy to keep`;
+  `note: ${path.join(productRoot, PROJECT_FILES.productConfig)} and ${PROJECT_FILES.productConfigLegacy} say different things, and one of them is verified, so this edit is guarded — run \`yad migrate --apply --keep product\` (or \`--keep hub\`) to choose the copy to keep`;
 
 // What the agent is told when the edit is refused. Names the command that owns each transition —
 // the whole point of #171 was that the ledger write had no command behind it.

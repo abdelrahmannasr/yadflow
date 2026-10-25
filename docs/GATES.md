@@ -172,7 +172,7 @@ The Product's settings are kept under two names until v5: `.sdlc/product.json` a
 | Message | What to change |
 |---|---|
 | `FAIL [product-settings]: SDLC_PRODUCT_CONFIG (…) and SDLC_HUB_CONFIG (…) name files that say different things. Set only SDLC_PRODUCT_CONFIG.` | Remove `SDLC_HUB_CONFIG` from the job's environment. |
-| `FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things … Run yad migrate in the Product …` | In the Product, run `yad migrate --apply --keep product` (or `--keep hub`) to choose the copy to keep, then commit both files. |
+| `FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things … In the Product, run yad migrate --apply --keep product (or --keep hub) …` | In the Product, run `yad migrate --apply --keep product` (or `--keep hub`) to choose the copy to keep, then commit both files. |
 
 Gates that print them: spec-link, contract-check, backfill, lineage-check, epic-open, reconcile-debt,
 commit-message, verified-commits, ledger-guard and product-checkout. risk-map prints a note instead.
