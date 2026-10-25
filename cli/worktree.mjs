@@ -21,12 +21,12 @@ import { err } from './errors.mjs';
 import { epicRoot, readFrontmatter, isValidEpicId } from './epic-state.mjs';
 import { PROJECT_FILES, productConfigPath } from './manifest.mjs';
 import { resolveDefaultBranch } from './productcommit.mjs';
-import { WORKTREE_RECORD, worktreeAt, sameDir } from './worktree-record.mjs';
+import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir } from './worktree-record.mjs';
 
 const CODE = 'YAD-STATE-010';
 const git = (cwd, ...args) => run('git', args, { cwd });
 // Untrimmed: `run` trims, which eats the leading space of a porcelain entry (` M file`).
-const gitRaw = (cwd, ...args) => String(spawnSync('git', args, { cwd, encoding: 'utf8' }).stdout || '');
+const gitRaw = (cwd, ...args) => String(spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } }).stdout || '');
 // Files yad itself writes into a checkout as local working state: named apart when they keep a worktree
 // from being removed, so a finished epic does not look dirty for a reason nobody can see.
 export const YAD_LOCAL_FILES = ['.specify/feature.json', '.gitmessage'];
@@ -36,18 +36,22 @@ const BUSY = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG', 're
 export const worktreePath = (main, epic) => path.join(path.dirname(main), `${path.basename(main)}--${epic}`);
 
 // PURE: what `add` does for one target, from the facts the command read.
-//   facts: { main, epic, repo, hasOrigin, pathTaken, existing (path of this epic's yad worktree, or null),
-//            mainIsLinked (the checkout is itself a linked worktree) }
-// → { path, refuse: null | { message, hint } }
-export function planAdd({ main, epic, repo, hasOrigin, pathTaken, existing, mainIsLinked }) {
+//   facts: { main, epic, repo, hasOrigin, pathTaken, existing ({ path, missing } of this epic's yad
+//            worktree, or null), mainIsLinked (the checkout is itself a linked worktree), nested (a code
+//            repo kept inside the Product's folder) }
+// → { path, skip (already there: a re-run goes on with the rest), refuse: null | { message, hint } }
+export function planAdd({ main, epic, repo, hasOrigin, pathTaken, existing, mainIsLinked, nested = false }) {
   const where = worktreePath(main, epic);
   const name = repo ?? 'the Product';
-  const no = (message, hint) => ({ path: where, refuse: { message, hint } });
+  const no = (message, hint) => ({ path: where, skip: false, refuse: { message, hint } });
   if (mainIsLinked) return no(`${name}'s registered folder is itself a worktree`, 'register the main checkout, then run this again');
-  if (existing) return no(`${epic} already has a worktree for ${name}: ${existing}`, 'work there; `yad worktree list` shows them all');
-  if (pathTaken) return no(`${where} is already there`, 'move it away, or remove the old worktree with `yad worktree remove`');
+  // Its worktree would sit inside the Product's own checkout, and could not find the Product or its repos.
+  if (nested) return no(`${name} is kept inside the Product's folder, and a worktree is only made for a repo beside it`, 'keep the repo beside the Product (`../<repo>` in repos.json) to give it worktrees');
+  if (existing?.missing) return no(`${epic}'s worktree for ${name} is gone (${existing.path}), but git still lists it`, 'run `git worktree prune` in the main checkout, then run this again');
+  if (existing) return { path: existing.path, skip: true, refuse: null };
+  if (pathTaken) return no(`${where} is already there`, 'move it away (a worktree yad did not record: `git worktree remove` it), then run this again');
   if (!hasOrigin) return no(`${name} has no origin remote, so a worktree's work could not reach the default branch`, 'add the remote (`git remote add origin <url>`), then run this again');
-  return { path: where, refuse: null };
+  return { path: where, skip: false, refuse: null };
 }
 
 // PURE: why `remove` must not remove one worktree; [] means it may.
@@ -64,7 +68,8 @@ export function planRemove({ path: where, missing, inside, locked, busy, changes
     why.push({ reason: `${others.length} uncommitted or untracked file(s): ${others.slice(0, 5).join(', ')}${others.length > 5 ? ', …' : ''}`, fix: `commit and push them, or \`git -C ${where} stash -u\`` });
   }
   if (own.length) why.push({ reason: `yad's own working file(s) are there: ${own.join(', ')}`, fix: `they are local state, safe to delete: ${own.map((f) => `rm ${path.join(where, f)}`).join('; ')}` });
-  if (unpushed) why.push({ reason: `${unpushed} commit(s) are on no remote`, fix: `push them (\`git -C ${where} push origin HEAD:<branch>\`), or \`yad capture\`` });
+  if (unpushed === null) why.push({ reason: 'git could not count its commits that are on no remote', fix: `check \`git -C ${where} log --not --remotes\`` });
+  else if (unpushed) why.push({ reason: `${unpushed} commit(s) are on no remote`, fix: `push them (\`git -C ${where} push origin HEAD:<branch>\`), or \`yad capture\`` });
   return why;
 }
 
@@ -75,8 +80,8 @@ function productMain(root) {
   return rec && rec.repo === null && fs.existsSync(productConfigPath(rec.main)) ? rec.main : root;
 }
 
-// The checkouts an epic's worktrees can be made from: the Product, and every registered code repo that is
-// a checkout of its own beside or inside the workspace. → [{ repo: null|name, main, defaultBranch }]
+// The checkouts an epic's worktrees can be made from: the Product, and every registered code repo.
+// → [{ repo: null|name, main, defaultBranch, missing, nested }]
 function targetsOf(productRoot) {
   const main = productMain(productRoot);
   const config = readJSON(productConfigPath(main), null) || {};
@@ -87,7 +92,8 @@ function targetsOf(productRoot) {
     const at = path.resolve(main, r.path);
     if (sameDir(at, main)) continue; // the Product's own entry (a monorepo): its worktree is the Product's
     const named = typeof r.default_branch === 'string' && r.default_branch ? r.default_branch : null;
-    out.push({ repo: r.name, main: at, defaultBranch: named, missing: !fs.existsSync(path.join(at, '.git')) });
+    const nested = path.resolve(at).startsWith(path.resolve(main) + path.sep);
+    out.push({ repo: r.name, main: at, defaultBranch: named, missing: !fs.existsSync(path.join(at, '.git')), nested });
   }
   return out;
 }
@@ -113,26 +119,33 @@ export function yadWorktrees(main) {
 }
 
 function stateOf(w) {
-  if (w.missing) return { branch: null, changes: [], unpushed: 0 };
+  if (w.missing) return { branch: null, changes: [], ignored: [], unpushed: 0 };
   const head = git(w.path, 'rev-parse', '--abbrev-ref', 'HEAD');
-  const status = gitRaw(w.path, 'status', '--porcelain=v1', '-z', '--untracked-files=all');
+  // As capture reads it: no rename pairs to unpick, and no index refresh in a tree an agent may be using.
+  const status = gitRaw(w.path, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored', '--no-renames');
   const links = new Set(Array.isArray(w.links) ? w.links : []);
   const changes = [];
-  const parts = status.split('\0');
-  for (let i = 0; i < parts.length; i++) {
-    const e = parts[i];
+  const ignored = [];
+  for (const e of status.split('\0')) {
     if (e.length < 4) continue;
     const file = e.slice(3);
-    if (e[0] === 'R' || e[0] === 'C') i++; // the old name follows a rename or copy
     const bare = file.replace(/\/$/, '');
     if (links.has(bare) && isLinkTo(path.join(w.path, bare))) continue; // yad's own node_modules link
-    changes.push(file);
+    (e.startsWith('!!') ? ignored : changes).push(file);
   }
-  const unpushed = Number(git(w.path, 'rev-list', '--count', 'HEAD', '--not', '--remotes').stdout || 0);
+  const count = git(w.path, 'rev-list', '--count', 'HEAD', '--not', '--remotes');
+  const unpushed = count.ok && /^\d+$/.test(count.stdout) ? Number(count.stdout) : null; // unknown is not 0
   const busy = BUSY.find((f) => fs.existsSync(path.join(w.gitDir, f))) || null;
-  return { branch: head.ok && head.stdout !== 'HEAD' ? head.stdout : null, changes, unpushed, busy };
+  return { branch: head.ok && head.stdout !== 'HEAD' ? head.stdout : null, changes, ignored, unpushed, busy };
 }
 const isLinkTo = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+// Is `dir` the folder `top`, or inside it — compared on disk, as the disk spells it (find-product's rule).
+function within(dir, top) {
+  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+  const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const [d, t] = [real(dir), real(top)];
+  return !!d && !!t && (fold(d) === fold(t) || fold(d).startsWith(fold(t) + path.sep));
+}
 
 // The node_modules folders of the main checkout that git ignores, at the repo root and beside each tracked
 // package.json — linked into the worktree where it has none. Relative paths, POSIX form.
@@ -178,57 +191,93 @@ function pickTargets(productRoot, epic, { repo = null, all = false }) {
 export async function runWorktreeAdd(productRoot, { epic, repo = null, all = false, dryRun = false, today = null } = {}) {
   const targets = pickTargets(productRoot, epic, { repo, all });
   const plans = [];
+  // Every target is checked — and fetched — before any worktree is made, so a refusal makes nothing.
   for (const t of targets) {
     const name = t.repo ?? 'the Product';
     if (t.missing) throw err(CODE, `${t.repo} is not cloned here (${t.main})`, `\`yad repo clone ${t.repo}\` fetches it`);
-    const mainIsLinked = !!linkedGit(t.main);
-    const existing = yadWorktrees(t.main).find((w) => w.epic === epic && (w.repo ?? null) === t.repo)?.path ?? null;
-    const hasOrigin = git(t.main, 'remote', 'get-url', 'origin').ok;
+    const mine = yadWorktrees(t.main).find((w) => w.epic === epic && (w.repo ?? null) === t.repo);
     const where = worktreePath(t.main, epic);
-    const plan = planAdd({ main: t.main, epic, repo: t.repo, hasOrigin, pathTaken: fs.existsSync(where), existing, mainIsLinked });
+    const plan = planAdd({
+      main: t.main, epic, repo: t.repo, nested: !!t.nested, mainIsLinked: !!linkedGitDir(t.main),
+      hasOrigin: git(t.main, 'remote', 'get-url', 'origin').ok, pathTaken: fs.existsSync(where),
+      existing: mine ? { path: mine.path, missing: mine.missing } : null,
+    });
     if (plan.refuse) throw err(CODE, plan.refuse.message, plan.refuse.hint);
     const branch = t.defaultBranch || resolveDefaultBranch((...a) => git(t.main, ...a), {});
-    plans.push({ ...t, name, path: plan.path, branch, links: t.repo ? nodeModulesLinks(t.main) : [] });
+    plans.push({ ...t, name, path: plan.path, skip: plan.skip, branch, links: t.repo && !plan.skip ? nodeModulesLinks(t.main) : [] });
   }
   if (dryRun) {
-    for (const p of plans) info(`would add ${p.path} for ${p.name}, detached at origin/${p.branch}${p.links.length ? `, linking ${p.links.join(', ')}` : ''}`);
-    return { epic, dryRun: true, worktrees: plans.map((p) => ({ repo: p.repo, path: p.path, base: p.branch, links: p.links, added: false })) };
+    for (const p of plans) info(p.skip ? `${p.name}: ${p.path} is already there` : `would add ${p.path} for ${p.name}, detached at origin/${p.branch}${p.links.length ? `, linking ${p.links.join(', ')}` : ''}`);
+    return { epic, dryRun: true, worktrees: plans.map((p) => ({ repo: p.repo, path: p.path, base: p.branch, links: p.links, added: false, existing: p.skip })) };
   }
-  // Every target is checked before any is made, so a refusal never leaves half an epic's worktrees.
+  for (const p of plans.filter((x) => !x.skip)) {
+    if (!git(p.main, 'fetch', '--quiet', 'origin', `+refs/heads/${p.branch}:refs/remotes/origin/${p.branch}`).ok) {
+      throw err(CODE, `could not fetch ${p.branch} for ${p.name}`, `check the network and your login, and that ${p.branch} is its default branch — nothing was made`);
+    }
+  }
   const by = git(plans[0].main, 'config', 'user.name').stdout || null;
   const done = [];
-  for (const p of plans) {
-    if (!git(p.main, 'fetch', '--quiet', 'origin', `+refs/heads/${p.branch}:refs/remotes/origin/${p.branch}`).ok) {
-      throw err(CODE, `could not fetch ${p.branch} for ${p.name}`, `check the network and your login, and that ${p.branch} is its default branch`);
+  const made = [];
+  try {
+    for (const p of plans) {
+      if (p.skip) {
+        info(`${p.name}: ${p.path} is already there`);
+        done.push({ repo: p.repo, path: p.path, base: p.branch, links: [], added: false, existing: true });
+        continue;
+      }
+      const added = git(p.main, 'worktree', 'add', '--detach', p.path, `origin/${p.branch}`);
+      if (!added.ok) throw err(CODE, `git could not add ${p.path}: ${added.stderr || added.stdout}`, 'fix what git says, then run this again — the worktrees this run made were taken back');
+      made.push(p);
+      const linked = linkNodeModules(p);
+      p.linked = linked;
+      writeJSON(path.join(linkedGitDir(p.path), WORKTREE_RECORD), { epic, repo: p.repo, base: p.branch, created: today, by, links: linked });
+      done.push({ repo: p.repo, path: p.path, base: p.branch, links: linked, added: true, existing: false });
     }
-    const added = git(p.main, 'worktree', 'add', '--detach', p.path, `origin/${p.branch}`);
-    if (!added.ok) throw err(CODE, `git could not add ${p.path}: ${added.stderr || added.stdout}`, 'fix what git says, then run this again');
-    const gitDir = linkedGit(p.path);
-    const linked = [];
-    for (const rel of p.links) {
-      const dst = path.join(p.path, rel);
-      if (fs.existsSync(dst)) continue;
-      try { fs.symlinkSync(path.join(p.main, rel), dst, process.platform === 'win32' ? 'junction' : 'dir'); linked.push(rel); } catch (e) { warn(`could not link ${rel}: ${e.message}`); }
+  } catch (e) {
+    // Take back what this run made, so a re-run starts clean: each is fresh, holding only checked-out files.
+    for (const p of made.reverse()) {
+      for (const rel of p.linked || []) { const at = path.join(p.path, rel); if (isLinkTo(at)) fs.unlinkSync(at); }
+      if (!git(p.main, 'worktree', 'remove', p.path).ok) warn(`could not take back ${p.path} — remove it with \`git worktree remove ${p.path}\``);
     }
-    writeJSON(path.join(gitDir, WORKTREE_RECORD), { epic, repo: p.repo, base: p.branch, created: today, by, links: linked });
+    throw e;
+  }
+  for (const p of made) {
     ok(`${p.name}: ${p.path} (detached at origin/${p.branch})`);
-    if (linked.length) warn(`${p.name}: ${linked.join(', ')} ${linked.length > 1 ? 'are links' : 'is a link'} to the main checkout's — do not \`npm install\` in the worktree, or delete the link first`);
+    if (p.linked.length) warn(`${p.name}: ${p.linked.join(', ')} ${p.linked.length > 1 ? 'are links' : 'is a link'} to the main checkout's — do not \`npm install\` in the worktree, or delete the link first`);
     if (p.repo && (fs.existsSync(path.join(p.main, '.husky')) || git(p.main, 'config', 'core.hooksPath').stdout)) {
       info(`${p.name}: its git hooks run in the worktree too — a hook that rewrites files adds them to your commits`);
     }
-    done.push({ repo: p.repo, path: p.path, base: p.branch, links: linked, added: true });
   }
-  hand(`open each agent's session IN its worktree folder (the capture hook watches the folder the session started in), then make the step's usual branch there`);
+  if (made.length) hand(`open each agent's session IN its worktree folder (the capture hook watches the folder the session started in), then make the step's usual branch there`);
   return { epic, dryRun: false, worktrees: done };
 }
 
-const linkedGit = (top) => worktreeAt(top)?.gitDir ?? (() => {
-  try {
-    const text = fs.readFileSync(path.join(top, '.git'), 'utf8');
-    const m = text.match(/^gitdir:\s*(.+?)\s*$/m);
-    return m ? path.resolve(top, m[1]) : null;
-  } catch { return null; }
-})();
+// Link each planned node_modules into the new worktree. A `node_modules/` ignore line matches folders only,
+// and git sees a link as a file — so a link it would not ignore is excluded in the repo's own
+// `info/exclude` (local, never committed), or taken back: it must never be staged by a `git add -A`.
+function linkNodeModules(p) {
+  const linked = [];
+  for (const rel of p.links) {
+    const dst = path.join(p.path, rel);
+    if (fs.existsSync(dst)) continue;
+    try { fs.symlinkSync(path.join(p.main, rel), dst, process.platform === 'win32' ? 'junction' : 'dir'); } catch (e) { warn(`could not link ${rel}: ${e.message}`); continue; }
+    if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
+      const file = path.resolve(p.path, git(p.path, 'rev-parse', '--git-path', 'info/exclude').stdout || '.git/info/exclude');
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const had = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+        if (!had.split(/\r?\n/).includes(`/${rel}`)) fs.appendFileSync(file, `${had && !had.endsWith('\n') ? '\n' : ''}# yad worktree (#115): the node_modules link\n/${rel}\n`);
+      } catch { /* checked below */ }
+      if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
+        fs.unlinkSync(dst);
+        warn(`${p.name}: ${rel} was not linked — git would not ignore the link, so a \`git add -A\` would commit it`);
+        continue;
+      }
+    }
+    linked.push(rel);
+  }
+  return linked;
+}
 
 export async function runWorktreeList(productRoot, { epic = null } = {}) {
   const rows = [];
@@ -253,7 +302,9 @@ export async function runWorktreeList(productRoot, { epic = null } = {}) {
 }
 
 export async function runWorktreeRemove(productRoot, { epic, repo = null, all = false, cwd = process.cwd() } = {}) {
-  const targets = pickTargets(productRoot, epic, { repo, all });
+  // --all: every checkout's worktree for the epic, also one of a repo the epic no longer names.
+  const picked = pickTargets(productRoot, epic, { repo, all });
+  const targets = all ? targetsOf(productRoot) : picked;
   const found = [];
   for (const t of targets) {
     if (t.missing) continue;
@@ -265,10 +316,10 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
   const refused = [];
   for (const f of found) {
     const s = stateOf(f.w);
-    const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-    const inside = !f.w.missing && (real(cwd) === real(f.w.path) || real(cwd).startsWith(real(f.w.path) + path.sep));
+    const inside = !f.w.missing && within(cwd, f.w.path);
     const why = planRemove({ path: f.w.path, missing: f.w.missing, inside, locked: f.w.locked, busy: s.busy, changes: s.changes, unpushed: s.unpushed });
     if (why.length) refused.push({ repo: f.t.repo, path: f.w.path, why });
+    f.ignored = s.ignored;
   }
   if (refused.length) {
     for (const r of refused) for (const y of r.why) warn(`${r.repo ?? 'Product'}: ${r.path} — ${y.reason}; ${y.fix}`);
@@ -276,12 +327,15 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
   }
   const removed = [];
   for (const f of found) {
-    for (const rel of Array.isArray(f.w.links) ? f.w.links : []) {
-      const p = path.join(f.w.path, rel);
-      if (isLinkTo(p)) fs.unlinkSync(p); // the link only — never what it points at
-    }
+    // Files git ignores (an .env, build output) go with the folder, as `git worktree remove` does: said first.
+    if (f.ignored?.length) warn(`${f.t.repo ?? 'Product'}: removed with it, as git ignores them: ${f.ignored.slice(0, 8).join(', ')}${f.ignored.length > 8 ? ', …' : ''}`);
+    const links = (Array.isArray(f.w.links) ? f.w.links : []).filter((rel) => isLinkTo(path.join(f.w.path, rel)));
+    for (const rel of links) fs.unlinkSync(path.join(f.w.path, rel)); // the link only — never what it points at
     const r = git(f.t.main, 'worktree', 'remove', f.w.path);
-    if (!r.ok) throw err(CODE, `git could not remove ${f.w.path}: ${r.stderr || r.stdout}`, 'fix what git says, then run this again');
+    if (!r.ok) {
+      for (const rel of links) { try { fs.symlinkSync(path.join(f.t.main, rel), path.join(f.w.path, rel), process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* said below */ } }
+      throw err(CODE, `git could not remove ${f.w.path}: ${r.stderr || r.stdout}`, `fix what git says, then run this again${removed.length ? ` (already removed: ${removed.map((x) => x.path).join(', ')})` : ''}`);
+    }
     ok(`removed ${f.w.path}`);
     removed.push({ repo: f.t.repo, path: f.w.path });
   }

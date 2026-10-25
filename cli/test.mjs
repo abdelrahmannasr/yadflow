@@ -19419,7 +19419,8 @@ test('gate ci: the product level stays put on stale checks, on a local ledger, a
     // A person's manual sweep from a feature branch with work of its own: the push goes to the default
     // branch, so that work would land there unreviewed. (A branch sitting exactly at the default branch's
     // tip carries nothing extra, and is allowed — it is how a detached CI checkout looks.)
-    ['a feature branch', {}, {}, /not on trunk/, (ci) => {
+    // #115: refused first by gate ci's own branch guard, in its words; nothing is pushed either way.
+    ['a feature branch', {}, {}, /not on trunk|not the default branch 'trunk'/, (ci) => {
       git(ci, 'checkout', '-q', '-b', 'feature');
       fs.writeFileSync(path.join(ci, 'wip.md'), '# unreviewed\n');
       git(ci, 'add', 'wip.md');

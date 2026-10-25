@@ -70,13 +70,16 @@ function workspace({ product = {} } = {}) {
 test('worktree planners: the path beside the checkout, the refusals, and yad\'s own files named apart (#115)', () => {
   assert.equal(worktreePath('/ws/product', 'EP-x'), path.join('/ws', 'product--EP-x'));
   const base = { main: '/ws/api', epic: 'EP-x', repo: 'api', hasOrigin: true, pathTaken: false, existing: null, mainIsLinked: false };
-  assert.equal(planAdd(base).refuse, null);
-  assert.match(planAdd({ ...base, existing: '/ws/api--EP-x' }).refuse.message, /already has a worktree for api/);
+  assert.deepEqual(planAdd(base), { path: path.join('/ws', 'api--EP-x'), skip: false, refuse: null });
+  assert.deepEqual(planAdd({ ...base, existing: { path: '/ws/api--EP-x', missing: false } }), { path: '/ws/api--EP-x', skip: true, refuse: null }, 'a re-run goes on');
+  assert.match(planAdd({ ...base, existing: { path: '/ws/api--EP-x', missing: true } }).refuse.hint, /git worktree prune/);
+  assert.match(planAdd({ ...base, nested: true }).refuse.message, /kept inside the Product's folder/);
   assert.match(planAdd({ ...base, pathTaken: true }).refuse.message, /is already there/);
   assert.match(planAdd({ ...base, hasOrigin: false }).refuse.message, /no origin remote/);
   assert.match(planAdd({ ...base, mainIsLinked: true }).refuse.message, /itself a worktree/);
   assert.deepEqual(planRemove({ path: '/w' }), []);
   assert.equal(planRemove({ path: '/w', missing: true })[0].fix, 'run `git worktree prune` in the main checkout');
+  assert.match(planRemove({ path: '/w', unpushed: null })[0].reason, /could not count/, 'unknown is not 0');
   const why = planRemove({ path: '/w', inside: true, locked: 'agent 2', busy: 'MERGE_HEAD', changes: ['a.js', ...YAD_LOCAL_FILES], unpushed: 2 });
   assert.equal(why.length, 6);
   assert.match(why.map((y) => y.reason).join('\n'), /you are inside it\nit is locked \(agent 2\)\na MERGE_HEAD is half done in it\n1 uncommitted or untracked file\(s\): a\.js\nyad's own working file\(s\) are there: \.specify\/feature\.json, \.gitmessage\n2 commit\(s\) are on no remote/);
@@ -88,7 +91,7 @@ test('yad worktree add --all, list and remove: beside each checkout, detached, n
   try {
     let r = yad(P, 'worktree', 'add', 'EP-x', '--all', '--dry-run', '--json');
     assert.equal(r.code, 0, r.out);
-    assert.deepEqual(json(r).worktrees.map((w) => [w.repo, w.path, w.added, w.links]), [[null, pwt, false, []], ['api', awt, false, ['node_modules']]]);
+    assert.deepEqual(json(r).worktrees.map((w) => [w.repo, w.path, w.added, w.links, w.existing]), [[null, pwt, false, [], false], ['api', awt, false, ['node_modules'], false]]);
     assert.equal(fs.existsSync(pwt) || fs.existsSync(awt), false, 'a dry run makes nothing');
 
     r = yad(P, 'worktree', 'add', 'EP-x', '--all', '--json');
@@ -104,9 +107,14 @@ test('yad worktree add --all, list and remove: beside each checkout, detached, n
     assert.match(r.out, /node_modules is a link to the main checkout's — do not `npm install` in the worktree/);
     assert.match(r.out, /open each agent's session IN its worktree folder/);
 
-    r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api');
-    assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /YAD-STATE-010.*EP-x already has a worktree for api/s);
+    // The link is never staged: `node_modules/` matches folders only, so yad excludes the link itself.
+    assert.equal(git(awt, 'status', '--porcelain'), '');
+    git(awt, 'add', '-A');
+    assert.equal(git(awt, 'diff', '--cached', '--name-only'), '', 'git add -A stages nothing');
+
+    r = yad(P, 'worktree', 'add', 'EP-x', '--all', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).worktrees.map((w) => [w.repo, w.added, w.existing]), [[null, false, true], ['api', false, true]], 'a re-run finds them there');
 
     r = yad(P, 'worktree', 'list', '--json');
     assert.equal(r.code, 0, r.out);
@@ -286,5 +294,66 @@ test('yad build step spec in_progress pins the epic\'s code worktree when there 
     assert.deepEqual(json(r).specKit, { file: 'api--EP-x/.specify/feature.json', featureDirectory: 'specs/EP-x-S01', changed: true });
     assert.equal(JSON.parse(fs.readFileSync(path.join(awt, '.specify/feature.json'), 'utf8')).feature_directory, 'specs/EP-x-S01');
     assert.equal(fs.existsSync(path.join(api, '.specify/feature.json')), false, 'the main checkout is left alone');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree add --all makes nothing when one target cannot be fetched, and a repo inside the Product is refused (#115 review 1)', () => {
+  const { W, P, api, pwt } = workspace();
+  try {
+    git(api, 'remote', 'set-url', 'origin', path.join(W, 'gone.git'));
+    let r = yad(P, 'worktree', 'add', 'EP-x', '--all');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /could not fetch main for api/);
+    assert.equal(fs.existsSync(pwt), false, 'the Product worktree was not made either');
+    git(api, 'remote', 'set-url', 'origin', path.join(W, 'api.git'));
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--all').code, 0, 'and a re-run makes both');
+    // A code repo kept inside the Product's folder: its worktree could not find the Product.
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'inner', path: 'inner' }] }) });
+    repoWithOrigin(P, 'inner', { f: 'x\n' });
+    r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'inner');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /inner is kept inside the Product's folder/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('an epic Product worktree: yad\'s own unpushed commit is pushed by the next run; gate ci there refuses a step\'s commits (#115 review 1)', () => {
+  const { W, P, pwt } = workspace({ product: { platform: 'github', git_url: 'https://github.com/acme/product', default_branch: 'main' } });
+  try {
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x').code, 0);
+    git(pwt, 'config', 'user.name', 'bob');
+    git(pwt, 'config', 'user.email', 'bob@corp.io');
+    write(pwt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T01-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T01', repo: 'api', mergeCommit: 'abc', date: '2026-10-25' }) });
+    let r = yad(pwt, 'checkpoint');
+    assert.equal(r.code, 0, r.out);
+    // The next run, with something new, is not refused for that unpushed yad commit, and pushes both.
+    write(pwt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T02-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T02', repo: 'api', mergeCommit: 'def', date: '2026-10-25' }) });
+    r = yad(pwt, 'checkpoint', '--push');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(git(path.join(W, 'product.git'), 'log', '-2', '--format=%s', 'main').split('\n').map((x) => /sync Build state/.test(x)), [true, true], 'the earlier commit went up too');
+    // gate ci from the worktree with a step's commit on its detached HEAD: refused, nothing pushed.
+    write(pwt, { 'epics/EP-x/epic.md': '---\nid: EP-x\n---\n# unreviewed\n' });
+    git(pwt, 'commit', '-qam', 'author epic');
+    const head = git(path.join(W, 'product.git'), 'rev-parse', 'main');
+    r = yad(pwt, 'gate', 'ci');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /a detached HEAD with commits of its own', not the default branch 'main'/);
+    assert.equal(git(path.join(W, 'product.git'), 'rev-parse', 'main'), head);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree remove says which ignored files go with it (#115 review 1)', () => {
+  const { W, P, awt } = workspace();
+  try {
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api').code, 0);
+    git(awt, 'config', 'user.name', 'bob');
+    git(awt, 'config', 'user.email', 'bob@corp.io');
+    fs.appendFileSync(path.join(awt, '.gitignore'), '.env\n');
+    git(awt, 'commit', '-qam', 'ignore env');
+    git(awt, 'push', '-q', 'origin', 'HEAD:refs/heads/ignore-env');
+    write(awt, { '.env': 'SECRET=1\n' });
+    const r = yad(P, 'worktree', 'remove', 'EP-x', '--repo', 'api');
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /removed with it, as git ignores them: \.env/);
+    assert.doesNotMatch(r.out, /removed with it, as git ignores them: .*node_modules/, 'yad\'s own link is not listed');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });

@@ -20,7 +20,8 @@ import {
 import { readShips } from './ledger.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
-import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn } from './productcommit.mjs';
+import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead } from './productcommit.mjs';
+import { worktreeAt } from './worktree-record.mjs';
 import {
   readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists, newestPrNumber,
@@ -1035,8 +1036,10 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     const head = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
     const originHead = git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
     const trunk = productConfig.default_branch || (originHead.ok && originHead.stdout ? originHead.stdout.replace(/^origin\//, '') : null);
-    if (head && head !== 'HEAD' && trunk && head !== trunk) {
-      fail(`on '${forTerminal(head)}', not the default branch '${forTerminal(trunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
+    // An epic's Product worktree sits detached: there, the same rule as the other default-branch commands.
+    const detachedWorktree = head === 'HEAD' && worktreeAt(root)?.repo === null && trunk && !onlyYadCommitsAhead(git, trunk);
+    if ((head && head !== 'HEAD' && trunk && head !== trunk) || detachedWorktree) {
+      fail(`on '${forTerminal(head === 'HEAD' ? 'a detached HEAD with commits of its own' : head)}', not the default branch '${forTerminal(trunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
       hand(`run it from the default branch: \`git switch ${forTerminal(trunk)}\` (in an epic worktree, \`git fetch origin ${forTerminal(trunk)}\` then \`git switch --detach origin/${forTerminal(trunk)}\`)`);
       process.exitCode = 1;
       return { synced: 0, committed: false, pushed: false };

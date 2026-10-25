@@ -99,7 +99,10 @@ export function findProduct(start) {
       // An epic's worktree of a registered repo (#115), beside it: that repo — and the Product commands go
       // to the same epic's Product worktree when there is one, so its Build records stay in its own tree.
       const wt = codeWorktreeOf(ws.product, from);
-      if (wt) return { root: epicProductWorktree(ws.product, wt.epic) ?? ws.product, via: 'workspace', workspace: d, repo: wt.meta, worktree: wt.epic };
+      if (wt) {
+        const epicTree = epicProductWorktree(ws.product, wt.epic);
+        return { root: epicTree ?? ws.product, via: 'workspace', workspace: d, repo: wt.meta, ...(epicTree ? { worktree: wt.epic } : {}) };
+      }
       return { elsewhere: ws.product };
     }
     if (fs.existsSync(path.join(d, '.git'))) crossedRepo = true;

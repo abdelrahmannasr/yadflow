@@ -33,14 +33,23 @@ export function resolveDefaultBranch(git, productConfig) {
 
 // The branch a default-branch command commits on: the current one — or, in an epic's Product worktree
 // (#115), which sits DETACHED because the default branch is checked out in the main tree, the default
-// branch itself, so the commit is pushed as HEAD:<default>. Only when HEAD holds nothing the default branch
-// lacks (fetched first): a detached HEAD on a step branch's unreviewed commits must never reach it. A
-// detached HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
+// branch itself, so the commit is pushed as HEAD:<default>. Only when every commit HEAD holds that the
+// default branch lacks (fetched first) is one of yad's own default-branch commits — each says `[skip ci]`
+// in its subject: one a run made without --push, or whose push failed, is pushed by the next run, as in the
+// main checkout. Anything else (a step's unreviewed work) must never reach the default branch. A detached
+// HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
 export function branchToCommitOn(root, git, defaultBranch) {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  if (branch !== 'HEAD' || worktreeAt(root)?.repo !== null) return branch;
-  if (!git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return branch;
-  return git('merge-base', '--is-ancestor', 'HEAD', `origin/${defaultBranch}`).ok ? defaultBranch : branch;
+  return branch === 'HEAD' && worktreeAt(root)?.repo === null && onlyYadCommitsAhead(git, defaultBranch) ? defaultBranch : branch;
+}
+
+// HEAD holds nothing origin/<default> lacks but yad's own `[skip ci]` commits. False when the fetch or the
+// read fails: unknown is not safe.
+export function onlyYadCommitsAhead(git, defaultBranch) {
+  if (!git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return false;
+  const ahead = git('log', '--format=%s', `origin/${defaultBranch}..HEAD`);
+  if (!ahead.ok) return false;
+  return ahead.stdout.split('\n').filter(Boolean).every((s) => /\[skip ci\]/.test(s));
 }
 
 // Guard: only commit on the default branch. Returns true when OK; on a non-default branch it prints the
@@ -58,7 +67,7 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
   fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
   // An epic worktree (#115) refused here holds commits origin/<default> lacks, or could not fetch it.
   if (branch === 'HEAD' && root && worktreeAt(root)?.repo === null) {
-    hand(`this epic worktree's HEAD has commits origin/${d} does not (or the fetch failed): push them where they belong, then \`git fetch origin ${d}\` and \`git switch --detach origin/${d}\``);
+    hand(`this epic worktree's HEAD has commits origin/${d} does not that are not yad's own (or the fetch failed) — a step's work goes on its branch and through review: \`git switch -c <step>/<epic>\` keeps it, then \`git fetch origin ${d}\` and \`git switch --detach origin/${d}\``);
     process.exitCode = 1;
     return false;
   }
