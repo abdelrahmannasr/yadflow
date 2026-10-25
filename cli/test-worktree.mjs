@@ -443,23 +443,30 @@ test('yad worktree remove drops yad\'s exclude lines once no worktree of the rep
     const left = fs.readFileSync(exclude, 'utf8');
     assert.doesNotMatch(left, /yad worktree|^\/node_modules$/m, 'the last link gone: so is the pair');
     assert.match(left, /^\/scratch$/m, 'the person\'s own line stays');
-    assert.equal(fs.existsSync(awt), false);
+    assert.equal(fs.existsSync(awt) || fs.existsSync(path.join(W, 'api--EP-y')), false);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
 test('yad worktree add --all takes back what it made when git fails — also the half-made worktree git keeps (#115 follow-up)', { skip: process.platform === 'win32' && 'a sh hook' }, () => {
   const { W, P, api, pwt, awt } = workspace();
   try {
+    // A second repo, last: api is made and linked before web fails.
+    const web = repoWithOrigin(W, 'web', { 'package.json': '{}\n', '.gitignore': 'node_modules/\n' });
+    write(P, {
+      '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'web', path: '../web' }] }),
+      'epics/EP-x/epic.md': '---\nid: EP-x\ntype: chore\nstatus: draft\nrepos: [api, web]\n---\n# EP-x\n',
+    });
     // git keeps a worktree whose post-checkout hook fails, and still exits 1.
-    write(api, { '.git/hooks/post-checkout': '#!/bin/sh\nexit 1\n' });
-    fs.chmodSync(path.join(api, '.git/hooks/post-checkout'), 0o755);
+    write(web, { '.git/hooks/post-checkout': '#!/bin/sh\nexit 1\n' });
+    fs.chmodSync(path.join(web, '.git/hooks/post-checkout'), 0o755);
     const r = yad(P, 'worktree', 'add', 'EP-x', '--all');
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /git could not add .*api--EP-x[\s\S]*were taken back/);
-    assert.equal(fs.existsSync(pwt), false, 'the Product worktree made first is gone');
-    assert.equal(fs.existsSync(awt), false, 'and so is the one git kept');
-    assert.equal(git(P, 'worktree', 'list').split('\n').length, 1);
-    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1);
+    assert.match(r.out, /git could not add .*web--EP-x[\s\S]*were taken back/);
+    assert.equal(fs.existsSync(pwt) || fs.existsSync(awt), false, 'the worktrees made first are gone');
+    assert.equal(fs.existsSync(path.join(W, 'web--EP-x')), false, 'and so is the one git kept');
+    for (const at of [P, api, web]) assert.equal(git(at, 'worktree', 'list').split('\n').length, 1);
+    assert.doesNotMatch(fs.readFileSync(path.join(api, '.git/info/exclude'), 'utf8'), /yad worktree/, 'api\'s exclude pair went with it');
+    assert.equal(fs.readFileSync(path.join(api, 'node_modules/dep/index.js'), 'utf8'), 'dep\n', 'only the link went');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 

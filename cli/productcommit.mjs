@@ -39,7 +39,8 @@ export function resolveDefaultBranch(git, productConfig) {
 // without --push, or whose push failed, is pushed by the next run, as in the main checkout. Anything else (a step's unreviewed work) must never reach the default branch. A detached
 // HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
 // `fetch: false` judges by the local origin/<default> — for a caller that writes a derived file and pushes
-// nothing (the index refresh): a stale or missing ref can only make it skip, and it asks no network.
+// nothing (the index refresh): a stale or missing ref can only make it skip — unless the default branch
+// was rewound — and it asks no network.
 export function branchToCommitOn(root, git, defaultBranch, { fetch = true } = {}) {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   return branch === 'HEAD' && worktreeAt(root)?.repo === null && onlyYadCommitsAhead(git, defaultBranch, { fetch }) ? defaultBranch : branch;

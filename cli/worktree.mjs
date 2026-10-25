@@ -242,9 +242,11 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
     }
   } catch (e) {
     // Take back what this run made, so a re-run starts clean: each is fresh, holding only checked-out files.
+    // Every PLANNED link: a link made just before a failure is not in `linked` yet, and a fresh worktree had
+    // none of its own there.
     for (const p of made.reverse()) {
-      for (const rel of p.linked || []) { const at = path.join(p.path, rel); if (isLinkTo(at)) fs.unlinkSync(at); }
-      if (git(p.main, 'worktree', 'remove', p.path).ok) dropExcludeLines(p.main, p.linked || []);
+      for (const rel of p.links) { const at = path.join(p.path, rel); if (isLinkTo(at)) fs.unlinkSync(at); }
+      if (git(p.main, 'worktree', 'remove', p.path).ok) dropExcludeLines(p.main, p.links);
       else warn(`could not take back ${p.path} — remove it with \`git worktree remove ${p.path}\``);
     }
     throw e;
