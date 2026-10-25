@@ -856,8 +856,8 @@ QSTORIES
   echo "  -> If it changes the surface: Route back to the architecture gate — update + re-lock contract.md"
   echo "     in the product repo, or, if this epic is on a short lane (chore/spike) and has no architecture"
   echo "     gate, move the surface change to a new epic on the classic route,"
-  echo "     re-run yad-spec, then implement with Contract-Change: yes. The surface is never widened"
-  echo "     from inside a code repo."
+  echo "     re-run yad-spec, then implement with Contract-Change: yes (\`yad commit --contract-change\` adds"
+  echo "     the trailer). The surface is never widened from inside a code repo."
   exit 1
 fi
 while IFS= read -r story; do

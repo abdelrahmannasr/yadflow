@@ -845,6 +845,7 @@ test('contract-check gate: each reason a slice is not a quote says what to chang
     fs.rmSync(T, { recursive: true, force: true });
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /FAIL \[contract-check\]: contract surface changed without a 'Contract-Change: yes' trailer\./, r.out);
+    assert.match(r.out, /implement with Contract-Change: yes \(`yad commit --contract-change` adds\n\s+the trailer\)/, r.out); // #386
     const line = r.out.split('\n').find((l) => l.startsWith(`  ${starts}`));
     assert.ok(line, `no reason starting '${starts}':\n${r.out}`);
     return line;
