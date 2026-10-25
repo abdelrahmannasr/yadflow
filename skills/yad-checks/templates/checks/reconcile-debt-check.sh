@@ -617,8 +617,8 @@ while IFS= read -r sha; do
     done <<DEBT_OWNERS
 $blockers
 DEBT_OWNERS
-    echo "  -> Pay it first: update the Shape artifacts + add the regression test, then set the open entry's"
-    echo "     \"status\" to \"paid\" in that file in the Product (\`yad reconcile check\` there lists every open entry)."
+    echo "  -> Pay it first: update the Shape artifacts + add the regression test, then set each open entry's"
+    echo "     \"status\" to \"paid\" in each file listed above, in the Product (\`yad reconcile check\` there lists every open entry)."
     echo "     The thread is frozen for new changes until then."
     rc=1
     continue

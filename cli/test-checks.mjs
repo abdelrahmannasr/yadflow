@@ -4066,7 +4066,7 @@ test('reconcile-debt gate: an ABSOLUTE product-repo reaches the Product and free
   assert.match(r.out, /thread EP-root carries OPEN hotfix debt/);
   // What to change: the ledger's full path, and the command that lists it (#386).
   assert.match(r.out, /^ {4}EP-fix — epics\/EP-fix\/\.sdlc\/reconcile-debt\.json$/m);
-  assert.match(r.out, /set the open entry's\n\s+"status" to "paid" in that file in the Product \(`yad reconcile check` there lists every open entry\)/);
+  assert.match(r.out, /set each open entry's\n\s+"status" to "paid" in each file listed above, in the Product \(`yad reconcile check` there lists every open entry\)/);
   fs.rmSync(productConfig, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
