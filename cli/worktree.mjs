@@ -21,7 +21,7 @@ import { err } from './errors.mjs';
 import { epicRoot, readFrontmatter, isValidEpicId } from './epic-state.mjs';
 import { PROJECT_FILES, productConfigPath } from './manifest.mjs';
 import { resolveDefaultBranch } from './productcommit.mjs';
-import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir } from './worktree-record.mjs';
+import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir, commonDirOf } from './worktree-record.mjs';
 
 const CODE = 'YAD-STATE-010';
 const git = (cwd, ...args) => run('git', args, { cwd });
@@ -231,6 +231,8 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
         continue;
       }
       const added = git(p.main, 'worktree', 'add', '--detach', p.path, `origin/${p.branch}`);
+      // git keeps a worktree whose post-checkout hook failed, and still fails: that one is taken back too.
+      if (!added.ok && sameDir(commonDirOf(linkedGitDir(p.path) || ''), path.join(p.main, '.git'))) made.push(p);
       if (!added.ok) throw err(CODE, `git could not add ${p.path}: ${added.stderr || added.stdout}`, 'fix what git says, then run this again — the worktrees this run made were taken back');
       made.push(p);
       const linked = linkNodeModules(p);
@@ -242,7 +244,8 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
     // Take back what this run made, so a re-run starts clean: each is fresh, holding only checked-out files.
     for (const p of made.reverse()) {
       for (const rel of p.linked || []) { const at = path.join(p.path, rel); if (isLinkTo(at)) fs.unlinkSync(at); }
-      if (!git(p.main, 'worktree', 'remove', p.path).ok) warn(`could not take back ${p.path} — remove it with \`git worktree remove ${p.path}\``);
+      if (git(p.main, 'worktree', 'remove', p.path).ok) dropExcludeLines(p.main, p.linked || []);
+      else warn(`could not take back ${p.path} — remove it with \`git worktree remove ${p.path}\``);
     }
     throw e;
   }
@@ -267,11 +270,11 @@ function linkNodeModules(p) {
     if (fs.existsSync(dst)) continue;
     try { fs.symlinkSync(path.join(p.main, rel), dst, process.platform === 'win32' ? 'junction' : 'dir'); } catch (e) { warn(`could not link ${rel}: ${e.message}`); continue; }
     if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
-      const file = path.resolve(p.path, git(p.path, 'rev-parse', '--git-path', 'info/exclude').stdout || '.git/info/exclude');
+      const file = excludeFile(p.path);
       try {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         const had = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-        if (!had.split(/\r?\n/).includes(`/${rel}`)) fs.appendFileSync(file, `${had && !had.endsWith('\n') ? '\n' : ''}# yad worktree (#115): the node_modules link\n/${rel}\n`);
+        if (!had.split(/\r?\n/).includes(`/${rel}`)) fs.appendFileSync(file, `${had && !had.endsWith('\n') ? '\n' : ''}${EXCLUDE_MARK}\n/${rel}\n`);
       } catch { /* checked below */ }
       if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
         fs.unlinkSync(dst);
@@ -282,6 +285,28 @@ function linkNodeModules(p) {
     linked.push(rel);
   }
   return linked;
+}
+
+// `info/exclude` is a common-dir file: the main checkout and every worktree of the repo share it.
+const EXCLUDE_MARK = '# yad worktree (#115): the node_modules link';
+const excludeFile = (dir) => path.resolve(dir, git(dir, 'rev-parse', '--git-path', 'info/exclude').stdout || '.git/info/exclude');
+// After a worktree is gone: drop yad's own pair (the mark, then `/<rel>`) for each link no other yad
+// worktree of the repo still has — another epic's link must stay unstageable. Only a pair under yad's mark
+// goes; a line the person wrote stays.
+export function dropExcludeLines(main, rels) {
+  const kept = new Set(yadWorktrees(main).flatMap((w) => (Array.isArray(w.links) ? w.links : [])));
+  const gone = new Set(rels.filter((rel) => !kept.has(rel)).map((rel) => `/${rel}`));
+  if (!gone.size) return;
+  const file = excludeFile(main);
+  let lines;
+  try { lines = fs.readFileSync(file, 'utf8').split('\n'); } catch { return; }
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].replace(/\r$/, '') === EXCLUDE_MARK && gone.has((lines[i + 1] ?? '').replace(/\r$/, ''))) { i++; continue; }
+    out.push(lines[i]);
+  }
+  if (out.length === lines.length) return;
+  try { fs.writeFileSync(file, out.join('\n')); } catch (e) { warn(`could not tidy ${file}: ${e.message} — yad's lines there are harmless`); }
 }
 
 export async function runWorktreeList(productRoot, { epic = null } = {}) {
@@ -341,6 +366,7 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
       for (const rel of links) { try { fs.symlinkSync(path.join(f.t.main, rel), path.join(f.w.path, rel), process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* said below */ } }
       throw err(CODE, `git could not remove ${f.w.path}: ${r.stderr || r.stdout}`, `fix what git says, then run this again${removed.length ? ` (already removed: ${removed.map((x) => x.path).join(', ')})` : ''}`);
     }
+    dropExcludeLines(f.t.main, Array.isArray(f.w.links) ? f.w.links : []); // also a link the person deleted
     ok(`removed ${f.w.path}`);
     removed.push({ repo: f.t.repo, path: f.w.path });
   }

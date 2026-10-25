@@ -13,6 +13,7 @@ import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES } from './worktree.m
 import { worktreeAt } from './worktree-record.mjs';
 import { registryEntryFor, findProduct } from './find-product.mjs';
 import { branchToCommitOn, YAD_COMMIT_SUBJECT } from './productcommit.mjs';
+import { refreshIndexAfterWrite, INDEX_FILE } from './product-index.mjs';
 import { run } from './lib.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -21,10 +22,11 @@ const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) =>
   !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && !/^(CI|GITLAB_CI|GITHUB_ACTIONS|SDLC_BASE|SDLC_HUB_CONFIG|SDLC_PRODUCT_CONFIG)$/.test(k) && !/^(CI_|GITHUB_)/.test(k)));
 ENV.GIT_CONFIG_GLOBAL = '/dev/null';
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: ENV }).toString().trim();
-const yad = (cwd, ...args) => {
-  const r = spawnSync(process.execPath, [YAD, ...args], { cwd, env: { ...ENV, PWD: cwd, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1', NO_COLOR: '1' }, encoding: 'utf8' });
+const yadWith = (env, cwd, ...args) => {
+  const r = spawnSync(process.execPath, [YAD, ...args], { cwd, env: { ...ENV, ...env, PWD: cwd, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1', NO_COLOR: '1' }, encoding: 'utf8' });
   return { code: r.status, out: `${r.stdout}${r.stderr}`, stdout: r.stdout, stderr: r.stderr };
 };
+const yad = (cwd, ...args) => yadWith({}, cwd, ...args);
 const json = (r) => JSON.parse(r.stdout);
 
 function write(dir, files) {
@@ -390,5 +392,95 @@ test('gate ci in an epic Product worktree with no default branch set still refus
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /a detached HEAD with commits of its own', not the default branch 'main'/);
     assert.equal(git(path.join(W, 'product.git'), 'rev-parse', 'main'), head);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('the index refresh in an epic Product worktree asks no network: offline, it still rebuilds (#115 follow-up)', () => {
+  const { W, P, pwt } = workspace();
+  try {
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x').code, 0);
+    git(pwt, 'remote', 'set-url', 'origin', path.join(W, 'gone.git')); // offline: every fetch fails
+    const g = (...a) => run('git', a, { cwd: pwt });
+    assert.equal(branchToCommitOn(pwt, g, 'main'), 'HEAD', 'a command that pushes still fetches first, and refuses');
+    assert.equal(refreshIndexAfterWrite(pwt, null, { quiet: true }), true, 'a derived file is judged by the local origin/main');
+    assert.equal(fs.existsSync(path.join(pwt, INDEX_FILE)), true);
+    // A step's commit: the local ref says no, as the fetched one would.
+    git(pwt, 'config', 'user.name', 'bob');
+    git(pwt, 'config', 'user.email', 'bob@corp.io');
+    git(pwt, 'add', INDEX_FILE);
+    git(pwt, 'commit', '-qm', 'docs(EP-x): author epic');
+    fs.rmSync(path.join(pwt, INDEX_FILE));
+    assert.equal(refreshIndexAfterWrite(pwt, null), false);
+    assert.equal(fs.existsSync(path.join(pwt, INDEX_FILE)), false);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree remove drops yad\'s exclude lines once no worktree of the repo has the link; a person\'s own line stays (#115 follow-up)', () => {
+  const { W, P, api, awt } = workspace();
+  try {
+    write(P, {
+      'epics/EP-y/epic.md': '---\nid: EP-y\ntype: chore\nstatus: draft\nrepos: [api]\n---\n# EP-y\n',
+      'epics/EP-y/.sdlc/state.json': fs.readFileSync(path.join(P, 'epics/EP-x/.sdlc/state.json'), 'utf8').replace('"EP-x"', '"EP-y"'),
+      'epics/EP-y/.sdlc/approvals.json': '[]',
+    });
+    git(P, 'add', '-A');
+    git(P, 'commit', '-qm', 'EP-y');
+    git(P, 'push', '-q', 'origin', 'main');
+    const exclude = path.join(api, '.git/info/exclude');
+    fs.appendFileSync(exclude, '/scratch\n');
+    const mark = '# yad worktree (#115): the node_modules link\n/node_modules\n';
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api').code, 0);
+    assert.equal(yad(P, 'worktree', 'add', 'EP-y', '--repo', 'api').code, 0);
+    assert.equal(fs.readFileSync(exclude, 'utf8').split(mark).length, 2, 'the pair is written once, and shared');
+
+    let r = yad(P, 'worktree', 'remove', 'EP-x', '--repo', 'api');
+    assert.equal(r.code, 0, r.out);
+    assert.match(fs.readFileSync(exclude, 'utf8'), /# yad worktree \(#115\)/, 'EP-y still has the link');
+    assert.equal(git(path.join(W, 'api--EP-y'), 'status', '--porcelain'), '', 'so it is still never staged');
+
+    r = yad(P, 'worktree', 'remove', 'EP-y', '--repo', 'api');
+    assert.equal(r.code, 0, r.out);
+    const left = fs.readFileSync(exclude, 'utf8');
+    assert.doesNotMatch(left, /yad worktree|^\/node_modules$/m, 'the last link gone: so is the pair');
+    assert.match(left, /^\/scratch$/m, 'the person\'s own line stays');
+    assert.equal(fs.existsSync(awt), false);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree add --all takes back what it made when git fails — also the half-made worktree git keeps (#115 follow-up)', { skip: process.platform === 'win32' && 'a sh hook' }, () => {
+  const { W, P, api, pwt, awt } = workspace();
+  try {
+    // git keeps a worktree whose post-checkout hook fails, and still exits 1.
+    write(api, { '.git/hooks/post-checkout': '#!/bin/sh\nexit 1\n' });
+    fs.chmodSync(path.join(api, '.git/hooks/post-checkout'), 0o755);
+    const r = yad(P, 'worktree', 'add', 'EP-x', '--all');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /git could not add .*api--EP-x[\s\S]*were taken back/);
+    assert.equal(fs.existsSync(pwt), false, 'the Product worktree made first is gone');
+    assert.equal(fs.existsSync(awt), false, 'and so is the one git kept');
+    assert.equal(git(P, 'worktree', 'list').split('\n').length, 1);
+    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree remove puts the node_modules link back when git cannot remove the worktree (#115 follow-up)', { skip: process.platform === 'win32' && 'a sh shim for git' }, () => {
+  const { W, P, api, awt } = workspace();
+  try {
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api').code, 0);
+    // A git that refuses `worktree remove` and runs everything else: yad's own checks all pass.
+    const bin = path.join(W, 'bin');
+    const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    write(bin, { git: `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then echo 'fatal: refused by the test' >&2; exit 128; fi\nexec '${real}' "$@"\n` });
+    fs.chmodSync(path.join(bin, 'git'), 0o755);
+    let r = yadWith({ PATH: `${bin}${path.delimiter}${process.env.PATH}` }, P, 'worktree', 'remove', 'EP-x', '--repo', 'api');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /git could not remove .*api--EP-x: fatal: refused by the test/);
+    assert.equal(fs.lstatSync(path.join(awt, 'node_modules')).isSymbolicLink(), true, 'the link is back');
+    assert.equal(fs.readFileSync(path.join(awt, 'node_modules/dep/index.js'), 'utf8'), 'dep\n');
+    assert.equal(worktreeAt(awt)?.epic, 'EP-x', 'still yad\'s worktree');
+    assert.match(fs.readFileSync(path.join(api, '.git/info/exclude'), 'utf8'), /# yad worktree \(#115\)/, 'its exclude pair is kept');
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--repo', 'api');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(fs.existsSync(awt), false);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });

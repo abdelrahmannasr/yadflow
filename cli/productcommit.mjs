@@ -38,17 +38,19 @@ export function resolveDefaultBranch(git, productConfig) {
 // `chore(product|gate): … [skip ci]`, so a `Revert "…"` of one, or a step's commit, is not. One a run made
 // without --push, or whose push failed, is pushed by the next run, as in the main checkout. Anything else (a step's unreviewed work) must never reach the default branch. A detached
 // HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
-export function branchToCommitOn(root, git, defaultBranch) {
+// `fetch: false` judges by the local origin/<default> — for a caller that writes a derived file and pushes
+// nothing (the index refresh): a stale or missing ref can only make it skip, and it asks no network.
+export function branchToCommitOn(root, git, defaultBranch, { fetch = true } = {}) {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  return branch === 'HEAD' && worktreeAt(root)?.repo === null && onlyYadCommitsAhead(git, defaultBranch) ? defaultBranch : branch;
+  return branch === 'HEAD' && worktreeAt(root)?.repo === null && onlyYadCommitsAhead(git, defaultBranch, { fetch }) ? defaultBranch : branch;
 }
 
 // The subject every yad default-branch commit has (checkpoint, tidy, repo refresh, gate ci/repair/reopen).
 export const YAD_COMMIT_SUBJECT = /^chore\((product|gate)\): .* \[skip ci\]$/;
 // HEAD holds nothing origin/<default> lacks but yad's own `[skip ci]` commits. False when the fetch or the
 // read fails: unknown is not safe.
-export function onlyYadCommitsAhead(git, defaultBranch) {
-  if (!git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return false;
+export function onlyYadCommitsAhead(git, defaultBranch, { fetch = true } = {}) {
+  if (fetch && !git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return false;
   const ahead = git('log', '--format=%s', `origin/${defaultBranch}..HEAD`);
   if (!ahead.ok) return false;
   return ahead.stdout.split('\n').filter(Boolean).every((s) => YAD_COMMIT_SUBJECT.test(s));

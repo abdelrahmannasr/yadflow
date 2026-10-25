@@ -274,7 +274,9 @@ export function refreshIndexAfterWrite(root, productConfig, { quiet = false } = 
   if (isVerifiedLedger(productConfig) || !fs.existsSync(path.join(root, '.git'))) return false;
   const git = productGit(root);
   const defaultBranch = resolveDefaultBranch(git, productConfig);
-  if (branchToCommitOn(root, git, defaultBranch) !== defaultBranch) return false; // an epic worktree counts (#115)
+  // An epic worktree counts (#115), judged by the local origin/<default>: the index is a derived file this
+  // writes and never pushes — the command that commits it fetches first — so no fetch on every write.
+  if (branchToCommitOn(root, git, defaultBranch, { fetch: false }) !== defaultBranch) return false;
   try {
     const changed = writeIndex(root);
     if (changed && !quiet) info(`rebuilt ${INDEX_FILE}`);
