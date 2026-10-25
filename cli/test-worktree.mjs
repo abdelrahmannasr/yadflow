@@ -374,3 +374,21 @@ test('yad\'s own commit is the exact subject yad writes — a revert of one, or 
     assert.equal(branchToCommitOn(pwt, (...a) => run('git', a, { cwd: pwt }), 'main'), 'HEAD');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+test('gate ci in an epic Product worktree with no default branch set still refuses a step\'s commits (#115 review 3)', () => {
+  const { W, P, pwt } = workspace({ product: { platform: 'github', git_url: 'https://github.com/acme/product' } });
+  try {
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x').code, 0);
+    git(pwt, 'remote', 'set-head', 'origin', '-d');
+    git(pwt, 'config', 'user.name', 'bob');
+    git(pwt, 'config', 'user.email', 'bob@corp.io');
+    write(pwt, { 'notes.md': 'x\n' });
+    git(pwt, 'add', 'notes.md');
+    git(pwt, 'commit', '-qm', 'docs(EP-x): author epic');
+    const head = git(path.join(W, 'product.git'), 'rev-parse', 'main');
+    const r = yad(pwt, 'gate', 'ci');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /a detached HEAD with commits of its own', not the default branch 'main'/);
+    assert.equal(git(path.join(W, 'product.git'), 'rev-parse', 'main'), head);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});

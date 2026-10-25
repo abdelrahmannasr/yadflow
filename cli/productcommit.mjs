@@ -35,8 +35,8 @@ export function resolveDefaultBranch(git, productConfig) {
 // (#115), which sits DETACHED because the default branch is checked out in the main tree, the default
 // branch itself, so the commit is pushed as HEAD:<default>. Only when every commit HEAD holds that the
 // default branch lacks (fetched first) is one of yad's own default-branch commits — each subject is
-// `chore(product|gate): … [skip ci]`, so a `Revert "…"` of one, or a step's commit, is not: one a run made without --push, or whose push failed, is pushed by the next run, as in the
-// main checkout. Anything else (a step's unreviewed work) must never reach the default branch. A detached
+// `chore(product|gate): … [skip ci]`, so a `Revert "…"` of one, or a step's commit, is not. One a run made
+// without --push, or whose push failed, is pushed by the next run, as in the main checkout. Anything else (a step's unreviewed work) must never reach the default branch. A detached
 // HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
 export function branchToCommitOn(root, git, defaultBranch) {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;

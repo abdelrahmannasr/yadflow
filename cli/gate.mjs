@@ -1037,10 +1037,12 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     const originHead = git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
     const trunk = productConfig.default_branch || (originHead.ok && originHead.stdout ? originHead.stdout.replace(/^origin\//, '') : null);
     // An epic's Product worktree sits detached: there, the same rule as the other default-branch commands.
-    const detachedWorktree = head === 'HEAD' && worktreeAt(root)?.repo === null && trunk && !onlyYadCommitsAhead(git, trunk);
+    // In a worktree the default branch is never left unknown: a missing setting must not skip this check.
+    const wtTrunk = trunk || resolveDefaultBranch(git, productConfig);
+    const detachedWorktree = head === 'HEAD' && worktreeAt(root)?.repo === null && !onlyYadCommitsAhead(git, wtTrunk);
     if ((head && head !== 'HEAD' && trunk && head !== trunk) || detachedWorktree) {
-      fail(`on '${forTerminal(head === 'HEAD' ? 'a detached HEAD with commits of its own' : head)}', not the default branch '${forTerminal(trunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
-      hand(`run it from the default branch: \`git switch ${forTerminal(trunk)}\` (in an epic worktree, \`git fetch origin ${forTerminal(trunk)}\` then \`git switch --detach origin/${forTerminal(trunk)}\`)`);
+      fail(`on '${forTerminal(head === 'HEAD' ? 'a detached HEAD with commits of its own' : head)}', not the default branch '${forTerminal(trunk || wtTrunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
+      hand(`run it from the default branch: \`git switch ${forTerminal(trunk || wtTrunk)}\` (in an epic worktree, \`git fetch origin ${forTerminal(trunk || wtTrunk)}\` then \`git switch --detach origin/${forTerminal(trunk || wtTrunk)}\`)`);
       process.exitCode = 1;
       return { synced: 0, committed: false, pushed: false };
     }
