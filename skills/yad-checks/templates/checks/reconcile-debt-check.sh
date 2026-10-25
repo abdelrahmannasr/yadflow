@@ -27,7 +27,7 @@ product_config() {
   if [ -n "${SDLC_PRODUCT_CONFIG:-}" ]; then printf '%s' "$SDLC_PRODUCT_CONFIG"; return 0; fi
   if [ -n "${SDLC_HUB_CONFIG:-}" ]; then printf '%s' "$SDLC_HUB_CONFIG"; return 0; fi
   if [ -f .sdlc/product.json ] && [ -f .sdlc/hub.json ] && ! cmp -s .sdlc/product.json .sdlc/hub.json; then
-    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. Run \`yad migrate\` in the Product to choose the copy to keep, and commit both." >&2
+    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. In the Product, run \`yad migrate --apply --keep product\` (or \`--keep hub\`) to choose the copy to keep, then commit both files." >&2
     return 1
   fi
   if [ -f .sdlc/product.json ]; then printf '%s' .sdlc/product.json; else printf '%s' .sdlc/hub.json; fi
@@ -611,9 +611,15 @@ while IFS= read -r sha; do
   blockers="$(open_debt_on_thread "$prod" "$thread" "$epic")"
   if [ -n "$blockers" ]; then
     echo "FAIL [reconcile-debt]: thread ${thread} carries OPEN hotfix debt:"
-    printf '%s\n' "$blockers" | sed 's/^/    /'
-    echo "  -> Pay it first: update the Shape artifacts + add the regression test, then mark the"
-    echo "     reconcile-debt.json entry status: paid. The thread is frozen for new changes until then."
+    # Each owning epic with the full path of its ledger in the Product, so the entry is found at once (#386).
+    while IFS= read -r _owner; do
+      [ -n "$_owner" ] && echo "    ${_owner} — epics/${_owner}/.sdlc/reconcile-debt.json"
+    done <<DEBT_OWNERS
+$blockers
+DEBT_OWNERS
+    echo "  -> Pay it first: update the Shape artifacts + add the regression test, then set each open entry's"
+    echo "     \"status\" to \"paid\" in each file listed above, in the Product (\`yad reconcile check\` there lists every open entry)."
+    echo "     The thread is frozen for new changes until then."
     rc=1
     continue
   fi

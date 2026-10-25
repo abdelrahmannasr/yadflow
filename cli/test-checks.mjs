@@ -845,6 +845,7 @@ test('contract-check gate: each reason a slice is not a quote says what to chang
     fs.rmSync(T, { recursive: true, force: true });
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /FAIL \[contract-check\]: contract surface changed without a 'Contract-Change: yes' trailer\./, r.out);
+    assert.match(r.out, /implement with Contract-Change: yes \(`yad commit --contract-change` adds\n\s+the trailer\)/, r.out); // #386
     const line = r.out.split('\n').find((l) => l.startsWith(`  ${starts}`));
     assert.ok(line, `no reason starting '${starts}':\n${r.out}`);
     return line;
@@ -3922,7 +3923,7 @@ test('the settings block: new name first, the old as a fallback, and two that di
       [A, null, {}, 0, '.sdlc/product.json'],
       [null, A, {}, 0, '.sdlc/hub.json'],
       [null, null, {}, 0, '.sdlc/hub.json'], // no Product settings at all: the old behaviour, nothing to read
-      [A, B, {}, 1, /\.sdlc\/product\.json and \.sdlc\/hub\.json say different things/],
+      [A, B, {}, 1, /\.sdlc\/product\.json and \.sdlc\/hub\.json say different things — .* In the Product, run `yad migrate --apply --keep product` \(or `--keep hub`\) to choose the copy to keep, then commit both files\./],
       // The environment names the file: it wins over the disk, and the disk's drift is not its business.
       [A, B, { SDLC_PRODUCT_CONFIG: 'p.json' }, 0, 'p.json'],
       [A, B, { SDLC_HUB_CONFIG: 'h.json' }, 0, 'h.json'],
@@ -3951,7 +3952,7 @@ test('risk-map stays advisory on two settings files that disagree, and reads the
   commit(T, 'feat: a thing', { 'src/a.js': 'x\n' });
   let r = runGate(path.join(CHECKS, 'risk-map-check.sh'), T, []);
   assert.equal(r.code, 0, `advisory means exit 0 on every input:\n${r.out}`);
-  assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things/);
+  assert.match(r.out, /note \[risk-map\]: \.sdlc\/product\.json and \.sdlc\/hub\.json say different things .* in the Product, run `yad migrate --apply --keep product` \(or `--keep hub`\)\./);
   assert.doesNotMatch(r.out, /FAIL \[product-settings\]/);
   // From a subfolder: the settings are the root's, so the same note, not a silent pass on nothing.
   fs.mkdirSync(path.join(T, 'src/deep'), { recursive: true });
@@ -4063,7 +4064,9 @@ test('reconcile-debt gate: an ABSOLUTE product-repo reaches the Product and free
   const r = runGate(DEBT, T);
   assert.equal(r.code, 1, 'open thread debt must freeze the thread, not defer');
   assert.match(r.out, /thread EP-root carries OPEN hotfix debt/);
-  assert.match(r.out, /EP-fix/);
+  // What to change: the ledger's full path, and the command that lists it (#386).
+  assert.match(r.out, /^ {4}EP-fix — epics\/EP-fix\/\.sdlc\/reconcile-debt\.json$/m);
+  assert.match(r.out, /set each open entry's\n\s+"status" to "paid" in each file listed above, in the Product \(`yad reconcile check` there lists every open entry\)/);
   fs.rmSync(productConfig, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -4868,6 +4871,8 @@ test('commit-message gate: unknown type fails', () => {
   const r = runGate(COMMIT_MSG, T, ['main']);
   assert.equal(r.code, 1);
   assert.match(r.out, /is not '<type>/);
+  // What to change: reword it, with the real base, then force-push (#386).
+  assert.match(r.out, /-> Reword each commit listed above: `git commit --amend` for the last one, or `git rebase -i main` \(mark it 'reword'\) for an older one; then force-push the branch \(`git push --force-with-lease`\)\./);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

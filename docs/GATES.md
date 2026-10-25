@@ -172,7 +172,7 @@ The Product's settings are kept under two names until v5: `.sdlc/product.json` a
 | Message | What to change |
 |---|---|
 | `FAIL [product-settings]: SDLC_PRODUCT_CONFIG (…) and SDLC_HUB_CONFIG (…) name files that say different things. Set only SDLC_PRODUCT_CONFIG.` | Remove `SDLC_HUB_CONFIG` from the job's environment. |
-| `FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things … Run yad migrate in the Product …` | In the Product, run `yad migrate --apply --keep product` (or `--keep hub`) to choose the copy to keep, then commit both files. |
+| `FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things … In the Product, run yad migrate --apply --keep product (or --keep hub) …` | In the Product, run `yad migrate --apply --keep product` (or `--keep hub`) to choose the copy to keep, then commit both files. |
 
 Gates that print them: spec-link, contract-check, backfill, lineage-check, epic-open, reconcile-debt,
 commit-message, verified-commits, ledger-guard and product-checkout. risk-map prints a note instead.
@@ -478,7 +478,7 @@ another epic, no other change may ship on that thread.
 | `<link.md> says epic: <x>, but <story> is a story of <epic>. … Fix epic: in <link.md>.` | Set `epic:` to the story id's prefix. |
 | [Where the Product is read from](#where-the-product-is-read-from) messages | See that table. |
 | `-> epic <epic> does not exist in the product repo (orphan story link). …` | Fix the story id, or merge the epic's Shape review PRs into the Product first. |
-| `thread <thread> carries OPEN hotfix debt:` (the epics follow) | Do the owed work first: update the planning documents and add the regression test, then set that entry's `status` to `paid` in `epics/<epic>/.sdlc/reconcile-debt.json`. `yad reconcile check` lists open debt. |
+| `thread <thread> carries OPEN hotfix debt:` (then each epic with its ledger, `<epic> — epics/<epic>/.sdlc/reconcile-debt.json`, and how to pay it) | Do the owed work first: update the planning documents and add the regression test, then set that entry's `status` to `paid` in `epics/<epic>/.sdlc/reconcile-debt.json` in the Product. `yad reconcile check`, run in the Product, lists every open entry. |
 
 ## risk-map (advice only)
 
@@ -530,6 +530,7 @@ is the same).
 | `<sha> subject '<subject>' is not '<type>(<scope>)?!?: <description>' (type one of: …).` | Reword the commit (`git commit --amend`, or `git rebase -i <base>`) and force-push. |
 | `<sha> subject '<subject>' must not end with a period.` | Remove the full stop the same way. |
 | `<sha> trailers out of order — expected Task -> Contract-Change -> Co-Authored-By.` | Reorder the trailers the same way. |
+| `-> Reword each commit listed above: git commit --amend for the last one, or git rebase -i <base> (mark it 'reword') for an older one; then force-push the branch (git push --force-with-lease).` | Printed once after any of the three above: it is the fix for all of them. |
 | `unknown --profile '<x>' …` | A wiring problem: use `code` or `product`. |
 
 ## pr-title

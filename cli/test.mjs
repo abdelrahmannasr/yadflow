@@ -28500,7 +28500,7 @@ test('E122: the ledger hook guards a drifted pair when EITHER copy is verified, 
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ledger: 'verified', default_branch: 'main' }));
     let v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
     assert.equal(v.allow, false);
-    assert.match(v.message, /product\.json and \.sdlc\/hub\.json say different things, and one of them is verified, so this edit is guarded — run `yad migrate`/);
+    assert.match(v.message, /product\.json and \.sdlc\/hub\.json say different things, and one of them is verified, so this edit is guarded — run `yad migrate --apply --keep product` \(or `--keep hub`\)/);
     // The other way round too.
     fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', ledger: 'verified', default_branch: 'main' }));
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ledger: 'local', default_branch: 'main' }));

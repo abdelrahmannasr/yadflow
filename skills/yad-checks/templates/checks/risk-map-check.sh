@@ -111,7 +111,7 @@ product_config() {
   if [ -n "${SDLC_PRODUCT_CONFIG:-}" ]; then printf '%s' "$SDLC_PRODUCT_CONFIG"; return 0; fi
   if [ -n "${SDLC_HUB_CONFIG:-}" ]; then printf '%s' "$SDLC_HUB_CONFIG"; return 0; fi
   if [ -f .sdlc/product.json ] && [ -f .sdlc/hub.json ] && ! cmp -s .sdlc/product.json .sdlc/hub.json; then
-    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. Run \`yad migrate\` in the Product to choose the copy to keep, and commit both." >&2
+    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. In the Product, run \`yad migrate --apply --keep product\` (or \`--keep hub\`) to choose the copy to keep, then commit both files." >&2
     return 1
   fi
   if [ -f .sdlc/product.json ]; then printf '%s' .sdlc/product.json; else printf '%s' .sdlc/hub.json; fi
@@ -120,7 +120,7 @@ product_config() {
 # that disagree fail the other gates, but here they are a note, and neither is read.
 # `--level` answers in one line on stdout, so there the note goes to stderr.
 if ! PRODUCT_CONFIG="$(product_config 2>/dev/null)"; then
-  _drift="note [risk-map]: .sdlc/product.json and .sdlc/hub.json say different things (or SDLC_PRODUCT_CONFIG and SDLC_HUB_CONFIG do) — neither is read; run \`yad migrate\` in the Product."
+  _drift="note [risk-map]: .sdlc/product.json and .sdlc/hub.json say different things (or SDLC_PRODUCT_CONFIG and SDLC_HUB_CONFIG do) — neither is read; in the Product, run \`yad migrate --apply --keep product\` (or \`--keep hub\`)."
   if [ "$LEVEL_ONLY" = 1 ]; then echo "$_drift" >&2; else echo "$_drift"; fi
   # An empty file, so `resolve_base` reads no default_branch and falls back like a repo with no settings.
   PRODUCT_CONFIG=/dev/null

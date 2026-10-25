@@ -31,7 +31,7 @@ product_config() {
   if [ -n "${SDLC_PRODUCT_CONFIG:-}" ]; then printf '%s' "$SDLC_PRODUCT_CONFIG"; return 0; fi
   if [ -n "${SDLC_HUB_CONFIG:-}" ]; then printf '%s' "$SDLC_HUB_CONFIG"; return 0; fi
   if [ -f .sdlc/product.json ] && [ -f .sdlc/hub.json ] && ! cmp -s .sdlc/product.json .sdlc/hub.json; then
-    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. Run \`yad migrate\` in the Product to choose the copy to keep, and commit both." >&2
+    echo "FAIL [product-settings]: .sdlc/product.json and .sdlc/hub.json say different things — they are one file under two names until v5. In the Product, run \`yad migrate --apply --keep product\` (or \`--keep hub\`) to choose the copy to keep, then commit both files." >&2
     return 1
   fi
   if [ -f .sdlc/product.json ]; then printf '%s' .sdlc/product.json; else printf '%s' .sdlc/hub.json; fi
@@ -141,5 +141,11 @@ while IFS= read -r sha; do
 done <<EOF
 $commits
 EOF
+
+# Every failure above is fixed the same way: the commit is reworded, which rewrites it, so the branch is
+# force-pushed. Said once, with the real base, after the list (#386).
+if [ "$rc" -ne 0 ]; then
+  echo "  -> Reword each commit listed above: \`git commit --amend\` for the last one, or \`git rebase -i ${BASE}\` (mark it 'reword') for an older one; then force-push the branch (\`git push --force-with-lease\`)."
+fi
 
 exit "$rc"
