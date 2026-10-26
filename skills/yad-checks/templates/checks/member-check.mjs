@@ -80,8 +80,10 @@ if (!git('rev-parse', '--verify', '-q', `${base}^{commit}`).ok) { say(`FAIL [mem
 // in that the diff never lists. `git merge-tree --write-tree` (git 2.38+) builds the merge without touching
 // anything, and the diff runs from the base to it. A branch that does not merge cleanly fails closed: the
 // platform cannot merge it either. An older git falls back to the one merge base, failing closed when
-// there are several, or when the base removed or moved a file the branch changes (the real merge would
-// follow it). No merge base at all fails closed too.
+// there are several, when the base removed or moved a file the branch changes (the real merge would
+// follow it), when the base has moved on and the branch changes member files, or when the base moved a
+// folder's files into the members folder and the branch adds a file to that folder (a merge that follows
+// folder renames would carry it in). No merge base at all fails closed too.
 const HISTORY = 'check the code out with full history (GitHub: actions/checkout with fetch-depth: 0; GitLab: GIT_DEPTH: "0")';
 const bases = git('merge-base', '--all', base, 'HEAD').out.split('\n').filter(Boolean);
 if (!bases.length) { say(`FAIL [member-check]: '${base}' and HEAD share no history (a shallow clone has no merge base), so the changed files cannot be listed — ${HISTORY}, and give a base this branch shares history with, then run again`); process.exit(1); }
@@ -128,10 +130,24 @@ if (built.status === 0 && mergeTree && git('rev-parse', '--verify', '-q', `${mer
     say(`FAIL [member-check]: ${base} has moved on since this branch split off, and this git (older than 2.38) cannot read the member files this branch changes as the merge would hold them — merge ${base} into the branch, then push again`);
     process.exit(1);
   }
+  // A folder the base moved into the members folder (its files deleted there, member files added): a merge
+  // that follows folder renames (merge.directoryRenames=true) carries a file the branch adds to that folder
+  // in as a member file this diff never shows. Git's default makes it a conflict; this closes it either way.
+  if (baseTip !== from) {
+    const baseRead = git('diff', '--no-renames', '--name-status', '-z', from, base);
+    if (!baseRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
+    const dirOf = (f) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
+    const emptied = new Set(names(baseRead, (s) => s === 'D').map(dirOf));
+    const movedIn = names(baseRead, (s) => s === 'A').some(memberish);
+    if (movedIn && names(mineRead, (s) => s === 'A').some((f) => emptied.has(dirOf(f)))) {
+      say(`FAIL [member-check]: ${base} moved files into the members folder from a folder this branch adds a file to, and this git (older than 2.38) cannot tell where the merge puts it — merge ${base} into the branch, then push again`);
+      process.exit(1);
+    }
+  }
 }
 const diff = git('diff', '--no-renames', '--name-status', '-z', from, to);
 // Where every rule below reads the files (review 1): what the merge into the base holds — the tree git
-// built, or HEAD on an older git, where a member file both sides changed has already failed closed above.
+// built, or HEAD on an older git, where any case the merge could hold differently has failed closed above.
 const AT = to;
 if (!diff.ok) { say('FAIL [member-check]: git could not list the changed files — check the code out with full history (GitHub: actions/checkout with fetch-depth: 0; GitLab: GIT_DEPTH: "0"), and give a base this branch shares history with, then run again'); process.exit(1); }
 const parts = diff.out.split('\0').filter(Boolean);

@@ -668,6 +668,26 @@ test('#368 review 2: on a git older than 2.38, member files changed while the ba
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 
+test('#368 review 3: on a git older than 2.38, a folder the base moved into the members folder, with a file the branch adds there, fails closed', () => {
+  const g = gateRepo();
+  try {
+    const sh = (...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+    sh('checkout', '-q', 'main');
+    put(path.join(g.T, 'foo/github-carol.json'), JSON.stringify(rec('alice', [])));
+    sh('add', '-A'); sh('commit', '-q', '-m', 'chore: foo');
+    sh('checkout', '-q', 'pr'); sh('reset', '-q', '--hard', 'main');
+    put(path.join(g.T, 'foo/github-mallory.json'), JSON.stringify(rec('mallory', [])));
+    sh('add', '-A'); sh('commit', '-q', '-m', 'chore: a note');
+    sh('checkout', '-q', 'main');
+    fs.mkdirSync(path.join(g.T, '.sdlc/members'), { recursive: true });
+    sh('mv', 'foo/github-carol.json', '.sdlc/members/github-carol.json');
+    sh('commit', '-q', '-m', 'chore: foo moved'); sh('checkout', '-q', 'pr');
+    const r = g.check({ ...as('alice'), ...olderGit(g) });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /^FAIL \[member-check\]: main moved files into the members folder from a folder this branch adds a file to, and this git \(older than 2\.38\) cannot tell where the merge puts it — merge main into the branch, then push again$/m);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
 test('#368 member-check: a git older than 2.38 falls back to the one merge base, and fails closed on two', () => {
   const g = gateRepo();
   try {
