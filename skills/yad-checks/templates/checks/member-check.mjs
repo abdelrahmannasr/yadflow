@@ -117,14 +117,15 @@ if (built.status === 0 && mergeTree && git('rev-parse', '--verify', '-q', `${mer
     say(`FAIL [member-check]: ${base} removed or moved a file this branch changes, and this git (older than 2.38) cannot follow it into the merge — merge ${base} into the branch, then push again`);
     process.exit(1);
   }
-  // The rules below read the files as the merge would hold them, and this git reads them at HEAD: a member
-  // file BOTH sides changed could merge into something neither side shows (review 1), so it fails closed.
-  const baseRead = git('diff', '--no-renames', '--name-status', '-z', from, base, '--', DIR);
-  if (!baseRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
-  const baseMembers = new Set(names(baseRead, () => true));
-  const both = names(mineRead, () => true).filter((f) => baseMembers.has(f));
-  if (both.length) {
-    say(`FAIL [member-check]: ${base} and this branch both changed ${both.join(', ')}, and this git (older than 2.38) cannot read the file as the merge would hold it — merge ${base} into the branch, then push again`);
+  // The rules below read the files as the merge would hold them, and this git reads them at HEAD. Once the
+  // base has moved on, the merge can hold member files HEAD does not show: a file both sides changed (review
+  // 1), a file the branch renamed in and the base edited at its old path, a file the base added that the clash
+  // check must see (review 2). So a branch that changes member files fails closed until it holds the base.
+  // Any spelling of the folder counts (the twin rule below names it), read the way a case-blind disk reads it.
+  const baseTip = git('rev-parse', '--verify', '-q', `${base}^{commit}`).out.trim();
+  const memberish = (f) => f.normalize('NFKC').toLowerCase().startsWith('.sdlc/members');
+  if (baseTip !== from && names(mineRead, () => true).some(memberish)) {
+    say(`FAIL [member-check]: ${base} has moved on since this branch split off, and this git (older than 2.38) cannot read the member files this branch changes as the merge would hold them — merge ${base} into the branch, then push again`);
     process.exit(1);
   }
 }

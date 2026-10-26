@@ -631,7 +631,40 @@ test('#368 review 1: on a git older than 2.38, a member file both sides changed 
     mergedIntoBob(g);
     const r = g.check({ ...as('alice'), ...olderGit(g) });
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /^FAIL \[member-check\]: main and this branch both changed \.sdlc\/members\/github-alice\.json, and this git \(older than 2\.38\) cannot read the file as the merge would hold it — merge main into the branch, then push again$/m);
+    assert.match(r.out, /^FAIL \[member-check\]: main has moved on since this branch split off, and this git \(older than 2\.38\) cannot read the member files this branch changes as the merge would hold them — merge main into the branch, then push again$/m);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+test('#368 review 2: on a git older than 2.38, member files changed while the base moved on fail closed — a rename in, a file the base added', () => {
+  const MOVED = /^FAIL \[member-check\]: main has moved on since this branch split off, and this git \(older than 2\.38\) cannot read the member files this branch changes as the merge would hold them — merge main into the branch, then push again$/m;
+  const sh = (g, ...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+  // The branch renames a file into the folder; the base then edits it at its old path, and a real merge
+  // follows the rename — the merged member file holds the base's edit, which HEAD does not show.
+  let g = gateRepo();
+  try {
+    sh(g, 'checkout', '-q', 'main');
+    put(path.join(g.T, 'notes/x.json'), JSON.stringify(rec('alice', ['alice@work.com']), null, 2));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore: notes');
+    sh(g, 'checkout', '-q', 'pr'); sh(g, 'reset', '-q', '--hard', 'main');
+    fs.mkdirSync(path.dirname(path.join(g.T, FILE('alice'))), { recursive: true });
+    sh(g, 'mv', 'notes/x.json', FILE('alice'));
+    execFileSync('git', ['-c', 'user.email=alice@work.com', 'commit', '-q', '-m', 'chore(product): member'], { cwd: g.T, stdio: 'pipe' });
+    g.attribute(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: g.T }).toString().trim(), 'alice');
+    sh(g, 'checkout', '-q', 'main');
+    put(path.join(g.T, 'notes/x.json'), JSON.stringify(rec('alice', ['alice@work.com', 'eve@else.com']), null, 2));
+    sh(g, 'commit', '-q', '-am', 'chore: notes edited'); sh(g, 'checkout', '-q', 'pr');
+    assert.match(g.check({ ...as('alice'), ...olderGit(g) }).out, MOVED);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+  // The base adds Bob's file with an email this branch's own file also holds: the clash check must see it.
+  g = gateRepo();
+  try {
+    sh(g, 'checkout', '-q', 'main');
+    put(path.join(g.T, FILE('bob')), JSON.stringify(rec('bob', ['shared@work.com'])));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore(product): bob joined'); sh(g, 'checkout', '-q', 'pr');
+    const sha = g.commitAs('shared@work.com', { [FILE('alice')]: rec('alice', ['shared@work.com']) });
+    g.attribute(sha, 'alice');
+    assert.match(g.check({ ...as('alice'), ...olderGit(g) }).out, MOVED);
+    if (writeTreeGit) assert.match(g.check(as('alice')).out, /FAIL \[member-check\]: one email is in/);
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 
