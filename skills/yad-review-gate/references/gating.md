@@ -210,7 +210,10 @@ approved, never of the default branch when the gate happens to read it (#366). S
 cover one artifact (per-story `review/<epic>/stories-S0N` branches, or a re-review on a fresh MR), and
 another one merged in between, without approvals, would otherwise pass on these approvals. So a
 merged review whose head differs from the default branch passes nothing, and the gate says so and
-names the fix: review the artifact as it stands on a fresh PR/MR (`yad gate open <epic> <artifact>`).
+names the fix: review the artifact as it stands on a fresh PR/MR — branch `review/<epic>/<artifact>` from the default branch, add a commit (an empty one is enough: `git commit --allow-empty`), push it, then run `yad gate open <epic> <artifact>`. A default branch
+with nothing to fingerprint (every story deleted, a contract with no END marker) passes no approval of
+real content either, and solo mode, which counts no approvals, says nothing. Each file at the head is
+read through git's checkout filters, so line-ending conversion gives the bytes the disk holds.
 A squash-merged head is fetched from the platform's own ref (`refs/pull/<n>/head`,
 `refs/merge-requests/<n>/head`); a head that cannot be read records nothing and turns the CI run red.
 Two limits: GitLab approvals carry no commit, so an approval given before later pushes to the same MR
