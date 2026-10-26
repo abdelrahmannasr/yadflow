@@ -26055,7 +26055,11 @@ test('E44 fold (ledger: local): one commit of the step\'s files and the ledger; 
     const r = await foldRun(T, { epic: 'EP-x', step: 'architecture' });
     assert.equal(r.code, 0, r.out);
     assert.equal(g('rev-parse', 'HEAD^'), head0);
-    assert.equal(g('log', '-1', '--format=%B'), `docs(EP-x): author architecture\n\nYad-Epic: EP-x\nYad-Step: architecture\nYad-Folded: ${tip}`);
+    assert.equal(g('log', '-1', '--format=%B'), `docs(ep-x): author architecture\n\nYad-Epic: EP-x\nYad-Step: architecture\nYad-Folded: ${tip}`);
+    // #413: the fold commit passes the commit-message gate a review PR runs on the Product.
+    const cm = spawnSync('bash', [path.join(ROOT, 'skills/yad-checks/templates/checks/commit-message.sh'), '--profile', 'product', head0], { cwd: T, encoding: 'utf8' });
+    assert.equal(cm.status, 0, `${cm.stdout}${cm.stderr}`);
+    assert.match(cm.stdout, /PASS \[commit-message\]: \w+ 'docs\(ep-x\): author architecture'/);
     assert.deepEqual(g('show', '--name-only', '--format=', 'HEAD').split('\n').sort(),
       ['epics/EP-x/.sdlc/state.json', 'epics/EP-x/architecture.md', 'epics/EP-x/contract.md']);
     assert.deepEqual(r.value.leftOnDisk, ['epics/EP-x/epic.md']);

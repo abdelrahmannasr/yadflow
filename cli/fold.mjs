@@ -55,8 +55,11 @@ export function stepPaths(epic, stepId) {
 }
 const covers = (paths, p) => paths.some((s) => p === s || p.startsWith(`${s}/`));
 
+// The scope is the epic ID in lowercase (#413): the commit-message gate takes a lowercase scope
+// (`[a-z0-9._-]`), so `docs(EP-x)` failed every review PR. The exact ID stays in the Yad-Epic trailer.
+export const foldSubject = (epic, step) => `docs(${epic.toLowerCase()}): author ${step}`;
 export const foldMessage = ({ epic, step, folded }) =>
-  `docs(${epic}): author ${step}\n\nYad-Epic: ${epic}\nYad-Step: ${step}\nYad-Folded: ${folded || 'none'}\n`;
+  `${foldSubject(epic, step)}\n\nYad-Epic: ${epic}\nYad-Step: ${step}\nYad-Folded: ${folded || 'none'}\n`;
 
 // Sort one epic's changed files into what the fold takes and what it leaves. `entries` are
 // `statusEntries` rows; `verified` is the ledger mode; `seeding` is true while the epic has no
@@ -236,7 +239,7 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   const sha = git(['rev-parse', 'HEAD']).out.trim();
-  const subject = `docs(${epic}): author ${step}`;
+  const subject = foldSubject(epic, step);
   ok(`${subject} → ${sha.slice(0, 7)} (${files.length} file(s))`);
   if (sorted.seed.length) info(`with the new epic's seed: ${sorted.seed.join(', ')}`);
   if (sorted.ledger.length) info(`with the ledger (${verified ? 'a new epic\'s seed' : 'ledger: local'}): ${sorted.ledger.length} file(s)`);
