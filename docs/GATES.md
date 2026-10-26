@@ -647,8 +647,9 @@ so a branch with several merge bases — where a hand-resolved merge could bring
 in full. The member files are read as that merge holds them, so two changes that each pass cannot merge
 into a file neither showed. An older git reads from the one merge base and the files at the branch's
 head, and so fails closed when there are several merge bases, when the base removed or moved a file the
-branch changes, or when the branch changes member files and the base has moved on since it split off
-(merging the base into the branch clears it). The Product's `platform` and `git_url`; the pull request's author (GitHub: `PR_AUTHOR` and `PR_AUTHOR_ID` from the event; GitLab: the merge request API
+branch changes, when the branch changes member files and the base has moved on since it split off, or
+when the base moved a folder's files into the members folder and the branch adds a file to that folder
+(merging the base into the branch clears each). The Product's `platform` and `git_url`; the pull request's author (GitHub: `PR_AUTHOR` and `PR_AUTHOR_ID` from the event; GitLab: the merge request API
 with `GITLAB_TOKEN` or `SDLC_API_TOKEN`).
 
 | Message (after `FAIL [member-check]: …`) | What to change |
@@ -673,7 +674,7 @@ with `GITLAB_TOKEN` or `SDLC_API_TOKEN`).
 | The base messages | See [the base cannot be found](#the-base-cannot-be-found). |
 | `git could not list the changed files` / `'<base>' and HEAD share no history …` | Check the code out with full history (GitHub: `actions/checkout` with `fetch-depth: 0`; GitLab: `GIT_DEPTH: "0"`), and give a base this branch shares history with, then run again. |
 | `this branch does not merge cleanly into <base> …` | Merge the base into the branch, resolve the conflicts, then push again. The platform cannot merge it either. |
-| `'<base>' and HEAD have N merge bases, and this git (older than 2.38) cannot build the merge …` / `<base> removed or moved a file this branch changes, and this git (older than 2.38) cannot follow it …` / `<base> has moved on since this branch split off, and this git (older than 2.38) cannot read the member files this branch changes …` | Merge the base into the branch, then push again — or run the job with git 2.38 or newer. |
+| `'<base>' and HEAD have N merge bases, and this git (older than 2.38) cannot build the merge …` / `<base> removed or moved a file this branch changes, and this git (older than 2.38) cannot follow it …` / `<base> has moved on since this branch split off, and this git (older than 2.38) cannot read the member files this branch changes …` / `<base> moved files into the members folder from a folder this branch adds a file to …` | Merge the base into the branch, then push again — or run the job with git 2.38 or newer. |
 | `git could not build the merge of this branch into <base> …` / `git could not list what changed since this branch split off from <base>` | Check the code out with full history (GitHub: `actions/checkout` with `fetch-depth: 0`; GitLab: `GIT_DEPTH: "0"`), then run again. |
 | `usage: node checks/member-check.mjs <base-ref> …` | A wiring problem: the job must pass the base ref (the branch the pull request targets), as `yad-product-checks.yml` (GitHub) and `yad-product-checks.gitlab-ci.yml` (GitLab) do. |
 
