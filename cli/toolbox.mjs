@@ -18,7 +18,8 @@
 //
 // THREE TIERS:
 //   core         offered at setup (E85) — repomix, spec-kit, impeccable
-//   recommended  listed, never pushed — pools of skills and agents a team may choose (Part 7)
+//   recommended  listed, never pushed — pools of skills and agents a team may choose (Part 7),
+//                and other optional tools such as Docker MCP Toolkit (#361)
 //   connector    the tools a Product connects for design, testing and learning (`yad-connect-*`); the
 //                same adapters `skills/sdlc/config.yaml` names, with the same fallbacks
 //
@@ -213,6 +214,28 @@ export const TOOLBOX = Object.freeze([
     fallback: "nothing changes: yadflow's own skills run every step",
     records: null, note: 'About 8 contributors: fine as an option, risky as a default.',
     usedBy: ['yad skill bind'],
+  },
+  {
+    // Not a pool of skills (#361): a gateway that runs other MCP servers, so no yad skill or command uses
+    // it, and `yad skill recommend` never names it as a pool (recommend.mjs: POOLS).
+    id: 'docker-mcp', name: 'Docker MCP Toolkit', tier: 'recommended', role: "a gateway that runs MCP servers from Docker's catalogue as containers",
+    licence: 'MIT', source: 'https://github.com/docker/mcp-gateway', checked: '2026-10-26',
+    vetted: {
+      on: '2026-10-26', licenceFrom: 'https://github.com/docker/mcp-gateway/blob/main/LICENSE',
+      source: 'https://github.com/docker/mcp-gateway', release: 'v0.44.2',
+      packages: [],
+      note: 'The gateway and its `docker mcp` CLI plugin are MIT; Docker Desktop, which ships them, is under Docker\'s own terms. v0.44.2 is the newest tag, published as a GitHub pre-release, as every release there is, so GitHub names no latest release.',
+    },
+    // It comes with Docker Desktop: none of the four install types fits.
+    install: [],
+    manual: 'https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/',
+    // The plugin is not on PATH, so the one server a client connects through is the signal.
+    detect: { mcp: ['MCP_DOCKER'] },
+    versions: null,
+    fallback: 'nothing changes: agents use the MCP servers they already have',
+    records: null,
+    note: 'The first gateway start pulls every server image and can outlast a client\'s 30-second timeout: warm it once with `docker mcp gateway run --profile <id> --dry-run`. A server\'s secrets (an access token) are set with `docker mcp secret set`, never in yad.',
+    usedBy: [],
   },
 
   // ---- connectors: what a Product connects (skills/sdlc/config.yaml names the same adapters) -------
@@ -733,7 +756,7 @@ export function toolUse(tool, { shipped, connected }) {
 //              tool is installed.
 //   connector  used when the Product's design, testing or learning file connects it. The connect skill
 //              writes that file and the step skill follows it, as before E87.
-// Recommended tools are bound with `yad skill bind`, so no skill names one.
+// Recommended tools are bound with `yad skill bind`, or, like Docker MCP, used by no skill, so no skill names one.
 export const SKILL_FALLBACK_HEADING = '## When a tool is missing';
 // The section's last line. The section is exactly the lines from its heading to this marker, so a
 // rewrite never has to guess from the Markdown where the section ends (rounds 5 to 9 of the E87 review

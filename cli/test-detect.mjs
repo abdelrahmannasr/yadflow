@@ -1230,6 +1230,27 @@ test('E86: a team\'s own words are cleaned before they reach the terminal', () =
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#361 Docker MCP Toolkit: a recommended tool, found by its MCP_DOCKER server, added like any other', () => {
+  const t = TOOLBOX.find((x) => x.id === 'docker-mcp');
+  assert.equal(t.tier, 'recommended');
+  assert.deepEqual([toolProblems(t), vettingProblems(t)], [[], []]);
+  // The server name is matched whatever its case, as a client config spells it.
+  const { T, p, home } = product({ '.mcp.json': JSON.stringify({ mcpServers: { mcp_docker: { command: 'docker', args: ['mcp', 'gateway', 'run'] } } }) });
+  try {
+    let r = yad(['toolbox', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(JSON.parse(r.stdout).tools.find((x) => x.id === 'docker-mcp').status.state, 'installed');
+    const human = yad(['toolbox', 'list'], { cwd: p, home }).stdout;
+    const recommended = human.slice(human.indexOf('Recommended'), human.indexOf('Connectors'));
+    assert.match(recommended, /Docker MCP Toolkit/, 'listed under Recommended');
+    r = yad(['toolbox', 'add', 'docker-mcp'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /Docker MCP Toolkit is used here now/);
+    assert.match(r.stdout, /set it up by hand: https:\/\/docs\.docker\.com\//, 'it comes with Docker Desktop: the manual page is the way in');
+    assert.deepEqual(toolboxJSON(p).shipped, { 'docker-mcp': 'use' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E86: `yad toolbox add / remove` write only the difference from the default, and install nothing', () => {
   const { T, p, home } = product({ '.sdlc/design.json': '{"tool":"figma"}' });
   const file = path.join(p, '.sdlc/toolbox.json');

@@ -637,8 +637,8 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   server without showing its settings, which can hold a token. `--json` adds each item's version and
   a content hash.
 - **See the toolbox:** `yad toolbox list` shows the external tools yadflow can use — core tools offered
-  at setup (Repomix, Spec Kit, Impeccable), optional skill pools, and the design, testing and learning
-  tools a Product connects — whether each is found here, whether this Product uses it, and what
+  at setup (Repomix, Spec Kit, Impeccable), optional skill pools and other optional tools such as Docker
+  MCP Toolkit, and the design, testing and learning tools a Product connects — whether each is found here, whether this Product uses it, and what
   yadflow does without it. None is required. It installs nothing. Every tool listed was vetted before it
   shipped: its licence read from its own licence file (or the vendor's terms) and its source confirmed
   as the official one — the list prints the licence and the day. yadflow runs Repomix at that vetted
