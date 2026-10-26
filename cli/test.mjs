@@ -10584,7 +10584,7 @@ test('headContentHash: a GitLab merge request\'s head is fetched from refs/merge
   const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-mr-'));
   try {
     const origin = path.join(R, 'origin.git');
-    git(R, 'init', '-q', '--bare', origin);
+    git(R, 'init', '-q', '--bare', '-b', 'main', origin); // CI's git defaults to master: the clone below must check out main
     const a = path.join(R, 'a');
     git(R, 'clone', '-q', origin, a);
     git(a, 'config', 'user.email', 'a@b.c');
