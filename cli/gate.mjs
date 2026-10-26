@@ -10,7 +10,7 @@ import {
 import { OWNING_COMMIT_ENV } from './hook.mjs';
 import { PROJECT_FILES, VERSION, isVerifiedLedger , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
-  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate, printable,
+  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, artifactHashAt, acceptedHashes, isStaleHash, gatePredicate, printable,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertProductPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
@@ -222,8 +222,25 @@ export { legacyLogins };
 // entry for the same review would count one person twice), and an open step records the approval
 // against a STALE fingerprint from those older records when one exists — the approval must be given
 // again, on a new review, rather than pass on content one of those people may never have seen.
-function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
-  const live = accepted ?? (curHash ? [curHash] : []);
+// What a review approved (#366): the artifact as it stands at the PR/MR's head, never the default branch's
+// content when the gate happens to read it — another review merged in between may have changed that, and
+// its approvals would then pass content they never saw. A squash-merged review's head is on no branch here
+// and its source branch may be gone, so the platform's own ref for it is fetched (into FETCH_HEAD only: no
+// branch moves). → artifactHashAt's answer: { ok, hash } or { ok: false, reason }.
+export function headContentHash({ root, epicDir, artifact, platform, number, headOid }) {
+  const first = artifactHashAt(root, epicDir, artifact, headOid);
+  if (first.ok || !first.missing || !Number.isInteger(Number(number)) || Number(number) <= 0) return first;
+  const ref = platform === 'gitlab' ? `refs/merge-requests/${Number(number)}/head` : `refs/pull/${Number(number)}/head`;
+  run('git', ['fetch', '--quiet', '--no-tags', 'origin', ref], { cwd: root });
+  return artifactHashAt(root, epicDir, artifact, headOid);
+}
+// The fingerprint new approvals take when the approved head held none of the artifact while the default
+// branch does: no claim (`null`) would count everywhere, so it is a value no content can hash to.
+const NOTHING_AT_HEAD = 'sha256:none-at-the-approved-head';
+
+// `bindHash` is what a new approval is bound to: the content its review approved (#366, `headContentHash`).
+function upsertBridge(approvals, recs, { stepId, artifact, bindHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
+  const live = accepted ?? (bindHash ? [bindHash] : []);
   const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
   // A submission TIME, not a date. Every GitLab record written before E64 read `approved_at` holds the
   // day it was synced (`today`), and as text `2026-09-15T10:00:00Z` sorts after `2026-09-15` — so a
@@ -346,9 +363,9 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   for (const r of recs) {
     if (closed && ambiguous.has(r)) continue;
     const was = matchOf.get(r);
-    // first time we see this approval => bind to current content; an ambiguous one => to the stale print
+    // first time we see this approval => bind to the content it approved; an ambiguous one => to the stale print
     const staleOrphan = ambiguous.has(r) ? staleFor(r) : null;
-    let artHash = staleOrphan ? staleOrphan.artifactHash : curHash;
+    let artHash = staleOrphan ? staleOrphan.artifactHash : bindHash;
     let approvedAt = r.submittedAt || today;
     let recordedOn = today;
     if (was) {
@@ -364,7 +381,7 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
       const newerReview = hasTime(r.submittedAt) && hasTime(was.approvedAt) && Date.parse(r.submittedAt) > Date.parse(was.approvedAt);
       const newerPr = prNumber != null && was.pr != null && was.pr !== prNumber;
       if (!newerReview && !newerPr) {
-        artHash = was.artifactHash ?? curHash;
+        artHash = was.artifactHash ?? bindHash;
         // A record holding only a date takes the platform's time once (E64) and keeps its fingerprint: the
         // time is evidence of when, the fingerprint is what the gate decides on. Then it is byte-stable.
         approvedAt = !hasTime(was.approvedAt) && hasTime(r.submittedAt) ? r.submittedAt : (was.approvedAt ?? approvedAt);
@@ -644,7 +661,7 @@ function stageIndexIfClean(root, git, commits = null) {
   return !git('diff', '--cached', '--quiet', '--', INDEX_FILE).ok;
 }
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null, probe = null, newest = newestPrNumber } = {}) {
+export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false, headCount = null, probe = null, newest = newestPrNumber, contentAt = headContentHash } = {}) {
   const { productConfig } = loadProduct(root);
   if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — local gate, nothing to sync`); return { epic, synced: 0, advanced: 0, written: false, gates: [] }; }
   const platform = productConfig.platform;
@@ -781,6 +798,21 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     if (!pull.ok) { fail(`${pr.artifact}: ${pull.reason} — skipping (local)`); process.exitCode = 1; continue; }
 
     const curHash = artifactHash(epicDir, pr.artifact);
+    // New approvals bind to what the review approved (#366); see headContentHash. Unknown is never
+    // taken as approved: nothing is bound, and the run goes red so CI tries again.
+    const at = contentAt({ root, epicDir, artifact: pr.artifact, platform, number: pr.number, headOid: pull.headOid });
+    if (!at?.ok) {
+      fail(`${pr.artifact}: could not read what PR #${pr.number} approved (${at?.reason || 'no answer'}) — nothing was recorded`);
+      hand('run it again; CI needs the full history (fetch-depth: 0, or GIT_DEPTH: "0") and must be able to fetch the PR/MR');
+      process.exitCode = 1;
+      continue;
+    }
+    const approvedHash = at.hash ?? (curHash ? NOTHING_AT_HEAD : null);
+    // Merged, and the default branch holds something else: another merge changed it after this review.
+    if (pull.merged && approvedHash !== curHash) {
+      warn(`${pr.artifact}: PR #${pr.number} approved a different ${pr.artifact} than the default branch holds now — another merge changed it after that review, so its approvals do not pass the gate`);
+      hand(`review ${pr.artifact} as it stands on a fresh PR/MR: \`yad gate open ${epic} ${step.artifact}\``);
+    }
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
     const approvalsBefore = JSON.stringify(approvals);
@@ -788,7 +820,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const stateBefore = JSON.stringify(state);
     const nudgedBefore = JSON.stringify(pr.nudged || []);
     const recs = mapApprovers(pull.reviews, { headOid: pull.headOid });
-    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone, aliases, clashed, accepted: acceptedHashes(epicDir, pr.artifact) });
+    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, bindHash: approvedHash, today, prNumber: pr.number ?? null, closed: alreadyDone, aliases, clashed, accepted: acceptedHashes(epicDir, pr.artifact) });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the
@@ -832,7 +864,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const pred = gatePredicate({
       // E72: caps the reported ask at `active − 1`; `null` (not counted) gives no cap. Only the base holds.
       active: people.capacity.active,
-      step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact),
+      // An open review is judged against its own head — what it will merge — and a merged one against the
+      // default branch (#366).
+      step, approvals, currentHash: curHash, acceptedHashes: pull.merged || !approvedHash ? acceptedHashes(epicDir, pr.artifact) : [approvedHash],
       threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
       // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
       // ledger here rather than from a module-level set that answered the same for every epic.
@@ -1022,7 +1056,7 @@ export function convertProductLevel(root, productConfig, { git = (...a) => run('
   }
 }
 
-export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr, branchOf = prBranch, newest = newestPrNumber } = {}) {
+export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr, branchOf = prBranch, newest = newestPrNumber, contentAt = headContentHash } = {}) {
   const { productConfig } = loadProduct(root);
   if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
@@ -1163,7 +1197,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       // Silenced: its verdict is only this decision's input, and would read as a second verdict in the
       // CI log. Its exit code is this decision's too — a failed read is said, and failed, below.
       const code = process.exitCode;
-      const trial = await quietly(() => gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: true, probe: Number(job.pr), headCount: sweepCount }));
+      const trial = await quietly(() => gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: true, probe: Number(job.pr), headCount: sweepCount, contentAt }));
       process.exitCode = code;
       if (trial.gates.some((g) => g.passed)) older = false;
       else if (!trial.gates.length) {
@@ -1224,7 +1258,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     try {
       // A branch event that is not a merge can never advance (the predicate requires merged), so it
       // is read-only under Path B — run it as a dry sync that persists nothing to the working tree.
-      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: !!branch && !merged, headCount: sweepCount, newest });
+      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: !!branch && !merged, headCount: sweepCount, newest, contentAt });
       synced += r.synced;
       // When the step actually ADVANCED (the merge phase, or a swept merge the schedule observed),
       // reflect it in the artifact frontmatter (draft → approved). Keyed off the advance, not the
