@@ -10458,7 +10458,7 @@ test('gate ci --merged: the #362 older-review trial holds when a newer merge cha
   assert.equal(reviewStatus(author), 'in_review', 'the older approved review does not pass content a newer merge changed');
   assert.match(out, /PR #7 is older than #9, .* and does not pass the gate — syncing #9/);
   assert.match(out, /PR #7 approved a different architecture\.md than the default branch holds now/);
-  assert.match(out, /git switch -c review\/EP-test\/architecture origin\/trunk.*git commit --allow-empty -m "docs\(ep-test\): review architecture as merged".*yad gate open EP-test architecture\.md/);
+  assert.match(out, /git switch -C review\/EP-test\/architecture origin\/trunk.*git commit --allow-empty -m "docs\(ep-test\): review architecture as merged".*git push --force-with-lease -u origin review\/EP-test\/architecture.*yad gate open EP-test architecture\.md/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10487,6 +10487,49 @@ test('gate ci --merged: an approval recorded before #366 against the default bra
   const recorded = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json'));
   assert.ok(recorded.every((a) => a.artifactHash !== cur), 'each record now names what its review approved');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci --merged: a done step is only re-synced — no hold is printed and its approvals keep their binding (issue #366 review 2)', async () => {
+  const { T, author, ci, head } = mergedThenChanged(BRANCH_CONTRACT.replace('POST /y', 'POST /y\nPOST /z'));
+  const ep = path.join(ci, 'epics/EP-test');
+  const { artifactHash: now } = await import('./epic-state.mjs');
+  const cur = now(ep, 'architecture.md');
+  const st = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
+  st.steps.find((x) => x.id === 'architecture-review').status = 'done';
+  st.currentStep = 'ui-design';
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(st));
+  const kept = ['al', 'bo', 'ca'].map((approver) => ({ artifact: 'architecture.md', step: 'architecture-review', approver, status: 'approved', date: '2026-06-09', source: 'bridge', artifactHash: cur, approvedAt: '2026-06-09T00:00:00Z', pr: 7, engagement: 'none' }));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(kept));
+  git(ci, 'add', '-A');
+  git(ci, 'commit', '-qm', 'a done step');
+  git(ci, 'push', '-q', 'origin', 'trunk');
+  const { out } = await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, today: '2026-06-10', reader: () => approvedAt(head), ...realHead }));
+  assert.doesNotMatch(out, /approved a different|yad gate open/, 'the gate already decided this step');
+  git(author, 'fetch', '-q', 'origin');
+  assert.deepEqual(JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json')).map((x) => x.artifactHash), [cur, cur, cur], 'its history is not rewritten');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('approvedContent: a review opened before the shape-8 move is read from epics/EP-discovery/ at its head (issue #366 review 2)', async () => {
+  const { approvedContent, headContentHash } = await import('./gate.mjs');
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-s8-'));
+  try {
+    git(R, 'init', '-q');
+    git(R, 'config', 'user.email', 'a@b.c');
+    git(R, 'config', 'user.name', 'x');
+    const files = ['market-research.md', 'competitor-analysis.md', 'current-state.md', 'feasibility.md', 'requirements.md', 'roadmap.md'];
+    for (const f of files) { fs.mkdirSync(path.join(R, 'epics/EP-discovery'), { recursive: true }); fs.writeFileSync(path.join(R, 'epics/EP-discovery', f), `# ${f}\n`); }
+    git(R, 'add', '-A');
+    git(R, 'commit', '-qm', 'the review, before the move');
+    const head = git(R, 'rev-parse', 'HEAD').toString().trim();
+    git(R, 'mv', 'epics/EP-discovery', 'foundation');
+    git(R, 'commit', '-qm', 'shape 8');
+    const epicDir = path.join(R, 'foundation');
+    const got = approvedContent(headContentHash, { root: R, epic: 'EP-foundation', epicDir, artifact: 'discovery/', platform: 'github', number: 3, headOid: head });
+    assert.equal(got.ok, true, got.reason);
+    assert.equal(got.hash, hashForStubs(epicDir, 'discovery/'));
+    assert.notEqual(got.hash, null);
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
 });
 
 test('headContentHash: a GitLab merge request\'s head is fetched from refs/merge-requests/<n>/head (issue #366)', async () => {

@@ -986,16 +986,19 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
   try {
     const dir = path.join(tmp, 'epic');
     fs.mkdirSync(dir);
-    for (const entry of listed.stdout.toString('utf8').split('\0')) {
-      const m = entry.match(/^(\d{6}) (\w+) ([0-9a-f]+)\t([\s\S]+)$/);
-      if (!m || m[2] !== 'blob' || !['100644', '100755'].includes(m[1])) continue;
-      if (!m[4].startsWith(top)) continue;
-      const blob = git('cat-file', '--filters', `--path=${m[4]}`, m[3]);
-      if (blob.status !== 0) return { ok: false, reason: `git could not read ${m[4]} at ${rev.slice(0, 12)}` };
-      const out = path.join(dir, ...m[4].slice(top.length).split('/'));
-      fs.mkdirSync(path.dirname(out), { recursive: true });
-      fs.writeFileSync(out, blob.stdout);
-    }
+    // A name this disk cannot hold (a Windows-invalid one) is an unreadable head, not a crash.
+    try {
+      for (const entry of listed.stdout.toString('utf8').split('\0')) {
+        const m = entry.match(/^(\d{6}) (\w+) ([0-9a-f]+)\t([\s\S]+)$/);
+        if (!m || m[2] !== 'blob' || !['100644', '100755'].includes(m[1])) continue;
+        if (!m[4].startsWith(top)) continue;
+        const blob = git('cat-file', '--filters', `--path=${m[4]}`, m[3]);
+        if (blob.status !== 0) return { ok: false, reason: `git could not read ${m[4]} at ${rev.slice(0, 12)}` };
+        const out = path.join(dir, ...m[4].slice(top.length).split('/'));
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        fs.writeFileSync(out, blob.stdout);
+      }
+    } catch (e) { return { ok: false, reason: `the files at ${rev.slice(0, 12)} could not be copied (${e.code || e.message})` }; }
     return { ok: true, hash: artifactHash(dir, artifact) };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
