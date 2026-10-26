@@ -4,6 +4,9 @@
 # (owner + reviewer approved, PR merged). Mirrors the shapes cli/platform.mjs actually reads.
 set -euo pipefail
 phase="$(cat "${E2E_GH_PHASE_FILE:?E2E_GH_PHASE_FILE not set}")"
+# The PR's head commit (#366: the gate fingerprints the artifact there), written by run.sh's review_head.
+head="$(cat "${E2E_GH_HEAD_FILE:-/dev/null}" 2>/dev/null || true)"
+head="${head:-deadbeef}"
 
 case "${1:-} ${2:-}" in
   "pr create")
@@ -27,9 +30,9 @@ case "${1:-} ${2:-}" in
       fi
     else
       if [ "$phase" = "approved" ]; then
-        echo '{"state":"MERGED","mergedAt":"2026-06-13T10:05:00Z","headRefOid":"deadbeef"}'
+        echo '{"state":"MERGED","mergedAt":"2026-06-13T10:05:00Z","headRefOid":"'"$head"'"}'
       else
-        echo '{"state":"OPEN","mergedAt":null,"headRefOid":"deadbeef"}'
+        echo '{"state":"OPEN","mergedAt":null,"headRefOid":"'"$head"'"}'
       fi
     fi
     ;;
@@ -43,14 +46,14 @@ case "${1:-} ${2:-}" in
   "api graphql")
     # readPrGitHub fires two GraphQL queries: latestReviews (with commit.oid) and reviewThreads.
     # Discriminate on the query text so each gets its matching shape. Commit oids equal headRefOid
-    # (deadbeef) so the in-code revoke-on-change (commit === merged head) keeps the approvals.
+    # ($head) so the in-code revoke-on-change (commit === merged head) keeps the approvals.
     q=""
     for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
     if printf '%s' "$q" | grep -q latestReviews; then
       if [ "$phase" = "approved" ]; then
-        echo '{"data":{"repository":{"pullRequest":{"latestReviews":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"alice"},"state":"APPROVED","submittedAt":"2026-06-13T10:00:00Z","commit":{"oid":"deadbeef"}},{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T10:01:00Z","commit":{"oid":"deadbeef"}}]}}}}}'
+        echo '{"data":{"repository":{"pullRequest":{"latestReviews":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"alice"},"state":"APPROVED","submittedAt":"2026-06-13T10:00:00Z","commit":{"oid":"'"$head"'"}},{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T10:01:00Z","commit":{"oid":"'"$head"'"}}]}}}}}'
       else
-        echo '{"data":{"repository":{"pullRequest":{"latestReviews":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T09:00:00Z","commit":{"oid":"deadbeef"}}]}}}}}'
+        echo '{"data":{"repository":{"pullRequest":{"latestReviews":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T09:00:00Z","commit":{"oid":"'"$head"'"}}]}}}}}'
       fi
     else
       echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}'

@@ -123,8 +123,11 @@ repository access decides who may approve. A review with no login is not counted
   recorded one (numbers only grow within one repo), and syncs the recorded one instead. A newer review
   still moves it forward, so a re-review of a done step is still read (#156). Merges happen in any
   order, so on a step that is still open the older review is first read in a dry run: if it passes the
-  gate, the pointer moves back to it once and the step advances (a held newer review cannot block an
-  approved older one, and the manual recovery still works). A pointer from another platform never
+  gate, the pointer moves back to it once and the step advances (a held newer review that left the
+  artifact as the older one approved it cannot block it, and the manual recovery still works; one that
+  changed the artifact is content the older review never approved, so the gate holds until a fresh
+  review of the artifact as it stands — the approvals count only for the content at each review's head,
+  #366). A pointer from another platform never
   counts as newer, and before the pointer moves to a number other than the one it holds, `gate ci` asks the
   platform that the PR/MR is on the review branch — a mistyped `--pr` the platform places on another
   branch is refused, not recorded (one the platform cannot place is used as given, with a warning). A

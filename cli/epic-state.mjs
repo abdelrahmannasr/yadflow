@@ -2,7 +2,9 @@
 // source of truth; the platform PR/MR is only an input path. Everything here is pure / filesystem —
 // no gh/glab — so the predicate is unit-testable without a network. Node built-ins only.
 import path from 'node:path';
+import os from 'node:os';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { isPlainObject, readJSON, readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { err } from './errors.mjs';
@@ -959,6 +961,52 @@ export function acceptedHashes(epicDir, artifact) {
 // Is a recorded fingerprint stale against the accepted ones? Never when nothing was recorded (a manual
 // approval with no hash) or nothing can be fingerprinted — both are "no claim", as they always were.
 export const isStaleHash = (recorded, accepted) => !!recorded && accepted.length > 0 && !accepted.includes(recorded);
+
+// The fingerprint of `artifact` as it stands at the git commit `rev` (#366): the head a review approved.
+// The review's files (`artifactPaths`) are copied out of the commit into a scratch epic folder and
+// fingerprinted by `artifactHash` itself, so a commit and the disk are never hashed by two copies of the
+// rules. Each file is read through git's checkout filters (`cat-file --filters`), so line-ending
+// conversion (`core.autocrlf`, an `eol` attribute) gives the bytes a checkout would put on disk. Only
+// regular files are copied: a link or a submodule there leaves the copy different, so it can only fail
+// to match. `rev` must be a full SHA — a name could be a branch or tag standing in for another
+// commit (#410). `root` is the Product's checkout, and `epicDir` a folder inside it.
+// → { ok: true, hash, copied } (`hash` null when there is nothing to fingerprint, as `artifactHash`; `copied`
+//   the number of files found there), or
+//   { ok: false, reason } when the commit cannot be read here.
+export function artifactHashAt(root, epicDir, artifact, rev) {
+  if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(rev || '')) return { ok: false, reason: `'${rev ?? ''}' is not a full commit SHA` };
+  const git = (...args) => spawnSync('git', ['--literal-pathspecs', ...args], { cwd: root, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
+  if (git('cat-file', '-e', `${rev}^{commit}`).status !== 0) return { ok: false, missing: true, reason: `commit ${rev.slice(0, 12)} is not in this clone` };
+  const rel = path.relative(root, epicDir).split(path.sep).join('/');
+  // `--filters` needs each path as the repository names it, from its top, not from `root`.
+  const prefix = git('rev-parse', '--show-prefix').stdout.toString('utf8').trim();
+  const top = `${prefix}${rel ? `${rel}/` : ''}`;
+  const listed = git('ls-tree', '-r', '-z', '--full-name', rev, '--', ...artifactPaths(artifactBase(artifact)).map((p) => (rel ? `${rel}/${p}` : p)));
+  if (listed.status !== 0) return { ok: false, reason: `git could not list ${rel || '.'} at ${rev.slice(0, 12)}` };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-at-'));
+  try {
+    const dir = path.join(tmp, 'epic');
+    fs.mkdirSync(dir);
+    let copied = 0;
+    // A name this disk cannot hold (a Windows-invalid one) is an unreadable head, not a crash.
+    try {
+      for (const entry of listed.stdout.toString('utf8').split('\0')) {
+        const m = entry.match(/^(\d{6}) (\w+) ([0-9a-f]+)\t([\s\S]+)$/);
+        if (!m || m[2] !== 'blob' || !['100644', '100755'].includes(m[1])) continue;
+        if (!m[4].startsWith(top)) continue;
+        const blob = git('cat-file', '--filters', `--path=${m[4]}`, m[3]);
+        if (blob.status !== 0) return { ok: false, reason: `git could not read ${m[4]} at ${rev.slice(0, 12)}` };
+        const out = path.join(dir, ...m[4].slice(top.length).split('/'));
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        fs.writeFileSync(out, blob.stdout);
+        copied++;
+      }
+    } catch (e) { return { ok: false, reason: `the files at ${rev.slice(0, 12)} could not be copied (${e.code || e.message})` }; }
+    return { ok: true, hash: artifactHash(dir, artifact), copied };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
 
 // Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger
 // silently treated as a default would be rewritten by the next sync, destroying the real data.
