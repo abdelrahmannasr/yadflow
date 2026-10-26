@@ -216,9 +216,9 @@ real content either, and solo mode, which counts no approvals, says nothing. A s
 only re-synced: no hold is printed, and its approvals keep the fingerprint they were recorded with. Each file at the head is
 read through git's checkout filters, so line-ending conversion gives the bytes the disk holds.
 A squash-merged head is fetched from the platform's own ref (`refs/pull/<n>/head`,
-`refs/merge-requests/<n>/head`); a head that cannot be read records nothing and turns the CI run red.
+`refs/merge-requests/<n>/head`); a head that cannot be read records nothing and turns the CI run red on a step not yet done (on a step already done it is said and skipped, and a later sweep tries again).
 Two limits: GitLab approvals carry no commit, so an approval given before later pushes to the same MR
-is bound to the head when it was first read, and stays bound there until the MR merges — on a local
+is bound to the head when it was first read, and stays bound there — on a local
 ledger it then does not count at merge when the artifact changed after it, and in CI (which reads at
 merge) it counts against the merged head; the project's "reset approvals on push"
 setting covers both; and a
