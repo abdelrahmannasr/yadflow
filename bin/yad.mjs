@@ -175,7 +175,7 @@ ${c.bold('Where am I / what next')}
                                        command (pool skill first, yadflow's skill last). Binds nothing
   yad toolbox list [--json] [--dir <folder>]
                                        The external tools yadflow can use — core (offered at setup),
-                                       recommended pools, the design/testing/learning connectors and
+                                       recommended (skill pools, Docker MCP), the connectors and
                                        this project's own — whether each is found here, whether this
                                        project uses it, and what yadflow does without it. Installs nothing
   yad toolbox check [--json]           The tools this project uses that are not ready here, each with
