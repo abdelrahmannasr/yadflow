@@ -307,7 +307,7 @@ function printAction(a, { solo, theme: tag = null, bindings = null, automation =
   // DEBT is reminded on every run until it is paid (E41). The line says what is owed and the one command
   // that starts paying it — or, once that has started, what finishes it.
   for (const d of a.debt || []) warn(debtLine(a.epicId, d, verified));
-  for (const x of changed) { warn(`${x.step} is done, but ${x.artifact} changed after it was approved`); hand(forTerminal(x.fix)); }
+  for (const x of changed) { warn(forTerminal(`${x.step} is done, but ${x.artifact} changed after it was approved`)); hand(forTerminal(x.fix)); }
   // Why the chain walked back, when it did (#322). Read from a file a person can edit: plain text only.
   if (a.lastReopen) {
     const r = a.lastReopen;

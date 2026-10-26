@@ -267,7 +267,7 @@ function owedLine(o) {
   if (o.kind === 'debt') return `${o.epic}: ${o.step.replace(/-review$/, '')} owed as debt (${o.status})${o.reason ? ` — ${safe(o.reason)}` : ''}`;
   if (o.kind === 'blocked') return `${o.epic}${o.story ? ` ${o.story} in ${safe(o.repo)}` : ''}: ${o.step} blocked${o.reason ? ` — ${safe(o.reason)}` : ''}`;
   if (o.kind === 'hotfix-debt') return `${o.epic}: ${o.count} open hotfix debt — yad reconcile check`;
-  if (o.kind === 'unapproved-change') return `${o.epic}: ${o.step} is done, but ${safe(o.artifact)} changed after it was approved — ${safe(o.fix)}`;
+  if (o.kind === 'unapproved-change') return `${o.epic}: ${safe(o.step)} is done, but ${safe(o.artifact)} changed after it was approved — ${safe(o.fix)}`;
   return `${safe(o.repo)} ${prWord(o.platform)}${o.number}: open follow-up of ${o.task}`;
 }
 

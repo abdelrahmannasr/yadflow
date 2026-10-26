@@ -842,7 +842,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     if (differs && !solo && !alreadyDone) {
       const trunk = resolveDefaultBranch(productGit(root), productConfig);
       warn(`${pr.artifact}: PR #${pr.number} approved a different ${pr.artifact} than the default branch holds now — another merge changed it after that review, so its approvals do not pass the gate${local ? ` (or this checkout's ${trunk} is behind origin: pull it first)` : ''}`);
-      hand(reviewAsItStands(epic, step.artifact, trunk));
+      hand(forTerminal(reviewAsItStands(epic, step.artifact, trunk)));
     }
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
@@ -953,7 +953,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
         // #418: a merge changed the artifact and no approval covers it now. The gate stays one-way — the step
         // is not reopened and nothing is refused — so this is said loudly, with the way to review it again.
         warn(`${step.id} is done, but ${step.artifact} changed after it was approved — none of its ${changedSinceApproved.count} approval(s) covers it as it stands now; the step stays done`);
-        hand(reviewAsItStands(epic, step.artifact, resolveDefaultBranch(productGit(root), productConfig)));
+        hand(forTerminal(reviewAsItStands(epic, step.artifact, resolveDefaultBranch(productGit(root), productConfig))));
       } else {
         const verdict = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
         info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${verdict}`);
@@ -1259,7 +1259,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // newer review when only a fresh review of the artifact as it stands can pass.
     if (older && !unread && trialDiffers) {
       warn(`${job.epic}: PR #${job.pr} approved a different ${job.artifact} than the default branch holds now — another merge changed it after that review`);
-      hand(reviewAsItStands(job.epic, step.artifact, resolveDefaultBranch(productGit(root), productConfig)));
+      hand(forTerminal(reviewAsItStands(job.epic, step.artifact, resolveDefaultBranch(productGit(root), productConfig))));
     }
     // Before the pointer moves to a number other than the one it holds, ask the platform that the PR/MR is on
     // this review branch: a mistyped `--pr` on the manual recovery would otherwise become the pointer,
