@@ -18,7 +18,8 @@
 //
 // THREE TIERS:
 //   core         offered at setup (E85) — repomix, spec-kit, impeccable
-//   recommended  listed, never pushed — pools of skills and agents a team may choose (Part 7)
+//   recommended  listed, never pushed — pools of skills and agents a team may choose (Part 7),
+//                and other optional tools such as Docker MCP Toolkit (#361)
 //   connector    the tools a Product connects for design, testing and learning (`yad-connect-*`); the
 //                same adapters `skills/sdlc/config.yaml` names, with the same fallbacks
 //
