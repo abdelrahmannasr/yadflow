@@ -952,7 +952,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       } else if (changedSinceApproved) {
         // #418: a merge changed the artifact and no approval covers it now. The gate stays one-way — the step
         // is not reopened and nothing is refused — so this is said loudly, with the way to review it again.
-        warn(`${step.id} is done, but ${step.artifact} changed after it was approved — none of its ${changedSinceApproved.count} approval(s) covers it as it stands now; the step stays done`);
+        warn(forTerminal(`${step.id} is done, but ${step.artifact} changed after it was approved — none of its ${changedSinceApproved.count} approval(s) covers it as it stands now; the step stays done`));
         hand(forTerminal(reviewAsItStands(epic, step.artifact, resolveDefaultBranch(productGit(root), productConfig))));
       } else {
         const verdict = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;

@@ -931,7 +931,7 @@ function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
       if (solo) continue;
       const records = ledger.approvals.filter((a) => a.step === s.id).length;
       check(checks, `epic:${epic}:${s.id}:unapproved`, 'epics', 'fail',
-        `${epic}: ${s.id} is done but holds no approval${records ? ` (${records} record(s), none of them live)` : ''}`,
+        `${epic}: ${forTerminal(s.id)} is done but holds no approval${records ? ` (${records} record(s), none of them live)` : ''}`,
         'the step advanced without the record the gate exists to keep — re-open the review (a fresh PR/MR) and re-approve, or run `yad gate sync` if the approvals are on the PR but never reached the ledger');
       continue;
     }
@@ -939,7 +939,7 @@ function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
     const changed = doneStepUnapproved(epicDir, s, ledger.approvals);
     if (!changed) continue;
     check(checks, `epic:${epic}:${s.id}:stale`, 'epics', 'warn',
-      `${epic}: ${s.id} is done, but all ${changed.count} approval(s) are bound to an older ${s.artifact}`,
+      `${epic}: ${forTerminal(s.id)} is done, but all ${changed.count} approval(s) are bound to an older ${forTerminal(s.artifact)}`,
       'the artifact changed after it was approved — re-open the review (a fresh PR/MR) so the record matches what shipped');
   }
 }
