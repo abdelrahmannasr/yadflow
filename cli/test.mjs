@@ -10458,7 +10458,7 @@ test('gate ci --merged: the #362 older-review trial holds when a newer merge cha
   assert.equal(reviewStatus(author), 'in_review', 'the older approved review does not pass content a newer merge changed');
   assert.match(out, /PR #7 is older than #9, .* and does not pass the gate — syncing #9/);
   assert.match(out, /PR #7 approved a different architecture\.md than the default branch holds now/);
-  assert.match(out, /git switch -C review\/EP-test\/architecture origin\/trunk.*git commit --allow-empty -m "docs\(ep-test\): review architecture as merged".*git push --force-with-lease -u origin review\/EP-test\/architecture.*yad gate open EP-test architecture\.md/);
+  assert.match(out, /git fetch --prune origin.*git switch -C review\/EP-test\/architecture origin\/trunk.*git commit --allow-empty -m "docs\(ep-test\): review architecture as merged".*git push --force-with-lease -u origin review\/EP-test\/architecture.*yad gate open EP-test architecture\.md/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10507,6 +10507,26 @@ test('gate ci --merged: a done step is only re-synced — no hold is printed and
   assert.doesNotMatch(out, /approved a different|yad gate open/, 'the gate already decided this step');
   git(author, 'fetch', '-q', 'origin');
   assert.deepEqual(JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json')).map((x) => x.artifactHash), [cur, cur, cur], 'its history is not rewritten');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a GitLab approval read on an open MR stays bound to that head when the author pushes again (issue #366 review 3)', async () => {
+  const { T, ci } = scaffoldCiProduct();
+  const ep = path.join(ci, 'epics/EP-test');
+  const hub = JSON.parse(fs.readFileSync(path.join(ci, '.sdlc/hub.json'), 'utf8'));
+  fs.writeFileSync(path.join(ci, '.sdlc/hub.json'), JSON.stringify({ ...hub, platform: 'gitlab' }));
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([{ step: 'architecture-review', artifact: 'architecture.md', platform: 'gitlab', number: 7, branch: 'review/EP-test/architecture' }]));
+  const sameAsTrunk = git(ci, 'rev-parse', 'HEAD').toString().trim();
+  const pushed = git(ci, 'rev-parse', 'origin/review/EP-test/architecture').toString().trim();
+  // GitLab: no commit and no time on the approval
+  const mr = (merged, head) => ({ ok: true, state: merged ? 'merged' : 'opened', merged, headOid: head, reviews: [{ login: 'al', state: 'APPROVED' }], threads: [] });
+  const sync = (reader) => captureConsole(() => gateSync(ci, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader, contentAt: undefined }));
+  await sync(() => mr(false, sameAsTrunk));          // approved while the MR changed nothing yet
+  await sync(() => mr(false, pushed));               // the author pushes a change the reviewer never saw
+  git(ci, 'merge', '-q', '--no-ff', 'origin/review/EP-test/architecture', '-m', 'merge !7');
+  await sync(() => mr(true, pushed));
+  const st = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
+  assert.equal(st.steps.find((s) => s.id === 'architecture-review').status, 'in_review', 'the approval is of the content before the push');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

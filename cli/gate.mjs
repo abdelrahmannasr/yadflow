@@ -231,7 +231,7 @@ export { legacyLogins };
 // still holds its files in the old folder at its head, so when the new one is empty there, the old is read.
 export function approvedContent(contentAt, { root, epic, epicDir, ...rest }) {
   const at = contentAt({ root, epicDir, ...rest });
-  if (!at?.ok || at.hash != null || epic !== FOUNDATION_EPIC) return at;
+  if (!at?.ok || at.copied !== 0 || epic !== FOUNDATION_EPIC) return at;
   const old = contentAt({ root, epicDir: epicRoot(root, DISCOVERY_EPIC), ...rest });
   return old?.ok && old.hash != null ? old : at;
 }
@@ -249,7 +249,9 @@ export function headContentHash({ root, epicDir, artifact, platform, number, hea
 function reviewAsItStands(epic, artifact, trunk) {
   const branch = `review/${epic}/${artifactBase(artifact)}`;
   // `-C` and a forced push: the merged review's branch is usually still there, and its PR/MR is done with.
-  return `review ${artifact} as it stands on a fresh PR/MR: \`git switch -C ${branch} origin/${trunk}\`, \`git commit --allow-empty -m "docs(${epic.toLowerCase()}): review ${artifactBase(artifact)} as merged"\`, \`git push --force-with-lease -u origin ${branch}\`, then \`yad gate open ${epic} ${artifact}\``;
+  // The fetch first: a branch the platform deleted at merge is still in the clone's remote refs, and
+  // --force-with-lease would refuse against it.
+  return `review ${artifact} as it stands on a fresh PR/MR: \`git fetch --prune origin\`, \`git switch -C ${branch} origin/${trunk}\`, \`git commit --allow-empty -m "docs(${epic.toLowerCase()}): review ${artifactBase(artifact)} as merged"\`, \`git push --force-with-lease -u origin ${branch}\`, then \`yad gate open ${epic} ${artifact}\``;
 }
 
 // The fingerprint new approvals take when the approved head held none of the artifact while the default
@@ -261,7 +263,7 @@ const NOTHING_AT_HEAD = 'sha256:none-at-the-approved-head';
 const NOTHING_ON_DEFAULT = 'sha256:none-on-the-default-branch';
 
 // `bindHash` is what a new approval is bound to: the content its review approved (#366, `headContentHash`).
-function upsertBridge(approvals, recs, { stepId, artifact, bindHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
+function upsertBridge(approvals, recs, { stepId, artifact, bindHash, today, prNumber = null, closed = false, merged = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
   const live = accepted ?? (bindHash ? [bindHash] : []);
   const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
   // A submission TIME, not a date. Every GitLab record written before E64 read `approved_at` holds the
@@ -407,8 +409,10 @@ function upsertBridge(approvals, recs, { stepId, artifact, bindHash, today, prNu
         // Recorded by a release before #366, bound to the default branch's content when it was read rather
         // than to what the review approved: when that record still counts and the review approved other
         // content, the content it approved wins, so it stops counting. A stale record stays as it is.
-        // Never on a closed step: its approvals are its history, and the gate already decided it.
-        if (!closed && was.artifactHash && bindHash && !stale(was) && !live.includes(bindHash)) artHash = bindHash;
+        // Never on a closed step: its approvals are its history, and the gate already decided it. Only for a
+        // merged review: before the merge the head can still move, and a GitLab approval carries no commit, so
+        // a record bound to an earlier head must stay there and go stale.
+        if (!closed && merged && was.artifactHash && bindHash && !stale(was) && !live.includes(bindHash)) artHash = bindHash;
         // A record holding only a date takes the platform's time once (E64) and keeps its fingerprint: the
         // time is evidence of when, the fingerprint is what the gate decides on. Then it is byte-stable.
         approvedAt = !hasTime(was.approvedAt) && hasTime(r.submittedAt) ? r.submittedAt : (was.approvedAt ?? approvedAt);
@@ -828,6 +832,11 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // New approvals bind to what the review approved (#366); see headContentHash. Unknown is never
     // taken as approved: nothing is bound, and the run goes red so CI tries again.
     const at = approvedContent(contentAt, { root, epic, epicDir, artifact: pr.artifact, platform, number: pr.number, headOid: pull.headOid });
+    if (!at?.ok && alreadyDone) {
+      // A done step only records what arrives: nothing is bound, and the run is not failed for it.
+      warn(`${pr.artifact}: could not read what PR #${pr.number} approved (${at?.reason || 'no answer'}) — ${step.id} is already done; no approval was recorded`);
+      continue;
+    }
     if (!at?.ok) {
       fail(`${pr.artifact}: could not read what PR #${pr.number} approved (${at?.reason || 'no answer'}) — nothing was recorded`);
       hand('run it again; CI needs the full history (fetch-depth: 0, or GIT_DEPTH: "0") and must be able to fetch the PR/MR');
@@ -851,7 +860,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const stateBefore = JSON.stringify(state);
     const nudgedBefore = JSON.stringify(pr.nudged || []);
     const recs = mapApprovers(pull.reviews, { headOid: pull.headOid });
-    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, bindHash: approvedHash, today, prNumber: pr.number ?? null, closed: alreadyDone, aliases, clashed, accepted: acceptedHashes(epicDir, pr.artifact) });
+    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, bindHash: approvedHash, today, prNumber: pr.number ?? null, closed: alreadyDone, merged: !!pull.merged, aliases, clashed, accepted: acceptedHashes(epicDir, pr.artifact) });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the

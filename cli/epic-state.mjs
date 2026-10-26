@@ -970,7 +970,8 @@ export const isStaleHash = (recorded, accepted) => !!recorded && accepted.length
 // regular files are copied: a link or a submodule there leaves the copy different, so it can only fail
 // to match. `rev` must be a full SHA — a name could be a branch or tag standing in for another
 // commit (#410). `root` is the Product's checkout, and `epicDir` a folder inside it.
-// → { ok: true, hash } (`hash` null when there is nothing to fingerprint, as `artifactHash`), or
+// → { ok: true, hash, copied } (`hash` null when there is nothing to fingerprint, as `artifactHash`; `copied`
+//   the number of files found there), or
 //   { ok: false, reason } when the commit cannot be read here.
 export function artifactHashAt(root, epicDir, artifact, rev) {
   if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(rev || '')) return { ok: false, reason: `'${rev ?? ''}' is not a full commit SHA` };
@@ -986,6 +987,7 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
   try {
     const dir = path.join(tmp, 'epic');
     fs.mkdirSync(dir);
+    let copied = 0;
     // A name this disk cannot hold (a Windows-invalid one) is an unreadable head, not a crash.
     try {
       for (const entry of listed.stdout.toString('utf8').split('\0')) {
@@ -997,9 +999,10 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
         const out = path.join(dir, ...m[4].slice(top.length).split('/'));
         fs.mkdirSync(path.dirname(out), { recursive: true });
         fs.writeFileSync(out, blob.stdout);
+        copied++;
       }
     } catch (e) { return { ok: false, reason: `the files at ${rev.slice(0, 12)} could not be copied (${e.code || e.message})` }; }
-    return { ok: true, hash: artifactHash(dir, artifact) };
+    return { ok: true, hash: artifactHash(dir, artifact), copied };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
