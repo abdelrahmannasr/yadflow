@@ -363,7 +363,7 @@ test('yad worktree remove says which ignored files go with it (#115 review 1)', 
 test('yad\'s own commit is the exact subject yad writes — a revert of one, or a step\'s commit with the marker, is not (#115 review 2)', () => {
   for (const ok of ['chore(product): sync Build state — EP-x/EP-x-S01 by bob [skip ci]', 'chore(gate): repair epic state — close stranded author step(s) [skip ci]'])
     assert.ok(YAD_COMMIT_SUBJECT.test(ok), ok);
-  for (const no of ['Revert "chore(product): sync Build state — x by y [skip ci]"', 'docs(EP-x): author epic [skip ci]', 'chore(product): sync Build state'])
+  for (const no of ['Revert "chore(product): sync Build state — x by y [skip ci]"', 'docs(ep-x): author epic [skip ci]', 'chore(product): sync Build state'])
     assert.equal(YAD_COMMIT_SUBJECT.test(no), false, no);
   const { W, P, pwt } = workspace();
   try {
@@ -372,7 +372,7 @@ test('yad\'s own commit is the exact subject yad writes — a revert of one, or 
     git(pwt, 'config', 'user.email', 'bob@corp.io');
     write(pwt, { 'notes.md': 'x\n' });
     git(pwt, 'add', 'notes.md');
-    git(pwt, 'commit', '-qm', 'docs(EP-x): author epic [skip ci]');
+    git(pwt, 'commit', '-qm', 'docs(ep-x): author epic [skip ci]');
     assert.equal(branchToCommitOn(pwt, (...a) => run('git', a, { cwd: pwt }), 'main'), 'HEAD');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
@@ -386,7 +386,7 @@ test('gate ci in an epic Product worktree with no default branch set still refus
     git(pwt, 'config', 'user.email', 'bob@corp.io');
     write(pwt, { 'notes.md': 'x\n' });
     git(pwt, 'add', 'notes.md');
-    git(pwt, 'commit', '-qm', 'docs(EP-x): author epic');
+    git(pwt, 'commit', '-qm', 'docs(ep-x): author epic');
     const head = git(path.join(W, 'product.git'), 'rev-parse', 'main');
     const r = yad(pwt, 'gate', 'ci');
     assert.equal(r.code, 1, r.out);
@@ -408,7 +408,7 @@ test('the index refresh in an epic Product worktree asks no network: offline, it
     git(pwt, 'config', 'user.name', 'bob');
     git(pwt, 'config', 'user.email', 'bob@corp.io');
     git(pwt, 'add', INDEX_FILE);
-    git(pwt, 'commit', '-qm', 'docs(EP-x): author epic');
+    git(pwt, 'commit', '-qm', 'docs(ep-x): author epic');
     fs.rmSync(path.join(pwt, INDEX_FILE));
     assert.equal(refreshIndexAfterWrite(pwt, null), false);
     assert.equal(fs.existsSync(path.join(pwt, INDEX_FILE)), false);
