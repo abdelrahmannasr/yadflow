@@ -962,6 +962,19 @@ export function acceptedHashes(epicDir, artifact) {
 // approval with no hash) or nothing can be fingerprinted — both are "no claim", as they always were.
 export const isStaleHash = (recorded, accepted) => !!recorded && accepted.length > 0 && !accepted.includes(recorded);
 
+// A done review step whose artifact changed after it was approved (#418): it holds approvals, and none of
+// them is live against the artifact as it stands. → { count } (the step's approvals), or null. `yad doctor`,
+// the gate and `yad status` ask this one question. A done step with no approval at all is a different
+// finding (doctor's `:unapproved`), and nothing to fingerprint is no staleness claim.
+export function doneStepUnapproved(epicDir, step, approvals) {
+  if (!step || step.type !== 'review+approve' || stepStatus(step) !== 'done') return null;
+  const forStep = (Array.isArray(approvals) ? approvals : []).filter((a) => a?.step === step.id && a.status === 'approved');
+  if (!forStep.length) return null;
+  const accepted = acceptedHashes(epicDir, step.artifact);
+  if (!accepted.length) return null;
+  return forStep.some((a) => !isStaleHash(a.artifactHash, accepted)) ? null : { count: forStep.length };
+}
+
 // The fingerprint of `artifact` as it stands at the git commit `rev` (#366): the head a review approved.
 // The review's files (`artifactPaths`) are copied out of the commit into a scratch epic folder and
 // fingerprinted by `artifactHash` itself, so a commit and the disk are never hashed by two copies of the

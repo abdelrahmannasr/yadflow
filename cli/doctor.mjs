@@ -10,7 +10,7 @@ import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MOD
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
-import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
+import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -935,12 +935,11 @@ function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
         'the step advanced without the record the gate exists to keep — re-open the review (a fresh PR/MR) and re-approve, or run `yad gate sync` if the approvals are on the PR but never reached the ledger');
       continue;
     }
-    const accepted = acceptedHashes(epicDir, s.artifact);
-    if (!accepted.length) continue; // nothing to bind to (no locked surface / incomplete set) — not a staleness claim
-    const live = forStep.filter((a) => !isStaleHash(a.artifactHash, accepted));
-    if (live.length) continue;
+    // The shared rule (#418): nothing to fingerprint is no staleness claim, and one live approval clears it.
+    const changed = doneStepUnapproved(epicDir, s, ledger.approvals);
+    if (!changed) continue;
     check(checks, `epic:${epic}:${s.id}:stale`, 'epics', 'warn',
-      `${epic}: ${s.id} is done, but all ${forStep.length} approval(s) are bound to an older ${s.artifact}`,
+      `${epic}: ${s.id} is done, but all ${changed.count} approval(s) are bound to an older ${s.artifact}`,
       'the artifact changed after it was approved — re-open the review (a fresh PR/MR) so the record matches what shipped');
   }
 }
