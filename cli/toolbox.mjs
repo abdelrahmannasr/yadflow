@@ -234,7 +234,7 @@ export const TOOLBOX = Object.freeze([
     versions: null,
     fallback: 'nothing changes: agents use the MCP servers they already have',
     records: null,
-    note: 'The first gateway start pulls every server image and can outlast a client\'s 30-second timeout: warm it once with `docker mcp gateway run --profile <id> --dry-run`. A server\'s secrets (a Docker Hub token) are set with `docker mcp secret set`, never in yad.',
+    note: 'The first gateway start pulls every server image and can outlast a client\'s 30-second timeout: warm it once with `docker mcp gateway run --profile <id> --dry-run`. A server\'s secrets (an access token) are set with `docker mcp secret set`, never in yad.',
     usedBy: [],
   },
 
