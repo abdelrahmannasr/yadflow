@@ -684,7 +684,41 @@ test('#368 review 3: on a git older than 2.38, a folder the base moved into the 
     sh('commit', '-q', '-m', 'chore: foo moved'); sh('checkout', '-q', 'pr');
     const r = g.check({ ...as('alice'), ...olderGit(g) });
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /^FAIL \[member-check\]: main moved files into the members folder from a folder this branch adds a file to, and this git \(older than 2\.38\) cannot tell where the merge puts it — merge main into the branch, then push again$/m);
+    assert.match(r.out, FOLDER_MOVED);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+const FOLDER_MOVED = /^FAIL \[member-check\]: main moved files into the members folder from a folder this branch adds a file to, and this git \(older than 2\.38\) cannot tell where the merge puts it — merge main into the branch, then push again$/m;
+test('#368 review 4: the folder rule follows git — a folder of only subfolders moved whole is caught; a folder still there is not', () => {
+  const sh = (g, ...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+  const setup = (g, files) => {
+    sh(g, 'checkout', '-q', 'main');
+    for (const f of files) put(path.join(g.T, f), JSON.stringify(rec('alice', [])));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore: foo');
+    sh(g, 'checkout', '-q', 'pr'); sh(g, 'reset', '-q', '--hard', 'main');
+    put(path.join(g.T, 'foo/github-mallory.json'), JSON.stringify(rec('mallory', [])));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore: a note');
+    sh(g, 'checkout', '-q', 'main');
+  };
+  // foo/ holds only subfolders, and the base moves it whole: git would carry foo/github-mallory.json in.
+  let g = gateRepo();
+  try {
+    setup(g, ['foo/a/github-carol.json', 'foo/b/github-dave.json']);
+    fs.mkdirSync(path.join(g.T, '.sdlc'), { recursive: true });
+    sh(g, 'mv', 'foo', '.sdlc/members');
+    sh(g, 'commit', '-q', '-m', 'chore: foo moved'); sh(g, 'checkout', '-q', 'pr');
+    assert.match(g.check({ ...as('alice'), ...olderGit(g) }).out, FOLDER_MOVED);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+  // Only part of foo/ moves, so foo/ is still there and git renames nothing: no refusal from this rule.
+  g = gateRepo();
+  try {
+    setup(g, ['foo/github-carol.json', 'foo/keep.txt']);
+    fs.mkdirSync(path.join(g.T, '.sdlc/members'), { recursive: true });
+    sh(g, 'mv', 'foo/github-carol.json', '.sdlc/members/github-carol.json');
+    sh(g, 'commit', '-q', '-m', 'chore: carol moved'); sh(g, 'checkout', '-q', 'pr');
+    const r = g.check({ ...as('alice'), ...olderGit(g) });
+    assert.doesNotMatch(r.out, FOLDER_MOVED);
+    assert.equal(r.code, 0, r.out);
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 

@@ -136,10 +136,14 @@ if (built.status === 0 && mergeTree && git('rev-parse', '--verify', '-q', `${mer
   if (baseTip !== from) {
     const baseRead = git('diff', '--no-renames', '--name-status', '-z', from, base);
     if (!baseRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
-    const dirOf = (f) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
-    const emptied = new Set(names(baseRead, (s) => s === 'D').map(dirOf));
+    // Every folder a path sits in (never the top level, which git never renames).
+    const folders = (f) => { const out = []; for (let i = f.indexOf('/'); i > 0; i = f.indexOf('/', i + 1)) out.push(f.slice(0, i)); return out; };
+    // Git renames a folder only when it is gone on that side: the folders of the base's deletions, less any
+    // the base still holds — a folder that held only subfolders counts too (review 4).
+    const stillThere = new Set(git('ls-tree', '-r', '-d', '--name-only', '-z', base).out.split('\0').filter(Boolean));
+    const gone = new Set(names(baseRead, (s) => s === 'D').flatMap(folders).filter((d) => !stillThere.has(d)));
     const movedIn = names(baseRead, (s) => s === 'A').some(memberish);
-    if (movedIn && names(mineRead, (s) => s === 'A').some((f) => emptied.has(dirOf(f)))) {
+    if (movedIn && gone.size && names(mineRead, (s) => s === 'A').some((f) => folders(f).some((d) => gone.has(d)))) {
       say(`FAIL [member-check]: ${base} moved files into the members folder from a folder this branch adds a file to, and this git (older than 2.38) cannot tell where the merge puts it — merge ${base} into the branch, then push again`);
       process.exit(1);
     }
