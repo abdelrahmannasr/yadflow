@@ -203,7 +203,20 @@ content. This prevents "approve, then quietly change it" (build plan §5 spirit)
 The engine checks this by content, not by date. A bridge approval records `artifactHash`, the
 fingerprint of what was approved. When the artifact's fingerprint no longer matches, the approval is
 counted as revoked: it stays on disk, it no longer counts, and the gate reports `N approval(s) revoked —
-artifact changed; re-approve`. An approval recorded with no `artifactHash` is never treated as stale.
+artifact changed; re-approve`.
+
+The fingerprint is taken of the content **at the review PR/MR's head**, the commit its reviewers
+approved, never of the default branch when the gate happens to read it (#366). Several reviews can
+cover one artifact (per-story `review/<epic>/stories-S0N` branches, or a re-review on a fresh MR), and
+another one merged in between, without approvals, would otherwise pass on these approvals. So a
+merged review whose head differs from the default branch passes nothing, and the gate says so and
+names the fix: review the artifact as it stands on a fresh PR/MR (`yad gate open <epic> <artifact>`).
+A squash-merged head is fetched from the platform's own ref (`refs/pull/<n>/head`,
+`refs/merge-requests/<n>/head`); a head that cannot be read records nothing and turns the CI run red.
+Two limits: GitLab approvals carry no commit, so an approval given before later pushes to the same MR
+counts against its head at merge (the project's "reset approvals on push" setting covers this); and a
+branch rebased onto the default branch carries the content merged there, which its reviewers then
+approved with it. An approval recorded with no `artifactHash` is never treated as stale.
 A hand-written approval (the `approve` action, on a Product with no platform) carries no fingerprint and
 no platform evidence, so an edit to the artifact does **not** revoke it: after a real change, remove the
 old approval and record it again once the reviewer has seen the new content.
