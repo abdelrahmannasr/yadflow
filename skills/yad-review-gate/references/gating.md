@@ -210,7 +210,7 @@ approved, never of the default branch when the gate happens to read it (#366). S
 cover one artifact (per-story `review/<epic>/stories-S0N` branches, or a re-review on a fresh MR), and
 another one merged in between, without approvals, would otherwise pass on these approvals. So a
 merged review whose head differs from the default branch passes nothing, and the gate says so and
-names the fix: review the artifact as it stands on a fresh PR/MR — reset the branch `review/<epic>/<artifact>` to the default branch (`git switch -C`: the merged review's branch is usually still there), add a commit (an empty one is enough: `git commit --allow-empty`), push it with `--force-with-lease`, then run `yad gate open <epic> <artifact>`. A default branch
+names the fix: review the artifact as it stands on a fresh PR/MR — fetch with `git fetch --prune origin`, reset the branch `review/<epic>/<artifact>` to the default branch (`git switch -C`: the merged review's branch is usually still there), add a commit (an empty one is enough: `git commit --allow-empty`), push it with `--force-with-lease`, then run `yad gate open <epic> <artifact>`. A default branch
 with nothing to fingerprint (every story deleted, a contract with no END marker) passes no approval of
 real content either, and solo mode, which counts no approvals, says nothing. A step already done is
 only re-synced: no hold is printed, and its approvals keep the fingerprint they were recorded with. Each file at the head is
@@ -218,8 +218,9 @@ read through git's checkout filters, so line-ending conversion gives the bytes t
 A squash-merged head is fetched from the platform's own ref (`refs/pull/<n>/head`,
 `refs/merge-requests/<n>/head`); a head that cannot be read records nothing and turns the CI run red.
 Two limits: GitLab approvals carry no commit, so an approval given before later pushes to the same MR
-is bound to the head when it was first read — on a local ledger it may then not count at merge, and in
-CI (which reads at merge) it counts against the merged head; the project's "reset approvals on push"
+is bound to the head when it was first read, and stays bound there until the MR merges — on a local
+ledger it then does not count at merge when the artifact changed after it, and in CI (which reads at
+merge) it counts against the merged head; the project's "reset approvals on push"
 setting covers both; and a
 branch rebased onto the default branch carries the content merged there, which its reviewers then
 approved with it. An approval recorded with no `artifactHash` is never treated as stale.
