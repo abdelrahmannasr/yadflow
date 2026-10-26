@@ -1246,6 +1246,7 @@ test('#361 Docker MCP Toolkit: a recommended tool, found by its MCP_DOCKER serve
     r = yad(['toolbox', 'add', 'docker-mcp'], { cwd: p, home });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /Docker MCP Toolkit is used here now/);
+    assert.match(r.stdout, /set it up by hand: https:\/\/docs\.docker\.com\//, 'it comes with Docker Desktop: the manual page is the way in');
     assert.deepEqual(toolboxJSON(p).shipped, { 'docker-mcp': 'use' });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

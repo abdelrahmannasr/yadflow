@@ -223,7 +223,7 @@ export const TOOLBOX = Object.freeze([
       on: '2026-10-26', licenceFrom: 'https://github.com/docker/mcp-gateway/blob/main/LICENSE',
       source: 'https://github.com/docker/mcp-gateway', release: 'v0.44.2',
       packages: [],
-      note: 'The gateway and its `docker mcp` CLI plugin are MIT; Docker Desktop, which ships them, is under Docker\'s own terms. v0.44.2 is the newest tag; no GitHub release is published.',
+      note: 'The gateway and its `docker mcp` CLI plugin are MIT; Docker Desktop, which ships them, is under Docker\'s own terms. v0.44.2 is the newest tag, published as a GitHub pre-release, as every release there is, so GitHub names no latest release.',
     },
     // It comes with Docker Desktop: none of the four install types fits.
     install: [],
@@ -755,7 +755,7 @@ export function toolUse(tool, { shipped, connected }) {
 //              tool is installed.
 //   connector  used when the Product's design, testing or learning file connects it. The connect skill
 //              writes that file and the step skill follows it, as before E87.
-// Recommended tools are bound with `yad skill bind`, so no skill names one.
+// Recommended tools are bound with `yad skill bind`, or, like Docker MCP, used by no skill, so no skill names one.
 export const SKILL_FALLBACK_HEADING = '## When a tool is missing';
 // The section's last line. The section is exactly the lines from its heading to this marker, so a
 // rewrite never has to guess from the Markdown where the section ends (rounds 5 to 9 of the E87 review
