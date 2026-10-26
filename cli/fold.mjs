@@ -2,7 +2,7 @@
 //
 // E43 saves every draft of an artifact to a private `yad/wip/<name>/<epic>` branch, as unsigned `wip(…)`
 // commits. At the end of an authoring step, this command makes the ONE commit the record keeps:
-// `docs(<epic>): author <step>`. The decisions were the user's (2026-09-25):
+// `docs(<epic, lowercase>): author <step>` (#413). The decisions were the user's (2026-09-25):
 //   1. THE DRAFT BRANCH IS LEFT ALONE. The fold does not delete, reset or mark it. E95 (rework measurement)
 //      reads the draft history, and deleting a capture branch is the multi-machine trap E43's reviews kept
 //      finding (another machine pushes its copy back). Capture's own rule makes the next capture a no-op:
@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
-import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot } from './epic-state.mjs';
+import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot, isValidEpicId } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
 import { resolveDefaultBranch, preflightGuardReadiness } from './productcommit.mjs';
 
@@ -55,8 +55,11 @@ export function stepPaths(epic, stepId) {
 }
 const covers = (paths, p) => paths.some((s) => p === s || p.startsWith(`${s}/`));
 
+// The scope is the epic ID in lowercase (#413): the commit-message gate takes a lowercase scope
+// (`[a-z0-9._-]`), so `docs(EP-x)` failed every review PR. The exact ID stays in the Yad-Epic trailer.
+export const foldSubject = (epic, step) => `docs(${epic.toLowerCase()}): author ${step}`;
 export const foldMessage = ({ epic, step, folded }) =>
-  `docs(${epic}): author ${step}\n\nYad-Epic: ${epic}\nYad-Step: ${step}\nYad-Folded: ${folded || 'none'}\n`;
+  `${foldSubject(epic, step)}\n\nYad-Epic: ${epic}\nYad-Step: ${step}\nYad-Folded: ${folded || 'none'}\n`;
 
 // Sort one epic's changed files into what the fold takes and what it leaves. `entries` are
 // `statusEntries` rows; `verified` is the ledger mode; `seeding` is true while the epic has no
@@ -113,7 +116,8 @@ export function unfoldedPaths(root, epic, base, env = process.env) {
 export async function runFold(root, { epic, step, env = process.env, capture = runCapture } = {}) {
   const refuse = (msg, hint) => { fail(msg); if (hint) hand(hint); process.exitCode = 1; };
   if (!epic || !step) return refuse('yad fold needs an epic and a step', `usage: yad fold <epic> <step>   (steps: ${FOLD_STEPS.join(', ')})`);
-  if (!/^EP-[a-z0-9-]+$/.test(epic)) return refuse(`not an epic id: ${epic}`, 'an epic id looks like EP-<slug> (the Product level is EP-foundation)');
+  // One rule with the rest of yad, which also keeps foldSubject's lowercased scope inside the gate's [a-z0-9._-].
+  if (!isValidEpicId(epic)) return refuse(`not an epic id: ${epic}`, 'an epic id looks like EP-<slug> (the Product level is EP-foundation)');
   if (!FOLD_STEPS.includes(step)) return refuse(`${step} is not an authoring step with an artifact`, `steps: ${FOLD_STEPS.join(', ')}`);
   // The Product level has one folder, `foundation/`; a feature step never runs there, and `foundation`
   // never runs in an epic. (`discovery` is the old spelling, which lived in an ordinary epic folder.)
@@ -236,7 +240,7 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   const sha = git(['rev-parse', 'HEAD']).out.trim();
-  const subject = `docs(${epic}): author ${step}`;
+  const subject = foldSubject(epic, step);
   ok(`${subject} → ${sha.slice(0, 7)} (${files.length} file(s))`);
   if (sorted.seed.length) info(`with the new epic's seed: ${sorted.seed.join(', ')}`);
   if (sorted.ledger.length) info(`with the ledger (${verified ? 'a new epic\'s seed' : 'ledger: local'}): ${sorted.ledger.length} file(s)`);

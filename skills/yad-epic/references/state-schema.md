@@ -618,7 +618,8 @@ The shared procedure (run once the `EP-<slug>` is known):
 2. Branch name = `<step>/EP-<slug>`. If it already exists, check it out; otherwise create it from the
    Product's default branch (`git checkout -b <step>/EP-<slug>`).
 3. Author the step's artifact(s) on that branch, and end the step with `yad fold EP-<slug> <step>` (E44): one
-   commit, `docs(EP-<slug>): author <step>`, of that step's files only. The drafts stay on the private
+   commit, `docs(ep-<slug>): author <step>` (the epic ID in lowercase: the commit-message gate takes a lowercase
+   scope), of that step's files only. The drafts stay on the private
    `yad/wip/…` capture branch. With `ledger: local` the epic's ledger changes ride in the same commit;
    with `ledger: verified` only a brand-new epic's seed does (its ledger is not in HEAD yet), together with
    its new person-written `.sdlc/` files such as a change-epic's `change.json`. The verified ledger's `review/…` branch is created

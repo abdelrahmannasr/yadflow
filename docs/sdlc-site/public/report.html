@@ -604,7 +604,7 @@ each code repo/
   <h3>Drafting together (Shape authoring)</h3>
   <div class="term"><strong>Capture (<code>yad capture</code>)</strong><span class="badge b-core">core</span><br>Saves every changed Shape artifact onto your own private branch, <code>yad/wip/&lt;git-name&gt;/&lt;epic&gt;</code>, and pushes it — never touching your checkout. A harness hook runs it after each agent edit, so drafts are never lost.</div>
   <div class="term"><strong>Claims (<code>yad claims</code>)</strong><span class="badge b-core">core</span><br>Shows who else is editing which artifact, read from everyone’s capture branches. Advice, not a lock: a claim ends 4 hours after the last save, or once the file is merged.</div>
-  <div class="term"><strong>Fold (<code>yad fold &lt;epic&gt; &lt;step&gt;</code>)</strong><span class="badge b-core">core</span><br>Ends an authoring step: commits that step’s artifacts as one clean commit (<code>docs(&lt;epic&gt;): author &lt;step&gt;</code>). The drafts stay on the <code>yad/wip/…</code> branch. On a <code>local</code> ledger the epic’s ledger rides along in the same commit.</div>
+  <div class="term"><strong>Fold (<code>yad fold &lt;epic&gt; &lt;step&gt;</code>)</strong><span class="badge b-core">core</span><br>Ends an authoring step: commits that step’s artifacts as one clean commit (<code>docs(&lt;epic, lowercase&gt;): author &lt;step&gt;</code>). The drafts stay on the <code>yad/wip/…</code> branch. On a <code>local</code> ledger the epic’s ledger rides along in the same commit.</div>
   <div class="term"><strong>Step owner (<code>yad assign</code> / <code>unassign</code> / <code>owners</code>)</strong><span class="badge b-role">roles</span><br>Names one person (by git name) as the owner of an authoring step, in <code>.sdlc/owners/&lt;step&gt;.json</code>. Advice, not a lock: the capture hook warns anyone else who edits that step’s files. <code>yad owners</code> lists every assignment.</div>
 
   <h3>Automation &amp; trust</h3>
@@ -1351,7 +1351,7 @@ yad open-pr --repo backend --base release/1.4     # deliberate non-default base 
     <tr><td><code>yad capture [--no-push]</code></td><td>Saves every changed Shape artifact onto your private <code>yad/wip/&lt;git-name&gt;/&lt;epic&gt;</code> branches and pushes them — never your checkout. A harness hook runs it after each agent edit.</td></tr>
     <tr><td><code>yad claims [&lt;epic&gt;]</code></td><td>Who else is editing which artifact, read from everyone’s capture branches. Advice, not a lock; a claim ends 4 hours after the last save or once the file is merged.</td></tr>
     <tr><td><code>yad assign &lt;epic&gt; &lt;step&gt; [--to &lt;name&gt;]</code> · <code>yad unassign</code> · <code>yad owners [&lt;epic&gt;]</code></td><td>Name the owner of an authoring step (you, or a git name), remove it, or list every assignment. Advice, not a lock: the capture hook warns anyone else who edits its files.</td></tr>
-    <tr><td><code>yad fold &lt;epic&gt; &lt;step&gt;</code></td><td>Ends an authoring step: commits its artifacts as one commit, <code>docs(&lt;epic&gt;): author &lt;step&gt;</code>. On a <code>local</code> ledger the epic’s ledger rides along.</td></tr>
+    <tr><td><code>yad fold &lt;epic&gt; &lt;step&gt;</code></td><td>Ends an authoring step: commits its artifacts as one commit, <code>docs(&lt;epic, lowercase&gt;): author &lt;step&gt;</code>. On a <code>local</code> ledger the epic’s ledger rides along.</td></tr>
   </table>
 
   <h3>Where am I, what next, and the dials</h3>

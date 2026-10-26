@@ -93,7 +93,7 @@ Details: **"The one gate"** below.
 While you write, your drafts are saved for you: a hook runs `yad capture` after each agent edit and
 commits the changed files to your private `yad/wip/<your git name>/<epic>` branch, without touching your
 checkout. `yad claims` shows who else is editing which file. At the end of each author step the skill
-runs `yad fold <epic> <step>`, which makes one clean commit, `docs(<epic>): author <step>`, with only
+runs `yad fold <epic> <step>`, which makes one clean commit, `docs(<epic, lowercase>): author <step>`, with only
 that step's files.
 
 0. *(optional, once per product)* `yad foundation new` then `yad-discovery` → the **Foundation** in
