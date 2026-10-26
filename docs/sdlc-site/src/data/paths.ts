@@ -346,7 +346,7 @@ const frontSteps: FlowStep[] = [
     id: "drafts",
     title: "Drafts: Capture → Claims → Fold",
     description:
-      "While a Shape step is being written: `yad capture` snapshots every changed Shape artifact onto your private yad/wip/<git-name>/<epic> branch — never your checkout — and pushes it; a post-edit hook runs it after each agent edit. `yad claims [<epic>]` reads everyone's capture branches and shows who else is editing which artifact — advice, not a lock; a claim ends 4 hours after the last save or once the file is merged. `yad fold <epic> <step>` ends the authoring step with one clean commit of that step's artifacts, docs(<epic>): author <step>; the drafts stay on yad/wip/…, and with a local ledger the epic's ledger rides along.",
+      "While a Shape step is being written: `yad capture` snapshots every changed Shape artifact onto your private yad/wip/<git-name>/<epic> branch — never your checkout — and pushes it; a post-edit hook runs it after each agent edit. `yad claims [<epic>]` reads everyone's capture branches and shows who else is editing which artifact — advice, not a lock; a claim ends 4 hours after the last save or once the file is merged. `yad fold <epic> <step>` ends the authoring step with one clean commit of that step's artifacts, docs(<epic, lowercase>): author <step>; the drafts stay on yad/wip/…, and with a local ledger the epic's ledger rides along.",
     actor: "system",
     status: "draft",
     stepState: "yad/wip/<git-name>/<epic> branches",
@@ -358,7 +358,7 @@ const frontSteps: FlowStep[] = [
       { id: "dr-2", from: "platform", to: "product", label: "claims: who else is editing", type: "notification", color: "#566573", delay: 800, duration: 700 },
       { id: "dr-3", from: "product", to: "state-json", label: "fold: one commit per authoring step", type: "event", color: "#1e8449", delay: 1600, duration: 700 },
     ],
-    sideEffects: { jobs: "private draft branches · one docs(<epic>) commit per authoring step", notifications: "an edit-time warning when someone else holds a live claim" },
+    sideEffects: { jobs: "private draft branches · one docs(<epic, lowercase>) commit per authoring step", notifications: "an edit-time warning when someone else holds a live claim" },
   },
   {
     id: "step-owners",

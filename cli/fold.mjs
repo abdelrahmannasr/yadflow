@@ -2,7 +2,7 @@
 //
 // E43 saves every draft of an artifact to a private `yad/wip/<name>/<epic>` branch, as unsigned `wip(…)`
 // commits. At the end of an authoring step, this command makes the ONE commit the record keeps:
-// `docs(<epic>): author <step>`. The decisions were the user's (2026-09-25):
+// `docs(<epic, lowercase>): author <step>` (#413). The decisions were the user's (2026-09-25):
 //   1. THE DRAFT BRANCH IS LEFT ALONE. The fold does not delete, reset or mark it. E95 (rework measurement)
 //      reads the draft history, and deleting a capture branch is the multi-machine trap E43's reviews kept
 //      finding (another machine pushes its copy back). Capture's own rule makes the next capture a no-op:

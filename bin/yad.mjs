@@ -344,7 +344,7 @@ ${c.bold('Build helpers')}
   yad unassign <epic> <step> [--force] Remove an assignment (someone else's needs --force)
   yad owners [<epic>]                  List every step assignment, and whether it is live
   yad fold <epic> <step>               End an authoring step: commit ITS artifacts as one commit,
-                                       docs(<epic>): author <step> (signed if git signs) — the drafts
+                                       docs(<epic, lowercase>): author <step> (signed if git signs) — drafts
                                        stay on yad/wip/…; with ledger: local the epic's ledger rides along
   yad tidy up [<epic>] [--push]        Fold FINISHED Build shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
