@@ -641,8 +641,11 @@ must be proven by a commit in the pull request that GitHub links to that person.
 - On GitLab, emails are not proven (its API cannot show which account wrote a commit); only the
   owner rule applies.
 
-**Reads:** the changed paths; the member files; the Product's `platform` and `git_url`; the pull
-request's author (GitHub: `PR_AUTHOR` and `PR_AUTHOR_ID` from the event; GitLab: the merge request API
+**Reads:** the changed paths, as merging the pull request into the base would change them (#368): git
+2.38 or newer builds that merge (`git merge-tree --write-tree`) and the gate diffs the base against it,
+so a branch with several merge bases — where a hand-resolved merge could bring a member file in — is read
+in full. An older git reads from the one merge base, and fails closed when there are several. The member
+files; the Product's `platform` and `git_url`; the pull request's author (GitHub: `PR_AUTHOR` and `PR_AUTHOR_ID` from the event; GitLab: the merge request API
 with `GITLAB_TOKEN` or `SDLC_API_TOKEN`).
 
 | Message (after `FAIL [member-check]: …`) | What to change |
@@ -665,14 +668,17 @@ with `GITLAB_TOKEN` or `SDLC_API_TOKEN`).
 | `cannot tell who opened this PR/MR (<x> is a bot) …` | A bot cannot change member files: open the pull request as the person. |
 | `cannot tell who opened this PR/MR — …` / `cannot tell the numeric id of who opened this PR (PR_AUTHOR_ID) …` | On GitHub, the job must pass `PR_AUTHOR` and `PR_AUTHOR_ID` from the `pull_request` event, as `yad-product-checks.yml` does. On GitLab, run the job in a merge request pipeline, as `yad-product-checks.gitlab-ci.yml` does; if the API named no author, run the job again. |
 | The base messages | See [the base cannot be found](#the-base-cannot-be-found). |
-| `git could not list the changed files` | Check the code out with full history (GitHub: `actions/checkout` with `fetch-depth: 0`; GitLab: `GIT_DEPTH: "0"`), and give a base this branch shares history with, then run again. |
+| `git could not list the changed files` / `'<base>' and HEAD share no history …` | Check the code out with full history (GitHub: `actions/checkout` with `fetch-depth: 0`; GitLab: `GIT_DEPTH: "0"`), and give a base this branch shares history with, then run again. |
+| `this branch does not merge cleanly into <base> …` | Merge the base into the branch, resolve the conflicts, then push again. The platform cannot merge it either. |
+| `'<base>' and HEAD have N merge bases, and this git (older than 2.38) cannot build the merge …` / `<base> removed or moved a file this branch changes, and this git (older than 2.38) cannot follow it …` | Merge the base into the branch, then push again — or run the job with git 2.38 or newer. |
+| `git could not build the merge of this branch into <base> …` | Check the code out again, fresh and with full history, then run again. |
 | `usage: node checks/member-check.mjs <base-ref> …` | A wiring problem: the job must pass the base ref (the branch the pull request targets), as `yad-product-checks.yml` (GitHub) and `yad-product-checks.gitlab-ci.yml` (GitLab) do. |
 
 **Taking a member file out** (the rule the account clash, the email duplicate and the twin messages use): a file this pull request brings in, and the base does not hold, is dropped from the pull request — `git rm` it on this branch, so the pull request no longer adds it. A file the base holds — even one this pull request only edits — is deleted with `git rm`; any pull request may delete a member file. A path with a space or another unusual character is printed in single quotes, so the command can be pasted as it is.
 
-**Undoing a change to a member file** (the owner, link and `yad member add` rows use it): a file the base holds is restored to the base's copy (`git checkout <base>...HEAD -- <file>`), never deleted — deleting a teammate's file would remove them, and a deletion always passes. A file only this pull request adds is dropped (`git rm` it on this branch).
+**Undoing a change to a member file** (the owner, link and `yad member add` rows use it): a file the base holds is restored to the base's copy (`git checkout <base> -- <file>`; on a git older than 2.38, `git checkout <base>...HEAD -- <file>`), never deleted — deleting a teammate's file would remove them, and a deletion always passes. A file only this pull request adds is dropped (`git rm` it on this branch).
 
-In both rules, "the base" is the commit this branch split off from, which is what the gate compares against. `<base>...HEAD` names that commit, so a restore still works after the base branch has moved on.
+In both rules, "the base" is the commit the gate compares against: the base branch itself where git builds the merge (#368), or, on a git older than 2.38, the commit this branch split off from (`<base>...HEAD` names it, so a restore still works after the base branch has moved on).
 
 ## product-checkout
 
