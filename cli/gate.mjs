@@ -10,7 +10,7 @@ import {
 import { OWNING_COMMIT_ENV } from './hook.mjs';
 import { PROJECT_FILES, VERSION, isVerifiedLedger , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
-  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, artifactHashAt, acceptedHashes, doneStepUnapproved, isStaleHash, gatePredicate, printable,
+  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, artifactHashAt, acceptedHashes, doneStepUnapproved, reviewAsItStands, isStaleHash, gatePredicate, printable,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertProductPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
@@ -243,15 +243,6 @@ export function headContentHash({ root, epicDir, artifact, platform, number, hea
   const second = artifactHashAt(root, epicDir, artifact, headOid);
   if (second.ok || fetched.ok) return second;
   return { ...second, reason: `${second.reason}; fetching ${ref} failed: ${String(fetched.stderr || fetched.stdout || 'no answer').split('\n')[0]}` };
-}
-// How to review an artifact as it already stands on the default branch (#366): `yad gate open` needs a review
-// branch on origin, and a PR/MR needs a commit on it, so an empty one is made.
-function reviewAsItStands(epic, artifact, trunk) {
-  const branch = `review/${epic}/${artifactBase(artifact)}`;
-  // `-C` and a forced push: the merged review's branch is usually still there, and its PR/MR is done with.
-  // The fetch first: a branch the platform deleted at merge is still in the clone's remote refs, and
-  // --force-with-lease would refuse against it.
-  return `review ${artifact} as it stands on a fresh PR/MR: \`git fetch --prune origin\`, \`git switch -C ${branch} origin/${trunk}\`, \`git commit --allow-empty -m "docs(${epic.toLowerCase()}): review ${artifactBase(artifact)} as merged"\`, \`git push --force-with-lease -u origin ${branch}\`, then \`yad gate open ${epic} ${artifact}\``;
 }
 
 // The fingerprint new approvals take when the approved head held none of the artifact while the default

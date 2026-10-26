@@ -14,8 +14,9 @@ import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists, emitJSON, forTerminal } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { printTeamHint, soloTeamHint } from './people.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { OWNER_STEPS, liveOwner, readState as loadLedgerState } from './owners.mjs';
-import { bindingsForEpic, doneStepUnapproved, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { bindingsForEpic, doneStepUnapproved, reviewAsItStands, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -90,8 +91,14 @@ const rowFor = (root, id, bindings = loadSkillBindings(root)) => {
 const changedSinceApproved = (root, id) => {
   let ledger;
   try { ledger = loadLedger(epicRoot(root, id)); } catch { return []; }
+  const productConfig = readJSON(productConfigPath(root), null);
+  // Not in solo mode, where no approval is counted and the gate says nothing either.
+  if (soloOf(productConfig)) return [];
   const steps = Array.isArray(ledger?.state?.steps) ? ledger.state.steps : [];
-  return steps.filter((s) => doneStepUnapproved(epicRoot(root, id), s, ledger.approvals)).map((s) => ({ step: s.id, artifact: s.artifact }));
+  const found = steps.filter((s) => doneStepUnapproved(epicRoot(root, id), s, ledger.approvals));
+  if (!found.length) return [];
+  const trunk = resolveDefaultBranch(productGit(root), productConfig);
+  return found.map((s) => ({ step: s.id, artifact: s.artifact, fix: reviewAsItStands(id, s.artifact, trunk) }));
 };
 
 // The live step owners of one epic (E47), by step. Beside the action, never in it: `yad next --json`'s
@@ -300,7 +307,7 @@ function printAction(a, { solo, theme: tag = null, bindings = null, automation =
   // DEBT is reminded on every run until it is paid (E41). The line says what is owed and the one command
   // that starts paying it — or, once that has started, what finishes it.
   for (const d of a.debt || []) warn(debtLine(a.epicId, d, verified));
-  for (const x of changed) warn(`${x.step} is done, but ${x.artifact} changed after it was approved — review it again: yad gate open ${a.epicId} ${x.artifact}`);
+  for (const x of changed) { warn(`${x.step} is done, but ${x.artifact} changed after it was approved`); hand(forTerminal(x.fix)); }
   // Why the chain walked back, when it did (#322). Read from a file a person can edit: plain text only.
   if (a.lastReopen) {
     const r = a.lastReopen;

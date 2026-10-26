@@ -15,8 +15,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, info, hand, readJSON, exists, forTerminal, stripAnsi, run } from './lib.mjs';
 import { isVerifiedLedger, productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { epicRoot, epicStories, featureStatus, isPassed, loadLedger, doneStepUnapproved, loadSkillBindings, buildNextForRepo, stepStatus, isValidEpicId, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { epicRoot, epicStories, featureStatus, isPassed, loadLedger, doneStepUnapproved, reviewAsItStands, loadSkillBindings, buildNextForRepo, stepStatus, isValidEpicId, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 import { listEpics, epicAction, actionLine, skillPhrase, soloOf } from './next.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { repoSources } from './standup.mjs';
 import { listPrs, prTarget } from './pr-list.mjs';
 import { platformLogin } from './platform.mjs';
@@ -108,7 +109,7 @@ function hereOf(root, cwd, ledgers, views) {
 }
 
 // What is still owed, from the files: debt steps, recorded blockers, open hotfix debt.
-function owedOf(root, id, ledger, action) {
+function owedOf(root, id, ledger, action, { solo = false, trunk = () => 'main' } = {}) {
   const out = [];
   for (const d of action.debt || []) out.push({ kind: 'debt', epic: id, step: d.step, status: d.status, reason: d.record?.reason ?? null });
   // A blocker is `blocked` WITH a record (E38); a bare `blocked` is the old spelling of `todo`.
@@ -123,9 +124,10 @@ function owedOf(root, id, ledger, action) {
       }
     }
   }
-  // A done review whose artifact changed after it was approved (#418): owed a fresh review.
-  for (const s of Array.isArray(ledger?.state?.steps) ? ledger.state.steps : []) {
-    if (doneStepUnapproved(epicRoot(root, id), s, ledger?.approvals)) out.push({ kind: 'unapproved-change', epic: id, step: s.id, artifact: s.artifact });
+  // A done review whose artifact changed after it was approved (#418): owed a fresh review, with the steps
+  // the gate prints. Not in solo mode, where no approval is counted and the gate says nothing either.
+  for (const s of !solo && Array.isArray(ledger?.state?.steps) ? ledger.state.steps : []) {
+    if (doneStepUnapproved(epicRoot(root, id), s, ledger?.approvals)) out.push({ kind: 'unapproved-change', epic: id, step: s.id, artifact: s.artifact, fix: reviewAsItStands(id, s.artifact, trunk()) });
   }
   const open = loadDebt(root, id).filter((d) => d?.status === 'open');
   if (open.length) out.push({ kind: 'hotfix-debt', epic: id, count: open.length });
@@ -180,6 +182,8 @@ export function buildStatus(root, { cwd = root, fetch = true, env = process.env,
   if (!setUp) return { setUp: false };
   const bindings = loadSkillBindings(root);
   const solo = soloOf(productConfig);
+  let trunkName = null;   // asked of git only when a fresh review is owed
+  const trunk = () => (trunkName ??= resolveDefaultBranch(productGit(root), productConfig));
   const verified = isVerifiedLedger(productConfig);
   const ledgers = new Map();
   const views = new Map();
@@ -193,7 +197,7 @@ export function buildStatus(root, { cwd = root, fetch = true, env = process.env,
     ledgers.set(id, ledger);
     const { action, view } = epicAction(root, id, undefined, bindings);
     views.set(id, view);
-    owed.push(...owedOf(root, id, ledger, action));
+    owed.push(...owedOf(root, id, ledger, action, { solo, trunk }));
     if (finished(root, id, ledger, action)) { finishedCount += 1; continue; }
     // The same words `yad next` prints, with the parallel test-cases track and any re-opened step beside
     // the chain's own action — they are what keeps a shipped epic open.
@@ -263,7 +267,7 @@ function owedLine(o) {
   if (o.kind === 'debt') return `${o.epic}: ${o.step.replace(/-review$/, '')} owed as debt (${o.status})${o.reason ? ` — ${safe(o.reason)}` : ''}`;
   if (o.kind === 'blocked') return `${o.epic}${o.story ? ` ${o.story} in ${safe(o.repo)}` : ''}: ${o.step} blocked${o.reason ? ` — ${safe(o.reason)}` : ''}`;
   if (o.kind === 'hotfix-debt') return `${o.epic}: ${o.count} open hotfix debt — yad reconcile check`;
-  if (o.kind === 'unapproved-change') return `${o.epic}: ${o.step} is done, but ${safe(o.artifact)} changed after it was approved — review it again (yad gate open ${o.epic} ${safe(o.artifact)})`;
+  if (o.kind === 'unapproved-change') return `${o.epic}: ${o.step} is done, but ${safe(o.artifact)} changed after it was approved — ${safe(o.fix)}`;
   return `${safe(o.repo)} ${prWord(o.platform)}${o.number}: open follow-up of ${o.task}`;
 }
 

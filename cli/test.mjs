@@ -10635,6 +10635,11 @@ test('doneStepUnapproved: a done review whose every approval is of older content
     assert.equal(doneStepUnapproved(D, { ...review, status: 'in_review' }, [appr('sha256:old')]), null, 'only a done step');
     assert.equal(doneStepUnapproved(D, { ...review, type: 'author' }, [appr('sha256:old')]), null, 'only a review');
     assert.equal(doneStepUnapproved(D, { ...review, artifact: 'missing.md' }, [appr('sha256:old')]), null, 'nothing to fingerprint is no claim');
+    assert.equal(doneStepUnapproved(D, { ...review, status: 'deferred' }, [appr('sha256:old')]), null, 'a deferred step was never approved');
+    // a hand-edited state.json: no crash in yad status / yad next, which ask this of every step
+    assert.equal(doneStepUnapproved(D, { ...review, artifact: undefined }, [appr('sha256:old')]), null);
+    fs.mkdirSync(path.join(D, 'dir.md'));
+    assert.equal(doneStepUnapproved(D, { ...review, artifact: 'dir.md' }, [appr('sha256:old')]), null);
   } finally { fs.rmSync(D, { recursive: true, force: true }); }
 });
 

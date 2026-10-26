@@ -967,10 +967,12 @@ export const isStaleHash = (recorded, accepted) => !!recorded && accepted.length
 // the gate and `yad status` ask this one question. A done step with no approval at all is a different
 // finding (doctor's `:unapproved`), and nothing to fingerprint is no staleness claim.
 export function doneStepUnapproved(epicDir, step, approvals) {
-  if (!step || step.type !== 'review+approve' || stepStatus(step) !== 'done') return null;
+  if (!step || step.type !== 'review+approve' || stepStatus(step) !== 'done' || typeof step.artifact !== 'string') return null;
   const forStep = (Array.isArray(approvals) ? approvals : []).filter((a) => a?.step === step.id && a.status === 'approved');
   if (!forStep.length) return null;
-  const accepted = acceptedHashes(epicDir, step.artifact);
+  // A read-only question: an artifact that cannot be read (a hand-edited path naming a folder) is no claim.
+  let accepted;
+  try { accepted = acceptedHashes(epicDir, step.artifact); } catch { return null; }
   if (!accepted.length) return null;
   return forStep.some((a) => !isStaleHash(a.artifactHash, accepted)) ? null : { count: forStep.length };
 }
@@ -1019,6 +1021,16 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+// How to review an artifact as it already stands on the default branch (#366): `yad gate open` needs a review
+// branch on origin, and a PR/MR needs a commit on it, so an empty one is made.
+export function reviewAsItStands(epic, artifact, trunk) {
+  const branch = `review/${epic}/${artifactBase(artifact)}`;
+  // `-C` and a forced push: the merged review's branch is usually still there, and its PR/MR is done with.
+  // The fetch first: a branch the platform deleted at merge is still in the clone's remote refs, and
+  // --force-with-lease would refuse against it.
+  return `review ${artifact} as it stands on a fresh PR/MR: \`git fetch --prune origin\`, \`git switch -C ${branch} origin/${trunk}\`, \`git commit --allow-empty -m "docs(${epic.toLowerCase()}): review ${artifactBase(artifact)} as merged"\`, \`git push --force-with-lease -u origin ${branch}\`, then \`yad gate open ${epic} ${artifact}\``;
 }
 
 // Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger
