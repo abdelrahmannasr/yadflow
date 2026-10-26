@@ -10513,8 +10513,9 @@ test('gate ci --merged: a done step is only re-synced — no hold is printed and
 test('gate sync: a GitLab approval read on an open MR stays bound to that head when the author pushes again (issue #366 review 3)', async () => {
   const { T, ci } = scaffoldCiProduct();
   const ep = path.join(ci, 'epics/EP-test');
-  const hub = JSON.parse(fs.readFileSync(path.join(ci, '.sdlc/hub.json'), 'utf8'));
-  fs.writeFileSync(path.join(ci, '.sdlc/hub.json'), JSON.stringify({ ...hub, platform: 'gitlab' }));
+  const { productConfigPath: settingsFile } = await import('./manifest.mjs');
+  const settings = JSON.parse(fs.readFileSync(settingsFile(ci), 'utf8'));
+  fs.writeFileSync(settingsFile(ci), JSON.stringify({ ...settings, platform: 'gitlab' }));
   fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([{ step: 'architecture-review', artifact: 'architecture.md', platform: 'gitlab', number: 7, branch: 'review/EP-test/architecture' }]));
   const sameAsTrunk = git(ci, 'rev-parse', 'HEAD').toString().trim();
   const pushed = git(ci, 'rev-parse', 'origin/review/EP-test/architecture').toString().trim();
@@ -10527,6 +10528,32 @@ test('gate sync: a GitLab approval read on an open MR stays bound to that head w
   await sync(() => mr(true, pushed));
   const st = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
   assert.equal(st.steps.find((s) => s.id === 'architecture-review').status, 'in_review', 'the approval is of the content before the push');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci --merged: on a done step, a head that cannot be read is said and skipped, and the run is not failed (issue #366 review 3)', async () => {
+  const { T, author, ci } = scaffoldCiProduct();
+  git(author, 'checkout', '-q', 'trunk');
+  git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge !7');
+  const ep = path.join(author, 'epics/EP-test');
+  const st = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
+  st.steps.find((x) => x.id === 'architecture-review').status = 'done';
+  st.currentStep = 'ui-design';
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(st));
+  git(author, 'commit', '-qam', 'a done step');
+  git(author, 'push', '-q', 'origin', 'trunk');
+  git(ci, 'fetch', '-q', 'origin');
+  git(ci, 'checkout', '-q', '-B', 'trunk', 'origin/trunk');
+  const before = process.exitCode;
+  try {
+    process.exitCode = undefined;
+    const { out } = await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, today: '2026-06-10', reader: () => approvedAt('f'.repeat(40)), contentAt: () => ({ ok: false, reason: 'no such head' }) }));
+    assert.equal(process.exitCode, undefined, 'not failed');
+    assert.match(out, /could not read what PR #7 approved \(no such head\) — architecture-review is already done; no approval was recorded this time — a later sweep tries again/);
+  } finally { process.exitCode = before; }
+  let recorded = '[]';
+  try { recorded = show(ci, 'HEAD:epics/EP-test/.sdlc/approvals.json'); } catch { /* none written */ }
+  assert.equal(JSON.parse(recorded).length, 0);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

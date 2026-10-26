@@ -834,7 +834,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const at = approvedContent(contentAt, { root, epic, epicDir, artifact: pr.artifact, platform, number: pr.number, headOid: pull.headOid });
     if (!at?.ok && alreadyDone) {
       // A done step only records what arrives: nothing is bound, and the run is not failed for it.
-      warn(`${pr.artifact}: could not read what PR #${pr.number} approved (${at?.reason || 'no answer'}) — ${step.id} is already done; no approval was recorded`);
+      warn(`${pr.artifact}: could not read what PR #${pr.number} approved (${at?.reason || 'no answer'}) — ${step.id} is already done; no approval was recorded this time — a later sweep tries again`);
       continue;
     }
     if (!at?.ok) {
