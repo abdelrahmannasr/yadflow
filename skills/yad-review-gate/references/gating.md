@@ -217,8 +217,8 @@ only re-synced: no hold is printed, and its approvals keep the fingerprint they 
 When a later merge changes a done step's artifact and none of its approvals covers it any more, the
 gate says so loudly — `<step> is done, but <artifact> changed after it was approved` — with the same
 fresh-review steps, and never reopens or blocks the step (#418). `yad doctor`, `yad status` (owed) and
-`yad next` say it too, until a fresh review's approvals cover the artifact as it stands (not in solo
-mode, where no approval is counted). Each file at the head is
+`yad next` say it too, until a fresh review's approvals cover the artifact as it stands (`status` and
+`next` not in solo mode, where no approval is counted). Each file at the head is
 read through git's checkout filters, so line-ending conversion gives the bytes the disk holds.
 A squash-merged head is fetched from the platform's own ref (`refs/pull/<n>/head`,
 `refs/merge-requests/<n>/head`); a head that cannot be read records nothing and turns the CI run red on a step not yet done (on a step already done it is said and skipped, and a later sweep tries again).
