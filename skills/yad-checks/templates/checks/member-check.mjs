@@ -96,7 +96,7 @@ if (built.status === 0 && mergeTree && git('rev-parse', '--verify', '-q', `${mer
 } else if (built.status === 1) {
   say(`FAIL [member-check]: this branch does not merge cleanly into ${base}, so what it changes there cannot be read — merge ${base} into the branch, resolve the conflicts, then push again`);
   process.exit(1);
-} else if (built.status !== 129) {
+} else if (built.status !== 129) {   // 129: git's usage error, which a git older than 2.38 gives for --write-tree (as contract-check reads it)
   say(`FAIL [member-check]: git could not build the merge of this branch into ${base} (git merge-tree exit ${built.status}) — ${HISTORY}, then run again`);
   process.exit(1);
 } else if (bases.length !== 1) {
@@ -112,12 +112,26 @@ if (built.status === 0 && mergeTree && git('rev-parse', '--verify', '-q', `${mer
   const mineRead = git('diff', '--no-renames', '--name-status', '-z', from, 'HEAD');
   if (!goneRead.ok || !mineRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
   const gone = new Set(names(goneRead, () => true));
+  // Every path, not only member files: a base rename from elsewhere INTO the members folder must be caught.
   if (names(mineRead, (s) => s === 'M' || s === 'T').some((f) => gone.has(f))) {
     say(`FAIL [member-check]: ${base} removed or moved a file this branch changes, and this git (older than 2.38) cannot follow it into the merge — merge ${base} into the branch, then push again`);
     process.exit(1);
   }
+  // The rules below read the files as the merge would hold them, and this git reads them at HEAD: a member
+  // file BOTH sides changed could merge into something neither side shows (review 1), so it fails closed.
+  const baseRead = git('diff', '--no-renames', '--name-status', '-z', from, base, '--', DIR);
+  if (!baseRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
+  const baseMembers = new Set(names(baseRead, () => true));
+  const both = names(mineRead, () => true).filter((f) => baseMembers.has(f));
+  if (both.length) {
+    say(`FAIL [member-check]: ${base} and this branch both changed ${both.join(', ')}, and this git (older than 2.38) cannot read the file as the merge would hold it — merge ${base} into the branch, then push again`);
+    process.exit(1);
+  }
 }
 const diff = git('diff', '--no-renames', '--name-status', '-z', from, to);
+// Where every rule below reads the files (review 1): what the merge into the base holds — the tree git
+// built, or HEAD on an older git, where a member file both sides changed has already failed closed above.
+const AT = to;
 if (!diff.ok) { say('FAIL [member-check]: git could not list the changed files — check the code out with full history (GitHub: actions/checkout with fetch-depth: 0; GitLab: GIT_DEPTH: "0"), and give a base this branch shares history with, then run again'); process.exit(1); }
 const parts = diff.out.split('\0').filter(Boolean);
 const all = [];
@@ -163,10 +177,10 @@ for (const { status, path } of all) {
   // `.sdlc/members` itself, a link where the folder goes, is the folder check's below, not a second spelling.
   else if ((f === '.sdlc/members' || f.startsWith(DIR)) && !path.startsWith(DIR) && path !== '.sdlc/members') fail(`${JSON.stringify(path)} is another spelling of ${DIR}, which a macOS or Windows checkout reads as a member file this gate does not judge — move it into the real ${DIR} folder (git mv), or delete it`);
 }
-// The folders themselves must be folders at HEAD, and nothing under them a link.
+// The folders themselves must be folders in the merge, and nothing under them a link.
 for (const p of ['.sdlc', '.sdlc/members']) {
-  const t = git('ls-tree', 'HEAD', '--', p).out.trim();
-  if (t && !t.startsWith('040000 ')) fail(`${p} is not a folder at HEAD (a link?), and member files are read only from a real ${DIR} — replace it with a real folder that holds the files themselves`);
+  const t = git('ls-tree', AT, '--', p).out.trim();
+  if (t && !t.startsWith('040000 ')) fail(`${p} is not a folder in this change (a link?), and member files are read only from a real ${DIR} — replace it with a real folder that holds the files themselves`);
 }
 // Names of one file (twins): keep ONE per group, take every other out (reviews 4-6). Kept first: a plain file
 // (a link is refused in this same run), then a copy the base holds (a new one was meant as another file),
@@ -186,7 +200,7 @@ function twins(group) {
   const instead = own ? `; or, if ${q(own.path)} is your own file as yad member add writes it, keep it and ${removal(group.filter((g) => g !== own).map((g) => g.path))}` : '';
   fail(`${group.map((g) => g.path).join(' and ')} are one file on macOS and Windows — keep ${q(keep)}: ${removal(group.filter((g) => g.path !== keep).map((g) => g.path))}${instead}`);
 }
-const tree = git('ls-tree', '-r', '-z', 'HEAD', '--', DIR).out.split('\0').filter(Boolean);
+const tree = git('ls-tree', '-r', '-z', AT, '--', DIR).out.split('\0').filter(Boolean);
 const folded = new Map();
 for (const line of tree) {
   const [meta, p] = line.split('\t');
@@ -281,7 +295,7 @@ for (const { status, path } of changed) {
   if (status === 'D') { say(`PASS [member-check]: ${path} removed (removing a member can only make the count larger)`); continue; }
   if (name.includes('/') || !name.endsWith('.json')) { fail(`${path}: only <platform>-<login>.json files belong in ${DIR} — move it to ${DIR}${platform}-<login>.json, or remove it`); continue; }
   if (name !== `${platform}-${author.toLowerCase()}.json`) { fail(`${path}: a PR may add or change only its author's own member file (${platform}-${author.toLowerCase()}.json) — ${undo(path)}, and change only ${platform}-${author.toLowerCase()}.json, which yad member add writes. To remove someone else, use yad member remove <login> --reason "<why>" in a pull request of its own`); continue; }
-  const rec = fileAt('HEAD', path);
+  const rec = fileAt(AT, path);
   if (!rec || !Array.isArray(rec.accounts)) { fail(`${path}: not a member file (no "accounts" list) — ${again(path)}`); continue; }
   const here = rec.accounts.filter(onProduct);
   if (here.length !== 1) { fail(`${path}: must hold exactly one ${platform} account on ${productHost}, the author's own (it holds ${here.length}) — ${again(path)}`); continue; }
@@ -303,12 +317,12 @@ for (const { status, path } of changed) {
   if (!rc) say(`PASS [member-check]: ${path} belongs to ${author}${added.length ? `; ${added.length} email(s), each proven by a commit GitHub attributes to them` : ''}`);
 }
 
-// No account on the Product's platform and no email in two files, across every member file at HEAD.
+// No account on the Product's platform and no email in two files, across every member file in the merge.
 const files = tree.map((l) => l.split('\t')[1]).filter((p) => p.endsWith('.json'));
 const accounts = new Map();
 const emails = new Map();
 for (const p of files) {
-  const rec = fileAt('HEAD', p);
+  const rec = fileAt(AT, p);
   // Keyed on each file's OWN account only (review 2): an OTHER account two files claim is not refused here —
   // the CLI matches it to nobody — or whoever claimed someone's account first would block its owner.
   const login = p.slice(DIR.length).replace(new RegExp(`^${platform}-`), '').replace(/\.json$/, '');
