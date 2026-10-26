@@ -965,8 +965,10 @@ export const isStaleHash = (recorded, accepted) => !!recorded && accepted.length
 // The fingerprint of `artifact` as it stands at the git commit `rev` (#366): the head a review approved.
 // The review's files (`artifactPaths`) are copied out of the commit into a scratch epic folder and
 // fingerprinted by `artifactHash` itself, so a commit and the disk are never hashed by two copies of the
-// rules. Only regular files are copied: a link or a submodule there leaves the copy different, so it can
-// only fail to match. `rev` must be a full SHA — a name could be a branch or tag standing in for another
+// rules. Each file is read through git's checkout filters (`cat-file --filters`), so line-ending
+// conversion (`core.autocrlf`, an `eol` attribute) gives the bytes a checkout would put on disk. Only
+// regular files are copied: a link or a submodule there leaves the copy different, so it can only fail
+// to match. `rev` must be a full SHA — a name could be a branch or tag standing in for another
 // commit (#410). `root` is the Product's checkout, and `epicDir` a folder inside it.
 // → { ok: true, hash } (`hash` null when there is nothing to fingerprint, as `artifactHash`), or
 //   { ok: false, reason } when the commit cannot be read here.
@@ -975,7 +977,10 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
   const git = (...args) => spawnSync('git', ['--literal-pathspecs', ...args], { cwd: root, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
   if (git('cat-file', '-e', `${rev}^{commit}`).status !== 0) return { ok: false, missing: true, reason: `commit ${rev.slice(0, 12)} is not in this clone` };
   const rel = path.relative(root, epicDir).split(path.sep).join('/');
-  const listed = git('ls-tree', '-r', '-z', rev, '--', ...artifactPaths(artifactBase(artifact)).map((p) => (rel ? `${rel}/${p}` : p)));
+  // `--filters` needs each path as the repository names it, from its top, not from `root`.
+  const prefix = git('rev-parse', '--show-prefix').stdout.toString('utf8').trim();
+  const top = `${prefix}${rel ? `${rel}/` : ''}`;
+  const listed = git('ls-tree', '-r', '-z', '--full-name', rev, '--', ...artifactPaths(artifactBase(artifact)).map((p) => (rel ? `${rel}/${p}` : p)));
   if (listed.status !== 0) return { ok: false, reason: `git could not list ${rel || '.'} at ${rev.slice(0, 12)}` };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-at-'));
   try {
@@ -984,10 +989,10 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
     for (const entry of listed.stdout.toString('utf8').split('\0')) {
       const m = entry.match(/^(\d{6}) (\w+) ([0-9a-f]+)\t([\s\S]+)$/);
       if (!m || m[2] !== 'blob' || !['100644', '100755'].includes(m[1])) continue;
-      if (rel && !m[4].startsWith(`${rel}/`)) continue;
-      const blob = git('cat-file', 'blob', m[3]);
+      if (!m[4].startsWith(top)) continue;
+      const blob = git('cat-file', '--filters', `--path=${m[4]}`, m[3]);
       if (blob.status !== 0) return { ok: false, reason: `git could not read ${m[4]} at ${rev.slice(0, 12)}` };
-      const out = path.join(dir, ...(rel ? m[4].slice(rel.length + 1) : m[4]).split('/'));
+      const out = path.join(dir, ...m[4].slice(top.length).split('/'));
       fs.mkdirSync(path.dirname(out), { recursive: true });
       fs.writeFileSync(out, blob.stdout);
     }

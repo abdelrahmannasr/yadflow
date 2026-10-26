@@ -231,12 +231,25 @@ export function headContentHash({ root, epicDir, artifact, platform, number, hea
   const first = artifactHashAt(root, epicDir, artifact, headOid);
   if (first.ok || !first.missing || !Number.isInteger(Number(number)) || Number(number) <= 0) return first;
   const ref = platform === 'gitlab' ? `refs/merge-requests/${Number(number)}/head` : `refs/pull/${Number(number)}/head`;
-  run('git', ['fetch', '--quiet', '--no-tags', 'origin', ref], { cwd: root });
-  return artifactHashAt(root, epicDir, artifact, headOid);
+  const fetched = run('git', ['fetch', '--quiet', '--no-tags', 'origin', ref], { cwd: root });
+  const second = artifactHashAt(root, epicDir, artifact, headOid);
+  if (second.ok || fetched.ok) return second;
+  return { ...second, reason: `${second.reason}; fetching ${ref} failed: ${String(fetched.stderr || fetched.stdout || 'no answer').split('\n')[0]}` };
 }
+// How to review an artifact as it already stands on the default branch (#366): `yad gate open` needs a review
+// branch on origin, and a PR/MR needs a commit on it, so an empty one is made.
+function reviewAsItStands(epic, artifact, trunk) {
+  const branch = `review/${epic}/${artifactBase(artifact)}`;
+  return `review ${artifact} as it stands on a fresh PR/MR: \`git switch -c ${branch} origin/${trunk}\`, \`git commit --allow-empty -m "docs(${epic.toLowerCase()}): review ${artifactBase(artifact)} as merged"\`, \`git push -u origin ${branch}\`, then \`yad gate open ${epic} ${artifact}\``;
+}
+
 // The fingerprint new approvals take when the approved head held none of the artifact while the default
 // branch does: no claim (`null`) would count everywhere, so it is a value no content can hash to.
 const NOTHING_AT_HEAD = 'sha256:none-at-the-approved-head';
+// And the other way round: the default branch holds nothing to fingerprint (every story deleted, a contract
+// with no END marker) while the approved head did. No accepted hash at all would make every approval count,
+// so the gate is judged against a value no approval is bound to.
+const NOTHING_ON_DEFAULT = 'sha256:none-on-the-default-branch';
 
 // `bindHash` is what a new approval is bound to: the content its review approved (#366, `headContentHash`).
 function upsertBridge(approvals, recs, { stepId, artifact, bindHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
@@ -382,6 +395,10 @@ function upsertBridge(approvals, recs, { stepId, artifact, bindHash, today, prNu
       const newerPr = prNumber != null && was.pr != null && was.pr !== prNumber;
       if (!newerReview && !newerPr) {
         artHash = was.artifactHash ?? bindHash;
+        // Recorded by a release before #366, bound to the default branch's content when it was read rather
+        // than to what the review approved: when that record still counts and the review approved other
+        // content, the content it approved wins, so it stops counting. A stale record stays as it is.
+        if (was.artifactHash && bindHash && !stale(was) && !live.includes(bindHash)) artHash = bindHash;
         // A record holding only a date takes the platform's time once (E64) and keeps its fingerprint: the
         // time is evidence of when, the fingerprint is what the gate decides on. Then it is byte-stable.
         approvedAt = !hasTime(was.approvedAt) && hasTime(r.submittedAt) ? r.submittedAt : (was.approvedAt ?? approvedAt);
@@ -809,9 +826,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     }
     const approvedHash = at.hash ?? (curHash ? NOTHING_AT_HEAD : null);
     // Merged, and the default branch holds something else: another merge changed it after this review.
-    if (pull.merged && approvedHash !== curHash) {
-      warn(`${pr.artifact}: PR #${pr.number} approved a different ${pr.artifact} than the default branch holds now — another merge changed it after that review, so its approvals do not pass the gate`);
-      hand(`review ${pr.artifact} as it stands on a fresh PR/MR: \`yad gate open ${epic} ${step.artifact}\``);
+    // Solo mode counts no approvals, so there is nothing to say there.
+    const differs = !!pull.merged && approvedHash !== curHash;
+    if (differs && !solo) {
+      const trunk = resolveDefaultBranch(productGit(root), productConfig);
+      warn(`${pr.artifact}: PR #${pr.number} approved a different ${pr.artifact} than the default branch holds now — another merge changed it after that review, so its approvals do not pass the gate${local ? ` (or this checkout's ${trunk} is behind origin: pull it first)` : ''}`);
+      hand(reviewAsItStands(epic, step.artifact, trunk));
     }
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
@@ -866,7 +886,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       active: people.capacity.active,
       // An open review is judged against its own head — what it will merge — and a merged one against the
       // default branch (#366).
-      step, approvals, currentHash: curHash, acceptedHashes: pull.merged || !approvedHash ? acceptedHashes(epicDir, pr.artifact) : [approvedHash],
+      step, approvals, currentHash: curHash,
+      acceptedHashes: !pull.merged && approvedHash ? [approvedHash]
+        : differs && curHash === null ? [NOTHING_ON_DEFAULT] : acceptedHashes(epicDir, pr.artifact),
       threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
       // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
       // ledger here rather than from a module-level set that answered the same for every epic.
@@ -887,6 +909,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       step: step.id, artifact: pr.artifact, pr: pr.number ?? null, merged: !!pull.merged, rule: pred.rule,
       passed: !!pred.passed, alreadyDone: !!alreadyDone, have: pred.have, gateRule: pred.gateRule ?? null,
       cap: pred.cap ?? null, short: pred.short ?? null, missing: pred.missing, staleDropped: pred.staleDropped ?? 0,
+      // #366: merged, and the default branch holds other content than this review approved.
+      differs,
     });
     // E73: why this gate may not pass — reported only, never enforced. Only on a gate that counted
     // (`rule: 'count'`, so never in solo mode) and is still open: not one already done (`alreadyDone` —
@@ -1193,12 +1217,14 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     let older = merged && existing?.number != null && Number(job.pr) > 0 && Number(job.pr) < existing.number
       && (existing.platform == null || existing.platform === productConfig.platform);
     let unread = false;
+    let trialDiffers = false;
     if (older && !isPassed(step)) {
       // Silenced: its verdict is only this decision's input, and would read as a second verdict in the
       // CI log. Its exit code is this decision's too — a failed read is said, and failed, below.
       const code = process.exitCode;
       const trial = await quietly(() => gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: true, probe: Number(job.pr), headCount: sweepCount, contentAt }));
       process.exitCode = code;
+      trialDiffers = trial.gates.some((g) => g.differs);
       if (trial.gates.some((g) => g.passed)) older = false;
       else if (!trial.gates.length) {
         // A failed platform read is not "does not pass": the gate cannot tell, so the run goes red.
@@ -1208,6 +1234,12 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       }
     }
     if (older && !unread) info(`${job.epic}: PR #${job.pr} is older than #${existing.number}, the review recorded for ${job.artifact}, and ${isPassed(step) ? `the step is already ${stepStatus(step) === 'deferred' ? 'deferred' : stepStatus(step) === 'skipped' ? 'skipped' : 'done'}` : 'does not pass the gate'} — syncing #${existing.number}`);
+    // The trial ran silenced: say why when it was the content (#366), or the team chases approvals on the
+    // newer review when only a fresh review of the artifact as it stands can pass.
+    if (older && !unread && trialDiffers) {
+      warn(`${job.epic}: PR #${job.pr} approved a different ${job.artifact} than the default branch holds now — another merge changed it after that review`);
+      hand(reviewAsItStands(job.epic, step.artifact, resolveDefaultBranch(productGit(root), productConfig)));
+    }
     // Before the pointer moves to a number other than the one it holds, ask the platform that the PR/MR is on
     // this review branch: a mistyped `--pr` on the manual recovery would otherwise become the pointer,
     // and with numbers that only grow it could stay there (issue #362 review). A platform that cannot

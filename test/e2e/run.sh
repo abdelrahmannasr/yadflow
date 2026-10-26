@@ -59,6 +59,18 @@ cp "$ROOT/test/e2e/fixtures/gh" "$WORK/shim/gh"
 chmod +x "$WORK/shim/gh"
 export PATH="$WORK/shim:$PATH"
 export E2E_GH_PHASE_FILE="$WORK/gh-phase"
+export E2E_GH_HEAD_FILE="$WORK/gh-head"
+# The review PR's head (#366): a commit of the epic as the review shows it, on no branch, as a merged
+# PR's head is. The fake gh answers it as headRefOid; the gate fingerprints the artifact there.
+review_head() {
+  local idx="$WORK/review-index" tree
+  rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$PRODUCT" read-tree HEAD
+  GIT_INDEX_FILE="$idx" git -C "$PRODUCT" add -A -- "$1"
+  tree="$(GIT_INDEX_FILE="$idx" git -C "$PRODUCT" write-tree)"
+  rm -f "$idx"
+  git -C "$PRODUCT" -c user.name=e2e -c user.email=e2e@example.invalid commit-tree "$tree" -p HEAD -m "review head" > "$E2E_GH_HEAD_FILE"
+}
 echo pending > "$E2E_GH_PHASE_FILE"
 [ "$(command -v gh)" = "$WORK/shim/gh" ] || die "fake gh not first on PATH"
 
@@ -125,6 +137,7 @@ yad gate open EP-e2e epic.md --dir "$PRODUCT" || die "gate open failed"
 
 say "CI pre-merge is read-only in verified mode (Path B): no ledger, the platform is the source of truth"
 echo pending > "$E2E_GH_PHASE_FILE"
+review_head epics/EP-e2e
 yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$PRODUCT" || die "gate ci (pre-merge) failed"
 [ ! -f "$EPIC/.sdlc/hub-prs.json" ] && [ ! -f "$EPIC/.sdlc/product-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
 [ ! -f "$EPIC/.sdlc/approvals.json" ] || die "pre-merge must not write approvals (Path B)"
@@ -162,6 +175,7 @@ cat > "$CIE/.sdlc/state.json" <<'EOF'
 ]}
 EOF
 echo pending > "$E2E_GH_PHASE_FILE"
+review_head epics/EP-cici
 HEAD_BEFORE="$(git -C "$PRODUCT" rev-parse HEAD)"
 yad gate ci --branch review/EP-cici/epic --pr 7 --no-push --dir "$PRODUCT" || die "gate ci (pre-merge) failed"
 # Path B: pre-merge writes/commits nothing — the platform PR holds the review state until merge.

@@ -10384,7 +10384,7 @@ test('gate ci --merged: a head that cannot be read records nothing and turns the
   try {
     const { out } = await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, today: '2026-06-09', reader: () => approvedAt('f'.repeat(40)), ...realHead }));
     assert.equal(process.exitCode, 1, 'unknown is never taken as approved');
-    assert.match(out, /could not read what PR #7 approved \(commit ffffffffffff is not in this clone\) — nothing was recorded/);
+    assert.match(out, /could not read what PR #7 approved \(commit ffffffffffff is not in this clone; fetching refs\/pull\/7\/head failed: [^)]*\) — nothing was recorded/);
   } finally { process.exitCode = before; }
   git(author, 'fetch', '-q', 'origin');
   const st = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/state.json'));
@@ -10430,6 +10430,117 @@ test('per-story reviews: S01 approved on its own head does not pass a stories/ t
   assert.equal(st.steps.find((s) => s.id === 'stories-review').status, 'in_review', 'S02 was never approved');
   assert.match(out, /`yad gate open EP-test stories\/`/);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Merge !7 (approved, head = the review branch), then a later merge changes contract.md with `change`.
+function mergedThenChanged(change) {
+  const sc = scaffoldCiProduct();
+  const head = git(sc.author, 'rev-parse', 'review/EP-test/architecture').toString().trim();
+  git(sc.author, 'checkout', '-q', 'trunk');
+  git(sc.author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge !7');
+  fs.writeFileSync(path.join(sc.author, 'epics/EP-test/contract.md'), change);
+  git(sc.author, 'commit', '-qam', 'merge !9 (no approvals)');
+  git(sc.author, 'push', '-q', 'origin', 'trunk');
+  git(sc.ci, 'fetch', '-q', 'origin');
+  git(sc.ci, 'checkout', '-q', '-B', 'trunk', 'origin/trunk');
+  return { ...sc, head };
+}
+const reviewStatus = (author) => { git(author, 'fetch', '-q', 'origin'); return JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/state.json')).steps.find((s) => s.id === 'architecture-review').status; };
+
+test('gate ci --merged: the #362 older-review trial holds when a newer merge changed the content, and says why (issue #366)', async () => {
+  const { T, author, ci, head } = mergedThenChanged(BRANCH_CONTRACT.replace('POST /y', 'POST /y\nPOST /z'));
+  const nine = git(author, 'rev-parse', 'origin/trunk').toString().trim();
+  const reader = (_p, n) => (n === 7 ? approvedAt(head) : { ...approvedAt(nine), reviews: [] });
+  await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 9, merged: true, today: '2026-06-09', reader, ...realHead }));
+  git(ci, 'fetch', '-q', 'origin');
+  git(ci, 'checkout', '-q', '-B', 'trunk', 'origin/trunk');
+  const { out } = await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, today: '2026-06-09', reader, ...realHead }));
+  assert.equal(reviewStatus(author), 'in_review', 'the older approved review does not pass content a newer merge changed');
+  assert.match(out, /PR #7 is older than #9, .* and does not pass the gate — syncing #9/);
+  assert.match(out, /PR #7 approved a different architecture\.md than the default branch holds now/);
+  assert.match(out, /git switch -c review\/EP-test\/architecture origin\/trunk.*git commit --allow-empty -m "docs\(ep-test\): review architecture as merged".*yad gate open EP-test architecture\.md/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci --merged: a default branch with nothing to fingerprint does not pass on approvals of real content (issue #366)', async () => {
+  // the later merge leaves the contract with no END marker: nothing to fingerprint on the default branch
+  const { T, author, ci, head } = mergedThenChanged('<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\nPOST /z\n');
+  await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, today: '2026-06-09', reader: () => approvedAt(head), ...realHead }));
+  assert.equal(reviewStatus(author), 'in_review');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci --merged: an approval recorded before #366 against the default branch is re-bound to what its review approved (issue #366)', async () => {
+  const { T, author, ci, head } = mergedThenChanged(BRANCH_CONTRACT.replace('POST /y', 'POST /y\nPOST /z'));
+  const { artifactHash: now } = await import('./epic-state.mjs');
+  const ep = path.join(ci, 'epics/EP-test');
+  const cur = now(ep, 'architecture.md');
+  // what an older release wrote: the same review (same time, same PR), bound to the content when it read it
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(['al', 'bo', 'ca'].map((approver) => ({
+    artifact: 'architecture.md', step: 'architecture-review', approver, status: 'approved', date: '2026-06-09', source: 'bridge',
+    artifactHash: cur, approvedAt: '2026-06-09T00:00:00Z', pr: 7, engagement: 'none' }))));
+  git(ci, 'add', '-A');
+  git(ci, 'commit', '-qm', 'approvals an older release recorded');
+  git(ci, 'push', '-q', 'origin', 'trunk');
+  await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, today: '2026-06-10', reader: () => approvedAt(head), ...realHead }));
+  assert.equal(reviewStatus(author), 'in_review', 'the old binding no longer passes content the review never saw');
+  const recorded = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json'));
+  assert.ok(recorded.every((a) => a.artifactHash !== cur), 'each record now names what its review approved');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('headContentHash: a GitLab merge request\'s head is fetched from refs/merge-requests/<n>/head (issue #366)', async () => {
+  const { headContentHash } = await import('./gate.mjs');
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-mr-'));
+  try {
+    const origin = path.join(R, 'origin.git');
+    git(R, 'init', '-q', '--bare', origin);
+    const a = path.join(R, 'a');
+    git(R, 'clone', '-q', origin, a);
+    git(a, 'config', 'user.email', 'a@b.c');
+    git(a, 'config', 'user.name', 'x');
+    fs.mkdirSync(path.join(a, 'epics/EP-a'), { recursive: true });
+    fs.writeFileSync(path.join(a, 'epics/EP-a/epic.md'), '# a\n');
+    git(a, 'add', '-A');
+    git(a, 'commit', '-qm', 'base');
+    git(a, 'push', '-q', 'origin', 'HEAD:main');
+    fs.writeFileSync(path.join(a, 'epics/EP-a/epic.md'), '# a, reviewed\n');
+    git(a, 'commit', '-qam', 'the MR');
+    const head = git(a, 'rev-parse', 'HEAD').toString().trim();
+    git(a, 'push', '-q', 'origin', 'HEAD:refs/merge-requests/12/head');
+    const b = path.join(R, 'b');
+    git(R, 'clone', '-q', '--no-local', origin, b);
+    const epicDir = path.join(b, 'epics/EP-a');
+    const got = headContentHash({ root: b, epicDir, artifact: 'epic.md', platform: 'gitlab', number: 12, headOid: head });
+    assert.equal(got.ok, true, got.reason);
+    fs.writeFileSync(path.join(epicDir, 'epic.md'), '# a, reviewed\n');
+    assert.equal(got.hash, hashForStubs(epicDir, 'epic.md'));
+    const missing = headContentHash({ root: b, epicDir, artifact: 'epic.md', platform: 'gitlab', number: 13, headOid: 'c'.repeat(40) });
+    assert.match(missing.reason, /not in this clone; fetching refs\/merge-requests\/13\/head failed: /, 'the fetch error is kept');
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
+});
+
+test('artifactHashAt: line-ending conversion on checkout gives the same fingerprint as the disk (issue #366)', async () => {
+  const { artifactHashAt } = await import('./epic-state.mjs');
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-eol-'));
+  try {
+    git(R, 'init', '-q');
+    git(R, 'config', 'user.email', 'a@b.c');
+    git(R, 'config', 'user.name', 'x');
+    fs.writeFileSync(path.join(R, '.gitattributes'), '*.md text eol=crlf\n');
+    fs.mkdirSync(path.join(R, 'sub/epics/EP-a/stories'), { recursive: true });
+    fs.writeFileSync(path.join(R, 'sub/epics/EP-a/stories/EP-a-S01.md'), '---\nid: EP-a-S01\nstatus: draft\n---\n# one\n');
+    git(R, 'add', '-A');
+    git(R, 'commit', '-qm', 'stories');
+    fs.rmSync(path.join(R, 'sub'), { recursive: true });
+    git(R, 'checkout', '--', '.');
+    const ep = path.join(R, 'sub/epics/EP-a');
+    assert.match(fs.readFileSync(path.join(ep, 'stories/EP-a-S01.md'), 'utf8'), /\r\n/, 'checked out with CRLF');
+    // the Product is a folder of the repository: paths are named from its top for the filters
+    const at = artifactHashAt(path.join(R, 'sub'), ep, 'stories/', git(R, 'rev-parse', 'HEAD').toString().trim());
+    assert.equal(at.ok, true, at.reason);
+    assert.equal(at.hash, hashForStubs(ep, 'stories/'));
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
 });
 
 test('artifactHashAt: the fingerprint at a commit is artifactHash of the same files, for every kind of artifact (issue #366)', async () => {
