@@ -213,7 +213,11 @@ merged review whose head differs from the default branch passes nothing, and the
 names the fix: review the artifact as it stands on a fresh PR/MR — fetch with `git fetch --prune origin`, reset the branch `review/<epic>/<artifact>` to the default branch (`git switch -C`: the merged review's branch is usually still there), add a commit (an empty one is enough: `git commit --allow-empty`), push it with `--force-with-lease`, then run `yad gate open <epic> <artifact>`. A default branch
 with nothing to fingerprint (every story deleted, a contract with no END marker) passes no approval of
 real content either, and solo mode, which counts no approvals, says nothing. A step already done is
-only re-synced: no hold is printed, and its approvals keep the fingerprint they were recorded with. Each file at the head is
+only re-synced: no hold is printed, and its approvals keep the fingerprint they were recorded with.
+When a later merge changes a done step's artifact and none of its approvals covers it any more, the
+gate says so loudly — `<step> is done, but <artifact> changed after it was approved` — with the same
+fresh-review steps, and never reopens or blocks the step (#418). `yad doctor`, `yad status` (owed) and
+`yad next` say it too, until a fresh review passes. Each file at the head is
 read through git's checkout filters, so line-ending conversion gives the bytes the disk holds.
 A squash-merged head is fetched from the platform's own ref (`refs/pull/<n>/head`,
 `refs/merge-requests/<n>/head`); a head that cannot be read records nothing and turns the CI run red on a step not yet done (on a step already done it is said and skipped, and a later sweep tries again).
