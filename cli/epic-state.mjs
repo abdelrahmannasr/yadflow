@@ -962,6 +962,21 @@ export function acceptedHashes(epicDir, artifact) {
 // approval with no hash) or nothing can be fingerprinted — both are "no claim", as they always were.
 export const isStaleHash = (recorded, accepted) => !!recorded && accepted.length > 0 && !accepted.includes(recorded);
 
+// A done review step whose artifact changed after it was approved (#418): it holds approvals, and none of
+// them is live against the artifact as it stands. → { count } (the step's approvals), or null. `yad doctor`,
+// the gate and `yad status` ask this one question. A done step with no approval at all is a different
+// finding (doctor's `:unapproved`), and nothing to fingerprint is no staleness claim.
+export function doneStepUnapproved(epicDir, step, approvals) {
+  if (!step || step.type !== 'review+approve' || stepStatus(step) !== 'done' || typeof step.artifact !== 'string') return null;
+  const forStep = (Array.isArray(approvals) ? approvals : []).filter((a) => a?.step === step.id && a.status === 'approved');
+  if (!forStep.length) return null;
+  // A read-only question: an artifact that cannot be read (a hand-edited path naming a folder) is no claim.
+  let accepted;
+  try { accepted = acceptedHashes(epicDir, step.artifact); } catch { return null; }
+  if (!accepted.length) return null;
+  return forStep.some((a) => !isStaleHash(a.artifactHash, accepted)) ? null : { count: forStep.length };
+}
+
 // The fingerprint of `artifact` as it stands at the git commit `rev` (#366): the head a review approved.
 // The review's files (`artifactPaths`) are copied out of the commit into a scratch epic folder and
 // fingerprinted by `artifactHash` itself, so a commit and the disk are never hashed by two copies of the
@@ -1006,6 +1021,23 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+// How to review an artifact as it already stands on the default branch (#366): `yad gate open` needs a review
+// branch on origin, and a PR/MR needs a commit on it, so an empty one is made.
+export function reviewAsItStands(epic, artifact, trunk) {
+  // A command the person is invited to paste: each name goes in only as a plain path — `state.json` and the
+  // Product settings are files a person can edit, and `x; curl …|sh/architecture.md` must never reach a
+  // shell (the `asArg` rule in lib.mjs). Anything else is shown as a placeholder.
+  const plain = (s) => typeof s === 'string' && /^\w[\w./-]*$/.test(s) && !s.includes('..');
+  const art = plain(artifact) ? artifact : '<artifact>';
+  const base = plain(artifact) ? artifactBase(artifact) : '<artifact>';
+  const ep = plain(epic) ? epic : '<epic>';
+  const branch = `review/${ep}/${base}`;
+  // `-C` and a forced push: the merged review's branch is usually still there, and its PR/MR is done with.
+  // The fetch first: a branch the platform deleted at merge is still in the clone's remote refs, and
+  // --force-with-lease would refuse against it.
+  return `review ${art} as it stands on a fresh PR/MR: \`git fetch --prune origin\`, \`git switch -C ${branch} origin/${plain(trunk) ? trunk : '<default branch>'}\`, \`git commit --allow-empty -m "docs(${ep.toLowerCase()}): review ${base} as merged"\`, \`git push --force-with-lease -u origin ${branch}\`, then \`yad gate open ${ep} ${art}\``;
 }
 
 // Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger

@@ -14,8 +14,9 @@ import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists, emitJSON, forTerminal } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { printTeamHint, soloTeamHint } from './people.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { OWNER_STEPS, liveOwner, readState as loadLedgerState } from './owners.mjs';
-import { bindingsForEpic, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { bindingsForEpic, doneStepUnapproved, reviewAsItStands, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -82,7 +83,22 @@ const actionFor = (root, id, lin, bindings) => epicAction(root, id, lin, binding
 const rowFor = (root, id, bindings = loadSkillBindings(root)) => {
   const lin = epicLineage(root, id);
   const { action, view } = epicAction(root, id, lin, bindings);
-  return { action, theme: lin.theme, owners: liveOwners(root, id), bindings: view };
+  return { action, theme: lin.theme, owners: liveOwners(root, id), changed: changedSinceApproved(root, id), bindings: view };
+};
+
+// The done reviews whose artifact changed after they were approved (#418). Beside the action, like the
+// owners below: the action's `--json` keys are frozen. Said on every run until a fresh review passes.
+const changedSinceApproved = (root, id) => {
+  let ledger;
+  try { ledger = loadLedger(epicRoot(root, id)); } catch { return []; }
+  const productConfig = readJSON(productConfigPath(root), null);
+  // Not in solo mode, where no approval is counted and the gate says nothing either.
+  if (soloOf(productConfig)) return [];
+  const steps = Array.isArray(ledger?.state?.steps) ? ledger.state.steps : [];
+  const found = steps.filter((s) => doneStepUnapproved(epicRoot(root, id), s, ledger.approvals));
+  if (!found.length) return [];
+  const trunk = resolveDefaultBranch(productGit(root), productConfig);
+  return found.map((s) => ({ step: s.id, artifact: s.artifact, fix: reviewAsItStands(id, s.artifact, trunk) }));
 };
 
 // The live step owners of one epic (E47), by step. Beside the action, never in it: `yad next --json`'s
@@ -244,7 +260,7 @@ export function actionLine(a, { solo, bindings = null, verified = false } = {}) 
 // `printAction` renders `a` and `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled
 // by the golden test, which an added key breaks (see actionFor). It comes from `rowFor`, off the same
 // `epic.md` read the action's own `lineageKind` came from.
-function printAction(a, { solo, theme: tag = null, bindings = null, automation = null, verified = false, owners = null } = {}) {
+function printAction(a, { solo, theme: tag = null, bindings = null, automation = null, verified = false, owners = null, changed = [] } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The product level is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && !PRODUCT_EPICS.includes(a.epicId) ? `${typeNoun(a.lineageKind)} ` : '';
@@ -291,6 +307,7 @@ function printAction(a, { solo, theme: tag = null, bindings = null, automation =
   // DEBT is reminded on every run until it is paid (E41). The line says what is owed and the one command
   // that starts paying it — or, once that has started, what finishes it.
   for (const d of a.debt || []) warn(debtLine(a.epicId, d, verified));
+  for (const x of changed) { warn(forTerminal(`${x.step} is done, but ${x.artifact} changed after it was approved`)); hand(forTerminal(x.fix)); }
   // Why the chain walked back, when it did (#322). Read from a file a person can edit: plain text only.
   if (a.lastReopen) {
     const r = a.lastReopen;
@@ -429,11 +446,12 @@ function generalNext(root, { all, headCount = null } = {}) {
   // The grouping theme rides this list too. This is the ONE `yad next` view that shows several epics
   // side by side, so it is where seeing which of them belong together is worth most — and leaving it
   // off would have meant bare `yad next`, the command people run by default, never showed the tag.
-  for (const { action: a, theme: tag, bindings: view } of rows) {
+  for (const { action: a, theme: tag, bindings: view, changed } of rows) {
     const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
     // Debt is reminded here too (E41): the roll-up is the view people run most, and a reminder that only
     // appears once you already look at the one epic is not a reminder.
-    const owed = a.debt?.length ? `  ${c.yellow(`· ${a.debt.length} owed as debt`)}` : '';
+    const owed = (a.debt?.length ? `  ${c.yellow(`· ${a.debt.length} owed as debt`)}` : '')
+      + (changed?.length ? `  ${c.yellow(`· ${changed.length} changed since approved`)}` : '');
     log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo, bindings: view, verified })}${owed}`);
   }
   // Painted per segment, not dim-wrapping a bold: `paint` closes with a full reset, so the nested
