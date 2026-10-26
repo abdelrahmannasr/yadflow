@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
-import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot } from './epic-state.mjs';
+import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot, isValidEpicId } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
 import { resolveDefaultBranch, preflightGuardReadiness } from './productcommit.mjs';
 
@@ -116,7 +116,8 @@ export function unfoldedPaths(root, epic, base, env = process.env) {
 export async function runFold(root, { epic, step, env = process.env, capture = runCapture } = {}) {
   const refuse = (msg, hint) => { fail(msg); if (hint) hand(hint); process.exitCode = 1; };
   if (!epic || !step) return refuse('yad fold needs an epic and a step', `usage: yad fold <epic> <step>   (steps: ${FOLD_STEPS.join(', ')})`);
-  if (!/^EP-[a-z0-9-]+$/.test(epic)) return refuse(`not an epic id: ${epic}`, 'an epic id looks like EP-<slug> (the Product level is EP-foundation)');
+  // One rule with the rest of yad, which also keeps foldSubject's lowercased scope inside the gate's [a-z0-9._-].
+  if (!isValidEpicId(epic)) return refuse(`not an epic id: ${epic}`, 'an epic id looks like EP-<slug> (the Product level is EP-foundation)');
   if (!FOLD_STEPS.includes(step)) return refuse(`${step} is not an authoring step with an artifact`, `steps: ${FOLD_STEPS.join(', ')}`);
   // The Product level has one folder, `foundation/`; a feature step never runs there, and `foundation`
   // never runs in an epic. (`discovery` is the old spelling, which lived in an ordinary epic folder.)
