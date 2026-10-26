@@ -43,7 +43,7 @@ const say = (s) => process.stdout.write(`${s}\n`);
 const fail = (s) => { say(`FAIL [member-check]: ${s}`); rc = 1; };
 const git = (...args) => {
   const r = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 });
-  return { ok: r.status === 0, out: r.stdout || '' };
+  return { ok: r.status === 0, out: r.stdout || '', status: r.status };
 };
 const hash = (email) => {
   const e = String(email || '').trim().toLowerCase();
@@ -73,7 +73,51 @@ if (!git('rev-parse', '--verify', '-q', `${base}^{commit}`).ok) { say(`FAIL [mem
 
 // Every path the PR touches, with its status. NUL-separated, no renames (a rename is a delete plus an add,
 // and each is judged).
-const diff = git('diff', '--no-renames', '--name-status', '-z', `${base}...HEAD`);
+//
+// What the PR changes is what MERGING it into the base makes it (#368), read as contract-check reads it
+// (#363 reviews 1, 3-5). A diff from the merge base (`<base>...HEAD`) reads from ONE of several: on a
+// GitLab MR pipeline (the branch tip, not a merge commit), a hand-resolved merge could bring a member file
+// in that the diff never lists. `git merge-tree --write-tree` (git 2.38+) builds the merge without touching
+// anything, and the diff runs from the base to it. A branch that does not merge cleanly fails closed: the
+// platform cannot merge it either. An older git falls back to the one merge base, failing closed when
+// there are several, or when the base removed or moved a file the branch changes (the real merge would
+// follow it). No merge base at all fails closed too.
+const HISTORY = 'check the code out with full history (GitHub: actions/checkout with fetch-depth: 0; GitLab: GIT_DEPTH: "0")';
+const bases = git('merge-base', '--all', base, 'HEAD').out.split('\n').filter(Boolean);
+if (!bases.length) { say(`FAIL [member-check]: '${base}' and HEAD share no history (a shallow clone has no merge base), so the changed files cannot be listed — ${HISTORY}, and give a base this branch shares history with, then run again`); process.exit(1); }
+const built = git('merge-tree', '--write-tree', '--no-messages', base, 'HEAD');
+const mergeTree = built.out.split('\n')[0].trim();
+let from;
+let to;
+if (built.status === 0 && mergeTree && git('rev-parse', '--verify', '-q', `${mergeTree}^{tree}`).ok) {
+  from = git('rev-parse', '--verify', '-q', `${base}^{commit}`).out.trim();
+  to = mergeTree;
+  if (bases.length > 1) say(`note [member-check]: '${base}' and HEAD have ${bases.length} merge bases — the change is read as the merge into ${base} makes it`);
+} else if (built.status === 1) {
+  say(`FAIL [member-check]: this branch does not merge cleanly into ${base}, so what it changes there cannot be read — merge ${base} into the branch, resolve the conflicts, then push again`);
+  process.exit(1);
+} else if (built.status !== 129) {
+  say(`FAIL [member-check]: git could not build the merge of this branch into ${base} (git merge-tree exit ${built.status}) — ${HISTORY}, then run again`);
+  process.exit(1);
+} else if (bases.length !== 1) {
+  say(`FAIL [member-check]: '${base}' and HEAD have ${bases.length} merge bases, and this git (older than 2.38) cannot build the merge into ${base} — merge ${base} into the branch, then push again`);
+  process.exit(1);
+} else {
+  from = bases[0];
+  to = 'HEAD';
+  // The fallback reads the branch's own diff, so an edit to a file the base has since removed or moved
+  // would follow the rename into the merge unseen: such a path fails closed.
+  const names = (r, keep) => { const v = r.out.split('\0').filter(Boolean); const o = []; for (let i = 0; i + 1 < v.length; i += 2) if (keep(v[i][0])) o.push(v[i + 1]); return o; };
+  const goneRead = git('diff', '--no-renames', '--diff-filter=D', '--name-status', '-z', from, base);
+  const mineRead = git('diff', '--no-renames', '--name-status', '-z', from, 'HEAD');
+  if (!goneRead.ok || !mineRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
+  const gone = new Set(names(goneRead, () => true));
+  if (names(mineRead, (s) => s === 'M' || s === 'T').some((f) => gone.has(f))) {
+    say(`FAIL [member-check]: ${base} removed or moved a file this branch changes, and this git (older than 2.38) cannot follow it into the merge — merge ${base} into the branch, then push again`);
+    process.exit(1);
+  }
+}
+const diff = git('diff', '--no-renames', '--name-status', '-z', from, to);
 if (!diff.ok) { say('FAIL [member-check]: git could not list the changed files — check the code out with full history (GitHub: actions/checkout with fetch-depth: 0; GitLab: GIT_DEPTH: "0"), and give a base this branch shares history with, then run again'); process.exit(1); }
 const parts = diff.out.split('\0').filter(Boolean);
 const all = [];
@@ -82,9 +126,9 @@ for (let i = 0; i + 1 < parts.length; i += 2) all.push({ status: parts[i][0], pa
 // How to take member files out, the one rule every message uses (#381 review 4): a file this PR brings in
 // (not on the base) is dropped from it; one the base holds — even one this PR edits — is deleted with git
 // rm, which any PR may do (a deletion is never refused).
-// "On the base" means where this branch split off from it — the commit the diff above starts from — not the
-// base's tip, which may have moved on (review 7). The path is read literally, never as a pattern.
-const split = git('merge-base', base, 'HEAD').out.trim() || base;
+// "On the base" means the commit the diff above starts from (review 7): the base itself when the merge was
+// built (#368), the one merge base on an older git. The path is read literally, never as a pattern.
+const split = from;
 const modeOnBase = (p) => {
   const t = spawnSync('git', ['--literal-pathspecs', 'ls-tree', '-z', split, '--', p], { encoding: 'utf8' });
   const [meta, at] = (t.status === 0 ? t.stdout : '').split('\0')[0].split('\t');
@@ -97,8 +141,9 @@ const plainOnBase = (p) => ['100644', '100755'].includes(modeOnBase(p));
 const q = (p) => (/^[A-Za-z0-9._\/@+-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
 // How to UNDO this PR's change to one file (review 6) — not to remove it: the base's copy, if the base holds
 // one, comes back; a file only this PR added goes. A teammate's file the PR edited is never deleted by it.
-// `<base>...HEAD` names that split point, so the command restores the copy the diff compares against.
-const undo = (p) => (onBase(p) ? `restore ${q(p)} to the base's copy (git checkout ${q(`${base}...HEAD`)} -- ${q(p)})`
+// The command restores the copy the diff compares against: the base's, or (older git) the merge base's.
+const restoreFrom = to === 'HEAD' ? `${base}...HEAD` : base;
+const undo = (p) => (onBase(p) ? `restore ${q(p)} to the base's copy (git checkout ${q(restoreFrom)} -- ${q(p)})`
   : `drop ${q(p)} from this pull request (git rm it on this branch)`);
 const removal = (paths) => {
   const here = paths.filter((p) => !onBase(p));
