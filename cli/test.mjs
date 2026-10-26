@@ -18864,6 +18864,8 @@ test('E52: a malformed entry is named, sentence by sentence', () => {
   says({ step: 'epic-review' }, /not a review gate/);
   says({ step: 'release' }, /step a skill runs/);
   says({ pool: 'repomix' }, /recommended pools/);
+  // Docker MCP is a recommended tool, but a gateway, not a pool of skills to bind (#361).
+  says({ pool: 'docker-mcp' }, /recommended pools \(bmad-method, ecc, mattpocock-skills\)/);
   says({ reason: 'no full stop' }, /full stop/);
   says({ caveat: '' }, /caveat is null/);
   says({ file: 'https://example.com/README.md' }, /SKILL\.md/);

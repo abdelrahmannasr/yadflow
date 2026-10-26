@@ -214,6 +214,28 @@ export const TOOLBOX = Object.freeze([
     records: null, note: 'About 8 contributors: fine as an option, risky as a default.',
     usedBy: ['yad skill bind'],
   },
+  {
+    // Not a pool of skills (#361): a gateway that runs other MCP servers, so no yad skill or command uses
+    // it, and `yad skill recommend` never names it as a pool (recommend.mjs: POOLS).
+    id: 'docker-mcp', name: 'Docker MCP Toolkit', tier: 'recommended', role: "a gateway that runs MCP servers from Docker's catalogue as containers",
+    licence: 'MIT', source: 'https://github.com/docker/mcp-gateway', checked: '2026-10-26',
+    vetted: {
+      on: '2026-10-26', licenceFrom: 'https://github.com/docker/mcp-gateway/blob/main/LICENSE',
+      source: 'https://github.com/docker/mcp-gateway', release: 'v0.44.2',
+      packages: [],
+      note: 'The gateway and its `docker mcp` CLI plugin are MIT; Docker Desktop, which ships them, is under Docker\'s own terms. v0.44.2 is the newest tag; no GitHub release is published.',
+    },
+    // It comes with Docker Desktop: none of the four install types fits.
+    install: [],
+    manual: 'https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/',
+    // The plugin is not on PATH, so the one server a client connects through is the signal.
+    detect: { mcp: ['MCP_DOCKER'] },
+    versions: null,
+    fallback: 'nothing changes: agents use the MCP servers they already have',
+    records: null,
+    note: 'The first gateway start pulls every server image and can outlast a client\'s 30-second timeout: warm it once with `docker mcp gateway run --profile <id> --dry-run`. A server\'s secrets (a Docker Hub token) are set with `docker mcp secret set`, never in yad.',
+    usedBy: [],
+  },
 
   // ---- connectors: what a Product connects (skills/sdlc/config.yaml names the same adapters) -------
   {

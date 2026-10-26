@@ -142,7 +142,9 @@ export const RECOMMENDATIONS = Object.freeze([
 
 // ---- checking an entry ------------------------------------------------------------------------------
 
-const POOLS = () => TOOLBOX.filter((t) => t.tier === 'recommended').map((t) => t.id);
+// The skill pools: the recommended tools `yad skill bind` takes skills from. Docker MCP is recommended too,
+// but it is a gateway, not a pool (#361).
+const POOLS = () => TOOLBOX.filter((t) => t.tier === 'recommended' && t.usedBy.includes('yad skill bind')).map((t) => t.id);
 const bindable = (step) => !!stepDef(step)?.skill && STEPS.some((s) => s.id === step);
 
 // Every way an entry is malformed, as sentences; [] means it is well formed. The vetting record is
