@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, info, hand, readJSON, exists, forTerminal, stripAnsi, run } from './lib.mjs';
 import { isVerifiedLedger, productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { epicRoot, epicStories, featureStatus, isPassed, loadLedger, loadSkillBindings, buildNextForRepo, stepStatus, isValidEpicId, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { epicRoot, epicStories, featureStatus, isPassed, loadLedger, doneStepUnapproved, loadSkillBindings, buildNextForRepo, stepStatus, isValidEpicId, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 import { listEpics, epicAction, actionLine, skillPhrase, soloOf } from './next.mjs';
 import { repoSources } from './standup.mjs';
 import { listPrs, prTarget } from './pr-list.mjs';
@@ -122,6 +122,10 @@ function owedOf(root, id, ledger, action) {
         if (stepStatus(s) === 'blocked') out.push({ kind: 'blocked', epic: id, story: bs.story ?? null, repo, step: s.id, reason: s.record?.reason ?? null });
       }
     }
+  }
+  // A done review whose artifact changed after it was approved (#418): owed a fresh review.
+  for (const s of Array.isArray(ledger?.state?.steps) ? ledger.state.steps : []) {
+    if (doneStepUnapproved(epicRoot(root, id), s, ledger?.approvals)) out.push({ kind: 'unapproved-change', epic: id, step: s.id, artifact: s.artifact });
   }
   const open = loadDebt(root, id).filter((d) => d?.status === 'open');
   if (open.length) out.push({ kind: 'hotfix-debt', epic: id, count: open.length });
@@ -259,6 +263,7 @@ function owedLine(o) {
   if (o.kind === 'debt') return `${o.epic}: ${o.step.replace(/-review$/, '')} owed as debt (${o.status})${o.reason ? ` — ${safe(o.reason)}` : ''}`;
   if (o.kind === 'blocked') return `${o.epic}${o.story ? ` ${o.story} in ${safe(o.repo)}` : ''}: ${o.step} blocked${o.reason ? ` — ${safe(o.reason)}` : ''}`;
   if (o.kind === 'hotfix-debt') return `${o.epic}: ${o.count} open hotfix debt — yad reconcile check`;
+  if (o.kind === 'unapproved-change') return `${o.epic}: ${o.step} is done, but ${safe(o.artifact)} changed after it was approved — review it again (yad gate open ${o.epic} ${safe(o.artifact)})`;
   return `${safe(o.repo)} ${prWord(o.platform)}${o.number}: open follow-up of ${o.task}`;
 }
 

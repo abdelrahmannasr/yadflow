@@ -10,7 +10,7 @@ import {
 import { OWNING_COMMIT_ENV } from './hook.mjs';
 import { PROJECT_FILES, VERSION, isVerifiedLedger , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
-  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, artifactHashAt, acceptedHashes, isStaleHash, gatePredicate, printable,
+  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, artifactHashAt, acceptedHashes, doneStepUnapproved, isStaleHash, gatePredicate, printable,
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertProductPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
@@ -811,7 +811,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     if (!alreadyDone && retiredPr(state, pr.artifact, pr.number, platform)) {
       info(`${step.id}: PR #${pr.number} was retired by \`yad gate reopen\` — not read; review ${pr.artifact} again on a fresh PR/MR: \`yad gate open ${epic} ${step.artifact}\``);
       productPrs = canonicalProductPrs(productPrs.filter((p) => !(p.artifact === pr.artifact && p.number === pr.number)));
-      gates.push({ step: step.id, artifact: pr.artifact, pr: pr.number ?? null, merged: null, rule: null, passed: false, alreadyDone: false, retired: true, have: null, gateRule: null, cap: null, short: null, missing: ['a fresh review'], staleDropped: 0, differs: false });
+      gates.push({ step: step.id, artifact: pr.artifact, pr: pr.number ?? null, merged: null, rule: null, passed: false, alreadyDone: false, retired: true, have: null, gateRule: null, cap: null, short: null, missing: ['a fresh review'], staleDropped: 0, differs: false, changedSinceApproved: false });
       continue;
     }
     // A held review is not read, and once the step it waits on passes, its PR is retired with every later
@@ -820,7 +820,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     if (holdFor) {
       warn(`${step.id} waits for ${holdFor}, an earlier step not passed since \`yad gate reopen\` — PR #${pr.number} is not read`);
       hand(`once ${holdFor} passes, review ${step.artifact} again on a fresh PR/MR: \`yad gate open ${epic} ${step.artifact}\``);
-      gates.push({ step: step.id, artifact: pr.artifact, pr: pr.number ?? null, merged: null, rule: null, passed: false, alreadyDone: false, held: holdFor, have: null, gateRule: null, cap: null, short: null, missing: [`${holdFor} must pass first`], staleDropped: 0, differs: false });
+      gates.push({ step: step.id, artifact: pr.artifact, pr: pr.number ?? null, merged: null, rule: null, passed: false, alreadyDone: false, held: holdFor, have: null, gateRule: null, cap: null, short: null, missing: [`${holdFor} must pass first`], staleDropped: 0, differs: false, changedSinceApproved: false });
       continue;
     }
     const pull = reader(platform, pr.number, { cwd: root });
@@ -915,6 +915,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       optional: optionalStepsFor(state),
     });
 
+    // #418: a done step whose artifact a merge changed, with no approval covering it now (or null).
+    const changedSinceApproved = alreadyDone && pull.merged && !pred.passed ? doneStepUnapproved(epicDir, step, approvals) : null;
+
     // Say the arithmetic, not just the verdict (rule 6): the count, the cap when the people were counted,
     // and which half of it holds the gate — only the base until E108 — labelled so nobody reads a number
     // the gate is not enforcing as the reason it did or did not pass.
@@ -931,6 +934,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       cap: pred.cap ?? null, short: pred.short ?? null, missing: pred.missing, staleDropped: pred.staleDropped ?? 0,
       // #366: merged, and the default branch holds other content than this review approved.
       differs,
+      // #418: a done step whose artifact changed after it was approved — said, never enforced.
+      changedSinceApproved: !!changedSinceApproved,
     });
     // E73: why this gate may not pass — reported only, never enforced. Only on a gate that counted
     // (`rule: 'count'`, so never in solo mode) and is still open: not one already done (`alreadyDone` —
@@ -953,6 +958,11 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       if (stepStatus(step) === 'deferred') {
         info(`${step.id} is deferred — approvals re-synced, chain not re-advanced; its review is still owed`);
         for (const m of pred.missing) hand(`still owed: ${m}`);
+      } else if (changedSinceApproved) {
+        // #418: a merge changed the artifact and no approval covers it now. The gate stays one-way — the step
+        // is not reopened and nothing is refused — so this is said loudly, with the way to review it again.
+        warn(`${step.id} is done, but ${step.artifact} changed after it was approved — none of its ${changedSinceApproved.count} approval(s) covers it as it stands now; the step stays done`);
+        hand(reviewAsItStands(epic, step.artifact, resolveDefaultBranch(productGit(root), productConfig)));
       } else {
         const verdict = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
         info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${verdict}`);

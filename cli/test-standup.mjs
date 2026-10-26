@@ -706,6 +706,29 @@ test('#349 yad status: a project not set up says so', () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#418 yad status and yad next: a done review whose artifact changed after it was approved is owed a fresh review', async () => {
+  const { P, T } = await statusFixture();
+  try {
+    const f = path.join(T, 'epics/EP-pay/.sdlc/state.json');
+    const st = JSON.parse(fs.readFileSync(f, 'utf8'));
+    const review = st.steps.find((s) => s.type === 'review+approve');
+    for (const s of st.steps) if (st.steps.indexOf(s) <= st.steps.indexOf(review)) s.status = 'done';
+    put(f, st);
+    put(path.join(T, 'epics/EP-pay', review.artifact), '---\nid: EP-pay\nstatus: approved\n---\n# Pay, as it stands now\n');
+    // approved, then the artifact changed: the approval's fingerprint is of older content
+    put(path.join(T, 'epics/EP-pay/.sdlc/approvals.json'), [{ artifact: review.artifact, step: review.id, approver: 'bo', status: 'approved', date: '2026-10-01', source: 'bridge', artifactHash: 'sha256:older', approvedAt: '2026-10-01T00:00:00Z', pr: 3, engagement: 'none' }]);
+    const m = St.buildStatus(T, { cwd: T, fetch: false });
+    assert.deepEqual(m.owed.filter((o) => o.kind === 'unapproved-change'), [{ kind: 'unapproved-change', epic: 'EP-pay', step: review.id, artifact: review.artifact }]);
+    assert.ok(St.briefLines(m).includes(`  EP-pay: ${review.id} is done, but ${review.artifact} changed after it was approved — review it again (yad gate open EP-pay ${review.artifact})`), St.briefLines(m).join('\n'));
+    const next = spawnSync(process.execPath, [YAD, 'next', 'EP-pay', '--dir', T], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+    assert.match(`${next.stdout}${next.stderr}`, new RegExp(`${review.id} is done, but ${review.artifact.replace('.', '\\.')} changed after it was approved — review it again: yad gate open EP-pay`));
+    // re-approved on the content as it stands: nothing owed
+    const { artifactHash } = await import('./epic-state.mjs');
+    put(path.join(T, 'epics/EP-pay/.sdlc/approvals.json'), [{ artifact: review.artifact, step: review.id, approver: 'bo', status: 'approved', date: '2026-10-02', source: 'bridge', artifactHash: artifactHash(path.join(T, 'epics/EP-pay'), review.artifact), approvedAt: '2026-10-02T00:00:00Z', pr: 4, engagement: 'none' }]);
+    assert.equal(St.buildStatus(T, { cwd: T, fetch: false }).owed.filter((o) => o.kind === 'unapproved-change').length, 0);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); }
+});
+
 test('#349 yad status: here is the task branch and its lane step; owed lists recorded blockers, debt and hotfix debt — a bare blocked is not one', async () => {
   const { P, T, api } = await statusFixture();
   try {

@@ -10579,6 +10579,65 @@ test('approvedContent: a review opened before the shape-8 move is read from epic
   } finally { fs.rmSync(R, { recursive: true, force: true }); }
 });
 
+// #418: a done step whose artifact a later unapproved merge changed. Approved at !7's head, then !9 merged.
+async function doneThenChanged({ approvedOn = 'head' } = {}) {
+  const sc = mergedThenChanged(BRANCH_CONTRACT.replace('POST /y', 'POST /y\nPOST /z'));
+  const { artifactHashAt, artifactHash: now } = await import('./epic-state.mjs');
+  const ep = path.join(sc.ci, 'epics/EP-test');
+  const bound = approvedOn === 'head' ? artifactHashAt(sc.ci, ep, 'architecture.md', sc.head).hash : now(ep, 'architecture.md');
+  const st = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
+  st.steps.find((x) => x.id === 'architecture-review').status = 'done';
+  st.currentStep = 'ui-design';
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(st));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(['al', 'bo', 'ca'].map((approver) => ({ artifact: 'architecture.md', step: 'architecture-review', approver, status: 'approved', date: '2026-06-09', source: 'bridge', artifactHash: bound, approvedAt: '2026-06-09T00:00:00Z', pr: 7, engagement: 'none' }))));
+  git(sc.ci, 'add', '-A');
+  git(sc.ci, 'commit', '-qm', 'a done step');
+  git(sc.ci, 'push', '-q', 'origin', 'trunk');
+  const nine = git(sc.ci, 'rev-parse', 'HEAD').toString().trim();
+  return { ...sc, ep, reader: () => ({ ...approvedAt(nine), reviews: [] }) };
+}
+
+test('gate ci --merged: a done step whose artifact an unapproved merge changed is warned loudly, never blocked (issue #418)', async () => {
+  const { T, author, ci, reader } = await doneThenChanged();
+  const before = process.exitCode;
+  try {
+    process.exitCode = undefined;
+    const { out } = await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 9, merged: true, today: '2026-06-10', reader, ...realHead }));
+    assert.equal(process.exitCode, undefined, 'said, never enforced');
+    assert.match(out, /architecture-review is done, but architecture\.md changed after it was approved — none of its 3 approval\(s\) covers it as it stands now; the step stays done/);
+    assert.match(out, /git fetch --prune origin.*yad gate open EP-test architecture\.md/);
+    assert.doesNotMatch(out, /the rule no longer holds/, 'the quiet line is replaced');
+  } finally { process.exitCode = before; }
+  assert.equal(reviewStatus(author), 'done', 'the step is not reopened');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: changedSinceApproved is in the JSON gates, and stays quiet while an approval still covers the artifact (issue #418)', async () => {
+  for (const [approvedOn, want] of [['head', true], ['now', false]]) {
+    const { T, ci, reader } = await doneThenChanged({ approvedOn });
+    const { value, out } = await captureConsole(() => gateSync(ci, { epic: 'EP-test', artifact: 'architecture.md', number: 9, today: '2026-06-10', reader, contentAt: undefined }));
+    assert.equal(value.gates[0].changedSinceApproved, want, approvedOn);
+    if (!want) assert.match(out, /already done — approvals re-synced, chain not re-advanced; the rule still holds/);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('doneStepUnapproved: a done review whose every approval is of older content, and nothing else (issue #418)', async () => {
+  const { doneStepUnapproved, artifactHash: now } = await import('./epic-state.mjs');
+  const D = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-418-'));
+  try {
+    fs.writeFileSync(path.join(D, 'epic.md'), '# x\n');
+    const review = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done' };
+    const appr = (hash) => ({ step: 'epic-review', status: 'approved', artifactHash: hash });
+    assert.deepEqual(doneStepUnapproved(D, review, [appr('sha256:old'), appr('sha256:older')]), { count: 2 });
+    assert.equal(doneStepUnapproved(D, review, [appr('sha256:old'), appr(now(D, 'epic.md'))]), null, 'one live approval covers it');
+    assert.equal(doneStepUnapproved(D, review, []), null, 'no approval at all is doctor\'s other check');
+    assert.equal(doneStepUnapproved(D, { ...review, status: 'in_review' }, [appr('sha256:old')]), null, 'only a done step');
+    assert.equal(doneStepUnapproved(D, { ...review, type: 'author' }, [appr('sha256:old')]), null, 'only a review');
+    assert.equal(doneStepUnapproved(D, { ...review, artifact: 'missing.md' }, [appr('sha256:old')]), null, 'nothing to fingerprint is no claim');
+  } finally { fs.rmSync(D, { recursive: true, force: true }); }
+});
+
 test('headContentHash: a GitLab merge request\'s head is fetched from refs/merge-requests/<n>/head (issue #366)', async () => {
   const { headContentHash } = await import('./gate.mjs');
   const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-mr-'));
