@@ -668,6 +668,83 @@ test('--open-pr is all or nothing: one repo that cannot take it, and nothing is 
   } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+test('--open-pr reaches every cloned repo: one on a feature branch stops it even with nothing of its own to update', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { VERSION } = await import('./manifest.mjs');
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  const RT = tmp();
+  const RA = tmp();
+  try {
+    fs.mkdirSync(T); fs.mkdirSync(A);
+    for (const [d, r] of [[T, RT], [A, RA]]) {
+      git(r, ['init', '-q', '--bare', '-b', 'main']);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']);
+      git(d, ['config', 'user.email', 'alice@work.com']);
+      git(d, ['config', 'commit.gpgsign', 'false']);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]);
+      git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: settings']); git(T, ['push', '-q']);
+    // The app's own work, on its feature branch; its managed ledger already current.
+    git(A, ['checkout', '-q', '-b', 'feat/x']);
+    put(path.join(A, '.sdlc/managed.json'), { version: VERSION, files: {} });
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'feat: my work']);
+    const r = await reconcile(T, { fix: true, scope: 'all', openPr: true, creator: () => { throw new Error('no PR may open'); } });
+    assert.equal(r.applied, 0);
+    assert.deepEqual(r.commits.map((c) => [c.label, c.reason]), [['app', 'branch']]);
+    assert.equal(git(A, ['rev-parse', '--abbrev-ref', 'HEAD']), 'feat/x', 'never moved off its branch');
+    assert.equal(git(A, ['status', '--porcelain']), '');
+    assert.equal(git(T, ['status', '--porcelain']), '');
+    process.exitCode = 0;
+    // The guide agrees: with the Product behind and the app on its branch, no run it would refuse.
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    const g = buildGuide(T);
+    assert.ok(!g.upkeep.agent.some((x) => (x.run ?? '').includes('--open-pr')));
+    assert.ok(g.upkeep.person[0].steps.some((x) => /^app: on 'feat\/x'/.test(x)));
+    // And the other way: the Product current but on an epic branch, the app behind.
+    put(path.join(T, '.sdlc/cli-version.json'), { version: VERSION });
+    git(A, ['checkout', '-q', 'main']);
+    fs.rmSync(path.join(A, '.sdlc'), { recursive: true, force: true });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: stamp']); git(T, ['push', '-q']);
+    git(T, ['checkout', '-q', '-b', 'epic/pay']);
+    const g2 = buildGuide(T);
+    assert.deepEqual(g2.situation.install.repos.map((x) => x.repo), ['app'], 'an app with no ledger was never reached');
+    assert.ok(!g2.upkeep.agent.some((x) => (x.run ?? '').includes('--open-pr')));
+    assert.ok(g2.upkeep.person[0].steps.some((x) => /^the Product: on 'epic\/pay'/.test(x)));
+  } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('a push that fails keeps the update in the working tree, unstaged, deletions included, and drops the branch', async () => {
+  const { openUpdatePr } = await import('./update-commit.mjs');
+  const T = tmp();
+  try {
+    git(T, ['init', '-q', '-b', 'main']);
+    git(T, ['config', 'user.name', 'Alice Smith']);
+    git(T, ['config', 'user.email', 'alice@work.com']);
+    git(T, ['config', 'commit.gpgsign', 'false']);
+    put(path.join(T, 'old.sh'), 'old\n');
+    put(path.join(T, 'a.txt'), 'v1\n');
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: start']);
+    git(T, ['remote', 'add', 'origin', path.join(T, 'no-such-remote')]);
+    fs.rmSync(path.join(T, 'old.sh'));
+    put(path.join(T, 'a.txt'), 'v2\n');
+    const r = openUpdatePr({ root: T, paths: ['old.sh', 'a.txt'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'github', creator: () => ({ ok: true }), version: '4.7.0', checked: true });
+    assert.deepEqual([r.pushed, r.error], [false, true]);
+    assert.equal(git(T, ['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+    assert.equal(git(T, ['branch', '--list', 'chore/yad-update-v4.7.0']), '', 'the branch is dropped, so a later run retries');
+    assert.equal(fs.readFileSync(path.join(T, 'a.txt'), 'utf8'), 'v2\n');
+    assert.ok(!fs.existsSync(path.join(T, 'old.sh')));
+    assert.equal(git(T, ['diff', '--cached', '--name-only']), '', 'nothing staged');
+    assert.deepEqual(git(T, ['diff', '--name-status']).split('\n').sort(), ['D\told.sh', 'M\ta.txt'], 'the update, unstaged');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened, and the repo back on its default branch', async () => {
   const { openUpdatePr, updateBranchName, buildUpdatePrBody } = await import('./update-commit.mjs');
   const T = tmp();

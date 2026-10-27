@@ -234,6 +234,20 @@ export function buildUpdatePrBody({ version = VERSION, items = [] } = {}) {
   ].join('\n');
 }
 
+// The repos `--open-pr` reaches, and so the ones it checks: the Product and every connected repo that is
+// cloned here (one that is not is `yad repo clone`'s business, not the update's). ONE list for both
+// readers — reconcile, which refuses a run, and the guide, which must never advise a run that is refused.
+export function updateTargets(productRoot) {
+  const settings = readJSONSafe(path.join(productRoot, '.sdlc/product.json')) ?? {};
+  const registry = readJSONSafe(path.join(productRoot, '.sdlc/repos.json'));
+  const repos = (Array.isArray(registry?.repos) ? registry.repos : [])
+    .filter((x) => typeof x?.path === 'string' && x.path)
+    .map((x) => ({ root: path.resolve(productRoot, x.path), name: typeof x.name === 'string' ? x.name : x.path, defaultBranch: x.default_branch ?? null, platform: x.platform ?? null }))
+    .filter((x) => x.root !== productRoot && fs.existsSync(path.join(x.root, '.git')));
+  return [{ root: productRoot, name: 'product', defaultBranch: settings.default_branch ?? null, platform: settings.platform ?? null, product: true }, ...repos];
+}
+const readJSONSafe = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+
 // Where one repo stands against its default branch, from git alone (origin as last fetched, no network):
 // the branch checked out (null when detached or unborn), whether it has an origin, and how far HEAD is
 // ahead of and behind origin/<base>. Every pull or push hint below is decided from this table.
@@ -274,6 +288,8 @@ export function updatePrBlocker(root, { defaultBranch, version = VERSION, produc
   if (git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${head}`).ok) return onReview(' (on origin)');
   // Exit 0: the branch is on origin. Exit 2: it is not. Anything else (offline): not known, and the push says so.
   if (network && run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], { cwd: root }).ok) return onReview(' (opened from another clone)');
+  // `ahead` is null when origin/<base> was never fetched: the branch is then cut from the local base as it
+  // is, and the push says the rest.
   if (t.ahead > 0) return { kind: 'ahead', label, message: `${t.ahead} local commit(s) on '${t.base}' are not on origin — push or drop them first, so the update PR/MR carries only the update` };
   return null;
 }
@@ -329,10 +345,14 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   const pushed = run('git', ['push', '-q', '-u', 'origin', head], { cwd: root });
   if (!pushed.ok) {
     // The branch is dropped, so a run after the push problem is fixed tries again rather than reading it as
-    // "already on review". The update stays in the working tree, uncommitted, as a failed --push leaves it.
-    if (back()) { git('checkout', '-q', head, '--', ...staged); git('branch', '-q', '-D', head); }
+    // "already on review". The update stays in the working tree, unstaged, deletions included: the branch is
+    // moved back to the base with the files left as they are, then the switch to the base carries them.
+    const kept = git('reset', '-q', '--mixed', base).ok && back();
+    if (kept) git('branch', '-q', '-D', head);
     fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
-    hand(`fix the push (access, network), drop the uncommitted update with \`git checkout -- .\` in ${isProduct ? '.' : label} if you want it clean, and run the update again`);
+    hand(kept
+      ? `fix the push (access, network) and run the update again; the update is left in ${isProduct ? '.' : label}'s working tree, uncommitted (\`git restore .\` drops it)`
+      : `the update is committed on ${head} in ${isProduct ? '.' : label}; fix the push, then push that branch (\`git push -u origin ${head}\`) and open a PR/MR from it`);
     process.exitCode = 1;
     return out({ committed: false, error: true });
   }

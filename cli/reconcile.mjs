@@ -17,7 +17,7 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets } from './update-commit.mjs';
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
@@ -256,19 +256,17 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     platformByRoot.set(repoRoot, repo.platform);
   }
 
-  // --open-pr is all or nothing (E157 update review 2). Every repo this update would write to — the Product,
-  // and each registered repo with something to fix or a managed ledger to restamp — is checked BEFORE
-  // anything is written. One that cannot take a PR/MR now (a feature branch, a detached HEAD, no origin,
-  // local commits origin lacks) stops the whole run with nothing written, so no repo is left half updated
-  // and no update is lost from sight: the person fixes it and runs it again. A repo whose update is already
-  // on review (`open`) is left alone (`held`): nothing is written there until its PR/MR merges.
+  // --open-pr is all or nothing (E157 update reviews 2 and 3). The Product and every connected repo cloned
+  // here (`updateTargets`, the one list the guide reads too) are checked BEFORE anything is written: each must
+  // be on its default branch, not detached, with an origin and no local commits origin lacks. One that is not
+  // stops the whole run with nothing written, so no repo is left half updated, no one's feature work rides an
+  // update PR/MR, and no one is moved off their branch: the person fixes it and runs it again. A repo whose
+  // update is already on review (`open`) is left alone (`held`): nothing is written there until it merges.
   let held = new Set();
+  let reached = null;
   if (openPr) {
-    const ledgerVersion = (r) => readJSON(path.join(r, MANAGED_LEDGER), null)?.version ?? null;
-    const roots = [...new Set([root, ...registry.repos.map((r) => path.resolve(root, r.path)), ...actions.flatMap((a) => [a.root, a.managed?.root]).filter(Boolean)])];
-    const writes = (r) => r === root || fixable.some((a) => a.root === r || a.managed?.root === r)
-      || (actions.some((a) => a.managed?.root === r) && ledgerVersion(r) !== VERSION);
-    const checks = roots.filter(writes).map((r) => [r, updatePrBlocker(r, { defaultBranch: defByRoot.get(r), productRoot: root })]);
+    reached = new Set(updateTargets(root).map((t) => t.root));
+    const checks = updateTargets(root).map((t) => [t.root, updatePrBlocker(t.root, { defaultBranch: t.defaultBranch ?? defByRoot.get(t.root), productRoot: root })]);
     const stop = checks.filter(([, b]) => b && b.kind !== 'open');
     const row = (r, b) => ({ label: b.label, product: r === root, branch: b.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: b.kind !== 'open', reason: b.kind });
     if (stop.length) {
@@ -282,12 +280,16 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     held = new Set(checks.filter(([, b]) => b).map(([r]) => r));
     for (const [, b] of checks) if (b) info(`${b.label}: ${b.message}`);
     if (held.size === checks.length) {
+      info('every repo\'s update is already on review — nothing written');
       const toolbox = toolboxSection(root, toolboxAt);
       return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: checks.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
     }
-    fixable = fixable.filter((a) => !held.has(a.root) && !held.has(a.managed?.root));
+    fixable = fixable.filter((a) => (!a.root || reached.has(a.root)) && !held.has(a.root) && (!a.managed?.root || reached.has(a.managed.root)) && !held.has(a.managed?.root));
   }
-  const live = (a) => !held.has(a.root) && !held.has(a.managed?.root);
+  // Under --open-pr, only a repo it checked and did not hold is written (a registered repo not cloned here is
+  // `yad repo clone`'s business).
+  const reaches = (r) => !r || ((!reached || reached.has(r)) && !held.has(r));
+  const live = (a) => reaches(a.root) && reaches(a.managed?.root);
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
   log('');
