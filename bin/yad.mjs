@@ -895,8 +895,8 @@ async function main() {
       if (o._[2] !== undefined) { refuse(`yad guide takes one epic id, not ${o._[2]}`, 'usage: yad guide [<epic>] [--json]'); break; }
       if (epic !== undefined && !commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`, 'usage: yad guide [<epic>] [--json]'); break; }
       const root = o.product || (commands.hasProduct(o.dir) ? o.dir : null);
-      if (!root && o.productElsewhere) warn(`this folder is not in a repo the Product registers — the Product is ${o.productElsewhere}: cd there, or pass --dir ${o.productElsewhere}`);
-      result = await commands.runGuide(root, { epic: epic ?? null, cwd: o.dir, json: o.json });
+      // A Product one `cd` away is said in the answer too, so an agent never starts a second one (E80).
+      result = await commands.runGuide(root, { epic: epic ?? null, cwd: o.dir, json: o.json, productElsewhere: root ? null : o.productElsewhere ?? null });
       break;
     }
     case 'next': {

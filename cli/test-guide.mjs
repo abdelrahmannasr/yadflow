@@ -32,6 +32,7 @@ const { buildGuide, stepFacts, playbook } = await import('./guide.mjs');
 const { COMMAND_CLASS, CLASSES, ASK, RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor } = await import('./agent-rules.mjs');
 const { DEFAULT_LIFECYCLE } = await import('./lifecycle.mjs');
 const { runEpicNew } = await import('./epic.mjs');
+const { gateOpen } = await import('./gate.mjs');
 
 const ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
 const YAD = path.join(ROOT, 'bin', 'yad.mjs');
@@ -39,14 +40,14 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guide-'));
 const put = (file, data) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data, null, 2)); };
 const git = (cwd, args) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
 
-async function product({ platform = 'github', solo = false, epics = ['pay'] } = {}) {
+async function product({ platform = 'github', solo = false, epics = ['pay'], verified = true } = {}) {
   const T = tmp();
   git(T, ['init', '-q', '-b', 'main']);
   git(T, ['config', 'user.name', 'Alice Smith']);
   git(T, ['config', 'user.email', 'alice@work.com']);
   git(T, ['config', 'commit.gpgsign', 'false']);
   git(T, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
-  put(path.join(T, '.sdlc/product.json'), { platform, git_url: 'git@github.com:acme/product.git', default_branch: 'main', ...(solo ? { solo: true } : {}), ...(platform !== 'none' ? { ledger: 'verified' } : {}) });
+  put(path.join(T, '.sdlc/product.json'), { platform, git_url: 'git@github.com:acme/product.git', default_branch: 'main', ...(solo ? { solo: true } : {}), ...(platform && verified ? { ledger: 'verified' } : {}) });
   for (const slug of epics) await runEpicNew(T, { slug, today: '2026-10-20' });
   return T;
 }
@@ -94,9 +95,18 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   assert.equal(askFor('default-push'), 'each-time');
   assert.equal(classify(['dial']), 'read');
   assert.equal(classify(['dial', 'open-pr'], ['to']), 'on-request');
-  for (const c of ['mode', 'kill', 'unkill']) assert.equal(classify([c]), 'on-request');
+  for (const c of ['kill', 'unkill']) assert.equal(classify([c]), 'on-request');
+  assert.equal(classify(['mode']), 'read', 'yad mode alone reads it');
+  for (const m of ['solo', 'team']) assert.equal(classify(['mode', m]), 'on-request');
+  // A skip, a deferral or clearing a blocker is a decision about the work: the person's.
+  for (const c of ['skip', 'unskip', 'defer', 'undefer', 'unblock']) assert.equal(classify([c]), 'on-request', c);
+  assert.equal(classify(['check'], ['fix', 'push']), 'default-push', 'check --fix --push is update --push');
   assert.equal(askFor('on-request'), 'only-when-asked');
-  for (const w of [['gate', 'open'], ['open-pr'], ['ship'], ['member', 'add']]) assert.equal(askFor(classify(w)), 'never', w.join(' '));
+  for (const w of [['gate', 'open'], ['gate', 'sync'], ['member', 'add']]) assert.equal(askFor(classify(w)), 'never', w.join(' '));
+  // A task PR/MR follows `yad dial open-pr` (#356): asked first unless the dial is `auto`.
+  for (const w of [['open-pr'], ['ship']]) assert.equal(classify(w), 'task-pr', w.join(' '));
+  assert.equal(askFor('task-pr'), 'per-dial');
+  assert.equal(classify(['docs', 'deploy']), 'local-write', 'it builds here; CI publishes on a push');
   assert.equal(classify(['report']), 'public-post');
   assert.equal(askFor('public-post'), 'each-time');
   assert.equal(classify(['check']), 'read');
@@ -109,6 +119,24 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   assert.deepEqual(HUMAN_ONLY_ACTS.map((a) => a.id), ['approve-merge', 'login', 'secrets', 'signing-key', 'platform-settings']);
   assert.ok(NEVER.some((n) => n.id === 'force-push'));
   assert.ok(RULES.some((r) => r.id === 'report'));
+});
+
+test('every command that pushes with --push says so: its --push is asked every time', () => {
+  // Each `case` of bin/yad.mjs's dispatch that hands `o.push` on must class --push as default-push.
+  const src = fs.readFileSync(YAD, 'utf8');
+  const sw = src.slice(src.indexOf('switch (cmd) {'));
+  const blocks = sw.split(/\n(?=\s{4}case ')/);
+  const pushers = [];
+  for (const b of blocks) {
+    if (!/\bo\.push\b/.test(b)) continue;
+    const cmds = [...b.matchAll(/^\s{4}case '([a-z-]+)':/gm)].map((m) => m[1]);
+    pushers.push(...cmds);
+  }
+  assert.ok(pushers.length >= 6, pushers.join(' '));
+  for (const cmd of pushers) {
+    const keys = Object.keys(COMMAND_CLASS).filter((k) => k === cmd || k.startsWith(`${cmd} `));
+    assert.ok(keys.some((k) => COMMAND_CLASS[k].flags?.push === 'default-push' || COMMAND_CLASS[k].class === 'human-only'), `${cmd}: --push must be default-push`);
+  }
 });
 
 // ---- the brief ----------------------------------------------------------------------------------------
@@ -144,9 +172,11 @@ test('an author step: its brief, mandatory, the epic\'s recorded driver, the bou
     assert.equal(g.step.driver, 'pair');
     assert.deepEqual(g.step.skills.bound, ['yad-epic']);
     assert.ok(g.step.skills.recommended.some((r) => r.skill === 'bmad-prd' && r.bind.startsWith('yad skill bind epic')));
-    assert.deepEqual(g.agent.map((a) => a.skill ?? a.run), ['yad-epic', 'yad next EP-pay --check epic']);
-    assert.equal(g.agent[1].class, 'read');
+    assert.deepEqual(g.agent.map((a) => a.skill ?? a.run), ['yad next EP-pay --check epic', 'yad-epic']);
+    assert.equal(g.agent[0].class, 'read');
     assert.equal(g.person[0].act, 'answer');
+    assert.equal(g.person[0].verify, null);
+    assert.doesNotMatch(g.then, /verify/, 'no verify command to name');
     assert.deepEqual(g.rules, RULES);
     // An epic that records another driver is told as it records it.
     const st = readState(T, 'EP-pay');
@@ -164,48 +194,99 @@ test('an optional step on the epic\'s route can be skipped, and the skip is the 
     assert.equal(g.step.id, 'ui-design');
     assert.equal(g.step.mandatory, false);
     assert.deepEqual(g.step.skip, { command: 'yad skip EP-pay ui-design --reason "<why>"', decidedBy: 'human' });
+    // At its review the step is already written: `yad skip` would refuse, so no skip is offered.
+    moveTo(T, 'EP-pay', 'ui-design-review', 'todo');
+    const atGate = buildGuide(T, { epic: 'EP-pay' }).step;
+    assert.equal(atGate.id, 'ui-design-review');
+    assert.equal(atGate.skip, null);
     moveTo(T, 'EP-pay', 'architecture');
     assert.equal(buildGuide(T, { epic: 'EP-pay' }).step.mandatory, true);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('a review gate: the agent opens it; the approval and the merge are the person\'s, with a platform or without one', async () => {
+test('a review gate on a verified Product: the agent opens it once, and the person approves and merges', async () => {
   const T = await product();
   try {
     moveTo(T, 'EP-pay', 'epic-review', 'todo');
-    let g = buildGuide(T, { epic: 'EP-pay' });
+    // On a verified Product the PR/MR is recorded only at the merge, so the review stays `review-open`
+    // while it is open: the person's hand-off is given with it.
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    assert.equal(g.situation.ledger, 'verified');
     assert.equal(g.step.actionKind, 'review-open');
     assert.equal(g.step.name, 'Epic review');
     assert.equal(g.step.driver, 'human');
     assert.equal(g.step.advance, 'human');
     assert.deepEqual(g.agent.map((a) => [a.run, a.class, a.ask]), [['yad gate open EP-pay epic.md', 'open-pr', 'never']]);
-    assert.deepEqual(g.person, []);
-    // The review is open on GitHub: the person approves and merges, then the agent reads it back.
-    put(path.join(T, 'epics/EP-pay/.sdlc/product-prs.json'), [{ artifact: 'epic.md', number: 7, url: 'https://github.com/acme/product/pull/7' }]);
-    g = buildGuide(T, { epic: 'EP-pay' });
-    assert.equal(g.step.actionKind, 'review-sync');
+    assert.match(g.agent[0].why, /do not open another/);
     assert.equal(g.person[0].act, 'approve-merge');
-    assert.match(g.person[0].steps[0], /pull request #7 for epic\.md on GitHub/);
+    assert.match(g.person[0].steps[0], /^Once the agent has opened it, open the review pull request for epic\.md on GitHub/);
+    assert.ok(g.person[0].steps.some((x) => /CI writes the approval into the ledger at the merge/.test(x)));
     assert.equal(g.person[0].verify, 'yad gate sync EP-pay epic.md');
-    assert.deepEqual(g.person[0].commands, []);
     assert.match(g.then, /never go on from their word alone/);
-    // No platform: the person records the approval and advances, as themselves.
-    const settings = path.join(T, '.sdlc/product.json');
-    put(settings, { ...JSON.parse(fs.readFileSync(settings, 'utf8')), platform: 'none' });
-    g = buildGuide(T, { epic: 'EP-pay' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a review gate with a platform and a local ledger: once the PR/MR is recorded, the person approves and merges', async () => {
+  const T = await product({ verified: false });
+  try {
+    moveTo(T, 'EP-pay', 'epic-review', 'in_review');
+    put(path.join(T, 'epics/EP-pay/.sdlc/product-prs.json'), [{ artifact: 'epic.md', number: 7, url: 'https://github.com/acme/product/pull/7' }]);
+    const g = buildGuide(T, { epic: 'EP-pay' });
     assert.equal(g.situation.ledger, 'local');
+    assert.equal(g.step.actionKind, 'review-sync');
+    assert.deepEqual(g.agent.map((a) => [a.run, a.class]), [['yad gate sync EP-pay epic.md', 'open-pr']]);
+    assert.match(g.person[0].steps[0], /^Open the review pull request #7 for epic\.md on GitHub/);
+    assert.deepEqual(g.person[0].commands, []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a review gate with no platform: the agent marks it open, then the person approves and advances as themselves', async () => {
+  const T = await product({ platform: null });
+  try {
+    moveTo(T, 'EP-pay', 'epic-review', 'todo');
+    put(path.join(T, 'epics/EP-pay/epic.md'), '---\nid: EP-pay\nstatus: draft\n---\n# Pay\n');
+    let g = buildGuide(T, { epic: 'EP-pay' });
+    assert.equal(g.situation.platform, null);
+    assert.deepEqual(g.agent.map((a) => a.run), ['yad gate open EP-pay epic.md']);
+    assert.deepEqual(g.person[0].commands, ['yad gate approve EP-pay epic.md --by "<your name>"', 'yad gate advance EP-pay epic.md']);
+    // The real `yad gate open`, with no platform, marks the review open here; the agent has nothing left to run.
+    await gateOpen(T, { epic: 'EP-pay', artifact: 'epic.md', today: '2026-10-27' });
+    g = buildGuide(T, { epic: 'EP-pay' });
+    assert.equal(g.step.status, 'in_review');
+    assert.deepEqual(g.agent, []);
     assert.deepEqual(g.person[0].commands, ['yad gate approve EP-pay epic.md --by "<your name>"', 'yad gate advance EP-pay epic.md']);
     for (const cmd of g.person[0].commands) assert.equal(classify(cmd.split(' ').slice(1, 3)), 'human-only');
+    assert.equal(g.person[0].verify, 'yad guide EP-pay --json');
     // Solo: nothing to approve, only the advance.
+    const settings = path.join(T, '.sdlc/product.json');
     put(settings, { ...JSON.parse(fs.readFileSync(settings, 'utf8')), solo: true });
     assert.deepEqual(buildGuide(T, { epic: 'EP-pay' }).person[0].commands, ['yad gate advance EP-pay epic.md']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('a blocked step: the agent clears it only after the person says the blocker is gone', () => {
+test('a word from the ledger that is not a plain path never reaches a command line', async () => {
+  const T = await product({ platform: null });
+  try {
+    moveTo(T, 'EP-pay', 'epic-review', 'todo');
+    const st = readState(T, 'EP-pay');
+    st.steps.find((s) => s.id === 'epic-review').artifact = 'epic.md; rm -rf ~';
+    put(statePath(T, 'EP-pay'), st);
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    const lines = [...g.agent.map((a) => a.run ?? ''), ...g.person.flatMap((p) => p.commands)];
+    assert.ok(lines.length > 0);
+    for (const l of lines) assert.doesNotMatch(l, /rm -rf/, l);
+    assert.ok(lines.some((l) => l.includes('<artifact>')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a blocked step: the agent clears it only when the person asks; on a verified Product it cannot', () => {
   const p = playbook({ epicId: 'EP-pay', kind: 'blocked', step: 'architecture', record: { reason: 'waiting on\u001b[31m legal' } }, {});
   assert.equal(p.agent[0].run, 'yad unblock EP-pay architecture');
-  assert.equal(p.person[0].steps[0], 'Resolve the blocker: waiting on [31m legal, then tell the agent.', 'a control character from the ledger is cleaned');
+  assert.equal(p.agent[0].ask, 'only-when-asked');
+  const v = playbook({ epicId: 'EP-pay', kind: 'blocked', step: 'architecture', record: null }, { verified: true, platform: 'github' });
+  assert.deepEqual(v.agent, []);
+  assert.match(v.person[0].steps[1], /yad unblock` refuses/);
+  assert.equal(p.person[0].steps[0], 'Resolve the blocker: waiting on [31m legal, then tell the agent to clear it.', 'a control character from the ledger is cleaned');
 });
 
 test('the agent never picks an epic: several open epics are listed, one is chosen by name, an unknown name is said', async () => {
@@ -251,6 +332,50 @@ test('Build: the step is the Build loop, with its brief', async () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('a ledger that does not load: the answer is yad doctor, never another epic', async () => {
+  const T = await product();
+  try {
+    put(statePath(T, 'EP-pay'), '{ not json');
+    const g = buildGuide(T);
+    assert.equal(g.situation.stage, 'broken');
+    assert.deepEqual(g.problems.map((p) => p.epic), ['EP-pay']);
+    assert.deepEqual(g.agent.map((a) => a.run), ['yad doctor']);
+    assert.ok(!g.agent.some((a) => a.skill === 'yad-epic'));
+    const named = buildGuide(T, { epic: 'EP-pay' });
+    assert.equal(named.situation.stage, 'broken');
+    put(statePath(T, 'EP-pay'), 'null');
+    assert.equal(buildGuide(T, { epic: 'EP-pay' }).situation.stage, 'broken');
+    put(statePath(T, 'EP-pay'), { epicId: 'EP-pay', steps: 'nope' });
+    assert.equal(buildGuide(T, { epic: 'EP-pay' }).situation.stage, 'broken');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('the Foundation is the Product level: neither mandatory nor skippable', async () => {
+  const T = await product({ epics: [] });
+  try {
+    const { runFoundationNew } = await import('./epic.mjs');
+    await runFoundationNew(T, { today: '2026-10-27' });
+    const g = buildGuide(T);
+    assert.equal(g.step.id, 'foundation');
+    assert.equal(g.step.mandatory, null);
+    assert.equal(g.step.skip, null);
+    assert.equal(g.step.brief, stepFacts('foundation').description);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a Product one folder away is named, so the agent never starts a second one', () => {
+  const g = buildGuide(null, { productElsewhere: '../product' });
+  assert.equal(g.situation.stage, 'product-elsewhere');
+  assert.equal(g.situation.product, '../product');
+  assert.deepEqual(g.agent.map((a) => a.run), ['yad guide --dir ../product --json']);
+  assert.ok(!JSON.stringify(g).includes('yadflow@4 new'));
+});
+
+test('the test-cases track beside Build is given to the agent too', () => {
+  const p = playbook({ epicId: 'EP-pay', kind: 'build', step: 'ready-for-build', parallel: { step: 'test-cases', skill: 'yad-test-cases', artifact: 'test-cases.md' } }, {});
+  assert.deepEqual(p.agent.map((a) => [a.skill, a.class, a.ask]), [['yad-run', 'task-pr', 'per-dial'], ['yad-test-cases', 'local-write', 'never']]);
+});
+
 // ---- the command ----------------------------------------------------------------------------------------
 
 test('yad guide --json: with no Product it says how to start one, and carries the rules; a bad id is refused', () => {
@@ -264,6 +389,7 @@ test('yad guide --json: with no Product it says how to start one, and carries th
     assert.equal(out.situation.stage, 'no-product');
     assert.deepEqual(out.rules, RULES);
     assert.ok(out.person[0].commands.includes('npx -y yadflow@4 new <name>'));
+    assert.equal(out.stage, undefined, 'the stage is in situation only');
     const bad = spawnSync(process.execPath, [YAD, 'guide', 'not-an-epic', '--json'], { cwd: T, encoding: 'utf8' });
     assert.equal(bad.status, 1);
     assert.match(JSON.parse(bad.stdout).error, /invalid epic id/);
