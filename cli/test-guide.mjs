@@ -428,13 +428,30 @@ test('a Product one folder away is named, so the agent never starts a second one
   assert.ok(!JSON.stringify(g).includes('yadflow@4 new'));
 });
 
-test('a Build step yad-run halted waits for the person', () => {
-  const p = playbook({ epicId: 'EP-pay', kind: 'build', step: 'ready-for-build', builds: [{ story: 'EP-pay-S01', repos: [
-    { repo: 'api', step: 'implement', status: 'blocked', record: { reason: 'contract touch' } }, { repo: 'web', step: 'spec', status: 'in_progress' }] }] }, {});
-  const halts = p.person.filter((x) => x.act === 'unblock');
-  assert.equal(halts.length, 1);
-  assert.equal(halts[0].steps[0], 'Resolve the halt on EP-pay-S01 in api (implement): contract touch, then tell the agent to move it on.');
-  assert.ok(RULES.some((r) => r.id === 'build-halts'));
+test('a Build step yad-run halted waits for the person, with the reason the build-state records', async () => {
+  const T = await product();
+  try {
+    const st = readState(T, 'EP-pay');
+    for (const s of st.steps) s.status = 'done';
+    st.currentStep = 'ready-for-build';
+    put(statePath(T, 'EP-pay'), st);
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S01.json'), { story: 'EP-pay-S01', repos: {
+      api: { currentStep: 'implement', steps: [{ id: 'spec', status: 'done' }, { id: 'tasks', status: 'done' }, { id: 'implement', status: 'blocked', record: { reason: 'contract touch' } }, { id: 'checks', status: 'todo' }] },
+      web: { currentStep: 'spec', steps: [{ id: 'spec', status: 'in_progress' }] },
+    } });
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    const halts = g.person.filter((x) => x.act === 'unblock');
+    assert.equal(halts.length, 1);
+    assert.equal(halts[0].steps[0], 'Resolve the halt on EP-pay-S01 in api (implement): contract touch, then tell the agent to move it on.');
+    assert.ok(RULES.some((r) => r.id === 'build-halts'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a flag that needs the person to have asked is kept under a push', () => {
+  const { reaches } = COMMAND_CLASS_MODULE;
+  assert.deepEqual(reaches(['update'], ['push', 'overwrite-local']).sort(), ['default-push', 'local-write', 'on-request']);
+  const p = playbook({ epicId: 'EP-pay', kind: 'unknown-kind' }, {});
+  assert.equal(p.agent[0].onRequest, undefined);
 });
 
 test('the test-cases track beside Build is given to the agent too', () => {

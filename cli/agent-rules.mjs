@@ -20,7 +20,8 @@
 //   human-only   an approval, or another act only the person may make. The agent never runs it: it gives
 //                the person the exact command and steps, waits, then confirms by reading.
 //   on-request   changes how much the agent itself may do (a dial, the mode, the kill switch), is a
-//                decision about the work that is the person's (skip, defer, unblock), passes a guard
+//                decision about the work that is the person's (skip, defer, unblock), sets the Product up
+//                (its mode and route), changes a team-wide setting (skill bind, toolbox add), passes a guard
 //                (`--force`, `--overwrite-local`), or records what only the person knows (a run's verdict,
 //                who approved a merge no platform could confirm). The agent runs it only when the person
 //                asked for that exact change, or gave it the facts it records.
@@ -187,10 +188,10 @@ export const COMMAND_CLASS = {
   'hook ledger-guard': { class: 'internal' },
 };
 
-// The rank used when a flag raises a class: the higher of the two wins. `human-only` and `on-request`
-// outrank every push; a removed or internal command is never raised.
-// A push to the default branch and a public post rank above `on-request`: the person having asked for the
-// command does not cover the push, so it is still asked about, naming what will be pushed.
+// The rank used when a flag raises a class: the higher of the two wins, and a removed or internal command is
+// never raised. `human-only` is the top. A push to the default branch and a public post rank above
+// `on-request`: the person having asked for the command does not cover the push, so it is still asked
+// about, naming what will be pushed. The `on-request` a flag also reaches is not lost: `reaches` says it.
 const STRENGTH = ['read', 'local-write', 'open-pr', 'task-pr', 'on-request', 'public-post', 'default-push', 'human-only'];
 const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 
@@ -220,6 +221,14 @@ export function classify(words, flags = []) {
   if (cls === 'removed' || cls === 'internal' || cls === 'ci-only') return cls;
   for (const f of flags) if (e.flags && Object.hasOwn(e.flags, f)) cls = stronger(cls, e.flags[f]);
   return cls;
+}
+
+// Every class a command line reaches: its own and each flag's. `classify` is the strongest of them; a caller
+// that must not lose an `on-request` under a push (the guide, E158's hook guard) reads this too.
+export function reaches(words, flags = []) {
+  const e = commandEntry(words);
+  if (!e) return [];
+  return [...new Set([e.class, ...flags.filter((f) => e.flags && Object.hasOwn(e.flags, f)).map((f) => e.flags[f])])];
 }
 
 export const askFor = (cls) => (cls && Object.hasOwn(ASK, cls) ? ASK[cls] : 'each-time');

@@ -25,7 +25,7 @@ import { epicAction, soloOf } from './next.mjs';
 import { buildStatus } from './status.mjs';
 import { recommendationsFor, bindCommand } from './recommend.mjs';
 import { TOOLBOX } from './toolbox.mjs';
-import { RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor } from './agent-rules.mjs';
+import { RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor, reaches } from './agent-rules.mjs';
 import { seededSlugs } from './hook.mjs';
 
 export const GUIDE_VERSION = 1;
@@ -75,8 +75,11 @@ const shellPath = (p) => (/^[A-Za-z0-9._/~-]+$/.test(p) ? p : `'${p.replace(/'/g
 const agentRun = (line, why) => {
   const words = line.replace(/^yad\s+/, '').split(/\s+/);
   const flags = words.filter((w) => w.startsWith('--')).map((w) => w.slice(2).split('=')[0]);
-  const cls = classify(words.filter((w) => !w.startsWith('-')).slice(0, 2), flags);
-  return { run: line, class: cls, ask: askFor(cls), why };
+  const cmd = words.filter((w) => !w.startsWith('-')).slice(0, 2);
+  const cls = classify(cmd, flags);
+  // A flag that needs the person to have asked, under a stronger class (a push): said, never dropped.
+  const onRequest = cls !== 'on-request' && cls !== 'human-only' && reaches(cmd, flags).includes('on-request');
+  return { run: line, class: cls, ask: askFor(cls), ...(onRequest ? { onRequest: true } : {}), why };
 };
 // A skill the agent runs. Its class is what the skill does at most: `yad-run` opens task PRs/MRs.
 const agentSkill = (skill, why, cls = 'local-write') => ({ skill: clean(skill), class: cls, ask: askFor(cls), why });
@@ -195,7 +198,8 @@ export function playbook(a, ctx) {
         const halted = (a.builds || []).flatMap((b) => (b.repos || []).filter((r) => r.status === 'blocked').map((r) => ({
           act: 'unblock',
           why: 'yad-run halted this Build step: a person must resolve it',
-          steps: [`Resolve the halt on ${tok(b.story, '<story>')} in ${tok(r.repo, '<repo>')} (${tok(r.step, '<step>')})${r.record?.reason ? `: ${clean(r.record.reason)}` : ''}, then tell the agent to move it on.`],
+          // The lane summary carries no record for a halted step (its keys are frozen); the build-state does.
+          steps: [`Resolve the halt on ${tok(b.story, '<story>')} in ${tok(r.repo, '<repo>')} (${tok(r.step, '<step>')})${(() => { const why = ctx.haltReason?.(b.story, r.repo, r.step); return why ? `: ${clean(why)}` : ''; })()}, then tell the agent to move it on.`],
           commands: [],
           verify: `yad guide ${epic} --json`,
         })));
@@ -369,8 +373,10 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
     }
     let state;
     let action;
+    let ledger;
     try {
-      state = loadLedger(epicRoot(root, chosen))?.state;
+      ledger = loadLedger(epicRoot(root, chosen));
+      state = ledger?.state;
       if (!state || typeof state !== 'object' || Array.isArray(state) || !Array.isArray(state.steps)) throw new Error('its state.json is not a ledger');
       ({ action } = epicAction(root, chosen));
     } catch {
@@ -380,7 +386,14 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
     // same read `yad skip` and `yad unblock` make (cli/skip.mjs). Unknown (origin not read) is not "yes".
     const seeded = verified ? seededSlugs(root, productConfig, runner) : null;
     // `originAsFetched`: read from origin as last fetched, which may be behind the platform.
-    const ectx = { ...ctx, ciOwns: !!seeded && seeded.has(chosen.toLowerCase()), originUnread: verified && seeded === null, originAsFetched: !!seeded && !seeded.has(chosen.toLowerCase()) };
+    // Why yad-run halted a Build step: read from the build-state, where the skill records it.
+    const haltReason = (story, repo, step) => {
+      const bs = (ledger?.buildStates || []).find((b) => b?.story === story);
+      const steps = bs?.repos?.[repo]?.steps;
+      const st = Array.isArray(steps) ? steps.find((x) => x?.id === step) : null;
+      return typeof st?.record?.reason === 'string' ? st.record.reason : null;
+    };
+    const ectx = { ...ctx, haltReason, ciOwns: !!seeded && seeded.has(chosen.toLowerCase()), originUnread: verified && seeded === null, originAsFetched: !!seeded && !seeded.has(chosen.toLowerCase()) };
     const { agent, person } = playbook(action, ectx);
     return { ...base, situation: { ...situation, stage: 'in-epic' }, step: stepBlock(action, state, ectx), agent, person, then: thenFor(person, chosen) };
   }
@@ -399,7 +412,7 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   return { ...base, situation, step: null,
     agent: [
       ...(brownfield ? [agentSkill('yad-backfill', 'existing code: document what is already built first, so new epics can thread off it')] : []),
-      ...(hasFoundation ? [] : [{ ...agentRun('yad foundation new', 'frame the whole product once (purpose, scope, MVP, roadmap, stack), then run its skill'), optional: true }]),
+      ...(hasFoundation ? [] : [{ ...agentRun('yad foundation new', 'only once the person says they want the Foundation: frame the whole product once (purpose, scope, MVP, roadmap, stack), then run its skill'), optional: true }]),
       agentSkill('yad-epic', 'start the first feature epic, from what the person wants built'),
     ],
     person: [{ act: 'choose', why: 'what to build first is the person\'s call', steps: [hasFoundation ? 'Say which roadmap item to start.' : 'Say whether to write the Foundation first (optional), and what the first epic is.'], commands: [], verify: null }],

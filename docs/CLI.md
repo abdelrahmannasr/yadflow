@@ -375,7 +375,9 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   | `ci-only`, `internal`, `removed` | `not-by-agent` | CI's, the harness's, or gone. |
 
   When a command line's flags reach two classes, the stricter one wins, and a push to the default branch or
-  a public post is always asked about, even when the person asked for the command.
+  a public post is always asked about, even when the person asked for the command. When a flag also needs the person
+  to have asked (`--overwrite-local` with `--push`, say), the agent entry carries `onRequest: true` beside
+  the push's class.
   A command named without its action is classed as its default action (`yad member` is `yad member list`).
   A command the rules do not know has `class: null` and `ask: each-time`.
 
