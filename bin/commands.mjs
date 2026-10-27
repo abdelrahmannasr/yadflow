@@ -19,6 +19,7 @@ export { gateApprove, gateComment, gateAdvance } from '../cli/gate-local.mjs';
 export { isValidEpicId, productDriftError, seedableProfiles } from '../cli/epic-state.mjs';
 export { runEpicNew, runFoundationNew, runFoundationStatus } from '../cli/epic.mjs';
 export { runStatus } from '../cli/status.mjs';
+export { runGuide } from '../cli/guide.mjs';
 export { runSkillBind, runSkillList, runSkillRecommend, runSkillUnbind } from '../cli/skill.mjs';
 export { runCommit } from '../cli/commit.mjs';
 export { runOpenPr } from '../cli/openpr.mjs';

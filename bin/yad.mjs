@@ -151,6 +151,11 @@ ${c.bold('Where am I / what next')}
   yad next --all                       Every active epic's next action at once
   yad next [<epic>] --json             The same answer as a machine-readable action object (for
                                        agents/CI) — always every epic, so --all is implied
+  yad guide [<epic>] [--json]          The brief an AI agent reads before each step (E157): what the
+                                       step is for, mandatory or skippable, who does it, the skills
+                                       that fit, what the agent runs, and what only the person can do
+                                       (with the exact steps and the command that confirms it). With
+                                       no Product yet, how to start one. Read-only
   yad status [--brief] [--no-fetch] [--json]
                                        Where the work stands in ~20 lines, for after a context reset:
                                        this checkout's task and its Build step, each open epic and its
@@ -570,7 +575,7 @@ const PRODUCT_CMDS = new Set([
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build', 'worktree',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
-const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status']);
+const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
 // The Product commands that WRITE its files without first checking it is one. Run from a code repo they
 // wrote an epic, a dial or the module into it; they refuse instead (E80). The rest either only read, or
 // already refuse a folder that is not a Product.
@@ -679,7 +684,7 @@ async function main() {
       // The workspace folder itself, or a repo the Product does not register: no Product here, but the
       // person is one `cd` away from it — say so, rather than let "run yad setup" make a second one.
       if (PRODUCT_CMDS.has(cmd)) warn(`this folder is not in a repo the Product registers — the Product is ${shown(found.elsewhere)}: cd there, or pass --dir ${shown(found.elsewhere)}`);
-      else if (cmd === 'status') o.productElsewhere = shown(found.elsewhere);
+      else if (cmd === 'status' || cmd === 'guide') o.productElsewhere = shown(found.elsewhere);
     } else if (found?.root && REPO_CMDS.has(cmd)) o.product = found.root;
     else if (found?.root && !dirGiven && found.via !== 'here') {
       o.dir = found.root;
@@ -881,6 +886,17 @@ async function main() {
         break;
       }
       result = await commands.runStatus(root, { cwd: o.dir, json: o.json, fetch: !o.noFetch });
+      break;
+    }
+    case 'guide': {
+      // Like `status`, it keeps the folder it ran in ("here" is that checkout). Unlike `status`, no Product
+      // is an answer, not a refusal: it says how to start one (the first start, E157).
+      const [, epic] = o._;
+      if (o._[2] !== undefined) { refuse(`yad guide takes one epic id, not ${o._[2]}`, 'usage: yad guide [<epic>] [--json]'); break; }
+      if (epic !== undefined && !commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`, 'usage: yad guide [<epic>] [--json]'); break; }
+      const root = o.product || (commands.hasProduct(o.dir) ? o.dir : null);
+      if (!root && o.productElsewhere) warn(`this folder is not in a repo the Product registers — the Product is ${o.productElsewhere}: cd there, or pass --dir ${o.productElsewhere}`);
+      result = await commands.runGuide(root, { epic: epic ?? null, cwd: o.dir, json: o.json });
       break;
     }
     case 'next': {
