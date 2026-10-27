@@ -1,6 +1,6 @@
 // The lifecycle definition (E134). The rules each test pins:
 //   - the five lists the engine reads (STEPS, LIFECYCLE_PROFILES, PHASES, PRODUCT_PHASES, the Build order)
-//     are views of cli/lifecycle/defaults/1.json and equal, key for key and in order, a FROZEN copy of the
+//     are views of the newest default (cli/lifecycle/defaults/2.json) and equal, key for key and in order, a FROZEN copy of the
 //     lists as they stood before the move — comparing a view with itself would prove nothing;
 //   - the shipped default passes the validator, and each validator rule fires on a file broken that way;
 //   - a value this release does not know makes one step unusable, never the whole file;
@@ -23,12 +23,13 @@ if (process.env.NODE_TEST_CONTEXT) {
 }
 
 const {
-  ARTIFACT_TYPES, BEHAVIOURS, DEFAULT_LIFECYCLE, DEFAULT_VERSION, KNOWN_KEYS, PARTS, PHASE_LEVELS,
+  ARTIFACT_TYPES, DRIVERS, BEHAVIOURS, DEFAULT_LIFECYCLE, DEFAULT_VERSION, KNOWN_KEYS, PARTS, PHASE_LEVELS,
   PHASE_RUNS, SENTINELS, STEP_KINDS, applyConfigRegions, configRegions, expandRoutes, expandSteps, featurePhases,
   artifactKey, laneAuthorSteps, laneOrder, lifecycleProblems, loadDefault, normalizeLifecycle, productPhases, routeKind,
   shippedDefaults, yadflowClaims,
 } = await import('./lifecycle.mjs');
 const { stepPaths } = await import('./fold.mjs');
+const { DRIVER_FROM_ASSISTANCE } = await import('./manifest.mjs');
 const ES = await import('./epic-state.mjs');
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -116,6 +117,54 @@ test('loading never changes the file: normalizing returns a new object and keeps
 });
 
 // ---- the validator -------------------------------------------------------------------------------------
+
+test('default 2 is default 1 plus the step facts, and nothing else (E157)', () => {
+  // 2.json added a description to each phase, step and gate, a driver to each step, and an advance to each gate. Taking those away must give 1.json back,
+  // so the engine's lists (the views) did not move.
+  const strip = (d) => {
+    const c = JSON.parse(JSON.stringify(d));
+    delete c.extends;
+    for (const ph of c.phases) delete ph.description;
+    for (const st of c.steps) {
+      delete st.description;
+      delete st.driver;
+      if (st.gate) { delete st.gate.description; delete st.gate.advance; }
+    }
+    return c;
+  };
+  assert.equal(JSON.stringify(strip(loadDefault(2))), JSON.stringify(strip(loadDefault(1))));
+  const d = normalizeLifecycle(loadDefault(2));
+  assert.deepEqual(expandSteps(d), FROZEN.STEPS);
+  assert.deepEqual(expandRoutes(d), FROZEN.LIFECYCLE_PROFILES);
+});
+
+test('every step of the newest default says what it is for and who does it; every gate is a person\'s (E157)', () => {
+  for (const st of loadDefault(DEFAULT_VERSION).steps) {
+    assert.ok(typeof st.description === 'string' && st.description.length > 20, `${st.id} has a description`);
+    assert.ok(DRIVERS.includes(st.driver), `${st.id} has a driver`);
+    if (st.kind === 'review') assert.equal(st.driver, 'human', `${st.id} is a person's approval`);
+    if (st.gate) {
+      assert.equal(st.gate.advance, 'human', `${st.id}'s gate is a person's`);
+      assert.ok(typeof st.gate.description === 'string' && st.gate.description.length > 20, `${st.id}'s gate has a description`);
+    }
+  }
+});
+
+test('the driver rules: a wrong type is an error, an unknown word makes the step unusable, a gate or review is a person\'s', () => {
+  const d1 = loadDefault(2); step(d1, 'epic').driver = 3;
+  assert.match(messages(d1).map((m) => m.message).join('\n'), /"driver" must be one word/);
+  const d2 = loadDefault(2); step(d2, 'epic').driver = 'robot';
+  assert.deepEqual(messages(d2), []);
+  assert.match(messages(d2, 'unusable').map((m) => m.message).join('\n'), /"driver" is "robot"/);
+  const d3 = loadDefault(2); step(d3, 'engineer-review').driver = 'agent';
+  assert.match(messages(d3).map((m) => m.message).join('\n'), /a review step is a person's approval/);
+  const d4 = loadDefault(2); step(d4, 'epic').gate.advance = 'auto';
+  assert.match(messages(d4).map((m) => m.message).join('\n'), /a gate is moved on only by a person/);
+  const d5 = loadDefault(2); step(d5, 'epic').gate.description = ['x'];
+  assert.match(messages(d5).map((m) => m.message).join('\n'), /the gate's "description" must be text/);
+  // A file without the facts (1.json, or a team file copied from it) still loads with no problem.
+  assert.deepEqual(lifecycleProblems(loadDefault(1)), []);
+});
 
 test('the shipped default has no problems at all', () => {
   for (const n of shippedDefaults()) assert.deepEqual(lifecycleProblems(loadDefault(n)), [], `default ${n}`);
@@ -506,6 +555,9 @@ test('the editor schema agrees with the code on every list of allowed values and
   assert.deepEqual($.phase.properties.level.enum, PHASE_LEVELS);
   assert.deepEqual($.phase.properties.part.enum, PARTS);
   assert.deepEqual($.step.properties.behaviours.items.enum, Object.keys(BEHAVIOURS));
+  assert.deepEqual($.step.properties.driver.enum, DRIVERS);
+  assert.deepEqual(DRIVERS, [...new Set(Object.values(DRIVER_FROM_ASSISTANCE))], 'the words of the shape-4 driver dial');
+  assert.equal($.gate.oneOf.find((x) => x.type === 'object').properties.advance.const, 'human');
   assert.deepEqual(Object.keys(schema.properties), KNOWN_KEYS.file);
   assert.deepEqual(Object.keys($.phase.properties), KNOWN_KEYS.phase);
   assert.deepEqual(Object.keys($.step.properties), KNOWN_KEYS.step);

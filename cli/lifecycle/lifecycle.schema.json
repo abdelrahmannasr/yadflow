@@ -54,7 +54,9 @@
           "type": "object",
           "properties": {
             "riskTags": { "type": "array", "items": { "type": "string" } },
-            "skills": { "type": "array", "items": { "type": "string" } }
+            "skills": { "type": "array", "items": { "type": "string" } },
+            "description": { "type": "string", "description": "What the review is for, in a sentence an AI agent can show the person." },
+            "advance": { "const": "human", "description": "Who moves the gate on: always a person." }
           }
         }
       ]
@@ -88,7 +90,8 @@
         "inputs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "retired": { "type": "boolean", "default": false },
         "replaces": { "type": "string" },
-        "provider": { "$ref": "#/$defs/provider" }
+        "provider": { "$ref": "#/$defs/provider" },
+        "driver": { "enum": ["human", "pair", "agent"], "description": "Who does the step's work by default: only a person, the AI agent and the person together (the agent drafts, the person decides), or the agent. A review step's driver is \"human\"." }
       }
     },
     "route": {

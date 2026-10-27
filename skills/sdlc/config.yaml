@@ -42,7 +42,7 @@ document_output_language: English
 #
 # A phase is DERIVED from a step's id and is never written into `state.json` — there is nothing to
 # author here, nothing to keep in step, and no way for it to disagree with the step it describes.
-# The phase of each step is set in the lifecycle default (`cli/lifecycle/defaults/1.json`), which
+# The phase of each step is set in the lifecycle default (`cli/lifecycle/defaults/2.json`), which
 # `stepPhase` in cli/epic-state.mjs reads; this block is generated from it for people to read. A review gate takes the phase of the artifact it reviews, so `epic-review` is Discover.
 #
 # Release and Operate are NAMED and not built. No step, skill or gate exists for either yet.
@@ -50,7 +50,7 @@ document_output_language: English
 # NOTE the word: "phase" here means one of these six. It does NOT mean the numbered development
 # phases of yadflow itself (docs/phase-N-build-plan.md), which is what "Phase 4a/4b" means elsewhere
 # in these files, nor a gate's internal merge phase.
-# The step CATALOGUE is the lifecycle default that ships with yadflow, `cli/lifecycle/defaults/1.json`
+# The step CATALOGUE is the lifecycle default that ships with yadflow, `cli/lifecycle/defaults/2.json`
 # (E134; the engine reads it as `STEPS` in `cli/epic-state.mjs`). It is the one place that says what a
 # step is: its phase, whether it authors or gates, what artifact it writes, which skill runs it, and
 # which step a gate reviews. The lines between the `generated` markers below are written from it by
@@ -77,7 +77,7 @@ lifecycle:
   # any epic, and part of no Part. `discovery` is listed because it is the old spelling of the same level.
   # Release and Operate are planned: E32 builds Release, E33 builds Operate.
   # `sentinels` are `currentStep` markers that are NOT steps: they never appear in `steps[]` and have no phase.
-  # >>> generated: lifecycle — from cli/lifecycle/defaults/1.json by scripts/lifecycle-config.mjs; do not edit by hand
+  # >>> generated: lifecycle — from cli/lifecycle/defaults/2.json by scripts/lifecycle-config.mjs; do not edit by hand
   parts: [Shape, Build, Run]
   profiles: [classic, analysis-first, chore, spike, discovery, foundation]
   product_phases:
@@ -356,7 +356,7 @@ product:
 automation:
   # The only steps that MAY be automated, safest-end first (phase-4-build-plan.md build order).
   # The Build lane's author steps — every lane step but the merge gate, `engineer-review`.
-  # >>> generated: back_steps — from cli/lifecycle/defaults/1.json by scripts/lifecycle-config.mjs; do not edit by hand
+  # >>> generated: back_steps — from cli/lifecycle/defaults/2.json by scripts/lifecycle-config.mjs; do not edit by hand
   back_steps: [spec, tasks, implement, checks]
   # <<< generated: back_steps
   default: human_approve            # = `advance: human`. Every lane step starts manual; `yad dial` turns one to auto

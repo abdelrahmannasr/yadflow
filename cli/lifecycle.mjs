@@ -25,7 +25,7 @@
 import fs from 'node:fs';
 
 // The newest shipped default — the one every reader uses until a team file exists (E135).
-export const DEFAULT_VERSION = 1;
+export const DEFAULT_VERSION = 2;
 
 const DEFAULTS_DIR = new URL('./lifecycle/defaults/', import.meta.url);
 
@@ -92,6 +92,14 @@ export const ARTIFACT_TYPES = ['file', 'folder', 'set'];
 export const PHASE_RUNS = ['once', 'loop'];
 export const PHASE_LEVELS = ['feature', 'product'];
 export const PARTS = ['Shape', 'Build', 'Run'];
+// Who does a step's work, by default (E157), in the words of the shape-4 `driver` dial (cli/manifest.mjs):
+// `human` (only a person can), `pair` (the AI agent drafts, the person answers its questions and decides)
+// or `agent` (the agent does it). An epic's own `driver` on a step, when it records one, says what that
+// epic chose. An AI agent reads it through `yad guide --json` to know when to stop and hand the work over.
+// A review step is a person's approval, so its driver is `human`. A gate is moved on only by a person (its
+// `advance` is `human`, rule 1 of the spine: a gate is never automatic), so a file that says otherwise is
+// refused.
+export const DRIVERS = ['human', 'pair', 'agent'];
 
 // THE BEHAVIOUR REGISTRY. A behaviour is something the engine does because of a step, not because of a
 // step's name: the epic step is where the work-item type is read, the architecture step locks the
@@ -137,9 +145,9 @@ export const KNOWN_KEYS = {
   file: ['$schema', 'schemaVersion', 'extends', 'phases', 'steps', 'routes', 'plugins'],
   phase: ['id', 'name', 'description', 'part', 'level', 'runs', 'over', 'built'],
   step: ['id', 'name', 'description', 'phase', 'kind', 'artifact', 'optional', 'gate', 'skills', 'behaviours',
-    'extraPaths', 'inputs', 'retired', 'replaces', 'provider'],
+    'extraPaths', 'inputs', 'retired', 'replaces', 'provider', 'driver'],
   route: ['id', 'name', 'description', 'steps', 'bindings', 'retired', 'provider'],
-  gate: ['riskTags', 'skills'],
+  gate: ['riskTags', 'skills', 'description', 'advance'],
   artifact: ['type', 'path', 'unit', 'files', 'optional', 'in'],
   provider: ['id', 'version', 'origin'],
   routeStep: ['id', 'optional'],
@@ -335,6 +343,9 @@ export function lifecycleProblems(raw) {
     }
     if (s.replaces !== undefined && typeof s.replaces !== 'string') add('error', where, '"replaces" must be a step id');
     if (s.description !== undefined && typeof s.description !== 'string') add('error', where, '"description" must be text');
+    if (s.driver !== undefined && typeof s.driver !== 'string') add('error', where, `"driver" must be one word: ${DRIVERS.join(', ')}`);
+    else if (s.driver !== undefined && !DRIVERS.includes(s.driver)) add('unusable', where, `"driver" is "${s.driver}", which this yadflow does not know; the step cannot be used for new epics`);
+    if (s.kind === 'review' && s.driver !== undefined && s.driver !== 'human') add('error', where, 'a review step is a person\'s approval, so its "driver" is "human"');
     if (s.provider !== undefined && !providerOk(s.provider)) add('error', where, PROVIDER_SHAPE);
     if (!phaseIds.has(s.phase)) add('error', where, `its phase "${s.phase}" does not exist`);
     else if (unknownRuns.has(s.phase)) add('unusable', where, `its phase "${s.phase}" uses a "runs" value this yadflow does not know`);
@@ -351,6 +362,8 @@ export function lifecycleProblems(raw) {
       || (s.gate.skills !== undefined && !isStrings(s.gate.skills)))) {
       add('error', where, '"gate" must be null or { "riskTags": [ … ], "skills": [ … ] }');
     }
+    if (isObj(s.gate) && s.gate.description !== undefined && typeof s.gate.description !== 'string') add('error', where, 'the gate\'s "description" must be text');
+    if (isObj(s.gate) && s.gate.advance !== undefined && s.gate.advance !== 'human') add('error', where, 'a gate is moved on only by a person, so the gate\'s "advance" is "human"');
 
     if (n.artifact !== null) {
       const a = n.artifact;
