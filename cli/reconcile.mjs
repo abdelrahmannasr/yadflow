@@ -17,7 +17,8 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel } from './update-commit.mjs';
+import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
 
@@ -31,7 +32,7 @@ const repoShown = (repo) => `product (the code repo at ${forTerminal(repo.path)}
 const shown = (a) => a.shownScope ?? a.scope;
 const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
-export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null } = {}) {
+export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, openPr = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null, creator = createPr } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
 
@@ -238,7 +239,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   let workspaceFile = wsNeeded ? workspaceFileState(root) : null;
   if (!fix) {
     if (workspaceFile === 'missing') info(`no ${WORKSPACE_FILE} beside the Product — \`yad check --fix\` writes it, so yad finds the Product from its code repos`);
-    if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
+    if (push || openPr) warn(`${push ? '--push' : '--open-pr'} has no effect without --fix (there is nothing applied to commit).`);
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
     // After the --fix hint, never above it: --fix installs no tool, and must not read as if it did.
     const toolbox = toolboxSection(root, toolboxAt);
@@ -264,7 +265,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   }
   // A file that is right on disk but not committed as it stands, which --push must still commit: the
   // product-link record (E120) — the gates read it from the default branch, not from anyone's disk.
-  if (push) for (const a of actions) if (a.pendingCommit && !appliedActions.includes(a)) appliedActions.push(a);
+  if (push || openPr) for (const a of actions) if (a.pendingCommit && !appliedActions.includes(a)) appliedActions.push(a);
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   writeCanonicalStamp();
@@ -293,8 +294,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // Each repo's `{ label, committed, pushed }`, for the --json answer (E1): a push that failed after a
   // commit landed is said per repo.
   let commits = [];
-  if (push) {
-    preflightGuardReadiness(root);
+  if (push || openPr) {
+    if (push) preflightGuardReadiness(root);
     const productConfig = readJSON(productConfigPath(root), {});
     const defByRoot = new Map([[root, productConfig?.default_branch]]);
     const platformByRoot = new Map([[root, productConfig?.platform]]);
@@ -303,7 +304,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       defByRoot.set(repoRoot, repo.default_branch);
       platformByRoot.set(repoRoot, repo.platform);
     }
-    commits = commitUpdates(root, groupByRoot(appliedActions), {
+    // --open-pr: each repo's changes on their own branch, with a PR/MR a person merges.
+    if (openPr) commits = openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator });
+    else commits = commitUpdates(root, groupByRoot(appliedActions), {
       push: true, allowBranch,
       defaultBranchFor: (r) => defByRoot.get(r),
       // GitLab's yad-update-guard is an includable fragment: unlike a GitHub workflow it does nothing

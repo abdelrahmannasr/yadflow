@@ -196,3 +196,121 @@ export function commitUpdates(productRoot, groups, { push = false, allowBranch =
   } else ok(`update committed locally — ${committed}/${groups.length} repo(s); push with \`yad update --push\``);
   return results;
 }
+
+// ---- `yad update --open-pr` / `yad check --fix --open-pr`: the same commit, reviewed ----------------
+// The other way to publish an update (2026-10-27, the agent-first feature E157): each repo's changes go on
+// their own branch, which is pushed, and a PR/MR is opened against the default branch. A person merges it,
+// so the pull_request gates check the new files first, and it works where branch protection blocks a direct
+// push. The branch is the update's own, so an AI agent opens it without asking (cli/agent-rules.mjs).
+// Afterwards the repo is back on its default branch: the update lands there when the PR/MR merges.
+
+export const updateBranchName = (version = VERSION) => `chore/yad-update-v${oneLine(version).replace(/[^0-9A-Za-z.-]/g, '-')}`;
+
+// PURE — the PR/MR body. It carries the code template's required sections (`## Summary`, `## Impact &
+// Risk` with a filled `Risk level:`, `## Checklist`), so the pr-template gate passes it on a code repo and
+// on the Product (a non-review branch there is read as a tooling change).
+export function buildUpdatePrBody({ version = VERSION, items = [] } = {}) {
+  const list = items.length ? items.map((i) => `- ${oneLine(i)}`).join('\n') : '- the version stamp only';
+  return [
+    '## Summary',
+    '',
+    `\`yad update\` brought the files yadflow manages here up to yadflow v${oneLine(version)}.`,
+    '',
+    list,
+    '',
+    '## Impact & Risk',
+    '',
+    'Risk level: low',
+    '',
+    'Only files yadflow installs and manages changed. The checks on this PR/MR run them before they land.',
+    '',
+    '## Checklist',
+    '',
+    '- [x] Only yadflow-managed files are in this change',
+    '- [ ] After the merge, each person pulls the default branch',
+  ].join('\n');
+}
+
+// One repo group: branch, commit exactly the allowlist, push the branch, open the PR/MR, switch back.
+// Never throws; sets process.exitCode on a hard error. `creator(platform, opts)` opens the PR/MR (createPr).
+export function openUpdatePr(group, { productRoot, defaultBranch, platform, creator, version = VERSION } = {}) {
+  const { root, paths, items } = group;
+  const label = repoLabel(productRoot ?? root, root);
+  const isProduct = root === (productRoot ?? root);
+  const git = productGit(root);
+  const out = (o) => ({ label, product: isProduct, branch: null, committed: false, pushed: false, pr: null, skipped: false, error: false, ...o });
+  const top = git('rev-parse', '--show-toplevel');
+  if (!(top.ok && samePath(top.stdout, root))) {
+    warn(`${label}: not its own git repo (missing/renamed clone?) — skipped (changes left in the working tree)`);
+    return out({ skipped: true });
+  }
+  const base = defaultBranch || resolveDefaultBranch(git);
+  const here = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+  if (here !== base) {
+    warn(`${label}: on '${here}', not the default branch '${base}' — skipped (switch to '${base}', then run it again)`);
+    return out({ skipped: true });
+  }
+  const head = updateBranchName(version);
+  if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) {
+    warn(`${label}: the branch '${head}' already exists here, from an earlier update — merge or delete its PR/MR and the branch, then run it again`);
+    return out({ skipped: true, branch: head });
+  }
+  if (!git('switch', '-q', '-c', head).ok) {
+    fail(`${label}: could not create the branch '${head}'`);
+    process.exitCode = 1;
+    return out({ error: true });
+  }
+  const back = () => git('switch', '-q', base);
+  const { staged, addError } = stageAllowlist(git, root, paths);
+  if (addError) warn(`${label}: git add reported "${addError}" — staging may be incomplete`);
+  if (!staged.length) {
+    back();
+    git('branch', '-q', '-D', head);
+    info(`${label}: nothing to commit (unchanged or ignored)`);
+    return out({});
+  }
+  const cm = git('commit', '-m', buildUpdateMessage({ version, items }), '--', ...staged);
+  if (!cm.ok) {
+    git('reset', '-q', '--', ...staged);
+    back();
+    git('branch', '-q', '-D', head);
+    fail(`${label}: git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
+    process.exitCode = 1;
+    return out({ error: true });
+  }
+  ok(`${label}: committed ${staged.length} file(s) on ${head}`);
+  const pushed = run('git', ['push', '-q', '-u', 'origin', head], { cwd: root });
+  if (!pushed.ok) {
+    back();
+    fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
+    hand(`push it with \`git push -u origin ${head}\` from ${isProduct ? '.' : label}, then open a PR/MR from it`);
+    process.exitCode = 1;
+    return out({ branch: head, committed: true, error: true });
+  }
+  let pr = null;
+  if (platform === 'github' || platform === 'gitlab') {
+    const r = creator(platform, { title: buildUpdateMessage({ version, items: [] }), body: buildUpdatePrBody({ version, items }), base, head, cwd: root });
+    if (r?.ok) { pr = r.url ?? null; ok(`${label}: opened ${pr ?? 'the PR/MR'}`); }
+    else {
+      warn(`${label}: pushed ${head}, but the PR/MR did not open — ${oneLine(r?.reason || 'no reason given').slice(0, 200)}`);
+      hand(`open it from ${head} into ${base} by hand`);
+    }
+  } else {
+    hand(`${label}: pushed ${head} — no platform is recorded, so open a PR/MR from it into ${base} by hand`);
+  }
+  back();
+  return out({ branch: head, committed: true, pushed: true, pr });
+}
+
+// Every repo the update changed, one PR/MR each.
+export function openUpdatePrs(productRoot, groups, { defaultBranchFor, platformFor, creator, version = VERSION } = {}) {
+  if (!groups.length) { info('no committable changes were applied'); return []; }
+  log('');
+  log(c.bold(`yad update — a branch and a PR/MR in each repo (${updateBranchName(version)})`));
+  const results = groups.map((g) => openUpdatePr(g, { productRoot, defaultBranch: defaultBranchFor?.(g.root), platform: platformFor?.(g.root), creator, version }));
+  const opened = results.filter((r) => r.pushed).length;
+  log('');
+  if (results.some((r) => r.error || r.skipped)) warn(`update not fully published — ${opened}/${groups.length} repo(s) have a branch pushed; finish the rest (see above).`);
+  else ok(`update on review — ${opened}/${groups.length} repo(s); merge each PR/MR, then pull the default branch`);
+  return results;
+}

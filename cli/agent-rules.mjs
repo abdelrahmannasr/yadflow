@@ -69,8 +69,10 @@ export const COMMAND_CLASS = {
   // `check --fix --push` is `update --push` (bin/yad.mjs): it pushes to every repo's default branch.
   // `--overwrite-local` replaces the team's hand edits to managed files, in every connected repo.
   // `--allow-branch` passes the guard that keeps yad's own commits on the default branch (cli/productcommit.mjs).
-  check: { class: 'read', flags: { fix: 'local-write', push: 'default-push', 'overwrite-local': 'on-request', 'allow-branch': 'on-request' } },
-  update: { class: 'local-write', flags: { push: 'default-push', 'overwrite-local': 'on-request', 'allow-branch': 'on-request' } },
+  // `--open-pr` commits the update on its own branch in each repo and opens a PR/MR: the agent runs it
+  // without asking (the person's choice, 2026-10-27), and a person merges each one.
+  check: { class: 'read', flags: { fix: 'local-write', push: 'default-push', 'open-pr': 'open-pr', 'overwrite-local': 'on-request', 'allow-branch': 'on-request' } },
+  update: { class: 'local-write', flags: { push: 'default-push', 'open-pr': 'open-pr', 'overwrite-local': 'on-request', 'allow-branch': 'on-request' } },
   doctor: { class: 'read' },
   migrate: { class: 'read', flags: { apply: 'local-write' } },
   detect: { class: 'read' },
@@ -259,6 +261,7 @@ export const RULES = [
   { id: 'read-first', text: 'Before each step, run `yad guide --json` (or `yad guide <epic> --json`) and act only on what it says.' },
   { id: 'brief', text: 'Before doing a step, tell the person what it is for, whether it is mandatory or can be skipped, who does it, and the skill or tool you will use.' },
   { id: 'human-only', text: 'Never do a human-only act. Give the exact command and steps, wait, then confirm by reading (the guide names the command that confirms it).' },
+  { id: 'update', text: 'When the guide says the install is behind yadflow, run `yad update --open-pr` without asking: it commits the update on its own branch in each repo and opens a PR/MR; a person merges each one. Never use `yad update --push` unless the person asks for it.' },
   { id: 'pushes', text: 'Commit, push your own branch, and open a review PR/MR without asking. Open a task PR/MR without asking only when `yad dial open-pr` is `auto`; otherwise ask first. Ask every time before anything that pushes straight to the default branch. Never force-push.' },
   { id: 'on-request', text: 'Run a command the guide classes `on-request` only when the person asked for that exact change or gave you what it records: `yad dial … --to`, `yad mode solo|team`, `yad kill`, `yad unkill`, `yad skip`, `yad defer`, `yad unblock`, `yad setup`/`new`/`init` (until you can ask the setup questions yourself), `yad skill bind`, `yad toolbox add`, a flag that passes a guard (`--force`, `--overwrite-local`, `--allow-branch`), and the others the guide marks.' },
   { id: 'build-halts', text: 'A Build step the yad-run skill halted (`blocked`: a failing check, a scope overrun, a contract touch) waits for the person: never move it on (`yad build step … in_progress`) until they say it is resolved.' },

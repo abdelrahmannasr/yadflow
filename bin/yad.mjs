@@ -43,6 +43,11 @@ ${c.bold('Setup & maintenance')}
                        commit; no PR — the push-on-main yad-update-guard runs verified-commits
                        + commit-message). Announce the team & pause merges first. Also works as
                        'yad check --fix --push'; --allow-branch permits a non-default branch
+  yad update --open-pr Instead of --push: commit each repo's changes on its own branch
+                       (chore/yad-update-v<version>), push it, and open a PR/MR into the
+                       default branch, so the checks run and a person merges it. Works on a
+                       protected branch. Each repo must be on its default branch; it is left
+                       there. Also 'yad check --fix --open-pr'
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
   yad migrate [--apply] [--keep product|hub] [--json]   Move this project's state files onto the shape
@@ -466,6 +471,7 @@ function parseArgs(argv) {
     else if (a === '--no-fetch') o.noFetch = true;
     else if (a === '--no-build') o.noBuild = true;
     else if (a === '--push') o.push = true;
+    else if (a === '--open-pr') o.openPr = true;
     else if (a === '--allow-branch') o.allowBranch = true;
     else if (a === '--overwrite-local') o.overwriteLocal = true;
     else if (a === '--merged') o.merged = true;
@@ -763,11 +769,13 @@ async function main() {
     }
     case 'check':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
+      if (o.push && o.openPr) { refuse('--push and --open-pr publish the update two different ways — pick one', 'use --open-pr for a branch and a PR/MR per repo, or --push to push straight to each default branch'); break; }
+      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'update':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
+      if (o.push && o.openPr) { refuse('--push and --open-pr publish the update two different ways — pick one', 'use --open-pr for a branch and a PR/MR per repo, or --push to push straight to each default branch'); break; }
+      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'doctor':
       result = await commands.runDoctor(o.dir, { json: o.json });
