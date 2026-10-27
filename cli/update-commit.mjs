@@ -208,15 +208,13 @@ export const updateBranchName = (version = VERSION) => `chore/yad-update-v${oneL
 
 // PURE — the PR/MR body. It carries the code template's required sections (`## Summary`, `## Impact &
 // Risk` with a filled `Risk level:`, `## Checklist`), so the pr-template gate passes it on a code repo and
-// on the Product (a non-review branch there is read as a tooling change).
+// on the Product (a non-review branch there is read as a tooling change). The file list comes last.
 export function buildUpdatePrBody({ version = VERSION, items = [] } = {}) {
   const list = items.length ? items.map((i) => `- ${oneLine(i)}`).join('\n') : '- the version stamp only';
   return [
     '## Summary',
     '',
-    `\`yad update\` brought the files yadflow manages here up to yadflow v${oneLine(version)}.`,
-    '',
-    list,
+    `\`yad update\` brought the files yadflow manages here up to yadflow v${oneLine(version)}. The files are listed at the end.`,
     '',
     '## Impact & Risk',
     '',
@@ -228,7 +226,38 @@ export function buildUpdatePrBody({ version = VERSION, items = [] } = {}) {
     '',
     '- [x] Only yadflow-managed files are in this change',
     '- [ ] After the merge, each person pulls the default branch',
+    '',
+    // Last: a long list must never push a required section past GitLab's description cut.
+    '## Files',
+    '',
+    list,
   ].join('\n');
+}
+
+// Why a repo cannot take the update as a PR/MR now, or null. Asked BEFORE anything is applied (reconcile),
+// so a repo that would be skipped is never left with the update written into its working tree: a dirty
+// default branch would stop the person's own `git pull` once the PR/MR merges.
+//   kind `open`: the update is already on review (its branch is here, or on origin from another clone) —
+//   nothing to do but merge it. Every other kind needs the person to fix something first.
+export function updatePrBlocker(root, { defaultBranch, version = VERSION, productRoot = root } = {}) {
+  const label = repoLabel(productRoot, root);
+  const git = productGit(root);
+  const top = git('rev-parse', '--show-toplevel');
+  if (!(top.ok && samePath(top.stdout, root))) return { kind: 'not-a-repo', label, message: 'not its own git repo (missing or renamed clone?)' };
+  const base = defaultBranch || resolveDefaultBranch(git);
+  const here = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+  if (here === 'HEAD') return { kind: 'detached', label, message: `a detached HEAD — check out '${base}' first` };
+  if (here !== base) return { kind: 'branch', label, message: `on '${here}', not the default branch '${base}' — switch to '${base}' first` };
+  if (!git('remote', 'get-url', 'origin').ok) return { kind: 'no-origin', label, message: 'no origin remote to push the update branch to' };
+  const head = updateBranchName(version);
+  if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) return { kind: 'open', label, branch: head, message: `the update is already on review from '${head}': a person merges its PR/MR, then everyone pulls — nothing to do here` };
+  // Exit 0: the branch is on origin. Exit 2: it is not. Anything else (offline): not known, and the push says so.
+  if (run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], { cwd: root }).ok) {
+    return { kind: 'open', label, branch: head, message: `the update is already on review from '${head}' (opened from another clone): a person merges its PR/MR, then everyone pulls — nothing to do here` };
+  }
+  const ahead = git('rev-list', '--count', `origin/${base}..HEAD`);
+  if (ahead.ok && Number(ahead.stdout) > 0) return { kind: 'ahead', label, message: `${Number(ahead.stdout)} local commit(s) on '${base}' are not on origin — push or drop them first, so the update PR/MR carries only the update` };
+  return null;
 }
 
 // One repo group: branch, commit exactly the allowlist, push the branch, open the PR/MR, switch back.
@@ -238,42 +267,41 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   const label = repoLabel(productRoot ?? root, root);
   const isProduct = root === (productRoot ?? root);
   const git = productGit(root);
-  const out = (o) => ({ label, product: isProduct, branch: null, committed: false, pushed: false, pr: null, skipped: false, error: false, ...o });
-  const top = git('rev-parse', '--show-toplevel');
-  if (!(top.ok && samePath(top.stdout, root))) {
-    warn(`${label}: not its own git repo (missing/renamed clone?) — skipped (changes left in the working tree)`);
-    return out({ skipped: true });
+  const out = (o) => ({ label, product: isProduct, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: false, error: false, ...o });
+  const blocked = updatePrBlocker(root, { defaultBranch, version, productRoot: productRoot ?? root });
+  if (blocked) {
+    (blocked.kind === 'open' ? info : warn)(`${label}: ${blocked.message}${blocked.kind === 'open' ? '' : ' — skipped'}`);
+    return out({ skipped: true, branch: blocked.branch ?? null, reason: blocked.kind });
   }
   const base = defaultBranch || resolveDefaultBranch(git);
-  const here = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  if (here !== base) {
-    warn(`${label}: on '${here}', not the default branch '${base}' — skipped (switch to '${base}', then run it again)`);
-    return out({ skipped: true });
-  }
   const head = updateBranchName(version);
-  if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) {
-    warn(`${label}: the branch '${head}' already exists here, from an earlier update — merge or delete its PR/MR and the branch, then run it again`);
-    return out({ skipped: true, branch: head });
-  }
   if (!git('switch', '-q', '-c', head).ok) {
     fail(`${label}: could not create the branch '${head}'`);
     process.exitCode = 1;
     return out({ error: true });
   }
-  const back = () => git('switch', '-q', base);
+  // Back to the default branch. A switch that fails (a hook rewrote a committed file) leaves the repo on the
+  // update branch: said, never silent.
+  const back = () => {
+    const r = git('switch', '-q', base);
+    if (!r.ok) {
+      fail(`${label}: could not switch back to '${base}' — ${r.stderr.split('\n')[0] || 'see git'}; run \`git switch ${base}\` in ${isProduct ? '.' : label}`);
+      process.exitCode = 1;
+    }
+    return r.ok;
+  };
   const { staged, addError } = stageAllowlist(git, root, paths);
   if (addError) warn(`${label}: git add reported "${addError}" — staging may be incomplete`);
   if (!staged.length) {
-    back();
-    git('branch', '-q', '-D', head);
+    const ok2 = back();
+    if (ok2) git('branch', '-q', '-D', head);
     info(`${label}: nothing to commit (unchanged or ignored)`);
-    return out({});
+    return out({ error: !ok2 });
   }
   const cm = git('commit', '-m', buildUpdateMessage({ version, items }), '--', ...staged);
   if (!cm.ok) {
     git('reset', '-q', '--', ...staged);
-    back();
-    git('branch', '-q', '-D', head);
+    if (back()) git('branch', '-q', '-D', head);
     fail(`${label}: git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
     return out({ error: true });
@@ -283,14 +311,15 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   if (!pushed.ok) {
     back();
     fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
-    hand(`push it with \`git push -u origin ${head}\` from ${isProduct ? '.' : label}, then open a PR/MR from it`);
+    hand(`push it with \`git push -u origin ${head}\` from ${isProduct ? '.' : label}, then open a PR/MR from it into ${base}`);
     process.exitCode = 1;
     return out({ branch: head, committed: true, error: true });
   }
+  let opened = false;
   let pr = null;
   if (platform === 'github' || platform === 'gitlab') {
     const r = creator(platform, { title: buildUpdateMessage({ version, items: [] }), body: buildUpdatePrBody({ version, items }), base, head, cwd: root });
-    if (r?.ok) { pr = r.url ?? null; ok(`${label}: opened ${pr ?? 'the PR/MR'}`); }
+    if (r?.ok) { opened = true; pr = r.url || null; ok(`${label}: opened ${pr ?? 'the PR/MR (no URL came back)'}`); }
     else {
       warn(`${label}: pushed ${head}, but the PR/MR did not open — ${oneLine(r?.reason || 'no reason given').slice(0, 200)}`);
       hand(`open it from ${head} into ${base} by hand`);
@@ -298,8 +327,8 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   } else {
     hand(`${label}: pushed ${head} — no platform is recorded, so open a PR/MR from it into ${base} by hand`);
   }
-  back();
-  return out({ branch: head, committed: true, pushed: true, pr });
+  const home = back();
+  return out({ branch: head, committed: true, pushed: true, opened, pr, error: !home });
 }
 
 // Every repo the update changed, one PR/MR each.

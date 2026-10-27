@@ -770,11 +770,13 @@ async function main() {
     case 'check':
       if (noProduct()) break;
       if (o.push && o.openPr) { refuse('--push and --open-pr publish the update two different ways — pick one', 'use --open-pr for a branch and a PR/MR per repo, or --push to push straight to each default branch'); break; }
+      if (o.openPr && o.allowBranch) { refuse('--allow-branch does not apply to --open-pr: the update branch is cut from each repo\'s default branch', 'switch each repo to its default branch, then run it again'); break; }
       result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'update':
       if (noProduct()) break;
       if (o.push && o.openPr) { refuse('--push and --open-pr publish the update two different ways — pick one', 'use --open-pr for a branch and a PR/MR per repo, or --push to push straight to each default branch'); break; }
+      if (o.openPr && o.allowBranch) { refuse('--allow-branch does not apply to --open-pr: the update branch is cut from each repo\'s default branch', 'switch each repo to its default branch, then run it again'); break; }
       result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'doctor':

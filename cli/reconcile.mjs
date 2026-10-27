@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, readJSON, writeJSON, exists, forTerminal,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -17,7 +17,7 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker } from './update-commit.mjs';
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
@@ -225,7 +225,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     hand(`keep the edits (reported as \`modified\` on every check), or replace them with \`yad update --overwrite-local\` — each previous version is saved beside the file as <file>${BACKUP_SUFFIX}`);
   }
 
-  const fixable = actions.filter((a) =>
+  let fixable = actions.filter((a) =>
     a.status !== 'ok'
     && (a.status !== 'modified' || overwriteLocal)
     && (scope === 'all' ? true : a.status !== 'missing'),
@@ -244,6 +244,34 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // After the --fix hint, never above it: --fix installs no tool, and must not read as if it did.
     const toolbox = toolboxSection(root, toolboxAt);
     return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile, toolbox };
+  }
+
+  // Each repo's default branch and platform, for --push and --open-pr.
+  const productSettings = readJSON(productConfigPath(root), {});
+  const defByRoot = new Map([[root, productSettings?.default_branch]]);
+  const platformByRoot = new Map([[root, productSettings?.platform]]);
+  for (const repo of registry.repos) {
+    const repoRoot = path.resolve(root, repo.path);
+    defByRoot.set(repoRoot, repo.default_branch);
+    platformByRoot.set(repoRoot, repo.platform);
+  }
+
+  // --open-pr: a repo that cannot take the update as a PR/MR now gets nothing written, so it is never left
+  // with a dirty default branch (which would stop the person's own pull once the PR/MR merges). When it is
+  // the Product, nothing is written at all: its version stamp says what the update did.
+  if (openPr) {
+    const roots = [...new Set([root, ...fixable.map((a) => a.root).filter(Boolean)])];
+    const blocked = new Map(roots.map((r) => [r, updatePrBlocker(r, { defaultBranch: defByRoot.get(r), productRoot: root })]).filter(([, b]) => b));
+    const own = blocked.get(root);
+    if (own) {
+      log('');
+      if (own.kind === 'open') info(`${own.label}: ${own.message}`);
+      else { fail(`--open-pr: the Product is ${own.message} — nothing was written`); process.exitCode = 1; }
+      const toolbox = toolboxSection(root, toolboxAt);
+      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [{ label: own.label, product: true, branch: own.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: own.kind !== 'open', reason: own.kind }], workspaceFile, toolbox };
+    }
+    for (const [, b] of blocked) (b.kind === 'open' ? info : warn)(`${b.label}: ${b.message}${b.kind === 'open' ? '' : ' — not updated this time'}`);
+    fixable = fixable.filter((a) => !a.root || !blocked.has(a.root));
   }
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
@@ -295,15 +323,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // commit landed is said per repo.
   let commits = [];
   if (push || openPr) {
-    if (push) preflightGuardReadiness(root);
-    const productConfig = readJSON(productConfigPath(root), {});
-    const defByRoot = new Map([[root, productConfig?.default_branch]]);
-    const platformByRoot = new Map([[root, productConfig?.platform]]);
-    for (const repo of registry.repos) {
-      const repoRoot = path.resolve(root, repo.path);
-      defByRoot.set(repoRoot, repo.default_branch);
-      platformByRoot.set(repoRoot, repo.platform);
-    }
+    // Both commit: an unsigned commit fails the verified-commits check, on the default branch or on the PR/MR.
+    preflightGuardReadiness(root, openPr ? 'the PR/MR\'s verified-commits check requires a platform-Verified signature; an unsigned update commit fails it' : undefined);
     // --open-pr: each repo's changes on their own branch, with a PR/MR a person merges.
     if (openPr) commits = openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator });
     else commits = commitUpdates(root, groupByRoot(appliedActions), {
