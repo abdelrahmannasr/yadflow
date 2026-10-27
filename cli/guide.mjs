@@ -141,6 +141,10 @@ function reviewWork(a, ctx, epic, also = null) {
   };
 }
 
+// What `yad skip` and `yad unblock` say on a verified Product whose epic ledger is not on origin as last
+// fetched (cli/skip.mjs): the fetch may be behind a review that merged since.
+const ASFETCHED = 'checked against origin as last fetched: run `git fetch origin` first if the epic\'s first review PR/MR may have merged, because CI then owns its ledger and the command is refused';
+
 // A blocked step: the person resolves it, and the agent clears it only when asked. On a verified Product
 // `yad unblock` refuses once the epic's ledger is on the default branch, and CI has no step for it yet (the
 // same words `yad next` prints). Before that, the ledger is still the person's to write.
@@ -151,7 +155,7 @@ function blockedWork(a, ctx, epic, also = null) {
     return { agent: [], person: [{ act: 'unblock', why, steps: [`Resolve the blocker${reason}.`, 'On a verified Product only CI can clear it once the epic\'s ledger is on the default branch, and CI has no step for that yet (`yad unblock` refuses). Decide with the team how to go on.'], commands: [], verify: null }] };
   }
   return {
-    agent: [agentRun(`yad unblock ${epic} ${tok(a.step, '<step>')}`, 'only after the person says the blocker is gone and asks to clear it')],
+    agent: [agentRun(`yad unblock ${epic} ${tok(a.step, '<step>')}`, `only after the person says the blocker is gone and asks to clear it${ctx.originAsFetched ? `; ${ASFETCHED}` : ''}`)],
     person: [{ act: 'unblock', why, steps: [`Resolve the blocker${reason}, then tell the agent to clear it.`], commands: [], verify: `yad guide ${epic} --json` }],
   };
 }
@@ -252,7 +256,8 @@ function stepBlock(a, state, ctx = {}) {
       ? { command: null, decidedBy: 'human', note: 'on this verified Product the epic\'s ledger is on the default branch, and only CI writes it; CI has no step for a skip yet (`yad skip` refuses)' }
       : { command: `yad skip ${a.epicId} ${tok(authorId, '<step>')} --reason "<why>"`, decidedBy: 'human',
         // `yad skip` warns the same way when it cannot read origin (cli/skip.mjs).
-        ...(ctx.originUnread ? { note: 'origin could not be read, so it is not known whether CI already owns this epic\'s ledger; if its first review PR/MR has merged, `yad skip` will be refused' } : {}) },
+        ...(ctx.originUnread ? { note: 'origin could not be read, so it is not known whether CI already owns this epic\'s ledger; if its first review PR/MR has merged, `yad skip` will be refused' } : {}),
+        ...(ctx.originAsFetched ? { note: ASFETCHED } : {}) },
     driver: facts?.gate ? 'human' : recordedDriver(state, a.step) ?? facts?.driver ?? null,
     ...(facts?.gate ? { advance: facts.advance } : {}),
     status: clean(a.status ?? null),
@@ -362,7 +367,8 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
     // Does CI already own this epic's ledger (verified, and the ledger is on origin's default branch)? The
     // same read `yad skip` and `yad unblock` make (cli/skip.mjs). Unknown (origin not read) is not "yes".
     const seeded = verified ? seededSlugs(root, productConfig, runner) : null;
-    const ectx = { ...ctx, ciOwns: !!seeded && seeded.has(chosen.toLowerCase()), originUnread: verified && seeded === null };
+    // `originAsFetched`: read from origin as last fetched, which may be behind the platform.
+    const ectx = { ...ctx, ciOwns: !!seeded && seeded.has(chosen.toLowerCase()), originUnread: verified && seeded === null, originAsFetched: !!seeded && !seeded.has(chosen.toLowerCase()) };
     const { agent, person } = playbook(action, ectx);
     return { ...base, situation: { ...situation, stage: 'in-epic' }, step: stepBlock(action, state, ectx), agent, person, then: thenFor(person, chosen) };
   }
@@ -395,7 +401,7 @@ export function printGuide(g) {
     log(`\n  ${c.bold(`${s.epic} · ${s.name ?? s.id}`)}${s.part ? c.dim(`  (${s.part}${s.phase ? ` · ${s.phase}` : ''})`) : ''}`);
     if (s.brief) info(s.brief);
     if (s.mandatory === true) info(c.dim('mandatory'));
-    else if (s.mandatory === false) info(c.dim(s.skip?.command ? `can be skipped — the person decides: ${s.skip.command}` : `optional, but it cannot be skipped here: ${s.skip?.note ?? ''}`));
+    else if (s.mandatory === false) info(c.dim(s.skip?.command ? `can be skipped — the person decides: ${s.skip.command}${s.skip.note ? ` (${s.skip.note})` : ''}` : `optional, but it cannot be skipped here: ${s.skip?.note ?? ''}`));
     else if (s.name && !s.part) info(c.dim('the Product level: optional for the Product; once started, it is finished and reviewed'));
     if (s.driver) info(c.dim(`who: ${s.driver === 'pair' ? 'the agent drafts, the person decides' : s.driver === 'agent' ? 'the agent' : 'a person'}`));
     if (s.why) info(c.dim(s.why));
@@ -406,8 +412,10 @@ export function printGuide(g) {
     log(`\n  ${c.bold('No yadflow Product here yet.')}`);
   } else if (g.situation?.stage === 'unknown-epic') {
     log(`\n  ${c.bold(g.error)}`);
-    if (g.hint) hand(g.hint);
-    for (const e of g.epics) info(`${e.epic}  ${c.dim(e.next ?? '')}`);
+    if (g.epics.length) {
+      info('The open epics:');
+      for (const e of g.epics) info(`${e.epic}  ${c.dim(e.next ?? '')}`);
+    } else info('No epic is open.');
   } else if (g.situation?.stage === 'product-elsewhere') {
     log(`\n  ${c.bold(`The Product is at ${g.situation.product}.`)}`);
   } else if (g.situation?.stage === 'broken') {

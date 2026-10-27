@@ -101,6 +101,10 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   // A skip, a deferral or clearing a blocker is a decision about the work: the person's.
   for (const c of ['skip', 'unskip', 'defer', 'undefer', 'unblock']) assert.equal(classify([c]), 'on-request', c);
   assert.equal(classify(['check'], ['fix', 'push']), 'default-push', 'check --fix --push is update --push');
+  assert.equal(classify(['commit']), 'local-write');
+  assert.equal(classify(['commit'], ['manual']), 'human-only', 'the door past the ledger hook is the person\'s');
+  assert.equal(classify(['member', 'remove']), 'local-write', 'your own member file');
+  assert.equal(classify(['member', 'remove'], ['reason']), 'on-request', 'someone else\'s');
   assert.equal(askFor('on-request'), 'only-when-asked');
   for (const w of [['gate', 'open'], ['gate', 'sync'], ['member', 'add']]) assert.equal(askFor(classify(w)), 'never', w.join(' '));
   // A task PR/MR follows `yad dial open-pr` (#356): asked first unless the dial is `auto`.
@@ -446,6 +450,27 @@ test('on a verified Product whose ledger CI owns, a skip is said to be refused, 
     st.steps.find((s) => s.id === 'ui-design').record = { reason: 'legal', by: 'alice', date: '2026-10-27' };
     put(statePath(T, 'EP-pay'), st);
     assert.deepEqual(buildGuide(T, { epic: 'EP-pay' }).agent, []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
+});
+
+test('the review branch is named as yad gate open names it', () => {
+  for (const [art, branch] of [['stories/EP-pay-S01.md', 'review/EP-pay/stories-S01'], ['stories/', 'review/EP-pay/stories'], ['epic.md', 'review/EP-pay/epic']]) {
+    const p = playbook({ epicId: 'EP-pay', kind: 'review-open', step: 'x-review', status: 'todo', artifact: art }, { platform: 'github' });
+    assert.ok(p.agent[0].why.includes(`\`${branch}\``), `${art}: ${p.agent[0].why}`);
+  }
+});
+
+test('on a verified Product whose epic is not on origin as fetched, the skip is offered with yad skip\'s fetch caution', async () => {
+  const T = await product();
+  const R = tmp();
+  try {
+    git(R, ['init', '-q', '--bare', '-b', 'main']);
+    git(T, ['remote', 'add', 'origin', R]);
+    git(T, ['push', '-q', '-u', 'origin', 'main']);
+    moveTo(T, 'EP-pay', 'ui-design');
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    assert.equal(g.step.skip.command, 'yad skip EP-pay ui-design --reason "<why>"');
+    assert.match(g.step.skip.note, /origin as last fetched: run `git fetch origin` first/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
 });
 

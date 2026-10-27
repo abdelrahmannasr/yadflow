@@ -116,7 +116,8 @@ export const COMMAND_CLASS = {
   'review walkthrough': { class: 'read' },
   'review nudge': { class: 'open-pr' },
   'review reconcile': { class: 'read' },
-  commit: { class: 'local-write' },
+  // `--manual --reason` is the door past the ledger hook: the person's call, not the agent's (cli/hook.mjs).
+  commit: { class: 'local-write', flags: { manual: 'human-only' } },
   'build start': { class: 'local-write' },
   'build step': { class: 'local-write' },
   // `--uid` finalises a run a person confirmed: the person's word, recorded.
@@ -133,7 +134,8 @@ export const COMMAND_CLASS = {
   capture: { class: 'open-pr' },
   'member add': { class: 'open-pr' },
   'member list': { class: 'read' },
-  'member remove': { class: 'local-write' },
+  // Your own file takes no reason; removing someone else's (`--reason`) is a team decision.
+  'member remove': { class: 'local-write', flags: { reason: 'on-request' } },
   'worktree add': { class: 'local-write' },
   'worktree list': { class: 'read' },
   'worktree remove': { class: 'local-write' },

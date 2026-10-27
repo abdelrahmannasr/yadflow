@@ -354,9 +354,11 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
 - **`skip`** is `null` when the step cannot be skipped. On a verified Product whose epic ledger CI already
   owns (it is on the default branch), `yad skip` refuses, so `skip` has `command: null` and a `note` saying
   why; the printed form says "optional, but it cannot be skipped here". When origin cannot be read, the
-  command is offered with a `note` that it may be refused, as `yad skip` itself warns.
+  command is offered with a `note` that it may be refused, as `yad skip` itself warns; and when the epic is
+  not on origin as last fetched, the note says to run `git fetch origin` first.
 - **Re-opened work** (`reopened`): a step re-opened behind finished work (E41) is given to the agent too,
-  and a re-opened review brings the person's approval steps with it.
+  and a re-opened review brings the person's approval steps with it; a re-opened blocked step is handled
+  as a blocked step (below).
 - **Words read from the ledger** (an artifact, a story, a repo) go into a command only when they are a
   plain path or id; anything else is printed as a placeholder such as `<artifact>`.
 - **`class`** says what the agent may do with a command, and **`ask`** whether it asks first:
@@ -368,8 +370,8 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   | `task-pr` | `per-dial` | Opens a task's PR/MR (`yad open-pr`, `yad ship`): asked first unless `yad dial open-pr` is `auto` (#356). |
   | `default-push` | `each-time` | Pushes straight to the default branch (`--push`, including `check --fix --push`). |
   | `public-post` | `each-time` | Posts to a public place (`yad report`). |
-  | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen`, and `yad build trust --uid`: only the person. |
-  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`. |
+  | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen`, `yad build trust --uid` and `yad commit --manual`: only the person. |
+  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`, and `yad member remove … --reason` (someone else's file). |
   | `ci-only`, `internal`, `removed` | `not-by-agent` | CI's, the harness's, or gone. |
 
   A command the rules do not know has `class: null` and `ask: each-time`.
