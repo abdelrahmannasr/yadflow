@@ -110,6 +110,12 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   // A run's verdict is the person's judgement; the skills record it once given (yad-spec, yad-implement,
   // yad-engineer-review), so the agent may run it, never decide it.
   assert.equal(classify(['build', 'trust'], ['uid']), 'on-request');
+  // Setting solo or team through setup is switching the mode.
+  for (const c of ['setup', 'new', 'init', 'join']) for (const f of ['solo', 'team']) assert.equal(classify([c], [f]), 'on-request', `${c} --${f}`);
+  for (const c of ['check', 'update']) assert.equal(classify([c], ['overwrite-local']), 'on-request', `${c} --overwrite-local`);
+  assert.equal(classify(['build', 'ship'], ['merge-commit', 'approver']), 'on-request', 'a merge no platform confirmed');
+  assert.equal(classify(['checkpoint'], ['retro-ship']), 'on-request');
+  assert.equal(classify(['review', 'reconcile']), 'local-write');
   assert.equal(askFor('on-request'), 'only-when-asked');
   for (const w of [['gate', 'open'], ['gate', 'sync'], ['member', 'add']]) assert.equal(askFor(classify(w)), 'never', w.join(' '));
   // A task PR/MR follows `yad dial open-pr` (#356): asked first unless the dial is `auto`.
@@ -135,6 +141,7 @@ test('a command named alone runs its default action, and is classed as that acti
   const src = fs.readFileSync(YAD, 'utf8');
   const actions = src.slice(src.indexOf('const ACTIONS = {'), src.indexOf('};', src.indexOf('const ACTIONS = {')));
   const defaults = Object.fromEntries([...actions.matchAll(/^\s+'?([a-z-]+)'?: \{ known: \[[^\]]*\], default: '([a-z-]+)' \}/gm)].map((m) => [m[1], m[2]]));
+  assert.equal(Object.keys(defaults).length, (actions.match(/default:/g) || []).length, 'every default in ACTIONS was read');
   assert.deepEqual(DEFAULT_ACTION, defaults, 'DEFAULT_ACTION in cli/agent-rules.mjs follows ACTIONS in bin/yad.mjs');
   for (const [cmd, action] of Object.entries(defaults)) assert.equal(classify([cmd]), classify([cmd, action]), cmd);
   assert.equal(classify(['member']), 'read');

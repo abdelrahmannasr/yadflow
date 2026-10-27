@@ -371,7 +371,7 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   | `default-push` | `each-time` | Pushes straight to the default branch (`--push`, including `check --fix --push`). |
   | `public-post` | `each-time` | Posts to a public place (`yad report`). |
   | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen` and `yad commit --manual`: only the person. |
-  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`; `yad member remove … --reason` (someone else's file); `--force` on `commit`, `ship`, `assign` and `unassign`; and `yad build trust --uid`, which records the verdict the person gave. |
+  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`; `yad member remove … --reason` (someone else's file); `--force` on `commit`, `ship`, `assign` and `unassign`; `--overwrite-local` on `check` and `update`; `--solo`/`--team` on `setup`, `new`, `init` and `join` (they switch the mode); and what records only the person's word: `yad build trust --uid` (the verdict they gave), `yad build ship --merge-commit … --approver …` and `yad checkpoint --retro-ship`. |
   | `ci-only`, `internal`, `removed` | `not-by-agent` | CI's, the harness's, or gone. |
 
   A command named without its action is classed as its default action (`yad member` is `yad member list`).
