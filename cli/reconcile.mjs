@@ -256,23 +256,38 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     platformByRoot.set(repoRoot, repo.platform);
   }
 
-  // --open-pr: a repo that cannot take the update as a PR/MR now gets nothing written, so it is never left
-  // with a dirty default branch (which would stop the person's own pull once the PR/MR merges). When it is
-  // the Product, nothing is written at all: its version stamp says what the update did.
+  // --open-pr is all or nothing (E157 update review 2). Every repo this update would write to — the Product,
+  // and each registered repo with something to fix or a managed ledger to restamp — is checked BEFORE
+  // anything is written. One that cannot take a PR/MR now (a feature branch, a detached HEAD, no origin,
+  // local commits origin lacks) stops the whole run with nothing written, so no repo is left half updated
+  // and no update is lost from sight: the person fixes it and runs it again. A repo whose update is already
+  // on review (`open`) is left alone (`held`): nothing is written there until its PR/MR merges.
+  let held = new Set();
   if (openPr) {
-    const roots = [...new Set([root, ...fixable.map((a) => a.root).filter(Boolean)])];
-    const blocked = new Map(roots.map((r) => [r, updatePrBlocker(r, { defaultBranch: defByRoot.get(r), productRoot: root })]).filter(([, b]) => b));
-    const own = blocked.get(root);
-    if (own) {
+    const ledgerVersion = (r) => readJSON(path.join(r, MANAGED_LEDGER), null)?.version ?? null;
+    const roots = [...new Set([root, ...registry.repos.map((r) => path.resolve(root, r.path)), ...actions.flatMap((a) => [a.root, a.managed?.root]).filter(Boolean)])];
+    const writes = (r) => r === root || fixable.some((a) => a.root === r || a.managed?.root === r)
+      || (actions.some((a) => a.managed?.root === r) && ledgerVersion(r) !== VERSION);
+    const checks = roots.filter(writes).map((r) => [r, updatePrBlocker(r, { defaultBranch: defByRoot.get(r), productRoot: root })]);
+    const stop = checks.filter(([, b]) => b && b.kind !== 'open');
+    const row = (r, b) => ({ label: b.label, product: r === root, branch: b.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: b.kind !== 'open', reason: b.kind });
+    if (stop.length) {
       log('');
-      if (own.kind === 'open') info(`${own.label}: ${own.message}`);
-      else { fail(`--open-pr: the Product is ${own.message} — nothing was written`); process.exitCode = 1; }
+      for (const [, b] of stop) fail(`${b.label}: ${b.message}`);
+      fail(`--open-pr: ${stop.length} repo(s) cannot take the update as a PR/MR now — nothing was written; fix the above, then run it again`);
+      process.exitCode = 1;
       const toolbox = toolboxSection(root, toolboxAt);
-      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [{ label: own.label, product: true, branch: own.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: own.kind !== 'open', reason: own.kind }], workspaceFile, toolbox };
+      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: stop.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
     }
-    for (const [, b] of blocked) (b.kind === 'open' ? info : warn)(`${b.label}: ${b.message}${b.kind === 'open' ? '' : ' — not updated this time'}`);
-    fixable = fixable.filter((a) => !a.root || !blocked.has(a.root));
+    held = new Set(checks.filter(([, b]) => b).map(([r]) => r));
+    for (const [, b] of checks) if (b) info(`${b.label}: ${b.message}`);
+    if (held.size === checks.length) {
+      const toolbox = toolboxSection(root, toolboxAt);
+      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: checks.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
+    }
+    fixable = fixable.filter((a) => !held.has(a.root) && !held.has(a.managed?.root));
   }
+  const live = (a) => !held.has(a.root) && !held.has(a.managed?.root);
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
   log('');
@@ -289,19 +304,21 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (force) {
     // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —
     // only --overwrite-local discards a local edit, and only after backing it up.
-    for (const a of actions.filter((a) => a.status === 'ok')) { a.apply(); appliedActions.push(a); }
+    for (const a of actions.filter((a) => a.status === 'ok' && live(a))) { a.apply(); appliedActions.push(a); }
   }
   // A file that is right on disk but not committed as it stands, which --push must still commit: the
   // product-link record (E120) — the gates read it from the default branch, not from anyone's disk.
-  if (push || openPr) for (const a of actions) if (a.pendingCommit && !appliedActions.includes(a)) appliedActions.push(a);
+  if (push || openPr) for (const a of actions) if (a.pendingCommit && live(a) && !appliedActions.includes(a)) appliedActions.push(a);
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
-  writeCanonicalStamp();
-  appliedActions.push({ scope: 'product', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
+  if (!held.has(root)) {
+    writeCanonicalStamp();
+    appliedActions.push({ scope: 'product', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
+  }
   // Record what we wrote (and what was already correct) so the NEXT update can tell a stale managed
   // file from an edited one. Seeding the already-correct files is what migrates a pre-ledger install.
   // A file left as `modified` records nothing — it differs from the template by definition.
-  for (const ledgerRoot of recordManagedWrites(actions)) {
+  for (const ledgerRoot of recordManagedWrites(actions.filter(live))) {
     appliedActions.push({
       scope: repoLabel(root, ledgerRoot), item: MANAGED_LEDGER, status: 'stamp',
       root: ledgerRoot, paths: [MANAGED_LEDGER],
@@ -326,7 +343,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // Both commit: an unsigned commit fails the verified-commits check, on the default branch or on the PR/MR.
     preflightGuardReadiness(root, openPr ? 'the PR/MR\'s verified-commits check requires a platform-Verified signature; an unsigned update commit fails it' : undefined);
     // --open-pr: each repo's changes on their own branch, with a PR/MR a person merges.
-    if (openPr) commits = openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator });
+    if (openPr) commits = openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator, checked: true });
     else commits = commitUpdates(root, groupByRoot(appliedActions), {
       push: true, allowBranch,
       defaultBranchFor: (r) => defByRoot.get(r),

@@ -234,41 +234,60 @@ export function buildUpdatePrBody({ version = VERSION, items = [] } = {}) {
   ].join('\n');
 }
 
+// Where one repo stands against its default branch, from git alone (origin as last fetched, no network):
+// the branch checked out (null when detached or unborn), whether it has an origin, and how far HEAD is
+// ahead of and behind origin/<base>. Every pull or push hint below is decided from this table.
+export function branchTable(root, { defaultBranch } = {}) {
+  const git = productGit(root);
+  const top = git('rev-parse', '--show-toplevel');
+  if (!(top.ok && samePath(top.stdout, root))) return { repo: false };
+  const base = defaultBranch || resolveDefaultBranch(git);
+  const sym = git('symbolic-ref', '--short', '-q', 'HEAD');
+  const born = git('rev-parse', '--verify', '--quiet', 'HEAD').ok;
+  const here = sym.ok && sym.stdout ? sym.stdout : null;
+  const origin = git('remote', 'get-url', 'origin').ok;
+  const tracked = origin && git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${base}`).ok;
+  const count = (range) => { const r = git('rev-list', '--count', range); return r.ok ? Number(r.stdout) : null; };
+  return { repo: true, base, here, born, detached: !sym.ok, origin, tracked,
+    ahead: tracked && born ? count(`origin/${base}..HEAD`) : null,
+    behind: tracked && born ? count(`HEAD..origin/${base}`) : null };
+}
+
 // Why a repo cannot take the update as a PR/MR now, or null. Asked BEFORE anything is applied (reconcile),
-// so a repo that would be skipped is never left with the update written into its working tree: a dirty
+// so a repo that cannot take it is never left with the update written into its working tree: a dirty
 // default branch would stop the person's own `git pull` once the PR/MR merges.
 //   kind `open`: the update is already on review (its branch is here, or on origin from another clone) —
 //   nothing to do but merge it. Every other kind needs the person to fix something first.
-export function updatePrBlocker(root, { defaultBranch, version = VERSION, productRoot = root } = {}) {
+// `network: false` (the guide) leaves out the one network read, `git ls-remote`.
+export function updatePrBlocker(root, { defaultBranch, version = VERSION, productRoot = root, network = true } = {}) {
   const label = repoLabel(productRoot, root);
+  const t = branchTable(root, { defaultBranch });
+  if (!t.repo) return { kind: 'not-a-repo', label, message: 'not its own git repo (missing or renamed clone?)' };
+  if (!t.born) return { kind: 'unborn', label, message: `has no commit yet — commit and push '${t.base}' first` };
+  if (t.detached) return { kind: 'detached', label, message: `a detached HEAD — check out '${t.base}' first` };
+  if (t.here !== t.base) return { kind: 'branch', label, message: `on '${t.here}', not the default branch '${t.base}' — switch to '${t.base}' first` };
+  if (!t.origin) return { kind: 'no-origin', label, message: 'no origin remote to push the update branch to' };
   const git = productGit(root);
-  const top = git('rev-parse', '--show-toplevel');
-  if (!(top.ok && samePath(top.stdout, root))) return { kind: 'not-a-repo', label, message: 'not its own git repo (missing or renamed clone?)' };
-  const base = defaultBranch || resolveDefaultBranch(git);
-  const here = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  if (here === 'HEAD') return { kind: 'detached', label, message: `a detached HEAD — check out '${base}' first` };
-  if (here !== base) return { kind: 'branch', label, message: `on '${here}', not the default branch '${base}' — switch to '${base}' first` };
-  if (!git('remote', 'get-url', 'origin').ok) return { kind: 'no-origin', label, message: 'no origin remote to push the update branch to' };
   const head = updateBranchName(version);
-  if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) return { kind: 'open', label, branch: head, message: `the update is already on review from '${head}': a person merges its PR/MR, then everyone pulls — nothing to do here` };
+  const onReview = (where) => ({ kind: 'open', label, branch: head, message: `the update is already on review from '${head}'${where}: a person merges its PR/MR, then everyone pulls — nothing to do here (if that PR/MR was closed without merging, delete the branch, then run it again)` });
+  if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) return onReview('');
+  if (git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${head}`).ok) return onReview(' (on origin)');
   // Exit 0: the branch is on origin. Exit 2: it is not. Anything else (offline): not known, and the push says so.
-  if (run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], { cwd: root }).ok) {
-    return { kind: 'open', label, branch: head, message: `the update is already on review from '${head}' (opened from another clone): a person merges its PR/MR, then everyone pulls — nothing to do here` };
-  }
-  const ahead = git('rev-list', '--count', `origin/${base}..HEAD`);
-  if (ahead.ok && Number(ahead.stdout) > 0) return { kind: 'ahead', label, message: `${Number(ahead.stdout)} local commit(s) on '${base}' are not on origin — push or drop them first, so the update PR/MR carries only the update` };
+  if (network && run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], { cwd: root }).ok) return onReview(' (opened from another clone)');
+  if (t.ahead > 0) return { kind: 'ahead', label, message: `${t.ahead} local commit(s) on '${t.base}' are not on origin — push or drop them first, so the update PR/MR carries only the update` };
   return null;
 }
 
 // One repo group: branch, commit exactly the allowlist, push the branch, open the PR/MR, switch back.
 // Never throws; sets process.exitCode on a hard error. `creator(platform, opts)` opens the PR/MR (createPr).
-export function openUpdatePr(group, { productRoot, defaultBranch, platform, creator, version = VERSION } = {}) {
+export function openUpdatePr(group, { productRoot, defaultBranch, platform, creator, version = VERSION, checked = false } = {}) {
   const { root, paths, items } = group;
   const label = repoLabel(productRoot ?? root, root);
   const isProduct = root === (productRoot ?? root);
   const git = productGit(root);
   const out = (o) => ({ label, product: isProduct, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: false, error: false, ...o });
-  const blocked = updatePrBlocker(root, { defaultBranch, version, productRoot: productRoot ?? root });
+  // `checked`: reconcile already asked, before it wrote anything; asking again would be a second network read.
+  const blocked = checked ? null : updatePrBlocker(root, { defaultBranch, version, productRoot: productRoot ?? root });
   if (blocked) {
     (blocked.kind === 'open' ? info : warn)(`${label}: ${blocked.message}${blocked.kind === 'open' ? '' : ' — skipped'}`);
     return out({ skipped: true, branch: blocked.branch ?? null, reason: blocked.kind });
@@ -309,11 +328,13 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   ok(`${label}: committed ${staged.length} file(s) on ${head}`);
   const pushed = run('git', ['push', '-q', '-u', 'origin', head], { cwd: root });
   if (!pushed.ok) {
-    back();
+    // The branch is dropped, so a run after the push problem is fixed tries again rather than reading it as
+    // "already on review". The update stays in the working tree, uncommitted, as a failed --push leaves it.
+    if (back()) { git('checkout', '-q', head, '--', ...staged); git('branch', '-q', '-D', head); }
     fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
-    hand(`push it with \`git push -u origin ${head}\` from ${isProduct ? '.' : label}, then open a PR/MR from it into ${base}`);
+    hand(`fix the push (access, network), drop the uncommitted update with \`git checkout -- .\` in ${isProduct ? '.' : label} if you want it clean, and run the update again`);
     process.exitCode = 1;
-    return out({ branch: head, committed: true, error: true });
+    return out({ committed: false, error: true });
   }
   let opened = false;
   let pr = null;
@@ -332,11 +353,11 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
 }
 
 // Every repo the update changed, one PR/MR each.
-export function openUpdatePrs(productRoot, groups, { defaultBranchFor, platformFor, creator, version = VERSION } = {}) {
+export function openUpdatePrs(productRoot, groups, { defaultBranchFor, platformFor, creator, version = VERSION, checked = false } = {}) {
   if (!groups.length) { info('no committable changes were applied'); return []; }
   log('');
   log(c.bold(`yad update — a branch and a PR/MR in each repo (${updateBranchName(version)})`));
-  const results = groups.map((g) => openUpdatePr(g, { productRoot, defaultBranch: defaultBranchFor?.(g.root), platform: platformFor?.(g.root), creator, version }));
+  const results = groups.map((g) => openUpdatePr(g, { productRoot, defaultBranch: defaultBranchFor?.(g.root), platform: platformFor?.(g.root), creator, version, checked }));
   const opened = results.filter((r) => r.pushed).length;
   log('');
   if (results.some((r) => r.error || r.skipped)) warn(`update not fully published — ${opened}/${groups.length} repo(s) have a branch pushed; finish the rest (see above).`);

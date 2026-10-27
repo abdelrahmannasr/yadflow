@@ -598,11 +598,12 @@ test('an install behind yadflow: the update first, once — then on review, then
     g = buildGuide(T, { epic: 'EP-pay' });
     assert.deepEqual(g.upkeep.agent.map((a) => [a.run, a.class, a.ask]), [['yad update --open-pr', 'open-pr', 'never']]);
     assert.ok(RULES.some((r) => r.id === 'update'));
-    // On review (the update branch exists): nothing for the agent to run again; the person merges.
+    // On review (the update branch exists): nothing to run again; the person merges, the agent then fetches.
     git(T, ['branch', `chore/yad-update-v${VERSION}`]);
     g = buildGuide(T, { epic: 'EP-pay' });
-    assert.deepEqual(g.upkeep.agent, []);
+    assert.deepEqual(g.upkeep.agent.map((a) => [a.run, a.class]), [['git fetch origin', 'read']]);
     assert.equal(g.upkeep.person[0].act, 'approve-merge');
+    assert.deepEqual(g.situation.install.repos, [{ repo: 'product', version: '4.0.0', merged: false, blocked: 'open' }]);
     // Merged on origin, not pulled here: the agent pulls.
     git(T, ['checkout', '-q', '-b', 'tmp']);
     put(stamp, { version: VERSION });
@@ -611,30 +612,60 @@ test('an install behind yadflow: the update first, once — then on review, then
     git(T, ['checkout', '-q', 'main']);
     git(T, ['fetch', '-q', 'origin']);
     g = buildGuide(T, { epic: 'EP-pay' });
-    assert.deepEqual(g.upkeep.agent.map((a) => a.run), ['git pull --ff-only']);
+    assert.deepEqual(g.upkeep.agent.map((a) => a.run), ['git -C . pull --ff-only']);
+    // On another branch, the pull would fail: switching is the person's call, never a loop.
+    git(T, ['checkout', '-q', '-b', 'review/x']);
+    g = buildGuide(T, { epic: 'EP-pay' });
+    assert.deepEqual(g.upkeep.agent, []);
+    assert.match(g.upkeep.person[0].steps[0], /the update merged on origin, but this clone is on 'review\/x' — switch it to 'main' and pull/);
+    git(T, ['checkout', '-q', 'main']);
     git(T, ['pull', '-q', '--ff-only']);
     assert.equal(buildGuide(T, { epic: 'EP-pay' }).upkeep, null);
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
 });
 
-test('--open-pr checks every repo before anything is written: a Product that cannot take it is left untouched', async () => {
+test('--open-pr is all or nothing: one repo that cannot take it, and nothing is written anywhere', async () => {
   const { reconcile } = await import('./reconcile.mjs');
-  const T = await product();
-  const R = tmp();
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  const RT = tmp();
+  const RA = tmp();
   try {
+    fs.mkdirSync(T); fs.mkdirSync(A);
+    for (const [d, r] of [[T, RT], [A, RA]]) {
+      git(r, ['init', '-q', '--bare', '-b', 'main']);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']);
+      git(d, ['config', 'user.email', 'alice@work.com']);
+      git(d, ['config', 'commit.gpgsign', 'false']);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]);
+      git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
     git(T, ['add', '-A']);
-    git(T, ['commit', '-q', '-m', 'chore: seed']);
-    git(R, ['init', '-q', '--bare', '-b', 'main']);
-    git(T, ['remote', 'add', 'origin', R]);
-    git(T, ['push', '-q', '-u', 'origin', 'main']);
-    git(T, ['checkout', '-q', '-b', 'feat/x']);
-    const r = await reconcile(T, { fix: true, scope: 'changed', openPr: true, creator: () => { throw new Error('no PR may open'); } });
+    git(T, ['commit', '-q', '-m', 'chore: settings']);
+    git(T, ['push', '-q']);
+    git(A, ['checkout', '-q', '-b', 'feat/x']);
+    const r = await reconcile(T, { fix: true, scope: 'all', openPr: true, creator: () => { throw new Error('no PR may open'); } });
     assert.equal(r.applied, 0);
-    assert.equal(r.commits[0].reason, 'branch');
-    assert.equal(git(T, ['status', '--porcelain']), '', 'nothing written');
+    assert.deepEqual(r.commits.map((c) => [c.label, c.reason]), [['app', 'branch']]);
+    assert.equal(git(T, ['status', '--porcelain']), '', 'nothing written in the Product');
+    assert.equal(git(A, ['status', '--porcelain']), '', 'nothing written in the repo on a feature branch');
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
-  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
+    // A code repo the update has not reached keeps the upkeep alive, even with the Product current.
+    const { VERSION } = await import('./manifest.mjs');
+    put(path.join(T, '.sdlc/cli-version.json'), { version: VERSION });
+    put(path.join(A, '.sdlc/managed.json'), { version: '4.0.0', files: {} });
+    const g = buildGuide(T);
+    assert.equal(g.situation.install.behind, true);
+    assert.deepEqual(g.situation.install.repos.map((x) => [x.repo, x.blocked]), [['app', 'branch']]);
+    assert.ok(!g.upkeep.agent.some((a) => (a.run ?? '').includes('--open-pr')), 'never a run that would be refused');
+    assert.match(g.upkeep.person[0].steps[0], /^app: on 'feat\/x', not the default branch 'main'/);
+  } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
 test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened, and the repo back on its default branch', async () => {
@@ -677,7 +708,9 @@ test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened
     assert.deepEqual([again.skipped, again.reason, again.error], [true, 'open', false]);
     assert.equal(calls.length, 1);
     const { updatePrBlocker } = await import('./update-commit.mjs');
-    assert.doesNotMatch(updatePrBlocker(T, { defaultBranch: 'main', version: '4.7.0' }).message, /delete/, 'never advise deleting an open PR/MR');
+    const msg = updatePrBlocker(T, { defaultBranch: 'main', version: '4.7.0' }).message;
+    assert.doesNotMatch(msg, /delete (its|the) PR|merge or delete/, 'never advise deleting an open PR/MR');
+    assert.match(msg, /closed without merging, delete the branch/, 'a closed one: only its branch');
     // On origin from another clone, not here: still on review.
     git(T, ['branch', '-q', '-D', 'chore/yad-update-v4.7.0']);
     assert.equal(updatePrBlocker(T, { defaultBranch: 'main', version: '4.7.0' }).kind, 'open');
