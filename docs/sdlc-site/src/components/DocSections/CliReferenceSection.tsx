@@ -33,6 +33,7 @@ const GROUPS = [
     color: '#2471a3',
     items: [
       'yad next [<epic>] [--all] [--check <step>] [--json] — the one next action, project-wide or per epic; in Build, the next sub-step per story and repo',
+      'yad guide [<epic>] [--json] — the step brief an AI agent reads before each step: what it is for, mandatory or skippable, who does it, the skills that fit, what the agent runs, and what only the person can do (E157)',
       'yad status [--brief] [--no-fetch] [--json] — where the work stands in about 20 lines: this checkout\'s task and Build step, each open epic\'s next action, your open PRs/MRs, and what is owed (debt, blockers, hotfix debt, follow-up PRs); for after a context reset',
       'yad history [list] [--type t] [--theme x] [--thread EP-…] [--open|--done] | show <id> | search <text> — every work item newest first, one item\'s steps and approvals, or a text search; built live, writes nothing',
       'yad index [--json] — rebuild .sdlc/index.json, one summary line per work item (default branch only; on a verified Product CI writes it)',
