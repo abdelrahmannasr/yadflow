@@ -96,7 +96,7 @@ Each `steps[]` entry:
 ### The step catalogue
 
 Every one of those ids is defined in **one place** — the lifecycle default that ships with yadflow,
-`cli/lifecycle/defaults/2.json` (E134; 2.json added each step's description and actor, E157). The engine reads it as `STEPS` in `cli/epic-state.mjs` (E4):
+`cli/lifecycle/defaults/2.json` (E134; 2.json added each step's description and driver, E157). The engine reads it as `STEPS` in `cli/epic-state.mjs` (E4):
 there, each author step with a gate becomes two rows, the step and its `<id>-review` gate. A row says which phase the step is in, whether it authors an artifact or gates one, which file it
 writes, which skill runs it, and — for a gate — which step it reviews. The phase table, the skill
 tables and the Build order are all views of it, held to it by tests, so a step cannot exist in one and

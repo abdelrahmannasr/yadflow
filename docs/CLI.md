@@ -321,7 +321,7 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
 
 ```jsonc
 { …, "ok": true, "guideVersion": 1,
-  "situation": { "stage": "no-product|product-elsewhere|ready|choose-epic|broken|in-epic",
+  "situation": { "stage": "no-product|product-elsewhere|ready|choose-epic|broken|unknown-epic|in-epic",
                  "product": "<path from here>", "platform": "github|gitlab|null",
                  "ledger": "verified|local", "solo": false,
                  "here": { /* as yad status */ } },
@@ -341,15 +341,21 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   "rules": [{ "id": "…", "text": "…" }], "humanOnly": [ … ], "never": [ … ] }
 ```
 
-- **`stage`**: `no-product` (there is none here: `person` says how to start one, and `situation` holds only
-  `stage` and `product: null`), `product-elsewhere` (no Product here, but one is a `cd` away: `product`
+- **`stage`**: `no-product` (there is none here: `person` says how to start one; with no Product folder at
+  all, `situation` holds only `stage` and `product: null`), `product-elsewhere` (no Product here, but one is a `cd` away: `product`
   names it, never start a second one), `ready` (a Product with no open epic: the first epic, the
   Foundation offered as optional, and on a brownfield Product `yad-backfill` first), `choose-epic`
   (several are open: `epics` lists them and the person picks), `broken` (an epic's ledger does not load:
-  `problems` lists it, and the agent runs `yad doctor`, never a new epic), `in-epic`.
-- **`error`** and **`epics`**: an epic id with no ledger answers `stage: ready`, an `error`, and the open
-  `epics`. An agent entry may carry `optional: true` (the Foundation). `mandatory` is `null` for the
-  Foundation, which is optional for the Product.
+  `problems` lists it, the agent runs `yad doctor`, never a new epic, and `epics` lists the healthy ones),
+  `unknown-epic` (the epic named has no ledger: a refusal, `ok: false` with `error`, `code`, `hint` and the
+  open `epics`, exit 1), `in-epic`.
+- An agent entry may carry `optional: true` (the Foundation). `mandatory` is `null` for the Foundation,
+  which is optional for the Product.
+- **`skip`** is `null` when the step cannot be skipped. On a verified Product whose epic ledger CI already
+  owns (it is on the default branch), `yad skip` refuses, so `skip` has `command: null` and a `note` saying
+  why.
+- **Re-opened work** (`reopened`): a step re-opened behind finished work (E41) is given to the agent too,
+  and a re-opened review brings the person's approval steps with it.
 - **Words read from the ledger** (an artifact, a story, a repo) go into a command only when they are a
   plain path or id; anything else is printed as a placeholder such as `<artifact>`.
 - **`class`** says what the agent may do with a command, and **`ask`** whether it asks first:
@@ -367,14 +373,16 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
 
   A command the rules do not know has `class: null` and `ask: each-time`.
 
-- **A review gate's approval is the person's.** With a platform, the agent opens the review PR/MR once
+- **A review gate's approval is the person's.** With a platform, the agent pushes its own review branch
+  (`review/<epic>/<artifact>`; `yad gate open` never pushes it) and opens the review PR/MR once
   (`review-open`), and `person` says to approve and merge it, with `verify: yad gate sync`. On a verified
   Product the PR/MR is recorded only at the merge, so the review stays `review-open` until then and the
   hand-off comes with it. With no platform, `yad gate open` only marks the review open here, and `person`
   gives `yad gate approve … --by` and `yad gate advance` to run as themselves (in Claude Code, typed with a
   leading `!`; in solo mode only `yad gate advance`).
 - **A blocked step** is cleared with `yad unblock` only when the person asks. On a verified Product it
-  cannot be cleared once the epic's ledger is on the default branch, and the guide says so.
+  cannot be cleared once the epic's ledger is on the default branch (read from origin, as `yad unblock`
+  reads it), and the guide says so.
 - **`then`** says what comes next. When a person step has a `verify` command, the agent waits, then runs
   it: it never goes on from the person's word alone.
 
