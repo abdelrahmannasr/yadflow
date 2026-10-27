@@ -321,8 +321,9 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
 
 ```jsonc
 { …, "ok": true, "guideVersion": 1,
-  "situation": { "stage": "no-product|ready|choose-epic|in-epic", "product": "<path from here>",
-                 "platform": "github|gitlab|none", "ledger": "verified|local", "solo": false,
+  "situation": { "stage": "no-product|product-elsewhere|ready|choose-epic|broken|in-epic",
+                 "product": "<path from here>", "platform": "github|gitlab|null",
+                 "ledger": "verified|local", "solo": false,
                  "here": { /* as yad status */ } },
   "step": { "epic": "EP-x", "id": "ui-design", "name": "UI design", "phase": "design", "part": "Shape",
             "actionKind": "author", "brief": "Design the screens and flows, …",
@@ -331,35 +332,51 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
             "driver": "pair", "status": "in_progress", "artifact": "ui-design.md", "why": "…",
             "skills": { "bound": ["yad-ui"], "recommended": [{ "skill": "…", "why": "…", "bind": "yad skill bind …" }] },
             "tools": [{ "id": "…", "name": "…", "role": "…", "fallback": "…" }],
-            "parallel": { … }, "lanes": [ … ] },        // parallel and lanes only when there are some
-  "agent":  [{ "skill": "yad-ui", "class": "local-write", "ask": "never", "why": "…" },
-             { "run": "yad next EP-x --check ui-design", "class": "read", "ask": "never", "why": "…" }],
+            "parallel": { … }, "reopened": [ … ], "debt": [ … ], "lanes": [ … ] },  // only when there are some
+  "agent":  [{ "run": "yad next EP-x --check ui-design", "class": "read", "ask": "never", "why": "…" },
+             { "skill": "yad-ui", "class": "local-write", "ask": "never", "why": "…" }],
   "person": [{ "act": "approve-merge|answer|choose|unblock", "why": "…", "steps": ["…"],
                "commands": ["…"], "verify": "yad gate sync EP-x epic.md" }],
   "then": "…",
   "rules": [{ "id": "…", "text": "…" }], "humanOnly": [ … ], "never": [ … ] }
 ```
 
-- **`stage`**: `no-product` (there is none here: `person` says how to start one), `ready` (a Product with
-  no open epic: the first epic, and the Foundation offered as optional), `choose-epic` (several are open:
-  `epics` lists them and the person picks), `in-epic`.
+- **`stage`**: `no-product` (there is none here: `person` says how to start one, and `situation` holds only
+  `stage` and `product: null`), `product-elsewhere` (no Product here, but one is a `cd` away: `product`
+  names it, never start a second one), `ready` (a Product with no open epic: the first epic, the
+  Foundation offered as optional, and on a brownfield Product `yad-backfill` first), `choose-epic`
+  (several are open: `epics` lists them and the person picks), `broken` (an epic's ledger does not load:
+  `problems` lists it, and the agent runs `yad doctor`, never a new epic), `in-epic`.
+- **`error`** and **`epics`**: an epic id with no ledger answers `stage: ready`, an `error`, and the open
+  `epics`. An agent entry may carry `optional: true` (the Foundation). `mandatory` is `null` for the
+  Foundation, which is optional for the Product.
+- **Words read from the ledger** (an artifact, a story, a repo) go into a command only when they are a
+  plain path or id; anything else is printed as a placeholder such as `<artifact>`.
 - **`class`** says what the agent may do with a command, and **`ask`** whether it asks first:
 
   | Class | Ask | What it means |
   |---|---|---|
   | `read`, `local-write` | `never` | Reads, or writes files in this clone only. |
-  | `open-pr` | `never` | Pushes the agent's own branch or opens/updates a PR/MR. It says what it did. |
-  | `default-push` | `each-time` | Pushes straight to the default branch (`--push`). |
+  | `open-pr` | `never` | Pushes the agent's own branch, or opens, updates or comments on a review or member PR/MR (`gate open`, `gate sync`, `member add`). It says what it did. |
+  | `task-pr` | `per-dial` | Opens a task's PR/MR (`yad open-pr`, `yad ship`): asked first unless `yad dial open-pr` is `auto` (#356). |
+  | `default-push` | `each-time` | Pushes straight to the default branch (`--push`, including `check --fix --push`). |
   | `public-post` | `each-time` | Posts to a public place (`yad report`). |
-  | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen`: only the person. |
-  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode`, `kill`, `unkill`. |
+  | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen`, and `yad build trust --uid`: only the person. |
+  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`. |
   | `ci-only`, `internal`, `removed` | `not-by-agent` | CI's, the harness's, or gone. |
 
-- **A review gate's approval is the person's.** With a platform, `person` says to approve and merge the
-  review PR/MR, and `verify` is `yad gate sync`. With no platform, it gives `yad gate approve … --by` and
-  `yad gate advance` for the person to run as themselves (in Claude Code, typed with a leading `!`).
-- **`then`** says what comes next. When the person has a step, the agent waits, then runs `verify`: it
-  never goes on from the person's word alone.
+  A command the rules do not know has `class: null` and `ask: each-time`.
+
+- **A review gate's approval is the person's.** With a platform, the agent opens the review PR/MR once
+  (`review-open`), and `person` says to approve and merge it, with `verify: yad gate sync`. On a verified
+  Product the PR/MR is recorded only at the merge, so the review stays `review-open` until then and the
+  hand-off comes with it. With no platform, `yad gate open` only marks the review open here, and `person`
+  gives `yad gate approve … --by` and `yad gate advance` to run as themselves (in Claude Code, typed with a
+  leading `!`; in solo mode only `yad gate advance`).
+- **A blocked step** is cleared with `yad unblock` only when the person asks. On a verified Product it
+  cannot be cleared once the epic's ledger is on the default branch, and the guide says so.
+- **`then`** says what comes next. When a person step has a `verify` command, the agent waits, then runs
+  it: it never goes on from the person's word alone.
 
 ## The PR-driven review gate
 

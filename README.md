@@ -257,6 +257,7 @@ The record is worth trusting because people approve what goes into it.
 - the Shape and Build steps with review gates
 - linked changes and `yad thread`
 - `yad history`, `yad next` and `yad usage`
+- `yad guide`, the step brief an AI coding agent reads before each step — what the step is for, whether it can be skipped, who does it, the skills that fit, what the agent runs, and what only the person can do
 - `yad status --brief`, where the work stands in about 20 lines — this checkout's task, each open epic's next action, your open PRs/MRs and what is owed — for picking up after a break or an AI context reset
 - `yad standup`, a daily status for each team member — what they did since the last working day, what they are on now, and what is waiting — rebuilt live from git, the ledgers and the platform, facts only
 - `yad detect`, which lists the skills, agents, MCP servers and plugins installed for each AI agent
