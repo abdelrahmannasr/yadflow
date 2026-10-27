@@ -72,7 +72,7 @@ export const tok = (x, placeholder) => (typeof x === 'string' && /^[A-Za-z0-9][A
 const shellPath = (p) => (/^[A-Za-z0-9._/~-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
 
 // One command the agent runs, with what the rules let it do with it.
-const agentRun = (line, why) => {
+export const agentRun = (line, why) => {
   const words = line.replace(/^yad\s+/, '').split(/\s+/);
   const flags = words.filter((w) => w.startsWith('--')).map((w) => w.slice(2).split('=')[0]);
   const cmd = words.filter((w) => !w.startsWith('-')).slice(0, 2);

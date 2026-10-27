@@ -228,6 +228,8 @@ export function classify(words, flags = []) {
 export function reaches(words, flags = []) {
   const e = commandEntry(words);
   if (!e) return [];
+  // Never raised, as in `classify`.
+  if (e.class === 'removed' || e.class === 'internal' || e.class === 'ci-only') return [e.class];
   return [...new Set([e.class, ...flags.filter((f) => e.flags && Object.hasOwn(e.flags, f)).map((f) => e.flags[f])])];
 }
 

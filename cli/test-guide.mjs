@@ -28,7 +28,7 @@ process.env.YAD_PLATFORM_READ = '0';
 process.env.YAD_CAPTURE = '0';
 for (const k of Object.keys(process.env)) if (/^GIT_(AUTHOR|COMMITTER)_/.test(k)) delete process.env[k];
 
-const { buildGuide, stepFacts, playbook, tok } = await import('./guide.mjs');
+const { buildGuide, stepFacts, playbook, tok, agentRun } = await import('./guide.mjs');
 const COMMAND_CLASS_MODULE = await import('./agent-rules.mjs');
 const { COMMAND_CLASS, CLASSES, ASK, RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor } = await import('./agent-rules.mjs');
 const { DEFAULT_LIFECYCLE } = await import('./lifecycle.mjs');
@@ -452,6 +452,10 @@ test('a flag that needs the person to have asked is kept under a push', () => {
   assert.deepEqual(reaches(['update'], ['push', 'overwrite-local']).sort(), ['default-push', 'local-write', 'on-request']);
   const p = playbook({ epicId: 'EP-pay', kind: 'unknown-kind' }, {});
   assert.equal(p.agent[0].onRequest, undefined);
+  const both = agentRun('yad update --push --overwrite-local', 'x');
+  assert.deepEqual([both.class, both.ask, both.onRequest], ['default-push', 'each-time', true]);
+  assert.equal(agentRun('yad update --push', 'x').onRequest, undefined);
+  assert.deepEqual(reaches(['gate', 'ci'], ['merged']), ['ci-only'], 'never raised, as in classify');
 });
 
 test('the test-cases track beside Build is given to the agent too', () => {
