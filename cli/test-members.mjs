@@ -517,6 +517,229 @@ test('E131 member-check: your own file, each email proven by a commit GitHub giv
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 
+// #368: the change is read as the merge into the base makes it. A criss-cross history has two merge
+// bases; `<base>...HEAD` read from one of them, and a GitLab MR pipeline runs on the branch tip.
+function crissCross(g) {
+  const sh = (...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' }).toString().trim();
+  sh('checkout', '-q', 'main');
+  put(path.join(g.T, 'a.txt'), 'a\n');
+  sh('add', '-A'); sh('commit', '-q', '-m', 'chore: a');
+  const a = sh('rev-parse', 'HEAD');
+  sh('checkout', '-q', 'pr');
+  put(path.join(g.T, 'b.txt'), 'b\n');
+  sh('add', '-A'); sh('commit', '-q', '-m', 'chore: b');
+  const b = sh('rev-parse', 'HEAD');
+  sh('merge', '-q', '--no-edit', a);          // the branch takes the base's commit…
+  sh('checkout', '-q', 'main');
+  sh('merge', '-q', '--no-edit', b);          // …and the base takes the branch's: two merge bases
+  sh('checkout', '-q', 'pr');
+  assert.equal(sh('merge-base', '--all', 'main', 'HEAD').split('\n').length, 2);
+}
+// git 2.38+ builds the merge (`merge-tree --write-tree`); an older one falls back.
+const writeTreeGit = (() => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-mt-'));
+  try {
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: T });
+    execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=a', 'commit', '-q', '--allow-empty', '-m', 'x'], { cwd: T });
+    return spawnSyncNode0('git', ['merge-tree', '--write-tree', 'HEAD', 'HEAD'], { cwd: T }).status === 0;
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+})();
+// A git that answers `merge-tree` as one older than 2.38 does (exit 129), and runs everything else.
+function olderGit(g) {
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const dir = path.join(g.T, '.oldgit');
+  put(path.join(dir, 'git'), `#!/bin/sh\n[ "$1" = merge-tree ] && exit 129\nexec '${real}' "$@"\n`);
+  fs.chmodSync(path.join(dir, 'git'), 0o755);
+  return { PATH: `${dir}:${path.join(g.T, '.fakebin')}:${process.env.PATH}` };
+}
+
+// This shows the merge-tree path runs with two merge bases (the note); the file it refuses would be listed
+// from either merge base too. The test that the old gate passes and this one refuses is review 1's below.
+test('#368 member-check: with two merge bases the change is read as the merge makes it', { skip: !writeTreeGit && 'git older than 2.38' }, () => {
+  const g = gateRepo();
+  try {
+    crissCross(g);
+    // Bob's file, brought in on Alice's PR: judged (and refused), not missed.
+    const sha = g.commitAs('alice@work.com', { [FILE('bob')]: rec('bob', ['bob@work.com']) });
+    g.attribute(sha, 'alice');
+    const r = g.check(as('alice'));
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /note \[member-check\]: 'main' and HEAD have 2 merge bases — the change is read as the merge into main makes it/);
+    assert.match(r.out, /FAIL \[member-check\]: .*github-bob\.json/);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+test('#368 member-check: a branch that does not merge cleanly fails closed', { skip: !writeTreeGit && 'git older than 2.38' }, () => {
+  const g = gateRepo();
+  try {
+    const sh = (...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+    sh('checkout', '-q', 'main'); put(path.join(g.T, 'c.txt'), 'main\n'); sh('add', '-A'); sh('commit', '-q', '-m', 'chore: c');
+    sh('checkout', '-q', 'pr'); put(path.join(g.T, 'c.txt'), 'pr\n'); sh('add', '-A'); sh('commit', '-q', '-m', 'chore: c');
+    const r = g.check(as('alice'));
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /^FAIL \[member-check\]: this branch does not merge cleanly into main, so what it changes there cannot be read — merge main into the branch, resolve the conflicts, then push again$/m);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+// #368 review 1: two changes that each pass, merged into a file neither shows. Alice's file holds a second
+// account that is not on the Product's host; the base moves its host and login to Bob's GitHub account, and
+// her branch moves only its platform. Merged, the file names Bob's account on the Product — the gate must
+// read the file as the merge holds it, not at the branch's HEAD.
+function mergedIntoBob(g) {
+  const file = (platform, host, login, id) => `{
+  "accounts": [
+    { "platform": "github", "host": "github.com", "login": "alice", "id": 1 },
+    {
+      "platform": "${platform}",
+
+
+      "host": "${host}",
+      "login": "${login}",
+      "id": ${id}
+    }
+  ],
+  "emails": []
+}
+`;
+  const sh = (...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+  sh('checkout', '-q', 'main');
+  put(path.join(g.T, FILE('alice')), file('gitlab', 'ghe.example', 'nobody', 9));
+  sh('add', '-A'); sh('commit', '-q', '-m', 'chore(product): alice joined');
+  sh('checkout', '-q', 'pr'); sh('reset', '-q', '--hard', 'main');
+  sh('checkout', '-q', 'main');
+  put(path.join(g.T, FILE('alice')), file('gitlab', 'github.com', 'bob', 2));
+  sh('commit', '-q', '-am', 'chore(product): alice edits her other account');
+  sh('checkout', '-q', 'pr');
+  const sha = g.commitAs('alice@work.com', { [FILE('alice')]: file('github', 'ghe.example', 'nobody', 9) });
+  g.attribute(sha, 'alice');
+}
+
+test('#368 review 1: a file both sides changed is judged as the merge holds it', { skip: !writeTreeGit && 'git older than 2.38' }, () => {
+  const g = gateRepo();
+  try {
+    mergedIntoBob(g);
+    const r = g.check(as('alice'));
+    assert.equal(r.code, 1, `the merge puts Bob's GitHub account in Alice's file: ${r.out}`);
+    assert.match(r.out, /FAIL \[member-check\]: .*github-alice\.json/);
+    assert.doesNotMatch(r.out, /PASS \[member-check\]/);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+test('#368 review 1: on a git older than 2.38, a member file both sides changed fails closed', () => {
+  const g = gateRepo();
+  try {
+    mergedIntoBob(g);
+    const r = g.check({ ...as('alice'), ...olderGit(g) });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /^FAIL \[member-check\]: main has moved on since this branch split off, and this git \(older than 2\.38\) cannot read the member files this branch changes as the merge would hold them — merge main into the branch, then push again$/m);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+test('#368 review 2: on a git older than 2.38, member files changed while the base moved on fail closed — a rename in, a file the base added', () => {
+  const MOVED = /^FAIL \[member-check\]: main has moved on since this branch split off, and this git \(older than 2\.38\) cannot read the member files this branch changes as the merge would hold them — merge main into the branch, then push again$/m;
+  const sh = (g, ...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+  // The branch renames a file into the folder; the base then edits it at its old path, and a real merge
+  // follows the rename — the merged member file holds the base's edit, which HEAD does not show.
+  let g = gateRepo();
+  try {
+    sh(g, 'checkout', '-q', 'main');
+    put(path.join(g.T, 'notes/x.json'), JSON.stringify(rec('alice', ['alice@work.com']), null, 2));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore: notes');
+    sh(g, 'checkout', '-q', 'pr'); sh(g, 'reset', '-q', '--hard', 'main');
+    fs.mkdirSync(path.dirname(path.join(g.T, FILE('alice'))), { recursive: true });
+    sh(g, 'mv', 'notes/x.json', FILE('alice'));
+    execFileSync('git', ['-c', 'user.email=alice@work.com', 'commit', '-q', '-m', 'chore(product): member'], { cwd: g.T, stdio: 'pipe' });
+    g.attribute(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: g.T }).toString().trim(), 'alice');
+    sh(g, 'checkout', '-q', 'main');
+    put(path.join(g.T, 'notes/x.json'), JSON.stringify(rec('alice', ['alice@work.com', 'eve@else.com']), null, 2));
+    sh(g, 'commit', '-q', '-am', 'chore: notes edited'); sh(g, 'checkout', '-q', 'pr');
+    assert.match(g.check({ ...as('alice'), ...olderGit(g) }).out, MOVED);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+  // The base adds Bob's file with an email this branch's own file also holds: the clash check must see it.
+  g = gateRepo();
+  try {
+    sh(g, 'checkout', '-q', 'main');
+    put(path.join(g.T, FILE('bob')), JSON.stringify(rec('bob', ['shared@work.com'])));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore(product): bob joined'); sh(g, 'checkout', '-q', 'pr');
+    const sha = g.commitAs('shared@work.com', { [FILE('alice')]: rec('alice', ['shared@work.com']) });
+    g.attribute(sha, 'alice');
+    assert.match(g.check({ ...as('alice'), ...olderGit(g) }).out, MOVED);
+    if (writeTreeGit) assert.match(g.check(as('alice')).out, /FAIL \[member-check\]: one email is in/);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+test('#368 review 3: on a git older than 2.38, a folder the base moved into the members folder, with a file the branch adds there, fails closed', () => {
+  const g = gateRepo();
+  try {
+    const sh = (...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+    sh('checkout', '-q', 'main');
+    put(path.join(g.T, 'foo/github-carol.json'), JSON.stringify(rec('alice', [])));
+    sh('add', '-A'); sh('commit', '-q', '-m', 'chore: foo');
+    sh('checkout', '-q', 'pr'); sh('reset', '-q', '--hard', 'main');
+    put(path.join(g.T, 'foo/github-mallory.json'), JSON.stringify(rec('mallory', [])));
+    sh('add', '-A'); sh('commit', '-q', '-m', 'chore: a note');
+    sh('checkout', '-q', 'main');
+    fs.mkdirSync(path.join(g.T, '.sdlc/members'), { recursive: true });
+    sh('mv', 'foo/github-carol.json', '.sdlc/members/github-carol.json');
+    sh('commit', '-q', '-m', 'chore: foo moved'); sh('checkout', '-q', 'pr');
+    const r = g.check({ ...as('alice'), ...olderGit(g) });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, FOLDER_MOVED);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+const FOLDER_MOVED = /^FAIL \[member-check\]: main moved files into the members folder from a folder this branch adds a file to, and this git \(older than 2\.38\) cannot tell where the merge puts it — merge main into the branch, then push again$/m;
+test('#368 review 4: the folder rule follows git — a folder of only subfolders moved whole is caught; a folder still there is not', () => {
+  const sh = (g, ...a) => execFileSync('git', ['-c', 'user.email=dev@work.com', '-c', 'user.name=dev', ...a], { cwd: g.T, stdio: 'pipe' });
+  const setup = (g, files) => {
+    sh(g, 'checkout', '-q', 'main');
+    for (const f of files) put(path.join(g.T, f), JSON.stringify(rec('alice', [])));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore: foo');
+    sh(g, 'checkout', '-q', 'pr'); sh(g, 'reset', '-q', '--hard', 'main');
+    put(path.join(g.T, 'foo/github-mallory.json'), JSON.stringify(rec('mallory', [])));
+    sh(g, 'add', '-A'); sh(g, 'commit', '-q', '-m', 'chore: a note');
+    sh(g, 'checkout', '-q', 'main');
+  };
+  // foo/ holds only subfolders, and the base moves it whole: git would carry foo/github-mallory.json in.
+  let g = gateRepo();
+  try {
+    setup(g, ['foo/a/github-carol.json', 'foo/b/github-dave.json']);
+    fs.mkdirSync(path.join(g.T, '.sdlc'), { recursive: true });
+    sh(g, 'mv', 'foo', '.sdlc/members');
+    sh(g, 'commit', '-q', '-m', 'chore: foo moved'); sh(g, 'checkout', '-q', 'pr');
+    assert.match(g.check({ ...as('alice'), ...olderGit(g) }).out, FOLDER_MOVED);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+  // Only part of foo/ moves, so foo/ is still there and git renames nothing: no refusal from this rule.
+  g = gateRepo();
+  try {
+    setup(g, ['foo/github-carol.json', 'foo/keep.txt']);
+    fs.mkdirSync(path.join(g.T, '.sdlc/members'), { recursive: true });
+    sh(g, 'mv', 'foo/github-carol.json', '.sdlc/members/github-carol.json');
+    sh(g, 'commit', '-q', '-m', 'chore: carol moved'); sh(g, 'checkout', '-q', 'pr');
+    const r = g.check({ ...as('alice'), ...olderGit(g) });
+    assert.doesNotMatch(r.out, FOLDER_MOVED);
+    assert.equal(r.code, 0, r.out);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
+test('#368 member-check: a git older than 2.38 falls back to the one merge base, and fails closed on two', () => {
+  const g = gateRepo();
+  try {
+    const old = olderGit(g);
+    // One merge base: read as before.
+    const sha = g.commitAs('alice@work.com', { [FILE('alice')]: rec('alice', ['alice@work.com']) });
+    g.attribute(sha, 'alice');
+    let r = g.check({ ...as('alice'), ...old });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /1 email\(s\), each proven/);
+    // Two: this git cannot build the merge.
+    crissCross(g);
+    r = g.check({ ...as('alice'), ...old });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /^FAIL \[member-check\]: 'main' and HEAD have 2 merge bases, and this git \(older than 2\.38\) cannot build the merge into main — merge main into the branch, then push again$/m);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
+
 test('E131 member-check: an email no commit proves is refused (the forgery case)', () => {
   const g = gateRepo();
   try {
@@ -605,7 +828,7 @@ test('E131 member-check: a linked members folder, a link inside it, and a case t
     git(link.T, 'commit', '-q', '-m', 'link');
     const r = link.check(as('mallory'));
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /\.sdlc\/members is not a folder at HEAD/);
+    assert.match(r.out, /\.sdlc\/members is not a folder in this change/);
   } finally { fs.rmSync(link.T, { recursive: true, force: true }); }
   const inner = gateRepo();
   try {
@@ -650,7 +873,8 @@ test('E131 member-check: each failure says what to change (#381)', () => {
   };
   // Its own file, new in this PR: dropped from another PR; one the base holds is restored, never deleted (review 6).
   const AGAIN = /^write the file again with yad member add, run by its own person \(it opens its own pull request\); if this is another pull request, drop \.sdlc\/members\/github-alice\.json from this pull request \(git rm it on this branch\)$/;
-  const AGAIN_BASE = /^write the file again with yad member add, run by its own person \(it opens its own pull request\); if this is another pull request, restore \.sdlc\/members\/github-alice\.json to the base's copy \(git checkout main\.\.\.HEAD -- \.sdlc\/members\/github-alice\.json\)$/;
+  // The copy the diff starts from (#368): the base itself where git builds the merge, the merge base on an older git.
+  const AGAIN_BASE = new RegExp(`^write the file again with yad member add, run by its own person \\(it opens its own pull request\\); if this is another pull request, restore \\.sdlc/members/github-alice\\.json to the base's copy \\(git checkout ${writeTreeGit ? 'main' : 'main\\.\\.\\.HEAD'} -- \\.sdlc/members/github-alice\\.json\\)$`);
   const g = gateRepo();
   try {
     g.commitAs('alice@work.com', { [FILE('alice')]: { accounts: [{ platform: 'github', host: 'github.com', login: 'alice', id: 1 }] } });
@@ -700,18 +924,26 @@ test('E131 member-check: each failure says what to change (#381)', () => {
     put(path.join(g.T, FILE('bob')), { ...rec('bob', []), names: ['Bob B'] });
     git(g.T, 'commit', '-q', '-am', 'bob renamed himself');
     git(g.T, 'checkout', '-q', 'pr');
-    assert.equal(fixOf(g.check(as('alice')).out), OWN(`restore ${FILE('bob')} to the base's copy (git checkout main...HEAD -- ${FILE('bob')})`));
+    // Both sides changed bob's file (#368): git 2.38+ builds the merge, which conflicts, so the gate fails
+    // closed as the platform would; an older git cannot read the file as the merge would hold it, and fails
+    // closed too. Undoing the branch's edit (the split point's copy) is what clears both.
+    if (writeTreeGit) assert.equal(fixOf(g.check(as('alice')).out), 'merge main into the branch, resolve the conflicts, then push again');
+    const old = olderGit(g);
+    assert.equal(fixOf(g.check({ ...as('alice'), ...old }).out), 'merge main into the branch, then push again');
     git(g.T, 'checkout', 'main...HEAD', '--', FILE('bob'));
     git(g.T, 'commit', '-q', '-m', 'undo the edit to bob');
     assert.match(g.check(as('alice')).out, /PASS \[member-check\]: no member file changed/);
+    assert.match(g.check({ ...as('alice'), ...old }).out, /PASS \[member-check\]: no member file changed/);
     // A link put over a teammate's file is undone, not deleted: git rm would remove bob, and pass (review 7).
     git(g.T, 'reset', '-q', '--hard', 'HEAD~2');
     fs.rmSync(path.join(g.T, FILE('bob')));
     fs.symlinkSync('../../README.md', path.join(g.T, FILE('bob')));
     git(g.T, 'add', '-A');
     git(g.T, 'commit', '-q', '-m', 'bob, linked');
-    const linked = g.check(as('alice')).out;
-    assert.equal(fixOf(linked), `restore ${FILE('bob')} to the base's copy (git checkout main...HEAD -- ${FILE('bob')})`, linked);
+    // Both sides changed bob's file here too (the base renamed him, the branch linked it): closed on both paths.
+    const linked = g.check({ ...as('alice'), ...old }).out;
+    assert.equal(fixOf(linked), 'merge main into the branch, then push again', linked);
+    if (writeTreeGit) assert.equal(g.check(as('alice')).code, 1);
     git(g.T, 'checkout', 'main...HEAD', '--', FILE('bob'));
     git(g.T, 'commit', '-q', '-m', 'undo the link');
     assert.match(g.check(as('alice')).out, /PASS \[member-check\]: no member file changed/);

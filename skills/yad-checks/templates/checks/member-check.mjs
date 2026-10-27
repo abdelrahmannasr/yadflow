@@ -43,7 +43,7 @@ const say = (s) => process.stdout.write(`${s}\n`);
 const fail = (s) => { say(`FAIL [member-check]: ${s}`); rc = 1; };
 const git = (...args) => {
   const r = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 });
-  return { ok: r.status === 0, out: r.stdout || '' };
+  return { ok: r.status === 0, out: r.stdout || '', status: r.status };
 };
 const hash = (email) => {
   const e = String(email || '').trim().toLowerCase();
@@ -73,7 +73,86 @@ if (!git('rev-parse', '--verify', '-q', `${base}^{commit}`).ok) { say(`FAIL [mem
 
 // Every path the PR touches, with its status. NUL-separated, no renames (a rename is a delete plus an add,
 // and each is judged).
-const diff = git('diff', '--no-renames', '--name-status', '-z', `${base}...HEAD`);
+//
+// What the PR changes is what MERGING it into the base makes it (#368), read as contract-check reads it
+// (#363 reviews 1, 3-5). A diff from the merge base (`<base>...HEAD`) reads from ONE of several: on a
+// GitLab MR pipeline (the branch tip, not a merge commit), a hand-resolved merge could bring a member file
+// in that the diff never lists. `git merge-tree --write-tree` (git 2.38+) builds the merge without touching
+// anything, and the diff runs from the base to it. A branch that does not merge cleanly fails closed: the
+// platform cannot merge it either. An older git falls back to the one merge base, failing closed when
+// there are several, when the base removed or moved a file the branch changes (the real merge would
+// follow it), when the base has moved on and the branch changes member files, or when the base moved a
+// folder's files into the members folder and the branch adds a file to that folder (a merge that follows
+// folder renames would carry it in). No merge base at all fails closed too.
+const HISTORY = 'check the code out with full history (GitHub: actions/checkout with fetch-depth: 0; GitLab: GIT_DEPTH: "0")';
+const bases = git('merge-base', '--all', base, 'HEAD').out.split('\n').filter(Boolean);
+if (!bases.length) { say(`FAIL [member-check]: '${base}' and HEAD share no history (a shallow clone has no merge base), so the changed files cannot be listed — ${HISTORY}, and give a base this branch shares history with, then run again`); process.exit(1); }
+const built = git('merge-tree', '--write-tree', '--no-messages', base, 'HEAD');
+const mergeTree = built.out.split('\n')[0].trim();
+let from;
+let to;
+if (built.status === 0 && mergeTree && git('rev-parse', '--verify', '-q', `${mergeTree}^{tree}`).ok) {
+  from = git('rev-parse', '--verify', '-q', `${base}^{commit}`).out.trim();
+  to = mergeTree;
+  if (bases.length > 1) say(`note [member-check]: '${base}' and HEAD have ${bases.length} merge bases — the change is read as the merge into ${base} makes it`);
+} else if (built.status === 1) {
+  say(`FAIL [member-check]: this branch does not merge cleanly into ${base}, so what it changes there cannot be read — merge ${base} into the branch, resolve the conflicts, then push again`);
+  process.exit(1);
+} else if (built.status !== 129) {   // 129: git's usage error, which a git older than 2.38 gives for --write-tree (as contract-check reads it)
+  say(`FAIL [member-check]: git could not build the merge of this branch into ${base} (git merge-tree exit ${built.status}) — ${HISTORY}, then run again`);
+  process.exit(1);
+} else if (bases.length !== 1) {
+  say(`FAIL [member-check]: '${base}' and HEAD have ${bases.length} merge bases, and this git (older than 2.38) cannot build the merge into ${base} — merge ${base} into the branch, then push again`);
+  process.exit(1);
+} else {
+  from = bases[0];
+  to = 'HEAD';
+  // The fallback reads the branch's own diff, so an edit to a file the base has since removed or moved
+  // would follow the rename into the merge unseen: such a path fails closed.
+  const names = (r, keep) => { const v = r.out.split('\0').filter(Boolean); const o = []; for (let i = 0; i + 1 < v.length; i += 2) if (keep(v[i][0])) o.push(v[i + 1]); return o; };
+  const goneRead = git('diff', '--no-renames', '--diff-filter=D', '--name-status', '-z', from, base);
+  const mineRead = git('diff', '--no-renames', '--name-status', '-z', from, 'HEAD');
+  if (!goneRead.ok || !mineRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
+  const gone = new Set(names(goneRead, () => true));
+  // Every path, not only member files: a base rename from elsewhere INTO the members folder must be caught.
+  if (names(mineRead, (s) => s === 'M' || s === 'T').some((f) => gone.has(f))) {
+    say(`FAIL [member-check]: ${base} removed or moved a file this branch changes, and this git (older than 2.38) cannot follow it into the merge — merge ${base} into the branch, then push again`);
+    process.exit(1);
+  }
+  // The rules below read the files as the merge would hold them, and this git reads them at HEAD. Once the
+  // base has moved on, the merge can hold member files HEAD does not show: a file both sides changed (review
+  // 1), a file the branch renamed in and the base edited at its old path, a file the base added that the clash
+  // check must see (review 2). So a branch that changes member files fails closed until it holds the base.
+  // Any spelling of the folder counts (the twin rule below names it), read the way a case-blind disk reads it.
+  const baseTip = git('rev-parse', '--verify', '-q', `${base}^{commit}`).out.trim();
+  const memberish = (f) => f.normalize('NFKC').toLowerCase().startsWith('.sdlc/members');
+  if (baseTip !== from && names(mineRead, () => true).some(memberish)) {
+    say(`FAIL [member-check]: ${base} has moved on since this branch split off, and this git (older than 2.38) cannot read the member files this branch changes as the merge would hold them — merge ${base} into the branch, then push again`);
+    process.exit(1);
+  }
+  // A folder the base moved into the members folder (its files deleted there, member files added): a merge
+  // that follows folder renames (merge.directoryRenames=true) carries a file the branch adds to that folder
+  // in as a member file this diff never shows. Git's default makes it a conflict; this closes it either way.
+  if (baseTip !== from) {
+    const baseRead = git('diff', '--no-renames', '--name-status', '-z', from, base);
+    if (!baseRead.ok) { say(`FAIL [member-check]: git could not list what changed since this branch split off from ${base} — ${HISTORY}, then run again`); process.exit(1); }
+    // Every folder a path sits in (never the top level, which git never renames).
+    const folders = (f) => { const out = []; for (let i = f.indexOf('/'); i > 0; i = f.indexOf('/', i + 1)) out.push(f.slice(0, i)); return out; };
+    // Git renames a folder only when it is gone on that side: the folders of the base's deletions, less any
+    // the base still holds — a folder that held only subfolders counts too (review 4).
+    const stillThere = new Set(git('ls-tree', '-r', '-d', '--name-only', '-z', base).out.split('\0').filter(Boolean));
+    const gone = new Set(names(baseRead, (s) => s === 'D').flatMap(folders).filter((d) => !stillThere.has(d)));
+    const movedIn = names(baseRead, (s) => s === 'A').some(memberish);
+    if (movedIn && gone.size && names(mineRead, (s) => s === 'A').some((f) => folders(f).some((d) => gone.has(d)))) {
+      say(`FAIL [member-check]: ${base} moved files into the members folder from a folder this branch adds a file to, and this git (older than 2.38) cannot tell where the merge puts it — merge ${base} into the branch, then push again`);
+      process.exit(1);
+    }
+  }
+}
+const diff = git('diff', '--no-renames', '--name-status', '-z', from, to);
+// Where every rule below reads the files (review 1): what the merge into the base holds — the tree git
+// built, or HEAD on an older git, where any case the merge could hold differently has failed closed above.
+const AT = to;
 if (!diff.ok) { say('FAIL [member-check]: git could not list the changed files — check the code out with full history (GitHub: actions/checkout with fetch-depth: 0; GitLab: GIT_DEPTH: "0"), and give a base this branch shares history with, then run again'); process.exit(1); }
 const parts = diff.out.split('\0').filter(Boolean);
 const all = [];
@@ -82,9 +161,9 @@ for (let i = 0; i + 1 < parts.length; i += 2) all.push({ status: parts[i][0], pa
 // How to take member files out, the one rule every message uses (#381 review 4): a file this PR brings in
 // (not on the base) is dropped from it; one the base holds — even one this PR edits — is deleted with git
 // rm, which any PR may do (a deletion is never refused).
-// "On the base" means where this branch split off from it — the commit the diff above starts from — not the
-// base's tip, which may have moved on (review 7). The path is read literally, never as a pattern.
-const split = git('merge-base', base, 'HEAD').out.trim() || base;
+// "On the base" means the commit the diff above starts from (review 7): the base itself when the merge was
+// built (#368), the one merge base on an older git. The path is read literally, never as a pattern.
+const split = from;
 const modeOnBase = (p) => {
   const t = spawnSync('git', ['--literal-pathspecs', 'ls-tree', '-z', split, '--', p], { encoding: 'utf8' });
   const [meta, at] = (t.status === 0 ? t.stdout : '').split('\0')[0].split('\t');
@@ -97,8 +176,9 @@ const plainOnBase = (p) => ['100644', '100755'].includes(modeOnBase(p));
 const q = (p) => (/^[A-Za-z0-9._\/@+-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
 // How to UNDO this PR's change to one file (review 6) — not to remove it: the base's copy, if the base holds
 // one, comes back; a file only this PR added goes. A teammate's file the PR edited is never deleted by it.
-// `<base>...HEAD` names that split point, so the command restores the copy the diff compares against.
-const undo = (p) => (onBase(p) ? `restore ${q(p)} to the base's copy (git checkout ${q(`${base}...HEAD`)} -- ${q(p)})`
+// The command restores the copy the diff compares against: the base's, or (older git) the merge base's.
+const restoreFrom = to === 'HEAD' ? `${base}...HEAD` : base;
+const undo = (p) => (onBase(p) ? `restore ${q(p)} to the base's copy (git checkout ${q(restoreFrom)} -- ${q(p)})`
   : `drop ${q(p)} from this pull request (git rm it on this branch)`);
 const removal = (paths) => {
   const here = paths.filter((p) => !onBase(p));
@@ -118,10 +198,10 @@ for (const { status, path } of all) {
   // `.sdlc/members` itself, a link where the folder goes, is the folder check's below, not a second spelling.
   else if ((f === '.sdlc/members' || f.startsWith(DIR)) && !path.startsWith(DIR) && path !== '.sdlc/members') fail(`${JSON.stringify(path)} is another spelling of ${DIR}, which a macOS or Windows checkout reads as a member file this gate does not judge — move it into the real ${DIR} folder (git mv), or delete it`);
 }
-// The folders themselves must be folders at HEAD, and nothing under them a link.
+// The folders themselves must be folders in the merge, and nothing under them a link.
 for (const p of ['.sdlc', '.sdlc/members']) {
-  const t = git('ls-tree', 'HEAD', '--', p).out.trim();
-  if (t && !t.startsWith('040000 ')) fail(`${p} is not a folder at HEAD (a link?), and member files are read only from a real ${DIR} — replace it with a real folder that holds the files themselves`);
+  const t = git('ls-tree', AT, '--', p).out.trim();
+  if (t && !t.startsWith('040000 ')) fail(`${p} is not a folder in this change (a link?), and member files are read only from a real ${DIR} — replace it with a real folder that holds the files themselves`);
 }
 // Names of one file (twins): keep ONE per group, take every other out (reviews 4-6). Kept first: a plain file
 // (a link is refused in this same run), then a copy the base holds (a new one was meant as another file),
@@ -141,7 +221,7 @@ function twins(group) {
   const instead = own ? `; or, if ${q(own.path)} is your own file as yad member add writes it, keep it and ${removal(group.filter((g) => g !== own).map((g) => g.path))}` : '';
   fail(`${group.map((g) => g.path).join(' and ')} are one file on macOS and Windows — keep ${q(keep)}: ${removal(group.filter((g) => g.path !== keep).map((g) => g.path))}${instead}`);
 }
-const tree = git('ls-tree', '-r', '-z', 'HEAD', '--', DIR).out.split('\0').filter(Boolean);
+const tree = git('ls-tree', '-r', '-z', AT, '--', DIR).out.split('\0').filter(Boolean);
 const folded = new Map();
 for (const line of tree) {
   const [meta, p] = line.split('\t');
@@ -236,7 +316,7 @@ for (const { status, path } of changed) {
   if (status === 'D') { say(`PASS [member-check]: ${path} removed (removing a member can only make the count larger)`); continue; }
   if (name.includes('/') || !name.endsWith('.json')) { fail(`${path}: only <platform>-<login>.json files belong in ${DIR} — move it to ${DIR}${platform}-<login>.json, or remove it`); continue; }
   if (name !== `${platform}-${author.toLowerCase()}.json`) { fail(`${path}: a PR may add or change only its author's own member file (${platform}-${author.toLowerCase()}.json) — ${undo(path)}, and change only ${platform}-${author.toLowerCase()}.json, which yad member add writes. To remove someone else, use yad member remove <login> --reason "<why>" in a pull request of its own`); continue; }
-  const rec = fileAt('HEAD', path);
+  const rec = fileAt(AT, path);
   if (!rec || !Array.isArray(rec.accounts)) { fail(`${path}: not a member file (no "accounts" list) — ${again(path)}`); continue; }
   const here = rec.accounts.filter(onProduct);
   if (here.length !== 1) { fail(`${path}: must hold exactly one ${platform} account on ${productHost}, the author's own (it holds ${here.length}) — ${again(path)}`); continue; }
@@ -258,12 +338,12 @@ for (const { status, path } of changed) {
   if (!rc) say(`PASS [member-check]: ${path} belongs to ${author}${added.length ? `; ${added.length} email(s), each proven by a commit GitHub attributes to them` : ''}`);
 }
 
-// No account on the Product's platform and no email in two files, across every member file at HEAD.
+// No account on the Product's platform and no email in two files, across every member file in the merge.
 const files = tree.map((l) => l.split('\t')[1]).filter((p) => p.endsWith('.json'));
 const accounts = new Map();
 const emails = new Map();
 for (const p of files) {
-  const rec = fileAt('HEAD', p);
+  const rec = fileAt(AT, p);
   // Keyed on each file's OWN account only (review 2): an OTHER account two files claim is not refused here —
   // the CLI matches it to nobody — or whoever claimed someone's account first would block its owner.
   const login = p.slice(DIR.length).replace(new RegExp(`^${platform}-`), '').replace(/\.json$/, '');
