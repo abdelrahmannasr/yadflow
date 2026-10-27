@@ -353,7 +353,8 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   which is optional for the Product.
 - **`skip`** is `null` when the step cannot be skipped. On a verified Product whose epic ledger CI already
   owns (it is on the default branch), `yad skip` refuses, so `skip` has `command: null` and a `note` saying
-  why.
+  why; the printed form says "optional, but it cannot be skipped here". When origin cannot be read, the
+  command is offered with a `note` that it may be refused, as `yad skip` itself warns.
 - **Re-opened work** (`reopened`): a step re-opened behind finished work (E41) is given to the agent too,
   and a re-opened review brings the person's approval steps with it.
 - **Words read from the ledger** (an artifact, a story, a repo) go into a command only when they are a

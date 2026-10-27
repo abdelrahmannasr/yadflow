@@ -204,7 +204,10 @@ test('an optional step on the epic\'s route can be skipped, and the skip is the 
     const g = buildGuide(T, { epic: 'EP-pay' });
     assert.equal(g.step.id, 'ui-design');
     assert.equal(g.step.mandatory, false);
-    assert.deepEqual(g.step.skip, { command: 'yad skip EP-pay ui-design --reason "<why>"', decidedBy: 'human' });
+    assert.equal(g.step.skip.command, 'yad skip EP-pay ui-design --reason "<why>"');
+    assert.equal(g.step.skip.decidedBy, 'human');
+    // A verified Product with no origin to read: offered, with the same caution `yad skip` prints.
+    assert.match(g.step.skip.note, /origin could not be read/);
     // At its review the step is already written: `yad skip` would refuse, so no skip is offered.
     moveTo(T, 'EP-pay', 'ui-design-review', 'todo');
     const atGate = buildGuide(T, { epic: 'EP-pay' }).step;
@@ -433,6 +436,10 @@ test('on a verified Product whose ledger CI owns, a skip is said to be refused, 
     assert.equal(g.step.mandatory, false);
     assert.equal(g.step.skip.command, null);
     assert.match(g.step.skip.note, /only CI writes it/);
+    const said = spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', '--dir', T], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+    const text = `${said.stdout}${said.stderr}`;
+    assert.match(text, /optional, but it cannot be skipped here: on this verified Product/);
+    assert.doesNotMatch(text, /null/);
     // A blocked step there is not the agent's to clear either.
     const st = readState(T, 'EP-pay');
     st.steps.find((s) => s.id === 'ui-design').status = 'blocked';
@@ -448,7 +455,19 @@ test('a ledger word goes into a command only as a plain path or id', () => {
   assert.equal(tok('foundation/', '<a>'), 'foundation/');
   for (const bad of ['a b', 'x;y', '../up', '-rf', '', null, '$(id)']) assert.equal(tok(bad, '<a>'), '<a>', String(bad));
   const g = buildGuide(null, { productElsewhere: '../my product' });
-  assert.equal(g.agent[0].run, 'yad guide --dir "../my product" --json');
+  assert.equal(g.agent[0].run, "yad guide --dir '../my product' --json");
+  assert.equal(buildGuide(null, { productElsewhere: "../it's!" }).agent[0].run, "yad guide --dir '../it'\\''s!' --json");
+});
+
+test('a blocked step re-opened behind finished work: the person resolves it, the agent clears it on request (not where CI owns the ledger)', () => {
+  const a = { epicId: 'EP-pay', kind: 'review-open', step: 'stories-review', status: 'in_review', artifact: 'stories/',
+    reopened: [{ step: 'ui-design', kind: 'blocked', status: 'blocked', record: { reason: 'waiting on design' } }] };
+  const p = playbook(a, { platform: null });
+  assert.ok(p.agent.some((x) => x.run === 'yad unblock EP-pay ui-design' && x.ask === 'only-when-asked'));
+  assert.ok(p.person.some((x) => x.act === 'unblock' && /ui-design was re-opened behind finished work, and is blocked/.test(x.why) && /waiting on design/.test(x.steps[0])));
+  const v = playbook(a, { platform: 'github', verified: true, ciOwns: true });
+  assert.ok(!v.agent.some((x) => (x.run ?? '').startsWith('yad unblock')));
+  assert.ok(v.person.some((x) => x.act === 'unblock' && x.steps.some((st) => /yad unblock` refuses/.test(st))));
 });
 
 // ---- the command ----------------------------------------------------------------------------------------
