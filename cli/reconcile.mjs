@@ -252,6 +252,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const platformByRoot = new Map([[root, productSettings?.platform]]);
   for (const repo of registry.repos) {
     const repoRoot = path.resolve(root, repo.path);
+    // A monorepo entry (`path: "."`) is the Product itself: its settings are the Product's.
+    if (repoRoot === root) continue;
     defByRoot.set(repoRoot, repo.default_branch);
     platformByRoot.set(repoRoot, repo.platform);
   }
@@ -265,8 +267,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   let held = new Set();
   let reached = null;
   if (openPr) {
-    reached = new Set(updateTargets(root).map((t) => t.root));
-    const checks = updateTargets(root).map((t) => [t.root, updatePrBlocker(t.root, { defaultBranch: t.defaultBranch ?? defByRoot.get(t.root), productRoot: root })]);
+    const targets = updateTargets(root);
+    reached = new Set(targets.map((t) => t.root));
+    const checks = targets.map((t) => [t.root, updatePrBlocker(t.root, { defaultBranch: t.defaultBranch ?? defByRoot.get(t.root), productRoot: root })]);
     const stop = checks.filter(([, b]) => b && b.kind !== 'open');
     const row = (r, b) => ({ label: b.label, product: r === root, branch: b.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: b.kind !== 'open', reason: b.kind });
     if (stop.length) {

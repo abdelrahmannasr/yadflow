@@ -346,19 +346,23 @@ const behindOf = (stamped, running) => {
 };
 const versionIn = (text) => { try { const v = JSON.parse(text)?.version; return typeof v === 'string' ? v : null; } catch { return null; } };
 
-function repoInstall(t, { running, productRoot, all }) {
+function repoInstall(t, { running, productRoot, all, first = null }) {
   const file = t.product ? PROJECT_FILES.version : MANAGED_LEDGER;
   const local = versionIn((() => { try { return fs.readFileSync(path.join(t.root, file), 'utf8'); } catch { return ''; } })());
-  // A connected repo with no managed ledger has never been reached by an update: behind.
-  const behind = !t.product && !local ? true : behindOf(local, running);
-  const r = { label: t.product ? 'product' : clean(t.name), root: t.root, version: local ? clean(local) : null, behind };
+  // A connected repo with no managed ledger has had no managed file written yet (its checks were never wired):
+  // `yad update` never does that one-time setup (`yad check --fix` and the yad-checks skill do), so it is not
+  // behind, and not upkeep — counting it would advise an update that never changes it.
+  const behind = !t.product && !local ? null : behindOf(local, running);
+  const r = first ?? { label: t.product ? 'product' : clean(t.name), root: t.root, version: local ? clean(local) : null, behind };
   if (!behind && !all) return r;
+  if (first?.table) return first;
   const tbl = branchTable(t.root, { defaultBranch: t.defaultBranch });
   if (!tbl.repo) return { ...r, blocker: { kind: 'not-a-repo', message: 'not its own git repo (missing or renamed clone?)' } };
   const git = productGit(t.root);
   const shown = behind && tbl.tracked ? git('show', `refs/remotes/origin/${tbl.base}:${file}`) : { ok: false };
   const merged = shown.ok && behindOf(versionIn(shown.stdout), running) === false;
-  return { ...r, table: tbl, merged, blocker: merged ? null : updatePrBlocker(t.root, { defaultBranch: t.defaultBranch, version: running, productRoot, network: false }) };
+  // The blocker is read for a merged repo too: `yad update --open-pr` checks every repo it reaches, merged or not.
+  return { ...r, table: tbl, merged, blocker: updatePrBlocker(t.root, { defaultBranch: t.defaultBranch, version: running, productRoot, network: false, table: tbl }) };
 }
 
 // Every repo `yad update --open-pr` reaches (`updateTargets`, the list it checks), read the same way. When
@@ -367,7 +371,7 @@ export function installState(root, running = VERSION) {
   const targets = updateTargets(root);
   const first = targets.map((t) => repoInstall(t, { running, productRoot: root, all: false }));
   const any = first.some((r) => r.behind);
-  const rows = any ? targets.map((t) => repoInstall(t, { running, productRoot: root, all: true })) : first;
+  const rows = any ? targets.map((t, i) => repoInstall(t, { running, productRoot: root, all: true, first: first[i] })) : first;
   const product = rows.find((r) => r.label === 'product');
   return { project: product?.version ?? null, yadflow: running, behind: any ? true : product?.behind ?? null, repos: rows.filter((r) => r.behind), all: rows };
 }
@@ -387,7 +391,8 @@ function upkeepFor(install, { platform, cwd }) {
   const product = install.all.find((r) => r.label === 'product');
   const local = !platform || ['no-origin', 'unborn', 'not-a-repo'].includes(product?.blocker?.kind);
   // `yad update --open-pr` refuses when ANY repo it reaches cannot take a PR/MR, behind or not.
-  const stuck = install.all.filter((r) => !r.merged && r.blocker && r.blocker.kind !== 'open' && !(local && r === product));
+  // A merged repo that is not where git can fast-forward is said once, as a merged one (below).
+  const stuck = install.all.filter((r) => r.blocker && r.blocker.kind !== 'open' && !(local && r === product) && !(r.merged && !ff(r)));
   const onReview = open.filter((r) => r.blocker?.kind === 'open');
   // The repos still wanting the update (behind, not merged, not on review): what a run would write.
   const needs = open.filter((r) => r.blocker?.kind !== 'open');
@@ -408,7 +413,7 @@ function upkeepFor(install, { platform, cwd }) {
   }
   if (local && needs.length) {
     person.push({ act: 'choose', why: 'there is no platform or origin to open an update PR/MR on, so how it is published is the person\'s call', steps: ['Run `yad update`, then commit and share the changes the way this team does.'], commands: ['yad update'], verify: 'yad guide --json' });
-  } else if (needs.length && !stuck.length) {
+  } else if (needs.length && !stuck.length && !blockedMerged.length) {
     // `yad update --open-pr` is all or nothing, and leaves the repos on review alone.
     agent.push(agentRun('yad update --open-pr', `the files yadflow manages in ${needs.map(where).join(', ')} were written by an older yadflow, and this is v${install.yadflow}: bring them up to date on a branch in each repo and open a PR/MR for each. Do this before the step below`));
     person.push({ act: 'approve-merge', why: 'the update lands through review, like any change', steps: ['Merge each `chore(yad-update)` PR/MR once its checks pass, then tell the agent.'], commands: [], verify: 'yad guide --json' });

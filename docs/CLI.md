@@ -393,16 +393,17 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   cannot be cleared once the epic's ledger is on the default branch (read from origin, as `yad unblock`
   reads it), and the guide says so.
 - **`upkeep`**: when `situation.install` says a repo's managed files were written by an older yadflow
-  (`behind: true`; the Product's `.sdlc/cli-version.json` and each connected repo's `.sdlc/managed.json`,
-  whose absence means an update never reached that repo;
+  (`behind: true`; the Product's `.sdlc/cli-version.json` and each connected repo's `.sdlc/managed.json`;
+  a repo with no managed ledger has never had its checks wired, which `yad update` never does, so it is
+  not upkeep — `yad check --fix` and the yad-checks skill wire it;
   versions compared by semver, pre-releases label by label), every answer carries `upkeep`.
   `situation.install.repos` lists each repo not reached, with `merged` and `blocked`. Each repo is read from
   git too (origin as last fetched, no network), so the guide never gives a step that would fail or loop:
   - merged on origin, not pulled here: the agent runs `git -C <repo> pull --ff-only` when the repo is on
     its default branch with no local commits; otherwise the person switches it and pulls;
   - any repo `yad update --open-pr` reaches that cannot take a PR/MR now (a feature branch, a detached HEAD,
-    local commits origin lacks), behind or not: the person fixes it first, with the reason per repo, since
-    the run would refuse;
+    local commits origin lacks), behind, merged or current: the person fixes it first, with the reason per
+    repo, and the guide does not advise the run until none is left, since the run would refuse;
   - on review (its update branch is here or on origin): the person merges it; the agent then runs
     `git fetch origin`, so the guide sees the merge;
   - no platform, or a Product with no origin: the person runs `yad update` and shares it their way;

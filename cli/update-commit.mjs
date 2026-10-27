@@ -273,9 +273,10 @@ export function branchTable(root, { defaultBranch } = {}) {
 //   kind `open`: the update is already on review (its branch is here, or on origin from another clone) —
 //   nothing to do but merge it. Every other kind needs the person to fix something first.
 // `network: false` (the guide) leaves out the one network read, `git ls-remote`.
-export function updatePrBlocker(root, { defaultBranch, version = VERSION, productRoot = root, network = true } = {}) {
+export function updatePrBlocker(root, { defaultBranch, version = VERSION, productRoot = root, network = true, table = null } = {}) {
   const label = repoLabel(productRoot, root);
-  const t = branchTable(root, { defaultBranch });
+  // `table`: the caller's own read of `branchTable`, so it is not asked twice.
+  const t = table ?? branchTable(root, { defaultBranch });
   if (!t.repo) return { kind: 'not-a-repo', label, message: 'not its own git repo (missing or renamed clone?)' };
   if (!t.born) return { kind: 'unborn', label, message: `has no commit yet — commit and push '${t.base}' first` };
   if (t.detached) return { kind: 'detached', label, message: `a detached HEAD — check out '${t.base}' first` };
@@ -347,12 +348,16 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
     // The branch is dropped, so a run after the push problem is fixed tries again rather than reading it as
     // "already on review". The update stays in the working tree, unstaged, deletions included: the branch is
     // moved back to the base with the files left as they are, then the switch to the base carries them.
-    const kept = git('reset', '-q', '--mixed', base).ok && back();
-    if (kept) git('branch', '-q', '-D', head);
+    const where = isProduct ? '.' : label;
+    const reset = git('reset', '-q', '--mixed', base).ok;
+    const home = reset && back();
+    if (home) git('branch', '-q', '-D', head);
     fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
-    hand(kept
-      ? `fix the push (access, network) and run the update again; the update is left in ${isProduct ? '.' : label}'s working tree, uncommitted (\`git restore .\` drops it)`
-      : `the update is committed on ${head} in ${isProduct ? '.' : label}; fix the push, then push that branch (\`git push -u origin ${head}\`) and open a PR/MR from it`);
+    hand(home
+      ? `fix the push (access, network) and run the update again; the update is left in ${where}'s working tree, uncommitted (\`git restore .\` drops it)`
+      : reset
+        ? `the update is left uncommitted in ${where}, which is still on ${head}: run \`git switch ${base}\` there (the changes come with it), then \`git branch -D ${head}\`, fix the push and run the update again`
+        : `the update is committed on ${head} in ${where}; fix the push, then push that branch (\`git push -u origin ${head}\`) and open a PR/MR from it`);
     process.exitCode = 1;
     return out({ committed: false, error: true });
   }

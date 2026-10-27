@@ -710,13 +710,31 @@ test('--open-pr reaches every cloned repo: one on a feature branch stops it even
     // And the other way: the Product current but on an epic branch, the app behind.
     put(path.join(T, '.sdlc/cli-version.json'), { version: VERSION });
     git(A, ['checkout', '-q', 'main']);
-    fs.rmSync(path.join(A, '.sdlc'), { recursive: true, force: true });
+    put(path.join(A, '.sdlc/managed.json'), { version: '4.0.0', files: {} });
     git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: stamp']); git(T, ['push', '-q']);
     git(T, ['checkout', '-q', '-b', 'epic/pay']);
     const g2 = buildGuide(T);
-    assert.deepEqual(g2.situation.install.repos.map((x) => x.repo), ['app'], 'an app with no ledger was never reached');
+    assert.deepEqual(g2.situation.install.repos.map((x) => x.repo), ['app']);
     assert.ok(!g2.upkeep.agent.some((x) => (x.run ?? '').includes('--open-pr')));
     assert.ok(g2.upkeep.person[0].steps.some((x) => /^the Product: on 'epic\/pay'/.test(x)));
+    // A repo whose checks were never wired has no managed ledger: not upkeep (`yad update` never wires one).
+    git(T, ['checkout', '-q', 'main']);
+    fs.rmSync(path.join(A, '.sdlc'), { recursive: true, force: true });
+    assert.equal(buildGuide(T).upkeep, null);
+    // The Product behind, the app's update merged on origin but the clone on a feature branch: the run would
+    // refuse, so the guide never advises it; the person moves the app first.
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: old stamp']); git(T, ['push', '-q']);
+    put(path.join(A, '.sdlc/managed.json'), { version: '4.0.0', files: {} });
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: old ledger']); git(A, ['push', '-q']);
+    git(A, ['checkout', '-q', '-b', 'feat/y']);
+    git(A, ['checkout', '-q', '-b', 'tmp']);
+    put(path.join(A, '.sdlc/managed.json'), { version: VERSION, files: {} });
+    git(A, ['commit', '-q', '-am', 'chore(yad-update): sync']); git(A, ['push', '-q', 'origin', 'tmp:main']);
+    git(A, ['checkout', '-q', 'feat/y']); git(A, ['fetch', '-q', 'origin']);
+    const g3 = buildGuide(T);
+    assert.ok(!g3.upkeep.agent.some((x) => (x.run ?? '').includes('--open-pr')), JSON.stringify(g3.upkeep));
+    assert.ok(g3.upkeep.person[0].steps.some((x) => /^app: the update merged on origin, but this clone is on 'feat\/y'/.test(x)), JSON.stringify(g3.upkeep));
   } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
