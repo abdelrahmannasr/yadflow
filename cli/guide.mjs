@@ -19,13 +19,14 @@
 import path from 'node:path';
 import { c, log, info, hand, readJSON, forTerminal, exists } from './lib.mjs';
 import { isVerifiedLedger, productConfigPath } from './manifest.mjs';
-import { DEFAULT_LIFECYCLE, DRIVERS, GATE_SUFFIX } from './lifecycle.mjs';
+import { DEFAULT_LIFECYCLE, DRIVERS, GATE_SUFFIX, artifactKey } from './lifecycle.mjs';
 import { PRODUCT_EPICS, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds } from './epic-state.mjs';
 import { epicAction, soloOf } from './next.mjs';
 import { buildStatus } from './status.mjs';
 import { recommendationsFor, bindCommand } from './recommend.mjs';
 import { TOOLBOX } from './toolbox.mjs';
 import { RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor } from './agent-rules.mjs';
+import { seededSlugs } from './hook.mjs';
 
 export const GUIDE_VERSION = 1;
 
@@ -64,7 +65,11 @@ const recordedDriver = (state, stepId) => {
 
 // A word read from the ledger that goes into a command the agent or the person will type: a plain path or
 // id, or the placeholder. Anything else (a space, a quote, a `;`) never reaches a command line.
-const tok = (x, placeholder) => (typeof x === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(x) && !x.split('/').includes('..') ? x : placeholder);
+export const tok = (x, placeholder) => (typeof x === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(x.replace(/_/g, '-')) && !x.split('/').includes('..') ? x : placeholder);
+
+// A folder for a command line: as it is when it is a plain path, else in double quotes with `"`, `\`, `$`
+// and backquote escaped.
+const shellPath = (p) => (/^[A-Za-z0-9._/~-]+$/.test(p) ? p : `"${p.replace(/(["\\$`])/g, '\\$1')}"`);
 
 // One command the agent runs, with what the rules let it do with it.
 const agentRun = (line, why) => {
@@ -101,7 +106,7 @@ function reviewHandOff(a, { verified, platform, solo, epic, opening = false }) {
     act: 'approve-merge',
     why: WHY_APPROVAL,
     steps: [
-      `Read ${art}.`,
+      `${opening ? 'Once the agent has marked the review open, read' : 'Read'} ${art}.`,
       solo ? 'In solo mode no approval is counted: advance it when you are happy with it.' : 'Each reviewer records an approval under their own name.',
       'Then advance the step. In Claude Code, type the commands with a leading `!` so they run as you.',
     ],
@@ -111,6 +116,29 @@ function reviewHandOff(a, { verified, platform, solo, epic, opening = false }) {
     ],
     verify: `yad guide ${epic} --json`,
   }];
+}
+
+// A review gate: what the agent runs and what the person does. With no platform, `yad gate open` only marks
+// the review open here, and the review stays a `review-open` action until the person advances it: once it
+// is open there is nothing left for the agent to run. On a verified Product the PR/MR is recorded only at the
+// merge, so the review stays `review-open` while it is open: the agent opens it once.
+function reviewWork(a, ctx, epic, also = null) {
+  const art = tok(a.artifact, '<artifact>');
+  const add = (w) => (also ? `${also}: ${w}` : w);
+  if (a.kind === 'review-sync') {
+    return {
+      agent: [agentRun(`yad gate sync ${epic} ${art}`, add('read the review\'s state back after the person acted; it advances the step only once the review passed'))],
+      person: reviewHandOff(a, { ...ctx, epic }),
+    };
+  }
+  const branch = `review/${epic}/${tok(artifactKey(String(a.artifact ?? '')), '<artifact>')}`;
+  return {
+    agent: !ctx.platform && a.status === 'in_review' ? []
+      : [agentRun(`yad gate open ${epic} ${art}`, add(ctx.platform
+        ? `open the review PR/MR. Its branch \`${branch}\` must be on origin first: it is the agent's own branch, so push it (\`git push -u origin ${branch}\`); \`yad gate open\` never pushes it. If the review is already open, do not open another: \`yad gate sync\` finds it from the review branch`
+        : 'mark the review open; with no platform nothing leaves this machine'))],
+    person: reviewHandOff(a, { ...ctx, epic, opening: !!ctx.platform || a.status !== 'in_review' }),
+  };
 }
 
 // The agent's commands and the person's steps for one action (the action kinds of `nextAction`).
@@ -136,27 +164,14 @@ export function playbook(a, ctx) {
           person: [{ act: 'answer', why: 'the artifact records the person\'s decisions', steps: ['Answer the agent\'s questions, and read the draft before it goes to review.'], commands: [], verify: null }],
         };
       case 'review-open':
-        // With no platform, `yad gate open` only marks the review open here, and the review stays a
-        // `review-open` action until the person advances it; once it is open there is nothing to run again.
-        // On a verified Product the PR/MR is recorded only at the merge, so the review stays `review-open`
-        // while it is open: the agent opens it once.
-        return {
-          agent: !ctx.platform && a.status === 'in_review' ? []
-            : [agentRun(`yad gate open ${epic} ${art}`, ctx.platform
-              ? 'open the review PR/MR (its branch must be on origin; `yad open-pr` from that branch pushes it and opens the review). If it is already open, do not open another: `yad gate sync` finds it from the review branch'
-              : 'mark the review open; with no platform nothing leaves this machine')],
-          person: reviewHandOff(a, { ...ctx, epic, opening: !!ctx.platform || a.status !== 'in_review' }),
-        };
       case 'review-sync':
-        return {
-          agent: [agentRun(`yad gate sync ${epic} ${art}`, 'read the review\'s state back after the person acted; it advances the step only once the review passed')],
-          person: reviewHandOff(a, { ...ctx, epic }),
-        };
+        return reviewWork(a, ctx, epic);
       case 'blocked': {
         const reason = a.record?.reason ? `: ${clean(a.record.reason)}` : '';
         // On a verified Product `yad unblock` refuses once the epic's ledger is on the default branch, and CI
-        // has no step for it yet (the same words `yad next` prints).
-        if (ctx.verified) {
+        // has no step for it yet (the same words `yad next` prints). Before that, the ledger is still the
+        // person's to write.
+        if (ctx.ciOwns) {
           return { agent: [], person: [{ act: 'unblock', why: 'the step waits on something outside the agent\'s reach', steps: [`Resolve the blocker${reason}.`, 'On a verified Product only CI can clear it once the epic\'s ledger is on the default branch, and CI has no step for that yet (`yad unblock` refuses). Decide with the team how to go on.'], commands: [], verify: null }] };
         }
         return {
@@ -186,16 +201,26 @@ export function playbook(a, ctx) {
   // Work open beside the chain's own step: the test-cases track, and steps re-opened behind finished work.
   const beside = [];
   if (a.parallel?.skill) beside.push(agentSkill(a.parallel.skill, `the ${tok(a.parallel.step, 'parallel')} track runs beside this step: write ${tok(a.parallel.artifact, 'its artifact')}`));
+  const besidePerson = [];
   for (const l of Array.isArray(a.reopened) ? a.reopened : []) {
     const ls = tok(l?.step, '<step>');
-    if (l?.kind === 'author' && l.skill) beside.push(agentSkill(l.skill, `${ls} was re-opened behind finished work: write ${tok(l.artifact, 'its artifact')} again`));
-    else if (l?.kind === 'review-open' || l?.kind === 'review-sync') beside.push(agentRun(`yad gate ${l.kind === 'review-open' ? 'open' : 'sync'} ${epic} ${tok(l.artifact, '<artifact>')}`, `${ls} was re-opened behind finished work`));
+    const why = `${ls} was re-opened behind finished work`;
+    if (l?.kind === 'author') {
+      const chain = Array.isArray(l.skills) ? l.skills : l.skill ? [l.skill] : [];
+      for (const sk of chain) beside.push(agentSkill(sk, `${why}: write ${tok(l.artifact, 'its artifact')} again`));
+    } else if (l?.kind === 'review-open' || l?.kind === 'review-sync') {
+      const w = reviewWork({ ...l, epicId: epic }, ctx, epic, why);
+      beside.push(...w.agent);
+      besidePerson.push(...w.person);
+    } else if (l?.kind === 'blocked') {
+      besidePerson.push({ act: 'unblock', why: `${why}, and is blocked${l.record?.reason ? `: ${clean(l.record.reason)}` : ''}`, steps: ['Resolve the blocker, then tell the agent.'], commands: [], verify: `yad guide ${epic} --json` });
+    }
   }
-  return { agent: [...base.agent, ...beside], person: base.person };
+  return { agent: [...base.agent, ...beside], person: [...base.person, ...besidePerson] };
 }
 
 // The step block: the facts, mandatory or skippable, who does it, and the skills and tools that fit.
-function stepBlock(a, state) {
+function stepBlock(a, state, ctx = {}) {
   const facts = a.kind === 'build' ? buildFacts() : stepFacts(a.step);
   const authorId = facts?.gate ? facts.reviews : a.step;
   const author = Array.isArray(state?.steps) ? state.steps.find((s) => s?.id === authorId) : null;
@@ -216,7 +241,10 @@ function stepBlock(a, state) {
     actionKind: a.kind,
     brief: facts?.description ?? null,
     mandatory: !facts || productLevel ? null : !skippable,
-    skip: skippable ? { command: `yad skip ${a.epicId} ${tok(authorId, '<step>')} --reason "<why>"`, decidedBy: 'human' } : null,
+    // On a verified Product whose ledger CI already owns, `yad skip` refuses (cli/skip.mjs): said, not offered.
+    skip: !skippable ? null : ctx.ciOwns
+      ? { command: null, decidedBy: 'human', note: 'on this verified Product the epic\'s ledger is on the default branch, and only CI writes it; CI has no step for a skip yet (`yad skip` refuses)' }
+      : { command: `yad skip ${a.epicId} ${tok(authorId, '<step>')} --reason "<why>"`, decidedBy: 'human' },
     driver: facts?.gate ? 'human' : recordedDriver(state, a.step) ?? facts?.driver ?? null,
     ...(facts?.gate ? { advance: facts.advance } : {}),
     status: clean(a.status ?? null),
@@ -274,10 +302,10 @@ function noProduct() {
 const epicChoices = (m) => (m.epics || []).filter((e) => !e.problem).map((e) => ({ epic: e.epic, product: !!e.product, step: e.step, kind: e.kind, next: clean(e.next) }));
 
 // An epic whose ledger does not load: the answer is `yad doctor`, never "start another epic".
-const broken = (base, situation, problems) => ({
-  ...base, situation: { ...situation, stage: 'broken' }, problems, step: null,
+const broken = (base, situation, problems, epics = []) => ({
+  ...base, situation: { ...situation, stage: 'broken' }, problems, epics, step: null,
   agent: [agentRun('yad doctor', 'find what is wrong with the ledger; it names the fix')],
-  person: [{ act: 'choose', why: 'a ledger that does not load is not fixed by guessing', steps: ['Read what `yad doctor` reports with the agent, and decide the fix.'], commands: [], verify: 'yad guide --json' }],
+  person: [{ act: 'choose', why: 'a ledger that does not load is not fixed by guessing', steps: ['Read what `yad doctor` reports with the agent, and decide the fix.', ...(epics.length ? ['Or pick one of the other open epics to work on meanwhile (`yad guide <epic> --json`).'] : [])], commands: [], verify: 'yad guide --json' }],
   then: 'run `yad guide --json` again once `yad doctor` is clean',
 });
 
@@ -292,9 +320,10 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   const base = { guideVersion: GUIDE_VERSION, rules: RULES, humanOnly: HUMAN_ONLY_ACTS, never: NEVER };
   if (!root && productElsewhere) {
     const where = clean(productElsewhere);
+    const q = shellPath(where);
     return { ...base, situation: { stage: 'product-elsewhere', product: where }, step: null,
-      agent: [agentRun(`yad guide --dir ${where} --json`, 'the Product is one folder away: read it from there, never start a second one')],
-      person: [], then: `work from the Product (cd ${where}), or pass --dir ${where}` };
+      agent: [agentRun(`yad guide --dir ${q} --json`, 'the Product is one folder away: read it from there, never start a second one')],
+      person: [], then: `work from the Product (cd ${q}), or pass --dir ${q}` };
   }
   if (!root) return { ...base, situation: { stage: 'no-product', product: null }, ...noProduct() };
   const productConfig = readJSON(productConfigPath(root), null);
@@ -310,7 +339,8 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   const chosen = epic ?? m.here?.epic ?? null;
   if (chosen) {
     if (!isValidEpicId(chosen) || !exists(path.join(epicRoot(root, chosen), '.sdlc', 'state.json'))) {
-      return { ...base, situation: { ...situation, stage: 'ready' }, error: `no epic ${clean(chosen)} here`, epics: epicChoices(m), step: null, agent: [], person: [], then: 'ask the person which epic they mean' };
+      return { ...base, ok: false, error: `no epic ${clean(chosen)} here`, code: null, hint: 'ask the person which epic they mean; `epics` lists the open ones',
+        situation: { ...situation, stage: 'unknown-epic' }, epics: epicChoices(m), step: null, agent: [], person: [], then: 'ask the person which epic they mean' };
     }
     let state;
     let action;
@@ -321,11 +351,15 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
     } catch {
       return broken(base, situation, [{ epic: chosen, problem: 'its ledger does not load — run `yad doctor`' }]);
     }
-    const { agent, person } = playbook(action, ctx);
-    return { ...base, situation: { ...situation, stage: 'in-epic' }, step: stepBlock(action, state), agent, person, then: thenFor(person, chosen) };
+    // Does CI already own this epic's ledger (verified, and the ledger is on origin's default branch)? The
+    // same read `yad skip` and `yad unblock` make (cli/skip.mjs). Unknown (origin not read) is not "yes".
+    const seeded = verified ? seededSlugs(root, productConfig, runner) : null;
+    const ectx = { ...ctx, ciOwns: !!seeded && seeded.has(chosen.toLowerCase()) };
+    const { agent, person } = playbook(action, ectx);
+    return { ...base, situation: { ...situation, stage: 'in-epic' }, step: stepBlock(action, state, ectx), agent, person, then: thenFor(person, chosen) };
   }
   const problems = (m.epics || []).filter((e) => e.problem).map((e) => ({ epic: e.epic, problem: clean(e.problem) }));
-  if (problems.length) return broken(base, situation, problems);
+  if (problems.length) return broken(base, situation, problems, epicChoices(m));
   const open = epicChoices(m);
   if (open.length > 1) {
     return { ...base, situation: { ...situation, stage: 'choose-epic' }, epics: open, step: null, agent: [],
@@ -362,6 +396,9 @@ export function printGuide(g) {
     for (const e of g.epics) info(`${e.epic}  ${c.dim(e.next ?? '')}`);
   } else if (g.situation?.stage === 'no-product') {
     log(`\n  ${c.bold('No yadflow Product here yet.')}`);
+  } else if (g.situation?.stage === 'unknown-epic') {
+    log(`\n  ${c.bold(g.error)}`);
+    for (const e of g.epics) info(`${e.epic}  ${c.dim(e.next ?? '')}`);
   } else if (g.situation?.stage === 'product-elsewhere') {
     log(`\n  ${c.bold(`The Product is at ${g.situation.product}.`)}`);
   } else if (g.situation?.stage === 'broken') {
@@ -379,6 +416,7 @@ export function printGuide(g) {
 
 export async function runGuide(root, { epic = null, cwd, json = false, runner, productElsewhere = null } = {}) {
   const g = buildGuide(root, { epic, cwd, runner, productElsewhere });
+  if (g.ok === false) process.exitCode = 1;
   if (json) return g;
   printGuide(g);
   return undefined;
