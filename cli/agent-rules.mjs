@@ -7,16 +7,21 @@
 //
 //   read         reads only. The agent runs it whenever it needs to know something.
 //   local-write  writes files in this clone, and nothing leaves the machine. The agent runs it.
-//   open-pr      pushes the agent's own branch or opens/updates a PR/MR. The agent runs it without asking
-//                and says what it did. A merge is never this class.
+//   open-pr      pushes the agent's own branch, or opens, updates or comments on a review or member PR/MR.
+//                The agent runs it without asking and says what it did. A merge is never this class. The
+//                branch yad pushes for `member add` goes up with `--force-with-lease`: that is yad's own
+//                branch, not the person's, so it is not the force-push the rules forbid.
+//   task-pr      opens a task's PR/MR (`yad open-pr`, `yad ship`). `yad dial open-pr` decides (#356): on
+//                `auto` the agent opens it without asking; on `human`, the default, it asks first.
 //   default-push pushes straight to the default branch. The agent asks the person every time, names what
 //                will be pushed, and runs it only on a yes.
 //   public-post  posts to a public place (`yad report` files an issue upstream). The agent shows the exact
 //                text and asks every time.
 //   human-only   an approval, or another act only the person may make. The agent never runs it: it gives
 //                the person the exact command and steps, waits, then confirms by reading.
-//   on-request   changes how much the agent itself may do (a dial, the mode, the kill switch). The agent
-//                runs it only when the person asked for that exact change.
+//   on-request   changes how much the agent itself may do (a dial, the mode, the kill switch), or is a
+//                decision about the work that is the person's (skip, defer, unblock). The agent runs it
+//                only when the person asked for that exact change.
 //   ci-only      run by CI; a person runs it by hand only to recover. The agent does not run it.
 //   internal     called by the agent harness, never typed.
 //   removed      refuses with the command that replaced it.
@@ -24,15 +29,17 @@
 // A FLAG CAN RAISE THE CLASS. `yad check` reads; `yad check --fix` writes. `yad update` writes;
 // `yad update --push` pushes to the default branch. The highest class a given flag reaches wins.
 
-export const CLASSES = ['read', 'local-write', 'open-pr', 'default-push', 'public-post', 'human-only', 'on-request', 'ci-only', 'internal', 'removed'];
+export const CLASSES = ['read', 'local-write', 'open-pr', 'task-pr', 'default-push', 'public-post', 'human-only', 'on-request', 'ci-only', 'internal', 'removed'];
 
 // Whether the agent asks first, by class. `never`: it just runs it. `each-time`: it asks before every run.
-// `person-runs`: the person runs it. `only-when-asked`: the person must have asked for exactly this.
+// `per-dial`: ask unless `yad dial open-pr` is `auto`. `person-runs`: the person runs it.
+// `only-when-asked`: the person must have asked for exactly this.
 // `not-by-agent`: CI's, or the harness's.
 export const ASK = {
   read: 'never',
   'local-write': 'never',
   'open-pr': 'never',
+  'task-pr': 'per-dial',
   'default-push': 'each-time',
   'public-post': 'each-time',
   'human-only': 'person-runs',
@@ -52,7 +59,8 @@ export const COMMAND_CLASS = {
   init: { class: 'local-write' },
   // `join` clones, then runs `member add`, which pushes a branch and opens a PR/MR.
   join: { class: 'open-pr' },
-  check: { class: 'read', flags: { fix: 'local-write' } },
+  // `check --fix --push` is `update --push` (bin/yad.mjs): it pushes to every repo's default branch.
+  check: { class: 'read', flags: { fix: 'local-write', push: 'default-push' } },
   update: { class: 'local-write', flags: { push: 'default-push' } },
   doctor: { class: 'read' },
   migrate: { class: 'read', flags: { apply: 'local-write' } },
@@ -73,18 +81,23 @@ export const COMMAND_CLASS = {
   'foundation status': { class: 'read' },
   status: { class: 'read' },
   next: { class: 'read' },
-  skip: { class: 'local-write' },
-  unskip: { class: 'local-write' },
-  defer: { class: 'local-write' },
-  undefer: { class: 'local-write' },
-  unblock: { class: 'local-write' },
+  // Skipping, deferring or clearing a blocker is a decision about the work: the person's.
+  skip: { class: 'on-request' },
+  unskip: { class: 'on-request' },
+  defer: { class: 'on-request' },
+  undefer: { class: 'on-request' },
+  unblock: { class: 'on-request' },
   // `yad dial` with no `--to` only reads the dial.
   dial: { class: 'read', flags: { to: 'on-request' } },
-  mode: { class: 'on-request' },
+  // `yad mode` alone reads the mode; `yad mode solo|team` switches it.
+  mode: { class: 'read' },
+  'mode solo': { class: 'on-request' },
+  'mode team': { class: 'on-request' },
   kill: { class: 'on-request' },
   unkill: { class: 'on-request' },
   'gate open': { class: 'open-pr' },
-  'gate sync': { class: 'local-write' },
+  // With a platform and a local ledger it may post @-mention nudges to the reviewers.
+  'gate sync': { class: 'open-pr' },
   'gate comments': { class: 'read' },
   'gate status': { class: 'read' },
   'gate review': { class: 'read' },
@@ -113,8 +126,8 @@ export const COMMAND_CLASS = {
   'build done': { class: 'local-write' },
   'build sync': { class: 'local-write' },
   'run checks': { class: 'local-write' },
-  'open-pr': { class: 'open-pr' },
-  ship: { class: 'open-pr' },
+  'open-pr': { class: 'task-pr' },
+  ship: { class: 'task-pr' },
   checkpoint: { class: 'local-write', flags: { push: 'default-push' } },
   // Pushes the person's own `yad/wip/*` capture branch, never the default branch.
   capture: { class: 'open-pr' },
@@ -146,8 +159,8 @@ export const COMMAND_CLASS = {
   'docs list': { class: 'read' },
   'docs build': { class: 'local-write' },
   'docs sync': { class: 'local-write' },
-  // Publishes the doc sites.
-  'docs deploy': { class: 'default-push' },
+  // Builds the sites here; publishing is the CI workflow's, on a push.
+  'docs deploy': { class: 'local-write' },
   thread: { class: 'read' },
   'reconcile check': { class: 'read' },
   'reconcile refresh': { class: 'local-write' },
@@ -157,7 +170,7 @@ export const COMMAND_CLASS = {
 
 // The rank used when a flag raises a class: the higher of the two wins. `human-only` and `on-request`
 // outrank every push; a removed or internal command is never raised.
-const STRENGTH = ['read', 'local-write', 'open-pr', 'public-post', 'default-push', 'on-request', 'human-only'];
+const STRENGTH = ['read', 'local-write', 'open-pr', 'task-pr', 'public-post', 'default-push', 'on-request', 'human-only'];
 const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 
 // The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>`.
@@ -206,9 +219,10 @@ export const RULES = [
   { id: 'read-first', text: 'Before each step, run `yad guide --json` (or `yad guide <epic> --json`) and act only on what it says.' },
   { id: 'brief', text: 'Before doing a step, tell the person what it is for, whether it is mandatory or can be skipped, who does it, and the skill or tool you will use.' },
   { id: 'human-only', text: 'Never do a human-only act. Give the exact command and steps, wait, then confirm by reading (the guide names the command that confirms it).' },
-  { id: 'pushes', text: 'Commit, push your own branch, and open a PR/MR without asking. Ask every time before anything that pushes straight to the default branch. Never force-push.' },
-  { id: 'on-request', text: 'Run `yad dial … --to`, `yad mode`, `yad kill` or `yad unkill` only when the person asked for that exact change.' },
-  { id: 'never-by-hand', text: 'Never hand-write `.sdlc/` files, approvals, or text between yad markers.' },
+  { id: 'pushes', text: 'Commit, push your own branch, and open a review PR/MR without asking. Open a task PR/MR without asking only when `yad dial open-pr` is `auto`; otherwise ask first. Ask every time before anything that pushes straight to the default branch. Never force-push.' },
+  { id: 'on-request', text: 'Run `yad dial … --to`, `yad mode solo|team`, `yad kill`, `yad unkill`, `yad skip`, `yad defer` or `yad unblock` only when the person asked for that exact change.' },
+  { id: 'never-by-hand', text: 'Never hand-write `.sdlc/` files, approvals, or text between yad markers; only `yad` commands and the yad-* skills change them.' },
+  { id: 'record-truly', text: 'When you record Build work you did yourself, say so: `yad build step … --via auto` and `yad build trust … --ran-by machine`, as the yad-run skill does. The defaults record a person\'s work.' },
   { id: 'say-what-you-did', text: 'After every push, PR/MR or other outward act, tell the person what you did.' },
   { id: 'resume', text: 'After a context reset, run `yad status --brief --json`, then `yad guide --json`.' },
   { id: 'report', text: 'When yadflow itself has a bug, or could clearly do better, offer to report it with `yad report`: show the person the exact text first, and post only on their yes.' },
