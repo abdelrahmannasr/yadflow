@@ -56,27 +56,32 @@ export const ASK = {
 export const COMMAND_CLASS = {
   guide: { class: 'read' },
   help: { class: 'read' },
-  // `--solo` / `--team` switch the mode, as `yad mode` does (cli/setup.mjs): the person's choice.
-  setup: { class: 'local-write', flags: { solo: 'on-request', team: 'on-request' } },
-  new: { class: 'local-write', flags: { solo: 'on-request', team: 'on-request' } },
-  init: { class: 'local-write', flags: { solo: 'on-request', team: 'on-request' } },
-  // `join` clones, then runs `member add`, which pushes a branch and opens a PR/MR.
-  join: { class: 'open-pr', flags: { solo: 'on-request', team: 'on-request' } },
+  // Setting a Product up chooses its mode and route (`--solo`/`--team`, or the defaults a run with no
+  // answers takes: solo), which are the person's. Until the agent asks the setup questions itself (E159),
+  // it runs these only when the person asked, with the answers they gave.
+  setup: { class: 'on-request' },
+  new: { class: 'on-request' },
+  init: { class: 'on-request' },
+  // `join` clones a Product whose mode is already set, then runs `member add`, which pushes a branch and
+  // opens a PR/MR. It takes no `--solo`/`--team` (bin/yad.mjs passes only the IDE targets on).
+  join: { class: 'open-pr' },
   // `check --fix --push` is `update --push` (bin/yad.mjs): it pushes to every repo's default branch.
   // `--overwrite-local` replaces the team's hand edits to managed files, in every connected repo.
-  check: { class: 'read', flags: { fix: 'local-write', push: 'default-push', 'overwrite-local': 'on-request' } },
-  update: { class: 'local-write', flags: { push: 'default-push', 'overwrite-local': 'on-request' } },
+  // `--allow-branch` passes the guard that keeps yad's own commits on the default branch (cli/productcommit.mjs).
+  check: { class: 'read', flags: { fix: 'local-write', push: 'default-push', 'overwrite-local': 'on-request', 'allow-branch': 'on-request' } },
+  update: { class: 'local-write', flags: { push: 'default-push', 'overwrite-local': 'on-request', 'allow-branch': 'on-request' } },
   doctor: { class: 'read' },
   migrate: { class: 'read', flags: { apply: 'local-write' } },
   detect: { class: 'read' },
   'toolbox list': { class: 'read' },
   'toolbox check': { class: 'read' },
-  'toolbox add': { class: 'local-write' },
-  'toolbox remove': { class: 'local-write' },
+  // Which tools the team uses, and which skill runs a step, are team-wide settings committed to the Product.
+  'toolbox add': { class: 'on-request' },
+  'toolbox remove': { class: 'on-request' },
   'skill list': { class: 'read' },
   'skill recommend': { class: 'read' },
-  'skill bind': { class: 'local-write' },
-  'skill unbind': { class: 'local-write' },
+  'skill bind': { class: 'on-request' },
+  'skill unbind': { class: 'on-request' },
   report: { class: 'public-post' },
   usage: { class: 'local-write' },
   'sync-status': { class: 'local-write' },
@@ -107,7 +112,7 @@ export const COMMAND_CLASS = {
   'gate review': { class: 'read' },
   'gate walkthrough': { class: 'read' },
   'gate trailer': { class: 'open-pr' },
-  'gate repair': { class: 'local-write', flags: { push: 'default-push' } },
+  'gate repair': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
   'gate reopen': { class: 'human-only' },
   'gate ci': { class: 'ci-only' },
   'gate approve': { class: 'human-only' },
@@ -119,11 +124,12 @@ export const COMMAND_CLASS = {
   'review cards': { class: 'read' },
   'review walkthrough': { class: 'read' },
   'review nudge': { class: 'open-pr' },
-  // Writes the ship shard it finds missing (cli/review.mjs).
+  // Stamps the engineer review onto a ship record that already exists (cli/review.mjs).
   'review reconcile': { class: 'local-write' },
   // `--manual --reason` is the door past the ledger hook: the person's call, not the agent's (cli/hook.mjs).
   // `--force` passes the atomic-file guard (more than 3 files): split the change instead, unless asked.
-  commit: { class: 'local-write', flags: { manual: 'human-only', force: 'on-request' } },
+  // `--ai` adds an AI co-author line, which is off unless the person asks for it.
+  commit: { class: 'local-write', flags: { manual: 'human-only', force: 'on-request', ai: 'on-request' } },
   'build start': { class: 'local-write' },
   'build step': { class: 'local-write' },
   // `--uid` finalises a run's verdict, which is the person's judgement of the work (the skills record it
@@ -137,9 +143,9 @@ export const COMMAND_CLASS = {
   'build sync': { class: 'local-write' },
   'run checks': { class: 'local-write' },
   'open-pr': { class: 'task-pr' },
-  ship: { class: 'task-pr', flags: { force: 'on-request' } },
+  ship: { class: 'task-pr', flags: { force: 'on-request', ai: 'on-request' } },
   // `--retro-ship` records what merged before tracking began; its commit bounds what `reconcile check` reads.
-  checkpoint: { class: 'local-write', flags: { push: 'default-push', 'retro-ship': 'on-request' } },
+  checkpoint: { class: 'local-write', flags: { push: 'default-push', 'retro-ship': 'on-request', 'allow-branch': 'on-request' } },
   // Pushes the person's own `yad/wip/*` capture branch, never the default branch.
   capture: { class: 'open-pr' },
   'member add': { class: 'open-pr' },
@@ -156,13 +162,13 @@ export const COMMAND_CLASS = {
   unassign: { class: 'local-write', flags: { force: 'on-request' } },
   owners: { class: 'read' },
   fold: { class: 'local-write' },
-  'tidy up': { class: 'local-write', flags: { push: 'default-push' } },
+  'tidy up': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
   index: { class: 'local-write' },
   'history list': { class: 'read' },
   'history show': { class: 'read' },
   'history search': { class: 'read' },
   'repo list': { class: 'read' },
-  'repo refresh': { class: 'local-write', flags: { push: 'default-push' } },
+  'repo refresh': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
   'repo sync': { class: 'local-write' },
   'repo clone': { class: 'local-write' },
   'risk-map check': { class: 'read' },
@@ -183,7 +189,9 @@ export const COMMAND_CLASS = {
 
 // The rank used when a flag raises a class: the higher of the two wins. `human-only` and `on-request`
 // outrank every push; a removed or internal command is never raised.
-const STRENGTH = ['read', 'local-write', 'open-pr', 'task-pr', 'public-post', 'default-push', 'on-request', 'human-only'];
+// A push to the default branch and a public post rank above `on-request`: the person having asked for the
+// command does not cover the push, so it is still asked about, naming what will be pushed.
+const STRENGTH = ['read', 'local-write', 'open-pr', 'task-pr', 'on-request', 'public-post', 'default-push', 'human-only'];
 const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 
 // The action a command runs when none is named (`ACTIONS` in bin/yad.mjs): `yad member` is `yad member list`.
@@ -241,7 +249,8 @@ export const RULES = [
   { id: 'brief', text: 'Before doing a step, tell the person what it is for, whether it is mandatory or can be skipped, who does it, and the skill or tool you will use.' },
   { id: 'human-only', text: 'Never do a human-only act. Give the exact command and steps, wait, then confirm by reading (the guide names the command that confirms it).' },
   { id: 'pushes', text: 'Commit, push your own branch, and open a review PR/MR without asking. Open a task PR/MR without asking only when `yad dial open-pr` is `auto`; otherwise ask first. Ask every time before anything that pushes straight to the default branch. Never force-push.' },
-  { id: 'on-request', text: 'Run `yad dial … --to`, `yad mode solo|team` (or `--solo`/`--team` on setup), `yad kill`, `yad unkill`, `yad skip`, `yad defer`, `yad unblock`, any `--force` or `--overwrite-local`, or any other command the guide classes `on-request`, only when the person asked for that exact change or gave you what it records.' },
+  { id: 'on-request', text: 'Run a command the guide classes `on-request` only when the person asked for that exact change or gave you what it records: `yad dial … --to`, `yad mode solo|team`, `yad kill`, `yad unkill`, `yad skip`, `yad defer`, `yad unblock`, `yad setup`/`new`/`init` (until you can ask the setup questions yourself), `yad skill bind`, `yad toolbox add`, a flag that passes a guard (`--force`, `--overwrite-local`, `--allow-branch`), and the others the guide marks.' },
+  { id: 'build-halts', text: 'A Build step the yad-run skill halted (`blocked`: a failing check, a scope overrun, a contract touch) waits for the person: never move it on (`yad build step … in_progress`) until they say it is resolved.' },
   { id: 'never-by-hand', text: 'Never hand-write `.sdlc/` files, approvals, or text between yad markers; only `yad` commands and the yad-* skills change them.' },
   { id: 'record-truly', text: 'When you record Build work you did yourself, say so: `yad build step … --via auto` and `yad build trust … --ran-by machine`, as the yad-run skill does. The defaults record a person\'s work.' },
   { id: 'say-what-you-did', text: 'After every push, PR/MR or other outward act, tell the person what you did.' },

@@ -110,8 +110,16 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   // A run's verdict is the person's judgement; the skills record it once given (yad-spec, yad-implement,
   // yad-engineer-review), so the agent may run it, never decide it.
   assert.equal(classify(['build', 'trust'], ['uid']), 'on-request');
-  // Setting solo or team through setup is switching the mode.
-  for (const c of ['setup', 'new', 'init', 'join']) for (const f of ['solo', 'team']) assert.equal(classify([c], [f]), 'on-request', `${c} --${f}`);
+  // Setting a Product up chooses its mode (a run with no answers takes solo): the person's, until E159.
+  for (const c of ['setup', 'new', 'init']) for (const f of [[], ['solo'], ['team']]) assert.equal(classify([c], f), 'on-request', `${c} ${f.join(' ')}`);
+  assert.equal(classify(['join']), 'open-pr', 'a joined Product\'s mode is already set');
+  for (const w of [['skill', 'bind'], ['skill', 'unbind'], ['toolbox', 'add'], ['toolbox', 'remove']]) assert.equal(classify(w), 'on-request', w.join(' '));
+  for (const w of [['commit'], ['ship']]) assert.equal(classify(w, ['ai']), 'on-request', `${w[0]} --ai`);
+  for (const w of [['check'], ['update'], ['checkpoint'], ['gate', 'repair'], ['tidy', 'up'], ['repo', 'refresh']]) assert.equal(classify(w, ['allow-branch']), 'on-request', `${w.join(' ')} --allow-branch`);
+  // The person asking for a command does not cover its push: still asked every time.
+  assert.equal(askFor(classify(['update'], ['overwrite-local', 'push'])), 'each-time');
+  assert.equal(askFor(classify(['checkpoint'], ['retro-ship', 'push'])), 'each-time');
+  assert.equal(askFor(classify(['check'], ['fix', 'overwrite-local', 'push'])), 'each-time');
   for (const c of ['check', 'update']) assert.equal(classify([c], ['overwrite-local']), 'on-request', `${c} --overwrite-local`);
   assert.equal(classify(['build', 'ship'], ['merge-commit', 'approver']), 'on-request', 'a merge no platform confirmed');
   assert.equal(classify(['checkpoint'], ['retro-ship']), 'on-request');
@@ -208,7 +216,7 @@ test('an author step: its brief, mandatory, the epic\'s recorded driver, the bou
     assert.equal(g.step.skip, null);
     assert.equal(g.step.driver, 'pair');
     assert.deepEqual(g.step.skills.bound, ['yad-epic']);
-    assert.ok(g.step.skills.recommended.some((r) => r.skill === 'bmad-prd' && r.bind.startsWith('yad skill bind epic')));
+    assert.ok(g.step.skills.recommended.some((r) => r.skill === 'bmad-prd' && r.bind.startsWith('yad skill bind epic') && r.decidedBy === 'human'));
     assert.deepEqual(g.agent.map((a) => a.skill ?? a.run), ['yad next EP-pay --check epic', 'yad-epic']);
     assert.equal(g.agent[0].class, 'read');
     assert.equal(g.person[0].act, 'answer');
@@ -418,6 +426,15 @@ test('a Product one folder away is named, so the agent never starts a second one
   assert.equal(g.situation.product, '../product');
   assert.deepEqual(g.agent.map((a) => a.run), ['yad guide --dir ../product --json']);
   assert.ok(!JSON.stringify(g).includes('yadflow@4 new'));
+});
+
+test('a Build step yad-run halted waits for the person', () => {
+  const p = playbook({ epicId: 'EP-pay', kind: 'build', step: 'ready-for-build', builds: [{ story: 'EP-pay-S01', repos: [
+    { repo: 'api', step: 'implement', status: 'blocked', record: { reason: 'contract touch' } }, { repo: 'web', step: 'spec', status: 'in_progress' }] }] }, {});
+  const halts = p.person.filter((x) => x.act === 'unblock');
+  assert.equal(halts.length, 1);
+  assert.equal(halts[0].steps[0], 'Resolve the halt on EP-pay-S01 in api (implement): contract touch, then tell the agent to move it on.');
+  assert.ok(RULES.some((r) => r.id === 'build-halts'));
 });
 
 test('the test-cases track beside Build is given to the agent too', () => {

@@ -330,7 +330,7 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
             "mandatory": false,
             "skip": { "command": "yad skip EP-x ui-design --reason \"<why>\"", "decidedBy": "human" },
             "driver": "pair", "status": "in_progress", "artifact": "ui-design.md", "why": "…",
-            "skills": { "bound": ["yad-ui"], "recommended": [{ "skill": "…", "why": "…", "bind": "yad skill bind …" }] },
+            "skills": { "bound": ["yad-ui"], "recommended": [{ "skill": "…", "why": "…", "bind": "yad skill bind …", "decidedBy": "human" }] },
             "tools": [{ "id": "…", "name": "…", "role": "…", "fallback": "…" }],
             "parallel": { … }, "reopened": [ … ], "debt": [ … ], "lanes": [ … ] },  // only when there are some
   "agent":  [{ "run": "yad next EP-x --check ui-design", "class": "read", "ask": "never", "why": "…" },
@@ -371,9 +371,11 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   | `default-push` | `each-time` | Pushes straight to the default branch (`--push`, including `check --fix --push`). |
   | `public-post` | `each-time` | Posts to a public place (`yad report`). |
   | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen` and `yad commit --manual`: only the person. |
-  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`; `yad member remove … --reason` (someone else's file); `--force` on `commit`, `ship`, `assign` and `unassign`; `--overwrite-local` on `check` and `update`; `--solo`/`--team` on `setup`, `new`, `init` and `join` (they switch the mode); and what records only the person's word: `yad build trust --uid` (the verdict they gave), `yad build ship --merge-commit … --approver …` and `yad checkpoint --retro-ship`. |
+  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`; `yad member remove … --reason` (someone else's file); `yad setup`, `new` and `init` (they choose the mode and route; a run with no answers takes solo) until the agent asks the setup questions itself (E159); `yad skill bind`/`unbind` and `yad toolbox add`/`remove` (team-wide settings); `--force` on `commit`, `ship`, `assign` and `unassign`; `--overwrite-local` on `check` and `update`; `--allow-branch`; `--ai` on `commit` and `ship`; and what records only the person's word: `yad build trust --uid` (the verdict they gave), `yad build ship --merge-commit … --approver …` and `yad checkpoint --retro-ship`. |
   | `ci-only`, `internal`, `removed` | `not-by-agent` | CI's, the harness's, or gone. |
 
+  When a command line's flags reach two classes, the stricter one wins, and a push to the default branch or
+  a public post is always asked about, even when the person asked for the command.
   A command named without its action is classed as its default action (`yad member` is `yad member list`).
   A command the rules do not know has `class: null` and `ask: each-time`.
 

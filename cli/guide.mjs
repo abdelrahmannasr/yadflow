@@ -190,11 +190,20 @@ export function playbook(a, ctx) {
         return reviewWork(a, ctx, epic);
       case 'blocked':
         return blockedWork(a, ctx, epic);
-      case 'build':
+      case 'build': {
+        // A lane yad-run halted (`blocked`) waits for the person, like a blocked Shape step.
+        const halted = (a.builds || []).flatMap((b) => (b.repos || []).filter((r) => r.status === 'blocked').map((r) => ({
+          act: 'unblock',
+          why: 'yad-run halted this Build step: a person must resolve it',
+          steps: [`Resolve the halt on ${tok(b.story, '<story>')} in ${tok(r.repo, '<repo>')} (${tok(r.step, '<step>')})${r.record?.reason ? `: ${clean(r.record.reason)}` : ''}, then tell the agent to move it on.`],
+          commands: [],
+          verify: `yad guide ${epic} --json`,
+        })));
         return {
           agent: [agentSkill('yad-run', 'drive the Build lanes one step at a time; it stops at every step a person must decide, and asks before opening a task PR/MR unless `yad dial open-pr` is `auto`', 'task-pr')],
-          person: [{ act: 'approve-merge', why: 'the engineer review and every merge are a person\'s', steps: ['Review and merge each task PR/MR the agent opens.'], commands: [], verify: 'yad build sync' }],
+          person: [...halted, { act: 'approve-merge', why: 'the engineer review and every merge are a person\'s', steps: ['Review and merge each task PR/MR the agent opens.'], commands: [], verify: 'yad build sync' }],
         };
+      }
       case 'foundation-done':
       case 'discovery-done':
         return {
@@ -268,7 +277,7 @@ function stepBlock(a, state, ctx = {}) {
     why: clean(a.why ?? null),
     skills: {
       bound: skills,
-      recommended: facts && !facts.gate ? recommendationsFor(authorId).map((r) => ({ skill: r.skill, why: r.reason, bind: bindCommand(r) })) : [],
+      recommended: facts && !facts.gate ? recommendationsFor(authorId).map((r) => ({ skill: r.skill, why: r.reason, bind: bindCommand(r), decidedBy: 'human' })) : [],
     },
     tools,
     ...(a.parallel ? { parallel: { step: clean(a.parallel.step), skill: clean(a.parallel.skill ?? null), artifact: clean(a.parallel.artifact ?? null) } } : {}),
