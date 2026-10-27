@@ -18,13 +18,13 @@
 // it reaches a model, and a control character there is never wanted.
 import path from 'node:path';
 import { c, log, info, hand, readJSON, forTerminal, exists } from './lib.mjs';
-import { isVerifiedLedger, productConfigPath } from './manifest.mjs';
+import { PROJECT_FILES, VERSION, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { DEFAULT_LIFECYCLE, DRIVERS, GATE_SUFFIX } from './lifecycle.mjs';
 import { PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds } from './epic-state.mjs';
 import { epicAction, soloOf } from './next.mjs';
 import { buildStatus } from './status.mjs';
 import { recommendationsFor, bindCommand } from './recommend.mjs';
-import { TOOLBOX } from './toolbox.mjs';
+import { TOOLBOX, parseVersion } from './toolbox.mjs';
 import { RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor, reaches } from './agent-rules.mjs';
 import { seededSlugs } from './hook.mjs';
 
@@ -327,6 +327,25 @@ function noProduct() {
   };
 }
 
+// Is the Product's install behind this yadflow? Its stamp (`.sdlc/cli-version.json`) names the version that
+// last wrote the managed files. Behind: `yad update --open-pr` brings them up, one PR/MR per repo (the
+// person's choice, 2026-10-27). Ahead (an older yadflow here) is `yad`'s own warning, not upkeep.
+export function installState(root, running = VERSION) {
+  const stamped = readJSON(path.join(root, PROJECT_FILES.version), null)?.version;
+  const a = parseVersion(stamped);
+  const b = parseVersion(running);
+  if (!a || !b) return { project: typeof stamped === 'string' ? clean(stamped) : null, yadflow: running, behind: null };
+  let cmp = 0;
+  for (let i = 0; i < 3 && !cmp; i++) cmp = Math.sign(a.parts[i] - b.parts[i]);
+  if (!cmp && a.pre !== b.pre) cmp = a.pre ? -1 : b.pre ? 1 : 0;
+  return { project: clean(stamped), yadflow: running, behind: cmp < 0 };
+}
+
+const upkeepFor = (install) => (install.behind ? {
+  agent: [agentRun('yad update --open-pr', `the managed files were written by yadflow v${install.project} and this is v${install.yadflow}: bring them up to date on a branch in each repo and open a PR/MR for each. Do this before the step below`)],
+  person: [{ act: 'approve-merge', why: 'the update lands through review, like any change', steps: ['Merge each `chore(yad-update)` PR/MR once its checks pass.', 'Then pull the default branch in each repo.'], commands: [], verify: 'yad check' }],
+} : null);
+
 // The Product's open epics with their next step, as `yad status` lists them, for "which one?".
 const epicChoices = (m) => (m.epics || []).filter((e) => !e.problem).map((e) => ({ epic: e.epic, product: !!e.product, step: e.step, kind: e.kind, next: clean(e.next) }));
 
@@ -361,8 +380,11 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   const verified = isVerifiedLedger(productConfig);
   const m = buildStatus(root, { cwd, fetch: false, runner });
   const rel = path.relative(cwd, root) || '.';
-  const situation = { stage: 'ready', product: rel, platform, ledger: platform && verified ? 'verified' : 'local', solo, here: m.here ?? null };
+  const install = installState(root);
+  const situation = { stage: 'ready', product: rel, platform, ledger: platform && verified ? 'verified' : 'local', solo, here: m.here ?? null, install };
   if (!m.setUp) return { ...base, situation: { ...situation, stage: 'no-product' }, ...noProduct() };
+  // Upkeep rides every answer about this Product until it is done.
+  base.upkeep = upkeepFor(install);
 
   const ctx = { verified, platform, solo };
   const chosen = epic ?? m.here?.epic ?? null;
@@ -422,6 +444,10 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
 // The printed form: the brief a person would read, in the order the agent would say it.
 export function printGuide(g) {
   const s = g.step;
+  if (g.upkeep) {
+    log(`\n  ${c.bold(`Upkeep first: this Product's yadflow files are v${g.situation.install.project}, yadflow is v${g.situation.install.yadflow}.`)}`);
+    for (const a of g.upkeep.agent) hand(`${c.bold(a.run)} ${c.dim(`— ${a.why}`)}`);
+  }
   if (s) {
     log(`\n  ${c.bold(`${s.epic} · ${s.name ?? s.id}`)}${s.part ? c.dim(`  (${s.part}${s.phase ? ` · ${s.phase}` : ''})`) : ''}`);
     if (s.brief) info(s.brief);

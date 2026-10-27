@@ -564,6 +564,83 @@ test('a blocked step re-opened behind finished work: the person resolves it, the
   assert.ok(v.person.some((x) => x.act === 'unblock' && x.steps.some((st) => /yad unblock` refuses/.test(st))));
 });
 
+test('an install behind yadflow: the guide puts the update first, on a branch and a PR/MR, without asking', async () => {
+  const { installState } = await import('./guide.mjs');
+  const T = await product();
+  try {
+    const stamp = path.join(T, '.sdlc/cli-version.json');
+    put(stamp, { version: '4.0.0' });
+    assert.deepEqual(installState(T, '4.7.0'), { project: '4.0.0', yadflow: '4.7.0', behind: true });
+    assert.equal(installState(T, '4.0.0').behind, false);
+    assert.equal(installState(T, '3.9.9').behind, false, 'an older yadflow here is not upkeep');
+    assert.equal(installState(T, '4.0.0-next.1').behind, false);
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    assert.equal(g.situation.install.behind, true);
+    assert.deepEqual(g.upkeep.agent.map((a) => [a.run, a.class, a.ask]), [['yad update --open-pr', 'open-pr', 'never']]);
+    assert.equal(g.upkeep.person[0].act, 'approve-merge');
+    assert.ok(RULES.some((r) => r.id === 'update'));
+    put(stamp, { version: (await import('./manifest.mjs')).VERSION });
+    assert.equal(buildGuide(T, { epic: 'EP-pay' }).upkeep, null);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened, and the repo back on its default branch', async () => {
+  const { openUpdatePr, updateBranchName, buildUpdatePrBody } = await import('./update-commit.mjs');
+  const T = tmp();
+  const R = tmp();
+  try {
+    git(R, ['init', '-q', '--bare', '-b', 'main']);
+    git(T, ['init', '-q', '-b', 'main']);
+    git(T, ['config', 'user.name', 'Alice Smith']);
+    git(T, ['config', 'user.email', 'alice@work.com']);
+    git(T, ['config', 'commit.gpgsign', 'false']);
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    put(path.join(T, 'notes.txt'), 'mine\n');
+    git(T, ['add', '.sdlc/cli-version.json']);
+    git(T, ['commit', '-q', '-m', 'chore: start']);
+    git(T, ['remote', 'add', 'origin', R]);
+    git(T, ['push', '-q', '-u', 'origin', 'main']);
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.7.0' });
+    const calls = [];
+    const creator = (platform, opts) => { calls.push([platform, opts]); return { ok: true, url: 'https://github.com/acme/p/pull/9' }; };
+    const r = openUpdatePr({ root: T, paths: ['.sdlc/cli-version.json'], items: ['product/.sdlc/cli-version.json'] }, { productRoot: T, defaultBranch: 'main', platform: 'github', creator, version: '4.7.0' });
+    assert.equal(r.branch, updateBranchName('4.7.0'));
+    assert.equal(r.branch, 'chore/yad-update-v4.7.0');
+    assert.deepEqual([r.committed, r.pushed, r.pr, r.error], [true, true, 'https://github.com/acme/p/pull/9', false]);
+    assert.equal(git(T, ['rev-parse', '--abbrev-ref', 'HEAD']), 'main', 'back on the default branch');
+    assert.match(fs.readFileSync(path.join(T, '.sdlc/cli-version.json'), 'utf8'), /4\.0\.0/, 'the default branch has the update only once the PR/MR merges');
+    assert.equal(fs.readFileSync(path.join(T, 'notes.txt'), 'utf8'), 'mine\n', 'unrelated work is left alone');
+    assert.match(git(R, ['log', '-1', '--format=%s', 'chore/yad-update-v4.7.0']), /^chore\(yad-update\): sync SDLC install to yadflow v4\.7\.0$/);
+    assert.equal(calls.length, 1);
+    const [platform, opts] = calls[0];
+    assert.equal(platform, 'github');
+    assert.deepEqual([opts.base, opts.head], ['main', 'chore/yad-update-v4.7.0']);
+    assert.equal(opts.body, buildUpdatePrBody({ version: '4.7.0', items: ['product/.sdlc/cli-version.json'] }));
+    for (const h of ['## Summary', '## Impact & Risk', 'Risk level: low', '## Checklist']) assert.ok(opts.body.includes(h), h);
+    // Run again with the branch still here: skipped, never a second branch.
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.7.0' });
+    const again = openUpdatePr({ root: T, paths: ['.sdlc/cli-version.json'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'github', creator, version: '4.7.0' });
+    assert.equal(again.skipped, true);
+    assert.equal(calls.length, 1);
+    // Not on the default branch: skipped.
+    git(T, ['checkout', '-q', '-b', 'feat/x']);
+    const off = openUpdatePr({ root: T, paths: ['.sdlc/cli-version.json'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'github', creator, version: '4.8.0' });
+    assert.equal(off.skipped, true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
+});
+
+test('yad update refuses --push and --open-pr together; --open-pr is the agent\'s without asking', async () => {
+  assert.equal(classify(['update'], ['open-pr']), 'open-pr');
+  assert.equal(askFor(classify(['update'], ['open-pr'])), 'never');
+  assert.equal(classify(['check'], ['fix', 'open-pr']), 'open-pr');
+  const T = await product();
+  try {
+    const r = spawnSync(process.execPath, [YAD, 'update', '--push', '--open-pr', '--json', '--dir', T], { encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.match(JSON.parse(r.stdout).error, /two different ways/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // ---- the command ----------------------------------------------------------------------------------------
 
 test('yad guide --json: with no Product it says how to start one, and carries the rules; a bad id is refused', () => {
