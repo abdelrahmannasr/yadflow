@@ -141,8 +141,11 @@ function reviewWork(a, ctx, epic, also = null) {
   };
 }
 
-// What `yad skip` and `yad unblock` say on a verified Product whose epic ledger is not on origin as last
-// fetched (cli/skip.mjs): the fetch may be behind a review that merged since.
+// Two cautions for a skip or an unblock on a verified Product, where CI owns an epic's ledger once its first
+// review PR/MR merges. UNREAD: origin cannot be read, so nobody can tell (`yad skip` and `yad unblock` warn
+// the same, cli/skip.mjs). ASFETCHED: the ledger is not on origin as last fetched, and the fetch may be
+// behind a review that merged since (`yad skip` says so; `yad unblock` does not, so the guide does).
+const UNREAD = 'origin could not be read, so it is not known whether CI already owns this epic\'s ledger; if its first review PR/MR has merged, the command is refused';
 const ASFETCHED = 'checked against origin as last fetched: run `git fetch origin` first if the epic\'s first review PR/MR may have merged, because CI then owns its ledger and the command is refused';
 
 // A blocked step: the person resolves it, and the agent clears it only when asked. On a verified Product
@@ -155,7 +158,7 @@ function blockedWork(a, ctx, epic, also = null) {
     return { agent: [], person: [{ act: 'unblock', why, steps: [`Resolve the blocker${reason}.`, 'On a verified Product only CI can clear it once the epic\'s ledger is on the default branch, and CI has no step for that yet (`yad unblock` refuses). Decide with the team how to go on.'], commands: [], verify: null }] };
   }
   return {
-    agent: [agentRun(`yad unblock ${epic} ${tok(a.step, '<step>')}`, `only after the person says the blocker is gone and asks to clear it${ctx.originAsFetched ? `; ${ASFETCHED}` : ''}`)],
+    agent: [agentRun(`yad unblock ${epic} ${tok(a.step, '<step>')}`, `only after the person says the blocker is gone and asks to clear it${ctx.originAsFetched ? `; ${ASFETCHED}` : ctx.originUnread ? `; ${UNREAD}` : ''}`)],
     person: [{ act: 'unblock', why, steps: [`Resolve the blocker${reason}, then tell the agent to clear it.`], commands: [], verify: `yad guide ${epic} --json` }],
   };
 }
@@ -256,7 +259,7 @@ function stepBlock(a, state, ctx = {}) {
       ? { command: null, decidedBy: 'human', note: 'on this verified Product the epic\'s ledger is on the default branch, and only CI writes it; CI has no step for a skip yet (`yad skip` refuses)' }
       : { command: `yad skip ${a.epicId} ${tok(authorId, '<step>')} --reason "<why>"`, decidedBy: 'human',
         // `yad skip` warns the same way when it cannot read origin (cli/skip.mjs).
-        ...(ctx.originUnread ? { note: 'origin could not be read, so it is not known whether CI already owns this epic\'s ledger; if its first review PR/MR has merged, `yad skip` will be refused' } : {}),
+        ...(ctx.originUnread ? { note: UNREAD } : {}),
         ...(ctx.originAsFetched ? { note: ASFETCHED } : {}) },
     driver: facts?.gate ? 'human' : recordedDriver(state, a.step) ?? facts?.driver ?? null,
     ...(facts?.gate ? { advance: facts.advance } : {}),

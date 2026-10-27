@@ -117,18 +117,20 @@ export const COMMAND_CLASS = {
   'review nudge': { class: 'open-pr' },
   'review reconcile': { class: 'read' },
   // `--manual --reason` is the door past the ledger hook: the person's call, not the agent's (cli/hook.mjs).
-  commit: { class: 'local-write', flags: { manual: 'human-only' } },
+  // `--force` passes the atomic-file guard (more than 3 files): split the change instead, unless asked.
+  commit: { class: 'local-write', flags: { manual: 'human-only', force: 'on-request' } },
   'build start': { class: 'local-write' },
   'build step': { class: 'local-write' },
-  // `--uid` finalises a run a person confirmed: the person's word, recorded.
-  'build trust': { class: 'local-write', flags: { uid: 'human-only' } },
+  // `--uid` finalises a run's verdict, which is the person's judgement of the work (the skills record it
+  // once the person accepted, edited or rejected it): the agent records it, it never decides it.
+  'build trust': { class: 'local-write', flags: { uid: 'on-request' } },
   'build ship': { class: 'local-write' },
   'build merged': { class: 'read', flags: { ship: 'local-write' } },
   'build done': { class: 'local-write' },
   'build sync': { class: 'local-write' },
   'run checks': { class: 'local-write' },
   'open-pr': { class: 'task-pr' },
-  ship: { class: 'task-pr' },
+  ship: { class: 'task-pr', flags: { force: 'on-request' } },
   checkpoint: { class: 'local-write', flags: { push: 'default-push' } },
   // Pushes the person's own `yad/wip/*` capture branch, never the default branch.
   capture: { class: 'open-pr' },
@@ -141,8 +143,9 @@ export const COMMAND_CLASS = {
   'worktree remove': { class: 'local-write' },
   standup: { class: 'read' },
   claims: { class: 'read' },
-  assign: { class: 'local-write' },
-  unassign: { class: 'local-write' },
+  // `--force` replaces or removes another person's ownership.
+  assign: { class: 'local-write', flags: { force: 'on-request' } },
+  unassign: { class: 'local-write', flags: { force: 'on-request' } },
   owners: { class: 'read' },
   fold: { class: 'local-write' },
   'tidy up': { class: 'local-write', flags: { push: 'default-push' } },
@@ -175,9 +178,17 @@ export const COMMAND_CLASS = {
 const STRENGTH = ['read', 'local-write', 'open-pr', 'task-pr', 'public-post', 'default-push', 'on-request', 'human-only'];
 const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 
-// The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>`.
+// The action a command runs when none is named (`ACTIONS` in bin/yad.mjs): `yad member` is `yad member list`.
+// A test holds this to bin/yad.mjs.
+export const DEFAULT_ACTION = {
+  skill: 'list', history: 'list', repo: 'list', 'risk-map': 'check', codeowners: 'check', docs: 'list',
+  toolbox: 'list', member: 'list', worktree: 'list',
+};
+
+// The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>` (or its default action).
 export function commandEntry(words) {
-  const [cmd, action] = words.map(String);
+  const [cmd, named] = words.map(String);
+  const action = named ?? (cmd && Object.hasOwn(DEFAULT_ACTION, cmd) ? DEFAULT_ACTION[cmd] : undefined);
   if (cmd && action && Object.hasOwn(COMMAND_CLASS, `${cmd} ${action}`)) return { key: `${cmd} ${action}`, ...COMMAND_CLASS[`${cmd} ${action}`] };
   if (cmd && Object.hasOwn(COMMAND_CLASS, cmd)) return { key: cmd, ...COMMAND_CLASS[cmd] };
   return null;

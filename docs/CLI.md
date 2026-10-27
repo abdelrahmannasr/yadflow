@@ -370,10 +370,11 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
   | `task-pr` | `per-dial` | Opens a task's PR/MR (`yad open-pr`, `yad ship`): asked first unless `yad dial open-pr` is `auto` (#356). |
   | `default-push` | `each-time` | Pushes straight to the default branch (`--push`, including `check --fix --push`). |
   | `public-post` | `each-time` | Posts to a public place (`yad report`). |
-  | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen`, `yad build trust --uid` and `yad commit --manual`: only the person. |
-  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`, and `yad member remove … --reason` (someone else's file). |
+  | `human-only` | `person-runs` | `yad gate approve`, `advance`, `comment`, `reopen` and `yad commit --manual`: only the person. |
+  | `on-request` | `only-when-asked` | `yad dial … --to`, `mode solo\|team`, `kill`, `unkill`, `skip`, `unskip`, `defer`, `undefer`, `unblock`; `yad member remove … --reason` (someone else's file); `--force` on `commit`, `ship`, `assign` and `unassign`; and `yad build trust --uid`, which records the verdict the person gave. |
   | `ci-only`, `internal`, `removed` | `not-by-agent` | CI's, the harness's, or gone. |
 
+  A command named without its action is classed as its default action (`yad member` is `yad member list`).
   A command the rules do not know has `class: null` and `ask: each-time`.
 
 - **A review gate's approval is the person's.** With a platform, the agent pushes its own review branch

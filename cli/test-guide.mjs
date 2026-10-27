@@ -29,6 +29,7 @@ process.env.YAD_CAPTURE = '0';
 for (const k of Object.keys(process.env)) if (/^GIT_(AUTHOR|COMMITTER)_/.test(k)) delete process.env[k];
 
 const { buildGuide, stepFacts, playbook, tok } = await import('./guide.mjs');
+const COMMAND_CLASS_MODULE = await import('./agent-rules.mjs');
 const { COMMAND_CLASS, CLASSES, ASK, RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor } = await import('./agent-rules.mjs');
 const { DEFAULT_LIFECYCLE } = await import('./lifecycle.mjs');
 const { runEpicNew } = await import('./epic.mjs');
@@ -105,6 +106,10 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   assert.equal(classify(['commit'], ['manual']), 'human-only', 'the door past the ledger hook is the person\'s');
   assert.equal(classify(['member', 'remove']), 'local-write', 'your own member file');
   assert.equal(classify(['member', 'remove'], ['reason']), 'on-request', 'someone else\'s');
+  for (const w of [['commit'], ['ship'], ['assign'], ['unassign']]) assert.equal(classify(w, ['force']), 'on-request', `${w[0]} --force`);
+  // A run's verdict is the person's judgement; the skills record it once given (yad-spec, yad-implement,
+  // yad-engineer-review), so the agent may run it, never decide it.
+  assert.equal(classify(['build', 'trust'], ['uid']), 'on-request');
   assert.equal(askFor('on-request'), 'only-when-asked');
   for (const w of [['gate', 'open'], ['gate', 'sync'], ['member', 'add']]) assert.equal(askFor(classify(w)), 'never', w.join(' '));
   // A task PR/MR follows `yad dial open-pr` (#356): asked first unless the dial is `auto`.
@@ -123,6 +128,16 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   assert.deepEqual(HUMAN_ONLY_ACTS.map((a) => a.id), ['approve-merge', 'login', 'secrets', 'signing-key', 'platform-settings']);
   assert.ok(NEVER.some((n) => n.id === 'force-push'));
   assert.ok(RULES.some((r) => r.id === 'report'));
+});
+
+test('a command named alone runs its default action, and is classed as that action', () => {
+  const { DEFAULT_ACTION } = COMMAND_CLASS_MODULE;
+  const src = fs.readFileSync(YAD, 'utf8');
+  const actions = src.slice(src.indexOf('const ACTIONS = {'), src.indexOf('};', src.indexOf('const ACTIONS = {')));
+  const defaults = Object.fromEntries([...actions.matchAll(/^\s+'?([a-z-]+)'?: \{ known: \[[^\]]*\], default: '([a-z-]+)' \}/gm)].map((m) => [m[1], m[2]]));
+  assert.deepEqual(DEFAULT_ACTION, defaults, 'DEFAULT_ACTION in cli/agent-rules.mjs follows ACTIONS in bin/yad.mjs');
+  for (const [cmd, action] of Object.entries(defaults)) assert.equal(classify([cmd]), classify([cmd, action]), cmd);
+  assert.equal(classify(['member']), 'read');
 });
 
 test('every command that pushes with --push says so: its --push is asked every time', () => {
@@ -471,6 +486,15 @@ test('on a verified Product whose epic is not on origin as fetched, the skip is 
     const g = buildGuide(T, { epic: 'EP-pay' });
     assert.equal(g.step.skip.command, 'yad skip EP-pay ui-design --reason "<why>"');
     assert.match(g.step.skip.note, /origin as last fetched: run `git fetch origin` first/);
+    const said = spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', '--dir', T], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+    assert.match(`${said.stdout}${said.stderr}`, /can be skipped — the person decides: yad skip EP-pay ui-design --reason "<why>" \(checked against origin as last fetched/);
+    // An unblock there carries the same caution; with no origin at all, the unreadable one.
+    const st = readState(T, 'EP-pay');
+    Object.assign(st.steps.find((s) => s.id === 'ui-design'), { status: 'blocked', record: { reason: 'legal', by: 'alice', date: '2026-10-27' } });
+    put(statePath(T, 'EP-pay'), st);
+    assert.match(buildGuide(T, { epic: 'EP-pay' }).agent[0].why, /origin as last fetched/);
+    git(T, ['remote', 'remove', 'origin']);
+    assert.match(buildGuide(T, { epic: 'EP-pay' }).agent[0].why, /origin could not be read/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
 });
 
