@@ -1668,14 +1668,25 @@ export function allowListActions(root, ideTargets = ideTargetsFor(root)) {
   return [asNew({ ...hookSettingsAction(root, ALLOW_LIST_ADAPTER, mergeAllowList), item: `${path.basename(ALLOW_LIST_ADAPTER.settings)} (read-only yad commands)` })];
 }
 
-// yad's allow-list entries that should no longer be there: every one once `.claude` has left the IDE targets,
+// yad's allow-list entries that should no longer be there: all of them once `.claude` has left the IDE targets,
 // and, while it is a target, those a later yadflow stopped pre-approving (`RETIRED_ALLOW_ENTRIES`). Only these
 // exact strings come out; every other entry is the team's and stays. A file that does not parse is left alone.
+//
+// A team may type one of yad's strings by hand (`Bash(yad status:*)`), so with `.claude` gone the list comes out
+// only when ALL of yad's current entries are there: that is yad's list, not a hand-picked line (review 2).
 export function orphanAllowListActions(root, ideTargets = ideTargetsFor(root)) {
   if (!exists(productConfigPath(root))) return [];
-  const gone = new Set(safeIdeTargetsFor(root, ideTargets).includes('.claude') ? RETIRED_ALLOW_ENTRIES : [...readAllowList(), ...RETIRED_ALLOW_ENTRIES]);
   const file = path.join(root, ALLOW_LIST_ADAPTER.settings);
-  if (!gone.size || !exists(file)) return [];
+  if (!exists(file)) return [];
+  let wholeList = false;
+  if (!safeIdeTargetsFor(root, ideTargets).includes('.claude')) {
+    try {
+      const allow = JSON.parse(fs.readFileSync(file, 'utf8'))?.permissions?.allow;
+      wholeList = Array.isArray(allow) && readAllowList().every((e) => allow.includes(e));
+    } catch { return []; }
+  }
+  const gone = new Set(wholeList ? [...readAllowList(), ...RETIRED_ALLOW_ENTRIES] : RETIRED_ALLOW_ENTRIES);
+  if (!gone.size) return [];
   const without = (obj) => {
     if (!isPlainObject(obj) || !isPlainObject(obj.permissions) || !Array.isArray(obj.permissions.allow)) return null;
     const allow = obj.permissions.allow.filter((e) => !gone.has(e));

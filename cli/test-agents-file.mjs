@@ -245,6 +245,23 @@ test('the agent guard refuses every human-only yad command and every force push,
     'glab mr approve 3',
     'glab mr merge 3',
     'cat <<EOF > notes.md\nsome text\nEOF\nyad gate approve EP-x epic',
+    // Review 2: a here-string, a shift, an unclosed heredoc, CRLF, a comment, prefixes with options, shells.
+    'cat <<< "x"\nyad gate approve EP-x epic',
+    'echo $((1<<2))\nyad gate approve EP-x epic',
+    'cat <<EOF\r\nx\r\nEOF\r\nyad gate approve EP-x epic',
+    '# <<x\nyad gate approve EP-x epic',
+    'env -i yad gate approve EP-x epic',
+    'sudo -u me yad gate approve EP-x epic',
+    'nice -n 5 yad gate approve EP-x epic',
+    'time -p yad gate approve EP-x epic',
+    'npx -p yadflow yad gate approve EP-x epic',
+    'node -r ./x.js bin/yad.mjs gate approve EP-x epic',
+    '(yad gate approve EP-x epic)',
+    '{ yad gate approve EP-x epic; }',
+    'if true; then yad gate approve EP-x epic; fi',
+    'bash -c "yad gate approve EP-x epic"',
+    'gh -R o/r pr merge 5',
+    'glab -R g/p mr merge 1',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -267,6 +284,10 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'gh pr view 5',
     'glab mr view 3',
     'yad --json gate status EP-x',
+    'yad gate approve --help',
+    'gh pr merge --help',
+    'git log --oneline # yad gate approve',
+    'gh pr create --title t --body b',
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);
@@ -530,7 +551,12 @@ test('a bug report previews and posts the same text: its Command line too', asyn
 
 test('yad report with no terminal never prompts, so it never posts', async () => {
   let asked = 0;
+  // Only the terminal check may stop it: the switch that also would is cleared for this run.
+  const saved = process.env.SDLC_NONINTERACTIVE;
+  delete process.env.SDLC_NONINTERACTIVE;
+  assert.ok(!process.stdin.isTTY || !process.stdout.isTTY, 'the test runner has no terminal');
   const r = await runReport(tmp(), { message: 'x', searcher: () => ({ ok: true, matches: [] }), opener: () => {}, prompter: async () => { asked++; return true; }, filer: () => { throw new Error('posted'); }, argv: ['report', '-m', 'x'] });
+  if (saved !== undefined) process.env.SDLC_NONINTERACTIVE = saved;
   assert.equal(r.filed, false);
   assert.equal(asked, 0);
 });
@@ -549,6 +575,12 @@ test('the allow list comes out again when Claude Code leaves the targets; the te
     s.permissions.allow.push('Bash(npm test)');
     put(file, JSON.stringify(s));
     assert.deepEqual(orphanAllowListActions(T, ['.claude']), [], 'nothing retired while .claude is a target');
+    // One of yad's strings the team typed by hand, without yad's whole list: theirs, kept.
+    const U = tmp();
+    put(path.join(U, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    put(path.join(U, '.claude/settings.json'), JSON.stringify({ permissions: { allow: ['Bash(yad status:*)'] } }));
+    assert.deepEqual(orphanAllowListActions(U, ['.cursor']), []);
+    fs.rmSync(U, { recursive: true, force: true });
     const gone = orphanAllowListActions(T, ['.agents']);
     assert.equal(gone.length, 1);
     gone[0].apply();

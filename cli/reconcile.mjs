@@ -377,7 +377,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const KINDS = {
     // `eq` compares a file's text with what is committed: JSON trimmed (`run` trims git's output), text with its
     // line endings evened out, since git may store LF where the disk holds CRLF (`core.autocrlf`).
-    json: { read: (t) => parse(t), empty: {}, merge: (o, m) => { if (!o) return undefined; const r = m(o); return r.unreadable ? undefined : r.settings; }, same: (a, b) => JSON.stringify(a) === JSON.stringify(b), eq: (a, b) => a.trim() === b.trim(), what: 'its hook entry', reason: 'settings-uncommitted' },
+    json: { read: (t) => parse(t), empty: {}, merge: (o, m) => { if (!o) return undefined; const r = m(o); return r.unreadable ? undefined : r.settings; }, same: (a, b) => JSON.stringify(a) === JSON.stringify(b), eq: (a, b) => a.trim() === b.trim(), what: 'its entries (hooks, the read-only allow list)', reason: 'settings-uncommitted' },
     text: { read: (t) => t, empty: null, merge: (t, m) => { const r = m(t); return r.refused ? undefined : r.text; }, same: (a, b) => lf(a) === lf(b), eq: (a, b) => lf(a) === lf(b), what: 'its yadflow rules block', reason: 'agents-uncommitted' },
   };
   for (const [file, e] of shared) {

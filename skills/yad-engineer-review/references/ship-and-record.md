@@ -103,7 +103,7 @@ about follow-ups (`…-T03-followup-reminders`). A follow-up is opened by a pers
 This is the Build analogue of Shape's `approvals.json` — files only, no hidden state, so a
 future service can drive ship by writing the same records. Like the trust log and build-state, it is a
 machine-written ledger committed by **`yad checkpoint`** (the Build analogue of `yad gate` sync),
-not by hand: after recording the ship, `yad checkpoint --push` lands the new `build-log/` shard as a
+not by hand: after recording the ship, `yad checkpoint --push` (after the person's yes, E158) lands the new `build-log/` shard as a
 `chore(product): …` audit-trail commit on the default branch (allowlist-scoped to the Build ledgers,
 never a Shape gate file); `yad tidy up` folds finished shards into `build-log.json` later.
 

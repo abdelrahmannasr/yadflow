@@ -144,6 +144,9 @@ unless CI runs it), or `yad gate advance` with no platform, is the human decisio
 Run yadflow here: run `npx -y yadflow@4 guide --json` and follow the yad-guide rules.
 ```
 
+The rules call the command `yad`. Install it once (`npm install -g yadflow`) so `yad …` works; without it
+the agent runs `npx yadflow …`, which Claude Code asks you to allow each time.
+
 The agent reads `yad guide` before each step. It tells you what the step is for, whether you can skip
 it, and who does it. Then it does its own part. The parts that are yours (approvals and merges, logins,
 secrets, signing keys, repository settings) it hands to you with the exact command or steps, and it
