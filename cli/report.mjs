@@ -7,6 +7,7 @@
 // no absolute paths, hostnames, git URLs, repo names, logins/emails, epic/story IDs, branch
 // names, or flag values ever leave the machine. The user sees the exact payload and confirms before
 // anything is posted. See memory: no-private-data-in-reports.
+import { createHash } from 'node:crypto';
 import { c, log, info, ok, warn, note, ask, askYesNo, has, readJSON, run, inJSON } from './lib.mjs';
 import { VERSION, UPSTREAM_REPO , productConfigPath } from './manifest.mjs';
 import { createIssue, searchIssues, issueUrl, platformAuthed } from './platform.mjs';
@@ -107,8 +108,13 @@ export function sanitizeContext(dir, { error = null, argv = process.argv.slice(2
 
 // ---- body assembly ------------------------------------------------------------------------------
 
+// What a report is (E158): a `bug` (something broke) or an `enhancement` (yadflow could do better). It sets
+// the label, and an enhancement's title and body.
+export const REPORT_KINDS = ['bug', 'enhancement'];
+
 // Title: prefer the error code + command; fall back to the (scrubbed) summary.
-export function buildTitle(ctx, summary) {
+export function buildTitle(ctx, summary, kind = 'bug') {
+  if (kind === 'enhancement') return `[report] Enhancement: ${summary ? summary.slice(0, 72) : 'yad idea'}`;
   const code = ctx.error?.code ? ` [${ctx.error.code}]` : '';
   const cmd = ctx.command && ctx.command !== '(none)' ? `\`yad ${ctx.command}\`` : 'yad';
   if (ctx.error) return `[report] ${cmd} failed${code}`;
@@ -116,10 +122,12 @@ export function buildTitle(ctx, summary) {
 }
 
 // Body mirrors the fields of .github/ISSUE_TEMPLATE/bug_report.yml — but only the safe subset.
-export function buildBody(ctx, summary) {
+export function buildBody(ctx, summary, kind = 'bug') {
   const lines = [];
-  lines.push('### What happened?', '', summary || '_(no summary provided)_', '');
-  lines.push(`Command: \`yad ${ctx.command}\``, '');
+  if (kind === 'enhancement') lines.push('### What would help?', '', summary || '_(no summary provided)_', '');
+  else lines.push('### What happened?', '', summary || '_(no summary provided)_', '');
+  // An idea is not about a command line; a bug is.
+  if (kind !== 'enhancement') lines.push(`Command: \`yad ${ctx.command}\``, '');
   lines.push('### Environment');
   lines.push(`- yadflow: \`${ctx.version}\``);
   lines.push(`- node: \`${ctx.node}\``);
@@ -129,7 +137,7 @@ export function buildBody(ctx, summary) {
   if (ctx.glab) lines.push(`- glab: ${ctx.glab}`);
   lines.push(`- platform: ${ctx.platform}`);
   lines.push('');
-  if (ctx.error) {
+  if (ctx.error && kind !== 'enhancement') {
     lines.push('### Error');
     if (ctx.error.code) lines.push(`- code: \`${ctx.error.code}\``);
     lines.push(`- message: ${ctx.error.message}`);
@@ -139,6 +147,16 @@ export function buildBody(ctx, summary) {
   lines.push('---', '_Filed via `yad report`. Diagnostics are auto-scrubbed — no paths, hostnames, repo names, logins, or flag values._');
   return lines.join('\n');
 }
+
+// The check value for `--post --confirm` (E158): a hash of exactly what would be posted. `--json` returns it
+// with the preview; `--post` posts only when the text it builds again hashes the same, so what goes up is
+// exactly what the person saw.
+export const confirmHash = ({ title, body, labels }) => createHash('sha256').update(JSON.stringify([title, body, labels])).digest('hex');
+
+// The report's own flags never reach the posted command line: the preview and the post must build the same
+// text, and they are run with different flags.
+const OWN_FLAGS = new Set(['--json', '--post', '--confirm', '--kind']);
+const withoutOwnFlags = (argv) => argv.filter((a) => !OWN_FLAGS.has(String(a).split('=')[0]));
 
 // ---- open a URL (best-effort) -------------------------------------------------------------------
 function openUrl(url, { runner = run } = {}) {
@@ -154,6 +172,10 @@ export async function runReport(dir, opts = {}) {
   const {
     error = null,
     message = null,
+    // E158: `bug` or `enhancement`; and `post` with `confirm`, for an agent posting the preview the person saw.
+    kind = 'bug',
+    post = false,
+    confirm = null,
     // injectable seams (tests never shell out or prompt)
     filer = createIssue,
     searcher = searchIssues,
@@ -167,7 +189,7 @@ export async function runReport(dir, opts = {}) {
   } = opts;
 
   try {
-    const ctx = sanitizeContext(dir, { error, argv });
+    const ctx = sanitizeContext(dir, { error, argv: withoutOwnFlags(argv) });
 
     // Summary — the user's own description (scrubbed for stray paths/urls). Ask if interactive.
     let summary = message ? scrub(message) : '';
@@ -176,9 +198,33 @@ export async function runReport(dir, opts = {}) {
       summary = a ? scrub(a) : '';
     }
 
-    const title = buildTitle(ctx, summary);
-    const body = buildBody(ctx, summary);
-    const labels = ['bug'];
+    const title = buildTitle(ctx, summary, kind);
+    const body = buildBody(ctx, summary, kind);
+    const labels = [kind === 'enhancement' ? 'enhancement' : 'bug'];
+    const check = confirmHash({ title, body, labels });
+
+    // --post --confirm: post with no prompt, but only the text the person saw (its hash). Anything else posts
+    // nothing: the agent shows the new preview and asks again.
+    if (post) {
+      if (confirm !== check) {
+        warn('not posted: this report is not the text that was shown (it changed, or --confirm is not the value its --json preview gave) — preview it again with --json, show it, and ask again');
+        process.exitCode = 1;
+        return { filed: false, url: null, kind, title, body, labels, related: [], confirm: check, refused: 'confirm-mismatch' };
+      }
+      if (authed()) {
+        const r = filer(UPSTREAM_PLATFORM, UPSTREAM_REPO, { title, body, labels });
+        if (r.ok) {
+          ok(`Issue filed: ${c.cyan(r.url)}`);
+          return { filed: true, url: r.url, kind, title, body, labels, related: [], confirm: check };
+        }
+        warn(`Could not file automatically: ${r.reason || 'unknown error'}`);
+      } else {
+        note('gh is not logged in — file it here instead (prefilled); the person opens the link:');
+      }
+      const url = issueUrl(UPSTREAM_PLATFORM, UPSTREAM_REPO, { title, body, labels });
+      log(`  → ${c.cyan(url)}`);
+      return { filed: false, url, kind, title, body, labels, related: [], confirm: check };
+    }
 
     // Dedup — search open issues by the error code (or the first summary word). Advisory: a failed
     // search just skips this step, it never blocks filing.
@@ -193,7 +239,7 @@ export async function runReport(dir, opts = {}) {
         if (interactive && await prompter('Open an existing issue instead of filing a new one?', true)) {
           opener(matches[0].url);
           log(`\n  → ${c.cyan(matches[0].url)}`);
-          return { filed: false, url: matches[0].url, deduped: true, title, body, labels, related };
+          return { filed: false, url: matches[0].url, deduped: true, kind, title, body, labels, related, confirm: check };
         }
       }
     }
@@ -213,7 +259,7 @@ export async function runReport(dir, opts = {}) {
       note(interactive ? 'Not posted. You can file it yourself here (prefilled):' : 'Non-interactive — not posted. File it here (prefilled):');
       log(`  → ${c.cyan(url)}`);
       // The payload exactly as it would be posted, for a --json caller to show or file itself.
-      return { filed: false, url, title, body, labels, related };
+      return { filed: false, url, kind, title, body, labels, related, confirm: check };
     }
 
     // File directly when the CLI is authenticated; otherwise fall back to the prefilled URL.
@@ -221,7 +267,7 @@ export async function runReport(dir, opts = {}) {
       const r = filer(UPSTREAM_PLATFORM, UPSTREAM_REPO, { title, body, labels });
       if (r.ok) {
         ok(`Issue filed: ${c.cyan(r.url)}`);
-        return { filed: true, url: r.url, title, body, labels, related };
+        return { filed: true, url: r.url, kind, title, body, labels, related, confirm: check };
       }
       warn(`Could not file automatically: ${r.reason || 'unknown error'}`);
     } else {
@@ -230,7 +276,7 @@ export async function runReport(dir, opts = {}) {
     const url = issueUrl(UPSTREAM_PLATFORM, UPSTREAM_REPO, { title, body, labels });
     opener(url);
     log(`  → ${c.cyan(url)}`);
-    return { filed: false, url, title, body, labels, related };
+    return { filed: false, url, kind, title, body, labels, related, confirm: check };
   } catch (e) {
     // Reporting itself must never crash the CLI.
     note(`could not complete the report (${e?.message || e}) — please file manually at https://github.com/${UPSTREAM_REPO}/issues`);

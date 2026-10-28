@@ -9,12 +9,12 @@ import {
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
-  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS,
+  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS, AGENT_GUARD_WIRING, AGENT_GUARD_ADAPTERS,
   legacySkillPairs, REMOVED_SKILLS, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
 import { applyMarkedBlock } from './marked-block.mjs';
-import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock } from './agent-rules.mjs';
+import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, readAllowList } from './agent-rules.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
 // these so `yad update --push` can stage an EXPLICIT allowlist of exactly what it wrote per repo —
@@ -1187,7 +1187,7 @@ export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
 // bytes against — the file belongs to the team and we own exactly one entry inside it. So it is also
 // deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
 // byte-matches its src); the marker above is its provenance instead.
-function hookSettingsAction(root, adapter) {
+function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(obj, adapter)) {
   const ide = adapter.target;
   const relDest = adapter.settings;
   const dest = path.join(root, relDest);
@@ -1208,7 +1208,7 @@ function hookSettingsAction(root, adapter) {
   // `shared` names the file for `yad update --open-pr`, which stages it only when the change is yad's alone
   // (reconcile; E157 update review 11): without it a merged update ships a hook script nothing runs.
   // `mergeShared` adds yad's entry to a settings object, so reconcile can tell a file that is yad's alone.
-  const base = { scope: ide, item: path.basename(relDest), root, paths: [], shared: relDest, mergeShared: (obj) => mergeHookSettings(obj, adapter) };
+  const base = { scope: ide, item: path.basename(relDest), root, paths: [], shared: relDest, mergeShared: merge };
   // A settings file we cannot READ is never rewritten — not even by `--overwrite-local`.
   //
   // For a managed file, `--overwrite-local` restores the shipped template, which is coherent. Here
@@ -1225,7 +1225,7 @@ function hookSettingsAction(root, adapter) {
     warn(`${relDest} does not parse — the ${adapter.label || 'ledger guard'} cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
     return { ...base, status: 'modified', apply: () => {} };
   }
-  const { changed, unreadable: unmergeable } = mergeHookSettings(parsed, adapter);
+  const { changed, unreadable: unmergeable } = merge(parsed);
   // Same treatment as a file that does not parse, and for the same reason: everything in it is the
   // team's, there is no shipped template to restore, and `--overwrite-local` must not invent one.
   if (unmergeable) {
@@ -1255,7 +1255,7 @@ function hookSettingsAction(root, adapter) {
           warn(`${relDest} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
           return;
         }
-        const merged = mergeHookSettings(current, adapter);
+        const merged = merge(current);
         if (merged.unreadable) {
           warn(`${relDest}: ${merged.unreadable} — left untouched; fix it by hand, then re-run \`yad check --fix\``);
           return;
@@ -1264,7 +1264,7 @@ function hookSettingsAction(root, adapter) {
         return;
       }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      writeJSON(dest, mergeHookSettings({}, adapter).settings);
+      writeJSON(dest, merge({}).settings);
     },
   };
 }
@@ -1631,6 +1631,81 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
       if (!exists(dest)) continue;
       actions.push({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
     }
+  }
+  return actions;
+}
+
+// The read-only yad commands, pre-approved for Claude Code (E158, issue #353): `readAllowList` added to
+// `permissions.allow` in `.claude/settings.json`. Additive: the team's own entries are kept, and an entry of
+// ours already there is not added twice. A shape it cannot read is refused, as the hook merge refuses one.
+export function mergeAllowList(input) {
+  if (isPlainObject(input)) {
+    if (Object.hasOwn(input, 'permissions') && !isPlainObject(input.permissions)) return { settings: input, changed: false, unreadable: 'permissions is not an object' };
+    if (isPlainObject(input.permissions) && Object.hasOwn(input.permissions, 'allow') && !Array.isArray(input.permissions.allow)) {
+      return { settings: input, changed: false, unreadable: 'permissions.allow is not a list' };
+    }
+  }
+  const settings = { ...(isPlainObject(input) ? input : {}) };
+  const permissions = { ...(isPlainObject(settings.permissions) ? settings.permissions : {}) };
+  const allow = Array.isArray(permissions.allow) ? [...permissions.allow] : [];
+  const missing = readAllowList().filter((e) => !allow.includes(e));
+  if (!missing.length) return { settings, changed: false };
+  permissions.allow = [...allow, ...missing];
+  settings.permissions = permissions;
+  return { settings, changed: true };
+}
+
+// The settings action that writes it, for a configured Product that installs for Claude Code.
+export const ALLOW_LIST_ADAPTER = Object.freeze({ target: '.claude', settings: '.claude/settings.json', label: 'read-only yad allow list' });
+export function allowListActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root)) || !safeIdeTargetsFor(root, ideTargets).includes('.claude')) return [];
+  return [asNew({ ...hookSettingsAction(root, ALLOW_LIST_ADAPTER, mergeAllowList), item: `${path.basename(ALLOW_LIST_ADAPTER.settings)} (read-only yad commands)` })];
+}
+
+// The agent guard (E158): the script, and per IDE target with a hook protocol the entry that runs it before
+// every shell command the agent sends. On every configured Product, in both ledger modes (see the manifest).
+// The script and its entries land together, for the reason `hookActions` gives.
+export function agentGuardActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const ledger = readManagedLedger(root);
+  const actions = AGENT_GUARD_WIRING.map((w) =>
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+  );
+  for (const ide of safeIdeTargetsFor(root, ideTargets)) {
+    const adapter = AGENT_GUARD_ADAPTERS[ide];
+    if (adapter) actions.push(hookSettingsAction(root, adapter));
+  }
+  return actions.map(asNew);
+}
+
+// An agent-guard entry for a target that left `ideTargets`: only OUR entry comes out, as
+// `orphanCaptureHookActions` does it. The script stays while the Product is configured (a remaining target
+// may still run it; with none, it is one file nothing runs, and `yad check` names nothing wrong with it).
+export function orphanAgentGuardActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const kept = new Set(safeIdeTargetsFor(root, ideTargets));
+  const actions = [];
+  for (const adapter of Object.values(AGENT_GUARD_ADAPTERS)) {
+    if (kept.has(adapter.target)) continue;
+    const settingsPath = path.join(root, adapter.settings);
+    if (!exists(settingsPath)) continue;
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
+    if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
+    actions.push({
+      scope: adapter.target,
+      item: `${path.basename(adapter.settings)} (agent guard entry removed)`,
+      status: 'removed',
+      root,
+      paths: [],
+      apply: () => {
+        let current;
+        try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+        if (!isPlainObject(current)) return;
+        const { settings, changed } = unmergeHookSettings(current, adapter);
+        if (changed) writeJSON(settingsPath, settings);
+      },
+    });
   }
   return actions;
 }

@@ -85,7 +85,8 @@ export const COMMAND_CLASS = {
   'skill recommend': { class: 'read' },
   'skill bind': { class: 'on-request' },
   'skill unbind': { class: 'on-request' },
-  report: { class: 'public-post' },
+  // A preview (`--json`, or no yes to the prompt) posts nothing; `--post` posts the previewed text (E158).
+  report: { class: 'read', flags: { post: 'public-post' } },
   usage: { class: 'local-write' },
   'sync-status': { class: 'local-write' },
   'epic new': { class: 'local-write' },
@@ -188,6 +189,7 @@ export const COMMAND_CLASS = {
   'reconcile refresh': { class: 'local-write' },
   'reconcile wire': { class: 'local-write' },
   'hook ledger-guard': { class: 'internal' },
+  'hook agent-guard': { class: 'internal' },
 };
 
 // The rank used when a flag raises a class: the higher of the two wins, and a removed or internal command is
@@ -332,3 +334,21 @@ export function pointerBlock() {
 
 // The block in CLAUDE.md: Claude Code reads CLAUDE.md, not AGENTS.md, and `@<file>` imports another file.
 export const claudeBlock = () => ['@AGENTS.md'];
+
+// The yad commands Claude Code may run without a permission prompt (E158, issue #353): only those that READ,
+// whatever flag they are given. A command with a flag that raises its class (`check --fix`, `dial --to`) is
+// left out, because a prefix rule cannot tell its flags apart; so is a command whose words begin another
+// command that is not a read (`yad mode` begins `yad mode team`). Written into `.claude/settings.json`
+// `permissions.allow` as `Bash(yad <words>:*)`; nothing that writes, pushes, posts or approves is ever there.
+// `standup` reads, but `--out <file>` writes the file named: a prefix rule would let it overwrite any file.
+const NOT_PREAPPROVED = new Set(['standup']);
+export function readAllowList() {
+  const keys = Object.keys(COMMAND_CLASS);
+  const reads = keys.filter((key) => {
+    const e = COMMAND_CLASS[key];
+    if (e.class !== 'read' || NOT_PREAPPROVED.has(key)) return false;
+    if (Object.values(e.flags ?? {}).some((cls) => cls !== 'read')) return false;
+    return !keys.some((other) => other.startsWith(`${key} `) && COMMAND_CLASS[other].class !== 'read');
+  });
+  return reads.map((key) => `Bash(yad ${key}:*)`);
+}

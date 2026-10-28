@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, agentFileActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
+  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -17,6 +17,7 @@ import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
+import { readAllowList } from './agent-rules.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -660,6 +661,20 @@ export async function runSetup(root, opts = {}) {
   const agentFiles = agentFileActions(root, ideTargets);
   log(`  ${c.bold('product')} ${c.dim('(AGENTS.md rules for AI agents)')}`);
   applyActions(agentFiles, { force: true });
+  // E158: the agent guard — refuses a human-only yad command or a force push before the agent's shell runs it.
+  const agentGuard = agentGuardActions(root, ideTargets);
+  if (agentGuard.length) {
+    log(`  ${c.bold('product')} ${c.dim('(agent guard)')}`);
+    applyActions(agentGuard, { force: true });
+    wired.push(...agentGuard);
+  }
+  // E158 (#353): the read-only yad commands Claude Code may run without asking — shown before they are written.
+  const allowList = allowListActions(root, ideTargets);
+  if (allowList.some((a) => a.status !== 'ok')) {
+    log(`  ${c.bold('product')} ${c.dim('(read-only yad commands Claude Code runs without asking, in .claude/settings.json)')}`);
+    for (const e of readAllowList()) log(`    ${c.dim(e)}`);
+    applyActions(allowList);
+  }
   // E113: the shell-script hooks a re-run replaces, once the entries above no longer name them.
   const retiredHooks = legacyHookScriptActions(root, ideTargets);
   if (retiredHooks.length) applyActions(retiredHooks, { force: true });

@@ -27,7 +27,7 @@ process.env.YAD_PLATFORM_READ = '0';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HOOKS = path.join(ROOT, 'skills/yad-checks/templates/hooks');
 const IS_WINDOWS = process.platform === 'win32';
-const SCRIPTS = ['ledger-guard.mjs', 'ledger-guard-cursor.mjs', 'yad-capture.mjs'];
+const SCRIPTS = ['ledger-guard.mjs', 'ledger-guard-cursor.mjs', 'yad-capture.mjs', 'agent-guard.mjs'];
 
 // A Product laid out the way a hook expects: `<T>/hooks/<script>.mjs`.
 function scaffold() {
@@ -72,7 +72,7 @@ function runHook(T, script, { env = {}, pathDirs = [], input = '{"tool_input":{"
 
 // ---- the shared resolver ---------------------------------------------------------------------------
 
-test('E113: the three hook scripts carry the SAME yad-resolve block, byte for byte', () => {
+test('E113: every hook script carries the SAME yad-resolve block, byte for byte', () => {
   const block = (s) => {
     const text = fs.readFileSync(path.join(HOOKS, s), 'utf8');
     const start = text.indexOf('// ---- yad-resolve');
@@ -294,8 +294,8 @@ async function oldProduct({ record = true } = {}) {
 }
 // What `yad check --fix` applies, in its order: the hook wiring, then the retired scripts last.
 async function fixHooks(T) {
-  const { hookActions, captureHookActions, legacyHookScriptActions } = await import('./plan.mjs');
-  const actions = [...hookActions(T), ...captureHookActions(T), ...legacyHookScriptActions(T)];
+  const { hookActions, captureHookActions, agentGuardActions, legacyHookScriptActions } = await import('./plan.mjs');
+  const actions = [...hookActions(T), ...captureHookActions(T), ...agentGuardActions(T), ...legacyHookScriptActions(T)];
   for (const a of actions) if (a.status !== 'ok' && a.status !== 'modified') a.apply();
   return actions;
 }
@@ -307,8 +307,10 @@ test('E113: `yad check --fix` rewrites the bash entries to node and removes the 
     assert.deepEqual(actions.filter((a) => a.status === 'removed').map((a) => a.item).sort(),
       ['hooks/ledger-guard-cursor.sh (removed)', 'hooks/ledger-guard.sh (removed)', 'hooks/yad-capture.sh (removed)']);
     const claude = JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'));
-    assert.equal(claude.hooks.PreToolUse.length, 1, 'rewritten in place, not added beside');
-    assert.equal(claude.hooks.PreToolUse[0].hooks[0].command, 'node "$CLAUDE_PROJECT_DIR/hooks/ledger-guard.mjs"');
+    // The ledger guard's entry; the agent guard (E158) has its own, on the shell tool.
+    const ledgerEntries = claude.hooks.PreToolUse.filter((e) => e.matcher !== 'Bash');
+    assert.equal(ledgerEntries.length, 1, 'rewritten in place, not added beside');
+    assert.equal(ledgerEntries[0].hooks[0].command, 'node "$CLAUDE_PROJECT_DIR/hooks/ledger-guard.mjs"');
     assert.equal(claude.hooks.PostToolUse[0].hooks[0].command, 'node "$CLAUDE_PROJECT_DIR/hooks/yad-capture.mjs" --format claude');
     const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
     assert.equal(cursor.hooks.preToolUse[0].command, 'node hooks/ledger-guard-cursor.mjs');

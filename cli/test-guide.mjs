@@ -133,7 +133,9 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   for (const w of [['open-pr'], ['ship']]) assert.equal(classify(w), 'task-pr', w.join(' '));
   assert.equal(askFor('task-pr'), 'per-dial');
   assert.equal(classify(['docs', 'deploy']), 'local-write', 'it builds here; CI publishes on a push');
-  assert.equal(classify(['report']), 'public-post');
+  // A preview posts nothing; posting is asked every time (E158).
+  assert.equal(classify(['report']), 'read');
+  assert.equal(classify(['report'], ['post']), 'public-post');
   assert.equal(askFor('public-post'), 'each-time');
   assert.equal(classify(['check']), 'read');
   assert.equal(classify(['check'], ['fix']), 'local-write');

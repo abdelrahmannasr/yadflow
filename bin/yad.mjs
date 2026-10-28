@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
 import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
-import { runLedgerGuardHook, runStagedLedgerGuard } from '../cli/hook.mjs';
+import { runLedgerGuardHook, runStagedLedgerGuard, runAgentGuardHook } from '../cli/hook.mjs';
 
 const helpText = (profiles) => `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -62,6 +62,10 @@ ${c.bold('Setup & maintenance')}
   yad report [-m <text>]   File a bug in the yadflow repo with auto-scrubbed diagnostics
                        (no paths/hosts/repo names/logins/flag values). Also offered
                        automatically after an unexpected failure. YAD_NO_REPORT=1 disables.
+                       --kind enhancement files an idea instead of a bug. --json previews
+                       (never posts) and gives a \`confirm\` value; --post --confirm <value>
+                       then posts that exact text with no prompt — for an AI agent, after
+                       the person said yes to the preview.
   yad hook ledger-guard    ${c.dim('harness-invoked, not typed')} — refuse an agent's edit to the
                        CI-owned gate ledger in verified mode and name the command that owns
                        the transition. Reads a tool-call payload on stdin (or --path <p>);
@@ -72,6 +76,12 @@ ${c.bold('Setup & maintenance')}
                        setup / check --fix. With --staged it judges the files a commit is
                        about to record instead — the git pre-commit hook check --fix
                        installs in this clone refuses a person's hand commit to the ledger.
+  yad hook agent-guard     ${c.dim('harness-invoked, not typed')} — before an agent's shell command:
+                       refuse a yad command only the person runs (gate approve, comment,
+                       advance, reopen; commit --manual) or a force push, and say what to
+                       do instead. Reads the shell payload on stdin; answers in the
+                       protocol the payload names (Cursor: JSON; Claude Code: exit 2).
+                       A speed bump, not proof. Wired on every Product by setup / check --fix.
                        YAD_HOOK_DISABLE=1 skips.
 
 ${c.bold('Parallel agents')} ${c.dim('(one git worktree per epic — #115)')}
@@ -452,9 +462,10 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
+const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source', '--tz', '--verdict', '--ran-by', '--note', '--uid', '--run', '--via']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source', '--tz', '--verdict', '--ran-by', '--note', '--uid', '--run', '--via', '--kind', '--confirm']);
 const LIST_FLAGS = new Set(['--signal', '--approver']);
 
 function parseArgs(argv) {
@@ -472,6 +483,7 @@ function parseArgs(argv) {
     else if (a === '--no-build') o.noBuild = true;
     else if (a === '--push') o.push = true;
     else if (a === '--open-pr') o.openPr = true;
+    else if (a === '--post') o.post = true;
     else if (a === '--allow-branch') o.allowBranch = true;
     else if (a === '--overwrite-local') o.overwriteLocal = true;
     else if (a === '--merged') o.merged = true;
@@ -564,7 +576,7 @@ const ACTIONS = {
   codeowners: { known: ['check'], default: 'check' },
   docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
   reconcile: { known: ['check', 'refresh', 'wire'] },
-  hook: { known: ['ledger-guard'] },
+  hook: { known: ['ledger-guard', 'agent-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove'], default: 'list' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
@@ -651,7 +663,9 @@ async function main() {
     // Its stdout is already a protocol (Claude Code reads the exit code, Cursor a permission object),
     // so it takes no --json (E1).
     if (inJSON()) return refuse('yad hook takes no --json — its output is the protocol the agent reads', 'run it without --json');
-    if (action !== 'ledger-guard') return refuse(`unknown hook: ${action ?? '(none)'} (ledger-guard)`);
+    // E158: the agent guard, before an agent's shell command.
+    if (action === 'agent-guard') { runAgentGuardHook({ format: o.format ?? null }); return; }
+    if (action !== 'ledger-guard') return refuse(`unknown hook: ${action ?? '(none)'} (ledger-guard, agent-guard)`);
     // `--staged` is the git pre-commit half (E48): the files come from the index, never from stdin.
     if (o.staged) { runStagedLedgerGuard(); return; }
     runLedgerGuardHook({ paths: o.path ? [o.path] : [], format: o.format });
@@ -835,9 +849,16 @@ async function main() {
       result = commands.runDetect(o.dir || process.cwd(), { json: o.json });
       break;
     }
-    case 'report':
-      result = await commands.runReport(o.dir, { message: o.message });
+    case 'report': {
+      // E158: an agent previews with --json, shows the person, and on their yes posts with --post --confirm.
+      const kind = o.kind ?? 'bug';
+      if (!commands.REPORT_KINDS.includes(kind)) { refuse(`yad report --kind takes ${commands.REPORT_KINDS.join(' or ')} (got: ${kind})`, REPORT_USAGE); break; }
+      if (o.post && !o.confirm) { refuse('yad report --post needs --confirm <value>: the `confirm` its --json preview gave, after the person said yes to that text', REPORT_USAGE); break; }
+      if (o.confirm && !o.post) { refuse('yad report --confirm is for --post', REPORT_USAGE); break; }
+      result = await commands.runReport(o.dir, { message: o.message, kind, post: !!o.post, confirm: o.confirm ?? null });
+      if (result?.refused) process.exitCode = 1;
       break;
+    }
     case 'usage':
       result = commands.runUsage(o.dir, {
         out: o.out, since: o.since, until: o.until, all: o.all, member: o.member,
