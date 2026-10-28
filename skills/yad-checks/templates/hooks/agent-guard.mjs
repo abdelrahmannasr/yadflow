@@ -1,6 +1,6 @@
 // agent-guard HARNESS HOOK (E158) — before an AI agent's shell command runs, refuse a yad command only the
-// person may run (an approval; a gate comment, advance or reopen; `commit --manual`) or a force push, and
-// say what to do instead: ask the person to run it themselves.
+// person may run (an approval; a gate comment, advance or reopen; `commit --manual`), a PR/MR approval or merge
+// (`gh`, `glab`), or a force push, and say what to do instead: ask the person to run it themselves.
 //
 // This file is only the ADAPTER. It locates `yad` and hands the payload to `yad hook agent-guard`, which
 // holds the decision (cli/agent-guard.mjs). ONE script serves both harnesses, and answers in the protocol

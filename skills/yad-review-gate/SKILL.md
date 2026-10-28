@@ -1,6 +1,6 @@
 ---
 name: yad-review-gate
-description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the approver count (1 distinct approver; contract/auth/payments raise the full count, advisory), and advances the epic state ONLY when approval is recorded. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
+description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, syncs the reviewers'' comments and approvals into files, enforces the approver count (1 distinct approver; contract/auth/payments raise the full count, advisory), and the step advances ONLY when approval is recorded. Commenting, approving, advancing and reopening are the person''s acts: an AI agent gives them the exact command and confirms by reading, never runs it. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
 ---
 
 # SDLC — Team Review Gate (build plan §3 piece 2, §4, §5)

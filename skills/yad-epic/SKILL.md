@@ -229,7 +229,8 @@ Notes:
   every later change to it is CI's. See `references/state-schema.md`, "Authoring branches".
 - **No UI?** Seed the chain **as-is** (the two `ui-design` steps are always in it). If this epic has no
   user-facing surface (a backend/API service, data pipeline, infra), the `ui-design` step is optional
-  and can be marked N/A now with `yad skip EP-<slug> ui-design --reason "<why>"` — it stays visible,
+  and can be marked N/A now: offer it, and on the person's yes run `yad skip EP-<slug> ui-design --reason "<why>"` (a
+  skip is the person's decision, E158) — it stays visible,
   short-circuits its gate, and advances straight to `stories` when architecture is approved. It is
   reversible with `yad unskip EP-<slug> ui-design` until the stories review opens. **On a verified Product, now is the only time:** once this epic's first review PR merges, CI owns `state.json` and `yad skip` refuses. Don't hand-edit the chain to drop the steps;
   the skip is the single, auditable mechanism (see `references/state-schema.md` → "ui-design is optional").

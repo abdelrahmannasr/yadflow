@@ -19,14 +19,16 @@
 // `beginKey` is the start every begin line shares, so a later release can reword the note after it.
 export function applyMarkedBlock(text, { begin, beginKey = begin, end, lines }) {
   const source = text ?? '';
-  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  // Each line with its own ending, so the text outside the block is kept byte for byte, mixed endings too.
+  const rows = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const bare = rows.map((r) => r.replace(/\r?\n$/, ''));
+  const begins = bare.flatMap((l, i) => (l.trim().startsWith(beginKey) ? [i] : []));
+  const ends = bare.flatMap((l, i) => (l.trim() === end ? [i] : []));
   const want = [begin, ...lines, end];
-  const all = source.split(/\r?\n/);
-  const begins = all.flatMap((l, i) => (l.trim().startsWith(beginKey) ? [i] : []));
-  const ends = all.flatMap((l, i) => (l.trim() === end ? [i] : []));
   if (!begins.length && !ends.length) {
-    // Appended after the team's text, which is kept as it is: a newline is added only when it has none at the
-    // end, and a blank line only when it does not already end with one.
+    // Appended after the team's text, in the file's own line ending: a newline is added only when it has none
+    // at the end, and a blank line only when it does not already end with one.
+    const eol = source.includes('\r\n') ? '\r\n' : '\n';
     let head = source;
     if (head && !/\n$/.test(head)) head += eol;
     if (head && !/\n\r?\n$/.test(head)) head += eol;
@@ -36,7 +38,11 @@ export function applyMarkedBlock(text, { begin, beginKey = begin, end, lines }) 
     return { text: source, status: null, refused: `the yadflow block needs exactly one line starting "${beginKey}" followed by one line "${end}"` };
   }
   const [b, e] = [begins[0], ends[0]];
-  const same = all.slice(b, e + 1).join('\n') === want.join('\n');
-  all.splice(b, e - b + 1, ...want);
-  return { text: same ? source : all.join(eol), status: same ? 'ok' : 'outdated', refused: null };
+  if (bare.slice(b, e + 1).join('\n') === want.join('\n')) return { text: source, status: 'ok', refused: null };
+  // The block is written in the ending its begin line had; the end line keeps whatever followed it (none at
+  // the very end of a file).
+  const eol = /\r\n$/.test(rows[b]) ? '\r\n' : '\n';
+  const tail = (rows[e].match(/\r?\n$/) ?? [''])[0];
+  const block = `${want.join(eol)}${tail}`;
+  return { text: rows.slice(0, b).join('') + block + rows.slice(e + 1).join(''), status: 'outdated', refused: null };
 }

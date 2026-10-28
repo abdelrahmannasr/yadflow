@@ -74,6 +74,14 @@ test('markers yad cannot trust are refused, and the text is returned as it is', 
   }
 });
 
+test('mixed line endings outside the block are kept byte for byte', () => {
+  const { begin, end } = AGENTS_MARKERS;
+  const before = `a\r\nb\n${begin}\nold\n${end}\nc\r\n`;
+  assert.equal(applyMarkedBlock(before, opts()).text, `a\r\nb\n${begin}\nline one\nline two\n${end}\nc\r\n`);
+  const last = `${begin}\r\nold\r\n${end}`;
+  assert.equal(applyMarkedBlock(last, opts()).text, `${begin}\r\nline one\r\nline two\r\n${end}`);
+});
+
 test('Windows line endings are kept, and only the content counts as a change', () => {
   const before = `# Team\r\n\r\n${AGENTS_MARKERS.begin}\r\nline one\r\nline two\r\n${AGENTS_MARKERS.end}\r\n`;
   assert.equal(applyMarkedBlock(before, opts()).status, 'ok');
@@ -144,6 +152,8 @@ test('a connected code repo cloned here gets the short block; one not cloned, or
     put(path.join(P, '.sdlc/cli-version.json'), JSON.stringify({ version: '4.7.0', ideTargets: ['.claude'] }));
     const items = (repo) => repoActions(P, repo).filter((a) => a.kind === 'text').map((a) => `${a.scope}/${a.item}`);
     assert.deepEqual(items({ name: 'api', path: '../api', platform: 'github' }), ['api/AGENTS.md', 'api/CLAUDE.md']);
+    // On a repo yad has not wired, it stays `missing`: `yad update` never does a repo's one-time setup.
+    assert.ok(repoActions(P, { name: 'api', path: '../api', platform: 'github' }).filter((a) => a.kind === 'text').every((a) => a.status === 'missing'));
     assert.deepEqual(items({ name: 'web', path: '../web', platform: 'github' }), []);
     assert.deepEqual(items({ name: 'product', path: '.', platform: 'github' }), []);
     const a = repoActions(P, { name: 'api', path: '../api', platform: 'github' }).find((x) => x.item === 'AGENTS.md');
@@ -219,6 +229,22 @@ test('the agent guard refuses every human-only yad command and every force push,
     'git push --force-if-includes origin main',
     'git -C repo push origin +main',
     'git status | cat && git push origin +feat/x',
+    // Review 1: yad's flags anywhere, a joined line, other plain spellings, and the platform's own approve and merge.
+    'yad --dir ../product gate approve EP-x epic',
+    'yad --json gate advance EP-x epic',
+    'yad -m s commit --manual --reason r',
+    'yad gate approve \\\nEP-x epic',
+    'yad \\\n  gate reopen EP-x epic',
+    './bin/yad.mjs gate approve EP-x epic',
+    'timeout 30 yad gate approve EP-x epic',
+    'npm exec yadflow -- gate approve EP-x epic',
+    'git --git-dir .git push -f',
+    'gh pr review 5 --approve',
+    'gh pr review 5 -a -b ok',
+    'gh pr merge 5 --squash',
+    'glab mr approve 3',
+    'glab mr merge 3',
+    'cat <<EOF > notes.md\nsome text\nEOF\nyad gate approve EP-x epic',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -234,6 +260,13 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'echo "yad gate approve EP-a"',
     'grep -n "git push --force" docs/x.md',
     '',
+    // A heredoc's text is written into a file, never run.
+    'cat > notes.md <<EOF\nyad gate approve EP-x epic\ngit push --force\nEOF',
+    'cat > notes.md <<-\'END\'\n\tyad gate advance EP-x epic\n\tEND',
+    'gh pr review 5 --comment -b "looks fine"',
+    'gh pr view 5',
+    'glab mr view 3',
+    'yad --json gate status EP-x',
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);
@@ -480,4 +513,89 @@ test('no skill tells the agent to run a human-only command: only the person runs
   assert.match(gate, /are the person's to run, never yours \(E158\)/);
   assert.match(gate, /yad gate status <epic>/);
   assert.match(read(path.join(REPO, 'skills/yad-commit/SKILL.md')), /Never pass `--manual` yourself, even when asked/);
+});
+
+test('a bug report previews and posts the same text: its Command line too', async () => {
+  const D = tmp();
+  try {
+    const posted = [];
+    const seams = { searcher: () => ({ ok: true, matches: [] }), interactive: false, opener: () => {}, authed: () => true, filer: (p, repo, payload) => { posted.push(payload); return { ok: true, url: 'u' }; } };
+    const error = Object.assign(new Error('boom'), { code: 'YAD-CLI-001' });
+    const preview = await runReport(D, { ...seams, error, message: 'it broke', argv: ['report', '-m', 'it broke', '--json'] });
+    const r = await runReport(D, { ...seams, error, message: 'it broke', post: true, confirm: preview.confirm, argv: ['report', '-m', 'it broke', '--post', '--confirm', preview.confirm] });
+    assert.equal(r.filed, true);
+    assert.deepEqual(posted, [{ title: preview.title, body: preview.body, labels: ['bug'] }]);
+  } finally { fs.rmSync(D, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('yad report with no terminal never prompts, so it never posts', async () => {
+  let asked = 0;
+  const r = await runReport(tmp(), { message: 'x', searcher: () => ({ ok: true, matches: [] }), opener: () => {}, prompter: async () => { asked++; return true; }, filer: () => { throw new Error('posted'); }, argv: ['report', '-m', 'x'] });
+  assert.equal(r.filed, false);
+  assert.equal(asked, 0);
+});
+
+const { orphanAllowListActions } = await import('./plan.mjs');
+const { RETIRED_ALLOW_ENTRIES } = await import('./agent-rules.mjs');
+
+test('the allow list comes out again when Claude Code leaves the targets; the team\'s entries stay', () => {
+  const T = tmp();
+  try {
+    put(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    const [a] = allowListActions(T, ['.claude']);
+    a.apply();
+    const file = path.join(T, '.claude/settings.json');
+    const s = JSON.parse(read(file));
+    s.permissions.allow.push('Bash(npm test)');
+    put(file, JSON.stringify(s));
+    assert.deepEqual(orphanAllowListActions(T, ['.claude']), [], 'nothing retired while .claude is a target');
+    const gone = orphanAllowListActions(T, ['.agents']);
+    assert.equal(gone.length, 1);
+    gone[0].apply();
+    assert.deepEqual(JSON.parse(read(file)).permissions.allow, ['Bash(npm test)']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a command that leaves the allow list is retired, so check --fix takes it out', () => {
+  // The list as shipped. When a command leaves it, add its entry to RETIRED_ALLOW_ENTRIES (cli/agent-rules.mjs).
+  const SHIPPED = ['guide', 'help', 'doctor', 'detect', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
+    'gate comments', 'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
+    'worktree list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'docs list',
+    'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`);
+  const now = readAllowList();
+  for (const e of SHIPPED) assert.ok(now.includes(e) || RETIRED_ALLOW_ENTRIES.includes(e), `${e} left the list: add it to RETIRED_ALLOW_ENTRIES`);
+  for (const e of now) assert.ok(SHIPPED.includes(e), `${e} is new: add it to SHIPPED here`);
+});
+
+test('no pre-approved command reads a flag bin/yad.mjs uses to write, push, post or approve', () => {
+  // The flags a command reads in bin/yad.mjs, by the `case` that runs it.
+  const src = fs.readFileSync(path.join(REPO, 'bin', 'yad.mjs'), 'utf8');
+  const sw = src.slice(src.indexOf('switch (cmd) {'));
+  const blocks = {};
+  const re = /^\s{4}case '([a-z-]+)':/gm;
+  const hits = [...sw.matchAll(re)];
+  hits.forEach((m, i) => { blocks[m[1]] = sw.slice(m.index, hits[i + 1]?.index ?? sw.length); });
+  // A write flag the command reads must be one the rules know, on the command or one of its actions: a flag
+  // the rules know raises that command's class, which keeps it off the list. One they do not know is a hole.
+  const WRITES = { out: 'out', fix: 'fix', push: 'push', apply: 'apply', post: 'post', openPr: 'open-pr', overwriteLocal: 'overwrite-local', to: 'to', ship: 'ship' };
+  const known = (cmd, flag) => Object.entries(COMMAND_CLASS).some(([k, e]) => (k === cmd || k.startsWith(`${cmd} `)) && Object.hasOwn(e.flags ?? {}, flag));
+  for (const entry of readAllowList()) {
+    const [cmd] = entry.match(/^Bash\(yad (.+):\*\)$/)[1].split(' ');
+    const body = blocks[cmd] ?? '';
+    for (const [prop, flag] of Object.entries(WRITES)) {
+      if (new RegExp(`\\bo\\.${prop}\\b`).test(body)) assert.ok(known(cmd, flag), `yad ${cmd} reads --${flag}, which the rules do not class`);
+    }
+  }
+});
+
+test('a PR/MR approval or merge in a skill is always handed to the person', () => {
+  const bad = [];
+  for (const skill of fs.readdirSync(path.join(REPO, 'skills'))) {
+    const file = path.join(REPO, 'skills', skill, 'SKILL.md');
+    if (!fs.existsSync(file)) continue;
+    for (const para of read(file).split(/\n\s*\n/)) {
+      if (/`(gh pr review[^`]*--approve|gh pr merge|glab mr (approve|merge))/.test(para) && !/the person|they submit|the human submits/.test(para)) bad.push(`${skill}: ${para.slice(0, 120)}`);
+    }
+  }
+  assert.deepEqual(bad, []);
 });

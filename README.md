@@ -149,8 +149,9 @@ it, and who does it. Then it does its own part. The parts that are yours (approv
 secrets, signing keys, repository settings) it hands to you with the exact command or steps, and it
 checks they were done before it goes on. Setup writes the rules into `AGENTS.md` (and a `CLAUDE.md`
 that loads it), so every new session starts with them. In Claude Code and Cursor a hook also stops
-the agent from running an approval or a force push itself; Codex has no hooks, so there only the
-rules apply.
+the agent when it tries to run a yad approval, a PR/MR approval or merge (`gh`, `glab`), or a force
+push itself. The hook reads only the command line, so it catches mistakes, not tricks; Codex has no
+hooks, so there only the rules apply.
 
 **Other ways in:**
 

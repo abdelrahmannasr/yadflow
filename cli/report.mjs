@@ -185,7 +185,9 @@ export async function runReport(dir, opts = {}) {
     authed = () => platformAuthed(UPSTREAM_PLATFORM),
     argv = process.argv.slice(2),
     // A --json run never prompts, and so never posts (E1): it answers with the payload and the prefilled URL.
-    interactive = !process.env.SDLC_NONINTERACTIVE && !inJSON(),
+    // Nor does a run with no terminal (E158 review 1): an agent's `yad report` would otherwise read its "yes"
+    // from a pipe and post text no person saw. An agent posts only through --post --confirm.
+    interactive = !process.env.SDLC_NONINTERACTIVE && !inJSON() && !!process.stdin.isTTY && !!process.stdout.isTTY,
   } = opts;
 
   try {

@@ -845,6 +845,23 @@ test('the AGENTS.md rules block rides the update when it is yad\'s change alone;
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+test('AGENTS.md a run already wrote (its push failed) still rides the update, whatever blank lines the team left at its end', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/9' });
+    put(path.join(A, 'AGENTS.md'), '# Our team rules\n\n\n');
+    git(A, ['add', 'AGENTS.md']); git(A, ['commit', '-q', '-m', 'docs: team rules']); git(A, ['push', '-q']);
+    // The block written on disk, as a run whose push failed leaves it.
+    const { agentFileActions } = await import('./plan.mjs');
+    agentFileActions(A, ['.agents']).forEach((a) => a.apply());
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'agents-uncommitted'), JSON.stringify(r.commits));
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+    assert.ok(files.includes('AGENTS.md'), files.join(', '));
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('AGENTS.md with the team\'s own uncommitted edits never rides the update: said in a row', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const { P, R, A } = await twoClones();

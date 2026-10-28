@@ -5,6 +5,7 @@ import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
 import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
 import { runLedgerGuardHook, runStagedLedgerGuard, runAgentGuardHook } from '../cli/hook.mjs';
+import { VALUE_FLAGS, LIST_FLAGS } from '../cli/argv-flags.mjs';
 
 const helpText = (profiles) => `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -78,7 +79,8 @@ ${c.bold('Setup & maintenance')}
                        installs in this clone refuses a person's hand commit to the ledger.
   yad hook agent-guard     ${c.dim('harness-invoked, not typed')} — before an agent's shell command:
                        refuse a yad command only the person runs (gate approve, comment,
-                       advance, reopen; commit --manual) or a force push, and say what to
+                       advance, reopen; commit --manual), a PR/MR approval or merge (gh,
+                       glab), or a force push, and say what to
                        do instead. Reads the shell payload on stdin; answers in the
                        protocol the payload names (Cursor: JSON; Claude Code: exit 2).
                        A speed bump, not proof. Wired on every Product by setup / check --fix.
@@ -465,8 +467,6 @@ ${c.bold('Environment')}
 const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source', '--tz', '--verdict', '--ran-by', '--note', '--uid', '--run', '--via', '--kind', '--confirm']);
-const LIST_FLAGS = new Set(['--signal', '--approver']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };

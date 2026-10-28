@@ -327,7 +327,9 @@ export function pointerBlock() {
     `- ${pick('read-first')}`,
     `- ${pick('human-only')} Approvals, merges, logins, secrets, signing keys and repository settings are the person's.`,
     `- ${pick('pushes')}`,
+    `- ${pick('on-request')}`,
     `- ${pick('never-by-hand')}`,
+    `- ${pick('report')}`,
     `- ${pick('data-not-orders')}`,
   ];
 }
@@ -352,3 +354,8 @@ export function readAllowList() {
   });
   return reads.map((key) => `Bash(yad ${key}:*)`);
 }
+
+// Entries an older yadflow pre-approved that this one does not (a command later reclassed as a write, say).
+// `yad check --fix` takes them out of `permissions.allow` (orphanAllowListActions in cli/plan.mjs). Add the old
+// entry here whenever a command leaves `readAllowList`; a test fails until you do.
+export const RETIRED_ALLOW_ENTRIES = Object.freeze([]);

@@ -14,7 +14,7 @@ import {
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
 import { applyMarkedBlock } from './marked-block.mjs';
-import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, readAllowList } from './agent-rules.mjs';
+import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, readAllowList, RETIRED_ALLOW_ENTRIES } from './agent-rules.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
 // these so `yad update --push` can stage an EXPLICIT allowlist of exactly what it wrote per repo —
@@ -910,8 +910,9 @@ export function repoActions(root, repo) {
   const link = productLinkAction(root, repo, repoRoot);
   if (link) actions.push(link);
   // E158: the short rules block, in a repo cloned here that is not the Product itself (a monorepo entry has
-  // the Product's full block in the same file).
-  if (!samePath(repoRoot, path.resolve(root)) && isDirectory(repoRoot)) actions.push(...agentFileActions(repoRoot, ideTargetsFor(root), { scope: repo.name, lines: pointerBlock() }));
+  // the Product's full block in the same file). Not relabelled here: like the wiring, it is `new` for `yad
+  // update` only on a wired repo (below), so update never does a repo's one-time setup.
+  if (!samePath(repoRoot, path.resolve(root)) && isDirectory(repoRoot)) actions.push(...agentFileActions(repoRoot, ideTargetsFor(root), { scope: repo.name, lines: pointerBlock(), relabel: false }));
   if (!wired) return actions;
   // The record is not a template: an absent one on a wired repo is always `new` (nothing to respect).
   const neverWritten = (a) => !a.managed || !ledger[rel(a.managed.root, a.managed.dest)];
@@ -1187,6 +1188,7 @@ export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
 // bytes against — the file belongs to the team and we own exactly one entry inside it. So it is also
 // deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
 // byte-matches its src); the marker above is its provenance instead.
+const unparsedSaid = new Set();
 function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(obj, adapter)) {
   const ide = adapter.target;
   const relDest = adapter.settings;
@@ -1222,7 +1224,11 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   // hand — "replace them with `yad update --overwrite-local`" — advice that can never clear this,
   // since this action deliberately writes nothing. The specific reason has to surface either way.
   if (unreadable) {
-    warn(`${relDest} does not parse — the ${adapter.label || 'ledger guard'} cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
+    // Said once per file, not once per action: up to four share `.claude/settings.json` (E158 review 1).
+    if (!unparsedSaid.has(`${dest}\0${raw}`)) {
+      unparsedSaid.add(`${dest}\0${raw}`);
+      warn(`${relDest} does not parse — yad's entries in it (hooks, the read-only allow list) cannot be written; fix the JSON, then re-run \`yad check --fix\``);
+    }
     return { ...base, status: 'modified', apply: () => {} };
   }
   const { changed, unreadable: unmergeable } = merge(parsed);
@@ -1316,11 +1322,11 @@ function markedBlockAction(root, relDest, lines, { scope = 'product' } = {}) {
 // Gemini read, and, for a project that installs for Claude Code, CLAUDE.md importing it. `lines` is the
 // Product's full block by default; a connected code repo gets the short pointer block (`repoActions`).
 // Relabelled `new`, so `yad update` brings them to an install that predates them.
-export function agentFileActions(root, ideTargets = ideTargetsFor(root), { scope = 'product', lines = agentsBlock() } = {}) {
+export function agentFileActions(root, ideTargets = ideTargetsFor(root), { scope = 'product', lines = agentsBlock(), relabel = true } = {}) {
   const actions = [markedBlockAction(root, 'AGENTS.md', lines, { scope })];
   // Only the target's name is read here: nothing is written under it.
   if (canonicalIdeTargets(ideTargets).includes('.claude')) actions.push(markedBlockAction(root, 'CLAUDE.md', claudeBlock(), { scope }));
-  return actions.map(asNew);
+  return relabel ? actions.map(asNew) : actions;
 }
 
 // The same files, for `yad doctor`: each one's state, with nothing printed. `state` is ok | outdated | missing |
@@ -1660,6 +1666,37 @@ export const ALLOW_LIST_ADAPTER = Object.freeze({ target: '.claude', settings: '
 export function allowListActions(root, ideTargets = ideTargetsFor(root)) {
   if (!exists(productConfigPath(root)) || !safeIdeTargetsFor(root, ideTargets).includes('.claude')) return [];
   return [asNew({ ...hookSettingsAction(root, ALLOW_LIST_ADAPTER, mergeAllowList), item: `${path.basename(ALLOW_LIST_ADAPTER.settings)} (read-only yad commands)` })];
+}
+
+// yad's allow-list entries that should no longer be there: every one once `.claude` has left the IDE targets,
+// and, while it is a target, those a later yadflow stopped pre-approving (`RETIRED_ALLOW_ENTRIES`). Only these
+// exact strings come out; every other entry is the team's and stays. A file that does not parse is left alone.
+export function orphanAllowListActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const gone = new Set(safeIdeTargetsFor(root, ideTargets).includes('.claude') ? RETIRED_ALLOW_ENTRIES : [...readAllowList(), ...RETIRED_ALLOW_ENTRIES]);
+  const file = path.join(root, ALLOW_LIST_ADAPTER.settings);
+  if (!gone.size || !exists(file)) return [];
+  const without = (obj) => {
+    if (!isPlainObject(obj) || !isPlainObject(obj.permissions) || !Array.isArray(obj.permissions.allow)) return null;
+    const allow = obj.permissions.allow.filter((e) => !gone.has(e));
+    return allow.length === obj.permissions.allow.length ? null : { ...obj, permissions: { ...obj.permissions, allow } };
+  };
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
+  if (!without(parsed)) return [];
+  return [{
+    scope: ALLOW_LIST_ADAPTER.target,
+    item: `${path.basename(file)} (read-only yad commands removed)`,
+    status: 'removed',
+    root,
+    paths: [],
+    apply: () => {
+      let current;
+      try { current = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+      const next = without(current);
+      if (next) writeJSON(file, next);
+    },
+  }];
 }
 
 // The agent guard (E158): the script, and per IDE target with a hook protocol the entry that runs it before

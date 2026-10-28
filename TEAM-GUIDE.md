@@ -586,8 +586,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   own part, and hands you yours (approvals and merges, logins, secrets, signing keys, repository
   settings) with the exact steps, then checks they were done. The rules live in a yad-written block in
   `AGENTS.md` (and `CLAUDE.md`, which loads it); your own text around the block is kept. In Claude Code
-  and Cursor a hook refuses an approval or a force push the agent tries to run; Codex has no hooks. The
-  read-only yad commands run in Claude Code without a permission prompt. When the agent finds a yadflow
+  and Cursor a hook refuses a yad approval, a PR/MR approval or merge (`gh`, `glab`), or a force push the
+  agent tries to run; it reads only the command line, so it catches mistakes, not tricks. Codex has no
+  hooks. The read-only commands, typed as `yad …`, run in Claude Code without a permission prompt (an
+  `npx yadflow …` call still asks). When the agent finds a yadflow
   bug or idea, it shows you the exact report text and posts it only after your yes.
 - **See what's blocking:** `yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole
   chain, every step's status, the contract lock, and which approvals a gate is still waiting on. Start

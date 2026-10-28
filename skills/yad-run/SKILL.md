@@ -39,7 +39,8 @@ beside it as advice and never refuses on it. The kill switch (`yad kill`) holds 
   `../yad-epic/references/state-schema.md`.
 - These machine-written Build files (`build-state/<story>.json`, the `trust-log/` shards) are
   committed by **`yad checkpoint`** — the Build analogue of the Shape `yad gate` sync; the loop
-  calls it each iteration so the state is durable and shared without a human commit. (`yad checkpoint`
+  calls it each iteration so the state is durable and shared without a human commit — its `--push`, which
+  lands on the default branch, only after the person says yes (E158). (`yad checkpoint`
   stages the shard dirs; `yad tidy up` later folds finished shards — loose objects + `git gc`.)
 - The orchestrator **calls the existing step skills unchanged** — `yad-spec` (A), `yad-implement`
   (B), `yad-checks` (C). It owns only the *advance decision*, never what a step does.

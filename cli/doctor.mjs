@@ -2246,15 +2246,14 @@ function profileBindingChecks(checks, rel, profiles) {
   return bound;
 }
 
-// `.sdlc/toolbox.json`: which toolbox tools this Product uses or skips, and its own tools (E86). Absent is
-// the normal case. THE FILE ONLY: whether a tool is installed is `yad toolbox check`'s answer, and a
-// missing tool is never a doctor line (decided with E86 — no tool is required). A broken file fails, as
-// skills.json does; a line that does nothing warns, because `yad toolbox list` quietly shows the default.
 // E158: the rules block an AI agent reads first, in AGENTS.md (and CLAUDE.md importing it, for Claude Code).
 // Only the Product's own files: a connected repo's short block is `yad check`'s to report.
 export function agentFileChecks(checks, root) {
   let files;
-  try { files = agentFilesState(root); } catch { return; }
+  try { files = agentFilesState(root); } catch (e) {
+    check(checks, 'agent-files', 'project', 'warn', `the yadflow rules for AI agents could not be checked: ${e?.message || e}`, 'run `yad check` to see why');
+    return;
+  }
   const bad = files.filter((f) => f.state === 'refused' || f.state === 'unreadable');
   const behind = files.filter((f) => f.state === 'missing' || f.state === 'outdated');
   if (bad.length) {
@@ -2268,6 +2267,10 @@ export function agentFileChecks(checks, root) {
   }
 }
 
+// `.sdlc/toolbox.json`: which toolbox tools this Product uses or skips, and its own tools (E86). Absent is
+// the normal case. THE FILE ONLY: whether a tool is installed is `yad toolbox check`'s answer, and a
+// missing tool is never a doctor line (decided with E86 — no tool is required). A broken file fails, as
+// skills.json does; a line that does nothing warns, because `yad toolbox list` quietly shows the default.
 export function toolboxFileChecks(checks, root) {
   const rel = PROJECT_FILES.toolboxConfig;
   if (!exists(path.join(root, rel))) return;

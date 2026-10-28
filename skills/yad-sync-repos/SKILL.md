@@ -81,7 +81,8 @@ so any repo whose `HEAD` now differs from its registry `syncedHead` has a **stal
 the command ends by pointing the human at `yad repo refresh` to repack (that is a separate human
 decision; this skill never repacks or writes the registry). After the repack + AI code-map
 regeneration, `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product's
-default branch as a `chore(product): sync code-context … [skip ci]` audit commit.
+default branch as a `chore(product): sync code-context … [skip ci]` audit commit. It pushes to the default
+branch, so an AI agent asks the person first, every time (E158).
 
 ## Hard rules
 

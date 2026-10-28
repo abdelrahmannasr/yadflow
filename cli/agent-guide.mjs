@@ -25,7 +25,9 @@ const ASK_WORDS = {
 function commandsOf(cls) {
   const out = [];
   for (const [key, e] of Object.entries(COMMAND_CLASS)) {
-    if (e.class === cls) out.push(`yad ${key}`);
+    // A command whose flags raise it says which, so `yad dial` reads as "not with --to".
+    const raised = Object.entries(e.flags ?? {}).filter(([, c]) => c !== cls).map(([f]) => `--${f}`);
+    if (e.class === cls) out.push(raised.length ? `yad ${key}\` (not with \`${raised.join('`, `')}` : `yad ${key}`);
     for (const [flag, c] of Object.entries(e.flags ?? {})) if (c === cls) out.push(`yad ${key} --${flag}`);
   }
   return out;
