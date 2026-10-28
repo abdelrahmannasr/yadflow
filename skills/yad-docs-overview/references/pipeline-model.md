@@ -56,8 +56,8 @@ auto-seeds epics. A product created before E75 may still hold the old spelling, 
      yad-run and the docs skills; `6-change` holds yad-change, yad-stub, yad-timeline, yad-defects and
      yad-reconcile; yad-status (a read-only view) and yad-learn (a tutor for any stage) are `anytime`, the
      value for a skill available at every stage — they are listed under
-     Automation below only because the site needs one place to draw them. yad-report has no phase: it is
-     a CLI helper, not a pipeline step.
+     Automation below only because the site needs one place to draw them. yad-report and yad-guide have no
+     phase: one is a CLI helper and the other the rules an AI agent follows, not pipeline steps.
      Moving three of these from `1-front` needed no migration, and that does not contradict the note
      above: module-help.csv is catalogue content the tool ships, read from the package's skills/sdlc/ folder
      and never installed into a project. It is not state a user's project stores. The note above is about

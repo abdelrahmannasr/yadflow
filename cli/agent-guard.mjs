@@ -1,10 +1,11 @@
 // The agent guard (E158): a hook that runs before an AI agent's shell command, in Claude Code (`PreToolUse`,
-// matcher `Bash`) and Cursor (`beforeShellExecution`), and refuses two kinds of command:
+// matcher `Bash`) and Cursor (`beforeShellExecution`), and refuses three kinds of command:
 //   - a yad command only the person may run (`classify` in cli/agent-rules.mjs says `human-only`: an
 //     approval, a gate comment or advance or reopen, a commit past the ledger guard);
 //   - approving or merging a PR/MR on the platform (`gh pr review --approve`, `gh pr merge`, `glab mr approve`,
-//     `glab mr merge`): the person's, even when the agent's login could;
-//   - a force push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, a `+` refspec).
+//     `glab mr merge` or `accept`): the person's, even when the agent's login could;
+//   - a force push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+`
+//     refspec).
 // The refusal says what to do instead: ask the person to run it themselves (`! <command>` in Claude Code).
 //
 // A SPEED BUMP, NOT PROOF. It reads the command line the agent sends, so a command hidden in a script, an
@@ -20,10 +21,14 @@ import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
 // in the ways an agent's commands use most: a `\` at the end of a line joins the next line on, a `#` that
 // starts a word begins a comment, and the body of a heredoc (`cat > notes.md <<EOF` … `EOF`) is text fed to a
 // command, never commands. A `<<` whose end line never comes (an arithmetic shift, `$((1<<2))`) is not a
-// heredoc: nothing after it is skipped. `<<<` is a here-string, one word of text. `$(…)` and backticks are not
-// opened: their text stays inside a word, which is the safe side for a guard that only refuses.
+// heredoc: nothing after it is skipped. `<<<` is a here-string, one word of text. A command substitution
+// (`$(…)` or backticks, outside single quotes) stays inside its word, and its text is also kept in
+// `parts.subs`, so the caller judges the command it runs: `r=$(yad gate approve …)` runs an approval. Quotes
+// inside it are its own (`"$(cat <<'EOF' … EOF)"` holds any `"` in the heredoc's text).
 export function shellParts(line) {
   const parts = [];
+  // Not enumerable: `parts` reads as the plain list of parts it always was.
+  Object.defineProperty(parts, 'subs', { value: [] });
   let words = [];
   let word = '';
   let inWord = false;
@@ -48,6 +53,14 @@ export function shellParts(line) {
   };
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
+    // A command substitution, unquoted or in double quotes (single quotes keep it as text).
+    if (quote !== '\'' && ((ch === '$' && line[i + 1] === '(') || ch === '`')) {
+      const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2);
+      parts.subs.push(ch === '`' ? line.slice(i + 1, end).replace(/\\`/g, '`') : line.slice(i + 2, end));
+      word += line.slice(i, end + 1); inWord = true;
+      i = end;
+      continue;
+    }
     if (quote) {
       if (ch === quote) quote = null;
       else if (ch === '\\' && quote === '"' && line[i + 1] === '\n') i++;
@@ -80,6 +93,58 @@ export function shellParts(line) {
   }
   endPart();
   return parts;
+}
+
+// Where the `$(` whose text starts at `from` closes: the index of its `)`, or the end of the line when it never
+// closes. Quotes, nested `(…)` and a heredoc's text inside it are its own, so a `)` in them does not close it.
+function substitutionEnd(line, from) {
+  let depth = 1;
+  let quote = null;
+  const heredocs = [];
+  for (let i = from; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (ch === '\\' && quote === '"') i++;
+      continue;
+    }
+    if (ch === '\\') { i++; continue; }
+    if (ch === '\'' || ch === '"') { quote = ch; continue; }
+    if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
+      const m = /^<<(-?)[ \t]*(['"]?)([A-Za-z0-9_.-]+)\2/.exec(line.slice(i));
+      if (m) { heredocs.push({ word: m[3], tabs: m[1] === '-' }); i += m[0].length - 1; continue; }
+    }
+    if (ch === '\n' && heredocs.length) {
+      // Skip each heredoc's text to its end line; one that never ends is not a heredoc.
+      let at = i + 1;
+      let found = true;
+      for (const h of heredocs) {
+        for (;;) {
+          if (at > line.length) { found = false; break; }
+          const eol = line.indexOf('\n', at);
+          const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
+          at = eol < 0 ? line.length + 1 : eol + 1;
+          if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) break;
+        }
+        if (!found) break;
+      }
+      heredocs.length = 0;
+      if (found) i = at - 2;
+      continue;
+    }
+    if (ch === '(') depth++;
+    else if (ch === ')' && --depth === 0) return i;
+  }
+  return line.length;
+}
+
+// Where the backtick whose text starts at `from` closes, or the end of the line.
+function backtickEnd(line, from) {
+  for (let i = from; i < line.length; i++) {
+    if (line[i] === '\\') i++;
+    else if (line[i] === '`') return i;
+  }
+  return line.length;
 }
 
 // Words that only set up how a command runs, skipped to find the command itself: `env`, `VAR=value`, `sudo`,
@@ -116,8 +181,9 @@ function shellC(words) {
 }
 
 // The yad argv after the program, or null when the part does not run yad: `yad …` (any path, `yad.mjs` too),
-// `npx [-y] yadflow[@v] …` (and pnpx, bunx), `npx -p yadflow yad …`, `npm exec|x yadflow -- …`,
-// `node [options] …/yad.mjs …`.
+// `npx [-y] yadflow[@v] …` or `npx yad …` (and pnpx, bunx), `npx -p yadflow yad …`, `npm exec|x yadflow|yad -- …`,
+// `pnpm exec|dlx …`, `pnpm yad …`, `yarn [exec|dlx] yad …`, `node [options] …/yad.mjs …`. `yad` is the
+// program the yadflow package installs, so a local install runs it as `npx yad`.
 const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C']);
 const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--prefix']);
 const isYadflow = (x) => /^yadflow(@.*)?$/.test(x);
@@ -130,23 +196,21 @@ function yadArgs(words) {
   // The first plain word after `from`, past options, and the value of an option that takes one.
   const plainAfter = (from, valued) => {
     let i = from;
-    let pkg = false;
-    while (i < w.length && w[i].startsWith('-')) {
-      if (/^(-p|--package)(=|$)/.test(w[i]) && (w[i].includes('=') ? isYadflow(w[i].split('=')[1]) : isYadflow(w[i + 1] ?? ''))) pkg = true;
-      i += valued.has(w[i]) ? 2 : 1;
-    }
-    return { i, pkg };
+    while (i < w.length && w[i].startsWith('-')) i += valued.has(w[i]) ? 2 : 1;
+    return i;
   };
-  if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx' || (prog === 'npm' && (w[1] === 'exec' || w[1] === 'x'))) {
-    const { i, pkg } = plainAfter(prog === 'npm' ? 2 : 1, NPX_VALUE_OPTIONS);
-    if (i >= w.length) return null;
-    if (isYadflow(w[i])) return dropDashDash(w.slice(i + 1));
-    // `npx -p yadflow yad …`: the package named, then its `yad` command.
-    if (pkg && programOf(w[i]) === 'yad') return dropDashDash(w.slice(i + 1));
-    return null;
+  // Where a package runner's program word is: `npx …`, `npm exec …`, `pnpm exec|dlx …`, `pnpm <bin>`,
+  // `yarn [exec|dlx] …`.
+  let from = -1;
+  if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') from = 1;
+  else if (prog === 'npm' && (w[1] === 'exec' || w[1] === 'x')) from = 2;
+  else if (prog === 'pnpm' || prog === 'yarn') from = ['exec', 'dlx'].includes(w[1]) ? 2 : 1;
+  if (from > 0) {
+    const i = plainAfter(from, NPX_VALUE_OPTIONS);
+    return i < w.length && (isYadflow(w[i]) || programOf(w[i]) === 'yad') ? dropDashDash(w.slice(i + 1)) : null;
   }
   if (prog === 'node') {
-    const { i } = plainAfter(1, NODE_VALUE_OPTIONS);
+    const i = plainAfter(1, NODE_VALUE_OPTIONS);
     return i < w.length && programOf(w[i]) === 'yad.mjs' ? w.slice(i + 1) : null;
   }
   return null;
@@ -184,16 +248,17 @@ function gitArgs(words) {
 }
 
 // Is this part a force push? `git push … --force | -f | --force-with-lease[=…] | --force-if-includes | a refspec
-// starting with `+``.
+// starting with `+`` | --mirror.
 function forcePush(words) {
   const g = gitArgs(words);
   if (!g || g[0] !== 'push' || g.includes('--help') || g.includes('-h')) return false;
-  return g.slice(1).some((a) => a === '--force' || a === '--force-if-includes' || /^--force-with-lease(=|$)/.test(a)
+  // `--mirror` makes the remote match this clone: it overwrites and deletes refs there, as a force push does.
+  return g.slice(1).some((a) => a === '--force' || a === '--mirror' || a === '--force-if-includes' || /^--force-with-lease(=|$)/.test(a)
     || (/^-[A-Za-z]+$/.test(a) && a.includes('f')) || /^\+/.test(a));
 }
 
 // Is this part an approval or a merge of a PR/MR on the platform? `gh pr review … --approve|-a`, `gh pr merge`,
-// `glab mr approve`, `glab mr merge`. The person's, even when the agent's login could do it. The options that
+// `glab mr approve`, `glab mr merge` (or `accept`). The person's, even when the agent's login could do it. The options that
 // take a value (`-R <repo>`) are skipped with it, so `gh -R o/r pr merge 5` is read as `pr merge`.
 const PLATFORM_VALUE_OPTIONS = new Set(['-R', '--repo', '-b', '--body', '-F', '--body-file', '-t', '--subject', '-m', '--message', '--match-head-commit', '--author-email', '--sha']);
 function platformApproval(words) {
@@ -209,15 +274,24 @@ function platformApproval(words) {
   if (prog === 'gh') {
     if (rest[0] !== 'pr') return false;
     if (rest[1] === 'merge') return true;
-    return rest[1] === 'review' && w.some((x) => x === '--approve' || x === '-a');
+    return rest[1] === 'review' && w.some((x) => /^--approve(=|$)/.test(x) || x === '-a');
   }
-  return rest[0] === 'mr' && (rest[1] === 'approve' || rest[1] === 'merge');
+  // `glab mr accept` is `glab mr merge` by another name.
+  return rest[0] === 'mr' && ['approve', 'merge', 'accept'].includes(rest[1]);
 }
 
 // The verdict for one shell command line: `{allow: true}` or `{allow: false, message}`.
 export function agentGuardDecision(line, depth = 0) {
   if (typeof line !== 'string' || !line.trim()) return { allow: true };
-  for (const part of shellParts(line)) {
+  const parts = shellParts(line);
+  // The commands a `$(…)` or backticks run are judged too (a few levels deep at most).
+  if (depth < 3) {
+    for (const sub of parts.subs) {
+      const v = agentGuardDecision(sub, depth + 1);
+      if (!v.allow) return v;
+    }
+  }
+  for (const part of parts) {
     // `bash -c "<line>"`: the line it runs is judged too (a few levels deep at most).
     const inner = shellC(part);
     if (inner !== null && depth < 3) {

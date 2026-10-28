@@ -81,8 +81,8 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
   from before shape 7, `done` with `skipped: true` beside it — the step was marked N/A. If it is
   `deferred`, the team set it aside to come back to later. Either way the `--check` above refuses it
   (`ui-design is already skipped`, or `already deferred`). **STOP**, there is nothing to author now;
-  point the user at `yad next EP-<slug>` (the next step is `stories`). To pick a deferred UI back up,
-  run `yad undefer EP-<slug> ui-design` first.
+  point the user at `yad next EP-<slug>` (the next step is `stories`). When the person asks to pick a
+  deferred UI back up, run `yad undefer EP-<slug> ui-design` first.
 - **Should be skipped:** if you reach this step and the epic clearly produces no screens, do **not**
   invent a hollow UI artifact. Offer to mark it N/A instead:
   `yad skip EP-<slug> ui-design --reason "<why, e.g. backend-only service>"`. That marks both the

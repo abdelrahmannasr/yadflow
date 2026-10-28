@@ -177,7 +177,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A managed file the team edited is NEVER rewritten by a plain update — that silent clobber is what
   // #164 reported. It is reported on every run (honest drift) until either the edit is dropped or
   // `--overwrite-local` replaces it, which still saves the previous content beside it.
-  const modified = actions.filter((a) => a.status === 'modified');
+  // An action that writes nothing (`writesNothing`: a settings file that does not parse, rules-block markers yad
+  // cannot trust) has said why at plan time, and `--overwrite-local` cannot fix it either: it is left out here
+  // and from what --fix applies, so no run says it was fixed.
+  const modified = actions.filter((a) => a.status === 'modified' && !a.writesNothing);
   for (const m of modified) {
     // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
     warn(m.item === PRODUCT_LINK
@@ -234,6 +237,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
 
   let fixable = actions.filter((a) =>
     a.status !== 'ok'
+    && !a.writesNothing
     && (a.status !== 'modified' || overwriteLocal)
     && (scope === 'all' ? true : a.status !== 'missing'),
   );

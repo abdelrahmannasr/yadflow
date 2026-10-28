@@ -150,11 +150,19 @@ the agent runs `npx yadflow …`, which Claude Code asks you to allow each time.
 The agent reads `yad guide` before each step. It tells you what the step is for, whether you can skip
 it, and who does it. Then it does its own part. The parts that are yours (approvals and merges, logins,
 secrets, signing keys, repository settings) it hands to you with the exact command or steps, and it
-checks they were done before it goes on. Setup writes the rules into `AGENTS.md` (and a `CLAUDE.md`
-that loads it), so every new session starts with them. In Claude Code and Cursor a hook also stops
-the agent when it tries to run a yad approval, a PR/MR approval or merge (`gh`, `glab`), or a force
-push itself. The hook reads only the command line, so it catches mistakes, not tricks; Codex has no
-hooks, so there only the rules apply.
+checks they were done before it goes on. Setup writes the rules into `AGENTS.md` — the file AI coding
+agents read at the start of a session — and into a `CLAUDE.md` that loads it, so every new session
+starts with them.
+
+In Claude Code and Cursor a hook also stops the agent. A hook is a small script the agent's tool runs
+before each shell command. It refuses three kinds of command when the agent runs them:
+
+- a yad command only you may run (a gate approve, comment, advance or reopen, or `commit --manual`);
+- approving or merging a pull request (GitHub) or merge request (GitLab), a PR/MR, with `gh` or `glab`;
+- a force push, which overwrites commits already on the server.
+
+The hook reads only the command line, so it catches mistakes, not tricks. Codex has no hooks, so there
+only the rules apply.
 
 **Other ways in:**
 

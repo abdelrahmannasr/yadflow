@@ -110,7 +110,7 @@ test('check --fix writes AGENTS.md and CLAUDE.md for Claude Code, AGENTS.md alon
   try {
     put(path.join(T, 'AGENTS.md'), '# Our team rules\n');
     const both = agentFileActions(T, ['.claude', '.agents']);
-    assert.deepEqual(both.map((a) => [a.item, a.status]), [['AGENTS.md', 'outdated'], ['CLAUDE.md', 'new']]);
+    assert.deepEqual(both.map((a) => [a.item, a.status]), [['AGENTS.md', 'new'], ['CLAUDE.md', 'new']]);
     for (const a of both) assert.deepEqual(a.paths, [], `${a.item}: --push never stages it`);
     for (const a of both) a.apply();
     assert.ok(read(path.join(T, 'AGENTS.md')).startsWith('# Our team rules\n\n'));
@@ -127,6 +127,7 @@ test('broken markers and a file that is not a plain file are left alone', () => 
     put(path.join(T, 'AGENTS.md'), broken);
     const [a] = agentFileActions(T, ['.agents']);
     assert.equal(a.status, 'modified');
+    assert.equal(a.writesNothing, true, 'never applied, so no run says it was fixed');
     a.apply();
     assert.equal(read(path.join(T, 'AGENTS.md')), broken);
     if (process.platform !== 'win32') {
@@ -156,8 +157,15 @@ test('a connected code repo cloned here gets the short block; one not cloned, or
     assert.ok(repoActions(P, { name: 'api', path: '../api', platform: 'github' }).filter((a) => a.kind === 'text').every((a) => a.status === 'missing'));
     assert.deepEqual(items({ name: 'web', path: '../web', platform: 'github' }), []);
     assert.deepEqual(items({ name: 'product', path: '.', platform: 'github' }), []);
-    const a = repoActions(P, { name: 'api', path: '../api', platform: 'github' }).find((x) => x.item === 'AGENTS.md');
-    a.apply();
+    // Review 3: the team's own AGENTS.md there, with no block, is `missing` too, so `yad update` leaves it.
+    put(path.join(R, 'AGENTS.md'), '# Team notes\n');
+    const team = repoActions(P, { name: 'api', path: '../api', platform: 'github' }).find((x) => x.item === 'AGENTS.md');
+    assert.equal(team.status, 'missing');
+    // On a wired repo the block is `new`, and update adds it.
+    put(path.join(R, 'checks/spec-link.sh'), '#!/usr/bin/env bash\n');
+    assert.equal(repoActions(P, { name: 'api', path: '../api', platform: 'github' }).find((x) => x.item === 'AGENTS.md').status, 'new');
+    team.apply();
+    assert.ok(read(path.join(R, 'AGENTS.md')).startsWith('# Team notes\n'));
     assert.ok(read(path.join(R, 'AGENTS.md')).includes(pointerBlock()[0]));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -182,6 +190,28 @@ test('yad doctor names a missing, older or unwritable rules block, and passes a 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('--overwrite-local never says it fixed a rules block it could not write', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const T = tmp();
+  const said = [];
+  const orig = { log: console.log, error: console.error };
+  try {
+    put(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    put(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '4.0.0', ideTargets: ['.agents'] }));
+    const broken = `${AGENTS_MARKERS.begin}\nno end\n`;
+    put(path.join(T, 'AGENTS.md'), broken);
+    console.log = (...a) => said.push(a.join(' '));
+    console.error = (...a) => said.push(a.join(' '));
+    await reconcile(T, { fix: true, overwriteLocal: true });
+    Object.assign(console, orig);
+    assert.equal(read(path.join(T, 'AGENTS.md')), broken);
+    const text = said.join('\n');
+    assert.doesNotMatch(text, /fixed: [^\n]*AGENTS\.md/);
+    assert.doesNotMatch(text, /AGENTS\.md is locally modified/);
+    assert.match(text, /AGENTS\.md: the yadflow block needs exactly one line/);
+  } finally { Object.assign(console, orig); fs.rmSync(T, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('yad update brings the block to an install that predates it, beside the team\'s text', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const T = tmp();
@@ -194,7 +224,7 @@ test('yad update brings the block to an install that predates it, beside the tea
     put(path.join(T, 'AGENTS.md'), '# Team\n');
     git(['add', '-A']); git(['commit', '-q', '-m', 'chore: start']);
     const r = await reconcile(T, { fix: true, scope: 'changed' });
-    assert.ok(r.items.some((i) => i.item === 'AGENTS.md' && i.status === 'outdated'), JSON.stringify(r.items));
+    assert.ok(r.items.some((i) => i.item === 'AGENTS.md' && i.status === 'new'), JSON.stringify(r.items));
     assert.ok(r.items.some((i) => i.item === 'CLAUDE.md' && i.status === 'new'), JSON.stringify(r.items));
     assert.ok(read(path.join(T, 'AGENTS.md')).includes(AGENTS_MARKERS.end));
     assert.ok(fs.existsSync(path.join(T, 'CLAUDE.md')));
@@ -262,6 +292,22 @@ test('the agent guard refuses every human-only yad command and every force push,
     'bash -c "yad gate approve EP-x epic"',
     'gh -R o/r pr merge 5',
     'glab -R g/p mr merge 1',
+    // Review 3: a command substitution runs its command; the package runners run yadflow's own `yad`.
+    'r=$(yad gate approve EP-x epic --json)',
+    'echo `yad gate approve EP-x epic`',
+    'echo "$(yad gate advance EP-x epic)"',
+    'x=$(echo $(yad gate reopen EP-x epic))',
+    'npx yad gate approve EP-x epic',
+    'npm exec yad -- gate approve EP-x epic',
+    'pnpm exec yad gate approve EP-x epic',
+    'pnpm yad gate approve EP-x epic',
+    'pnpm dlx yadflow gate approve EP-x epic',
+    'yarn yad gate approve EP-x epic',
+    'yarn exec yad gate approve EP-x epic',
+    'glab mr accept 5',
+    'git push --mirror',
+    'gh pr review 5 --approve=true',
+    'git commit -m "$(cat <<\'EOF\'\nsubject\n\nsays "hi\nEOF\n)" && git push -f',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -288,6 +334,13 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'gh pr merge --help',
     'git log --oneline # yad gate approve',
     'gh pr create --title t --body b',
+    // Review 3: single quotes keep a substitution as text; quotes inside one are its own.
+    'echo \'$(yad gate approve EP-x epic)\'',
+    'r=$(yad gate status EP-x --json)',
+    'npx yad gate status',
+    'pnpm install',
+    'yarn test',
+    'git commit -m "$(cat <<\'EOF\'\nfix: x\n\nA "quote and 1) item\nyad gate approve EP-x\ngit push -f\nEOF\n)"',
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);
@@ -477,7 +530,7 @@ test('yad report refuses --post without --confirm, --confirm without --post, and
 
 const REPO = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
 const { SKILLS } = await import('./manifest.mjs');
-const { syncGuideSkill, GUIDE_SECTIONS } = await import('./agent-guide.mjs');
+const { syncGuideSkill, guideSections, GUIDE_SECTIONS } = await import('./agent-guide.mjs');
 
 test('the yad-guide skill is shipped, and its generated sections agree with the rules (scripts/agent-guide.mjs --check)', () => {
   assert.ok(SKILLS.includes('yad-guide'));
@@ -489,6 +542,8 @@ test('the yad-guide skill is shipped, and its generated sections agree with the 
   for (const name of GUIDE_SECTIONS) assert.ok(text.includes(`<!-- end: ${name} -->`), name);
   for (const c of humanOnlyCommands()) assert.ok(text.includes(`\`${c}\``), c);
   for (const n of NEVER) assert.ok(text.includes(n.text), n.id);
+  // Each generated line pairs its backticks, or every code span after an odd one reads wrongly.
+  for (const line of Object.values(guideSections()).flat()) assert.equal((line.match(/`/g) ?? []).length % 2, 0, line);
   const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts/agent-guide.mjs'), '--check'], { encoding: 'utf8' });
   assert.equal(cli.status, 0, cli.stdout + cli.stderr);
   // A stale section is found, and missing markers are refused rather than guessed.
@@ -536,6 +591,28 @@ test('no skill tells the agent to run a human-only command: only the person runs
   assert.match(read(path.join(REPO, 'skills/yad-commit/SKILL.md')), /Never pass `--manual` yourself, even when asked/);
 });
 
+test('every `yad … --push` a skill gives to copy says to ask the person first', () => {
+  // A command in a code block is what an agent copies and runs; --push lands on the default branch, which the
+  // agent asks for every time (E158 review 3: `checkpoint --retro-ship … --push` had no such line).
+  const bad = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!e.name.endsWith('.md')) continue;
+      const lines = read(p).split('\n');
+      let inBlock = false;
+      lines.forEach((line, i) => {
+        if (line.trim().startsWith('```')) { inBlock = !inBlock; return; }
+        if (!inBlock || !/\byad .*--push\b/.test(line)) return;
+        if (!/\bask|person/i.test(lines.slice(Math.max(0, i - 12), i + 1).join('\n'))) bad.push(`${path.relative(REPO, p)}:${i + 1}: ${line.trim()}`);
+      });
+    }
+  };
+  walk(path.join(REPO, 'skills'));
+  assert.deepEqual(bad, []);
+});
+
 test('a bug report previews and posts the same text: its Command line too', async () => {
   const D = tmp();
   try {
@@ -562,7 +639,7 @@ test('yad report with no terminal never prompts, so it never posts', async () =>
 });
 
 const { orphanAllowListActions } = await import('./plan.mjs');
-const { RETIRED_ALLOW_ENTRIES } = await import('./agent-rules.mjs');
+const { RETIRED_ALLOW_ENTRIES, SHIPPED_ALLOW_LISTS } = await import('./agent-rules.mjs');
 
 test('the allow list comes out again when Claude Code leaves the targets; the team\'s entries stay', () => {
   const T = tmp();
@@ -589,14 +666,11 @@ test('the allow list comes out again when Claude Code leaves the targets; the te
 });
 
 test('a command that leaves the allow list is retired, so check --fix takes it out', () => {
-  // The list as shipped. When a command leaves it, add its entry to RETIRED_ALLOW_ENTRIES (cli/agent-rules.mjs).
-  const SHIPPED = ['guide', 'help', 'doctor', 'detect', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
-    'gate comments', 'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
-    'worktree list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'docs list',
-    'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`);
+  // Today's list is the last one shipped: when it changes, append it to SHIPPED_ALLOW_LISTS (cli/agent-rules.mjs),
+  // and put each entry that left in RETIRED_ALLOW_ENTRIES.
   const now = readAllowList();
-  for (const e of SHIPPED) assert.ok(now.includes(e) || RETIRED_ALLOW_ENTRIES.includes(e), `${e} left the list: add it to RETIRED_ALLOW_ENTRIES`);
-  for (const e of now) assert.ok(SHIPPED.includes(e), `${e} is new: add it to SHIPPED here`);
+  assert.deepEqual(now, SHIPPED_ALLOW_LISTS.at(-1), 'append the new list to SHIPPED_ALLOW_LISTS');
+  for (const e of SHIPPED_ALLOW_LISTS.flat()) assert.ok(now.includes(e) || RETIRED_ALLOW_ENTRIES.includes(e), `${e} left the list: add it to RETIRED_ALLOW_ENTRIES`);
 });
 
 test('no pre-approved command reads a flag bin/yad.mjs uses to write, push, post or approve', () => {

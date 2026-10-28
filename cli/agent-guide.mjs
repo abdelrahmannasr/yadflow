@@ -20,15 +20,15 @@ const ASK_WORDS = {
   'not-by-agent': 'do not run it',
 };
 
-// Every command line of a class: the commands whose own class it is, and `<command> --<flag>` for each flag
-// that raises a command to it.
+// Every command line of a class, as finished Markdown: the commands whose own class it is, and
+// `<command> --<flag>` for each flag that raises a command to it.
 function commandsOf(cls) {
   const out = [];
   for (const [key, e] of Object.entries(COMMAND_CLASS)) {
     // A command whose flags raise it says which, so `yad dial` reads as "not with --to".
-    const raised = Object.entries(e.flags ?? {}).filter(([, c]) => c !== cls).map(([f]) => `--${f}`);
-    if (e.class === cls) out.push(raised.length ? `yad ${key}\` (not with \`${raised.join('`, `')}\`)` : `yad ${key}`);
-    for (const [flag, c] of Object.entries(e.flags ?? {})) if (c === cls) out.push(`yad ${key} --${flag}`);
+    const raised = Object.entries(e.flags ?? {}).filter(([, c]) => c !== cls).map(([f]) => `\`--${f}\``);
+    if (e.class === cls) out.push(raised.length ? `\`yad ${key}\` (not with ${raised.join(', ')})` : `\`yad ${key}\``);
+    for (const [flag, c] of Object.entries(e.flags ?? {})) if (c === cls) out.push(`\`yad ${key} --${flag}\``);
   }
   return out;
 }
@@ -48,7 +48,7 @@ export function guideSections() {
       '`yad guide --json` gives each command its `class` and `ask`. In short:',
       '',
       ...CLASSES.filter((cls) => !['internal', 'removed'].includes(cls)).flatMap((cls) => [
-        `- **${cls}** — ${ASK_WORDS[ASK[cls]]}. ${commandsOf(cls).map((c) => `\`${c}\``).join(', ')}.`,
+        `- **${cls}** — ${ASK_WORDS[ASK[cls]]}. ${commandsOf(cls).join(', ')}.`,
       ]),
       '',
       'A command not listed: read `yad <command> --help`, and treat it as a write until you know better.',

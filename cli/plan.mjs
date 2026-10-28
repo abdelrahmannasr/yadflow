@@ -14,7 +14,7 @@ import {
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
 import { applyMarkedBlock } from './marked-block.mjs';
-import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, readAllowList, RETIRED_ALLOW_ENTRIES } from './agent-rules.mjs';
+import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, readAllowList, RETIRED_ALLOW_ENTRIES, SHIPPED_ALLOW_LISTS } from './agent-rules.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
 // these so `yad update --push` can stage an EXPLICIT allowlist of exactly what it wrote per repo —
@@ -1229,14 +1229,14 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
       unparsedSaid.add(`${dest}\0${raw}`);
       warn(`${relDest} does not parse — yad's entries in it (hooks, the read-only allow list) cannot be written; fix the JSON, then re-run \`yad check --fix\``);
     }
-    return { ...base, status: 'modified', apply: () => {} };
+    return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
   const { changed, unreadable: unmergeable } = merge(parsed);
   // Same treatment as a file that does not parse, and for the same reason: everything in it is the
   // team's, there is no shipped template to restore, and `--overwrite-local` must not invent one.
   if (unmergeable) {
     warn(`${relDest}: ${unmergeable} — the ${adapter.label || 'ledger guard'} cannot be wired without discarding what is there; fix it by hand, then re-run \`yad check --fix\``);
-    return { ...base, status: 'modified', apply: () => {} };
+    return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
   return {
     ...base,
@@ -1289,7 +1289,9 @@ function blockState(dest, opts) {
   if (raw === undefined) return { raw, state: 'unreadable', refused: 'it is not a file yad can read' };
   const now = applyMarkedBlock(raw, opts);
   if (now.refused) return { raw, state: 'refused', refused: now.refused };
-  return { raw, state: raw === null ? 'missing' : now.status === 'ok' ? 'ok' : 'outdated', refused: null, hasBlock: now.status !== 'new' };
+  // A file with no block is `missing` too: the BLOCK is missing. So `yad update` adds it only where it adds
+  // other missing files (the Product, a wired repo), never to the team's own AGENTS.md in a repo yad never set up.
+  return { raw, state: now.status === 'ok' ? 'ok' : now.status === 'new' ? 'missing' : 'outdated', refused: null, exists: raw !== null };
 }
 
 function markedBlockAction(root, relDest, lines, { scope = 'product' } = {}) {
@@ -1301,7 +1303,7 @@ function markedBlockAction(root, relDest, lines, { scope = 'product' } = {}) {
   // text is left as it is (as a broken config.yaml region is, cli/lifecycle.mjs).
   if (refused) {
     warn(`${scope}/${relDest}: ${refused} — the yadflow rules block was left out; ${state === 'refused' ? 'fix the markers (or delete both to have the block added again)' : 'make it a plain file'}, then re-run \`yad check --fix\``);
-    return { ...base, status: 'modified', apply: () => {} };
+    return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
   return {
     ...base,
@@ -1329,14 +1331,15 @@ export function agentFileActions(root, ideTargets = ideTargetsFor(root), { scope
   return relabel ? actions.map(asNew) : actions;
 }
 
-// The same files, for `yad doctor`: each one's state, with nothing printed. `state` is ok | outdated | missing |
-// refused (markers yad cannot trust) | unreadable (not a plain file).
+// The same files, for `yad doctor`: each one's state, with nothing printed. `state` is ok | outdated | missing (no
+// block; `exists` says whether the file is there) | refused (markers yad cannot trust) | unreadable (not a plain
+// file).
 export function agentFilesState(root, ideTargets = ideTargetsFor(root), lines = agentsBlock()) {
   const files = [['AGENTS.md', lines]];
   if (canonicalIdeTargets(ideTargets).includes('.claude')) files.push(['CLAUDE.md', claudeBlock()]);
   return files.map(([file, l]) => {
-    const { state, refused, hasBlock = false } = blockState(path.join(root, file), { ...AGENTS_MARKERS, lines: l });
-    return { file, state, refused, hasBlock };
+    const { state, refused, exists = true } = blockState(path.join(root, file), { ...AGENTS_MARKERS, lines: l });
+    return { file, state, refused, exists };
   });
 }
 
@@ -1673,7 +1676,8 @@ export function allowListActions(root, ideTargets = ideTargetsFor(root)) {
 // exact strings come out; every other entry is the team's and stays. A file that does not parse is left alone.
 //
 // A team may type one of yad's strings by hand (`Bash(yad status:*)`), so with `.claude` gone the list comes out
-// only when ALL of yad's current entries are there: that is yad's list, not a hand-picked line (review 2).
+// only when ALL the entries of a list yad wrote are there (today's, or one an older release wrote and no
+// `check --fix` brought up to date, `SHIPPED_ALLOW_LISTS`): that is yad's list, not a hand-picked line.
 export function orphanAllowListActions(root, ideTargets = ideTargetsFor(root)) {
   if (!exists(productConfigPath(root))) return [];
   const file = path.join(root, ALLOW_LIST_ADAPTER.settings);
@@ -1682,10 +1686,10 @@ export function orphanAllowListActions(root, ideTargets = ideTargetsFor(root)) {
   if (!safeIdeTargetsFor(root, ideTargets).includes('.claude')) {
     try {
       const allow = JSON.parse(fs.readFileSync(file, 'utf8'))?.permissions?.allow;
-      wholeList = Array.isArray(allow) && readAllowList().every((e) => allow.includes(e));
+      wholeList = Array.isArray(allow) && [readAllowList(), ...SHIPPED_ALLOW_LISTS].some((list) => list.every((e) => allow.includes(e)));
     } catch { return []; }
   }
-  const gone = new Set(wholeList ? [...readAllowList(), ...RETIRED_ALLOW_ENTRIES] : RETIRED_ALLOW_ENTRIES);
+  const gone = new Set(wholeList ? [...readAllowList(), ...SHIPPED_ALLOW_LISTS.flat(), ...RETIRED_ALLOW_ENTRIES] : RETIRED_ALLOW_ENTRIES);
   if (!gone.size) return [];
   const without = (obj) => {
     if (!isPlainObject(obj) || !isPlainObject(obj.permissions) || !Array.isArray(obj.permissions.allow)) return null;

@@ -670,7 +670,8 @@ export async function runSetup(root, opts = {}) {
   }
   // E158 (#353): the read-only yad commands Claude Code may run without asking — shown before they are written.
   const allowList = allowListActions(root, ideTargets);
-  if (allowList.some((a) => a.status !== 'ok')) {
+  // Shown only when it will be written: a settings file that does not parse writes nothing, and says so.
+  if (allowList.some((a) => a.status !== 'ok' && !a.writesNothing)) {
     log(`  ${c.bold('product')} ${c.dim('(read-only yad commands Claude Code runs without asking, in .claude/settings.json)')}`);
     for (const e of readAllowList()) log(`    ${c.dim(e)}`);
     applyActions(allowList);

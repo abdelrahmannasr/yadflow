@@ -702,11 +702,15 @@ workflows run `checks/product-checkout.sh` (wired into every code repo). It read
 `YAD_PRODUCT_TOKEN` secret is set, clones the Product's `default_branch` (depth 1; the remote's own default when the record names
 none) into the record's `path`. To turn it on:
 
-1. From the Product, run `yad check --fix --push`: it writes `.sdlc/product-link.json` into each
-   connected code repo and commits it to the default branch. Set the Product's `git_url` in its
+1. From the Product, run `yad check --fix --open-pr`: it writes `.sdlc/product-link.json` into each
+   connected code repo and opens a PR/MR with it, which a person merges. (`--push` commits it straight
+   to the default branch instead; an agent asks the person every time before that, E158.) Set the Product's `git_url` in its
    `.sdlc/product.json` first (`yad setup` fills it from the `origin` remote). On a Product that has only
    `.sdlc/hub.json`, set it there, and never create a `product.json` beside it by hand; when both exist,
    run `yad migrate --apply --keep product` after the edit.
+Steps 2 and 3 are the person's: an AI agent gives them these steps and never makes or sets the token
+itself, then confirms by reading (`yad doctor`) once they say it is done (E158).
+
 2. Make a token that can **read** the Product repository — on GitHub a fine-grained personal access
    token or a GitHub App token with `contents: read` on that one repo (the workflow's own `GITHUB_TOKEN`
    cannot read another private repo); on GitLab a project or group access token with `read_repository`.

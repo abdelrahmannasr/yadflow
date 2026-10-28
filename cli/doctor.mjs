@@ -2260,7 +2260,7 @@ export function agentFileChecks(checks, root) {
     check(checks, 'agent-files', 'project', 'warn', `${bad.map((f) => `${f.file}: ${f.refused}`).join('; ')} — the yadflow rules for AI agents are not written there`,
       'fix the markers by hand (or delete both, to have the block added again), then run `yad check --fix`');
   } else if (behind.length) {
-    check(checks, 'agent-files', 'project', 'warn', `${behind.map((f) => (f.state === 'missing' ? `${f.file} is missing` : `${f.file} has ${f.hasBlock ? 'an older' : 'no'} yadflow rules block`)).join('; ')} — an AI agent may not follow the rules`,
+    check(checks, 'agent-files', 'project', 'warn', `${behind.map((f) => (f.state === 'outdated' ? `${f.file} has an older yadflow rules block` : f.exists ? `${f.file} has no yadflow rules block` : `${f.file} is missing`)).join('; ')} — an AI agent may not follow the rules`,
       'run `yad update --open-pr` (or `yad check --fix`) to write it; your own text in the file is kept');
   } else {
     check(checks, 'agent-files', 'project', 'ok', `${files.map((f) => f.file).join(' and ')}: the yadflow rules for AI agents are current`);
