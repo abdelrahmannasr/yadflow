@@ -362,6 +362,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const base = e.head === null ? {} : parse(e.head);
     // What yad alone would make of it: each adapter's entry merged into what is committed.
     const ours = e.merges.reduce((o, merge) => { if (!o) return null; const m = merge(o); return m.unreadable ? null : m.settings; }, base);
+    // yad's entries are all committed already: nothing of yad's is left out, and the person's own edits in the
+    // file are theirs to keep or share — no row (E157 update review 12).
+    if (ours && base && JSON.stringify(ours) === JSON.stringify(base)) continue;
     const was = e.disk === null ? null : parse(e.disk);
     const yadsAlone = e.disk === null ? e.head === null
       : e.head !== null && e.disk.trim() === e.head.trim() ? true

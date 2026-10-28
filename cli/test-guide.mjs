@@ -808,6 +808,24 @@ test('hook settings with the person\'s own uncommitted edits never ride the upda
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+test('hook settings whose yad entries are already committed: the person\'s own edit there gets no row', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/6' });
+    // Everything installed and committed, then the stamp made old so the next update has work to do.
+    await reconcile(A, { fix: true, scope: 'all' });
+    put(path.join(A, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: install']); git(A, ['push', '-q']);
+    const file = path.join(A, '.claude/settings.json');
+    put(file, { ...JSON.parse(fs.readFileSync(file, 'utf8')), permissions: { allow: ['Bash(npm test)'] } });
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'settings-uncommitted'), JSON.stringify(r.commits));
+    assert.ok(r.commits.some((c) => c.opened), JSON.stringify(r.commits));
+    assert.match(fs.readFileSync(file, 'utf8'), /npm test/, 'their edit is still there');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('--open-pr is all or nothing: one repo that cannot take it, and nothing is written anywhere', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const P = tmp();
