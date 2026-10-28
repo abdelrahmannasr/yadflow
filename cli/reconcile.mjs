@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, readJSON, writeJSON, exists, forTerminal,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -17,7 +17,8 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS } from './update-commit.mjs';
+import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
 
@@ -31,7 +32,7 @@ const repoShown = (repo) => `product (the code repo at ${forTerminal(repo.path)}
 const shown = (a) => a.shownScope ?? a.scope;
 const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
-export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null } = {}) {
+export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, openPr = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null, creator = createPr } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
 
@@ -224,7 +225,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     hand(`keep the edits (reported as \`modified\` on every check), or replace them with \`yad update --overwrite-local\` — each previous version is saved beside the file as <file>${BACKUP_SUFFIX}`);
   }
 
-  const fixable = actions.filter((a) =>
+  let fixable = actions.filter((a) =>
     a.status !== 'ok'
     && (a.status !== 'modified' || overwriteLocal)
     && (scope === 'all' ? true : a.status !== 'missing'),
@@ -238,21 +239,98 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   let workspaceFile = wsNeeded ? workspaceFileState(root) : null;
   if (!fix) {
     if (workspaceFile === 'missing') info(`no ${WORKSPACE_FILE} beside the Product — \`yad check --fix\` writes it, so yad finds the Product from its code repos`);
-    if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
+    if (push || openPr) warn(`${push ? '--push' : '--open-pr'} has no effect without --fix (there is nothing applied to commit).`);
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
     // After the --fix hint, never above it: --fix installs no tool, and must not read as if it did.
     const toolbox = toolboxSection(root, toolboxAt);
     return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile, toolbox };
   }
 
+  // Each repo's default branch and platform, for --push and --open-pr.
+  const productSettings = readJSON(productConfigPath(root), {});
+  const defByRoot = new Map([[root, productSettings?.default_branch]]);
+  const platformByRoot = new Map([[root, productSettings?.platform]]);
+  for (const repo of registry.repos) {
+    const repoRoot = path.resolve(root, repo.path);
+    // A monorepo entry (`path: "."`) is the Product itself: its settings are the Product's.
+    if (repoRoot === root) continue;
+    defByRoot.set(repoRoot, repo.default_branch);
+    platformByRoot.set(repoRoot, repo.platform);
+  }
+
+  // --open-pr is all or nothing (E157 update reviews 2 and 3). The Product and every connected repo cloned
+  // here (`updateTargets`, the one list the guide reads too) are checked BEFORE anything is written: each must
+  // be on its default branch, not detached, with an origin and no local commits origin lacks. One that is not
+  // stops the whole run with nothing written, so no repo is left half updated, no one's feature work rides an
+  // update PR/MR, and no one is moved off their branch: the person fixes it and runs it again. A repo whose
+  // update is already on review (`open`) is left alone (`held`): nothing is written there until it merges.
+  let held = new Set();
+  let heldRows = [];
+  let reached = null;
+  if (openPr) {
+    const targets = updateTargets(root);
+    reached = new Set(targets.map((t) => t.root));
+    const checks = targets.map((t) => [t.root, updatePrBlocker(t.root, { defaultBranch: t.defaultBranch ?? defByRoot.get(t.root), productRoot: root, file: t.file })]);
+    const stop = checks.filter(([, b]) => b && !HELD_KINDS.includes(b.kind));
+    // Every row says why, in `reason` (a word) and `hint` (what to do): the agent relays it to the person.
+    const row = (r, b) => ({ label: b.label, product: r === root, branch: b.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: !HELD_KINDS.includes(b.kind), reason: b.kind, hint: b.message });
+    if (stop.length) {
+      log('');
+      for (const [, b] of stop) fail(`${b.label}: ${b.message}`);
+      fail(`--open-pr: ${stop.length} repo(s) cannot take the update as a PR/MR now — nothing was written; fix the above, then run it again`);
+      process.exitCode = 1;
+      const toolbox = toolboxSection(root, toolboxAt);
+      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: stop.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
+    }
+    held = new Set(checks.filter(([, b]) => b).map(([r]) => r));
+    heldRows = checks.filter(([, b]) => b).map(([r, b]) => row(r, b));
+    for (const [, b] of checks) if (b) info(`${b.label}: ${b.message}`);
+    if (held.size === checks.length) {
+      info('every repo\'s update is already merged or on review — nothing written');
+      const toolbox = toolboxSection(root, toolboxAt);
+      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: checks.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
+    }
+    fixable = fixable.filter((a) => (!a.root || reached.has(a.root)) && !held.has(a.root) && (!a.managed?.root || reached.has(a.managed.root)) && !held.has(a.managed?.root));
+  }
+  // Under --open-pr, only a repo it checked and did not hold is written (a registered repo not cloned here is
+  // `yad repo clone`'s business).
+  const reaches = (r) => !r || ((!reached || reached.has(r)) && !held.has(r));
+  const live = (a) => reaches(a.root) && reaches(a.managed?.root);
+
+  // A file the team co-owns (the agent settings that run yad's hooks) is never staged by `--push`. Under
+  // --open-pr it rides the PR/MR when it is yad's alone: exactly what is committed (or nothing) with yad's
+  // entries merged in — so a file this run creates rides too, and so does one a failed push left behind.
+  // Otherwise the person has their own edits in it, which never ride an update: said in a row of its own.
+  // Read BEFORE anything is applied. Several adapters can share one file, so it is one entry per file
+  // (E157 update review 11).
+  const shared = new Map();
+  const sharedText = (f) => (exists(f) ? fs.readFileSync(f, 'utf8') : null);
+  if (openPr) {
+    for (const a of actions) {
+      if (!a.shared || !a.root || !live(a)) continue;
+      const file = path.join(a.root, a.shared);
+      if (!shared.has(file)) {
+        const head = run('git', ['show', `HEAD:${a.shared}`], { cwd: a.root, maxBuffer: 64 * 1024 * 1024 });
+        shared.set(file, { a, merges: [], disk: sharedText(file), head: head.ok ? head.stdout : null });
+      }
+      shared.get(file).merges.push(a.mergeShared);
+    }
+  }
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
   log('');
   let applied = 0;
   const appliedActions = [];
+  // Under --open-pr a skill folder keeps a person's own files and is staged by the template's files only, so
+  // nothing of theirs is deleted from disk or rides the PR/MR (E157 update review 7).
+  const keepOwn = (a) => {
+    if (!openPr || typeof a.applyKeepingOwn !== 'function') { a.apply(); return a; }
+    const kept = a.applyKeepingOwn();
+    if (kept.length) info(`kept ${kept.length} file(s) the template does not have in ${shown(a)}/${a.item} — delete any that an older yadflow shipped`);
+    return { ...a, paths: a.ownPaths() };
+  };
   for (const a of fixable) {
-    a.apply();
+    appliedActions.push(keepOwn(a));
     applied++;
-    appliedActions.push(a);
     // A backup means the replaced content was not provably ours (a pre-ledger install, or an edit
     // --overwrite-local was told to discard). Never report that as an ordinary template adoption.
     info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
@@ -260,19 +338,70 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (force) {
     // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —
     // only --overwrite-local discards a local edit, and only after backing it up.
-    for (const a of actions.filter((a) => a.status === 'ok')) { a.apply(); appliedActions.push(a); }
+    for (const a of actions.filter((a) => a.status === 'ok' && live(a))) appliedActions.push(keepOwn(a));
   }
   // A file that is right on disk but not committed as it stands, which --push must still commit: the
   // product-link record (E120) — the gates read it from the default branch, not from anyone's disk.
-  if (push) for (const a of actions) if (a.pendingCommit && !appliedActions.includes(a)) appliedActions.push(a);
+  if (push || openPr) for (const a of actions) if (a.pendingCommit && live(a) && !appliedActions.includes(a)) appliedActions.push(a);
+  // --open-pr also stages every managed file already right on disk: `stageAllowlist` keeps only what differs
+  // from the commit, so an update a failed commit or push left in the working tree is carried by the next run.
+  // A folder is staged by its template's own files only, never the folder: a person's own file beside them
+  // (notes in a skill folder) must not ride an update PR/MR.
+  if (openPr) {
+    for (const a of actions) {
+      if (a.status !== 'ok' || !a.root || !Array.isArray(a.paths) || !live(a) || appliedActions.includes(a)) continue;
+      appliedActions.push(typeof a.ownPaths === 'function' ? { ...a, paths: a.ownPaths() } : a);
+    }
+  }
+  const sharedRows = [];
+  const parse = (t) => { try { const v = JSON.parse(t); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
+  for (const [file, e] of shared) {
+    const now = sharedText(file);
+    // `run` trims what git prints, so text is compared trimmed.
+    if (now === null || (e.head !== null && now.trim() === e.head.trim())) continue;
+    const base = e.head === null ? {} : parse(e.head);
+    // What yad alone would make of it: each adapter's entry merged into what is committed.
+    const ours = e.merges.reduce((o, merge) => { if (!o) return null; const m = merge(o); return m.unreadable ? null : m.settings; }, base);
+    // yad's entries are all committed already: nothing of yad's is left out, and the person's own edits in the
+    // file are theirs to keep or share — no row (E157 update review 12).
+    if (ours && base && JSON.stringify(ours) === JSON.stringify(base)) continue;
+    const was = e.disk === null ? null : parse(e.disk);
+    const yadsAlone = e.disk === null ? e.head === null
+      : e.head !== null && e.disk.trim() === e.head.trim() ? true
+        : !!(ours && was && JSON.stringify(was) === JSON.stringify(ours));
+    if (yadsAlone) { appliedActions.push({ ...e.a, paths: [e.a.shared] }); continue; }
+    const hint = `${e.a.shared} has changes that are not committed, so the update left its hook entry out of the PR/MR: commit ${e.a.shared} as it now stands, through review on a branch of your own`;
+    info(`${repoLabel(root, e.a.root)}: ${hint}`);
+    sharedRows.push({ label: repoLabel(root, e.a.root), product: e.a.root === root, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: false, reason: 'settings-uncommitted', hint });
+  }
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
-  writeCanonicalStamp();
-  appliedActions.push({ scope: 'product', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
+  if (!held.has(root)) {
+    writeCanonicalStamp();
+    appliedActions.push({ scope: 'product', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
+  }
   // Record what we wrote (and what was already correct) so the NEXT update can tell a stale managed
   // file from an edited one. Seeding the already-correct files is what migrates a pre-ledger install.
   // A file left as `modified` records nothing — it differs from the template by definition.
-  for (const ledgerRoot of recordManagedWrites(actions)) {
+  const ledgerRoots = recordManagedWrites(actions.filter(live));
+  // A connected repo whose every managed file is the team's own (`modified`) records nothing above, so its
+  // ledger would name an older yadflow for good — and read as behind on every `yad guide`. Its version is
+  // brought up all the same: this release did look at it.
+  for (const repo of registry.repos) {
+    const repoRoot = path.resolve(root, repo.path);
+    const ledgerFile = path.join(repoRoot, MANAGED_LEDGER);
+    if (repoRoot === root || ledgerRoots.includes(repoRoot) || !reaches(repoRoot) || !exists(ledgerFile)) continue;
+    const ledger = readJSON(ledgerFile, null);
+    if (ledger && typeof ledger === 'object' && !Array.isArray(ledger) && ledger.version !== VERSION) {
+      writeJSON(ledgerFile, { ...ledger, version: VERSION });
+      ledgerRoots.push(repoRoot);
+    } else if (ledger && (push || openPr)) {
+      // Already restamped on disk by a run whose commit or push failed: still staged, so the next run carries
+      // it (staging keeps only what differs from the commit).
+      ledgerRoots.push(repoRoot);
+    }
+  }
+  for (const ledgerRoot of ledgerRoots) {
     appliedActions.push({
       scope: repoLabel(root, ledgerRoot), item: MANAGED_LEDGER, status: 'stamp',
       root: ledgerRoot, paths: [MANAGED_LEDGER],
@@ -293,17 +422,13 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // Each repo's `{ label, committed, pushed }`, for the --json answer (E1): a push that failed after a
   // commit landed is said per repo.
   let commits = [];
-  if (push) {
-    preflightGuardReadiness(root);
-    const productConfig = readJSON(productConfigPath(root), {});
-    const defByRoot = new Map([[root, productConfig?.default_branch]]);
-    const platformByRoot = new Map([[root, productConfig?.platform]]);
-    for (const repo of registry.repos) {
-      const repoRoot = path.resolve(root, repo.path);
-      defByRoot.set(repoRoot, repo.default_branch);
-      platformByRoot.set(repoRoot, repo.platform);
-    }
-    commits = commitUpdates(root, groupByRoot(appliedActions), {
+  if (push || openPr) {
+    // Both commit: an unsigned commit fails the verified-commits check, on the default branch or on the PR/MR.
+    preflightGuardReadiness(root, openPr ? 'the PR/MR\'s verified-commits check requires a platform-Verified signature; an unsigned update commit fails it' : undefined);
+    // --open-pr: each repo's changes on their own branch, with a PR/MR a person merges.
+    // Every repo has a row: the held ones (with their reason and hint) first, then what was opened.
+    if (openPr) commits = heldRows.concat(openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator, checked: true }), sharedRows);
+    else commits = commitUpdates(root, groupByRoot(appliedActions), {
       push: true, allowBranch,
       defaultBranchFor: (r) => defByRoot.get(r),
       // GitLab's yad-update-guard is an includable fragment: unlike a GitHub workflow it does nothing

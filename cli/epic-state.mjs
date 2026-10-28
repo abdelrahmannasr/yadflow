@@ -2589,7 +2589,7 @@ export function markInReview(state, step, close = null) {
 // and "what reviews it" were four separate lookups that nothing held together.
 //
 // THE DATA IS IN JSON NOW (E134). The rows are no longer written here: they are built from the shipped
-// lifecycle default, `cli/lifecycle/defaults/1.json`, by `expandSteps` (cli/lifecycle.mjs). In that file
+// lifecycle default, `cli/lifecycle/defaults/2.json`, by `expandSteps` (cli/lifecycle.mjs). In that file
 // an author step names its gate once (`gate: { riskTags }`) and its gate row is derived from that.
 // The rows, their fields and their order are exactly what this table held before; a test compares them
 // with a frozen copy (`cli/fixtures/lifecycle-v4-catalogue.json`).
@@ -2661,7 +2661,7 @@ export const STEPS = expandSteps(DEFAULT_LIFECYCLE);
 // word is a trap for whoever reads this next; two clearly different names is not.
 //
 // THE DATA IS IN JSON NOW (E134). The profiles are built from the `routes` of the shipped lifecycle
-// default, `cli/lifecycle/defaults/1.json`, by `expandRoutes` (cli/lifecycle.mjs). There, a route lists
+// default, `cli/lifecycle/defaults/2.json`, by `expandRoutes` (cli/lifecycle.mjs). There, a route lists
 // only its author steps and the engine adds each step's gate; a route's `name` is the `title` here. The
 // default also holds one more route, `lane` — the Build order one story walks in one repo — which is not
 // a profile, because an epic never walks it; it is `BUILD_STEP_ORDER` below. A test compares the
@@ -3338,7 +3338,7 @@ export const skillFields = (ids) => ({
 // So the phase NUMBER is deliberately never printed: "Phase 4" already means something else to anyone
 // who has read those. The name is what is shown.
 //
-// Built from the `phases` of the lifecycle default (`cli/lifecycle/defaults/1.json`, E134) by
+// Built from the `phases` of the lifecycle default (`cli/lifecycle/defaults/2.json`, E134; the step facts of E157) by
 // `featurePhases`. There each phase also says whether it runs once or in a loop (`runs`, `over`); those
 // fields are not part of this view, which keeps exactly the fields it always had.
 export const PHASES = featurePhases(DEFAULT_LIFECYCLE);

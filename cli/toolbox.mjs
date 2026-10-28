@@ -494,7 +494,7 @@ export function parseVersion(v) {
 
 // The semantic-versioning order: numbers first; then a pre-release is below its release, and two
 // pre-releases compare label by label — a number below a word, numbers as numbers, a shorter list first.
-function compare(a, b) {
+export function compare(a, b) {
   for (let i = 0; i < 3; i++) if (a.parts[i] !== b.parts[i]) return a.parts[i] < b.parts[i] ? -1 : 1;
   if (!a.pre || !b.pre) return a.pre === b.pre ? 0 : a.pre ? -1 : 1;
   const x = a.pre.split('.');

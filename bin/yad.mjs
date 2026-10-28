@@ -43,6 +43,11 @@ ${c.bold('Setup & maintenance')}
                        commit; no PR — the push-on-main yad-update-guard runs verified-commits
                        + commit-message). Announce the team & pause merges first. Also works as
                        'yad check --fix --push'; --allow-branch permits a non-default branch
+  yad update --open-pr Instead of --push: commit each repo's changes on its own branch
+                       (chore/yad-update-v<version>), push it, and open a PR/MR into the
+                       default branch, so the checks run and a person merges it. Works on a
+                       protected branch. Each repo must be on its default branch; it is left
+                       there. Also 'yad check --fix --open-pr'
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
   yad migrate [--apply] [--keep product|hub] [--json]   Move this project's state files onto the shape
@@ -151,6 +156,11 @@ ${c.bold('Where am I / what next')}
   yad next --all                       Every active epic's next action at once
   yad next [<epic>] --json             The same answer as a machine-readable action object (for
                                        agents/CI) — always every epic, so --all is implied
+  yad guide [<epic>] [--json]          The brief an AI agent reads before each step (E157): what the
+                                       step is for, mandatory or skippable, who does it, the skills
+                                       that fit, what the agent runs, and what only the person can do
+                                       (with the exact steps and the command that confirms it). With
+                                       no Product yet, how to start one. Read-only
   yad status [--brief] [--no-fetch] [--json]
                                        Where the work stands in ~20 lines, for after a context reset:
                                        this checkout's task and its Build step, each open epic and its
@@ -461,6 +471,7 @@ function parseArgs(argv) {
     else if (a === '--no-fetch') o.noFetch = true;
     else if (a === '--no-build') o.noBuild = true;
     else if (a === '--push') o.push = true;
+    else if (a === '--open-pr') o.openPr = true;
     else if (a === '--allow-branch') o.allowBranch = true;
     else if (a === '--overwrite-local') o.overwriteLocal = true;
     else if (a === '--merged') o.merged = true;
@@ -570,7 +581,7 @@ const PRODUCT_CMDS = new Set([
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build', 'worktree',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
-const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status']);
+const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
 // The Product commands that WRITE its files without first checking it is one. Run from a code repo they
 // wrote an epic, a dial or the module into it; they refuse instead (E80). The rest either only read, or
 // already refuse a folder that is not a Product.
@@ -679,7 +690,7 @@ async function main() {
       // The workspace folder itself, or a repo the Product does not register: no Product here, but the
       // person is one `cd` away from it — say so, rather than let "run yad setup" make a second one.
       if (PRODUCT_CMDS.has(cmd)) warn(`this folder is not in a repo the Product registers — the Product is ${shown(found.elsewhere)}: cd there, or pass --dir ${shown(found.elsewhere)}`);
-      else if (cmd === 'status') o.productElsewhere = shown(found.elsewhere);
+      else if (cmd === 'status' || cmd === 'guide') o.productElsewhere = shown(found.elsewhere);
     } else if (found?.root && REPO_CMDS.has(cmd)) o.product = found.root;
     else if (found?.root && !dirGiven && found.via !== 'here') {
       o.dir = found.root;
@@ -758,11 +769,15 @@ async function main() {
     }
     case 'check':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
+      if (o.push && o.openPr) { refuse('--push and --open-pr publish the update two different ways — pick one', 'use --open-pr for a branch and a PR/MR per repo, or --push to push straight to each default branch'); break; }
+      if (o.openPr && o.allowBranch) { refuse('--allow-branch does not apply to --open-pr: the update branch is cut from each repo\'s default branch', 'switch each repo to its default branch, then run it again'); break; }
+      result = await commands.reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'update':
       if (noProduct()) break;
-      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
+      if (o.push && o.openPr) { refuse('--push and --open-pr publish the update two different ways — pick one', 'use --open-pr for a branch and a PR/MR per repo, or --push to push straight to each default branch'); break; }
+      if (o.openPr && o.allowBranch) { refuse('--allow-branch does not apply to --open-pr: the update branch is cut from each repo\'s default branch', 'switch each repo to its default branch, then run it again'); break; }
+      result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt });
       break;
     case 'doctor':
       result = await commands.runDoctor(o.dir, { json: o.json });
@@ -881,6 +896,17 @@ async function main() {
         break;
       }
       result = await commands.runStatus(root, { cwd: o.dir, json: o.json, fetch: !o.noFetch });
+      break;
+    }
+    case 'guide': {
+      // Like `status`, it keeps the folder it ran in ("here" is that checkout). Unlike `status`, no Product
+      // is an answer, not a refusal: it says how to start one (the first start, E157).
+      const [, epic] = o._;
+      if (o._[2] !== undefined) { refuse(`yad guide takes one epic id, not ${o._[2]}`, 'usage: yad guide [<epic>] [--json]'); break; }
+      if (epic !== undefined && !commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`, 'usage: yad guide [<epic>] [--json]'); break; }
+      const root = o.product || (commands.hasProduct(o.dir) ? o.dir : null);
+      // A Product one `cd` away is said in the answer too, so an agent never starts a second one (E80).
+      result = await commands.runGuide(root, { epic: epic ?? null, cwd: o.dir, json: o.json, productElsewhere: root ? null : o.productElsewhere ?? null });
       break;
     }
     case 'next': {

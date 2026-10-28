@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
+  asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -52,7 +52,41 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
   status: !exists(dest) ? 'missing' : dirMatches(src, dest) ? 'ok' : 'outdated',
   root,
   paths: root ? [rel(root, dest)] : [],
+  // The template's own files, one path each — for staging a folder that is already right on disk without
+  // sweeping in a person's own files beside them (`yad update --open-pr` restages; E157 update review 6).
+  ownPaths: () => (root ? listFiles(src).map((f) => rel(root, path.join(dest, f))) : []),
   apply: () => copyDir(src, dest),
+  // Writes the template but keeps every file the template does not have (a person's notes, or a file an older
+  // yadflow shipped) — for `yad update --open-pr`, which an agent runs without asking (E157 update review 7).
+  // The kept files are moved aside and back, so their bytes, modes and links are untouched. Returns them,
+  // relative to `root`.
+  applyKeepingOwn: () => {
+    const shipped = listFiles(src);
+    const theirs = new Set(shipped);
+    // A path where the template now has a folder, or under a name the template now has as a file, is an older
+    // template's shape (a file swapped for a folder): it goes, as `yad update` always did, or it could never
+    // come back.
+    const clash = (f) => shipped.some((t) => t.startsWith(`${f}${path.sep}`) || f.startsWith(`${t}${path.sep}`));
+    const own = exists(dest) ? listFiles(dest).filter((f) => !theirs.has(f) && !clash(f)) : [];
+    if (!own.length) { copyDir(src, dest); return []; }
+    const aside = `${dest}.yad-keep-${process.pid}`;
+    const moved = [];
+    const stuck = [];
+    try {
+      for (const f of own) { fs.mkdirSync(path.dirname(path.join(aside, f)), { recursive: true }); fs.renameSync(path.join(dest, f), path.join(aside, f)); moved.push(f); }
+      copyDir(src, dest);
+    } finally {
+      // Back even when the copy failed. One that cannot go back stays in the side folder, which is named, never
+      // removed.
+      for (const f of moved) {
+        try { fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true }); fs.renameSync(path.join(aside, f), path.join(dest, f)); } catch { stuck.push(f); }
+      }
+      if (stuck.length) warn(`${stuck.length} of your own file(s) could not go back into ${dest}; they are in ${aside}`);
+      else fs.rmSync(aside, { recursive: true, force: true });
+    }
+    // Only the files back in place: one left in the side folder is said by the warning above.
+    return own.filter((f) => !stuck.includes(f)).map((f) => (root ? rel(root, path.join(dest, f)) : f));
+  },
 });
 
 // ---- managed-file provenance (#164) --------------------------------------------------------
@@ -1165,7 +1199,10 @@ function hookSettingsAction(root, adapter) {
   // every other entry in that allowlist is a file yad wrote in full. This one the team co-owns, so
   // staging it wholesale would sweep their unrelated working-tree edits into a `chore(yad-update)`
   // commit pushed straight to the default branch, bypassing review. The entry is theirs to commit.
-  const base = { scope: ide, item: path.basename(relDest), root, paths: [] };
+  // `shared` names the file for `yad update --open-pr`, which stages it only when the change is yad's alone
+  // (reconcile; E157 update review 11): without it a merged update ships a hook script nothing runs.
+  // `mergeShared` adds yad's entry to a settings object, so reconcile can tell a file that is yad's alone.
+  const base = { scope: ide, item: path.basename(relDest), root, paths: [], shared: relDest, mergeShared: (obj) => mergeHookSettings(obj, adapter) };
   // A settings file we cannot READ is never rewritten — not even by `--overwrite-local`.
   //
   // For a managed file, `--overwrite-local` restores the shipped template, which is coherent. Here

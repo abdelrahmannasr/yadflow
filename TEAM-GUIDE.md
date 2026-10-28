@@ -666,6 +666,9 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   - `npx yadflow update` — apply drift + install newly-added skills (the upgrade command).
   - `npx yadflow update --push` — the same, then commit + push each repo's changes straight to its
     default branch (a `chore(yad-update)` commit; announce the team & pause merges first).
+  - `npx yadflow update --open-pr` — the same commit, but on its own branch in each repo, with a PR/MR
+    a person merges: the checks run first, and it works on a protected branch. This is how an AI agent
+    publishes an update.
   - `npx yadflow --version` — the installed CLI version.
 
 ---
