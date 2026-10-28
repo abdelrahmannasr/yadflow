@@ -56,6 +56,8 @@ export const SKILLS = [
   'yad-pair-review',
   'yad-status',
   'yad-report',
+  // E158: the rules and the step loop for an AI agent, loaded before any yadflow work.
+  'yad-guide',
   'yad-change',
   'yad-timeline',
   'yad-defects',

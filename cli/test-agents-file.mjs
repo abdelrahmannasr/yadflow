@@ -418,3 +418,66 @@ test('yad report refuses --post without --confirm, --confirm without --post, and
     assert.match(r.stdout + r.stderr, re, args.join(' '));
   }
 });
+
+// ---- the yad-guide skill (E158) ------------------------------------------------------------------------
+
+const REPO = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
+const { SKILLS } = await import('./manifest.mjs');
+const { syncGuideSkill, GUIDE_SECTIONS } = await import('./agent-guide.mjs');
+
+test('the yad-guide skill is shipped, and its generated sections agree with the rules (scripts/agent-guide.mjs --check)', () => {
+  assert.ok(SKILLS.includes('yad-guide'));
+  const file = path.join(REPO, 'skills/yad-guide/SKILL.md');
+  const r = syncGuideSkill(file, { check: true });
+  assert.deepEqual(r.refused, []);
+  assert.deepEqual(r.stale, [], 'run `node scripts/agent-guide.mjs`');
+  const text = read(file);
+  for (const name of GUIDE_SECTIONS) assert.ok(text.includes(`<!-- end: ${name} -->`), name);
+  for (const c of humanOnlyCommands()) assert.ok(text.includes(`\`${c}\``), c);
+  for (const n of NEVER) assert.ok(text.includes(n.text), n.id);
+  const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts/agent-guide.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stdout + cli.stderr);
+  // A stale section is found, and missing markers are refused rather than guessed.
+  const T = tmp();
+  try {
+    put(path.join(T, 'SKILL.md'), text.replace(NEVER[0].text, 'something else'));
+    assert.deepEqual(syncGuideSkill(path.join(T, 'SKILL.md'), { check: true }).stale, ['never']);
+    put(path.join(T, 'SKILL.md'), text.replace('<!-- end: rules -->', ''));
+    assert.equal(syncGuideSkill(path.join(T, 'SKILL.md'), { check: true }).refused.length, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('every skill\'s description fits the 1,024 characters an agent harness reads', () => {
+  for (const skill of fs.readdirSync(path.join(REPO, 'skills'))) {
+    const file = path.join(REPO, 'skills', skill, 'SKILL.md');
+    if (!fs.existsSync(file)) continue;
+    const m = read(file).match(/^description:\s*(.*)$/m);
+    if (!m) continue;
+    let v = m[1].trim();
+    if (v.startsWith('\'')) v = v.slice(1, -1).replace(/''/g, '\'');
+    else if (v.startsWith('"')) v = JSON.parse(v);
+    assert.ok(v.length <= 1024, `${skill}: ${v.length} characters`);
+  }
+});
+
+test('no skill tells the agent to run a human-only command: only the person runs it', () => {
+  const human = humanOnlyCommands().map((c) => c.replace(/^yad /, ''));
+  const bad = [];
+  for (const skill of fs.readdirSync(path.join(REPO, 'skills'))) {
+    const file = path.join(REPO, 'skills', skill, 'SKILL.md');
+    if (!fs.existsSync(file)) continue;
+    read(file).split('\n').forEach((line, i) => {
+      for (const c of human) {
+        const [words, flag] = c.split(' --');
+        const run = new RegExp(`\\b[Rr]uns? \`yad ${words}${flag ? `[^\`]*--${flag}` : ''}\\b`);
+        if (run.test(line) && !/person/.test(line)) bad.push(`skills/${skill}/SKILL.md:${i + 1}: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(bad, []);
+  // The review gate hands its human-only commands over, and says how to confirm them.
+  const gate = read(path.join(REPO, 'skills/yad-review-gate/SKILL.md'));
+  assert.match(gate, /are the person's to run, never yours \(E158\)/);
+  assert.match(gate, /yad gate status <epic>/);
+  assert.match(read(path.join(REPO, 'skills/yad-commit/SKILL.md')), /Never pass `--manual` yourself, even when asked/);
+});
