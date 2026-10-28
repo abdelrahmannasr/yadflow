@@ -30,7 +30,7 @@ You will have **four separate git repos**, each with one job, plus the **yadflow
 
 ```
   yadflow         ──►  the TOOL
-  (npm package)        The `yad` CLI and the 38 workflow skills, installed from npm
+  (npm package)        The `yad` CLI and the 39 workflow skills, installed from npm
                        (`npx yadflow …` or `npm install -g yadflow`). You never clone it,
                        and no real product work happens inside it.
 
@@ -581,6 +581,14 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
 
 ## 9. Handy anytime
 
+- **Run it from your AI agent.** In Claude Code or Codex, say "follow the yad-guide rules". The agent
+  runs `yad guide --json` before each step, tells you what the step is for and who does it, does its
+  own part, and hands you yours (approvals and merges, logins, secrets, signing keys, repository
+  settings) with the exact steps, then checks they were done. The rules live in a yad-written block in
+  `AGENTS.md` (and `CLAUDE.md`, which loads it); your own text around the block is kept. In Claude Code
+  and Cursor a hook refuses an approval or a force push the agent tries to run; Codex has no hooks. The
+  read-only yad commands run in Claude Code without a permission prompt. When the agent finds a yadflow
+  bug or idea, it shows you the exact report text and posts it only after your yes.
 - **See what's blocking:** `yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole
   chain, every step's status, the contract lock, and which approvals a gate is still waiting on. Start
   here when stuck.
@@ -765,7 +773,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 12. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
+descriptions of all 39 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -809,6 +817,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-docs-overview` | Generate the project-level overview site (`docs/sdlc-site/`) that shows every yadflow stage. |
 | `yad-docs-sync` | Report which generated docs sites are stale, and why; rebuild them on request. |
 | `yad-report` | File a bug against yadflow with privacy-safe diagnostics. It shows you the exact text and asks before posting. |
+| `yad-guide` | The rules for an AI agent running yadflow: read `yad guide --json` before each step, brief you, do its part, and hand you yours with the exact steps. |
 
 ---
 
@@ -816,6 +825,6 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 - **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
-- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 38 agent skills.
+- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 39 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-checkout/`** — a full worked epic (Shape + Build) you can copy from.

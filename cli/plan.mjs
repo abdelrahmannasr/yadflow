@@ -319,7 +319,7 @@ export function safeIdeTargetStateFor(root, input) {
 // sight in a repo that uses Cursor for rules alone, and `.claude/` in one that only ever set
 // permissions. Detecting on the bare directory meant that adding `.cursor` to the supported list
 // silently enrolled every such project: no `ideTargets` in the stamp, so this fallback runs, `.cursor`
-// is "detected", and the next `yad check --fix` writes 38 skill folders into `.cursor/skills/`, adds
+// is "detected", and the next `yad check --fix` writes 39 skill folders into `.cursor/skills/`, adds
 // `.cursor/hooks.json`, and stamps the target permanently — for a team that never asked. Requiring
 // `<ide>/skills/` (or `.opencode/commands/`) means detection finds only a directory yad already
 // installs into, which is the question this function was always trying to answer.

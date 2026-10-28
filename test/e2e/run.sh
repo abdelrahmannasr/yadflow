@@ -103,6 +103,13 @@ say "yad setup (non-interactive, team profile + tools configured)"
 SDLC_NONINTERACTIVE=1 yad setup --dir "$PRODUCT" --team 2 --brownfield --separate --tools || die "yad setup failed"
 jassert "$PRODUCT/.sdlc/hub.json" 'j.solo === false && j.profile.codebase === "brownfield" && j.profile.repo_layout === "separate" && j.profile.team_size === 2'
 [ -f "$PRODUCT/.claude/skills/yad-epic/SKILL.md" ] || die "skills not installed"
+# E158: the rules for AI agents, the guide skill, the agent guard, and the read-only allow list.
+grep -q "yadflow:end" "$PRODUCT/AGENTS.md" || die "AGENTS.md has no yadflow rules block"
+grep -q "@AGENTS.md" "$PRODUCT/CLAUDE.md" || die "CLAUDE.md does not import AGENTS.md"
+grep -q "yadflow:end" "$BACKEND/AGENTS.md" || die "the code repo has no yadflow rules block"
+[ -f "$PRODUCT/.claude/skills/yad-guide/SKILL.md" ] || die "the yad-guide skill is not installed"
+[ -f "$PRODUCT/hooks/agent-guard.mjs" ] || die "the agent guard is not installed"
+jassert "$PRODUCT/.claude/settings.json" 'j.permissions.allow.includes("Bash(yad guide:*)") && !j.permissions.allow.some((e) => /gate approve|--push/.test(e))'
 [ -f "$BACKEND/checks/spec-link.sh" ] || die "code repo not wired with check gates"
 [ -x "$BACKEND/checks/spec-link.sh" ] || die "spec-link.sh not executable"
 # No author allowlist is generated any more: the verified-commits gate checks signatures only (E62).
