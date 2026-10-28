@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
+  moduleActions, repoActions, productActions, hookActions, agentFileActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -655,6 +655,11 @@ export async function runSetup(root, opts = {}) {
     applyActions(captureWiring, { force: true });
     wired.push(...captureWiring);
   }
+  // E158: the rules block in AGENTS.md (and CLAUDE.md importing it), which an AI agent reads first. The team's
+  // own text in these files is kept; only the lines between yad's markers are written.
+  const agentFiles = agentFileActions(root, ideTargets);
+  log(`  ${c.bold('product')} ${c.dim('(AGENTS.md rules for AI agents)')}`);
+  applyActions(agentFiles, { force: true });
   // E113: the shell-script hooks a re-run replaces, once the entries above no longer name them.
   const retiredHooks = legacyHookScriptActions(root, ideTargets);
   if (retiredHooks.length) applyActions(retiredHooks, { force: true });

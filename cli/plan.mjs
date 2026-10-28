@@ -13,6 +13,8 @@ import {
   legacySkillPairs, REMOVED_SKILLS, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
+import { applyMarkedBlock } from './marked-block.mjs';
+import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock } from './agent-rules.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
 // these so `yad update --push` can stage an EXPLICIT allowlist of exactly what it wrote per repo —
@@ -179,6 +181,7 @@ const displayTarget = (value) => {
   try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
 };
 const ideTargetError = (message) => Object.assign(new Error(message), { code: IDE_TARGET_ERROR_CODE });
+const isDirectory = (full) => { try { return fs.statSync(full).isDirectory(); } catch { return false; } };
 const lstatIfPresent = (full) => {
   try {
     return fs.lstatSync(full);
@@ -906,6 +909,9 @@ export function repoActions(root, repo) {
     || actions.some((a) => a.status !== 'missing' && a.item.startsWith('checks/'));
   const link = productLinkAction(root, repo, repoRoot);
   if (link) actions.push(link);
+  // E158: the short rules block, in a repo cloned here that is not the Product itself (a monorepo entry has
+  // the Product's full block in the same file).
+  if (!samePath(repoRoot, path.resolve(root)) && isDirectory(repoRoot)) actions.push(...agentFileActions(repoRoot, ideTargetsFor(root), { scope: repo.name, lines: pointerBlock() }));
   if (!wired) return actions;
   // The record is not a template: an absent one on a wired repo is always `new` (nothing to respect).
   const neverWritten = (a) => !a.managed || !ledger[rel(a.managed.root, a.managed.dest)];
@@ -1261,6 +1267,71 @@ function hookSettingsAction(root, adapter) {
       writeJSON(dest, mergeHookSettings({}, adapter).settings);
     },
   };
+}
+
+// A block yad owns inside a file the team owns (E158): AGENTS.md and CLAUDE.md. Like the agent settings file
+// above, the file is the team's, so `paths` is EMPTY (`yad update --push` never stages it) and `shared` names it
+// for `yad update --open-pr`, which stages it only when the change is yad's block alone (reconcile). It is
+// text, not JSON: `mergeShared` puts the block into a file's text.
+function blockState(dest, opts) {
+  let raw = null;
+  try {
+    const st = lstatIfPresent(dest);
+    if (st) raw = st.isFile() ? fs.readFileSync(dest, 'utf8') : undefined;
+  } catch { raw = undefined; }
+  // Not a plain file yad can read (a folder, a symbolic link that could point anywhere, no permission).
+  if (raw === undefined) return { raw, state: 'unreadable', refused: 'it is not a file yad can read' };
+  const now = applyMarkedBlock(raw, opts);
+  if (now.refused) return { raw, state: 'refused', refused: now.refused };
+  return { raw, state: raw === null ? 'missing' : now.status === 'ok' ? 'ok' : 'outdated', refused: null, hasBlock: now.status !== 'new' };
+}
+
+function markedBlockAction(root, relDest, lines, { scope = 'product' } = {}) {
+  const dest = path.join(root, relDest);
+  const opts = { ...AGENTS_MARKERS, lines };
+  const base = { scope, item: relDest, root, paths: [], shared: relDest, kind: 'text', mergeShared: (text) => applyMarkedBlock(text, opts) };
+  const { state, refused } = blockState(dest, opts);
+  // Never written, said once at plan time. Markers yad cannot trust are never guessed around: the team's
+  // text is left as it is (as a broken config.yaml region is, cli/lifecycle.mjs).
+  if (refused) {
+    warn(`${scope}/${relDest}: ${refused} — the yadflow rules block was left out; ${state === 'refused' ? 'fix the markers (or delete both to have the block added again)' : 'make it a plain file'}, then re-run \`yad check --fix\``);
+    return { ...base, status: 'modified', apply: () => {} };
+  }
+  return {
+    ...base,
+    status: state,
+    // Re-read at apply() time: the file may have been written since the plan was built.
+    apply: () => {
+      const now = blockState(dest, opts);
+      if (now.refused) { warn(`${scope}/${relDest}: ${now.refused} — left untouched`); return; }
+      if (now.state === 'ok') return;
+      const next = applyMarkedBlock(now.raw, opts);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, next.text);
+    },
+  };
+}
+
+// The always-read instruction files (E158): AGENTS.md with yad's rules block, which Codex, Cursor, Copilot and
+// Gemini read, and, for a project that installs for Claude Code, CLAUDE.md importing it. `lines` is the
+// Product's full block by default; a connected code repo gets the short pointer block (`repoActions`).
+// Relabelled `new`, so `yad update` brings them to an install that predates them.
+export function agentFileActions(root, ideTargets = ideTargetsFor(root), { scope = 'product', lines = agentsBlock() } = {}) {
+  const actions = [markedBlockAction(root, 'AGENTS.md', lines, { scope })];
+  // Only the target's name is read here: nothing is written under it.
+  if (canonicalIdeTargets(ideTargets).includes('.claude')) actions.push(markedBlockAction(root, 'CLAUDE.md', claudeBlock(), { scope }));
+  return actions.map(asNew);
+}
+
+// The same files, for `yad doctor`: each one's state, with nothing printed. `state` is ok | outdated | missing |
+// refused (markers yad cannot trust) | unreadable (not a plain file).
+export function agentFilesState(root, ideTargets = ideTargetsFor(root), lines = agentsBlock()) {
+  const files = [['AGENTS.md', lines]];
+  if (canonicalIdeTargets(ideTargets).includes('.claude')) files.push(['CLAUDE.md', claudeBlock()]);
+  return files.map(([file, l]) => {
+    const { state, refused, hasBlock = false } = blockState(path.join(root, file), { ...AGENTS_MARKERS, lines: l });
+    return { file, state, refused, hasBlock };
+  });
 }
 
 // Harness-hook wiring on the Product: the guard script plus, per IDE target that defines a hook protocol,

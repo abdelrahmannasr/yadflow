@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
@@ -452,6 +452,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // `project` check added after the `shape` section prints the word "project" a second time.
   skillBindingChecks(checks, root);
   toolboxFileChecks(checks, root);
+  agentFileChecks(checks, root);
 
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead
   let registry = { repos: [] };
@@ -2249,6 +2250,24 @@ function profileBindingChecks(checks, rel, profiles) {
 // the normal case. THE FILE ONLY: whether a tool is installed is `yad toolbox check`'s answer, and a
 // missing tool is never a doctor line (decided with E86 — no tool is required). A broken file fails, as
 // skills.json does; a line that does nothing warns, because `yad toolbox list` quietly shows the default.
+// E158: the rules block an AI agent reads first, in AGENTS.md (and CLAUDE.md importing it, for Claude Code).
+// Only the Product's own files: a connected repo's short block is `yad check`'s to report.
+export function agentFileChecks(checks, root) {
+  let files;
+  try { files = agentFilesState(root); } catch { return; }
+  const bad = files.filter((f) => f.state === 'refused' || f.state === 'unreadable');
+  const behind = files.filter((f) => f.state === 'missing' || f.state === 'outdated');
+  if (bad.length) {
+    check(checks, 'agent-files', 'project', 'warn', `${bad.map((f) => `${f.file}: ${f.refused}`).join('; ')} — the yadflow rules for AI agents are not written there`,
+      'fix the markers by hand (or delete both, to have the block added again), then run `yad check --fix`');
+  } else if (behind.length) {
+    check(checks, 'agent-files', 'project', 'warn', `${behind.map((f) => (f.state === 'missing' ? `${f.file} is missing` : `${f.file} has ${f.hasBlock ? 'an older' : 'no'} yadflow rules block`)).join('; ')} — an AI agent may not follow the rules`,
+      'run `yad update --open-pr` (or `yad check --fix`) to write it; your own text in the file is kept');
+  } else {
+    check(checks, 'agent-files', 'project', 'ok', `${files.map((f) => f.file).join(' and ')}: the yadflow rules for AI agents are current`);
+  }
+}
+
 export function toolboxFileChecks(checks, root) {
   const rel = PROJECT_FILES.toolboxConfig;
   if (!exists(path.join(root, rel))) return;

@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
-import { moduleActions, gitHookActions } from './plan.mjs';
+import { moduleActions, gitHookActions, agentFileActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
 import { runMemberAdd } from './members.mjs';
@@ -451,6 +451,8 @@ function installLocalSkills(product, ideTargets) {
     if (local && (a.status === 'new' || a.status === 'missing')) { a.apply(); res.installed.push(rel); }
     else (local ? res.stale : res.shared).push(rel || `${a.scope}/${a.item}`);
   }
+  // E158: the rules block in AGENTS.md and CLAUDE.md is the team's shared file too: named, never written here.
+  for (const a of agentFileActions(product, ideTargets)) if (a.status !== 'ok') res.shared.push(a.item);
   return res;
 }
 
