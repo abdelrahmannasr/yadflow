@@ -612,13 +612,15 @@ async function twoClones() {
   git(P, ['init', '-q', '--bare', '-b', 'main', R]);
   fs.mkdirSync(A);
   git(A, ['init', '-q', '-b', 'main']);
-  for (const d of [A]) { git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); }
+  // No global ignore file: a machine whose own one hides `.claude/` must see what CI sees.
+  const noGlobalIgnore = (d) => git(d, ['config', 'core.excludesFile', path.join(P, 'no-global-ignore')]);
+  for (const d of [A]) { git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); noGlobalIgnore(d); }
   put(path.join(A, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
   put(path.join(A, '.sdlc/cli-version.json'), { version: '4.0.0' });
   git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: start']);
   git(A, ['remote', 'add', 'origin', R]); git(A, ['push', '-q', '-u', 'origin', 'main']);
   git(P, ['clone', '-q', '-b', 'main', R, B]);
-  for (const d of [B]) { git(d, ['config', 'user.name', 'Bo Lee']); git(d, ['config', 'user.email', 'bo@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); }
+  for (const d of [B]) { git(d, ['config', 'user.name', 'Bo Lee']); git(d, ['config', 'user.email', 'bo@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); noGlobalIgnore(d); }
   return { P, R, A, B };
 }
 
@@ -659,7 +661,6 @@ test('the run after a pull is not held as merged; a person\'s own file in a skil
   const { VERSION } = await import('./manifest.mjs');
   const { P, R, A, B } = await twoClones();
   try {
-    for (const d of [A, B]) git(d, ['config', 'core.excludesFile', path.join(P, 'no-global-ignore')]);
     const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/3' });
     // Install everything, commit it, and make the stamp old again: the next update has folders already right.
     await reconcile(A, { fix: true, scope: 'all' });
@@ -777,7 +778,9 @@ test('an update a failed push left in the working tree is carried by the next ru
     git(A, ['remote', 'set-url', '--push', 'origin', R]);
     const again = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
     assert.deepEqual([again.commits[0].pushed, again.commits[0].opened], [true, true]);
-    assert.equal(git(A, ['status', '--porcelain']), '', 'nothing left behind');
+    // Tracked files only: `.claude/settings.json` is never staged by an update (a shared file), and a source
+    // checkout's skill templates hold build output (node_modules, dist) the published package does not ship.
+    assert.equal(git(A, ['status', '--porcelain', '--untracked-files=no']), '', 'nothing left behind');
     const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
     assert.ok(files.length > 1, `more than the stamp: ${files.join(', ')}`);
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
