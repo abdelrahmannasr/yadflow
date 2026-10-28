@@ -1199,7 +1199,10 @@ function hookSettingsAction(root, adapter) {
   // every other entry in that allowlist is a file yad wrote in full. This one the team co-owns, so
   // staging it wholesale would sweep their unrelated working-tree edits into a `chore(yad-update)`
   // commit pushed straight to the default branch, bypassing review. The entry is theirs to commit.
-  const base = { scope: ide, item: path.basename(relDest), root, paths: [] };
+  // `shared` names the file for `yad update --open-pr`, which stages it only when the change is yad's alone
+  // (reconcile; E157 update review 11): without it a merged update ships a hook script nothing runs.
+  // `mergeShared` adds yad's entry to a settings object, so reconcile can tell a file that is yad's alone.
+  const base = { scope: ide, item: path.basename(relDest), root, paths: [], shared: relDest, mergeShared: (obj) => mergeHookSettings(obj, adapter) };
   // A settings file we cannot READ is never rewritten — not even by `--overwrite-local`.
   //
   // For a managed file, `--overwrite-local` restores the shipped template, which is coherent. Here

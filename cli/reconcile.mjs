@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -297,6 +297,25 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const reaches = (r) => !r || ((!reached || reached.has(r)) && !held.has(r));
   const live = (a) => reaches(a.root) && reaches(a.managed?.root);
 
+  // A file the team co-owns (the agent settings that run yad's hooks) is never staged by `--push`. Under
+  // --open-pr it rides the PR/MR when it is yad's alone: exactly what is committed (or nothing) with yad's
+  // entries merged in — so a file this run creates rides too, and so does one a failed push left behind.
+  // Otherwise the person has their own edits in it, which never ride an update: said in a row of its own.
+  // Read BEFORE anything is applied. Several adapters can share one file, so it is one entry per file
+  // (E157 update review 11).
+  const shared = new Map();
+  const sharedText = (f) => (exists(f) ? fs.readFileSync(f, 'utf8') : null);
+  if (openPr) {
+    for (const a of actions) {
+      if (!a.shared || !a.root || !live(a)) continue;
+      const file = path.join(a.root, a.shared);
+      if (!shared.has(file)) {
+        const head = run('git', ['show', `HEAD:${a.shared}`], { cwd: a.root, maxBuffer: 64 * 1024 * 1024 });
+        shared.set(file, { a, merges: [], disk: sharedText(file), head: head.ok ? head.stdout : null });
+      }
+      shared.get(file).merges.push(a.mergeShared);
+    }
+  }
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
   log('');
   let applied = 0;
@@ -333,6 +352,24 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       if (a.status !== 'ok' || !a.root || !Array.isArray(a.paths) || !live(a) || appliedActions.includes(a)) continue;
       appliedActions.push(typeof a.ownPaths === 'function' ? { ...a, paths: a.ownPaths() } : a);
     }
+  }
+  const sharedRows = [];
+  const parse = (t) => { try { const v = JSON.parse(t); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
+  for (const [file, e] of shared) {
+    const now = sharedText(file);
+    // `run` trims what git prints, so text is compared trimmed.
+    if (now === null || (e.head !== null && now.trim() === e.head.trim())) continue;
+    const base = e.head === null ? {} : parse(e.head);
+    // What yad alone would make of it: each adapter's entry merged into what is committed.
+    const ours = e.merges.reduce((o, merge) => { if (!o) return null; const m = merge(o); return m.unreadable ? null : m.settings; }, base);
+    const was = e.disk === null ? null : parse(e.disk);
+    const yadsAlone = e.disk === null ? e.head === null
+      : e.head !== null && e.disk.trim() === e.head.trim() ? true
+        : !!(ours && was && JSON.stringify(was) === JSON.stringify(ours));
+    if (yadsAlone) { appliedActions.push({ ...e.a, paths: [e.a.shared] }); continue; }
+    const hint = `${e.a.shared} has changes that are not committed, so the update left its hook entry out of the PR/MR: commit ${e.a.shared} as it now stands, through review on a branch of your own`;
+    info(`${repoLabel(root, e.a.root)}: ${hint}`);
+    sharedRows.push({ label: repoLabel(root, e.a.root), product: e.a.root === root, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: false, reason: 'settings-uncommitted', hint });
   }
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
@@ -387,7 +424,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     preflightGuardReadiness(root, openPr ? 'the PR/MR\'s verified-commits check requires a platform-Verified signature; an unsigned update commit fails it' : undefined);
     // --open-pr: each repo's changes on their own branch, with a PR/MR a person merges.
     // Every repo has a row: the held ones (with their reason and hint) first, then what was opened.
-    if (openPr) commits = heldRows.concat(openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator, checked: true }));
+    if (openPr) commits = heldRows.concat(openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator, checked: true }), sharedRows);
     else commits = commitUpdates(root, groupByRoot(appliedActions), {
       push: true, allowBranch,
       defaultBranchFor: (r) => defByRoot.get(r),

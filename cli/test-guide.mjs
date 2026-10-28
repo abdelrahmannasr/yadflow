@@ -38,6 +38,9 @@ const { gateOpen } = await import('./gate.mjs');
 const ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
 const YAD = path.join(ROOT, 'bin', 'yad.mjs');
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guide-'));
+// A path with no file: a test repo set to it reads no global ignore file, so a machine whose own one hides
+// `.claude/` sees what CI sees.
+const NO_GLOBAL_IGNORE = path.join(os.tmpdir(), 'yad-guide-no-global-ignore');
 const put = (file, data) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data, null, 2)); };
 const git = (cwd, args) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
 
@@ -612,8 +615,7 @@ async function twoClones() {
   git(P, ['init', '-q', '--bare', '-b', 'main', R]);
   fs.mkdirSync(A);
   git(A, ['init', '-q', '-b', 'main']);
-  // No global ignore file: a machine whose own one hides `.claude/` must see what CI sees.
-  const noGlobalIgnore = (d) => git(d, ['config', 'core.excludesFile', path.join(P, 'no-global-ignore')]);
+  const noGlobalIgnore = (d) => git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
   for (const d of [A]) { git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); noGlobalIgnore(d); }
   put(path.join(A, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
   put(path.join(A, '.sdlc/cli-version.json'), { version: '4.0.0' });
@@ -748,7 +750,7 @@ test('a held repo has its row too when another repo goes ahead', async () => {
       git(P, ['init', '-q', '--bare', '-b', 'main', r]);
       fs.mkdirSync(d);
       git(d, ['init', '-q', '-b', 'main']);
-      git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']);
+      git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
       git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
       git(d, ['remote', 'add', 'origin', r]); git(d, ['push', '-q', '-u', 'origin', 'main']);
     }
@@ -778,11 +780,31 @@ test('an update a failed push left in the working tree is carried by the next ru
     git(A, ['remote', 'set-url', '--push', 'origin', R]);
     const again = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
     assert.deepEqual([again.commits[0].pushed, again.commits[0].opened], [true, true]);
-    // Tracked files only: `.claude/settings.json` is never staged by an update (a shared file), and a source
-    // checkout's skill templates hold build output (node_modules, dist) the published package does not ship.
-    assert.equal(git(A, ['status', '--porcelain', '--untracked-files=no']), '', 'nothing left behind');
+    // Nothing left behind, the hook settings included. Only a source checkout's build output in the yad-docs
+    // template (node_modules, dist) is left: the published package does not ship it.
+    const left = git(A, ['status', '--porcelain', '-uall']).split('\n').filter((l) => l && !/^\?\? \.claude\/skills\/yad-docs\/templates\/app\/(node_modules|dist)\//.test(l));
+    assert.deepEqual(left, [], 'nothing left behind');
     const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
     assert.ok(files.length > 1, `more than the stamp: ${files.join(', ')}`);
+    assert.ok(files.includes('.claude/settings.json') && files.includes('hooks/yad-capture.mjs'), `the hook script and the entry that runs it land together: ${files.join(', ')}`);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('hook settings with the person\'s own uncommitted edits never ride the update: said in a row', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/5' });
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)'] } });
+    git(A, ['add', '.claude/settings.json']); git(A, ['commit', '-q', '-m', 'chore: settings']); git(A, ['push', '-q']);
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)', 'Bash(pwd)'] } });
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    const row = r.commits.find((c) => c.reason === 'settings-uncommitted');
+    assert.ok(row, JSON.stringify(r.commits));
+    assert.match(row.hint, /commit \.claude\/settings\.json as it now stands/);
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+    assert.ok(!files.includes('.claude/settings.json'), files.join(', '));
+    assert.match(fs.readFileSync(path.join(A, '.claude/settings.json'), 'utf8'), /Bash\(pwd\)/, 'their edit is still there');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
@@ -800,7 +822,7 @@ test('--open-pr is all or nothing: one repo that cannot take it, and nothing is 
       git(d, ['init', '-q', '-b', 'main']);
       git(d, ['config', 'user.name', 'Alice Smith']);
       git(d, ['config', 'user.email', 'alice@work.com']);
-      git(d, ['config', 'commit.gpgsign', 'false']);
+      git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
       git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
       git(d, ['remote', 'add', 'origin', r]);
       git(d, ['push', '-q', '-u', 'origin', 'main']);
@@ -836,7 +858,7 @@ test('--open-pr reaches every cloned repo: one on a feature branch stops it even
       git(d, ['init', '-q', '-b', 'main']);
       git(d, ['config', 'user.name', 'Alice Smith']);
       git(d, ['config', 'user.email', 'alice@work.com']);
-      git(d, ['config', 'commit.gpgsign', 'false']);
+      git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
       git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
       git(d, ['remote', 'add', 'origin', r]);
       git(d, ['push', '-q', '-u', 'origin', 'main']);
@@ -933,7 +955,7 @@ test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened
     git(T, ['init', '-q', '-b', 'main']);
     git(T, ['config', 'user.name', 'Alice Smith']);
     git(T, ['config', 'user.email', 'alice@work.com']);
-    git(T, ['config', 'commit.gpgsign', 'false']);
+    git(T, ['config', 'commit.gpgsign', 'false']); git(T, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
     put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
     put(path.join(T, 'notes.txt'), 'mine\n');
     git(T, ['add', '.sdlc/cli-version.json']);
