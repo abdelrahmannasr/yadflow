@@ -367,7 +367,7 @@ function upkeepFor(install, { platform }) {
     return { agent: [], person: [{ act: 'choose', why: 'there is no platform to open an update PR/MR on, so how it is published is the person\'s call', steps: ['Run `yad update`, then commit and share the changes the way this team does.'], commands: ['yad update'], verify: 'yad guide --json' }] };
   }
   return {
-    agent: [agentRun('yad update --open-pr --json', `the files yadflow manages in ${which} were written by an older yadflow, and this is v${install.yadflow}: bring them up to date on a branch in each repo, with a PR/MR for each. Do this before the step below. If it refuses, or holds a repo back, show the person each \`commits[]\` row's \`reason\` and \`hint\`, wait for them, then run it again`)],
+    agent: [agentRun('yad update --open-pr --json', `the files yadflow manages in ${which} were written by an older yadflow, and this is v${install.yadflow}: bring them up to date on a branch in each repo, with a PR/MR for each. Do this before the step below. Show the person every \`commits[]\` row that has a \`hint\`, with its \`reason\`, wait for them, then run it again`)],
     person: [{ act: 'approve-merge', why: 'the update lands through review, like any change', steps: ['Merge each `chore(yad-update)` PR/MR it opens once its checks pass.', 'If it says a repo was refused or held back, do what its hint says, then tell the agent.'], commands: [], verify: 'yad update --open-pr --json' }],
   };
 }

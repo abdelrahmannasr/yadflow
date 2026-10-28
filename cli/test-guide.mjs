@@ -588,7 +588,7 @@ test('an install behind yadflow: the guide says so, from what is committed, and 
     const g = buildGuide(T, { epic: 'EP-pay' });
     assert.deepEqual(g.situation.install.repos, [{ repo: 'product', version: '4.0.0', behind: true }]);
     assert.deepEqual(g.upkeep.agent.map((a) => [a.run, a.class, a.ask]), [['yad update --open-pr --json', 'open-pr', 'never']]);
-    assert.match(g.upkeep.agent[0].why, /show the person each `commits\[\]` row's `reason` and `hint`/);
+    assert.match(g.upkeep.agent[0].why, /every `commits\[\]` row that has a `hint`, with its `reason`/);
     assert.ok(RULES.some((r) => r.id === 'update'));
     // No platform: the person publishes it their way.
     const settings = path.join(T, '.sdlc/product.json');
@@ -648,6 +648,62 @@ test('the run reads origin first: an update opened from another clone is held, a
     assert.match(rm.commits[0].hint, /pull --ff-only origin main/);
     assert.equal(git(B, ['status', '--porcelain']), '');
     assert.equal(calls.length, 1, 'never a second PR/MR for a merged update');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('the run after a pull is not held as merged; a person\'s own file in a skill folder never rides the update', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { VERSION } = await import('./manifest.mjs');
+  const { P, R, A, B } = await twoClones();
+  try {
+    for (const d of [A, B]) git(d, ['config', 'core.excludesFile', path.join(P, 'no-global-ignore')]);
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/3' });
+    // Install everything, commit it, and make the stamp old again: the next update has folders already right.
+    await reconcile(A, { fix: true, scope: 'all' });
+    put(path.join(A, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: install']); git(A, ['push', '-q']);
+    const skill = fs.readdirSync(path.join(A, '.claude/skills')).find((d) => d.startsWith('yad-'));
+    put(path.join(A, '.claude/skills', skill, 'my-notes.md'), 'private\n');
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.equal(r.commits[0].opened, true);
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${VERSION}`]).split('\n');
+    assert.ok(files.includes('.sdlc/cli-version.json'), files.join(', '));
+    assert.ok(!files.some((f) => f.endsWith('my-notes.md')), `never the person's own file: ${files.join(', ')}`);
+    assert.ok(fs.existsSync(path.join(A, '.claude/skills', skill, 'my-notes.md')), 'and it is left where it was');
+    // The PR merges; clone B pulls it. The next run there is not "merged — pull it": it was pulled.
+    git(A, ['push', '-q', 'origin', `chore/yad-update-v${VERSION}:main`]);
+    git(B, ['pull', '-q', '--ff-only', 'origin', 'main']);
+    const again = await reconcile(B, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!again.commits.some((c) => c.reason === 'merged'), JSON.stringify(again.commits));
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('a held repo has its row too when another repo goes ahead', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { VERSION } = await import('./manifest.mjs');
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  try {
+    for (const d of [T, A]) {
+      const r = path.join(P, `${path.basename(d)}.git`);
+      git(P, ['init', '-q', '--bare', '-b', 'main', r]);
+      fs.mkdirSync(d);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]); git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: settings']); git(T, ['push', '-q']);
+    git(A, ['branch', `chore/yad-update-v${VERSION}`]);
+    const r = await reconcile(T, { fix: true, scope: 'all', openPr: true, creator: () => ({ ok: true, url: 'https://github.com/acme/product/pull/4' }) });
+    const app = r.commits.find((c) => c.label === 'app');
+    assert.deepEqual([app.reason, app.error], ['open', false]);
+    assert.match(app.hint, /on review/);
+    assert.ok(r.commits.some((c) => c.product && c.opened), JSON.stringify(r.commits));
+    assert.equal(git(A, ['status', '--porcelain']), '', 'nothing written in the held repo');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 

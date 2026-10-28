@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
+  asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -52,6 +52,9 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
   status: !exists(dest) ? 'missing' : dirMatches(src, dest) ? 'ok' : 'outdated',
   root,
   paths: root ? [rel(root, dest)] : [],
+  // The template's own files, one path each — for staging a folder that is already right on disk without
+  // sweeping in a person's own files beside them (`yad update --open-pr` restages; E157 update review 6).
+  ownPaths: () => (root ? listFiles(src).map((f) => rel(root, path.join(dest, f))) : []),
   apply: () => copyDir(src, dest),
 });
 

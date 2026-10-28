@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } from './lib.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, productConfigPath } from './manifest.mjs';
+import { parseVersion, compare as compareVersions } from './toolbox.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 
 // Collapse whitespace/newline runs to a single space — keeps a stray path or hostile value from
@@ -77,11 +78,15 @@ export function buildUpdateMessage({ version = VERSION, items = [] } = {}) {
 //     .gitlab-ci.yml a github repo never has) that would otherwise abort `git add`.
 // Returns the pathspecs actually staged.
 function stageAllowlist(git, root, paths) {
-  const keep = paths.filter((p) => {
-    if (run('git', ['check-ignore', '-q', '--', p], { cwd: root }).ok) return false;
-    if (fs.existsSync(path.join(root, p))) return true;
-    return run('git', ['ls-files', '--error-unmatch', '--', p], { cwd: root }).ok;
-  });
+  // Two git calls for the whole list, not two per path: `--open-pr` hands over every file of every skill
+  // folder (E157 update review 6), hundreds of paths, and one spawn per path took minutes.
+  if (!paths.length) return { staged: [] };
+  const ignoredRun = run('git', ['check-ignore', '-z', '--stdin'], { cwd: root, input: paths.join('\0') });
+  const ignored = new Set(ignoredRun.stdout.split('\0').filter(Boolean));
+  const tracked = new Set(run('git', ['ls-files', '-z', '--', ...paths], { cwd: root }).stdout.split('\0').filter(Boolean));
+  // A folder path is tracked when any file under it is.
+  const isTracked = (p) => tracked.has(p) || [...tracked].some((t) => t.startsWith(`${p.replace(/\/$/, '')}/`));
+  const keep = paths.filter((p) => !ignored.has(p) && (fs.existsSync(path.join(root, p)) || isTracked(p)));
   if (!keep.length) return { staged: [] };
   // `git add` can exit non-zero (index lock, permissions) yet run() never throws — surface it rather
   // than silently reporting "nothing to commit". (A directory pathspec whose contents are ALL ignored
@@ -293,15 +298,24 @@ export function updatePrBlocker(root, { defaultBranch, version = VERSION, produc
   const head = updateBranchName(version);
   const rel = isRoot(productRoot, root) ? '.' : repoLabel(productRoot, root);
   if (network) {
-    // What origin already has. A failed fetch (offline) is not an error here: the push says so later.
-    git('fetch', '-q', 'origin', t.base);
+    // What origin already has. Never a password prompt (an agent cannot answer one), and a fetch that fails
+    // is said: what follows is then read from origin as last fetched.
+    const quiet = { cwd: root, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } };
+    if (!run('git', ['fetch', '-q', 'origin', t.base], quiet).ok) warn(`${label}: could not fetch origin's '${t.base}' — reading it as last fetched`);
     // Exit 0: the update branch is on origin; fetch it, so later reads (the guide's too) see it.
-    if (run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], { cwd: root }).ok) git('fetch', '-q', 'origin', `+refs/heads/${head}:refs/remotes/origin/${head}`);
+    if (run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], quiet).ok) run('git', ['fetch', '-q', 'origin', `+refs/heads/${head}:refs/remotes/origin/${head}`], quiet);
   }
   if (file && git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${t.base}`).ok) {
-    const shown = git('show', `refs/remotes/origin/${t.base}:${file}`);
-    const there = shown.ok ? (() => { try { return JSON.parse(shown.stdout)?.version; } catch { return null; } })() : null;
-    if (there === version) return { kind: 'merged', label, message: `the update to v${version} is already on origin's '${t.base}' — pull it: \`git -C ${rel} pull --ff-only origin ${t.base}\`` };
+    const versionAt = (ref) => { const s = git('show', `${ref}:${file}`); try { return s.ok ? JSON.parse(s.stdout)?.version ?? null : null; } catch { return null; } };
+    const there = parseVersion(versionAt(`refs/remotes/origin/${t.base}`));
+    const here = parseVersion(versionAt('HEAD'));
+    const want = parseVersion(version);
+    // Held only while THIS clone's commit is behind what origin has: once pulled, the run goes on as usual,
+    // so a same-version repair (a deleted managed file) is still possible.
+    if (there && want && compareVersions(there, want) >= 0 && (!here || compareVersions(here, there) < 0)) {
+      const newer = compareVersions(there, want) > 0;
+      return { kind: 'merged', label, message: `origin's '${t.base}' already has the update to v${versionAt(`refs/remotes/origin/${t.base}`)} — pull it: \`git -C ${rel} pull --ff-only origin ${t.base}\`${newer ? `; it is newer than this yadflow (v${version}), so update yadflow here too` : ''}` };
+    }
   }
   const onReview = (where) => ({ kind: 'open', label, branch: head, message: `the update is on review from '${head}'${where}: a person merges its PR/MR, then run this again. If no PR/MR was opened from it, open one into '${t.base}'; if it was closed without merging, delete the branch (here and on origin), then run this again` });
   if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) return onReview('');
@@ -331,7 +345,7 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   if (!git('switch', '-q', '-c', head).ok) {
     fail(`${label}: could not create the branch '${head}'`);
     process.exitCode = 1;
-    return out({ error: true });
+    return out({ error: true, reason: 'branch-failed', hint: `git could not create '${head}' in ${isProduct ? '.' : label} — see what \`git switch -c ${head}\` says there, fix it, and run this again` });
   }
   // Back to the default branch. A switch that fails (a hook rewrote a committed file) leaves the repo on the
   // update branch: said, never silent.
@@ -349,7 +363,7 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
     const ok2 = back();
     if (ok2) git('branch', '-q', '-D', head);
     info(`${label}: nothing to commit (unchanged or ignored)`);
-    return out({ error: !ok2 });
+    return out({ error: !ok2, ...(ok2 ? {} : { reason: 'switch-back-failed', hint: `${isProduct ? '.' : label} is still on '${head}': run \`git switch ${base}\` there, then \`git branch -D ${head}\`` }) });
   }
   const cm = git('commit', '-m', buildUpdateMessage({ version, items }), '--', ...staged);
   if (!cm.ok) {
@@ -382,18 +396,22 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   }
   let opened = false;
   let pr = null;
+  let left = null;
   if (platform === 'github' || platform === 'gitlab') {
     const r = creator(platform, { title: buildUpdateMessage({ version, items: [] }), body: buildUpdatePrBody({ version, items }), base, head, cwd: root });
     if (r?.ok) { opened = true; pr = r.url || null; ok(`${label}: opened ${pr ?? 'the PR/MR (no URL came back)'}`); }
     else {
       warn(`${label}: pushed ${head}, but the PR/MR did not open — ${oneLine(r?.reason || 'no reason given').slice(0, 200)}`);
-      hand(`open it from ${head} into ${base} by hand`);
+      left = { reason: 'pr-not-opened', hint: `the branch '${head}' is pushed, but its PR/MR did not open (${oneLine(r?.reason || 'no reason given').slice(0, 160)}): open one from '${head}' into '${base}' by hand, or log the platform CLI in and run this again` };
+      hand(left.hint);
     }
   } else {
-    hand(`${label}: pushed ${head} — no platform is recorded, so open a PR/MR from it into ${base} by hand`);
+    left = { reason: 'no-platform', hint: `the branch '${head}' is pushed, but no platform is recorded for this repo: open a PR/MR from '${head}' into '${base}' by hand` };
+    hand(`${label}: ${left.hint}`);
   }
   const home = back();
-  return out({ branch: head, committed: true, pushed: true, opened, pr, error: !home });
+  if (!home) left = { reason: 'switch-back-failed', hint: `${isProduct ? '.' : label} is still on '${head}': run \`git switch ${base}\` there` };
+  return out({ branch: head, committed: true, pushed: true, opened, pr, error: !home, ...(left ?? {}) });
 }
 
 // Every repo the update changed, one PR/MR each.

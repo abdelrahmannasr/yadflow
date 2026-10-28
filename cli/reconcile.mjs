@@ -265,6 +265,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // update PR/MR, and no one is moved off their branch: the person fixes it and runs it again. A repo whose
   // update is already on review (`open`) is left alone (`held`): nothing is written there until it merges.
   let held = new Set();
+  let heldRows = [];
   let reached = null;
   if (openPr) {
     const targets = updateTargets(root);
@@ -282,6 +283,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: stop.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
     }
     held = new Set(checks.filter(([, b]) => b).map(([r]) => r));
+    heldRows = checks.filter(([, b]) => b).map(([r, b]) => row(r, b));
     for (const [, b] of checks) if (b) info(`${b.label}: ${b.message}`);
     if (held.size === checks.length) {
       info('every repo\'s update is already merged or on review — nothing written');
@@ -317,7 +319,14 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (push || openPr) for (const a of actions) if (a.pendingCommit && live(a) && !appliedActions.includes(a)) appliedActions.push(a);
   // --open-pr also stages every managed file already right on disk: `stageAllowlist` keeps only what differs
   // from the commit, so an update a failed commit or push left in the working tree is carried by the next run.
-  if (openPr) for (const a of actions) if (a.status === 'ok' && a.root && Array.isArray(a.paths) && live(a) && !appliedActions.includes(a)) appliedActions.push(a);
+  // A folder is staged by its template's own files only, never the folder: a person's own file beside them
+  // (notes in a skill folder) must not ride an update PR/MR.
+  if (openPr) {
+    for (const a of actions) {
+      if (a.status !== 'ok' || !a.root || !Array.isArray(a.paths) || !live(a) || appliedActions.includes(a)) continue;
+      appliedActions.push(typeof a.ownPaths === 'function' ? { ...a, paths: a.ownPaths() } : a);
+    }
+  }
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   if (!held.has(root)) {
@@ -338,6 +347,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const ledger = readJSON(ledgerFile, null);
     if (ledger && typeof ledger === 'object' && !Array.isArray(ledger) && ledger.version !== VERSION) {
       writeJSON(ledgerFile, { ...ledger, version: VERSION });
+      ledgerRoots.push(repoRoot);
+    } else if (ledger && (push || openPr)) {
+      // Already restamped on disk by a run whose commit or push failed: still staged, so the next run carries
+      // it (staging keeps only what differs from the commit).
       ledgerRoots.push(repoRoot);
     }
   }
@@ -366,7 +379,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // Both commit: an unsigned commit fails the verified-commits check, on the default branch or on the PR/MR.
     preflightGuardReadiness(root, openPr ? 'the PR/MR\'s verified-commits check requires a platform-Verified signature; an unsigned update commit fails it' : undefined);
     // --open-pr: each repo's changes on their own branch, with a PR/MR a person merges.
-    if (openPr) commits = openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator, checked: true });
+    // Every repo has a row: the held ones (with their reason and hint) first, then what was opened.
+    if (openPr) commits = heldRows.concat(openUpdatePrs(root, groupByRoot(appliedActions), { defaultBranchFor: (r) => defByRoot.get(r), platformFor: (r) => platformByRoot.get(r), creator, checked: true }));
     else commits = commitUpdates(root, groupByRoot(appliedActions), {
       push: true, allowBranch,
       defaultBranchFor: (r) => defByRoot.get(r),
