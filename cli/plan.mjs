@@ -56,6 +56,25 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
   // sweeping in a person's own files beside them (`yad update --open-pr` restages; E157 update review 6).
   ownPaths: () => (root ? listFiles(src).map((f) => rel(root, path.join(dest, f))) : []),
   apply: () => copyDir(src, dest),
+  // Writes the template but keeps every file the template does not have (a person's notes, or a file an older
+  // yadflow shipped) — for `yad update --open-pr`, which an agent runs without asking (E157 update review 7).
+  // The kept files are moved aside and back, so their bytes, modes and links are untouched. Returns them,
+  // relative to `root`.
+  applyKeepingOwn: () => {
+    const theirs = new Set(listFiles(src));
+    const own = exists(dest) ? listFiles(dest).filter((f) => !theirs.has(f)) : [];
+    if (!own.length) { copyDir(src, dest); return []; }
+    const aside = `${dest}.yad-keep-${process.pid}`;
+    for (const f of own) { fs.mkdirSync(path.dirname(path.join(aside, f)), { recursive: true }); fs.renameSync(path.join(dest, f), path.join(aside, f)); }
+    try {
+      copyDir(src, dest);
+    } finally {
+      // Back even when the copy failed: a person's file is never left in the side folder.
+      for (const f of own) { fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true }); fs.renameSync(path.join(aside, f), path.join(dest, f)); }
+      fs.rmSync(aside, { recursive: true, force: true });
+    }
+    return own.map((f) => (root ? rel(root, path.join(dest, f)) : f));
+  },
 });
 
 // ---- managed-file provenance (#164) --------------------------------------------------------

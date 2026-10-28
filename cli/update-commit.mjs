@@ -78,22 +78,38 @@ export function buildUpdateMessage({ version = VERSION, items = [] } = {}) {
 //     .gitlab-ci.yml a github repo never has) that would otherwise abort `git add`.
 // Returns the pathspecs actually staged.
 function stageAllowlist(git, root, paths) {
-  // Two git calls for the whole list, not two per path: `--open-pr` hands over every file of every skill
-  // folder (E157 update review 6), hundreds of paths, and one spawn per path took minutes.
+  // Every path list goes to git on stdin, never as arguments: `--open-pr` hands over every file of every skill
+  // folder, hundreds of paths, which overflowed Windows' 32K command line (E157 update review 7); and one
+  // spawn per path took minutes (review 6).
   if (!paths.length) return { staged: [] };
-  const ignoredRun = run('git', ['check-ignore', '-z', '--stdin'], { cwd: root, input: paths.join('\0') });
-  const ignored = new Set(ignoredRun.stdout.split('\0').filter(Boolean));
-  const tracked = new Set(run('git', ['ls-files', '-z', '--', ...paths], { cwd: root }).stdout.split('\0').filter(Boolean));
-  // A folder path is tracked when any file under it is.
-  const isTracked = (p) => tracked.has(p) || [...tracked].some((t) => t.startsWith(`${p.replace(/\/$/, '')}/`));
+  const ignored = new Set(run('git', ['check-ignore', '-z', '--stdin'], { cwd: root, input: paths.join('\0') }).stdout.split('\0').filter(Boolean));
+  const tracked = run('git', ['ls-files', '-z'], { cwd: root }).stdout.split('\0').filter(Boolean);
+  const trackedSet = new Set(tracked);
+  // A folder path covers every file under it.
+  const under = (p, f) => f === p || f.startsWith(`${p.replace(/\/$/, '')}/`);
+  const isTracked = (p) => trackedSet.has(p) || tracked.some((t) => under(p, t));
   const keep = paths.filter((p) => !ignored.has(p) && (fs.existsSync(path.join(root, p)) || isTracked(p)));
   if (!keep.length) return { staged: [] };
   // `git add` can exit non-zero (index lock, permissions) yet run() never throws — surface it rather
   // than silently reporting "nothing to commit". (A directory pathspec whose contents are ALL ignored
   // also exits 1 after staging the rest; the empty-diff below then correctly drops it.)
-  const add = git('add', '--', ...keep);
-  const staged = git('diff', '--cached', '--name-only', '--', ...keep).stdout.split('\n').filter(Boolean);
+  const add = withPaths(root, ['add'], keep);
+  const staged = run('git', ['diff', '--cached', '--name-only', '-z'], { cwd: root }).stdout.split('\0').filter((f) => f && keep.some((p) => under(p, f)));
   return { staged, addError: !add.ok ? (add.stderr.split('\n')[0] || `exit ${add.code}`) : null };
+}
+
+// `git <args>` over a list of literal paths read from stdin (NUL-separated), not the command line.
+function withPaths(root, args, paths) {
+  return run('git', [...args, '--pathspec-from-file=-', '--pathspec-file-nul'], { cwd: root, input: paths.join('\0') });
+}
+
+// Network git that never waits on a question an agent cannot answer: no password prompt (HTTPS), and no SSH
+// passphrase or host-key question unless the person set their own ssh command, which is left alone.
+function quietGit(root) {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+  const own = process.env.GIT_SSH_COMMAND || process.env.GIT_SSH || run('git', ['config', '--get', 'core.sshCommand'], { cwd: root }).ok;
+  if (!own) env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes';
+  return (...args) => run('git', args, { cwd: root, env });
 }
 
 // Commit (and, with push, push) one repo group. `defaultBranch` is the repo's configured default
@@ -145,9 +161,9 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
   }
 
   const message = buildUpdateMessage({ items });
-  const cm = git('commit', '-m', message, '--', ...staged);
+  const cm = withPaths(root, ['commit', '-m', message], staged);
   if (!cm.ok) {
-    git('reset', '-q', '--', ...staged); // don't leave our allowlist staged for an unrelated commit to sweep up
+    withPaths(root, ['reset', '-q'], staged); // don't leave our allowlist staged for an unrelated commit to sweep up
     fail(`${label}: git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
     return { label, product: isProduct, committed: false, pushed: false, skipped: false, error: true };
@@ -298,18 +314,28 @@ export function updatePrBlocker(root, { defaultBranch, version = VERSION, produc
   const head = updateBranchName(version);
   const rel = isRoot(productRoot, root) ? '.' : repoLabel(productRoot, root);
   if (network) {
-    // What origin already has. Never a password prompt (an agent cannot answer one), and a fetch that fails
-    // is said: what follows is then read from origin as last fetched.
-    const quiet = { cwd: root, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } };
-    if (!run('git', ['fetch', '-q', 'origin', t.base], quiet).ok) warn(`${label}: could not fetch origin's '${t.base}' — reading it as last fetched`);
-    // Exit 0: the update branch is on origin; fetch it, so later reads (the guide's too) see it.
-    if (run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], quiet).ok) run('git', ['fetch', '-q', 'origin', `+refs/heads/${head}:refs/remotes/origin/${head}`], quiet);
+    // What origin already has. Never a prompt (an agent cannot answer one), and a fetch that fails is said:
+    // what follows is then read from origin as last fetched.
+    const quiet = quietGit(root);
+    if (!quiet('fetch', '-q', 'origin', t.base).ok) warn(`${label}: could not fetch origin's '${t.base}' — reading it as last fetched`);
+    // Exit 0: the update branch is on origin; fetch it, so later reads (the guide's too) see it. Exit 2: it is
+    // NOT on origin (deleted there, with the web page's button), so this clone's copy of it is dropped — kept,
+    // it would read as "on review" for good. Any other exit is a failed read: the copy is trusted as it is.
+    const lr = quiet('ls-remote', '--exit-code', '--heads', 'origin', head);
+    if (lr.ok) quiet('fetch', '-q', 'origin', `+refs/heads/${head}:refs/remotes/origin/${head}`);
+    else if (lr.code === 2) git('update-ref', '-d', `refs/remotes/origin/${head}`);
+  }
+  const versionAt = (ref) => { const s = file ? git('show', `${ref}:${file}`) : { ok: false }; try { return s.ok ? JSON.parse(s.stdout)?.version ?? null : null; } catch { return null; } };
+  const want = parseVersion(version);
+  const here = parseVersion(versionAt('HEAD'));
+  // This clone already has a NEWER install than this yadflow: running it would write the older templates and
+  // stamp over it — a downgrade PR/MR. The person updates yadflow first.
+  if (here && want && compareVersions(here, want) > 0) {
+    const v = String(versionAt('HEAD')).trim();
+    return { kind: 'newer', label, message: `'${t.base}' here has the update to v${v}, newer than this yadflow (v${version}) — update yadflow itself to v${v} or later, then run this again` };
   }
   if (file && git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${t.base}`).ok) {
-    const versionAt = (ref) => { const s = git('show', `${ref}:${file}`); try { return s.ok ? JSON.parse(s.stdout)?.version ?? null : null; } catch { return null; } };
     const there = parseVersion(versionAt(`refs/remotes/origin/${t.base}`));
-    const here = parseVersion(versionAt('HEAD'));
-    const want = parseVersion(version);
     // Held only while THIS clone's commit is behind what origin has: once pulled, the run goes on as usual,
     // so a same-version repair (a deleted managed file) is still possible.
     if (there && want && compareVersions(there, want) >= 0 && (!here || compareVersions(here, there) < 0)) {
@@ -318,8 +344,11 @@ export function updatePrBlocker(root, { defaultBranch, version = VERSION, produc
     }
   }
   const onReview = (where) => ({ kind: 'open', label, branch: head, message: `the update is on review from '${head}'${where}: a person merges its PR/MR, then run this again. If no PR/MR was opened from it, open one into '${t.base}'; if it was closed without merging, delete the branch (here and on origin), then run this again` });
-  if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) return onReview('');
-  if (git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${head}`).ok) return onReview(' (on origin)');
+  // Once this clone's commit has the update (merged and pulled), an update branch left behind is not "on
+  // review": the run goes on, so a same-version repair still works, and `openUpdatePr` deals with the leftover.
+  const landed = here && want && compareVersions(here, want) >= 0;
+  if (!landed && git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) return onReview('');
+  if (!landed && git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${head}`).ok) return onReview(' (on origin)');
   // `ahead` is null when origin/<base> was never fetched: the branch is then cut from the local base as it
   // is, and the push says the rest.
   if (t.ahead > 0) return { kind: 'ahead', label, message: `${t.ahead} local commit(s) on '${t.base}' are not on origin — push or drop them first, so the update PR/MR carries only the update` };
@@ -342,46 +371,72 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   }
   const base = defaultBranch || resolveDefaultBranch(git);
   const head = updateBranchName(version);
+  const where = isProduct ? '.' : label;
+  // Staged on the default branch first, so a repo with nothing to commit never gets a branch, and a
+  // staging problem is said before anything else moves.
+  const { staged, addError } = stageAllowlist(git, root, paths);
+  const unstage = () => { if (staged.length) withPaths(root, ['reset', '-q'], staged); };
+  if (addError) {
+    unstage();
+    fail(`${label}: git add failed — ${addError}`);
+    process.exitCode = 1;
+    return out({ error: true, reason: 'add-failed', hint: `git could not stage the update in ${where} (${oneLine(addError).slice(0, 160)}) — often a leftover index.lock or file permissions; fix it and run this again: the update is in the working tree, and the next run carries it` });
+  }
+  if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return out({}); }
+  // An update branch left from an update that already merged (`updatePrBlocker` lets the run on once this
+  // clone has it). Dropped only when it holds nothing but the update's own commit; anything else is a person's.
+  const leftover = (why) => {
+    unstage();
+    fail(`${label}: ${why}`);
+    process.exitCode = 1;
+    return out({ error: true, reason: 'leftover-branch', hint: why });
+  };
+  if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) {
+    const extra = git('log', '--format=%s', `${base}..${head}`);
+    const subjects = extra.ok ? extra.stdout.split('\n').filter(Boolean) : null;
+    const ours = subjects && subjects.every((x) => x === buildUpdateMessage({ version, items: [] }));
+    if (!ours || !git('branch', '-q', '-D', head).ok) {
+      return leftover(`the branch '${head}' is left from the update that already merged, and holds other commits: look at it (\`git -C ${where} log ${base}..${head}\`), delete it (\`git -C ${where} branch -D ${head}\`), then run this again`);
+    }
+  }
+  if (git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${head}`).ok) {
+    return leftover(`the branch '${head}' is still on origin, left from the update that already merged: delete it on origin (\`git -C ${where} push origin --delete ${head}\`), then run this again`);
+  }
   if (!git('switch', '-q', '-c', head).ok) {
+    unstage();
     fail(`${label}: could not create the branch '${head}'`);
     process.exitCode = 1;
-    return out({ error: true, reason: 'branch-failed', hint: `git could not create '${head}' in ${isProduct ? '.' : label} — see what \`git switch -c ${head}\` says there, fix it, and run this again` });
+    return out({ error: true, reason: 'branch-failed', hint: `git could not create '${head}' in ${where} — see what \`git switch -c ${head}\` says there, fix it, and run this again` });
   }
   // Back to the default branch. A switch that fails (a hook rewrote a committed file) leaves the repo on the
   // update branch: said, never silent.
+  const stuck = `${where} is still on '${head}': run \`git switch ${base}\` there (the changes come with it), then \`git branch -D ${head}\``;
   const back = () => {
     const r = git('switch', '-q', base);
     if (!r.ok) {
-      fail(`${label}: could not switch back to '${base}' — ${r.stderr.split('\n')[0] || 'see git'}; run \`git switch ${base}\` in ${isProduct ? '.' : label}`);
+      fail(`${label}: could not switch back to '${base}' — ${r.stderr.split('\n')[0] || 'see git'}; run \`git switch ${base}\` in ${where}`);
       process.exitCode = 1;
     }
     return r.ok;
   };
-  const { staged, addError } = stageAllowlist(git, root, paths);
-  if (addError) warn(`${label}: git add reported "${addError}" — staging may be incomplete`);
-  if (!staged.length) {
-    const ok2 = back();
-    if (ok2) git('branch', '-q', '-D', head);
-    info(`${label}: nothing to commit (unchanged or ignored)`);
-    return out({ error: !ok2, ...(ok2 ? {} : { reason: 'switch-back-failed', hint: `${isProduct ? '.' : label} is still on '${head}': run \`git switch ${base}\` there, then \`git branch -D ${head}\`` }) });
-  }
-  const cm = git('commit', '-m', buildUpdateMessage({ version, items }), '--', ...staged);
+  const cm = withPaths(root, ['commit', '-m', buildUpdateMessage({ version, items })], staged);
   if (!cm.ok) {
-    git('reset', '-q', '--', ...staged);
-    if (back()) git('branch', '-q', '-D', head);
+    unstage();
+    const home = back();
+    if (home) git('branch', '-q', '-D', head);
     const why = cm.stderr.split('\n')[0] || `exit ${cm.code}`;
     fail(`${label}: git commit failed — ${why}`);
     process.exitCode = 1;
-    return out({ error: true, reason: 'commit-failed', hint: `the commit failed (${oneLine(why).slice(0, 160)}) — often signing or a hook; fix it and run this again: the update is still in the working tree, and the next run carries it` });
+    return out({ error: true, branch: home ? null : head, reason: 'commit-failed', hint: `the commit failed (${oneLine(why).slice(0, 160)}) — often signing or a hook; fix it and run this again: the update is still in the working tree, and the next run carries it${home ? '' : `. First: ${stuck}`}` });
   }
   ok(`${label}: committed ${staged.length} file(s) on ${head}`);
-  const pushed = run('git', ['push', '-q', '-u', 'origin', head], { cwd: root });
+  const pushed = quietGit(root)('push', '-q', '-u', 'origin', head);
   if (!pushed.ok) {
     // The branch is dropped, so a run after the push problem is fixed tries again rather than reading it as
     // "already on review". The update stays in the working tree, unstaged, deletions included: the branch is
     // moved back to the base with the files left as they are, then the switch to the base carries them.
-    const where = isProduct ? '.' : label;
-    const reset = git('reset', '-q', '--mixed', base).ok;
+    // Only the update's own paths are unstaged: anything the person had staged before the run stays staged.
+    const reset = git('reset', '-q', '--soft', base).ok && withPaths(root, ['reset', '-q'], staged).ok;
     const home = reset && back();
     if (home) git('branch', '-q', '-D', head);
     fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
@@ -410,7 +465,8 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
     hand(`${label}: ${left.hint}`);
   }
   const home = back();
-  if (!home) left = { reason: 'switch-back-failed', hint: `${isProduct ? '.' : label} is still on '${head}': run \`git switch ${base}\` there` };
+  // Said together with what is left of the PR/MR, never in place of it.
+  if (!home) left = left ? { reason: left.reason, hint: `${left.hint}. Also: ${where} is still on '${head}': run \`git switch ${base}\` there` } : { reason: 'switch-back-failed', hint: `${where} is still on '${head}': run \`git switch ${base}\` there` };
   return out({ branch: head, committed: true, pushed: true, opened, pr, error: !home, ...(left ?? {}) });
 }
 

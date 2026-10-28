@@ -640,11 +640,14 @@ test('the run reads origin first: an update opened from another clone is held, a
     assert.equal(calls.length, 1, 'no second PR/MR');
     // The PR merges on origin, and its branch is deleted there.
     git(A, ['push', '-q', 'origin', `chore/yad-update-v${VERSION}:main`]);
+    // Deleted on origin only, as the web page's button does: clone B still has its copy of the branch.
     git(A, ['push', '-q', 'origin', '--delete', `chore/yad-update-v${VERSION}`]);
-    git(B, ['branch', '-q', '-D', '-r', `origin/chore/yad-update-v${VERSION}`]);
-    // Clone B, stale again: the run fetches, sees the update merged, and says to pull.
+    assert.ok(git(B, ['branch', '-r']).includes(`origin/chore/yad-update-v${VERSION}`));
+    // Clone B, stale again: the run fetches, drops its copy of the deleted branch, sees the update merged,
+    // and says to pull.
     const rm = await reconcile(B, { fix: true, scope: 'changed', openPr: true, creator });
     assert.deepEqual(rm.commits.map((c) => c.reason), ['merged']);
+    assert.ok(!git(B, ['branch', '-r']).includes(`origin/chore/yad-update-v${VERSION}`), 'the copy of a branch origin lost is dropped');
     assert.match(rm.commits[0].hint, /pull --ff-only origin main/);
     assert.equal(git(B, ['status', '--porcelain']), '');
     assert.equal(calls.length, 1, 'never a second PR/MR for a merged update');
@@ -662,19 +665,73 @@ test('the run after a pull is not held as merged; a person\'s own file in a skil
     await reconcile(A, { fix: true, scope: 'all' });
     put(path.join(A, '.sdlc/cli-version.json'), { version: '4.0.0' });
     git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: install']); git(A, ['push', '-q']);
-    const skill = fs.readdirSync(path.join(A, '.claude/skills')).find((d) => d.startsWith('yad-'));
+    const skills = fs.readdirSync(path.join(A, '.claude/skills')).filter((d) => d.startsWith('yad-'));
+    const [skill, old] = skills;
     put(path.join(A, '.claude/skills', skill, 'my-notes.md'), 'private\n');
+    // A second folder the update rewrites (outdated), holding a person's committed file and an untracked one.
+    fs.appendFileSync(path.join(A, '.claude/skills', old, 'SKILL.md'), '\nan older line\n');
+    put(path.join(A, '.claude/skills', old, 'team-notes.md'), 'ours\n');
+    git(A, ['add', '-A', `.claude/skills/${old}`]); git(A, ['commit', '-q', '-m', 'docs: team notes']); git(A, ['push', '-q']);
+    put(path.join(A, '.claude/skills', old, 'scratch.md'), 'mine\n');
     const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
     assert.equal(r.commits[0].opened, true);
     const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${VERSION}`]).split('\n');
     assert.ok(files.includes('.sdlc/cli-version.json'), files.join(', '));
-    assert.ok(!files.some((f) => f.endsWith('my-notes.md')), `never the person's own file: ${files.join(', ')}`);
-    assert.ok(fs.existsSync(path.join(A, '.claude/skills', skill, 'my-notes.md')), 'and it is left where it was');
+    assert.ok(files.includes(`.claude/skills/${old}/SKILL.md`), `the outdated folder is updated: ${files.join(', ')}`);
+    assert.ok(!files.some((f) => /(my|team)-notes\.md$|scratch\.md$/.test(f)), `never the person's own file: ${files.join(', ')}`);
+    for (const f of [`${skill}/my-notes.md`, `${old}/team-notes.md`, `${old}/scratch.md`]) {
+      assert.ok(fs.existsSync(path.join(A, '.claude/skills', f)), `${f} is left where it was`);
+    }
     // The PR merges; clone B pulls it. The next run there is not "merged — pull it": it was pulled.
     git(A, ['push', '-q', 'origin', `chore/yad-update-v${VERSION}:main`]);
     git(B, ['pull', '-q', '--ff-only', 'origin', 'main']);
     const again = await reconcile(B, { fix: true, scope: 'changed', openPr: true, creator });
     assert.ok(!again.commits.some((c) => c.reason === 'merged'), JSON.stringify(again.commits));
+    // Clone A pulls too. Its own update branch, left behind, is not "on review": a same-version repair runs.
+    git(A, ['pull', '-q', '--ff-only', 'origin', 'main']);
+    // A managed file deleted on the default branch: the repair puts it back.
+    git(A, ['rm', '-q', `.claude/skills/${skill}/SKILL.md`]); git(A, ['commit', '-q', '-m', 'chore: lose a file']); git(A, ['push', '-q']);
+    const blocked = await reconcile(A, { fix: true, scope: 'all', openPr: true, creator });
+    assert.ok(!blocked.commits.some((c) => c.reason === 'open'), JSON.stringify(blocked.commits));
+    // The local branch held only the update's own commit, so it is gone; origin still has the branch: said.
+    assert.equal(git(A, ['branch', '--list', `chore/yad-update-v${VERSION}`]), '', JSON.stringify(blocked.commits));
+    assert.deepEqual(blocked.commits.map((c) => c.reason), ['leftover-branch']);
+    assert.match(blocked.commits[0].hint, /push origin --delete/);
+    assert.notEqual(git(A, ['status', '--porcelain']), '', 'the repair waits in the working tree, unstaged');
+    assert.equal(git(A, ['diff', '--cached', '--name-only']), '');
+    process.exitCode = 0;
+    git(A, ['push', '-q', 'origin', '--delete', `chore/yad-update-v${VERSION}`]);
+    const repaired = await reconcile(A, { fix: true, scope: 'all', openPr: true, creator });
+    assert.deepEqual(repaired.commits.map((c) => [c.reason ?? null, c.opened]), [[null, true]]);
+    assert.ok(git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${VERSION}`]).includes(`.claude/skills/${skill}/SKILL.md`));
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('a repo newer than the yadflow running is refused, never rolled back; a failed git add is said', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => { throw new Error('no PR/MR'); };
+    put(path.join(A, '.sdlc/cli-version.json'), { version: '99.0.0' });
+    git(A, ['commit', '-q', '-am', 'chore: newer']); git(A, ['push', '-q']);
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.deepEqual(r.commits.map((c) => [c.reason, c.error]), [['newer', true]]);
+    assert.match(r.commits[0].hint, /update yadflow itself to v99\.0\.0 or later/);
+    assert.equal(git(A, ['status', '--porcelain']), '', 'nothing written');
+    assert.equal(process.exitCode, 1);
+    process.exitCode = 0;
+    // A git add that fails (a leftover index.lock): said, with nothing committed and no branch.
+    put(path.join(A, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    git(A, ['commit', '-q', '-am', 'chore: older']); git(A, ['push', '-q']);
+    const lock = path.join(A, '.git/index.lock');
+    const ran = await (async () => {
+      fs.writeFileSync(lock, '');
+      try { return await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator }); } finally { fs.rmSync(lock, { force: true }); }
+    })();
+    assert.deepEqual(ran.commits.map((c) => [c.reason, c.committed]), [['add-failed', false]]);
+    assert.match(ran.commits[0].hint, /index\.lock/);
+    assert.notEqual(git(A, ['status', '--porcelain']), '', 'the update is in the working tree');
+    assert.equal(git(A, ['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 

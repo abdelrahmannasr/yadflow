@@ -301,10 +301,17 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   log('');
   let applied = 0;
   const appliedActions = [];
+  // Under --open-pr a skill folder keeps a person's own files and is staged by the template's files only, so
+  // nothing of theirs is deleted from disk or rides the PR/MR (E157 update review 7).
+  const keepOwn = (a) => {
+    if (!openPr || typeof a.applyKeepingOwn !== 'function') { a.apply(); return a; }
+    const kept = a.applyKeepingOwn();
+    if (kept.length) info(`kept ${kept.length} file(s) the template does not have in ${shown(a)}/${a.item} — delete any that an older yadflow shipped`);
+    return { ...a, paths: a.ownPaths() };
+  };
   for (const a of fixable) {
-    a.apply();
+    appliedActions.push(keepOwn(a));
     applied++;
-    appliedActions.push(a);
     // A backup means the replaced content was not provably ours (a pre-ledger install, or an edit
     // --overwrite-local was told to discard). Never report that as an ordinary template adoption.
     info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
@@ -312,7 +319,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (force) {
     // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —
     // only --overwrite-local discards a local edit, and only after backing it up.
-    for (const a of actions.filter((a) => a.status === 'ok' && live(a))) { a.apply(); appliedActions.push(a); }
+    for (const a of actions.filter((a) => a.status === 'ok' && live(a))) appliedActions.push(keepOwn(a));
   }
   // A file that is right on disk but not committed as it stands, which --push must still commit: the
   // product-link record (E120) — the gates read it from the default branch, not from anyone's disk.
