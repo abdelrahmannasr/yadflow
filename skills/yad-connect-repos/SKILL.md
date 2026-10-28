@@ -188,7 +188,8 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 
 - **`refresh`** — re-run Steps 2–4 (including Step 3b) for an already-connected repo (after its code moves). A new directory gets an `unset` line and a guess; a `confirmed` line is only ever suggested against. Updates
   `syncedHead` + `lastSyncedAt`. Same machinery as `connect`. Once the AI has regenerated the
-  `code-map.md` (Step 3), publish it to the Product with **`yad repo refresh <repo> --push`**: it
+  `code-map.md` (Step 3), publish it to the Product with **`yad repo refresh <repo> --push`** — ask the
+  person first, every time: it pushes to the default branch (E158) — it
   commits the tracked code-maps + `.sdlc/repos.json` (never the gitignored `pack.md`) as one
   audit-trail commit `chore(product): sync code-context — <repos> by @<login> [skip ci]` and pushes it
   straight to the Product's **default branch** (add `--allow-branch` to commit on a non-default branch).
@@ -253,7 +254,8 @@ any user name or password taken out of `git_url`) into every connected repo, and
 to each repo's default branch — a record on disk that is not committed as it stands is committed by the
 next `--push`, though `yad check` reads it as `ok`. The Product-reading gates read it from
 the base; `checks/product-checkout.sh` uses it with the `YAD_PRODUCT_TOKEN` secret. After connecting a
-repo, run `yad check --fix --push`; `yad doctor` warns `repos:product-link-missing` until it is on
+repo, run `yad check --fix --open-pr` (a PR/MR per repo, no asking), or `yad check --fix --push` after the
+person says yes (it pushes to every repo's default branch, E158); `yad doctor` warns `repos:product-link-missing` until it is on
 the repo's default branch.
 
 ## Live on-demand (the third context layer)

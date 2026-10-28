@@ -77,9 +77,10 @@ the architecture gate. To also open the PR/MR in the same step, use `yad-ship`.
 - **Trailer order is fixed:** `Task → Contract-Change → Ledger-Override → Co-Authored-By` (the override only
   with `--manual`, the footer only when `--ai` is given).
 - **Never widen the contract here.** A contract touch is flagged (`--contract-change`), not hidden.
-- **Never pass `--manual` on your own initiative.** Committing past the ledger hook is a person's decision.
-  Pass it only when the user asked for it, with the reason they gave. `--manual` needs `--reason`, and the
-  reason must be one line.
+- **Never pass `--manual` yourself, even when asked (E158).** Committing past the ledger hook is the person's
+  act. Give them the exact command (in Claude Code: `! yad commit --manual --reason "<why>"`), wait, then
+  confirm by reading (`git log -1`). `--manual` needs `--reason`, and the reason must be one line. The agent
+  guard hook refuses it if you try.
 
 ## Reference
 - Branch/commit conventions + the file-boundary rule: `../yad-implement/references/implement-conventions.md`.

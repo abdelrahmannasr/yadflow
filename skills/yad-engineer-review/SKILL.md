@@ -147,14 +147,16 @@ engineer-review rule is satisfied (Step 2). Then:
   (`followUps`), never a second ship. Shape: `references/ship-and-record.md`.
 - **Catch up on merges (#365)** — `yad build sync [<epic>]` records every ship the code repos already show
   (what `yad reconcile check` finds merged with no ship), through `yad build ship`, then `yad build done`
-  for each story now fully shipped; it lists what it cannot record. Commit with `yad checkpoint --push`.
+  for each story now fully shipped; it lists what it cannot record. Then ask the person before
+  `yad checkpoint --push`: it pushes to the default branch, which is asked about every time (E158).
 - **Record the ship** — `yad build ship <story> --task <task> --repo <repo> --pr <n>` (what `--ship` runs),
   once the PR/MR has merged. A grouped PR (#350) — several small tasks of one story — ships each task it
   carries from the same `--pr`; a task that is not the branch's is found with `--pr`, as its commits carry it. It reads the merge commit, the branch, the checks that passed, the approvers (with the
   engagement signal), the body's `Risk level:` and the merge date from the platform, refuses a PR that is
   not merged or that comes from another task's branch, and writes the ship to its own shard
   `epics/<epic>/.sdlc/build-log/<story>-<task>-<repo>.json` (shape: `references/ship-and-record.md`). A
-  repo whose platform cannot be read records it by hand: `--merge-commit <sha> --approver <login>`. A
+  repo whose platform cannot be read records it by hand: `--merge-commit <sha> --approver <login>`, only with
+  the merge commit and approvers the person gave you, never guessed (E158). A
   task merged with no PR/MR: `--merge-commit <sha>` and no `--pr` (the commit must be on the default
   branch and name the task in its `Task:` trailer or subject; the platform is asked whether a PR merged it,
   and a PR that did is named instead). It moves the story to `in-build`. Never write the shard by hand.
@@ -176,7 +178,8 @@ engineer-review rule is satisfied (Step 2). Then:
   word on the trust signal: a diff merged as authored is `approved-unchanged`; one the engineer edited
   before merge is `approved-with-edits`; a rejected one is `rejected`. This is the run record `yad dial`
   shows the team beside a step's dial (it never weakens the merge gate — the engineer still owns the merge).
-- **Commit the machine-written ledgers.** Run `yad checkpoint --push` from `{project-root}` to commit
+- **Commit the machine-written ledgers.** Ask the person, then run `yad checkpoint --push` from `{project-root}`
+  (a push to the default branch is asked about every time, E158) to commit
   the Build ledgers just written (the `build-log/` shard, and the `trust-log/` shard /
   `build-state/<story>.json` if the story ran through `yad-run`) as one `chore(product): …` audit-trail
   commit — default branch only, staging the shard dirs (`yad tidy up` folds finished shards later),
