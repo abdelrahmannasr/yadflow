@@ -71,20 +71,21 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
     if (!own.length) { copyDir(src, dest); return []; }
     const aside = `${dest}.yad-keep-${process.pid}`;
     const moved = [];
+    const stuck = [];
     try {
       for (const f of own) { fs.mkdirSync(path.dirname(path.join(aside, f)), { recursive: true }); fs.renameSync(path.join(dest, f), path.join(aside, f)); moved.push(f); }
       copyDir(src, dest);
     } finally {
       // Back even when the copy failed. One that cannot go back stays in the side folder, which is named, never
       // removed.
-      const stuck = [];
       for (const f of moved) {
         try { fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true }); fs.renameSync(path.join(aside, f), path.join(dest, f)); } catch { stuck.push(f); }
       }
       if (stuck.length) warn(`${stuck.length} of your own file(s) could not go back into ${dest}; they are in ${aside}`);
       else fs.rmSync(aside, { recursive: true, force: true });
     }
-    return own.map((f) => (root ? rel(root, path.join(dest, f)) : f));
+    // Only the files back in place: one left in the side folder is said by the warning above.
+    return own.filter((f) => !stuck.includes(f)).map((f) => (root ? rel(root, path.join(dest, f)) : f));
   },
 });
 
