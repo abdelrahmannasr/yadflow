@@ -82,8 +82,16 @@ function stageAllowlist(git, root, paths) {
   // folder, hundreds of paths, which overflowed Windows' 32K command line (E157 update review 7); and one
   // spawn per path took minutes (review 6).
   if (!paths.length) return { staged: [] };
-  const ignored = new Set(run('git', ['check-ignore', '-z', '--stdin'], { cwd: root, input: paths.join('\0') }).stdout.split('\0').filter(Boolean));
-  const tracked = run('git', ['ls-files', '-z'], { cwd: root }).stdout.split('\0').filter(Boolean);
+  // Whole-repo lists can pass Node's 1 MB default in a big repo, which cuts them short: a cut list would drop a
+  // deletion from staging without a word. Room is made, and a list that still fails is said, never used.
+  const big = { cwd: root, maxBuffer: 1024 * 1024 * 1024 };
+  const ignoredRun = run('git', ['check-ignore', '-z', '--stdin'], { ...big, input: paths.join('\0') });
+  const trackedRun = run('git', ['ls-files', '-z'], big);
+  // check-ignore exits 1 when nothing is ignored; only a spawn error is a failed read there.
+  const unread = ignoredRun.error || trackedRun.error || !trackedRun.ok;
+  if (unread) return { staged: [], addError: `could not list the repo's files (${(ignoredRun.error || trackedRun.error)?.code || trackedRun.stderr.split('\n')[0] || `exit ${trackedRun.code}`})` };
+  const ignored = new Set(ignoredRun.stdout.split('\0').filter(Boolean));
+  const tracked = trackedRun.stdout.split('\0').filter(Boolean);
   const trackedSet = new Set(tracked);
   // A folder path covers every file under it.
   const under = (p, f) => f === p || f.startsWith(`${p.replace(/\/$/, '')}/`);
@@ -94,8 +102,13 @@ function stageAllowlist(git, root, paths) {
   // than silently reporting "nothing to commit". (A directory pathspec whose contents are ALL ignored
   // also exits 1 after staging the rest; the empty-diff below then correctly drops it.)
   const add = withPaths(root, ['add'], keep);
-  const staged = run('git', ['diff', '--cached', '--name-only', '-z'], { cwd: root }).stdout.split('\0').filter((f) => f && keep.some((p) => under(p, f)));
-  return { staged, addError: !add.ok ? (add.stderr.split('\n')[0] || `exit ${add.code}`) : null };
+  const diff = run('git', ['diff', '--cached', '--name-only', '-z'], big);
+  const staged = diff.ok ? diff.stdout.split('\0').filter((f) => f && keep.some((p) => under(p, f))) : [];
+  const addError = !add.ok ? (add.stderr.split('\n')[0] || `exit ${add.code}`)
+    : !diff.ok ? `could not read what was staged (${diff.error?.code || diff.stderr.split('\n')[0] || `exit ${diff.code}`})` : null;
+  // Nothing of ours may stay staged when the list of it could not be read.
+  if (!diff.ok) withPaths(root, ['reset', '-q'], keep);
+  return { staged, addError };
 }
 
 // `git <args>` over a list of literal paths read from stdin (NUL-separated), not the command line.
@@ -436,18 +449,21 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
     // "already on review". The update stays in the working tree, unstaged, deletions included: the branch is
     // moved back to the base with the files left as they are, then the switch to the base carries them.
     // Only the update's own paths are unstaged: anything the person had staged before the run stays staged.
-    const reset = git('reset', '-q', '--soft', base).ok && withPaths(root, ['reset', '-q'], staged).ok;
-    const home = reset && back();
+    // Two steps, said apart: once the soft reset is done the commit is gone from the branch, whatever follows.
+    const soft = git('reset', '-q', '--soft', base).ok;
+    const unstaged = soft && withPaths(root, ['reset', '-q'], staged).ok;
+    const home = soft && back();
     if (home) git('branch', '-q', '-D', head);
     fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
+    const still = unstaged ? '' : ' (still staged)';
     const hint = home
-      ? `fix the push (access, network) and run this again; the update is left uncommitted in ${where}'s working tree, and the next run carries it`
-      : reset
-        ? `the update is left uncommitted in ${where}, which is still on ${head}: run \`git switch ${base}\` there (the changes come with it), then \`git branch -D ${head}\`, fix the push and run the update again`
+      ? `fix the push (access, network) and run this again; the update is left uncommitted${still} in ${where}'s working tree, and the next run carries it`
+      : soft
+        ? `the update is left uncommitted${still} in ${where}, which is still on ${head}: run \`git switch ${base}\` there (the changes come with it), then \`git branch -D ${head}\`, fix the push and run the update again`
         : `the update is committed on ${head} in ${where}; fix the push, then push that branch (\`git push -u origin ${head}\`) and open a PR/MR from it`;
     hand(hint);
     process.exitCode = 1;
-    return out({ committed: !home && !reset, branch: home ? null : head, error: true, reason: 'push-failed', hint });
+    return out({ committed: !soft, branch: home ? null : head, error: true, reason: 'push-failed', hint });
   }
   let opened = false;
   let pr = null;

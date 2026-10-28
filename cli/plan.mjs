@@ -61,17 +61,28 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
   // The kept files are moved aside and back, so their bytes, modes and links are untouched. Returns them,
   // relative to `root`.
   applyKeepingOwn: () => {
-    const theirs = new Set(listFiles(src));
-    const own = exists(dest) ? listFiles(dest).filter((f) => !theirs.has(f)) : [];
+    const shipped = listFiles(src);
+    const theirs = new Set(shipped);
+    // A path where the template now has a folder, or under a name the template now has as a file, is an older
+    // template's shape (a file swapped for a folder): it goes, as `yad update` always did, or it could never
+    // come back.
+    const clash = (f) => shipped.some((t) => t.startsWith(`${f}${path.sep}`) || f.startsWith(`${t}${path.sep}`));
+    const own = exists(dest) ? listFiles(dest).filter((f) => !theirs.has(f) && !clash(f)) : [];
     if (!own.length) { copyDir(src, dest); return []; }
     const aside = `${dest}.yad-keep-${process.pid}`;
-    for (const f of own) { fs.mkdirSync(path.dirname(path.join(aside, f)), { recursive: true }); fs.renameSync(path.join(dest, f), path.join(aside, f)); }
+    const moved = [];
     try {
+      for (const f of own) { fs.mkdirSync(path.dirname(path.join(aside, f)), { recursive: true }); fs.renameSync(path.join(dest, f), path.join(aside, f)); moved.push(f); }
       copyDir(src, dest);
     } finally {
-      // Back even when the copy failed: a person's file is never left in the side folder.
-      for (const f of own) { fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true }); fs.renameSync(path.join(aside, f), path.join(dest, f)); }
-      fs.rmSync(aside, { recursive: true, force: true });
+      // Back even when the copy failed. One that cannot go back stays in the side folder, which is named, never
+      // removed.
+      const stuck = [];
+      for (const f of moved) {
+        try { fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true }); fs.renameSync(path.join(aside, f), path.join(dest, f)); } catch { stuck.push(f); }
+      }
+      if (stuck.length) warn(`${stuck.length} of your own file(s) could not go back into ${dest}; they are in ${aside}`);
+      else fs.rmSync(aside, { recursive: true, force: true });
     }
     return own.map((f) => (root ? rel(root, path.join(dest, f)) : f));
   },

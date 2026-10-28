@@ -869,15 +869,56 @@ test('a push that fails keeps the update in the working tree, unstaged, deletion
     git(T, ['remote', 'add', 'origin', path.join(T, 'no-such-remote')]);
     fs.rmSync(path.join(T, 'old.sh'));
     put(path.join(T, 'a.txt'), 'v2\n');
+    // The person's own change, staged before the run: it stays staged, and never rides the update.
+    put(path.join(T, 'mine.txt'), 'mine\n');
+    git(T, ['add', 'mine.txt']);
     const r = openUpdatePr({ root: T, paths: ['old.sh', 'a.txt'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'github', creator: () => ({ ok: true }), version: '4.7.0', checked: true });
     assert.deepEqual([r.pushed, r.error], [false, true]);
     assert.equal(git(T, ['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
     assert.equal(git(T, ['branch', '--list', 'chore/yad-update-v4.7.0']), '', 'the branch is dropped, so a later run retries');
     assert.equal(fs.readFileSync(path.join(T, 'a.txt'), 'utf8'), 'v2\n');
     assert.ok(!fs.existsSync(path.join(T, 'old.sh')));
-    assert.equal(git(T, ['diff', '--cached', '--name-only']), '', 'nothing staged');
+    assert.equal(git(T, ['diff', '--cached', '--name-only']), 'mine.txt', 'only the person\'s own staged file is staged');
     assert.deepEqual(git(T, ['diff', '--name-status']).split('\n').sort(), ['D\told.sh', 'M\ta.txt'], 'the update, unstaged');
   } finally { fs.rmSync(T, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('a leftover update branch holding a person\'s own commit is never deleted: said, with nothing staged', async () => {
+  const { openUpdatePr } = await import('./update-commit.mjs');
+  const T = tmp();
+  try {
+    git(T, ['init', '-q', '-b', 'main']);
+    git(T, ['config', 'user.name', 'Alice Smith']); git(T, ['config', 'user.email', 'alice@work.com']); git(T, ['config', 'commit.gpgsign', 'false']);
+    put(path.join(T, 'a.txt'), 'v1\n');
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: start']);
+    git(T, ['switch', '-q', '-c', 'chore/yad-update-v4.7.0']);
+    put(path.join(T, 'b.txt'), 'theirs\n');
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'feat: their work']);
+    git(T, ['switch', '-q', 'main']);
+    put(path.join(T, 'a.txt'), 'v2\n');
+    const r = openUpdatePr({ root: T, paths: ['a.txt'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'github', creator: () => ({ ok: true }), version: '4.7.0', checked: true });
+    assert.deepEqual([r.reason, r.committed], ['leftover-branch', false]);
+    assert.match(r.hint, /holds other commits/);
+    assert.equal(git(T, ['log', '-1', '--format=%s', 'chore/yad-update-v4.7.0']), 'feat: their work', 'their branch is kept');
+    assert.equal(git(T, ['diff', '--cached', '--name-only']), '');
+    assert.equal(fs.readFileSync(path.join(T, 'a.txt'), 'utf8'), 'v2\n');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('a skill folder keeps the person\'s files; an older template\'s file where a folder now is, is replaced', async () => {
+  const { moduleActions } = await import('./plan.mjs');
+  const T = tmp();
+  try {
+    const a = moduleActions(T, ['.claude']).find((x) => x.item === 'yad-architecture');
+    const dest = path.join(T, '.claude/skills/yad-architecture');
+    put(path.join(dest, 'references'), 'an older template had a file here\n');
+    put(path.join(dest, 'notes/mine.md'), 'mine\n');
+    const kept = a.applyKeepingOwn();
+    assert.deepEqual(kept, ['.claude/skills/yad-architecture/notes/mine.md']);
+    assert.ok(fs.statSync(path.join(dest, 'references')).isDirectory(), 'the template\'s folder is in place');
+    assert.equal(fs.readFileSync(path.join(dest, 'notes/mine.md'), 'utf8'), 'mine\n');
+    assert.deepEqual(fs.readdirSync(path.join(T, '.claude/skills')), ['yad-architecture'], 'no side folder left');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened, and the repo back on its default branch', async () => {
