@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } from './lib.mjs';
-import { VERSION } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, MANAGED_LEDGER, productConfigPath } from './manifest.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 
 // Collapse whitespace/newline runs to a single space — keeps a stray path or hostile value from
@@ -238,14 +238,16 @@ export function buildUpdatePrBody({ version = VERSION, items = [] } = {}) {
 // cloned here (one that is not is `yad repo clone`'s business, not the update's). ONE list for both
 // readers — reconcile, which refuses a run, and the guide, which must never advise a run that is refused.
 export function updateTargets(productRoot) {
-  const settings = readJSONSafe(path.join(productRoot, '.sdlc/product.json')) ?? {};
+  const settings = readJSONSafe(productConfigPath(productRoot)) ?? {};
   const registry = readJSONSafe(path.join(productRoot, '.sdlc/repos.json'));
   const repos = (Array.isArray(registry?.repos) ? registry.repos : [])
     .filter((x) => typeof x?.path === 'string' && x.path)
-    .map((x) => ({ root: path.resolve(productRoot, x.path), name: typeof x.name === 'string' ? x.name : x.path, defaultBranch: x.default_branch ?? null, platform: x.platform ?? null }))
+    .map((x) => ({ root: path.resolve(productRoot, x.path), name: typeof x.name === 'string' ? x.name : x.path, defaultBranch: x.default_branch ?? null, platform: x.platform ?? null, file: MANAGED_LEDGER }))
     .filter((x) => x.root !== productRoot && fs.existsSync(path.join(x.root, '.git')));
-  return [{ root: productRoot, name: 'product', defaultBranch: settings.default_branch ?? null, platform: settings.platform ?? null, product: true }, ...repos];
+  // `file`: where each records the yadflow version that last wrote it.
+  return [{ root: productRoot, name: 'product', defaultBranch: settings.default_branch ?? null, platform: settings.platform ?? null, product: true, file: PROJECT_FILES.version }, ...repos];
 }
+const isRoot = (a, b) => path.resolve(a) === path.resolve(b);
 const readJSONSafe = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 // Where one repo stands against its default branch, from git alone (origin as last fetched, no network):
@@ -270,10 +272,15 @@ export function branchTable(root, { defaultBranch } = {}) {
 // Why a repo cannot take the update as a PR/MR now, or null. Asked BEFORE anything is applied (reconcile),
 // so a repo that cannot take it is never left with the update written into its working tree: a dirty
 // default branch would stop the person's own `git pull` once the PR/MR merges.
-//   kind `open`: the update is already on review (its branch is here, or on origin from another clone) —
-//   nothing to do but merge it. Every other kind needs the person to fix something first.
-// `network: false` (the guide) leaves out the one network read, `git ls-remote`.
-export function updatePrBlocker(root, { defaultBranch, version = VERSION, productRoot = root, network = true, table = null } = {}) {
+//   kind `merged`: the update of this version is already on origin's default branch — pull it, never a
+//   second PR/MR. kind `open`: the update is on review (its branch is here, or on origin from another clone)
+//   — a person merges it. Both are HELD: nothing is written there. Every other kind needs the person to fix
+//   something first, and stops the run.
+// With `network` (the default), origin's default branch and the update branch are fetched first, so a stale
+// clone sees what already happened. `file` is the version record to compare: the Product's stamp, or a
+// connected repo's managed ledger.
+export const HELD_KINDS = ['merged', 'open'];
+export function updatePrBlocker(root, { defaultBranch, version = VERSION, productRoot = root, network = true, table = null, file = null } = {}) {
   const label = repoLabel(productRoot, root);
   // `table`: the caller's own read of `branchTable`, so it is not asked twice.
   const t = table ?? branchTable(root, { defaultBranch });
@@ -284,11 +291,21 @@ export function updatePrBlocker(root, { defaultBranch, version = VERSION, produc
   if (!t.origin) return { kind: 'no-origin', label, message: 'no origin remote to push the update branch to' };
   const git = productGit(root);
   const head = updateBranchName(version);
-  const onReview = (where) => ({ kind: 'open', label, branch: head, message: `the update is already on review from '${head}'${where}: a person merges its PR/MR, then everyone pulls — nothing to do here (if that PR/MR was closed without merging, delete the branch, then run it again)` });
+  const rel = isRoot(productRoot, root) ? '.' : repoLabel(productRoot, root);
+  if (network) {
+    // What origin already has. A failed fetch (offline) is not an error here: the push says so later.
+    git('fetch', '-q', 'origin', t.base);
+    // Exit 0: the update branch is on origin; fetch it, so later reads (the guide's too) see it.
+    if (run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], { cwd: root }).ok) git('fetch', '-q', 'origin', `+refs/heads/${head}:refs/remotes/origin/${head}`);
+  }
+  if (file && git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${t.base}`).ok) {
+    const shown = git('show', `refs/remotes/origin/${t.base}:${file}`);
+    const there = shown.ok ? (() => { try { return JSON.parse(shown.stdout)?.version; } catch { return null; } })() : null;
+    if (there === version) return { kind: 'merged', label, message: `the update to v${version} is already on origin's '${t.base}' — pull it: \`git -C ${rel} pull --ff-only origin ${t.base}\`` };
+  }
+  const onReview = (where) => ({ kind: 'open', label, branch: head, message: `the update is on review from '${head}'${where}: a person merges its PR/MR, then run this again. If no PR/MR was opened from it, open one into '${t.base}'; if it was closed without merging, delete the branch (here and on origin), then run this again` });
   if (git('rev-parse', '--verify', '--quiet', `refs/heads/${head}`).ok) return onReview('');
   if (git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${head}`).ok) return onReview(' (on origin)');
-  // Exit 0: the branch is on origin. Exit 2: it is not. Anything else (offline): not known, and the push says so.
-  if (network && run('git', ['ls-remote', '--exit-code', '--heads', 'origin', head], { cwd: root }).ok) return onReview(' (opened from another clone)');
   // `ahead` is null when origin/<base> was never fetched: the branch is then cut from the local base as it
   // is, and the push says the rest.
   if (t.ahead > 0) return { kind: 'ahead', label, message: `${t.ahead} local commit(s) on '${t.base}' are not on origin — push or drop them first, so the update PR/MR carries only the update` };
@@ -307,7 +324,7 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   const blocked = checked ? null : updatePrBlocker(root, { defaultBranch, version, productRoot: productRoot ?? root });
   if (blocked) {
     (blocked.kind === 'open' ? info : warn)(`${label}: ${blocked.message}${blocked.kind === 'open' ? '' : ' — skipped'}`);
-    return out({ skipped: true, branch: blocked.branch ?? null, reason: blocked.kind });
+    return out({ skipped: true, branch: blocked.branch ?? null, reason: blocked.kind, hint: blocked.message });
   }
   const base = defaultBranch || resolveDefaultBranch(git);
   const head = updateBranchName(version);
@@ -338,9 +355,10 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   if (!cm.ok) {
     git('reset', '-q', '--', ...staged);
     if (back()) git('branch', '-q', '-D', head);
-    fail(`${label}: git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
+    const why = cm.stderr.split('\n')[0] || `exit ${cm.code}`;
+    fail(`${label}: git commit failed — ${why}`);
     process.exitCode = 1;
-    return out({ error: true });
+    return out({ error: true, reason: 'commit-failed', hint: `the commit failed (${oneLine(why).slice(0, 160)}) — often signing or a hook; fix it and run this again: the update is still in the working tree, and the next run carries it` });
   }
   ok(`${label}: committed ${staged.length} file(s) on ${head}`);
   const pushed = run('git', ['push', '-q', '-u', 'origin', head], { cwd: root });
@@ -353,13 +371,14 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
     const home = reset && back();
     if (home) git('branch', '-q', '-D', head);
     fail(`${label}: could not push ${head} — ${pushed.stderr.split('\n')[0] || 'see git'}`);
-    hand(home
-      ? `fix the push (access, network) and run the update again; the update is left in ${where}'s working tree, uncommitted (\`git restore .\` drops it)`
+    const hint = home
+      ? `fix the push (access, network) and run this again; the update is left uncommitted in ${where}'s working tree, and the next run carries it`
       : reset
         ? `the update is left uncommitted in ${where}, which is still on ${head}: run \`git switch ${base}\` there (the changes come with it), then \`git branch -D ${head}\`, fix the push and run the update again`
-        : `the update is committed on ${head} in ${where}; fix the push, then push that branch (\`git push -u origin ${head}\`) and open a PR/MR from it`);
+        : `the update is committed on ${head} in ${where}; fix the push, then push that branch (\`git push -u origin ${head}\`) and open a PR/MR from it`;
+    hand(hint);
     process.exitCode = 1;
-    return out({ committed: false, error: true });
+    return out({ committed: !home && !reset, branch: home ? null : head, error: true, reason: 'push-failed', hint });
   }
   let opened = false;
   let pr = null;

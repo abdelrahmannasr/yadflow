@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, info, hand, readJSON, forTerminal, exists } from './lib.mjs';
-import { MANAGED_LEDGER, PROJECT_FILES, VERSION, isVerifiedLedger, productConfigPath } from './manifest.mjs';
+import { VERSION, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { DEFAULT_LIFECYCLE, DRIVERS, GATE_SUFFIX } from './lifecycle.mjs';
 import { PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds } from './epic-state.mjs';
 import { epicAction, soloOf } from './next.mjs';
@@ -27,7 +27,7 @@ import { buildStatus } from './status.mjs';
 import { recommendationsFor, bindCommand } from './recommend.mjs';
 import { TOOLBOX, parseVersion, compare as compareVersions } from './toolbox.mjs';
 import { productGit } from './productcommit.mjs';
-import { branchTable, updatePrBlocker, updateTargets } from './update-commit.mjs';
+import { updateTargets } from './update-commit.mjs';
 import { RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor, reaches } from './agent-rules.mjs';
 import { seededSlugs } from './hook.mjs';
 
@@ -330,95 +330,46 @@ function noProduct() {
   };
 }
 
-// Is the Product's install behind this yadflow? The Product's stamp (`.sdlc/cli-version.json`) and each
-// connected repo's managed ledger (`.sdlc/managed.json`, its `version`) name the yadflow that last wrote
-// their files. Behind: `yad update --open-pr` brings them up, one PR/MR per repo (the person's choice,
-// 2026-10-27). Ahead (an older yadflow here) is `yad`'s own warning, not upkeep.
+// Is the install behind this yadflow? The Product's stamp (`.sdlc/cli-version.json`) and each connected
+// repo's managed ledger (`.sdlc/managed.json`) name the yadflow that last wrote their files. They are read
+// as COMMITTED (`HEAD`), so an update left uncommitted in a working tree still counts as behind. A connected
+// repo with no ledger has never had its checks wired, which `yad update` never does: not counted.
 //
-// The working tree alone would loop: `--open-pr` leaves each default branch as it was until the PR/MR
-// merges. So each repo is also read from git (origin as last fetched, no network): where it stands against
-// its default branch (`branchTable`), whether its update branch is here or on origin (on review), and whether
-// origin's default branch already has the new version (merged, not pulled). Every hint is decided from that.
+// That is all the guide decides. Whether the update can run now, is already on review or already merged,
+// is the run's to say (`yad update --open-pr`, E157 update review 5): it fetches, checks every repo, and
+// answers with a reason and a hint per repo, which the agent passes to the person. A guide that predicted
+// the run would be a second copy of its rules, and drift from it.
 const behindOf = (stamped, running) => {
   const a = parseVersion(stamped);
   const b = parseVersion(running);
   return a && b ? compareVersions(a, b) < 0 : null;
 };
 const versionIn = (text) => { try { const v = JSON.parse(text)?.version; return typeof v === 'string' ? v : null; } catch { return null; } };
-
-function repoInstall(t, { running, productRoot, all, first = null }) {
-  const file = t.product ? PROJECT_FILES.version : MANAGED_LEDGER;
-  const local = versionIn((() => { try { return fs.readFileSync(path.join(t.root, file), 'utf8'); } catch { return ''; } })());
-  // A connected repo with no managed ledger has had no managed file written yet (its checks were never wired):
-  // `yad update` never does that one-time setup (`yad check --fix` and the yad-checks skill do), so it is not
-  // behind, and not upkeep — counting it would advise an update that never changes it.
-  const behind = !t.product && !local ? null : behindOf(local, running);
-  const r = first ?? { label: t.product ? 'product' : clean(t.name), root: t.root, version: local ? clean(local) : null, behind };
-  if (!behind && !all) return r;
-  if (first?.table) return first;
-  const tbl = branchTable(t.root, { defaultBranch: t.defaultBranch });
-  if (!tbl.repo) return { ...r, blocker: { kind: 'not-a-repo', message: 'not its own git repo (missing or renamed clone?)' } };
-  const git = productGit(t.root);
-  const shown = behind && tbl.tracked ? git('show', `refs/remotes/origin/${tbl.base}:${file}`) : { ok: false };
-  const merged = shown.ok && behindOf(versionIn(shown.stdout), running) === false;
-  // The blocker is read for a merged repo too: `yad update --open-pr` checks every repo it reaches, merged or not.
-  return { ...r, table: tbl, merged, blocker: updatePrBlocker(t.root, { defaultBranch: t.defaultBranch, version: running, productRoot, network: false, table: tbl }) };
+function committedVersion(root, file) {
+  const shown = productGit(root)('show', `HEAD:${file}`);
+  if (shown.ok) return versionIn(shown.stdout);
+  try { return versionIn(fs.readFileSync(path.join(root, file), 'utf8')); } catch { return null; }
 }
 
-// Every repo `yad update --open-pr` reaches (`updateTargets`, the list it checks), read the same way. When
-// any is behind, every one is checked, because the run refuses if any one cannot take a PR/MR.
 export function installState(root, running = VERSION) {
-  const targets = updateTargets(root);
-  const first = targets.map((t) => repoInstall(t, { running, productRoot: root, all: false }));
-  const any = first.some((r) => r.behind);
-  const rows = any ? targets.map((t, i) => repoInstall(t, { running, productRoot: root, all: true, first: first[i] })) : first;
-  const product = rows.find((r) => r.label === 'product');
-  return { project: product?.version ?? null, yadflow: running, behind: any ? true : product?.behind ?? null, repos: rows.filter((r) => r.behind), all: rows };
+  const rows = updateTargets(root).map((t) => {
+    const version = committedVersion(t.root, t.file);
+    return { repo: t.product ? 'product' : clean(t.name), version: version ? clean(version) : null, behind: !t.product && !version ? null : behindOf(version, running) };
+  });
+  const product = rows.find((r) => r.repo === 'product');
+  return { project: product?.version ?? null, yadflow: running, behind: rows.some((r) => r.behind) ? true : product?.behind ?? null, repos: rows.filter((r) => r.behind) };
 }
 
-function upkeepFor(install, { platform, cwd }) {
+function upkeepFor(install, { platform }) {
   if (!install.behind) return null;
-  const rows = install.repos;
-  const where = (r) => (r.label === 'product' ? 'the Product' : r.label);
-  // 1. Merged on origin, not pulled here: pull, where git can fast-forward; else it is the person's.
-  const merged = rows.filter((r) => r.merged);
-  const ff = (r) => r.table?.here === r.table?.base && r.table?.ahead === 0;
-  const blockedMerged = merged.filter((r) => !ff(r));
-  // 2. Not merged: a repo that cannot take a PR/MR now, one already on review, and one that needs the update.
-  const open = rows.filter((r) => !r.merged);
-  // No platform, or a Product with nowhere to push (no origin, no commit, no repo): no PR/MR can open, so
-  // the update is the person's to publish their way.
-  const product = install.all.find((r) => r.label === 'product');
-  const local = !platform || ['no-origin', 'unborn', 'not-a-repo'].includes(product?.blocker?.kind);
-  // `yad update --open-pr` refuses when ANY repo it reaches cannot take a PR/MR, behind or not.
-  // A merged repo that is not where git can fast-forward is said once, as a merged one (below).
-  const stuck = install.all.filter((r) => r.blocker && r.blocker.kind !== 'open' && !(local && r === product) && !(r.merged && !ff(r)));
-  const onReview = open.filter((r) => r.blocker?.kind === 'open');
-  // The repos still wanting the update (behind, not merged, not on review): what a run would write.
-  const needs = open.filter((r) => r.blocker?.kind !== 'open');
-  const agent = [];
-  const person = [];
-  for (const r of merged.filter(ff)) {
-    agent.push({ run: `git -C ${shellPath(path.relative(cwd, r.root) || '.')} pull --ff-only`, class: 'local-write', ask: 'never', why: `the update to v${install.yadflow} is on ${where(r)}'s default branch on origin: bring this clone up to date. If git says the tree has local changes, stop and ask the person` });
+  const which = install.repos.map((r) => (r.repo === 'product' ? 'the Product' : r.repo)).join(', ');
+  if (!platform) {
+    return { agent: [], person: [{ act: 'choose', why: 'there is no platform to open an update PR/MR on, so how it is published is the person\'s call', steps: ['Run `yad update`, then commit and share the changes the way this team does.'], commands: ['yad update'], verify: 'yad guide --json' }] };
   }
-  if (blockedMerged.length || (stuck.length && needs.length)) {
-    person.push({ act: 'choose', why: 'a repo is not where the update can reach it, and moving it is the person\'s call (it may hold their work)',
-      steps: [...blockedMerged.map((r) => `${where(r)}: the update merged on origin, but this clone is on ${r.table?.here ? `'${r.table.here}'` : 'a detached HEAD'}${r.table?.ahead ? ` with ${r.table.ahead} local commit(s)` : ''} — switch it to '${r.table?.base}' and pull`),
-        ...(needs.length ? stuck.map((r) => `${where(r)}: ${r.blocker.message}`) : [])],
-      commands: [], verify: 'yad guide --json' });
-  }
-  if (onReview.length) {
-    person.push({ act: 'approve-merge', why: 'the update is on review: it lands through its PR/MR', steps: [`Merge the open \`chore(yad-update)\` PR/MR of ${onReview.map(where).join(', ')} once its checks pass, then tell the agent.`], commands: [], verify: 'yad guide --json' });
-    agent.push({ run: 'git fetch origin', class: 'read', ask: 'never', why: 'once the person says it merged: see it on origin, so the guide moves on to the pull' });
-  }
-  if (local && needs.length) {
-    person.push({ act: 'choose', why: 'there is no platform or origin to open an update PR/MR on, so how it is published is the person\'s call', steps: ['Run `yad update`, then commit and share the changes the way this team does.'], commands: ['yad update'], verify: 'yad guide --json' });
-  } else if (needs.length && !stuck.length && !blockedMerged.length) {
-    // `yad update --open-pr` is all or nothing, and leaves the repos on review alone.
-    agent.push(agentRun('yad update --open-pr', `the files yadflow manages in ${needs.map(where).join(', ')} were written by an older yadflow, and this is v${install.yadflow}: bring them up to date on a branch in each repo and open a PR/MR for each. Do this before the step below`));
-    person.push({ act: 'approve-merge', why: 'the update lands through review, like any change', steps: ['Merge each `chore(yad-update)` PR/MR once its checks pass, then tell the agent.'], commands: [], verify: 'yad guide --json' });
-  }
-  return agent.length || person.length ? { agent, person } : null;
+  return {
+    agent: [agentRun('yad update --open-pr --json', `the files yadflow manages in ${which} were written by an older yadflow, and this is v${install.yadflow}: bring them up to date on a branch in each repo, with a PR/MR for each. Do this before the step below. If it refuses, or holds a repo back, show the person each \`commits[]\` row's \`reason\` and \`hint\`, wait for them, then run it again`)],
+    person: [{ act: 'approve-merge', why: 'the update lands through review, like any change', steps: ['Merge each `chore(yad-update)` PR/MR it opens once its checks pass.', 'If it says a repo was refused or held back, do what its hint says, then tell the agent.'], commands: [], verify: 'yad update --open-pr --json' }],
+  };
 }
 
 // The Product's open epics with their next step, as `yad status` lists them, for "which one?".
@@ -456,13 +407,10 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   const m = buildStatus(root, { cwd, fetch: false, runner });
   const rel = path.relative(cwd, root) || '.';
   const install = installState(root, VERSION);
-  // The facts the agent needs about each repo the update has not reached, without the paths and git tables.
-  const installShown = { project: install.project, yadflow: install.yadflow, behind: install.behind,
-    repos: install.repos.map((r) => ({ repo: r.label, version: r.version, merged: !!r.merged, blocked: r.blocker?.kind ?? null })) };
-  const situation = { stage: 'ready', product: rel, platform, ledger: platform && verified ? 'verified' : 'local', solo, here: m.here ?? null, install: installShown };
+  const situation = { stage: 'ready', product: rel, platform, ledger: platform && verified ? 'verified' : 'local', solo, here: m.here ?? null, install };
   if (!m.setUp) return { ...base, situation: { ...situation, stage: 'no-product' }, ...noProduct() };
   // Upkeep rides every answer about this Product until it is done.
-  base.upkeep = upkeepFor(install, { platform, cwd });
+  base.upkeep = upkeepFor(install, { platform });
 
   const ctx = { verified, platform, solo };
   const chosen = epic ?? m.here?.epic ?? null;

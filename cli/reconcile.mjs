@@ -17,7 +17,7 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS } from './update-commit.mjs';
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
@@ -269,9 +269,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (openPr) {
     const targets = updateTargets(root);
     reached = new Set(targets.map((t) => t.root));
-    const checks = targets.map((t) => [t.root, updatePrBlocker(t.root, { defaultBranch: t.defaultBranch ?? defByRoot.get(t.root), productRoot: root })]);
-    const stop = checks.filter(([, b]) => b && b.kind !== 'open');
-    const row = (r, b) => ({ label: b.label, product: r === root, branch: b.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: b.kind !== 'open', reason: b.kind });
+    const checks = targets.map((t) => [t.root, updatePrBlocker(t.root, { defaultBranch: t.defaultBranch ?? defByRoot.get(t.root), productRoot: root, file: t.file })]);
+    const stop = checks.filter(([, b]) => b && !HELD_KINDS.includes(b.kind));
+    // Every row says why, in `reason` (a word) and `hint` (what to do): the agent relays it to the person.
+    const row = (r, b) => ({ label: b.label, product: r === root, branch: b.branch ?? null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: !HELD_KINDS.includes(b.kind), reason: b.kind, hint: b.message });
     if (stop.length) {
       log('');
       for (const [, b] of stop) fail(`${b.label}: ${b.message}`);
@@ -283,7 +284,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     held = new Set(checks.filter(([, b]) => b).map(([r]) => r));
     for (const [, b] of checks) if (b) info(`${b.label}: ${b.message}`);
     if (held.size === checks.length) {
-      info('every repo\'s update is already on review — nothing written');
+      info('every repo\'s update is already merged or on review — nothing written');
       const toolbox = toolboxSection(root, toolboxAt);
       return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: checks.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
     }
@@ -314,6 +315,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A file that is right on disk but not committed as it stands, which --push must still commit: the
   // product-link record (E120) — the gates read it from the default branch, not from anyone's disk.
   if (push || openPr) for (const a of actions) if (a.pendingCommit && live(a) && !appliedActions.includes(a)) appliedActions.push(a);
+  // --open-pr also stages every managed file already right on disk: `stageAllowlist` keeps only what differs
+  // from the commit, so an update a failed commit or push left in the working tree is carried by the next run.
+  if (openPr) for (const a of actions) if (a.status === 'ok' && a.root && Array.isArray(a.paths) && live(a) && !appliedActions.includes(a)) appliedActions.push(a);
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   if (!held.has(root)) {
@@ -323,7 +327,21 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // Record what we wrote (and what was already correct) so the NEXT update can tell a stale managed
   // file from an edited one. Seeding the already-correct files is what migrates a pre-ledger install.
   // A file left as `modified` records nothing — it differs from the template by definition.
-  for (const ledgerRoot of recordManagedWrites(actions.filter(live))) {
+  const ledgerRoots = recordManagedWrites(actions.filter(live));
+  // A connected repo whose every managed file is the team's own (`modified`) records nothing above, so its
+  // ledger would name an older yadflow for good — and read as behind on every `yad guide`. Its version is
+  // brought up all the same: this release did look at it.
+  for (const repo of registry.repos) {
+    const repoRoot = path.resolve(root, repo.path);
+    const ledgerFile = path.join(repoRoot, MANAGED_LEDGER);
+    if (repoRoot === root || ledgerRoots.includes(repoRoot) || !reaches(repoRoot) || !exists(ledgerFile)) continue;
+    const ledger = readJSON(ledgerFile, null);
+    if (ledger && typeof ledger === 'object' && !Array.isArray(ledger) && ledger.version !== VERSION) {
+      writeJSON(ledgerFile, { ...ledger, version: VERSION });
+      ledgerRoots.push(repoRoot);
+    }
+  }
+  for (const ledgerRoot of ledgerRoots) {
     appliedActions.push({
       scope: repoLabel(root, ledgerRoot), item: MANAGED_LEDGER, status: 'stamp',
       root: ledgerRoot, paths: [MANAGED_LEDGER],

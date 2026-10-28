@@ -564,64 +564,110 @@ test('a blocked step re-opened behind finished work: the person resolves it, the
   assert.ok(v.person.some((x) => x.act === 'unblock' && x.steps.some((st) => /yad unblock` refuses/.test(st))));
 });
 
-test('an install behind yadflow: the update first, once — then on review, then merged and pulled', async () => {
+test('an install behind yadflow: the guide says so, from what is committed, and hands the rest to the run', async () => {
   const { installState } = await import('./guide.mjs');
-  const { VERSION } = await import('./manifest.mjs');
   const T = await product();
-  const R = tmp();
   try {
     const stamp = path.join(T, '.sdlc/cli-version.json');
-    put(stamp, { version: '4.0.0' });
+    const commitStamp = (v) => { put(stamp, { version: v }); git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', `chore: stamp ${v}`]); };
+    commitStamp('4.0.0');
     assert.equal(installState(T, '4.7.0').behind, true);
     assert.equal(installState(T, '4.0.0').behind, false);
     assert.equal(installState(T, '3.9.9').behind, false, 'an older yadflow here is not upkeep');
     // Pre-releases compare label by label: an older build is never told to update.
-    put(stamp, { version: '4.8.0-next.3' });
+    commitStamp('4.8.0-next.3');
     assert.equal(installState(T, '4.8.0-next.1').behind, false);
     assert.equal(installState(T, '4.8.0-next.4').behind, true);
-    put(stamp, { version: '4.8.0-next.9' });
+    commitStamp('4.8.0-next.9');
     assert.equal(installState(T, '4.8.0-next.10').behind, true);
-    put(stamp, { version: '4.8.0-next.10' });
-    assert.equal(installState(T, '4.8.0-next.9').behind, false);
-    // No origin: how to publish is the person's call.
-    put(stamp, { version: '4.0.0' });
-    git(T, ['add', '-A']);
-    git(T, ['commit', '-q', '-m', 'chore: stamp']);
-    let g = buildGuide(T, { epic: 'EP-pay' });
-    assert.equal(g.situation.install.behind, true);
-    assert.deepEqual(g.upkeep.agent, []);
-    assert.deepEqual(g.upkeep.person[0].commands, ['yad update']);
-    // With origin and a platform: the agent runs the update as a PR/MR, without asking.
-    git(R, ['init', '-q', '--bare', '-b', 'main']);
-    git(T, ['remote', 'add', 'origin', R]);
-    git(T, ['push', '-q', '-u', 'origin', 'main']);
-    g = buildGuide(T, { epic: 'EP-pay' });
-    assert.deepEqual(g.upkeep.agent.map((a) => [a.run, a.class, a.ask]), [['yad update --open-pr', 'open-pr', 'never']]);
+    // Read as committed: an update left uncommitted in the working tree still counts as behind.
+    commitStamp('4.0.0');
+    put(stamp, { version: '4.7.0' });
+    assert.equal(installState(T, '4.7.0').behind, true);
+    // The guide hands the update to the run, and the run's answer to the person.
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    assert.deepEqual(g.situation.install.repos, [{ repo: 'product', version: '4.0.0', behind: true }]);
+    assert.deepEqual(g.upkeep.agent.map((a) => [a.run, a.class, a.ask]), [['yad update --open-pr --json', 'open-pr', 'never']]);
+    assert.match(g.upkeep.agent[0].why, /show the person each `commits\[\]` row's `reason` and `hint`/);
     assert.ok(RULES.some((r) => r.id === 'update'));
-    // On review (the update branch exists): nothing to run again; the person merges, the agent then fetches.
-    git(T, ['branch', `chore/yad-update-v${VERSION}`]);
-    g = buildGuide(T, { epic: 'EP-pay' });
-    assert.deepEqual(g.upkeep.agent.map((a) => [a.run, a.class]), [['git fetch origin', 'read']]);
-    assert.equal(g.upkeep.person[0].act, 'approve-merge');
-    assert.deepEqual(g.situation.install.repos, [{ repo: 'product', version: '4.0.0', merged: false, blocked: 'open' }]);
-    // Merged on origin, not pulled here: the agent pulls.
-    git(T, ['checkout', '-q', '-b', 'tmp']);
-    put(stamp, { version: VERSION });
-    git(T, ['commit', '-q', '-am', 'chore(yad-update): sync']);
-    git(T, ['push', '-q', 'origin', 'tmp:main']);
-    git(T, ['checkout', '-q', 'main']);
-    git(T, ['fetch', '-q', 'origin']);
-    g = buildGuide(T, { epic: 'EP-pay' });
-    assert.deepEqual(g.upkeep.agent.map((a) => a.run), ['git -C . pull --ff-only']);
-    // On another branch, the pull would fail: switching is the person's call, never a loop.
-    git(T, ['checkout', '-q', '-b', 'review/x']);
-    g = buildGuide(T, { epic: 'EP-pay' });
-    assert.deepEqual(g.upkeep.agent, []);
-    assert.match(g.upkeep.person[0].steps[0], /the update merged on origin, but this clone is on 'review\/x' — switch it to 'main' and pull/);
-    git(T, ['checkout', '-q', 'main']);
-    git(T, ['pull', '-q', '--ff-only']);
+    // No platform: the person publishes it their way.
+    const settings = path.join(T, '.sdlc/product.json');
+    put(settings, { ...JSON.parse(fs.readFileSync(settings, 'utf8')), platform: null });
+    const local = buildGuide(T, { epic: 'EP-pay' });
+    assert.deepEqual(local.upkeep.agent, []);
+    assert.deepEqual(local.upkeep.person[0].commands, ['yad update']);
+    // Current: no upkeep.
+    const { VERSION } = await import('./manifest.mjs');
+    commitStamp(VERSION);
     assert.equal(buildGuide(T, { epic: 'EP-pay' }).upkeep, null);
-  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// Two clones of one Product with an origin, for the run's own reading of what origin holds.
+async function twoClones() {
+  const P = tmp();
+  const R = path.join(P, 'origin.git');
+  const A = path.join(P, 'a');
+  const B = path.join(P, 'b');
+  git(P, ['init', '-q', '--bare', '-b', 'main', R]);
+  fs.mkdirSync(A);
+  git(A, ['init', '-q', '-b', 'main']);
+  for (const d of [A]) { git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); }
+  put(path.join(A, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+  put(path.join(A, '.sdlc/cli-version.json'), { version: '4.0.0' });
+  git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: start']);
+  git(A, ['remote', 'add', 'origin', R]); git(A, ['push', '-q', '-u', 'origin', 'main']);
+  git(P, ['clone', '-q', '-b', 'main', R, B]);
+  for (const d of [B]) { git(d, ['config', 'user.name', 'Bo Lee']); git(d, ['config', 'user.email', 'bo@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); }
+  return { P, R, A, B };
+}
+
+test('the run reads origin first: an update opened from another clone is held, and one already merged is "pull it", never a second PR/MR', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { VERSION } = await import('./manifest.mjs');
+  const { P, A, B } = await twoClones();
+  try {
+    // Clone A opens the update.
+    const calls = [];
+    const creator = (platform, opts) => { calls.push(opts.head); return { ok: true, url: 'https://github.com/acme/product/pull/1' }; };
+    await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.equal(calls.length, 1);
+    // Clone B, never fetched since: held as on review, nothing written, no PR.
+    const rb = await reconcile(B, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.deepEqual(rb.commits.map((c) => [c.reason, c.error]), [['open', false]]);
+    assert.match(rb.commits[0].hint, /a person merges its PR\/MR, then run this again/);
+    assert.equal(git(B, ['status', '--porcelain']), '');
+    assert.equal(calls.length, 1, 'no second PR/MR');
+    // The PR merges on origin, and its branch is deleted there.
+    git(A, ['push', '-q', 'origin', `chore/yad-update-v${VERSION}:main`]);
+    git(A, ['push', '-q', 'origin', '--delete', `chore/yad-update-v${VERSION}`]);
+    git(B, ['branch', '-q', '-D', '-r', `origin/chore/yad-update-v${VERSION}`]);
+    // Clone B, stale again: the run fetches, sees the update merged, and says to pull.
+    const rm = await reconcile(B, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.deepEqual(rm.commits.map((c) => c.reason), ['merged']);
+    assert.match(rm.commits[0].hint, /pull --ff-only origin main/);
+    assert.equal(git(B, ['status', '--porcelain']), '');
+    assert.equal(calls.length, 1, 'never a second PR/MR for a merged update');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('an update a failed push left in the working tree is carried by the next run', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/2' });
+    git(A, ['remote', 'set-url', '--push', 'origin', path.join(P, 'nowhere.git')]);
+    const failed = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.equal(failed.commits[0].reason, 'push-failed');
+    assert.notEqual(git(A, ['status', '--porcelain']), '', 'the update is still here, uncommitted');
+    process.exitCode = 0;
+    git(A, ['remote', 'set-url', '--push', 'origin', R]);
+    const again = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.deepEqual([again.commits[0].pushed, again.commits[0].opened], [true, true]);
+    assert.equal(git(A, ['status', '--porcelain']), '', 'nothing left behind');
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+    assert.ok(files.length > 1, `more than the stamp: ${files.join(', ')}`);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
 test('--open-pr is all or nothing: one repo that cannot take it, and nothing is written anywhere', async () => {
@@ -656,15 +702,6 @@ test('--open-pr is all or nothing: one repo that cannot take it, and nothing is 
     assert.equal(git(A, ['status', '--porcelain']), '', 'nothing written in the repo on a feature branch');
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
-    // A code repo the update has not reached keeps the upkeep alive, even with the Product current.
-    const { VERSION } = await import('./manifest.mjs');
-    put(path.join(T, '.sdlc/cli-version.json'), { version: VERSION });
-    put(path.join(A, '.sdlc/managed.json'), { version: '4.0.0', files: {} });
-    const g = buildGuide(T);
-    assert.equal(g.situation.install.behind, true);
-    assert.deepEqual(g.situation.install.repos.map((x) => [x.repo, x.blocked]), [['app', 'branch']]);
-    assert.ok(!g.upkeep.agent.some((a) => (a.run ?? '').includes('--open-pr')), 'never a run that would be refused');
-    assert.match(g.upkeep.person[0].steps[0], /^app: on 'feat\/x', not the default branch 'main'/);
   } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
@@ -702,39 +739,6 @@ test('--open-pr reaches every cloned repo: one on a feature branch stops it even
     assert.equal(git(A, ['status', '--porcelain']), '');
     assert.equal(git(T, ['status', '--porcelain']), '');
     process.exitCode = 0;
-    // The guide agrees: with the Product behind and the app on its branch, no run it would refuse.
-    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
-    const g = buildGuide(T);
-    assert.ok(!g.upkeep.agent.some((x) => (x.run ?? '').includes('--open-pr')));
-    assert.ok(g.upkeep.person[0].steps.some((x) => /^app: on 'feat\/x'/.test(x)));
-    // And the other way: the Product current but on an epic branch, the app behind.
-    put(path.join(T, '.sdlc/cli-version.json'), { version: VERSION });
-    git(A, ['checkout', '-q', 'main']);
-    put(path.join(A, '.sdlc/managed.json'), { version: '4.0.0', files: {} });
-    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: stamp']); git(T, ['push', '-q']);
-    git(T, ['checkout', '-q', '-b', 'epic/pay']);
-    const g2 = buildGuide(T);
-    assert.deepEqual(g2.situation.install.repos.map((x) => x.repo), ['app']);
-    assert.ok(!g2.upkeep.agent.some((x) => (x.run ?? '').includes('--open-pr')));
-    assert.ok(g2.upkeep.person[0].steps.some((x) => /^the Product: on 'epic\/pay'/.test(x)));
-    // A repo whose checks were never wired has no managed ledger: not upkeep (`yad update` never wires one).
-    git(T, ['checkout', '-q', 'main']);
-    fs.rmSync(path.join(A, '.sdlc'), { recursive: true, force: true });
-    assert.equal(buildGuide(T).upkeep, null);
-    // The Product behind, the app's update merged on origin but the clone on a feature branch: the run would
-    // refuse, so the guide never advises it; the person moves the app first.
-    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
-    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: old stamp']); git(T, ['push', '-q']);
-    put(path.join(A, '.sdlc/managed.json'), { version: '4.0.0', files: {} });
-    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: old ledger']); git(A, ['push', '-q']);
-    git(A, ['checkout', '-q', '-b', 'feat/y']);
-    git(A, ['checkout', '-q', '-b', 'tmp']);
-    put(path.join(A, '.sdlc/managed.json'), { version: VERSION, files: {} });
-    git(A, ['commit', '-q', '-am', 'chore(yad-update): sync']); git(A, ['push', '-q', 'origin', 'tmp:main']);
-    git(A, ['checkout', '-q', 'feat/y']); git(A, ['fetch', '-q', 'origin']);
-    const g3 = buildGuide(T);
-    assert.ok(!g3.upkeep.agent.some((x) => (x.run ?? '').includes('--open-pr')), JSON.stringify(g3.upkeep));
-    assert.ok(g3.upkeep.person[0].steps.some((x) => /^app: the update merged on origin, but this clone is on 'feat\/y'/.test(x)), JSON.stringify(g3.upkeep));
   } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
