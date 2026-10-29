@@ -209,6 +209,8 @@ const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache',
 const RUNNER_VALUE_OPTIONS = new Set([...NPX_VALUE_OPTIONS, '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w',
   '--filter-prod', '--loglevel', '--reporter', '--workspace-concurrency']);
 const PNPM_VALUE_OPTIONS = new Set([...RUNNER_VALUE_OPTIONS].filter((o) => o !== '-c' && o !== '-w'));
+// bun's own options that take a value (`bun --env-file .env run …`).
+const BUN_VALUE_OPTIONS = new Set([...RUNNER_VALUE_OPTIONS, '--env-file', '--preload', '-r', '--config', '-e', '--eval', '--tsconfig-override']);
 const isYadflow = (x) => /^yadflow(@.*)?$/.test(x);
 const dropDashDash = (args) => (args[0] === '--' ? args.slice(1) : args);
 // The first plain word of `w` at or after `from`, past options and the value of an option that takes one.
@@ -224,7 +226,7 @@ const plainAfter = (w, from, valued) => {
 function runnerOf(w) {
   if (!w.length) return null;
   const prog = programOf(w[0]);
-  const valued = prog === 'pnpm' ? PNPM_VALUE_OPTIONS : RUNNER_VALUE_OPTIONS;
+  const valued = prog === 'pnpm' ? PNPM_VALUE_OPTIONS : prog === 'bun' ? BUN_VALUE_OPTIONS : RUNNER_VALUE_OPTIONS;
   if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') return { prog, start: 1, valued };
   if (prog === 'bun') {
     // bun's own options may come first: `bun --filter web run …`, `bun --bun x …`.
