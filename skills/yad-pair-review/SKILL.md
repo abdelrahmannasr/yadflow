@@ -92,8 +92,10 @@ After the last stop:
   carrying the engagement marker so the gate records `engagement: verified` — Build:
   `gh pr review <n> --approve --body "<note>\n\n<!-- yad:engagement verified -->"` (GitLab: `glab mr approve <n>`
   then a note with the marker); in Claude Code they type it with `!` in front. Shape: the human approves via
-  [`yad-review-gate`](../yad-review-gate/SKILL.md) the normal way. Then confirm by reading (`gh pr view <n>`, and
-  `yad gate status <epic>` after `git pull --ff-only` on the default branch).
+  [`yad-review-gate`](../yad-review-gate/SKILL.md) the normal way. Then confirm by reading the PR/MR, which
+  shows the approval at once: `gh pr view <n>` or `glab mr view <n>` (for a Shape review, `yad gate sync
+  <epic>` too, which only reads in verified mode). The ledger records an approval only when the review
+  PR/MR merges, so `yad gate status <epic>` shows it only after that merge and a `git pull --ff-only`.
 
 "**Both satisfied**" = the human approved **and** your verdict holds no unresolved blocking concern. If
 either is not satisfied, the loop continues (more stops, or the human requests changes and the owner

@@ -204,10 +204,11 @@ const programOf = (word) => word.split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i, '
 // installs, so a local install runs it as `npx yad`.
 const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C']);
 const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--prefix']);
-// The options that take a value and may come before the subcommand or the program (`pnpm -C x yad …`). pnpm's
-// `-c` is `--shell-mode`, which takes none.
-const RUNNER_VALUE_OPTIONS = new Set([...NPX_VALUE_OPTIONS, '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '--filter-prod']);
-const PNPM_VALUE_OPTIONS = new Set([...RUNNER_VALUE_OPTIONS].filter((o) => o !== '-c'));
+// The options that take a value and may come before the subcommand or the program (`pnpm -C x yad …`,
+// `npm -w web exec …`). pnpm's `-c` is `--shell-mode` and its `-w` is `--workspace-root`: neither takes one.
+const RUNNER_VALUE_OPTIONS = new Set([...NPX_VALUE_OPTIONS, '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w',
+  '--filter-prod', '--loglevel', '--reporter', '--workspace-concurrency']);
+const PNPM_VALUE_OPTIONS = new Set([...RUNNER_VALUE_OPTIONS].filter((o) => o !== '-c' && o !== '-w'));
 const isYadflow = (x) => /^yadflow(@.*)?$/.test(x);
 const dropDashDash = (args) => (args[0] === '--' ? args.slice(1) : args);
 // The first plain word of `w` at or after `from`, past options and the value of an option that takes one.

@@ -140,9 +140,11 @@ person's to run, never an AI agent's: it pushes to the default branch (E158). (l
      default branch (E158);
    - the rest of this step (the schedule, the token, the CI/CD variables) is project settings, so it is
      the person's (E158): an AI agent gives them the steps, never sets one itself, then confirms by
-     reading. `glab api projects/:id/pipeline_schedules` shows the schedule. yad cannot read a masked
-     variable, so for the token and the variables ask the person, and take the first green scheduled
-     `yad-gate-sync` run as the proof. `yad doctor` does not check these;
+     reading. `glab api projects/:id/pipeline_schedules` shows the schedule. Never read the token or
+     a variable through the API: GitLab's answer holds the secret value. Ask the person instead. A green
+     scheduled `yad-gate-sync` run proves the schedule and that the token can read the API; its right to
+     push shows only once a run advances a merged review MR, so until then check the token's scopes and
+     role with the person. `yad doctor` does not check these;
    - create the 15-minute pipeline **schedule** (variable `SDLC_GATE_SYNC=true`) and the masked
      `SDLC_GATE_TOKEN` project-access-token variable (`read_api` + `write_repository`). GitLab fires no
      pipeline on an approval alone, and a squash merge can drop the branch name, so the schedule is the
@@ -202,15 +204,16 @@ person's to run, never an AI agent's: it pushes to the default branch (E158). (l
   ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`
   project access token because `CI_JOB_TOKEN` can neither read the approvals API nor push — say so
   when wiring, and scope it to `read_api` + `write_repository` only. Making the token and setting it
-  are the person's (E158): give them these steps. yad cannot read a masked variable, so ask the person,
-  and take the first green scheduled `yad-gate-sync` run as the proof.
+  are the person's (E158): give them these steps. Never read the variable through the API (GitLab's
+  answer holds the secret value); ask the person. A green scheduled `yad-gate-sync` run proves the token
+  can read the API; its right to push shows only once a run advances a merged review MR.
 - **Protect the Product default branch.** Require that `epics/**` artifacts change only through a review
   PR/MR (branch protection). This keeps revoke-on-change sound: it removes the only window where a
   delayed reconcile could advance on an out-of-band post-merge artifact change (see `references/bridge.md`,
   "Known limitation"). Safe to require: a new epic's `.sdlc/` seed rides its first review PR/MR, so
   nobody needs a direct push to the default branch to start an epic (#162). Branch protection is a
   platform setting, so it is the person's (E158): give them the steps and confirm by reading
-  (`yad doctor`'s branch-protection check).
+  (`yad doctor`'s `protection` lines).
 - **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs local with no error.
 
 ## Reference

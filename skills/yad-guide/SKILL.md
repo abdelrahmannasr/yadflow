@@ -83,9 +83,11 @@ A command not listed: read `yad <command> --help`, and treat it as a write until
 
 <!-- end: classes -->
 
-A review PR/MR for a Shape step opens without asking: push the `review/<epic>/<artifact>` branch (your own
-branch, no asking), then run `yad gate open <epic> <artifact>` (a skill that says `yad open-pr` from a
-`review/EP-*` branch means the same thing, and `yad gate open` is the form that needs no asking). `yad open-pr` on a task branch is a task PR/MR: it follows the dial above.
+A review PR/MR for a Shape step opens without asking. Push the `review/<epic>/<name>` branch, where
+`<name>` is the artifact without its extension (`epic.md` → `review/EP-x/epic`); it is your own branch, so
+no asking. Then run `yad gate open <epic> <artifact>`. A skill that says `yad open-pr` from a
+`review/EP-*` branch means the same thing, and `yad gate open` is the form that needs no asking.
+`yad open-pr` on a task branch is a task PR/MR: it follows the dial above.
 
 ## Never
 
