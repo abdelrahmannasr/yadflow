@@ -1,11 +1,13 @@
 // The agent guard (E158): a hook that runs before an AI agent's shell command, in Claude Code (`PreToolUse`,
-// matcher `Bash`) and Cursor (`beforeShellExecution`), and refuses three kinds of command:
+// matcher `Bash`) and Cursor (`beforeShellExecution`), and refuses four kinds of command:
 //   - a yad command only the person may run (`classify` in cli/agent-rules.mjs says `human-only`: an
 //     approval, a gate comment or advance or reopen, a commit past the ledger guard);
 //   - approving or merging a PR/MR on the platform (`gh pr review --approve`, `gh pr merge`, `glab mr approve`,
 //     `glab mr merge` or `accept`): the person's, even when the agent's login could;
 //   - a force push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+`
-//     refspec).
+//     refspec);
+//   - skipping the git hooks, the ledger guard's door (`git commit --no-verify` or `-n`, `YAD_HOOK_DISABLE=…`,
+//     `git -c core.hooksPath=…`): the person's, through `yad commit --manual`.
 // The refusal says what to do instead: ask the person to run it themselves (`! <command>` in Claude Code).
 //
 // A SPEED BUMP, NOT PROOF. It reads the command line the agent sends, so a command hidden in a script, an
@@ -175,10 +177,17 @@ function backtickEnd(line, from) {
 
 // Words that only set up how a command runs, skipped to find the command itself: `env`, `VAR=value`, `sudo`,
 // `command`, `exec`, `time`, `nohup`, `nice`, `timeout` with its duration, the shell's own words (`then`, `do`,
-// `else`, `{`, `!`), and a `(` stuck to the front of the first word. The options of a prefix are skipped with
+// `else`, `{`, `!`), `xargs`, `stdbuf`, `watch`, and a `(` stuck to the front of the first word. The options of a prefix are skipped with
 // it, and the value of one that takes a value (`sudo -u <user>`, `nice -n <n>`, `env -u <name>`).
-const PREFIXES = new Set(['env', 'sudo', 'command', 'exec', 'time', 'nohup', 'nice', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', '{', '!']);
-const PREFIX_VALUE_OPTIONS = new Set(['-u', '-g', '-n', '-C', '-h', '-U', '-r', '-t', '-s', '-k', '--user', '--group', '--signal', '--kill-after', '--unset', '--chdir', '--adjustment']);
+const PREFIXES = new Set(['env', 'sudo', 'command', 'exec', 'time', 'nohup', 'nice', 'xargs', 'stdbuf', 'watch', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', '{', '!']);
+const PREFIX_VALUE_OPTIONS = new Set(['-u', '-g', '-n', '-C', '-h', '-U', '-r', '-t', '-s', '-k', '-o', '--user', '--group', '--signal',
+  '--kill-after', '--unset', '--chdir', '--adjustment', '--output']);
+// A prefix's own options that take a value, where a letter means something else elsewhere (`sudo -E` takes none).
+const PREFIX_OWN_VALUE_OPTIONS = {
+  xargs: new Set(['-I', '-L', '-P', '-d', '-E', '-a', '--replace', '--max-lines', '--max-args', '--max-procs', '--delimiter', '--arg-file', '--eof']),
+  stdbuf: new Set(['-i', '-e', '--input', '--error']),
+  watch: new Set(['--interval']),
+};
 const stripPrefix = (words) => {
   const w = words.slice();
   if (w.length && w[0].startsWith('(')) w[0] = w[0].replace(/^\(+/, '');
@@ -188,8 +197,9 @@ const stripPrefix = (words) => {
     if (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) { i++; continue; }
     if (i < w.length && (PREFIXES.has(w[i]) || w[i] === 'timeout')) {
       const isTimeout = w[i] === 'timeout';
+      const own = PREFIX_OWN_VALUE_OPTIONS[w[i]];
       i++;
-      while (i < w.length && w[i].startsWith('-')) i += PREFIX_VALUE_OPTIONS.has(w[i]) ? 2 : 1;
+      while (i < w.length && w[i].startsWith('-')) i += PREFIX_VALUE_OPTIONS.has(w[i]) || own?.has(w[i]) ? 2 : 1;
       if (isTimeout) i++; // the duration
       continue;
     }
@@ -202,12 +212,13 @@ const programOf = (word) => word.split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i, '
 // yadflow yad …`, `npm [opts] exec|x yadflow|yad -- …`, `pnpm [opts] exec|dlx …`, `pnpm yad …`, `yarn [opts]
 // [workspace <name>] [exec|dlx|run] yad …`, `bun x|run yad …`. `yad` is the program the yadflow package
 // installs, so a local install runs it as `npx yad`.
-const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C']);
+const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C',
+  '--env-file', '--env-file-if-exists', '--watch-path']);
 const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--prefix']);
 // The options that take a value and may come before the subcommand or the program (`pnpm -C x yad …`,
 // `npm -w web exec …`). pnpm's `-c` is `--shell-mode` and its `-w` is `--workspace-root`: neither takes one.
 const RUNNER_VALUE_OPTIONS = new Set([...NPX_VALUE_OPTIONS, '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w',
-  '--filter-prod', '--loglevel', '--reporter', '--workspace-concurrency']);
+  '--filter-prod', '--loglevel', '--reporter', '--workspace-concurrency', '--include', '--exclude', '--from', '-j', '--jobs']);
 const PNPM_VALUE_OPTIONS = new Set([...RUNNER_VALUE_OPTIONS].filter((o) => o !== '-c' && o !== '-w'));
 // bun's own options that take a value (`bun --env-file .env run …`).
 const BUN_VALUE_OPTIONS = new Set([...RUNNER_VALUE_OPTIONS, '--env-file', '--preload', '-r', '--config', '-e', '--eval', '--tsconfig-override']);
@@ -239,8 +250,10 @@ function runnerOf(w) {
   }
   if (prog === 'pnpm' || prog === 'yarn') {
     let k = plainAfter(w, 1, valued);
-    // `yarn workspace <name> <program> …` runs the program in that workspace.
+    // `yarn workspace <name> <program> …` runs the program in that workspace; `yarn workspaces foreach [opts]
+    // run|exec …` runs it in each one.
     if (prog === 'yarn' && w[k] === 'workspace') k = plainAfter(w, k + 2, valued);
+    else if (prog === 'yarn' && w[k] === 'workspaces' && w[k + 1] === 'foreach') k = plainAfter(w, k + 2, valued);
     const subs = prog === 'yarn' ? ['exec', 'dlx', 'run'] : ['exec', 'dlx'];
     return subs.includes(w[k]) ? { prog, start: k + 1, valued, sub: w[k] } : { prog, start: k, valued };
   }
@@ -331,19 +344,70 @@ function gitArgs(words) {
 }
 
 // Is this part a force push? `git push … --force | -f | --force-with-lease[=…] | --force-if-includes | a refspec
-// starting with `+`` | --mirror.
+// starting with `+`` | --mirror. The value of an option that takes one (`-o <text>`) is text, never a refspec.
+const PUSH_VALUE_OPTIONS = new Set(['-o', '--push-option', '--repo', '--receive-pack', '--exec']);
 function forcePush(words) {
   const g = gitArgs(words);
   if (!g || g[0] !== 'push' || g.includes('--help') || g.includes('-h')) return false;
-  // `--mirror` makes the remote match this clone: it overwrites and deletes refs there, as a force push does.
-  return g.slice(1).some((a) => a === '--force' || a === '--mirror' || a === '--force-if-includes' || /^--force-with-lease(=|$)/.test(a)
-    || (/^-[A-Za-z]+$/.test(a) && a.includes('f')) || /^\+/.test(a));
+  for (let i = 1; i < g.length; i++) {
+    const a = g[i];
+    if (PUSH_VALUE_OPTIONS.has(a)) { i++; continue; }
+    // `--mirror` makes the remote match this clone: it overwrites and deletes refs there, as a force push does.
+    if (a === '--force' || a === '--mirror' || a === '--force-if-includes' || /^--force-with-lease(=|$)/.test(a)
+      || (/^-[A-Za-z]+$/.test(a) && a.includes('f')) || /^\+/.test(a)) return true;
+  }
+  return false;
+}
+
+// Does this part skip the git hooks, the ledger guard's door? `git commit --no-verify` or `-n` (alone or in a
+// cluster such as `-nm`), `git -c core.hooksPath=… <any>`, or `YAD_HOOK_DISABLE=…` set for the command or
+// exported. That is what `yad commit --manual` does, with the reason recorded: the person's.
+const COMMIT_VALUE_OPTIONS = new Set(['-m', '--message', '-F', '--file', '-t', '--template', '-c', '--reedit-message', '-C',
+  '--reuse-message', '--author', '--date', '--fixup', '--squash', '--trailer', '--cleanup']);
+function hookSkip(words) {
+  const w = stripPrefix(words);
+  const lead = words.slice(0, words.length - w.length);
+  const disables = (x) => /^YAD_HOOK_DISABLE=./.test(x);
+  if (lead.some(disables)) return true;
+  if (w.length && ['export', 'declare', 'typeset'].includes(w[0]) && w.slice(1).some(disables)) return true;
+  if (!w.length || programOf(w[0]) !== 'git') return false;
+  for (let i = 1; i < w.length && w[i].startsWith('-'); i++) {
+    if (w[i] === '-c' && /^core\.hookspath=/i.test(w[i + 1] || '')) return true;
+    if (GIT_VALUE_OPTIONS.has(w[i])) i++;
+  }
+  const g = gitArgs(words);
+  if (!g || g[0] !== 'commit' || g.includes('--help') || g.includes('-h')) return false;
+  for (let i = 1; i < g.length; i++) {
+    const a = g[i];
+    if (a === '--') break;
+    if (COMMIT_VALUE_OPTIONS.has(a)) { i++; continue; }
+    if (a === '--no-verify') return true;
+    if (/^-[A-Za-z]+$/.test(a)) {
+      // A short cluster: the letters up to the first one that takes a value (`-mn` is `-m n`).
+      for (const c of a.slice(1)) {
+        if (c === 'n') return true;
+        if ('mFtcC'.includes(c)) break;
+      }
+    }
+  }
+  return false;
 }
 
 // Is this part an approval or a merge of a PR/MR on the platform? `gh pr review … --approve|-a`, `gh pr merge`,
-// `glab mr approve`, `glab mr merge` (or `accept`). The person's, even when the agent's login could do it. The options that
-// take a value (`-R <repo>`) are skipped with it, so `gh -R o/r pr merge 5` is read as `pr merge`.
-const PLATFORM_VALUE_OPTIONS = new Set(['-R', '--repo', '-b', '--body', '-F', '--body-file', '-t', '--subject', '-m', '--message', '--match-head-commit', '--author-email', '--sha']);
+// `glab mr approve`, `glab mr merge` (or `accept`), and the same through the API: `gh api …/pulls/<n>/merge`, an
+// approving review (`…/pulls/<n>/reviews` with `event=APPROVE`), `glab api …/merge_requests/<n>/merge|approve`,
+// and the GraphQL merge and approve mutations. The person's, even when the agent's login could do it. The options
+// that take a value (`-R <repo>`) are skipped with it, so `gh -R o/r pr merge 5` is read as `pr merge`.
+const PLATFORM_VALUE_OPTIONS = new Set(['-R', '--repo', '-b', '--body', '-F', '--body-file', '-t', '--subject', '-m', '--message', '--match-head-commit', '--author-email', '--sha',
+  '-f', '--field', '--raw-field', '-X', '--method', '-H', '--header', '--input', '-q', '--jq', '--template', '--hostname']);
+function apiApproval(prog, w, rest) {
+  if (rest[0] !== 'api') return false;
+  const path = rest[1] || '';
+  if (prog === 'glab') return /merge_requests\/\d+\/(merge|approve)(\?|$)/.test(path);
+  if (/\/pulls\/\d+\/merge(\?|$)/.test(path)) return true;
+  if (/\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^event=APPROVE$/i.test(x))) return true;
+  return path === 'graphql' && w.some((x) => /\b(mergePullRequest|enablePullRequestAutoMerge)\b/.test(x) || /\baddPullRequestReview\b[\s\S]*\bAPPROVE\b/.test(x));
+}
 function platformApproval(words) {
   const w = stripPrefix(words);
   if (!w.length || w.includes('--help') || w.includes('-h')) return false;
@@ -355,6 +419,7 @@ function platformApproval(words) {
     if (w[i].startsWith('-')) { options.push(w[i]); if (PLATFORM_VALUE_OPTIONS.has(w[i])) i++; continue; }
     rest.push(w[i]);
   }
+  if (apiApproval(prog, w, rest)) return true;
   if (prog === 'gh') {
     if (rest[0] !== 'pr') return false;
     if (rest[1] === 'merge') return true;
@@ -392,6 +457,9 @@ export function agentGuardDecision(line, depth = 0) {
     }
     if (platformApproval(part)) {
       return { allow: false, message: 'yad agent guard: approving or merging a PR/MR is the person\'s, never the agent\'s (the yadflow rules), even when your login could. Give the person the link and the exact steps, wait, then confirm by reading (`yad gate status` / `yad guide --json`).' };
+    }
+    if (hookSkip(part)) {
+      return { allow: false, message: 'yad agent guard: skipping the git hooks (`--no-verify`, `-n`, `YAD_HOOK_DISABLE`, `core.hooksPath`) is the person\'s, never the agent\'s (the yadflow rules): it is the door past the ledger guard. When a hook refuses a commit, follow its message; if the commit must go through, the person runs `yad commit --manual --reason "<why>"` themselves (`!` in front in Claude Code).' };
     }
     if (forcePush(part)) {
       return { allow: false, message: 'yad agent guard: a force push is never the agent\'s (the yadflow rules). Tell the person why the push was refused and what a force push would overwrite; if it is needed, they run it themselves.' };

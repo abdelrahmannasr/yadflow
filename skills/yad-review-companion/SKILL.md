@@ -68,15 +68,15 @@ Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `actio
    `<!-- yad:engagement verified -->` (so the gate records `engagement: verified`). GitHub:
    `gh pr review <n> --approve --body "<note>\n\n<!-- yad:engagement verified -->"`. GitLab: approve,
    then post the marker as a note (`glab mr approve <n>` + `glab mr note <n> -m "…<!-- yad:engagement verified -->"`).
-   In Claude Code they type it with `!` in front. Then confirm by reading (`gh pr view <n>`).
+   In Claude Code they type it with `!` in front. Then confirm by reading (`gh pr view <n>`, `glab mr view <n>`).
 6. **Nudge.** A bare approve (engagement `none`) still counts under the soft default; `yad gate sync`
    posts the friendly @-mention automatically. You may also post it directly with the
    `<!-- yad:noblock -->` marker.
 
 ## Hard rules
 
-- **Never write a ledger file.** Post comments / the trailer / the approval to the PLATFORM (the
-  reviewer's own `gh`/`glab`). CI writes `approvals.json`/`comments.json`; the `ledger-guard` check
+- **Never write a ledger file.** Post comments and the trailer to the PLATFORM; the reviewer posts the
+  approval with their own `gh`/`glab`. CI writes `approvals.json`/`comments.json`; the `ledger-guard` check
   rejects a human ledger edit on a review PR. The markers ride in platform data only.
 - **Trailer/cards/chat are grounded ONLY in real material.** If the material does not answer a
   question, say so and record the gap — do not fabricate.

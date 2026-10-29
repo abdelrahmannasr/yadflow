@@ -89,7 +89,7 @@ branch, so no asking), where `<name>` is the artifact without its extension: `ep
 Then run `yad gate open <epic> <artifact>` (`yad gate open EP-x stories/` for the stories). With a
 platform, when the branch is not on origin it refuses and prints the branch name it wants. A skill that
 says `yad open-pr` from a `review/EP-*` branch means the same thing: that command already opens the
-review, so do not also run `yad gate open`, and it follows the dial below, so prefer `yad gate open`.
+review, so do not also run `yad gate open`, and it follows the dial above, so prefer `yad gate open`.
 `yad open-pr` on a task branch is a task PR/MR: it follows the dial above.
 
 ## Never
@@ -97,6 +97,7 @@ review, so do not also run `yad gate open`, and it follows the dial below, so pr
 <!-- generated: never — from cli/agent-rules.mjs by scripts/agent-guide.mjs; do not edit by hand -->
 
 - force-push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), even when a yad message prints one: that is the person's step
+- skip the git hooks (`git commit --no-verify` or `-n`, `YAD_HOOK_DISABLE=1`, `git -c core.hooksPath=…`): when a hook refuses a commit, follow its message; if the commit must go through anyway, the person runs `yad commit --manual --reason "<why>"`
 - write or edit a file under `.sdlc/`, an approval, or text between yad markers by hand; only `yad` commands and the yad-* skills change them
 - guess an epic id, a step, a route, solo or team, the platform, or a command: read `yad guide --json`, or ask the person
 

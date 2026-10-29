@@ -35,8 +35,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    epic's ledger directory to resolve — a Product that is simply not checked out still defers, as before,
    except on a repo's **first spec** (no `link.md` on the base names a Product): there a slice change whose
    `product-repo` reaches nothing **fails** (E119), because the PR chose that value itself. Where the
-   Product lives is a repo fact once `yad check --fix --push` has merged `.sdlc/product-link.json` into
-   the code repo (E120): the gates read it from the base first, and `checks/product-checkout.sh` clones
+   Product lives is a repo fact once `.sdlc/product-link.json` is on the code repo's default branch
+   (E120; `yad check --fix --open-pr`, merged by a person, or `--push` after the person's yes): the gates read it from the base first, and `checks/product-checkout.sh` clones
    the Product there in CI when the `YAD_PRODUCT_TOKEN` secret is set (see `references/check-gates.md`).
    A missing token on a PR that is not from a fork is a `WARNING` in CI, and a token that expires within
    30 days is warned about there too (#345); `yad doctor` reports where each code repo's CI gets it.
@@ -121,8 +121,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
   - `templates/hooks/agent-guard.mjs` → **Product-only**, in **both** ledger modes (E158): the harness
     hook that runs `yad hook agent-guard` before every shell command an AI agent sends. It refuses a yad
     command only the person may run (`gate approve`, `comment`, `advance`, `reopen`, `commit --manual`),
-    approving or merging a PR/MR (`gh pr review --approve`, `gh pr merge`, `glab mr approve|merge|accept`), and a
-    force push (`--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), and tells the agent to hand it to the person. Wired as a `PreToolUse` entry on `Bash` in
+    approving or merging a PR/MR (`gh pr review --approve`, `gh pr merge`, `glab mr approve|merge|accept`, or the
+    same through `gh api`/`glab api`), skipping the git hooks (`git commit --no-verify` or `-n`,
+    `YAD_HOOK_DISABLE=…`, `core.hooksPath`), and a force push (`--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), and tells the agent to hand it to the person. Wired as a `PreToolUse` entry on `Bash` in
     `.claude/settings.json` and a `beforeShellExecution` entry in `.cursor/hooks.json`, so it runs only in
     a session opened at the Product folder; a code repo has none. Fails OPEN, and is a speed bump, not
     proof: a command inside a script is not seen, and Codex has no hooks.
