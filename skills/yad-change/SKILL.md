@@ -181,7 +181,7 @@ The engine writes everything this step used to spell out by hand (E42):
 
 | The command says | Why | What to do |
 |---|---|---|
-| `<owner> skipped <step>` | a skip is a decision, not an artifact — carrying it would claim a review nobody did | leave that base out of `inherits`, then `yad skip` it on this epic if it does not apply here either |
+| `<owner> skipped <step>` | a skip is a decision, not an artifact — carrying it would claim a review nobody did | leave that base out of `inherits`, then, if it does not apply here either, offer to `yad skip` it on this epic: skipping is the person's decision, so run it only on their yes |
 | `<owner> deferred <step>` | that work is still owed | leave the base out and author it on this epic, so the owed work follows the thread |
 | `<owner> has not finished <step>` | nothing approved exists yet | finish it on the owner, or author it here |
 | `holds no usable contract lock` / `surface no longer matches its lock` | you may skip authoring a contract, never having one | lock (or re-lock) the owner's surface first (`yad-architecture` Step 5) |

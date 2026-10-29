@@ -318,7 +318,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const sharedText = (f) => (exists(f) ? fs.readFileSync(f, 'utf8') : null);
   if (openPr) {
     for (const a of actions) {
-      if (!a.shared || !a.root || !live(a)) continue;
+      // Only a file this run writes, or one already right: a rules block `yad update` leaves out (an unwired
+      // repo's AGENTS.md is `missing`) or one it cannot write (`writesNothing`) is never staged or reported
+      // (E158 review 4).
+      if (!a.shared || !a.root || !live(a) || (a.status !== 'ok' && !fixable.includes(a))) continue;
       const file = path.join(a.root, a.shared);
       if (!shared.has(file)) {
         // A text file is read as committed, not trimmed (`run` trims): its trailing lines are part of the text

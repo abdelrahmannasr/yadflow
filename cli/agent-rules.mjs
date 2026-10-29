@@ -252,7 +252,7 @@ export const HUMAN_ONLY_ACTS = [
 
 // What the agent never does at all.
 export const NEVER = [
-  { id: 'force-push', text: 'force-push (`git push --force`, `--force-with-lease`), even when a yad message prints one: that is the person\'s step' },
+  { id: 'force-push', text: 'force-push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), even when a yad message prints one: that is the person\'s step' },
   { id: 'ledger-by-hand', text: 'write or edit a file under `.sdlc/`, an approval, or text between yad markers by hand; only `yad` commands and the yad-* skills change them' },
   { id: 'guess', text: 'guess an epic id, a step, a route, solo or team, the platform, or a command: read `yad guide --json`, or ask the person' },
 ];

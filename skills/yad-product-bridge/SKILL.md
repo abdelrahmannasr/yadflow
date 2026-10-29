@@ -157,8 +157,9 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
      host whose runner user may do that; otherwise use a docker executor for this job. `yad doctor`
      warns on a fragment that still runs a fixed `node:<n>` image (`YAD-CI-002`); `yad update`
      replaces it — or, if `yad check` lists the file as `modified` (edited by hand), move the change
-     into the CI/CD variables, then run `yad update --overwrite-local`, which keeps a `.yad-orig` copy
-     of each file it replaces.
+     into the CI/CD variables (the person sets them; an AI agent gives the steps, E158), then, when the
+     person asks, run `yad update --overwrite-local`, which keeps a `.yad-orig` copy of each file it
+     replaces.
    - **Git LFS needs nothing extra.** For a Product that uses Git LFS, the runner installs LFS git
      hooks that fail without `git-lfs`, and the job's node image has none — so the job downloads a
      pinned `git-lfs` itself before its checkout (#327; a Product without LFS skips it). A
@@ -189,12 +190,14 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
 - **The CI tokens are the one documented bend of "no stored tokens".** GitHub uses the platform's own
   ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`
   project access token because `CI_JOB_TOKEN` can neither read the approvals API nor push — say so
-  when wiring, and scope it to `read_api` + `write_repository` only.
+  when wiring, and scope it to `read_api` + `write_repository` only. Making the token and setting it
+  are the person's (E158): give them these steps, then confirm by reading (`yad doctor`).
 - **Protect the Product default branch.** Require that `epics/**` artifacts change only through a review
   PR/MR (branch protection). This keeps revoke-on-change sound: it removes the only window where a
   delayed reconcile could advance on an out-of-band post-merge artifact change (see `references/bridge.md`,
   "Known limitation"). Safe to require: a new epic's `.sdlc/` seed rides its first review PR/MR, so
-  nobody needs a direct push to the default branch to start an epic (#162).
+  nobody needs a direct push to the default branch to start an epic (#162). Branch protection is a
+  platform setting, so it is the person's (E158): give them the steps and confirm by reading.
 - **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs local with no error.
 
 ## Reference

@@ -126,11 +126,13 @@ the gate talks only through files; refuse to treat AI review as a human approval
 ### Step 3 — `ship` (merge + record + update state)
 Ship **iff ALL hold**: the check gates pass (Step C), the AI review has run (advisory), and the
 engineer-review rule is satisfied (Step 2). Then:
-- **Merge** the task branch into the repo's default branch (the human performs/authorises the merge).
+- **Merge** the task branch into the repo's default branch. The person merges it, never you, even when
+  your login could (E158): give them the PR/MR link, wait, then confirm by reading
+  (`yad build merged … --ship`).
 - **Check the lane is not skipped (E39)** — read `build-state/<story>.json`. If this repo's lane is
-  `status: skipped`, it was set aside as needing no change: stop, and run
-  `yad unskip <epic> <story> --repo <repo>` before recording a ship, so the two records never say opposite
-  things (`yad doctor` fails that as `lane:…:contradiction`; `yad checkpoint --retro-ship` refuses it).
+  `status: skipped`, it was set aside as needing no change: stop and tell the person. Only when they say
+  the lane is owed after all, run `yad unskip <epic> <story> --repo <repo>` before recording a ship
+  (E158), so the two records never say opposite things (`yad doctor` fails that as `lane:…:contradiction`; `yad checkpoint --retro-ship` refuses it).
 - **See whether it merged — ask, do not wait (#355).** The merge is a person's, but you do not need them
   to tell you it happened: run `yad build merged <story> --task <task> --repo <repo> --ship`. It asks the
   platform about the task's PR/MR (found by its branch; `--pr <n>` names it) and answers one `state`

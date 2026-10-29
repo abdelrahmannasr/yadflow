@@ -121,8 +121,8 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
   - `templates/hooks/agent-guard.mjs` → **Product-only**, in **both** ledger modes (E158): the harness
     hook that runs `yad hook agent-guard` before every shell command an AI agent sends. It refuses a yad
     command only the person may run (`gate approve`, `comment`, `advance`, `reopen`, `commit --manual`),
-    approving or merging a PR/MR (`gh pr review --approve`, `gh pr merge`, `glab mr approve|merge`), and a
-    force push, and tells the agent to hand it to the person. Wired as a `PreToolUse` entry on `Bash` in
+    approving or merging a PR/MR (`gh pr review --approve`, `gh pr merge`, `glab mr approve|merge|accept`), and a
+    force push (`--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), and tells the agent to hand it to the person. Wired as a `PreToolUse` entry on `Bash` in
     `.claude/settings.json` and a `beforeShellExecution` entry in `.cursor/hooks.json`. Fails OPEN, and is
     a speed bump, not proof: a command inside a script is not seen, and Codex has no hooks.
   - `templates/hooks/yad-capture.mjs` → **Product-only**, in **both** ledger modes (E43): the post-edit
@@ -200,6 +200,9 @@ Copy from this skill's `templates/`:
     human to paste (graceful degradation — never guess-edit a pipeline you cannot parse).
   - The legacy standalone `templates/gitlab/.gitlab-ci.yml` is retained only for a clean greenfield repo
     that prefers a single self-contained file; the include path above is the default.
+  - **CI/CD variables, tokens and branch protection are the person's (E158).** An AI agent gives them
+    the steps below, never sets one itself, and confirms by reading (`yad doctor`) once they say it is
+    done. It runs `yad update --overwrite-local` only when the person asks.
   - **Tag-locked runners** (`run_untagged: false`, common on self-hosted): the fragment's jobs run a
     docker image, so set a `YAD_RUNNER_TAGS` CI/CD variable (e.g. `dind_runner`) to route them — every
     GitLab fragment's jobs carry `tags: [$YAD_RUNNER_TAGS]`. When unset, current GitLab (≥15) drops the
@@ -221,7 +224,8 @@ Copy from this skill's `templates/`:
   - **Do not hand-edit the fragments to fit a runner.** They are managed bytes: `yad check` reports a
     hand-edited one as `modified`, and a plain `yad update` leaves it alone — so it never receives a
     fix again. Both runner settings above are CI/CD variables, so no edit is needed: move the
-    customisation into them, then run `yad update --overwrite-local` to restore the fragment (it keeps
+    customisation into them (the person's, above), then, when the person asks, run
+    `yad update --overwrite-local` to restore the fragment (it keeps
     a `.yad-orig` copy of the edited one first). `yad doctor` warns when a wired
     fragment has no `tags:` (`YAD-CI-001`) or still runs a fixed `node:<n>` image (`YAD-CI-002`, an
     install from before the variable — `yad update` replaces it).

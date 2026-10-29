@@ -37,18 +37,23 @@ export function shellParts(line) {
   const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false; };
   const endPart = () => { endWord(); if (words.length) parts.push(words); words = []; };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
-  // line never comes.
+  // line never comes. The text of one whose end word is not quoted (`<<EOF`, not `<<'EOF'`) still runs its
+  // `$(…)` and backticks, so those go to `parts.subs`.
   const heredocsEnd = (from) => {
     let at = from;
+    const bodies = [];
     for (const h of heredocs) {
+      const start = at;
       for (;;) {
         if (at > line.length) return -1;
         const eol = line.indexOf('\n', at);
         const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
+        const lineStart = at;
         at = eol < 0 ? line.length + 1 : eol + 1;
-        if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) break;
+        if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) { if (!h.quoted) bodies.push(line.slice(start, lineStart)); break; }
       }
     }
+    for (const body of bodies) parts.subs.push(...substitutionsIn(body));
     return at;
   };
   for (let i = 0; i < line.length; i++) {
@@ -77,7 +82,7 @@ export function shellParts(line) {
     if (ch === '<' && line[i + 1] === '<') {
       // A heredoc: its delimiter, bare or quoted, with `<<-` stripping leading tabs from the lines.
       const m = /^<<(-?)[ \t]*(['"]?)([A-Za-z0-9_.-]+)\2/.exec(line.slice(i));
-      if (m) { heredocs.push({ word: m[3], tabs: m[1] === '-' }); endWord(); i += m[0].length - 1; continue; }
+      if (m) { heredocs.push({ word: m[3], tabs: m[1] === '-', quoted: !!m[2] }); endWord(); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       endPart();
@@ -138,6 +143,22 @@ function substitutionEnd(line, from) {
   return line.length;
 }
 
+// The commands of every `$(…)` and backticks in a heredoc's text, where quotes are plain characters and `\`
+// keeps the next one as text.
+function substitutionsIn(text) {
+  const out = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\') { i++; continue; }
+    if ((ch === '$' && text[i + 1] === '(') || ch === '`') {
+      const end = ch === '`' ? backtickEnd(text, i + 1) : substitutionEnd(text, i + 2);
+      out.push(ch === '`' ? text.slice(i + 1, end).replace(/\\`/g, '`') : text.slice(i + 2, end));
+      i = end;
+    }
+  }
+  return out;
+}
+
 // Where the backtick whose text starts at `from` closes, or the end of the line.
 function backtickEnd(line, from) {
   for (let i = from; i < line.length; i++) {
@@ -186,6 +207,8 @@ function shellC(words) {
 // program the yadflow package installs, so a local install runs it as `npx yad`.
 const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C']);
 const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--prefix']);
+// The pnpm and yarn options that take a value and may come before `exec`/`dlx` or the program (`pnpm -C x yad …`).
+const RUNNER_VALUE_OPTIONS = new Set([...NPX_VALUE_OPTIONS, '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '--filter-prod']);
 const isYadflow = (x) => /^yadflow(@.*)?$/.test(x);
 const dropDashDash = (args) => (args[0] === '--' ? args.slice(1) : args);
 function yadArgs(words) {
@@ -204,9 +227,12 @@ function yadArgs(words) {
   let from = -1;
   if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') from = 1;
   else if (prog === 'npm' && (w[1] === 'exec' || w[1] === 'x')) from = 2;
-  else if (prog === 'pnpm' || prog === 'yarn') from = ['exec', 'dlx'].includes(w[1]) ? 2 : 1;
+  else if (prog === 'pnpm' || prog === 'yarn') {
+    const k = plainAfter(1, RUNNER_VALUE_OPTIONS);
+    from = ['exec', 'dlx'].includes(w[k]) ? k + 1 : k;
+  }
   if (from > 0) {
-    const i = plainAfter(from, NPX_VALUE_OPTIONS);
+    const i = plainAfter(from, RUNNER_VALUE_OPTIONS);
     return i < w.length && (isYadflow(w[i]) || programOf(w[i]) === 'yad') ? dropDashDash(w.slice(i + 1)) : null;
   }
   if (prog === 'node') {
@@ -267,14 +293,16 @@ function platformApproval(words) {
   const prog = programOf(w[0]);
   if (prog !== 'gh' && prog !== 'glab') return false;
   const rest = [];
+  const options = [];
   for (let i = 1; i < w.length; i++) {
-    if (w[i].startsWith('-')) { if (PLATFORM_VALUE_OPTIONS.has(w[i])) i++; continue; }
+    if (w[i].startsWith('-')) { options.push(w[i]); if (PLATFORM_VALUE_OPTIONS.has(w[i])) i++; continue; }
     rest.push(w[i]);
   }
   if (prog === 'gh') {
     if (rest[0] !== 'pr') return false;
     if (rest[1] === 'merge') return true;
-    return rest[1] === 'review' && w.some((x) => /^--approve(=|$)/.test(x) || x === '-a');
+    // An option, never an option's value (`--body "-a"` is text).
+    return rest[1] === 'review' && options.some((x) => /^--approve(=|$)/.test(x) || x === '-a');
   }
   // `glab mr accept` is `glab mr merge` by another name.
   return rest[0] === 'mr' && ['approve', 'merge', 'accept'].includes(rest[1]);

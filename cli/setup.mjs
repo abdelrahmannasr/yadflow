@@ -255,6 +255,9 @@ export function setupModeFields(root, cur, solo, opts = {}) {
 function applyActions(actions, { force = false } = {}) {
   let changed = 0;
   for (const a of actions) {
+    // An action that cannot write (a settings file that does not parse, rules-block markers yad cannot trust)
+    // said why when it was planned, and `--overwrite-local` would not help it.
+    if (a.writesNothing) continue;
     // A managed file the team edited is left alone here too — setup re-runs with force:true, so
     // without this the wizard would be a second silent-clobber path for the same edits (#164).
     if (a.status === 'modified') {

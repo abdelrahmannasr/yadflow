@@ -882,6 +882,39 @@ test('AGENTS.md with the team\'s own uncommitted edits never rides the update: s
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+test('a code repo yad never wired: its own AGENTS.md is left alone by update --open-pr, with no row', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  const RT = tmp();
+  const RA = tmp();
+  try {
+    fs.mkdirSync(T); fs.mkdirSync(A);
+    for (const [d, r] of [[T, RT], [A, RA]]) {
+      git(r, ['init', '-q', '--bare', '-b', 'main']);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']);
+      git(d, ['config', 'user.email', 'alice@work.com']);
+      git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]);
+      git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: settings']); git(T, ['push', '-q']);
+    // The team's own AGENTS.md, committed, then edited and not committed (E158 review 4).
+    fs.writeFileSync(path.join(A, 'AGENTS.md'), '# App notes\n');
+    git(A, ['add', 'AGENTS.md']); git(A, ['commit', '-q', '-m', 'docs: notes']); git(A, ['push', '-q']);
+    fs.writeFileSync(path.join(A, 'AGENTS.md'), '# App notes\n\nNot committed.\n');
+    const r = await reconcile(T, { fix: true, scope: 'changed', openPr: true, creator: () => ({ ok: true, url: 'https://github.com/acme/product/pull/10' }) });
+    assert.ok(!r.commits.some((c) => c.reason === 'agents-uncommitted'), JSON.stringify(r.commits));
+    assert.equal(fs.readFileSync(path.join(A, 'AGENTS.md'), 'utf8'), '# App notes\n\nNot committed.\n', 'never written');
+  } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('--open-pr is all or nothing: one repo that cannot take it, and nothing is written anywhere', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const P = tmp();

@@ -308,6 +308,12 @@ test('the agent guard refuses every human-only yad command and every force push,
     'git push --mirror',
     'gh pr review 5 --approve=true',
     'git commit -m "$(cat <<\'EOF\'\nsubject\n\nsays "hi\nEOF\n)" && git push -f',
+    // Review 4: an unquoted heredoc runs the commands in its text; runner options before the program.
+    'git commit -F - <<EOF\nfix: $(yad gate approve EP-a epic)\nEOF',
+    'cat <<EOF\n`yad gate advance EP-a epic`\nEOF',
+    'pnpm --dir x yad gate approve EP-a epic',
+    'pnpm -C x exec yad gate approve EP-a epic',
+    'yarn --cwd x yad gate approve EP-a epic',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -341,6 +347,11 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'pnpm install',
     'yarn test',
     'git commit -m "$(cat <<\'EOF\'\nfix: x\n\nA "quote and 1) item\nyad gate approve EP-x\ngit push -f\nEOF\n)"',
+    // Review 4: a quoted heredoc's text is only text; an option's value is not an option.
+    'git commit -F - <<\'EOF\'\nfix: $(yad gate approve EP-a epic)\nEOF',
+    'cat <<EOF\nescaped \\$(yad gate approve EP-a epic)\nEOF',
+    'gh pr review 5 --comment --body "-a"',
+    'pnpm --dir x test',
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);

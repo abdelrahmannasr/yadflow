@@ -452,7 +452,8 @@ function installLocalSkills(product, ideTargets) {
     else (local ? res.stale : res.shared).push(rel || `${a.scope}/${a.item}`);
   }
   // E158: the rules block in AGENTS.md and CLAUDE.md is the team's shared file too: named, never written here.
-  for (const a of agentFileActions(product, ideTargets)) if (a.status !== 'ok') res.shared.push(a.item);
+  // A block yad cannot write (`writesNothing`: markers it cannot trust) is not one `yad update` brings up to date.
+  for (const a of agentFileActions(product, ideTargets)) if (a.status !== 'ok' && !a.writesNothing) res.shared.push(a.item);
   return res;
 }
 

@@ -87,7 +87,7 @@ A command not listed: read `yad <command> --help`, and treat it as a write until
 
 <!-- generated: never — from cli/agent-rules.mjs by scripts/agent-guide.mjs; do not edit by hand -->
 
-- force-push (`git push --force`, `--force-with-lease`), even when a yad message prints one: that is the person's step
+- force-push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), even when a yad message prints one: that is the person's step
 - write or edit a file under `.sdlc/`, an approval, or text between yad markers by hand; only `yad` commands and the yad-* skills change them
 - guess an epic id, a step, a route, solo or team, the platform, or a command: read `yad guide --json`, or ask the person
 
