@@ -305,7 +305,7 @@
       <div class="flow-v">
         <div class="node plain"><strong>Pick a front door</strong><small><code>yad new &lt;name&gt;</code> (new product) · <code>yad init</code> (repos you already have) · <code>yad join &lt;url&gt;</code> (a teammate joining) — each leaves a <code>.yad-workspace.json</code>, so <code>yad</code> finds the Product from any repo it registers</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node plain"><strong>Install the module</strong><small><code>new</code> and <code>init</code> run <code>yad setup</code> (a profile interview: solo or team, greenfield or brownfield, monorepo or separate repos) — it copies the 38 skills into your agent dirs. <code>join</code> only clones and adds per-machine files.</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>new</code> and <code>init</code> run <code>yad setup</code> (a profile interview: solo or team, greenfield or brownfield, monorepo or separate repos) — it copies the 39 skills into your agent dirs. <code>join</code> only clones and adds per-machine files.</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> (CI gates, PR template)</small></div>
         <div class="arrow-v">▼</div>
@@ -516,7 +516,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the Product.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 38 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 39 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Shape (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the Product: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside Build. Every Shape review is always human-approved.</div>
   <div class="term"><strong>Build / Build (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. The team may set these mechanical steps to run on their own.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -628,7 +628,7 @@ each code repo/
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Toolbox</strong><span class="badge b-tool">tools</span><br>The one list, shipped inside yadflow, of every external tool it can use: <strong>core</strong> tools offered at setup (Repomix, Spec Kit, Impeccable), <strong>recommended</strong> tools never pushed (the skill pools BMAD-METHOD, ECC and mattpocock/skills, and Docker MCP Toolkit, a gateway for MCP servers), and the <strong>connectors</strong> a Product links for design, testing and learning (Figma, Pencil, Playwright, Cypress, pytest, Maestro, DeepTutor). Each entry gives the tool&rsquo;s role, licence, checked install commands and its fallback. <code>yad toolbox list</code> shows which ones you have; a Product records the ones its team uses, and its own tools, in <code>.sdlc/toolbox.json</code> (<code>yad toolbox add</code> / <code>remove</code>).</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
-  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 38 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
+  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 39 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>ship</code>, <code>repo</code>, <code>report</code>). Every command but <code>yad hook</code> takes <code>--json</code>: one JSON object on stdout, for agents and CI.</div>
 
   <h3>People &amp; AI roles</h3>
@@ -770,7 +770,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 38 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 39 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -808,6 +808,7 @@ each code repo/
     <tr><td><a href="#sk-backfill"><code>yad-backfill</code></a></td><td>Build G</td><td>Spec already-built / legacy code before changing it.</td></tr>
     <tr><td><a href="#sk-run"><code>yad-run</code></a></td><td>Automation</td><td>Drive Build on the dials; set dials; kill switch.</td></tr>
     <tr><td><a href="#sk-status"><code>yad-status</code></a></td><td>Anytime</td><td>Read-only view: where everything is and what’s blocking.</td></tr>
+    <tr><td><a href="#sk-guide"><code>yad-guide</code></a></td><td>Anytime</td><td>The rules an AI coding agent follows to drive yadflow: what it does itself, and what it hands to you.</td></tr>
     <tr><td><a href="#sk-report"><code>yad-report</code></a></td><td>Anytime</td><td>File a bug in the yadflow repo with auto-scrubbed diagnostics when a flow breaks.</td></tr>
     <tr><td><a href="#sk-change"><code>yad-change</code></a></td><td>Phase 6</td><td>Post-lock change/defect/hotfix intake — a new epic threaded to its parent.</td></tr>
     <tr><td><a href="#sk-timeline"><code>yad-timeline</code></a></td><td>Phase 6</td><td>Feature-thread evolution view + the resolved current-truth map.</td></tr>
@@ -1102,6 +1103,15 @@ yad next                          # the CLI's own answer: the one next action to
     <div class="row"><span class="lbl lbl-when">When</span> Any time, freely — it’s the “where are we and what’s blocking?” skill (the CLI views are <code>yad status</code>, <code>yad next</code>, <code>yad guide</code> and <code>yad history show</code>). The best first move whenever you’re unsure what to do next.</div>
   </div>
 
+  <div class="skillcard" id="sk-guide">
+    <h4><code>yad-guide</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The <strong>rules for an AI coding agent</strong> (Claude Code, Codex and others) that drives yadflow for you. Before each step the agent runs <code>yad guide --json</code>, tells you what the step is for, whether you can skip it, and who does it, then does its part. It never does the acts that are yours: approvals and merges, logins and secrets, signing keys and platform settings. For those it gives you the exact command or steps, waits, and checks the result by reading. It commits, pushes its own branch and opens review PRs/MRs without asking; it opens a task PR/MR without asking only when <code>yad dial open-pr</code> is <code>auto</code>, and asks first otherwise. It asks every time before a push to the default branch, and never force-pushes. The same rules are written into the Product's <code>AGENTS.md</code> — the file AI coding agents read at the start of a session.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>yad guide --json                    # what the agent reads before each step
+/yad-guide                          # load the skill in Claude Code</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Whenever an AI agent drives yadflow. In a session opened at the Product folder, a hook — a small script Claude Code or Cursor runs before each shell command — also stops the agent from running a yad command only you may run (a gate approve, comment, advance or reopen, or <code>commit --manual</code>), approving or merging a PR/MR, skipping the git hooks (<code>git commit --no-verify</code>), which would pass the local ledger check, or a force push (a push that overwrites commits already on the server). It is a speed bump, not proof. In a code repo, and in Codex, only the rules apply.</div>
+  </div>
+
   <div class="skillcard" id="sk-report">
     <h4><code>yad-report</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> The <strong>self issue reporter</strong>. When a <code>yad</code> flow breaks, it files a well-formed bug in the upstream yadflow repo so maintainers can fix it — with <strong>auto-scrubbed</strong> diagnostics. The payload is <em>allowlist-only</em>: the yadflow/node/os version, tool present+authenticated booleans, the Product platform enum, the error code/hint, a path-scrubbed message, and the failing command + flag <em>names</em>. It <strong>never</strong> posts absolute paths, hostnames, git URLs, repo names, logins/emails, epic/story IDs, branch names, or flag values. It searches open issues first (dedupe), shows you the exact payload and asks before posting, then files via an authenticated <code>gh</code>/<code>glab</code> or a prefilled <code>issues/new</code> URL. Reuses your local <code>gh</code>/<code>glab</code> session — no stored tokens. Never a gate; never touches epic state.</div>
@@ -1212,7 +1222,7 @@ yad repo clone             # later: fetch a newly registered repo</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard (<code>yad new</code> and <code>yad init</code> run it for you). It starts with a <strong>profile interview</strong> — solo or team (and how many), greenfield or brownfield, monorepo or separate repos, and whether to set up the optional tools now — then: preflight (git/node check), install all 38 skills into the agent dirs you pick, detect the Product’s platform and record the ledger mode (<code>verified</code> with a platform, <code>local</code> without; no reviewers, roles or commit emails are collected), connect a design, testing and learning tool (or defer all three), connect your code repos, wire each one and the Product (CI gates, PR template, gate sync), and optionally write the AI-review config.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard (<code>yad new</code> and <code>yad init</code> run it for you). It starts with a <strong>profile interview</strong> — solo or team (and how many), greenfield or brownfield, monorepo or separate repos, and whether to set up the optional tools now — then: preflight (git/node check), install all 39 skills into the agent dirs you pick, detect the Product’s platform and record the ledger mode (<code>verified</code> with a platform, <code>local</code> without; no reviewers, roles or commit emails are collected), connect a design, testing and learning tool (or defer all three), connect your code repos, wire each one and the Product (CI gates, PR template, gate sync), and optionally write the AI-review config.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-repo&gt;
 npx yadflow setup

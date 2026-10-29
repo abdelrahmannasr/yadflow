@@ -1,4 +1,4 @@
-# Agent skills (all 38)
+# Agent skills (all 39)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
@@ -254,6 +254,15 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   the exact payload and asks before posting, then files via an authenticated `gh`/`glab` or a
   prefilled `issues/new` URL. Also **offered automatically** after an unexpected failure (interactive
   only; `YAD_NO_REPORT=1` or `SDLC_NONINTERACTIVE` disables it). Never a gate; never touches epic state.
+  An AI agent files a report too, or an idea (`--kind enhancement`): it previews with `--json`, shows you
+  the exact text, and posts only after your yes, with `--post --confirm <value>` (E158).
+- **`yad-guide`** — The yadflow rules for an AI coding agent (E158). The agent loads it before any yadflow
+  work. Every step goes the same way: run `yad guide --json`; tell the person what the step is for,
+  whether it is mandatory or can be skipped, who does it, and the skill or tool it will use; do the
+  agent's part; hand the person's part over with the exact command or steps, then confirm by reading.
+  It lists what the agent runs without asking, what it asks about every time, and what only the person
+  runs (approvals and merges, logins, secrets, signing keys, platform settings). Its lists are written
+  from `cli/agent-rules.mjs` by `scripts/agent-guide.mjs`. Never a gate; never touches epic state.
 
 ## Post-lock change management — feature threads (Phase 6)
 

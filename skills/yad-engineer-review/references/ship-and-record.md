@@ -103,7 +103,7 @@ about follow-ups (`…-T03-followup-reminders`). A follow-up is opened by a pers
 This is the Build analogue of Shape's `approvals.json` — files only, no hidden state, so a
 future service can drive ship by writing the same records. Like the trust log and build-state, it is a
 machine-written ledger committed by **`yad checkpoint`** (the Build analogue of `yad gate` sync),
-not by hand: after recording the ship, `yad checkpoint --push` lands the new `build-log/` shard as a
+not by hand: after recording the ship, `yad checkpoint --push` (after the person's yes, E158) lands the new `build-log/` shard as a
 `chore(product): …` audit-trail commit on the default branch (allowlist-scoped to the Build ledgers,
 never a Shape gate file); `yad tidy up` folds finished shards into `build-log.json` later.
 
@@ -113,7 +113,8 @@ A story that was merged and shipped **before** the Build ledger existed has no b
 `yad checkpoint` can't carry its `status: shipped` flip (the flip is only carried when a ship backs it,
 #112) — leaving a raw `git push origin main` as the only way to land it, against the never-raw-git
 convention. To reconcile it through yad, record a **retroactive** ship, then checkpoint carries the flip
-in the same commit:
+in the same commit. Record one only when the person asked for a retroactive ship, and ask every time
+before `--push`: it lands on the default branch (E158).
 
 ```
 yad checkpoint --retro-ship <epic>/<story> --repo <r> [--task <t>] [--merge-commit <sha>] [--push]
@@ -136,7 +137,8 @@ indefinitely — which is precisely why reading the folded file alone is never s
 
 **One repo per run (#166).** A ship is recorded per `(story, task, repo)`, so a story that shipped in
 several repos needs one retroactive shard **per repo** — the guard is keyed on `(story, repo)`, not on
-the story alone, so recording the first repo never locks out the rest. Re-run once per repo:
+the story alone, so recording the first repo never locks out the rest. Re-run once per repo, asking
+before each `--push`:
 
 ```
 yad checkpoint --retro-ship EP-foo/EP-foo-S01 --repo web --push
@@ -186,7 +188,8 @@ The story frontmatter `status` reflects build progress:
 
 You write this flip into `stories/<story>.md`, but **do not hand-commit it** — the next
 `yad checkpoint --push` carries it in the same `chore(product)` commit as the ledgers (the story now has a
-build-log ship, so checkpoint stages it; #112). This is what keeps the story artifact from drifting
+build-log ship, so checkpoint stages it; #112; it pushes to the default branch, so an AI agent asks the
+person first, every time, E158). This is what keeps the story artifact from drifting
 from the build ledger, so there is never a reason to fall back to a raw `git push origin main`.
 
 So the chain is traceable both ways: from the epic down (`epic.md` → `stories/<story>.md` →

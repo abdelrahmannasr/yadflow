@@ -27,7 +27,7 @@ process.env.YAD_PLATFORM_READ = '0';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HOOKS = path.join(ROOT, 'skills/yad-checks/templates/hooks');
 const IS_WINDOWS = process.platform === 'win32';
-const SCRIPTS = ['ledger-guard.mjs', 'ledger-guard-cursor.mjs', 'yad-capture.mjs'];
+const SCRIPTS = ['ledger-guard.mjs', 'ledger-guard-cursor.mjs', 'yad-capture.mjs', 'agent-guard.mjs'];
 
 // A Product laid out the way a hook expects: `<T>/hooks/<script>.mjs`.
 function scaffold() {
@@ -72,7 +72,7 @@ function runHook(T, script, { env = {}, pathDirs = [], input = '{"tool_input":{"
 
 // ---- the shared resolver ---------------------------------------------------------------------------
 
-test('E113: the three hook scripts carry the SAME yad-resolve block, byte for byte', () => {
+test('E113: every hook script carries the SAME yad-resolve block, byte for byte', () => {
   const block = (s) => {
     const text = fs.readFileSync(path.join(HOOKS, s), 'utf8');
     const start = text.indexOf('// ---- yad-resolve');
@@ -294,8 +294,8 @@ async function oldProduct({ record = true } = {}) {
 }
 // What `yad check --fix` applies, in its order: the hook wiring, then the retired scripts last.
 async function fixHooks(T) {
-  const { hookActions, captureHookActions, legacyHookScriptActions } = await import('./plan.mjs');
-  const actions = [...hookActions(T), ...captureHookActions(T), ...legacyHookScriptActions(T)];
+  const { hookActions, captureHookActions, agentGuardActions, legacyHookScriptActions } = await import('./plan.mjs');
+  const actions = [...hookActions(T), ...captureHookActions(T), ...agentGuardActions(T), ...legacyHookScriptActions(T)];
   for (const a of actions) if (a.status !== 'ok' && a.status !== 'modified') a.apply();
   return actions;
 }
@@ -307,8 +307,10 @@ test('E113: `yad check --fix` rewrites the bash entries to node and removes the 
     assert.deepEqual(actions.filter((a) => a.status === 'removed').map((a) => a.item).sort(),
       ['hooks/ledger-guard-cursor.sh (removed)', 'hooks/ledger-guard.sh (removed)', 'hooks/yad-capture.sh (removed)']);
     const claude = JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'));
-    assert.equal(claude.hooks.PreToolUse.length, 1, 'rewritten in place, not added beside');
-    assert.equal(claude.hooks.PreToolUse[0].hooks[0].command, 'node "$CLAUDE_PROJECT_DIR/hooks/ledger-guard.mjs"');
+    // The ledger guard's entry; the agent guard (E158) has its own, on the shell tool.
+    const ledgerEntries = claude.hooks.PreToolUse.filter((e) => e.matcher !== 'Bash');
+    assert.equal(ledgerEntries.length, 1, 'rewritten in place, not added beside');
+    assert.equal(ledgerEntries[0].hooks[0].command, 'node "$CLAUDE_PROJECT_DIR/hooks/ledger-guard.mjs"');
     assert.equal(claude.hooks.PostToolUse[0].hooks[0].command, 'node "$CLAUDE_PROJECT_DIR/hooks/yad-capture.mjs" --format claude');
     const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
     assert.equal(cursor.hooks.preToolUse[0].command, 'node hooks/ledger-guard-cursor.mjs');
@@ -848,6 +850,13 @@ test('E48: a local ledger installs nothing, and removes the hook yad wrote — n
     assert.equal(rm.status, 'removed');
     rm.apply();
     assert.equal(fs.existsSync(hook), false);
+    // E158 review 12: the text an earlier yad wrote is yad's too.
+    const { gitPreCommitScripts } = await import('./plan.mjs');
+    const [, earlier] = gitPreCommitScripts('');
+    assert.match(earlier, /Skip it once with YAD_HOOK_DISABLE=1/);
+    fs.writeFileSync(hook, earlier);
+    assert.equal(orphanGitHookActions(product)[0]?.status, 'removed');
+    assert.match(gitPreCommitScript(''), /A person can skip it once with YAD_HOOK_DISABLE=1 \(never an AI\n# agent\)/);
   } finally { cleanup(T); }
 });
 
@@ -940,6 +949,27 @@ test('E48 review 1: a hook without its execute bit is not installed — git skip
   } finally { cleanup(T); }
 });
 
+test('E158 review 12: a hook text an earlier yad wrote is brought up to date with no backup', async () => {
+  const { gitHookActions, gitHookState, gitPreCommitScripts } = await import('./plan.mjs');
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { T, product } = verifiedRepo();
+  try {
+    gitHookActions(product)[0].apply();
+    const st = gitHookState(product);
+    fs.writeFileSync(st.file, gitPreCommitScripts(st.prefix)[1], { mode: 0o755 });
+    const [a] = gitHookActions(product);
+    assert.equal(a.status, 'outdated');
+    assert.equal(a.backup, null, 'an earlier yad text is yad\'s own: nothing to save');
+    assert.equal(gitHookState(product).why, 'earlier');
+    // E158 review 13: doctor promises no backup for it.
+    const hookCheck = collectDoctor(product).checks.find((c) => c.id === 'git-hook');
+    assert.match(hookCheck.message, /written by an earlier yad version and not edited since/);
+    assert.doesNotMatch(hookCheck.hint, /saves the current file/);
+    a.apply();
+    assert.equal(gitHookState(product).state, 'ok');
+  } finally { cleanup(T); }
+});
+
 test('E48 review 1: a linked worktree with the Product in a subfolder still refuses the mutation', { skip: IS_WINDOWS && 'the worktree path is POSIX-only here' }, async () => {
   const { gitHookActions } = await import('./plan.mjs');
   const { T, repo } = verifiedRepo({ sub: 'prod' });
@@ -959,7 +989,7 @@ test('E48 review 1: the refusal names the repair that commits, the amend-to-undo
   const top = path.join(os.tmpdir(), 'r');
   const m = commitDenyMessage({ top, hits: [{ kind: 'state', epic: 'EP-a', abs: path.join(top, 'epics/EP-a/.sdlc/state.json'), productRoot: top }] });
   assert.match(m, /yad gate repair EP-a --push/);
-  assert.match(m, /YAD_HOOK_DISABLE=1 git commit --amend/);
+  assert.match(m, /The person runs it as `YAD_HOOK_DISABLE=1 git commit --amend` \(an AI\nagent hands it to them/);
   assert.match(m, /without `-a`/);
   assert.doesNotMatch(m, /could not reach the default branch|CI still refuses/, 'the check runs on pull requests only');
 });
@@ -974,6 +1004,9 @@ test('E48 review 2: the agent\'s refusal and the commit refusal say the same thi
     assert.match(m, /yad commit --manual --reason "<why>"/, `${name}: the door for people (E49)`);
     assert.match(m, /check on the pull request\s+still fails it/, `${name}: and what it does not open`);
     assert.doesNotMatch(m, /reach the default branch|CI still refuses/, `${name}: the check runs on pull requests only`);
+    // E158 review 14: each row an AI agent may not simply run says so.
+    assert.match(m, /yad gate repair EP-a --push\n\s+\(it pushes to the default branch: an AI agent asks the person first\)/, `${name}: repair is asked first`);
+    assert.match(m, /yad gate reopen EP-a <step> --reason "<why>" --push\n\s+\(the person's: an AI agent hands it to them/, `${name}: reopen is the person's`);
     assert.doesNotMatch(m, /\n\n\n/, `${name}: no double blank line`);
   }
 });
@@ -1021,6 +1054,7 @@ test('E49: yad ship refuses --manual and --reason rather than ignoring them', ()
     const r = spawnSync(process.execPath, [YAD, 'ship', '--type', 'fix', '-m', 'x', ...flags], { cwd: os.tmpdir(), encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
     assert.notEqual(r.status, 0, flags.join(' '));
     assert.match(r.stdout + r.stderr, /yad ship takes no --manual\/--reason/);
+    assert.match(r.stdout + r.stderr, /the person commits with `yad commit --manual/, 'E158: the door is the person\'s');
   }
 });
 

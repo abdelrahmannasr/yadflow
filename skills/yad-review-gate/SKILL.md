@@ -1,6 +1,6 @@
 ---
 name: yad-review-gate
-description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the approver count (1 distinct approver; contract/auth/payments raise the full count, advisory), and advances the epic state ONLY when approval is recorded. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
+description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, syncs the reviewers'' comments and approvals into files, enforces the approver count (1 distinct approver; contract/auth/payments raise the full count, advisory), and the step advances ONLY when approval is recorded. Commenting, approving, advancing and reopening are the person''s acts: an AI agent gives them the exact command and confirms by reading, never runs it. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
 ---
 
 # SDLC — Team Review Gate (build plan §3 piece 2, §4, §5)
@@ -30,6 +30,10 @@ trigger is a parameter, not a hardcoded human.
 - `artifact`: the file under the epic being reviewed (e.g. `epic.md`).
 - `action`: one of `open` | `comment` | `approve` | `sync` | `advance` (default: `open`). With no platform,
   `comment` / `approve` / `advance` are the `yad gate comment|approve|advance` commands (E112).
+  **These, and `yad gate reopen`, are the person's to run, never yours (E158).** Give the person the exact
+  command (in Claude Code they type it with `!` in front, so its output lands in the chat), wait, then
+  confirm by reading — `yad gate status <epic>` — before you go on. Never go on from "done" alone. The agent
+  guard hook refuses them if you try.
 - For `comment` / `approve`: the reviewer's platform login (or the name they give, when there is no
   platform). No role and no domain. Ask if not provided.
 - `sync` needs no reviewer input — it reads the platform PR/MR review state (via `yad-product-bridge`).
@@ -140,7 +144,7 @@ CI records the gate at merge.) Opening the PR records no approvals and never adv
 - <comment>
 ```
 
-Then record the round with the engine — **never append to `.sdlc/comments.json` by hand**:
+Then the reviewer records the round with the engine — give them the command, and never append to `.sdlc/comments.json` by hand:
 ```bash
 yad gate comment <epic> <artifact> --by <name> --count <comments this round>          # the round in progress
 yad gate comment <epic> <artifact> --by <name> --count <n> --new-round                # after the owner addressed the last round
@@ -158,14 +162,14 @@ Then help the **owner address the comments** using the agent lens listed for thi
 stories → `pm`, with `architect` for technical detail; test-cases → `test architect`). Update the authored artifact in place.
 Repeat comment→address rounds until reviewers are satisfied. **Commenting never advances the gate.**
 
-**`approve`** — Record an approval with the engine — **never append to `.sdlc/approvals.json` by hand**:
+**`approve`** — The reviewer records their approval with the engine — give them the command, and never append to `.sdlc/approvals.json` by hand:
 ```bash
 yad gate approve <epic> <artifact> --by <name> [--engagement verified|none]
 ```
 One record per person (a second approval by the same name replaces the first). It records no `role` or
 `domain`. The approver must not be the artifact's author: the command warns when `--by` is the epic's
-`owner:` or the artifact's last git author, and records it anyway (it cannot tell who is typing), so do
-not run it for the author. The record carries the artifact's fingerprint (`artifactHash`), so **an edit to
+`owner:` or the artifact's last git author, and records it anyway (it cannot tell who is typing), so never
+hand it to the author. The record carries the artifact's fingerprint (`artifactHash`), so **an edit to
 the artifact revokes it**, exactly as a platform approval is revoked — the reviewer approves again once they
 have seen the new content. An older hand-written record with no fingerprint still counts until it is
 replaced. This is the **no-platform** path (E112): with a platform the approvals are the PR/MR's, and the
@@ -228,8 +232,8 @@ writes neither (issue #362). Always **re-evaluate Step 3**. **Never hand-write e
 gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-resolved, approved PR
 (the merge is the human act); otherwise it records state and holds the step `in_review`.
 
-**`advance`** — Run the gate predicate (Step 3) and advance only if it passes. With no platform that is
-`yad gate advance <epic> <artifact>`; with a platform it is the merge (`yad gate sync` / `yad gate ci`).
+**`advance`** — Check the gate predicate (Step 3); only when it passes, the person advances. With no platform
+that is `yad gate advance <epic> <artifact>`, which they run; with a platform it is the merge (`yad gate sync` / `yad gate ci`).
 
 ### Step 3 — Gate predicate (the only path that advances)
 The step may advance **iff ALL hold**:
@@ -248,7 +252,7 @@ The step may advance **iff ALL hold**:
    `../yad-architecture/references/contract-format.md`): if it no longer matches
    `.sdlc/contract-lock.json`, the surface changed → approvals stale → return to `comment` and re-lock.
 
-If the predicate **passes**, advance with the engine — **never edit `state.json` by hand**:
+If the predicate **passes**, hand the person the command that advances it — **never edit `state.json` by hand**:
 
 ```bash
 yad gate advance <epic> <artifact>     # a Product with no platform (E112)
@@ -337,7 +341,7 @@ write path.
   with no error: `yad gate approve`, `yad gate comment` and `yad gate advance` record the review in the
   engine (E112).
 - **A passed gate is taken back only by `yad gate reopen`** (#322), and only before Build starts:
-  `yad gate reopen <epic> <step> --reason "<why>"` walks the chain back to the step and revokes the
+  the person runs `yad gate reopen <epic> <step> --reason "<why>"`, which walks the chain back to the step and revokes the
   later reviews' approvals, so each gate runs again. Never edit `state.json` or `approvals.json` by hand
   to do it.
 

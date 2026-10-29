@@ -101,7 +101,7 @@ recorded once per task. The base is fetched first, so tasks merged since the las
 failed fetch refuses `--via auto`. A `--task` other than the branch's
 task is refused, and so is a Product branch. A task already opened this way, or one that has already shipped (a follow-up is opened by a person), is refused. Once open, the PR/MR is
 recorded on the lane (`opened`: task, number, url, the run, who, when) — commit it from the Product with
-`yad checkpoint --push`. Without `--via` (or `--via human`) it opens as before and records nothing. The
+`yad checkpoint --push`, after asking the person (a push to the default branch, E158). Without `--via` (or `--via human`) it opens as before and records nothing. The
 merge is always a person's.
 
 The non-default-base warning is **advisory — it does not block, and the PR/MR is already open by the

@@ -35,8 +35,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    epic's ledger directory to resolve — a Product that is simply not checked out still defers, as before,
    except on a repo's **first spec** (no `link.md` on the base names a Product): there a slice change whose
    `product-repo` reaches nothing **fails** (E119), because the PR chose that value itself. Where the
-   Product lives is a repo fact once `yad check --fix --push` has merged `.sdlc/product-link.json` into
-   the code repo (E120): the gates read it from the base first, and `checks/product-checkout.sh` clones
+   Product lives is a repo fact once `.sdlc/product-link.json` is on the code repo's default branch
+   (E120; `yad check --fix --open-pr`, merged by a person, or `--push` after the person's yes): the gates read it from the base first, and `checks/product-checkout.sh` clones
    the Product there in CI when the `YAD_PRODUCT_TOKEN` secret is set (see `references/check-gates.md`).
    A missing token on a PR that is not from a fork is a `WARNING` in CI, and a token that expires within
    30 days is warned about there too (#345); `yad doctor` reports where each code repo's CI gets it.
@@ -118,6 +118,15 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     `templates/hooks/ledger-guard-cursor.mjs` and a `preToolUse` entry in `.cursor/hooks.json`.
     Fails OPEN; see "Step 2b" below. Every hook is a Node script the entry runs as `node <script>`, so
     it needs no bash and no execute bit and runs on Windows too (E113).
+  - `templates/hooks/agent-guard.mjs` → **Product-only**, in **both** ledger modes (E158): the harness
+    hook that runs `yad hook agent-guard` before every shell command an AI agent sends. It refuses a yad
+    command only the person may run (`gate approve`, `comment`, `advance`, `reopen`, `commit --manual`),
+    approving or merging a PR/MR (`gh pr review --approve`, `gh pr merge`, `glab mr approve|merge|accept`, or the
+    same through `gh api`/`glab api`), skipping the git hooks (`git commit --no-verify` or `-n`,
+    `YAD_HOOK_DISABLE=…`, `core.hooksPath`), and a force push (`--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), and tells the agent to hand it to the person. Wired as a `PreToolUse` entry on `Bash` in
+    `.claude/settings.json` and a `beforeShellExecution` entry in `.cursor/hooks.json`, so it runs only in
+    a session opened at the Product folder; a code repo has none. Fails OPEN, and is a speed bump, not
+    proof: a command inside a script is not seen, and Codex has no hooks.
   - `templates/hooks/yad-capture.mjs` → **Product-only**, in **both** ledger modes (E43): the post-edit
     harness hook that runs `yad capture --hook`, which snapshots every changed Shape artifact onto the
     person's private `yad/wip/<name>/<epic>` branches without touching the checkout. Wired as a
@@ -193,6 +202,11 @@ Copy from this skill's `templates/`:
     human to paste (graceful degradation — never guess-edit a pipeline you cannot parse).
   - The legacy standalone `templates/gitlab/.gitlab-ci.yml` is retained only for a clean greenfield repo
     that prefers a single self-contained file; the include path above is the default.
+  - **CI/CD variables, tokens and branch protection are the person's (E158).** An AI agent gives them
+    the steps below, never sets one itself, and confirms by reading once they say it is done.
+    `yad doctor` reads branch protection and where `YAD_PRODUCT_TOKEN` is set; it cannot read the
+    `YAD_RUNNER_TAGS` or `YAD_NODE_VERSION` values, so for those, ask the person and take the next
+    green pipeline as the proof. It runs `yad update --overwrite-local` only when the person asks.
   - **Tag-locked runners** (`run_untagged: false`, common on self-hosted): the fragment's jobs run a
     docker image, so set a `YAD_RUNNER_TAGS` CI/CD variable (e.g. `dind_runner`) to route them — every
     GitLab fragment's jobs carry `tags: [$YAD_RUNNER_TAGS]`. When unset, current GitLab (≥15) drops the
@@ -214,7 +228,8 @@ Copy from this skill's `templates/`:
   - **Do not hand-edit the fragments to fit a runner.** They are managed bytes: `yad check` reports a
     hand-edited one as `modified`, and a plain `yad update` leaves it alone — so it never receives a
     fix again. Both runner settings above are CI/CD variables, so no edit is needed: move the
-    customisation into them, then run `yad update --overwrite-local` to restore the fragment (it keeps
+    customisation into them (the person's, above), then, when the person asks, run
+    `yad update --overwrite-local` to restore the fragment (it keeps
     a `.yad-orig` copy of the edited one first). `yad doctor` warns when a wired
     fragment has no `tags:` (`YAD-CI-001`) or still runs a fixed `node:<n>` image (`YAD-CI-002`, an
     install from before the variable — `yad update` replaces it).
@@ -228,7 +243,9 @@ Copy from this skill's `templates/`:
 
 Re-running `wire` is **idempotent** — markers (`# yad-managed: yad-checks`,
 `# yad-managed-include: yad-checks`) and the include-entry check make a second run a no-op.
-Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff).
+The wiring belongs on the repo's default branch (it is shared infrastructure, not a task diff). Get it
+there with `yad check --fix --open-pr`, which opens a PR/MR without asking; a commit or push straight
+to the default branch needs the person's yes each time (E158).
 
 **The Product is wired the same way.** `repo: product` wires the Product repo itself (platform from `.sdlc/product.json`)
 with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
@@ -236,7 +253,9 @@ with a Product-flavored gate set — see "Wiring the Product" in `references/che
 **The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.mjs` →
 `<product>/hooks/ledger-guard.mjs`, plus the `PreToolUse` entry in `.claude/settings.json`. A project
 whose targets include `.cursor` also gets `templates/hooks/ledger-guard-cursor.mjs` and a `preToolUse`
-entry in `.cursor/hooks.json`. `yad setup` and `yad check --fix` install them; nothing by hand.
+entry in `.cursor/hooks.json`. Every Product, in both ledger modes, also gets the agent guard
+(`templates/hooks/agent-guard.mjs`, above), which stops an agent from running an approval or a force
+push. `yad setup` and `yad check --fix` install them; nothing by hand.
 
 ### Step 2b — the agent guardrail (harness hooks, verified mode only)
 The CI gates speak at CI time. That is too late for one failure the field kept hitting (#171): in
@@ -272,9 +291,9 @@ file-editing tool call and refuses the write up front, naming the command that o
 - **A no-op with a local ledger.** There the ledger is locally owned and the hand-edit the authoring
   skills describe is *correct*, so nothing is wired and nothing is blocked.
 - **It fails OPEN** — no `yad`, no Product, an unreadable config, an unparseable payload all ALLOW, with
-  a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
-  skips one command. A PERSON who must commit a ledger change anyway uses `yad commit --manual --reason
-  "<why>"` (E49) — never the agent on its own initiative.
+  a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. A PERSON can skip it
+  for one command with `YAD_HOOK_DISABLE=1`; never the agent (a NEVER rule, and the agent guard refuses it). A PERSON who must commit a ledger change anyway uses `yad commit --manual --reason
+  "<why>"` (E49) — never the agent, even when asked: it gives the person the exact command (E158).
 - **Known gaps** (both caught by the CI gate instead): a `Bash` tool call (`sed -i epics/…`) is not
   intercepted — matching it would mean parsing shell; and the hook arms sessions **rooted at the
   Product**, since a harness reads hooks from its own project root — a session opened at the workspace

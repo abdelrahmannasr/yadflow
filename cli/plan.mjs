@@ -9,10 +9,12 @@ import {
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
-  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS,
+  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS, AGENT_GUARD_WIRING, AGENT_GUARD_ADAPTERS,
   legacySkillPairs, REMOVED_SKILLS, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
+import { applyMarkedBlock } from './marked-block.mjs';
+import { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, readAllowList, RETIRED_ALLOW_ENTRIES, SHIPPED_ALLOW_LISTS } from './agent-rules.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
 // these so `yad update --push` can stage an EXPLICIT allowlist of exactly what it wrote per repo —
@@ -179,6 +181,7 @@ const displayTarget = (value) => {
   try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
 };
 const ideTargetError = (message) => Object.assign(new Error(message), { code: IDE_TARGET_ERROR_CODE });
+const isDirectory = (full) => { try { return fs.statSync(full).isDirectory(); } catch { return false; } };
 const lstatIfPresent = (full) => {
   try {
     return fs.lstatSync(full);
@@ -316,7 +319,7 @@ export function safeIdeTargetStateFor(root, input) {
 // sight in a repo that uses Cursor for rules alone, and `.claude/` in one that only ever set
 // permissions. Detecting on the bare directory meant that adding `.cursor` to the supported list
 // silently enrolled every such project: no `ideTargets` in the stamp, so this fallback runs, `.cursor`
-// is "detected", and the next `yad check --fix` writes 38 skill folders into `.cursor/skills/`, adds
+// is "detected", and the next `yad check --fix` writes 39 skill folders into `.cursor/skills/`, adds
 // `.cursor/hooks.json`, and stamps the target permanently — for a team that never asked. Requiring
 // `<ide>/skills/` (or `.opencode/commands/`) means detection finds only a directory yad already
 // installs into, which is the question this function was always trying to answer.
@@ -906,6 +909,10 @@ export function repoActions(root, repo) {
     || actions.some((a) => a.status !== 'missing' && a.item.startsWith('checks/'));
   const link = productLinkAction(root, repo, repoRoot);
   if (link) actions.push(link);
+  // E158: the short rules block, in a repo cloned here that is not the Product itself (a monorepo entry has
+  // the Product's full block in the same file). Not relabelled here: like the wiring, it is `new` for `yad
+  // update` only on a wired repo (below), so update never does a repo's one-time setup.
+  if (!samePath(repoRoot, path.resolve(root)) && isDirectory(repoRoot)) actions.push(...agentFileActions(repoRoot, ideTargetsFor(root), { scope: repo.name, lines: pointerBlock(), relabel: false }));
   if (!wired) return actions;
   // The record is not a template: an absent one on a wired repo is always `new` (nothing to respect).
   const neverWritten = (a) => !a.managed || !ledger[rel(a.managed.root, a.managed.dest)];
@@ -1181,7 +1188,8 @@ export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
 // bytes against — the file belongs to the team and we own exactly one entry inside it. So it is also
 // deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
 // byte-matches its src); the marker above is its provenance instead.
-function hookSettingsAction(root, adapter) {
+const unparsedSaid = new Set();
+function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(obj, adapter)) {
   const ide = adapter.target;
   const relDest = adapter.settings;
   const dest = path.join(root, relDest);
@@ -1202,7 +1210,7 @@ function hookSettingsAction(root, adapter) {
   // `shared` names the file for `yad update --open-pr`, which stages it only when the change is yad's alone
   // (reconcile; E157 update review 11): without it a merged update ships a hook script nothing runs.
   // `mergeShared` adds yad's entry to a settings object, so reconcile can tell a file that is yad's alone.
-  const base = { scope: ide, item: path.basename(relDest), root, paths: [], shared: relDest, mergeShared: (obj) => mergeHookSettings(obj, adapter) };
+  const base = { scope: ide, item: path.basename(relDest), root, paths: [], shared: relDest, mergeShared: merge };
   // A settings file we cannot READ is never rewritten — not even by `--overwrite-local`.
   //
   // For a managed file, `--overwrite-local` restores the shipped template, which is coherent. Here
@@ -1216,15 +1224,19 @@ function hookSettingsAction(root, adapter) {
   // hand — "replace them with `yad update --overwrite-local`" — advice that can never clear this,
   // since this action deliberately writes nothing. The specific reason has to surface either way.
   if (unreadable) {
-    warn(`${relDest} does not parse — the ${adapter.label || 'ledger guard'} cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
-    return { ...base, status: 'modified', apply: () => {} };
+    // Said once per file, not once per action: up to four share `.claude/settings.json` (E158 review 1).
+    if (!unparsedSaid.has(`${dest}\0${raw}`)) {
+      unparsedSaid.add(`${dest}\0${raw}`);
+      warn(`${relDest} does not parse — yad's entries in it (hooks, the read-only allow list) cannot be written; fix the JSON, then re-run \`yad check --fix\``);
+    }
+    return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
-  const { changed, unreadable: unmergeable } = mergeHookSettings(parsed, adapter);
+  const { changed, unreadable: unmergeable } = merge(parsed);
   // Same treatment as a file that does not parse, and for the same reason: everything in it is the
   // team's, there is no shipped template to restore, and `--overwrite-local` must not invent one.
   if (unmergeable) {
     warn(`${relDest}: ${unmergeable} — the ${adapter.label || 'ledger guard'} cannot be wired without discarding what is there; fix it by hand, then re-run \`yad check --fix\``);
-    return { ...base, status: 'modified', apply: () => {} };
+    return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
   return {
     ...base,
@@ -1249,7 +1261,7 @@ function hookSettingsAction(root, adapter) {
           warn(`${relDest} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
           return;
         }
-        const merged = mergeHookSettings(current, adapter);
+        const merged = merge(current);
         if (merged.unreadable) {
           warn(`${relDest}: ${merged.unreadable} — left untouched; fix it by hand, then re-run \`yad check --fix\``);
           return;
@@ -1258,9 +1270,77 @@ function hookSettingsAction(root, adapter) {
         return;
       }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      writeJSON(dest, mergeHookSettings({}, adapter).settings);
+      writeJSON(dest, merge({}).settings);
     },
   };
+}
+
+// A block yad owns inside a file the team owns (E158): AGENTS.md and CLAUDE.md. Like the agent settings file
+// above, the file is the team's, so `paths` is EMPTY (`yad update --push` never stages it) and `shared` names it
+// for `yad update --open-pr`, which stages it only when the change is yad's block alone (reconcile). It is
+// text, not JSON: `mergeShared` puts the block into a file's text.
+function blockState(dest, opts) {
+  let raw = null;
+  try {
+    const st = lstatIfPresent(dest);
+    if (st) raw = st.isFile() ? fs.readFileSync(dest, 'utf8') : undefined;
+  } catch { raw = undefined; }
+  // Not a plain file yad can read (a folder, a symbolic link that could point anywhere, no permission).
+  if (raw === undefined) return { raw, state: 'unreadable', refused: 'it is not a file yad can read' };
+  const now = applyMarkedBlock(raw, opts);
+  if (now.refused) return { raw, state: 'refused', refused: now.refused };
+  // A file with no block is `missing` too: the BLOCK is missing. So `yad update` adds it only where it adds
+  // other missing files (the Product, a wired repo), never to the team's own AGENTS.md in a repo yad never set up.
+  return { raw, state: now.status === 'ok' ? 'ok' : now.status === 'new' ? 'missing' : 'outdated', refused: null, exists: raw !== null };
+}
+
+function markedBlockAction(root, relDest, lines, { scope = 'product' } = {}) {
+  const dest = path.join(root, relDest);
+  const opts = { ...AGENTS_MARKERS, lines };
+  const base = { scope, item: relDest, root, paths: [], shared: relDest, kind: 'text', mergeShared: (text) => applyMarkedBlock(text, opts) };
+  const { state, refused } = blockState(dest, opts);
+  // Never written, said once at plan time. Markers yad cannot trust are never guessed around: the team's
+  // text is left as it is (as a broken config.yaml region is, cli/lifecycle.mjs).
+  if (refused) {
+    warn(`${scope}/${relDest}: ${refused} — the yadflow rules block was left out; ${state === 'refused' ? 'fix the markers (or delete both to have the block added again)' : 'make it a plain file'}, then re-run \`yad check --fix\``);
+    return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
+  }
+  return {
+    ...base,
+    status: state,
+    // Re-read at apply() time: the file may have been written since the plan was built.
+    apply: () => {
+      const now = blockState(dest, opts);
+      if (now.refused) { warn(`${scope}/${relDest}: ${now.refused} — left untouched`); return; }
+      if (now.state === 'ok') return;
+      const next = applyMarkedBlock(now.raw, opts);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, next.text);
+    },
+  };
+}
+
+// The always-read instruction files (E158): AGENTS.md with yad's rules block, which Codex, Cursor, Copilot and
+// Gemini read, and, for a project that installs for Claude Code, CLAUDE.md importing it. `lines` is the
+// Product's full block by default; a connected code repo gets the short pointer block (`repoActions`).
+// Relabelled `new`, so `yad update` brings them to an install that predates them.
+export function agentFileActions(root, ideTargets = ideTargetsFor(root), { scope = 'product', lines = agentsBlock(), relabel = true } = {}) {
+  const actions = [markedBlockAction(root, 'AGENTS.md', lines, { scope })];
+  // Only the target's name is read here: nothing is written under it.
+  if (canonicalIdeTargets(ideTargets).includes('.claude')) actions.push(markedBlockAction(root, 'CLAUDE.md', claudeBlock(), { scope }));
+  return relabel ? actions.map(asNew) : actions;
+}
+
+// The same files, for `yad doctor`: each one's state, with nothing printed. `state` is ok | outdated | missing (no
+// block; `exists` says whether the file is there) | refused (markers yad cannot trust) | unreadable (not a plain
+// file).
+export function agentFilesState(root, ideTargets = ideTargetsFor(root), lines = agentsBlock()) {
+  const files = [['AGENTS.md', lines]];
+  if (canonicalIdeTargets(ideTargets).includes('.claude')) files.push(['CLAUDE.md', claudeBlock()]);
+  return files.map(([file, l]) => {
+    const { state, refused, exists = true } = blockState(path.join(root, file), { ...AGENTS_MARKERS, lines: l });
+    return { file, state, refused, exists };
+  });
 }
 
 // Harness-hook wiring on the Product: the guard script plus, per IDE target that defines a hook protocol,
@@ -1377,14 +1457,25 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
 // and `yad check` print it.
 export const GIT_HOOK_MARKER = '# yadflow ledger-guard (E48)';
 const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-export function gitPreCommitScript(prefix = '') {
+// The last two comment lines of the script, today's first. The earlier ones are kept so a copy yad wrote
+// before is still known as yad's own (`orphanGitHookActions` removes only yad's bytes).
+const PRE_COMMIT_NOTES = [
+  ['# node, or no guard script, it allows. A person can skip it once with YAD_HOOK_DISABLE=1 (never an AI',
+    '# agent). Git runs it from the top of the repo. yad rewrites this file; to stop it, delete the file.'],
+  // Up to E158.
+  ['# node, or no guard script, it allows. Skip it once with YAD_HOOK_DISABLE=1. Git runs it from the top',
+    '# of the repo. yad rewrites this file; to stop it, delete the file.'],
+];
+export const gitPreCommitScript = (prefix = '') => preCommitScript(prefix, PRE_COMMIT_NOTES[0]);
+// Every text yad has written for this hook, today's first.
+export const gitPreCommitScripts = (prefix = '') => PRE_COMMIT_NOTES.map((notes) => preCommitScript(prefix, notes));
+function preCommitScript(prefix, notes) {
   return [
     '#!/bin/sh',
     `${GIT_HOOK_MARKER} — installed in this clone by \`yad check --fix\`.`,
     '# Refuses a commit that changes a file only CI may change on a verified Product (the gate ledger and',
     '# the Product index), the same files the `ledger-guard` check in CI refuses. It fails open: with no',
-    '# node, or no guard script, it allows. Skip it once with YAD_HOOK_DISABLE=1. Git runs it from the top',
-    '# of the repo. yad rewrites this file; to stop it, delete the file.',
+    ...notes,
     `guard=${shQuote(`${prefix}hooks/ledger-guard.mjs`)}`,
     'command -v node >/dev/null 2>&1 || exit 0',
     '[ -f "$guard" ] || exit 0',
@@ -1442,7 +1533,9 @@ export function gitHookState(root) {
   let runnable = true;
   if (process.platform !== 'win32') { try { runnable = (fs.statSync(file).mode & 0o111) !== 0; } catch { runnable = false; } }
   if (text === expected && runnable) return { applies: true, file, expected, prefix, state: 'ok' };
-  return { applies: true, file, expected, prefix, state: 'outdated', why: text === expected ? 'not-executable' : 'changed' };
+  // `earlier`: a text an earlier yad wrote, so nothing in it is anyone's edit.
+  const why = text === expected ? 'not-executable' : gitPreCommitScripts(prefix).includes(text) ? 'earlier' : 'changed';
+  return { applies: true, file, expected, prefix, state: 'outdated', why };
 }
 
 // The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
@@ -1453,9 +1546,8 @@ export function gitHookActions(root) {
   const status = st.state === 'missing' ? 'new' : st.state;
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
   // the same rule `wiredFileAction` keeps for content it cannot prove it wrote. Not when only the execute
-  // bit is missing: nothing of anyone's is being replaced then.
-  const sameBytes = st.state === 'outdated' && (() => { try { return fs.readFileSync(st.file, 'utf8') === st.expected; } catch { return false; } })();
-  const backup = st.state === 'outdated' && !sameBytes ? backupPathFor(st.file) : null;
+  // bit is missing, nor when it is a text an earlier yad wrote: nothing of anyone's is being replaced then.
+  const backup = st.state === 'outdated' && st.why === 'changed' ? backupPathFor(st.file) : null;
   return [{
     scope: 'product',
     item: 'pre-commit git hook (this clone)',
@@ -1482,7 +1574,7 @@ export function orphanGitHookActions(root) {
   const file = path.resolve(root, hookRel);
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  if (text !== gitPreCommitScript(prefix)) return [];
+  if (!gitPreCommitScripts(prefix).includes(text)) return [];
   return [{ scope: 'product', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
 }
 
@@ -1560,6 +1652,124 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
       if (!exists(dest)) continue;
       actions.push({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
     }
+  }
+  return actions;
+}
+
+// The read-only yad commands, pre-approved for Claude Code (E158, issue #353): `readAllowList` added to
+// `permissions.allow` in `.claude/settings.json`. Additive: the team's own entries are kept, and an entry of
+// ours already there is not added twice. A shape it cannot read is refused, as the hook merge refuses one.
+export function mergeAllowList(input) {
+  if (isPlainObject(input)) {
+    if (Object.hasOwn(input, 'permissions') && !isPlainObject(input.permissions)) return { settings: input, changed: false, unreadable: 'permissions is not an object' };
+    if (isPlainObject(input.permissions) && Object.hasOwn(input.permissions, 'allow') && !Array.isArray(input.permissions.allow)) {
+      return { settings: input, changed: false, unreadable: 'permissions.allow is not a list' };
+    }
+  }
+  const settings = { ...(isPlainObject(input) ? input : {}) };
+  const permissions = { ...(isPlainObject(settings.permissions) ? settings.permissions : {}) };
+  const allow = Array.isArray(permissions.allow) ? [...permissions.allow] : [];
+  const missing = readAllowList().filter((e) => !allow.includes(e));
+  if (!missing.length) return { settings, changed: false };
+  permissions.allow = [...allow, ...missing];
+  settings.permissions = permissions;
+  return { settings, changed: true };
+}
+
+// The settings action that writes it, for a configured Product that installs for Claude Code.
+export const ALLOW_LIST_ADAPTER = Object.freeze({ target: '.claude', settings: '.claude/settings.json', label: 'read-only yad allow list' });
+export function allowListActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root)) || !safeIdeTargetsFor(root, ideTargets).includes('.claude')) return [];
+  return [asNew({ ...hookSettingsAction(root, ALLOW_LIST_ADAPTER, mergeAllowList), item: `${path.basename(ALLOW_LIST_ADAPTER.settings)} (read-only yad commands)` })];
+}
+
+// yad's allow-list entries that should no longer be there: all of them once `.claude` has left the IDE targets,
+// and, while it is a target, those a later yadflow stopped pre-approving (`RETIRED_ALLOW_ENTRIES`). Only these
+// exact strings come out; every other entry is the team's and stays. A file that does not parse is left alone.
+//
+// A team may type one of yad's strings by hand (`Bash(yad status:*)`), so with `.claude` gone the list comes out
+// only when ALL the entries of a list yad wrote are there (today's, or one an older release wrote and no
+// `check --fix` brought up to date, `SHIPPED_ALLOW_LISTS`): that is yad's list, not a hand-picked line.
+export function orphanAllowListActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const file = path.join(root, ALLOW_LIST_ADAPTER.settings);
+  if (!exists(file)) return [];
+  let wholeList = false;
+  if (!safeIdeTargetsFor(root, ideTargets).includes('.claude')) {
+    try {
+      const allow = JSON.parse(fs.readFileSync(file, 'utf8'))?.permissions?.allow;
+      wholeList = Array.isArray(allow) && [readAllowList(), ...SHIPPED_ALLOW_LISTS].some((list) => list.every((e) => allow.includes(e)));
+    } catch { return []; }
+  }
+  const gone = new Set(wholeList ? [...readAllowList(), ...SHIPPED_ALLOW_LISTS.flat(), ...RETIRED_ALLOW_ENTRIES] : RETIRED_ALLOW_ENTRIES);
+  if (!gone.size) return [];
+  const without = (obj) => {
+    if (!isPlainObject(obj) || !isPlainObject(obj.permissions) || !Array.isArray(obj.permissions.allow)) return null;
+    const allow = obj.permissions.allow.filter((e) => !gone.has(e));
+    return allow.length === obj.permissions.allow.length ? null : { ...obj, permissions: { ...obj.permissions, allow } };
+  };
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
+  if (!without(parsed)) return [];
+  return [{
+    scope: ALLOW_LIST_ADAPTER.target,
+    item: `${path.basename(file)} (read-only yad commands removed)`,
+    status: 'removed',
+    root,
+    paths: [],
+    apply: () => {
+      let current;
+      try { current = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+      const next = without(current);
+      if (next) writeJSON(file, next);
+    },
+  }];
+}
+
+// The agent guard (E158): the script, and per IDE target with a hook protocol the entry that runs it before
+// every shell command the agent sends. On every configured Product, in both ledger modes (see the manifest).
+// The script and its entries land together, for the reason `hookActions` gives.
+export function agentGuardActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const ledger = readManagedLedger(root);
+  const actions = AGENT_GUARD_WIRING.map((w) =>
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+  );
+  for (const ide of safeIdeTargetsFor(root, ideTargets)) {
+    const adapter = AGENT_GUARD_ADAPTERS[ide];
+    if (adapter) actions.push(hookSettingsAction(root, adapter));
+  }
+  return actions.map(asNew);
+}
+
+// An agent-guard entry for a target that left `ideTargets`: only OUR entry comes out, as
+// `orphanCaptureHookActions` does it. The script stays while the Product is configured (a remaining target
+// may still run it; with none, it is one file nothing runs, and `yad check` names nothing wrong with it).
+export function orphanAgentGuardActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const kept = new Set(safeIdeTargetsFor(root, ideTargets));
+  const actions = [];
+  for (const adapter of Object.values(AGENT_GUARD_ADAPTERS)) {
+    if (kept.has(adapter.target)) continue;
+    const settingsPath = path.join(root, adapter.settings);
+    if (!exists(settingsPath)) continue;
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
+    if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
+    actions.push({
+      scope: adapter.target,
+      item: `${path.basename(adapter.settings)} (agent guard entry removed)`,
+      status: 'removed',
+      root,
+      paths: [],
+      apply: () => {
+        let current;
+        try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+        if (!isPlainObject(current)) return;
+        const { settings, changed } = unmergeHookSettings(current, adapter);
+        if (changed) writeJSON(settingsPath, settings);
+      },
+    });
   }
   return actions;
 }

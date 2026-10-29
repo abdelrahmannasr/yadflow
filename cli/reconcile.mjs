@@ -1,6 +1,7 @@
 // `yad check` (report) and `yad check --fix` (reconcile) — and `yad update`
 // as a thin alias (--scope=changed). Inspects actual project state against the
 // manifest: missing setup, drifted files, stale code-context.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -12,7 +13,7 @@ const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch {
 import { preflightGuardReadiness } from './productcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions,
+  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, orphanAgentGuardActions, allowListActions, orphanAllowListActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
@@ -61,6 +62,12 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     // E123: a renamed CI file the team edited is kept, and its new name is not installed beside it.
     ...withoutKeptRenames([...productActions(root), ...legacyProductActions(root)]), ...hookActions(root, ideTargets),
+    // E158: the rules block in AGENTS.md (and CLAUDE.md importing it), which every agent reads first.
+    ...agentFileActions(root, ideTargets),
+    // E158: the agent guard, before every shell command the agent runs.
+    ...agentGuardActions(root, ideTargets), ...orphanAgentGuardActions(root, ideTargets),
+    // E158 (#353): the read-only yad commands, pre-approved for Claude Code.
+    ...allowListActions(root, ideTargets), ...orphanAllowListActions(root, ideTargets),
     ...orphanHookActions(root, ideTargets),
     // E48: this clone's git pre-commit hook — the person's half of the ledger guard.
     ...gitHookActions(root), ...orphanGitHookActions(root),
@@ -170,7 +177,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A managed file the team edited is NEVER rewritten by a plain update — that silent clobber is what
   // #164 reported. It is reported on every run (honest drift) until either the edit is dropped or
   // `--overwrite-local` replaces it, which still saves the previous content beside it.
-  const modified = actions.filter((a) => a.status === 'modified');
+  // An action that writes nothing (`writesNothing`: a settings file that does not parse, rules-block markers yad
+  // cannot trust) has said why at plan time, and `--overwrite-local` cannot fix it either: it is left out here
+  // and from what --fix applies, so no run says it was fixed.
+  const modified = actions.filter((a) => a.status === 'modified' && !a.writesNothing);
   for (const m of modified) {
     // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
     warn(m.item === PRODUCT_LINK
@@ -227,6 +237,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
 
   let fixable = actions.filter((a) =>
     a.status !== 'ok'
+    && !a.writesNothing
     && (a.status !== 'modified' || overwriteLocal)
     && (scope === 'all' ? true : a.status !== 'missing'),
   );
@@ -307,11 +318,23 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const sharedText = (f) => (exists(f) ? fs.readFileSync(f, 'utf8') : null);
   if (openPr) {
     for (const a of actions) {
-      if (!a.shared || !a.root || !live(a)) continue;
+      // Only a file this run writes, or one already right: a rules block `yad update` leaves out (an unwired
+      // repo's AGENTS.md is `missing`) or one it cannot write (`writesNothing`) is never staged or reported
+      // (E158 review 4).
+      if (!a.shared || !a.root || !live(a) || (a.status !== 'ok' && !fixable.includes(a))) continue;
       const file = path.join(a.root, a.shared);
       if (!shared.has(file)) {
-        const head = run('git', ['show', `HEAD:${a.shared}`], { cwd: a.root, maxBuffer: 64 * 1024 * 1024 });
-        shared.set(file, { a, merges: [], disk: sharedText(file), head: head.ok ? head.stdout : null });
+        // A text file is read as committed, not trimmed (`run` trims): its trailing lines are part of the text
+        // yad's block is merged into (E158 review 1).
+        let head;
+        if (a.kind === 'text') {
+          const r = spawnSync('git', ['show', `HEAD:${a.shared}`], { cwd: a.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+          head = r.status === 0 ? r.stdout : null;
+        } else {
+          const r = run('git', ['show', `HEAD:${a.shared}`], { cwd: a.root, maxBuffer: 64 * 1024 * 1024 });
+          head = r.ok ? r.stdout : null;
+        }
+        shared.set(file, { a, merges: [], disk: sharedText(file), head });
       }
       shared.get(file).merges.push(a.mergeShared);
     }
@@ -354,25 +377,35 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     }
   }
   const sharedRows = [];
+  const lf = (t) => t.replace(/\r\n/g, '\n');
   const parse = (t) => { try { const v = JSON.parse(t); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
+  // A settings file is JSON, merged as objects; a rules file (AGENTS.md, CLAUDE.md, E158) is text, with yad's
+  // block put into it. Each kind: how to read it, merge yad's part in, and compare.
+  const KINDS = {
+    // `eq` compares a file's text with what is committed: JSON trimmed (`run` trims git's output), text with its
+    // line endings evened out, since git may store LF where the disk holds CRLF (`core.autocrlf`).
+    json: { read: (t) => parse(t), empty: {}, merge: (o, m) => { if (!o) return undefined; const r = m(o); return r.unreadable ? undefined : r.settings; }, same: (a, b) => JSON.stringify(a) === JSON.stringify(b), eq: (a, b) => a.trim() === b.trim(), what: 'its entries (hooks, the read-only allow list)', reason: 'settings-uncommitted' },
+    text: { read: (t) => t, empty: null, merge: (t, m) => { const r = m(t); return r.refused ? undefined : r.text; }, same: (a, b) => lf(a) === lf(b), eq: (a, b) => lf(a) === lf(b), what: 'its yadflow rules block', reason: 'agents-uncommitted' },
+  };
   for (const [file, e] of shared) {
+    const k = KINDS[e.a.kind ?? 'json'];
     const now = sharedText(file);
-    // `run` trims what git prints, so text is compared trimmed.
-    if (now === null || (e.head !== null && now.trim() === e.head.trim())) continue;
-    const base = e.head === null ? {} : parse(e.head);
-    // What yad alone would make of it: each adapter's entry merged into what is committed.
-    const ours = e.merges.reduce((o, merge) => { if (!o) return null; const m = merge(o); return m.unreadable ? null : m.settings; }, base);
-    // yad's entries are all committed already: nothing of yad's is left out, and the person's own edits in the
+    if (now === null || (e.head !== null && k.eq(now, e.head))) continue;
+    const base = e.head === null ? k.empty : k.read(e.head);
+    // What yad alone would make of it: each adapter's part merged into what is committed.
+    // `undefined` when yad's part cannot be merged (a file that does not parse, markers it cannot trust).
+    const ours = e.merges.reduce((o, merge) => (o === undefined ? undefined : k.merge(o, merge)), base);
+    // yad's parts are all committed already: nothing of yad's is left out, and the person's own edits in the
     // file are theirs to keep or share — no row (E157 update review 12).
-    if (ours && base && JSON.stringify(ours) === JSON.stringify(base)) continue;
-    const was = e.disk === null ? null : parse(e.disk);
+    if (ours !== undefined && base !== null && k.same(ours, base)) continue;
+    const was = e.disk === null ? null : k.read(e.disk);
     const yadsAlone = e.disk === null ? e.head === null
-      : e.head !== null && e.disk.trim() === e.head.trim() ? true
-        : !!(ours && was && JSON.stringify(was) === JSON.stringify(ours));
+      : e.head !== null && k.eq(e.disk, e.head) ? true
+        : !!(ours !== undefined && was !== null && k.same(was, ours));
     if (yadsAlone) { appliedActions.push({ ...e.a, paths: [e.a.shared] }); continue; }
-    const hint = `${e.a.shared} has changes that are not committed, so the update left its hook entry out of the PR/MR: commit ${e.a.shared} as it now stands, through review on a branch of your own`;
+    const hint = `${e.a.shared} has changes that are not committed, so the update left ${k.what} out of the PR/MR: commit ${e.a.shared} as it now stands, through review on a branch of your own`;
     info(`${repoLabel(root, e.a.root)}: ${hint}`);
-    sharedRows.push({ label: repoLabel(root, e.a.root), product: e.a.root === root, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: false, reason: 'settings-uncommitted', hint });
+    sharedRows.push({ label: repoLabel(root, e.a.root), product: e.a.root === root, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: false, reason: k.reason, hint });
   }
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.

@@ -1042,7 +1042,7 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
   // way to commit it is named: a drift there came from a hand edit that got past the guard already.
   const ciOwnedSettled = plan.verified ? settledFiles.filter((f) => !f.startsWith('.sdlc/')) : [];
   if (ciOwnedSettled.length) {
-    warn(`${ciOwnedSettled.join(', ')} ${ciOwnedSettled.length === 1 ? 'is' : 'are'} CI-owned on this verified Product: the ledger-guard check refuses a hand commit of ${ciOwnedSettled.length === 1 ? 'it' : 'them'} — commit the repair with \`yad commit --manual --reason "<why>" --type chore -m "<subject>"\`, which records the reason the check quotes`);
+    warn(`${ciOwnedSettled.join(', ')} ${ciOwnedSettled.length === 1 ? 'is' : 'are'} CI-owned on this verified Product: the ledger-guard check refuses a hand commit of ${ciOwnedSettled.length === 1 ? 'it' : 'them'} — the person commits the repair with \`yad commit --manual --reason "<why>" --type chore -m "<subject>"\` (an AI agent hands it to them, \`!\` in front in Claude Code), which records the reason the check quotes`);
   }
   const move = plan.product?.action === 'move' ? plan.product : null;
   const pending = plan.rows.filter((r) => r.changes);

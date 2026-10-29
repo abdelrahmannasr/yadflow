@@ -1,7 +1,7 @@
 import { Icon } from '../shared/Icon';
 
 const METRICS = [
-  { label: 'yad-* Skills', value: '38', icon: 'extension', color: '#2471a3' },
+  { label: 'yad-* Skills', value: '39', icon: 'extension', color: '#2471a3' },
   { label: 'Pipeline Phases', value: '6', icon: 'route', color: '#1e8449' },
   { label: 'Shape review gates', value: '6', icon: 'rate_review', color: '#ca6f1e' },
   { label: 'Code-repo check jobs', value: '11', icon: 'verified', color: '#b7950b' },

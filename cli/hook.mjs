@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { note, readJSON, run } from './lib.mjs';
 import { isVerifiedLedger, mirrorDrift, productConfigPath, HOOK_PROJECT_DIR_ENVS, PROJECT_FILES } from './manifest.mjs';
 import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
+import { agentGuardDecision, payloadCommand, isCursorPayload } from './agent-guard.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -308,7 +309,9 @@ export function denyMessage({ epic, rel, productRoot }) {
     `  author step done → review opened   yad gate open ${epic} <artifact>`,
     '  the full advance at merge          CI runs `yad gate ci --merged` — nothing to do locally',
     `  a genuinely broken ledger          yad gate repair ${epic} --push`,
+    '                                     (it pushes to the default branch: an AI agent asks the person first)',
     `  an approved step to change         yad gate reopen ${epic} <step> --reason "<why>" --push`,
+    '                                     (the person\'s: an AI agent hands it to them, `!` in front in Claude Code)',
     '',
     'Commit the ARTIFACT only (the .md you authored) and hand off to `yad-review-gate`; the ledger',
     'follows on merge.',
@@ -458,15 +461,19 @@ export function commitDenyMessage({ hits, top }) {
       `  author step done → review opened   yad gate open ${epic} <artifact>`,
       '  the full advance at merge          CI runs `yad gate ci --merged` — nothing to do locally',
       `  a genuinely broken ledger          yad gate repair ${epic} --push`,
+      '                                     (it pushes to the default branch: an AI agent asks the person first)',
       `  an approved step to change         yad gate reopen ${epic} <step> --reason "<why>" --push`,
+      '                                     (the person\'s: an AI agent hands it to them, `!` in front in Claude Code)',
     ] : []),
     ...(index ? ['  the Product index                  CI rebuilds it at merge; read it with `yad index --json`'] : []),
     '',
     ...[...new Set(hits.filter((h) => h.drift).map((h) => h.productRoot))].map((r) => `${driftLine(r)}\n`),
     'Amending a commit to UNDO a ledger change it made? `git commit --amend` is compared with the commit it',
-    'replaces, so this hook cannot tell. Run it as `YAD_HOOK_DISABLE=1 git commit --amend`; the check on the',
-    'pull request judges the result against its parent.',
-    'To commit anyway, with the reason recorded in the commit (it adds a `Ledger-Override:` line):',
+    'replaces, so this hook cannot tell. The person runs it as `YAD_HOOK_DISABLE=1 git commit --amend` (an AI',
+    'agent hands it to them: `!` in front in Claude Code); the check on the pull request judges the result',
+    'against its parent.',
+    'To commit anyway, the person runs this (an AI agent hands it to them), with the reason recorded in the',
+    'commit (it adds a `Ledger-Override:` line):',
     '  yad commit --manual --reason "<why>" --type <type> -m "<subject>"   (add --force above 3 files)',
     'The check on the pull request still fails it, and quotes the reason.',
     `product: ${roots.join(', ')}`,
@@ -599,6 +606,28 @@ export function runLedgerGuardHook({ paths = [], format = 'exit' } = {}) {
     }
     process.stdout.write(`${cursorDeny(verdict.message)}\n`);
     console.error(verdict.message);
+    return 0;
+  }
+  if (verdict.allow) return 0;
+  console.error(verdict.message);
+  process.exitCode = 2;
+  return 2;
+}
+
+// The `yad hook agent-guard` entry point (E158): the shell command in the payload, judged by
+// `agentGuardDecision`, answered in the protocol the payload names (Cursor's `beforeShellExecution` wants a
+// JSON verdict; Claude Code reads the exit code) unless `--format` says which. `YAD_HOOK_DISABLE` turns it
+// off, as it does the ledger guard. Fail-open: no payload, or no command in it, is allowed.
+export function runAgentGuardHook({ format = null } = {}) {
+  const payload = readPayload();
+  const cursor = format ? format === 'cursor' : isCursorPayload(payload);
+  if (format && !HOOK_FORMATS.includes(format)) {
+    note(`yad hook: unknown --format '${format}' — using '${HOOK_FORMATS[0]}' (known: ${HOOK_FORMATS.join(', ')})`);
+  }
+  const verdict = process.env.YAD_HOOK_DISABLE ? { allow: true } : agentGuardDecision(payloadCommand(payload));
+  if (cursor) {
+    process.stdout.write(`${verdict.allow ? CURSOR_ALLOW : cursorDeny(verdict.message)}\n`);
+    if (!verdict.allow) console.error(verdict.message);
     return 0;
   }
   if (verdict.allow) return 0;

@@ -87,11 +87,20 @@ After the last stop:
 - **AI sign-off (your verdict).** State plainly: did the human demonstrate understanding across the
   rubric? Are there any unresolved blocking concerns? "Satisfied" from you means *no unresolved blocking
   concern remains*.
-- **Human sign-off.** The human decides: **approve** or **request changes**. When they approve through
-  this session, submit the approval carrying the engagement marker so the gate records
-  `engagement: verified` — Build: `gh pr review <n> --approve --body "<note>\n\n<!-- yad:engagement verified -->"`
-  (GitLab: `glab mr approve <n>` then a note with the marker); Shape: the human approves via
-  [`yad-review-gate`](../yad-review-gate/SKILL.md) the normal way.
+- **Human sign-off.** The human decides: **approve** or **request changes**, and the human submits it — never
+  you, even when your login could (E158: approving a PR/MR is the person's). Give them the exact command,
+  carrying the engagement marker so the gate records `engagement: verified` — Build:
+  `gh pr review <n> --approve --body "<note>\n\n<!-- yad:engagement verified -->"` (GitLab: `glab mr approve <n>`
+  then a note with the marker); in Claude Code they type it with `!` in front. Shape: the human approves via
+  [`yad-review-gate`](../yad-review-gate/SKILL.md) the normal way. Then confirm by reading:
+  - **Build:** the PR/MR shows the approval at once (`gh pr view <n>`, `glab mr view <n>`).
+  - **Shape, verified Product** (CI writes the ledger): read the review PR/MR the same way, or run
+    `yad gate sync <epic> <artifact>` (it only reads there). The ledger records the approval only when the
+    review merges, so `yad gate status <epic>` shows it only after that merge and a `git pull --ff-only`.
+  - **Shape, platform with a local ledger:** `yad gate sync <epic> <artifact>` records it, and
+    `yad gate status <epic>` shows it at once.
+  - **Shape, no platform:** there is no PR/MR; `yad gate status <epic>` shows the person's
+    `yad gate approve` at once.
 
 "**Both satisfied**" = the human approved **and** your verdict holds no unresolved blocking concern. If
 either is not satisfied, the loop continues (more stops, or the human requests changes and the owner

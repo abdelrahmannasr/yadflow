@@ -210,7 +210,7 @@ approved, never of the default branch when the gate happens to read it (#366). S
 cover one artifact (per-story `review/<epic>/stories-S0N` branches, or a re-review on a fresh MR), and
 another one merged in between, without approvals, would otherwise pass on these approvals. So a
 merged review whose head differs from the default branch passes nothing, and the gate says so and
-names the fix: review the artifact as it stands on a fresh PR/MR — fetch with `git fetch --prune origin`, reset the branch `review/<epic>/<artifact>` to the default branch (`git switch -C`: the merged review's branch is usually still there), add a commit (an empty one is enough: `git commit --allow-empty`), push it with `--force-with-lease`, then run `yad gate open <epic> <artifact>`. A default branch
+names the fix: review the artifact as it stands on a fresh PR/MR — fetch with `git fetch --prune origin`, reset the branch `review/<epic>/<artifact>` to the default branch (`git switch -C`: the merged review's branch is usually still there), add a commit (an empty one is enough: `git commit --allow-empty`), push it with `--force-with-lease`, then run `yad gate open <epic> <artifact>`. The force push is the person's (E158: an agent never force-pushes): an agent gives them the steps, and runs `yad gate open` once they say it is pushed and `git ls-remote origin review/<epic>/<artifact>` shows it. A default branch
 with nothing to fingerprint (every story deleted, a contract with no END marker) passes no approval of
 real content either, and solo mode, which counts no approvals, says nothing. A step already done is
 only re-synced: no hold is printed, and its approvals keep the fingerprint they were recorded with.

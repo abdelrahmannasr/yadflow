@@ -181,7 +181,7 @@ The engine writes everything this step used to spell out by hand (E42):
 
 | The command says | Why | What to do |
 |---|---|---|
-| `<owner> skipped <step>` | a skip is a decision, not an artifact — carrying it would claim a review nobody did | leave that base out of `inherits`, then `yad skip` it on this epic if it does not apply here either |
+| `<owner> skipped <step>` | a skip is a decision, not an artifact — carrying it would claim a review nobody did | leave that base out of `inherits`, then, if it does not apply here either, offer to `yad skip` it on this epic: skipping is the person's decision, so run it only on their yes |
 | `<owner> deferred <step>` | that work is still owed | leave the base out and author it on this epic, so the owed work follows the thread |
 | `<owner> has not finished <step>` | nothing approved exists yet | finish it on the owner, or author it here |
 | `holds no usable contract lock` / `surface no longer matches its lock` | you may skip authoring a contract, never having one | lock (or re-lock) the owner's surface first (`yad-architecture` Step 5) |
@@ -258,7 +258,8 @@ again. Unbound, that command names `yad-architecture` for a contract-surface cha
 
 - **Never mutate a locked artifact.** A change is a new threaded epic, not an edit to a shipped one.
   The one exception is BEFORE Build begins — no story has a Build lane and nothing has shipped: then
-  reopen the approved step with `yad gate reopen <epic> <step> --reason "<why>"` (#322) instead of
+  the person reopens the approved step with `yad gate reopen <epic> <step> --reason "<why>"` (#322; theirs
+  to run, E158: give them the command, then confirm with `yad gate status <epic>`) instead of
   threading a change epic; every gate from that step is approved again.
 - **A change MUST thread to a real parent.** Validate the parent + thread first; STOP on a broken lineage.
 - **Inherit by reference, never copy.** `yad epic new --parent` carries inherited steps as `satisfied` with

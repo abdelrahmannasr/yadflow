@@ -39,6 +39,21 @@ check list. Free-text fields (the summary, the error message) are scrubbed of pa
    URL. Otherwise, fall back to a **prefilled `issues/new` URL** (printed and, on a TTY, opened in the
    browser) so the user can complete it manually.
 
+## From an AI agent (E158)
+An agent that finds a bug in yadflow, or a clear way yadflow could do better, while it works (not a
+problem in the person's own project):
+1. `yad report -m "<one line>" --kind bug|enhancement --json` — a preview; it never posts. Write the line
+   in general words: never a project name, code, a path, a branch, an id or a person.
+2. Show the person the `title` and `body` exactly, and any `related` issues; if one matches, suggest adding
+   to it instead.
+3. Ask every time — it goes to a public repo.
+4. On a yes: `yad report -m "<the same line>" --kind <the same kind> --post --confirm <confirm>`, with the
+   `confirm` value from step 1. yad posts only when the text is exactly what the person saw; anything else
+   posts nothing, and the agent previews and asks again. With no `gh` login it prints the prefilled link.
+
+`--kind enhancement` labels it `enhancement`, titles it `[report] Enhancement: …`, and leaves out the error
+block.
+
 ## Hard rules
 - Reuse the `yad report` command — do not craft issues by hand or shell out to `gh` directly.
 - Reporting is best-effort: it must never crash the CLI or mask the original failure.

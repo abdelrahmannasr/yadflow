@@ -95,7 +95,8 @@ Write it only when you write `done`, and never over a `closed` already on the st
 nudge; otherwise `human`. Persist build-state after every transition so a halt leaves an accurate,
 resumable record.
 
-`checkpoint` = run `yad checkpoint --push` from `{project-root}`. It commits the machine-written
+`checkpoint` = ask the person, then run `yad checkpoint --push` from `{project-root}` (it pushes to the default
+branch, which an agent asks about every time, E158). It commits the machine-written
 Build ledgers (in this loop, the loose `trust-log/` shards this run wrote + `build-state/<story>.json`;
 also the `build-log/` shards at engineer-review) — the shard dirs are what checkpoint stages, the same
 way `git gc` folds loose objects later (`yad tidy up` folds finished shards into the folded

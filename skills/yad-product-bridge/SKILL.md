@@ -108,11 +108,14 @@ same write at the moment it tries it, instead of letting it surface as a CI fail
 Revoke-on-change is enforced at merge: on **GitHub** in code (an approval whose commit ≠ the merged
 head is dropped — no setting needed); on **GitLab** it has no per-approval commit SHA, so enabling the
 platform's **"remove all approvals when commits are added to the source branch"** is **required** for
-the guarantee. Either way it is safe because CI never pushes the review branch — only the owner's own
-artifact pushes dismiss approvals. In verified mode `yad gate sync` is advisory (read-only) and is **not**
-a recovery path; if a merge-time run fails, the scheduled reconcile job re-advances it automatically, or
-a maintainer can force it with `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the
-default branch. (local mode keeps `yad gate sync` as the local writer.)
+the guarantee. It is a platform setting, so the person turns it on (E158); confirm it with
+`glab api projects/:id/approvals` (`reset_approvals_on_push: true`). Either way it is safe because CI
+never pushes the review branch — only the owner's own artifact pushes dismiss approvals. In verified
+mode `yad gate sync` is advisory (read-only) and is **not** a recovery path; if a merge-time run fails,
+the scheduled reconcile job re-advances it automatically, or a maintainer can force it with
+`yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default branch. That is the
+person's to run, never an AI agent's: it pushes to the default branch (E158). (local mode keeps
+`yad gate sync` as the local writer.)
 
 1. Run `yad check --fix` (the wiring is manifest-driven, like `yad-checks`): with a platform +
    enabled bridge in `.sdlc/product.json` it installs
@@ -132,7 +135,16 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
      from the template. See `references/bridge.md`.
 2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes):
    - add `include: - local: '.gitlab/ci/yad-gate-sync.yml'` to the root `.gitlab-ci.yml`, or write
-     `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists;
+     `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists. This is a file in the
+     repo: an AI agent adds it on its own branch and opens a PR/MR, or asks before committing it to the
+     default branch (E158);
+   - the rest of this step (the schedule, the token, the CI/CD variables) is project settings, so it is
+     the person's (E158): an AI agent gives them the steps, never sets one itself, then confirms by
+     reading. `glab api projects/:id/pipeline_schedules` shows the schedule. Never read the token or
+     a variable through the API: GitLab's answer holds the secret value. Ask the person instead. A green
+     scheduled `yad-gate-sync` run proves the schedule and that the token can read the API; its right to
+     push shows only once a run advances a merged review MR, so until then check the token's scopes and
+     role with the person. `yad doctor` does not check these;
    - create the 15-minute pipeline **schedule** (variable `SDLC_GATE_SYNC=true`) and the masked
      `SDLC_GATE_TOKEN` project-access-token variable (`read_api` + `write_repository`). GitLab fires no
      pipeline on an approval alone, and a squash merge can drop the branch name, so the schedule is the
@@ -157,8 +169,9 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
      host whose runner user may do that; otherwise use a docker executor for this job. `yad doctor`
      warns on a fragment that still runs a fixed `node:<n>` image (`YAD-CI-002`); `yad update`
      replaces it — or, if `yad check` lists the file as `modified` (edited by hand), move the change
-     into the CI/CD variables, then run `yad update --overwrite-local`, which keeps a `.yad-orig` copy
-     of each file it replaces.
+     into the CI/CD variables (the person sets them; an AI agent gives the steps, E158), then, when the
+     person asks, run `yad update --overwrite-local`, which keeps a `.yad-orig` copy of each file it
+     replaces.
    - **Git LFS needs nothing extra.** For a Product that uses Git LFS, the runner installs LFS git
      hooks that fail without `git-lfs`, and the job's node image has none — so the job downloads a
      pinned `git-lfs` itself before its checkout (#327; a Product without LFS skips it). A
@@ -167,9 +180,10 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
    PR and pushes the merge advance to the default branch, and the workflow's reconcile **schedule**
    runs automatically (no setup) as the safety net that recovers a merge whose run failed transiently.
    If the default branch is protected, see the workflow header for the bypass / PAT options; until then
-   the run fails visibly — recover by granting the push path, then re-run the workflow or run
-   `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default branch (advisory
-   `yad gate sync` cannot recover a bridge gate).
+   the run fails visibly. The person recovers it (E158: an AI agent gives the steps, then confirms with
+   `yad gate status <epic>` after `git pull --ff-only` on the default branch): grant the push path (a branch-protection or ruleset setting), then re-run
+   the workflow or run `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default
+   branch (advisory `yad gate sync` cannot recover a bridge gate).
 
 ## Hard rules
 
@@ -189,12 +203,17 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
 - **The CI tokens are the one documented bend of "no stored tokens".** GitHub uses the platform's own
   ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`
   project access token because `CI_JOB_TOKEN` can neither read the approvals API nor push — say so
-  when wiring, and scope it to `read_api` + `write_repository` only.
+  when wiring, and scope it to `read_api` + `write_repository` only. Making the token and setting it
+  are the person's (E158): give them these steps. Never read the variable through the API (GitLab's
+  answer holds the secret value); ask the person. A green scheduled `yad-gate-sync` run proves the token
+  can read the API; its right to push shows only once a run advances a merged review MR.
 - **Protect the Product default branch.** Require that `epics/**` artifacts change only through a review
   PR/MR (branch protection). This keeps revoke-on-change sound: it removes the only window where a
   delayed reconcile could advance on an out-of-band post-merge artifact change (see `references/bridge.md`,
   "Known limitation"). Safe to require: a new epic's `.sdlc/` seed rides its first review PR/MR, so
-  nobody needs a direct push to the default branch to start an epic (#162).
+  nobody needs a direct push to the default branch to start an epic (#162). Branch protection is a
+  platform setting, so it is the person's (E158): give them the steps and confirm by reading
+  (`yad doctor`'s `protection` lines).
 - **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs local with no error.
 
 ## Reference

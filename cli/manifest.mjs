@@ -56,6 +56,8 @@ export const SKILLS = [
   'yad-pair-review',
   'yad-status',
   'yad-report',
+  // E158: the rules and the step loop for an AI agent, loaded before any yadflow work.
+  'yad-guide',
   'yad-change',
   'yad-timeline',
   'yad-defects',
@@ -745,6 +747,53 @@ export const CAPTURE_ADAPTERS = Object.freeze({
     observe: true,
     wiring: Object.freeze([]),
     legacyCommands: Object.freeze(['hooks/yad-capture.sh']), // before E113
+  }),
+});
+
+// The agent guard (E158): BEFORE an agent's shell command runs, `hooks/agent-guard.mjs` asks
+// `yad hook agent-guard` whether it is a yad command only the person may run (an approval, a gate comment,
+// advance or reopen, `commit --manual`), a PR/MR approval or merge, skipping the git hooks, or a force push,
+// and refuses it with what to do instead. Wired on every Product, in both ledger modes: it is about the agent's rules, not about who owns the ledger. A
+// speed bump, not proof (cli/agent-guard.mjs). Codex has no hooks: there, only the rules in AGENTS.md apply.
+//
+// ONE script for both harnesses. It reads the payload and answers in the protocol the payload names:
+// Cursor's `beforeShellExecution` is a permission hook (a JSON verdict on stdout, always), Claude Code's
+// `PreToolUse` reads the exit code. So both entries are a program and one path, the form Cursor documents.
+export const AGENT_GUARD_WIRING = [
+  { src: 'skills/yad-checks/templates/hooks/agent-guard.mjs', dest: 'hooks/agent-guard.mjs' },
+];
+export const AGENT_GUARD_ADAPTERS = Object.freeze({
+  '.claude': Object.freeze({
+    target: '.claude',
+    label: 'agent guard',
+    settings: '.claude/settings.json',
+    event: 'PreToolUse',
+    nested: true,
+    preamble: null,
+    // The shell tool: the one way an agent runs a yad command or a git push.
+    matcher: 'Bash',
+    projectDirEnv: CLAUDE_PROJECT_DIR_ENV,
+    // Quoted and anchored on the project root, for the reason the ledger guard's entry is (see above).
+    command: `node "$${CLAUDE_PROJECT_DIR_ENV}/hooks/agent-guard.mjs"`,
+    wiring: Object.freeze([]),
+    legacyCommands: Object.freeze([]),
+  }),
+  '.cursor': Object.freeze({
+    target: '.cursor',
+    label: 'agent guard',
+    settings: '.cursor/hooks.json',
+    // Fires before every shell command the agent runs, and takes no matcher.
+    event: 'beforeShellExecution',
+    nested: false,
+    preamble: Object.freeze({ version: 1 }),
+    matcher: null,
+    projectDirEnv: CURSOR_PROJECT_DIR_ENV,
+    // Relative and unquoted, for the reason the ledger guard's Cursor entry is (see above).
+    command: 'node hooks/agent-guard.mjs',
+    // A permission hook: an empty or off-schema answer BLOCKS, so the script always prints a verdict.
+    requiresJsonVerdict: true,
+    wiring: Object.freeze([]),
+    legacyCommands: Object.freeze([]),
   }),
 });
 

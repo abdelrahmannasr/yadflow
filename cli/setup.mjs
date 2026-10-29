@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
+  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -17,6 +17,7 @@ import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
+import { readAllowList } from './agent-rules.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -254,6 +255,9 @@ export function setupModeFields(root, cur, solo, opts = {}) {
 function applyActions(actions, { force = false } = {}) {
   let changed = 0;
   for (const a of actions) {
+    // An action that cannot write (a settings file that does not parse, rules-block markers yad cannot trust)
+    // said why when it was planned, and `--overwrite-local` would not help it.
+    if (a.writesNothing) continue;
     // A managed file the team edited is left alone here too — setup re-runs with force:true, so
     // without this the wizard would be a second silent-clobber path for the same edits (#164).
     if (a.status === 'modified') {
@@ -654,6 +658,27 @@ export async function runSetup(root, opts = {}) {
     log(`  ${c.bold('product')} ${c.dim('(wip capture)')}`);
     applyActions(captureWiring, { force: true });
     wired.push(...captureWiring);
+  }
+  // E158: the rules block in AGENTS.md (and CLAUDE.md importing it), which an AI agent reads first. The team's
+  // own text in these files is kept; only the lines between yad's markers are written.
+  const agentFiles = agentFileActions(root, ideTargets);
+  log(`  ${c.bold('product')} ${c.dim('(AGENTS.md rules for AI agents)')}`);
+  applyActions(agentFiles, { force: true });
+  // E158: the agent guard — refuses a human-only yad command, a PR/MR approval or merge, skipping the git hooks or
+  // a force push before the agent's shell runs it.
+  const agentGuard = agentGuardActions(root, ideTargets);
+  if (agentGuard.length) {
+    log(`  ${c.bold('product')} ${c.dim('(agent guard)')}`);
+    applyActions(agentGuard, { force: true });
+    wired.push(...agentGuard);
+  }
+  // E158 (#353): the read-only yad commands Claude Code may run without asking — shown before they are written.
+  const allowList = allowListActions(root, ideTargets);
+  // Shown only when it will be written: a settings file that does not parse writes nothing, and says so.
+  if (allowList.some((a) => a.status !== 'ok' && !a.writesNothing)) {
+    log(`  ${c.bold('product')} ${c.dim('(read-only yad commands Claude Code runs without asking, in .claude/settings.json)')}`);
+    for (const e of readAllowList()) log(`    ${c.dim(e)}`);
+    applyActions(allowList);
   }
   // E113: the shell-script hooks a re-run replaces, once the entries above no longer name them.
   const retiredHooks = legacyHookScriptActions(root, ideTargets);

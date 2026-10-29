@@ -83,7 +83,8 @@ silently re-packing the whole repo. A phase never refreshes the registry on its 
 `yad repo refresh` (or `yad check --fix`). After the AI regenerates the code-map, `yad repo refresh
 --push` publishes the refreshed code-maps + registry to the Product's default branch as a `chore(product): sync
 code-context … [skip ci]` audit commit (never the pack's content; `--allow-branch` overrides the branch
-guard). The `pack.md` is gitignored — `yad repo refresh`/`yad setup` scaffold
+guard; it pushes to the default branch, so an AI agent asks the person first, every time, E158). The
+`pack.md` is gitignored — `yad repo refresh`/`yad setup` scaffold
 `.sdlc/code-context/*/pack.md` into the Product `.gitignore` (so a regenerated pack never dirties the tree),
 and a Product that tracked the pack *before* that ignore existed is self-healed: `--push` untracks it and
 lands the removal + the managed `.gitignore` line in the same audit commit. The commit is a scoped

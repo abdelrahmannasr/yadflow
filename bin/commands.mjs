@@ -52,6 +52,6 @@ export { runDial, runKill } from '../cli/dial.mjs';
 export { runMode } from '../cli/mode.mjs';
 export { syncStatuses } from '../cli/artifact-status.mjs';
 export { runThread, runReconcile } from '../cli/thread.mjs';
-export { runReport } from '../cli/report.mjs';
+export { runReport, REPORT_KINDS } from '../cli/report.mjs';
 export { runUsage } from '../cli/usage.mjs';
 export { maybeNotifyUpdate } from '../cli/update-notice.mjs';

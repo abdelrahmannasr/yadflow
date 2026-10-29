@@ -39,7 +39,8 @@ beside it as advice and never refuses on it. The kill switch (`yad kill`) holds 
   `../yad-epic/references/state-schema.md`.
 - These machine-written Build files (`build-state/<story>.json`, the `trust-log/` shards) are
   committed by **`yad checkpoint`** — the Build analogue of the Shape `yad gate` sync; the loop
-  calls it each iteration so the state is durable and shared without a human commit. (`yad checkpoint`
+  calls it each iteration so the state is durable and shared without a human commit — its `--push`, which
+  lands on the default branch, only after the person says yes (E158). (`yad checkpoint`
   stages the shard dirs; `yad tidy up` later folds finished shards — loose objects + `git gc`.)
 - The orchestrator **calls the existing step skills unchanged** — `yad-spec` (A), `yad-implement`
   (B), `yad-checks` (C). It owns only the *advance decision*, never what a step does.
@@ -103,7 +104,8 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    step's skill stopped to ask its human-only questions (its first batch or a later one), the step's
    output is not finished, and a draft is not output to judge: record no trust entry. Run
    `yad build step <story> --repo <repo> <step> blocked [--task <task>] --reason "waiting on human
-   decisions: <the questions, short>"`, run `yad checkpoint --push`, and stop — skip steps 3 and 4.
+   decisions: <the questions, short>"`, ask the person before `yad checkpoint --push` (a push to the default
+   branch is asked about every time, E158), and stop — skip steps 3 and 4.
    **Not when the skill also hit its contract STOP** (a contract-change item in its batch): no answer
    lifts that, so it is the step-4 contract-touch halt, with its trust entry, as before.
 3. **Ask the engine for the effective dial:** `yad dial <epic> <story> --repo <repo> <step> --json`, and use
@@ -140,15 +142,17 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    gate, which finalizes the trust verdict (confirm/override the provisional one).
 
 **Commit the machine-written state.** After each iteration's writes (the trust-log shard in 2 and the
-build-state change in 4), run `yad checkpoint --push` from `{project-root}`. It commits *only* the
+build-state change in 4), ask the person, then run `yad checkpoint --push` from `{project-root}` (a push to
+the default branch is asked about every time, E158). It commits *only* the
 `trust-log/` shards + `build-state/<story>.json` (never a Shape gate file) as one `chore(product): …`
 audit-trail commit, and only ever on the default branch. It is a safe no-op when nothing changed, so
-call it every iteration — teammates don't review these machine writes, but CI and the `yad-status` skill on
+offer it every iteration — teammates don't review these machine writes, but CI and the `yad-status` skill on
 other machines must see current trust evidence. Never run it off the default branch (it will refuse):
 an unpushed or branch-stranded trust log leaves the run record `yad dial` shows out of date.
 
 ### `action: set-dial` — set (or revert) a step's advance dial
-Run `yad dial <epic> <story> --repo <repo> <step> --to <human|auto>` (map `human_approve` → `human` and
+Only when the person asked for this exact change (E158): run
+`yad dial <epic> <story> --repo <repo> <step> --to <human|auto>` (map `human_approve` → `human` and
 `machine_advance` → `auto` first). The engine writes both dial names on the lane step, refuses a gate and
 a lane step `yad-run` has not written yet, and prints the step's run record in that repo **as advice**.
 Relay its output. There is **no threshold** (E34): the team decides, and "it seems fine" is theirs to
@@ -158,7 +162,7 @@ For a Shape author step the team wants on auto, point at `yad dial <step> --to a
 recorded only: this loop never drives a Shape step.
 
 ### `action: kill` / `action: unkill` — the kill switch
-Run `yad kill --reason "<why>"` or `yad unkill [--reason "<why>"]`. The engine records who, when and why
+Only when the person asked for it (E158): run `yad kill --reason "<why>"` or `yad unkill [--reason "<why>"]`. The engine records who, when and why
 in `.sdlc/automation.json`; while the switch is on, **every** step's effective dial is `human`. Tell the
 user to commit that file so every machine and CI sees it. Never set a `kill_switch` in `config.yaml`:
 nothing reads it, and `yad doctor` fails on one left `true`.

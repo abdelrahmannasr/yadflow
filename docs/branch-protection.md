@@ -20,6 +20,7 @@ not read the answer, and the line says why.
 |---|---|---|
 | A local git hook (`.git/hooks/pre-commit`) | Refuses a hand commit to the CI-owned ledger on your machine, with a message naming the right command | **Weak.** It lives in one clone, `yad commit --manual`, `--no-verify` or `YAD_HOOK_DISABLE=1` skips it, and it allows the commit whenever something is wrong with it |
 | The agent hook (`hooks/ledger-guard.mjs`) | Refuses an AI agent's edit to the same files, at the moment of the edit | **Weak**, for the same reasons |
+| The agent guard (`hooks/agent-guard.mjs`, E158) | Refuses an AI agent's shell command that approves, comments on, advances or reopens a gate, commits past the ledger hook (`yad commit --manual`, git's `--no-verify` or `core.hooksPath`, or yad's `YAD_HOOK_DISABLE`), approves or merges a PR/MR with `gh`/`glab` (their `pr`/`mr` commands or their `api`), or force-pushes | **Weak.** It reads the command line only, so a command inside a script or an alias passes; when it cannot read the command, or yad cannot run, it lets the command through (it fails open); it runs only in a session opened at the Product folder, so a code repo has none; Codex has no hooks. It catches the agent's plain mistake, nothing more |
 | **Branch protection on the platform** | Refuses a merge that skipped review or failed a check | **Strong. This is the real enforcement** |
 | The `ledger-guard` check in CI | Fails a pull request that changes the CI-owned ledger | **Strong**, but only when branch protection makes that check required |
 
@@ -169,8 +170,9 @@ the files your commit is about to record. If one of them is a file only CI may c
 or the Product index `.sdlc/index.json` — the commit is refused, and the message names:
 
 - every refused file, and the `git restore --staged` line that takes them out of the commit;
-- the yad command that owns the change (`yad gate open`, `yad gate repair <epic> --push`, or CI at
-  merge);
+- the yad command that owns the change: `yad gate open`; `yad gate repair <epic> --push` (it pushes to the
+  default branch, so an AI agent asks the person first); `yad gate reopen <epic> <step> --reason "<why>"
+  --push` (the person's: an AI agent hands it to them); or CI at merge;
 - the way through, when you have decided the change must land anyway:
   `yad commit --manual --reason "<why>" --type <type> -m "<subject>"` (E49; add `--force` when more
   than 3 files are staged). It is refused when nothing staged is a file this hook refuses. It commits past this hook
@@ -217,7 +219,8 @@ without it allows everything. Where it and the CI check can differ:
 
 - **`git commit --amend`** is judged against the commit it replaces, because git does not tell the hook
   it is an amend. Amending a commit that already changed the ledger passes; amending one to **undo**
-  that change is refused, and the message says to run that amend with `YAD_HOOK_DISABLE=1`.
+  that change is refused, and the message says the person runs that amend with `YAD_HOOK_DISABLE=1` (an AI
+  agent hands it to them).
 - **The bot is matched by name.** CI also needs the platform's Verified signature, so a commit that only
   claims the `yad-gate-sync` name passes here and fails there. (A *signed* commit that claims the name is
   a known gap: the badge proves only who committed. On GitHub CI refuses every such ledger commit; on

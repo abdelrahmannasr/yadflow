@@ -17,7 +17,7 @@ where it matters.
 
 - **The `yad` command-line tool.** It is written in Node and has no dependencies. It sets up a
   project, tells you the next action, runs reviews, and reads the project history.
-- **38 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
+- **39 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
   such as "write the architecture". The skills run in Claude Code, Codex CLI, Cursor, Gemini CLI,
   GitHub Copilot, Zencoder and opencode.
 - **Plain files in git.** Every plan, decision, approval and link lives as a readable file in a
@@ -137,6 +137,35 @@ stops. `yad next` then says the epic review is waiting. How the review passes de
 
 In solo mode no approval is needed. Merging your own pull request (then the same `yad gate sync`,
 unless CI runs it), or `yad gate advance` with no platform, is the human decision. After that, `yad next` names the next step.
+
+**Or let your AI agent drive.** Open the folder in Claude Code or Codex and type:
+
+```text
+Run yadflow here: run `npx -y yadflow@4 guide --json` and follow the yad-guide rules.
+```
+
+The rules call the command `yad`. Install it once (`npm install -g yadflow`) so `yad …` works; without it
+the agent runs `npx yadflow …`, which Claude Code asks you to allow each time.
+
+The agent reads `yad guide` before each step. It tells you what the step is for, whether you can skip
+it, and who does it. Then it does its own part. The parts that are yours (approvals and merges, logins,
+secrets, signing keys, repository settings) it hands to you with the exact command or steps, and it
+checks they were done before it goes on. Setup writes the rules into `AGENTS.md` — the file AI coding
+agents read at the start of a session — and into a `CLAUDE.md` that loads it, so every new session
+starts with them.
+
+In Claude Code and Cursor, in a session opened at the Product folder, a hook also stops the agent. A
+hook is a small script the agent's tool runs before each shell command. It refuses four kinds of
+command when the agent runs them:
+
+- a yad command only you may run (a gate approve, comment, advance or reopen, or `commit --manual`,
+  a commit past the local ledger check, which CI still checks);
+- approving or merging a pull request (GitHub) or merge request (GitLab), a PR/MR, with `gh` or `glab`;
+- skipping the git hooks (`git commit --no-verify`), which would pass the local ledger check;
+- a force push, which overwrites commits already on the server.
+
+The hook reads only the command line, so it catches mistakes, not tricks. In a code repo, and in Codex,
+which has no hooks, only the rules apply.
 
 **Other ways in:**
 
@@ -285,7 +314,7 @@ The record is worth trusting because people approve what goes into it.
   - [working together: capture, claims, owners, fold](docs/CLI.md#working-together-capture-claims-owners-and-fold)
   - [troubleshooting and error codes](docs/CLI.md#troubleshooting-yad-doctor--error-codes)
   - [every CI gate: rules, exemptions and failures](docs/GATES.md)
-  - [all 38 skills](docs/SKILLS.md)
+  - [all 39 skills](docs/SKILLS.md)
   - [the by-hand walkthrough](docs/WALKTHROUGH.md)
 - **Upgrade:** [staying up to date](docs/CLI.md#staying-up-to-date) ·
   [upgrading to 4.0](docs/migrations/upgrading-to-4.md) ·

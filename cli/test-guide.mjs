@@ -133,7 +133,9 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   for (const w of [['open-pr'], ['ship']]) assert.equal(classify(w), 'task-pr', w.join(' '));
   assert.equal(askFor('task-pr'), 'per-dial');
   assert.equal(classify(['docs', 'deploy']), 'local-write', 'it builds here; CI publishes on a push');
-  assert.equal(classify(['report']), 'public-post');
+  // A preview posts nothing; posting is asked every time (E158).
+  assert.equal(classify(['report']), 'read');
+  assert.equal(classify(['report'], ['post']), 'public-post');
   assert.equal(askFor('public-post'), 'each-time');
   assert.equal(classify(['check']), 'read');
   assert.equal(classify(['check'], ['fix']), 'local-write');
@@ -824,6 +826,93 @@ test('hook settings whose yad entries are already committed: the person\'s own e
     assert.ok(r.commits.some((c) => c.opened), JSON.stringify(r.commits));
     assert.match(fs.readFileSync(file, 'utf8'), /npm test/, 'their edit is still there');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('the AGENTS.md rules block rides the update when it is yad\'s change alone; the team\'s committed text is kept', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/7' });
+    put(path.join(A, 'AGENTS.md'), '# Our team rules\n');
+    git(A, ['add', 'AGENTS.md']); git(A, ['commit', '-q', '-m', 'docs: team rules']); git(A, ['push', '-q']);
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'agents-uncommitted'), JSON.stringify(r.commits));
+    const branch = `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`;
+    const files = git(R, ['diff', '--name-only', 'main', branch]).split('\n');
+    assert.ok(files.includes('AGENTS.md'), files.join(', '));
+    const shipped = git(R, ['show', `${branch}:AGENTS.md`]);
+    assert.ok(shipped.startsWith('# Our team rules\n\n<!-- yadflow:begin'), shipped.slice(0, 80));
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('AGENTS.md a run already wrote (its push failed) still rides the update, whatever blank lines the team left at its end', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/9' });
+    put(path.join(A, 'AGENTS.md'), '# Our team rules\n\n\n');
+    git(A, ['add', 'AGENTS.md']); git(A, ['commit', '-q', '-m', 'docs: team rules']); git(A, ['push', '-q']);
+    // The block written on disk, as a run whose push failed leaves it.
+    const { agentFileActions } = await import('./plan.mjs');
+    agentFileActions(A, ['.agents']).forEach((a) => a.apply());
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'agents-uncommitted'), JSON.stringify(r.commits));
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+    assert.ok(files.includes('AGENTS.md'), files.join(', '));
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('AGENTS.md with the team\'s own uncommitted edits never rides the update: said in a row', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/8' });
+    put(path.join(A, 'AGENTS.md'), '# Our team rules\n');
+    git(A, ['add', 'AGENTS.md']); git(A, ['commit', '-q', '-m', 'docs: team rules']); git(A, ['push', '-q']);
+    put(path.join(A, 'AGENTS.md'), '# Our team rules\n\nA new rule, not committed.\n');
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    const row = r.commits.find((c) => c.reason === 'agents-uncommitted');
+    assert.ok(row, JSON.stringify(r.commits));
+    assert.match(row.hint, /left its yadflow rules block out of the PR\/MR: commit AGENTS\.md as it now stands/);
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+    assert.ok(!files.includes('AGENTS.md'), files.join(', '));
+    const now = fs.readFileSync(path.join(A, 'AGENTS.md'), 'utf8');
+    assert.match(now, /A new rule, not committed\./, 'their edit is still there');
+    assert.match(now, /yadflow:end/, 'the block is written on disk');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('a code repo yad never wired: its own AGENTS.md is left alone by update --open-pr, with no row', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  const RT = tmp();
+  const RA = tmp();
+  try {
+    fs.mkdirSync(T); fs.mkdirSync(A);
+    for (const [d, r] of [[T, RT], [A, RA]]) {
+      git(r, ['init', '-q', '--bare', '-b', 'main']);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']);
+      git(d, ['config', 'user.email', 'alice@work.com']);
+      git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]);
+      git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: settings']); git(T, ['push', '-q']);
+    // The team's own AGENTS.md, committed, then edited and not committed (E158 review 4).
+    fs.writeFileSync(path.join(A, 'AGENTS.md'), '# App notes\n');
+    git(A, ['add', 'AGENTS.md']); git(A, ['commit', '-q', '-m', 'docs: notes']); git(A, ['push', '-q']);
+    fs.writeFileSync(path.join(A, 'AGENTS.md'), '# App notes\n\nNot committed.\n');
+    const r = await reconcile(T, { fix: true, scope: 'changed', openPr: true, creator: () => ({ ok: true, url: 'https://github.com/acme/product/pull/10' }) });
+    assert.ok(!r.commits.some((c) => c.reason === 'agents-uncommitted'), JSON.stringify(r.commits));
+    assert.equal(fs.readFileSync(path.join(A, 'AGENTS.md'), 'utf8'), '# App notes\n\nNot committed.\n', 'never written');
+  } finally { for (const d of [P, RT, RA]) fs.rmSync(d, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
 test('--open-pr is all or nothing: one repo that cannot take it, and nothing is written anywhere', async () => {
