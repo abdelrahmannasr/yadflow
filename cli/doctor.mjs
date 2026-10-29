@@ -2958,6 +2958,9 @@ function gitHookCheck(root, checks) {
   } else if (st.state === 'outdated' && st.why === 'not-executable') {
     check(checks, 'git-hook', 'project', 'warn', `git pre-commit ledger guard installed but not executable (${where}) — git skips it`,
       'run `yad check --fix`, which restores the execute bit');
+  } else if (st.state === 'outdated' && st.why === 'earlier') {
+    check(checks, 'git-hook', 'project', 'warn', `git pre-commit ledger guard out of date (${where}) — an earlier yad's text`,
+      'run `yad check --fix`, which rewrites it (nothing in it is anyone\'s edit, so nothing is saved first)');
   } else if (st.state === 'outdated') {
     check(checks, 'git-hook', 'project', 'warn', `git pre-commit ledger guard out of date (${where})`,
       'run `yad check --fix` — it saves the current file beside it before replacing it');

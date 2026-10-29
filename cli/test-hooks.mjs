@@ -951,6 +951,7 @@ test('E48 review 1: a hook without its execute bit is not installed — git skip
 
 test('E158 review 12: a hook text an earlier yad wrote is brought up to date with no backup', async () => {
   const { gitHookActions, gitHookState, gitPreCommitScripts } = await import('./plan.mjs');
+  const { collectDoctor } = await import('./doctor.mjs');
   const { T, product } = verifiedRepo();
   try {
     gitHookActions(product)[0].apply();
@@ -959,6 +960,11 @@ test('E158 review 12: a hook text an earlier yad wrote is brought up to date wit
     const [a] = gitHookActions(product);
     assert.equal(a.status, 'outdated');
     assert.equal(a.backup, null, 'an earlier yad text is yad\'s own: nothing to save');
+    assert.equal(gitHookState(product).why, 'earlier');
+    // E158 review 13: doctor promises no backup for it.
+    const hookCheck = collectDoctor(product).checks.find((c) => c.id === 'git-hook');
+    assert.match(hookCheck.message, /an earlier yad's text/);
+    assert.doesNotMatch(hookCheck.hint, /saves the current file/);
     a.apply();
     assert.equal(gitHookState(product).state, 'ok');
   } finally { cleanup(T); }

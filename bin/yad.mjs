@@ -85,7 +85,7 @@ ${c.bold('Setup & maintenance')}
                        what to do instead. Reads the shell payload on stdin; answers in the
                        protocol the payload names (Cursor: JSON; Claude Code: exit 2).
                        A speed bump, not proof. Wired on every Product by setup / check --fix.
-                       YAD_HOOK_DISABLE=1 skips.
+                       A person's YAD_HOOK_DISABLE=1 skips it.
 
 ${c.bold('Parallel agents')} ${c.dim('(one git worktree per epic — #115)')}
   yad worktree add <epic> [--repo <name>|--all] [--dry-run]

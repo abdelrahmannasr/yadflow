@@ -1533,7 +1533,9 @@ export function gitHookState(root) {
   let runnable = true;
   if (process.platform !== 'win32') { try { runnable = (fs.statSync(file).mode & 0o111) !== 0; } catch { runnable = false; } }
   if (text === expected && runnable) return { applies: true, file, expected, prefix, state: 'ok' };
-  return { applies: true, file, expected, prefix, state: 'outdated', why: text === expected ? 'not-executable' : 'changed' };
+  // `earlier`: a text an earlier yad wrote, so nothing in it is anyone's edit.
+  const why = text === expected ? 'not-executable' : gitPreCommitScripts(prefix).includes(text) ? 'earlier' : 'changed';
+  return { applies: true, file, expected, prefix, state: 'outdated', why };
 }
 
 // The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
@@ -1545,8 +1547,7 @@ export function gitHookActions(root) {
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
   // the same rule `wiredFileAction` keeps for content it cannot prove it wrote. Not when only the execute
   // bit is missing, nor when it is a text an earlier yad wrote: nothing of anyone's is being replaced then.
-  const yadsOwn = st.state === 'outdated' && (() => { try { return gitPreCommitScripts(st.prefix).includes(fs.readFileSync(st.file, 'utf8')); } catch { return false; } })();
-  const backup = st.state === 'outdated' && !yadsOwn ? backupPathFor(st.file) : null;
+  const backup = st.state === 'outdated' && st.why === 'changed' ? backupPathFor(st.file) : null;
   return [{
     scope: 'product',
     item: 'pre-commit git hook (this clone)',

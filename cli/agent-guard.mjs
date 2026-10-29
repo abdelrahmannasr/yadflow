@@ -186,7 +186,8 @@ const PREFIX_VALUE_OPTIONS = new Set(['-u', '-g', '-n', '-C', '-h', '-U', '-r', 
 // A prefix whose letters mean something else (`xargs -r` and `-t` take no value, `sudo -E` none either) reads
 // only its own options that take a value, never the shared list.
 const PREFIX_OWN_VALUE_OPTIONS = {
-  xargs: new Set(['-n', '-s', '-I', '-L', '-P', '-d', '-E', '-a', '--replace', '--max-lines', '--max-args', '--max-chars',
+  // `-J`, `-R` and `-S` are the BSD (macOS) xargs's.
+  xargs: new Set(['-n', '-s', '-I', '-L', '-P', '-d', '-E', '-a', '-J', '-R', '-S', '--replace', '--max-lines', '--max-args', '--max-chars',
     '--max-procs', '--delimiter', '--arg-file', '--eof']),
   stdbuf: new Set(['-i', '-o', '-e', '--input', '--output', '--error']),
   watch: new Set(['-n', '--interval']),
@@ -419,7 +420,7 @@ function apiMethod(w) {
     const m = /^(?:-X|--method=)(.+)$/.exec(w[i]);
     if (m) return m[1].toUpperCase();
   }
-  return w.some((x) => /^(-f|-F|--field|--raw-field|--input)$/.test(x) || /^--(raw-)?field=/.test(x)) ? 'POST' : 'GET';
+  return w.some((x) => /^(-f|-F|--field|--raw-field|--input)$/.test(x) || /^(--(raw-)?field=|-[fF].)/.test(x)) ? 'POST' : 'GET';
 }
 function apiApproval(prog, w, rest) {
   if (rest[0] !== 'api') return false;
@@ -434,7 +435,7 @@ function apiApproval(prog, w, rest) {
       || (method === 'POST' && /merge_requests\/\d+\/approve(\?|$)/.test(path));
   }
   if (method === 'PUT' && /\/pulls\/\d+\/merge(\?|$)/.test(path)) return true;
-  return /\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^(?:--(?:raw-)?field=)?event=APPROVE$/i.test(x));
+  return /\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^(?:--(?:raw-)?field=|-[fF])?event=APPROVE$/i.test(x));
 }
 function platformApproval(words) {
   const w = stripPrefix(words);
