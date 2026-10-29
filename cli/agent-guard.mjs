@@ -3,11 +3,12 @@
 //   - a yad command only the person may run (`classify` in cli/agent-rules.mjs says `human-only`: an
 //     approval, a gate comment or advance or reopen, a commit past the ledger guard);
 //   - approving or merging a PR/MR on the platform (`gh pr review --approve`, `gh pr merge`, `glab mr approve`,
-//     `glab mr merge` or `accept`): the person's, even when the agent's login could;
+//     `glab mr merge` or `accept`, or the same through `gh api`/`glab api` and GraphQL): the person's, even
+//     when the agent's login could;
 //   - a force push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+`
 //     refspec);
 //   - skipping the git hooks, the ledger guard's door (`git commit --no-verify` or `-n`, `YAD_HOOK_DISABLE=…`,
-//     `git -c core.hooksPath=…`): the person's, through `yad commit --manual`.
+//     `git -c core.hooksPath=…`, `git config core.hooksPath <path>`): the person's, through `yad commit --manual`.
 // The refusal says what to do instead: ask the person to run it themselves (`! <command>` in Claude Code).
 //
 // A SPEED BUMP, NOT PROOF. It reads the command line the agent sends, so a command hidden in a script, an
@@ -182,11 +183,13 @@ function backtickEnd(line, from) {
 const PREFIXES = new Set(['env', 'sudo', 'command', 'exec', 'time', 'nohup', 'nice', 'xargs', 'stdbuf', 'watch', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', '{', '!']);
 const PREFIX_VALUE_OPTIONS = new Set(['-u', '-g', '-n', '-C', '-h', '-U', '-r', '-t', '-s', '-k', '-o', '--user', '--group', '--signal',
   '--kill-after', '--unset', '--chdir', '--adjustment', '--output']);
-// A prefix's own options that take a value, where a letter means something else elsewhere (`sudo -E` takes none).
+// A prefix whose letters mean something else (`xargs -r` and `-t` take no value, `sudo -E` none either) reads
+// only its own options that take a value, never the shared list.
 const PREFIX_OWN_VALUE_OPTIONS = {
-  xargs: new Set(['-I', '-L', '-P', '-d', '-E', '-a', '--replace', '--max-lines', '--max-args', '--max-procs', '--delimiter', '--arg-file', '--eof']),
-  stdbuf: new Set(['-i', '-e', '--input', '--error']),
-  watch: new Set(['--interval']),
+  xargs: new Set(['-n', '-s', '-I', '-L', '-P', '-d', '-E', '-a', '--replace', '--max-lines', '--max-args', '--max-chars',
+    '--max-procs', '--delimiter', '--arg-file', '--eof']),
+  stdbuf: new Set(['-i', '-o', '-e', '--input', '--output', '--error']),
+  watch: new Set(['-n', '--interval']),
 };
 const stripPrefix = (words) => {
   const w = words.slice();
@@ -199,7 +202,8 @@ const stripPrefix = (words) => {
       const isTimeout = w[i] === 'timeout';
       const own = PREFIX_OWN_VALUE_OPTIONS[w[i]];
       i++;
-      while (i < w.length && w[i].startsWith('-')) i += PREFIX_VALUE_OPTIONS.has(w[i]) || own?.has(w[i]) ? 2 : 1;
+      const valued = own || PREFIX_VALUE_OPTIONS;
+      while (i < w.length && w[i].startsWith('-')) i += valued.has(w[i]) ? 2 : 1;
       if (isTimeout) i++; // the duration
       continue;
     }
@@ -430,7 +434,7 @@ function apiApproval(prog, w, rest) {
       || (method === 'POST' && /merge_requests\/\d+\/approve(\?|$)/.test(path));
   }
   if (method === 'PUT' && /\/pulls\/\d+\/merge(\?|$)/.test(path)) return true;
-  return /\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^event=APPROVE$/i.test(x));
+  return /\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^(?:--(?:raw-)?field=)?event=APPROVE$/i.test(x));
 }
 function platformApproval(words) {
   const w = stripPrefix(words);
@@ -446,7 +450,8 @@ function platformApproval(words) {
   if (apiApproval(prog, w, rest)) return true;
   if (prog === 'gh') {
     if (rest[0] !== 'pr') return false;
-    if (rest[1] === 'merge') return true;
+    // `--disable-auto` only turns auto-merge off: it merges nothing.
+    if (rest[1] === 'merge') return !options.includes('--disable-auto');
     // An option, never an option's value (`--body "-a"` is text).
     return rest[1] === 'review' && options.some((x) => /^--approve(=|$)/.test(x) || x === '-a');
   }

@@ -850,6 +850,13 @@ test('E48: a local ledger installs nothing, and removes the hook yad wrote — n
     assert.equal(rm.status, 'removed');
     rm.apply();
     assert.equal(fs.existsSync(hook), false);
+    // E158 review 12: the text an earlier yad wrote is yad's too.
+    const { gitPreCommitScripts } = await import('./plan.mjs');
+    const [, earlier] = gitPreCommitScripts('');
+    assert.match(earlier, /Skip it once with YAD_HOOK_DISABLE=1/);
+    fs.writeFileSync(hook, earlier);
+    assert.equal(orphanGitHookActions(product)[0]?.status, 'removed');
+    assert.match(gitPreCommitScript(''), /A person can skip it once with YAD_HOOK_DISABLE=1 \(never an AI\n# agent\)/);
   } finally { cleanup(T); }
 });
 
@@ -937,6 +944,21 @@ test('E48 review 1: a hook without its execute bit is not installed — git skip
     const [a] = gitHookActions(product);
     assert.equal(a.status, 'outdated');
     assert.equal(a.backup, null, 'the bytes are yad\'s own: nothing to save');
+    a.apply();
+    assert.equal(gitHookState(product).state, 'ok');
+  } finally { cleanup(T); }
+});
+
+test('E158 review 12: a hook text an earlier yad wrote is brought up to date with no backup', async () => {
+  const { gitHookActions, gitHookState, gitPreCommitScripts } = await import('./plan.mjs');
+  const { T, product } = verifiedRepo();
+  try {
+    gitHookActions(product)[0].apply();
+    const st = gitHookState(product);
+    fs.writeFileSync(st.file, gitPreCommitScripts(st.prefix)[1], { mode: 0o755 });
+    const [a] = gitHookActions(product);
+    assert.equal(a.status, 'outdated');
+    assert.equal(a.backup, null, 'an earlier yad text is yad\'s own: nothing to save');
     a.apply();
     assert.equal(gitHookState(product).state, 'ok');
   } finally { cleanup(T); }

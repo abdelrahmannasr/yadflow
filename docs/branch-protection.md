@@ -218,7 +218,8 @@ without it allows everything. Where it and the CI check can differ:
 
 - **`git commit --amend`** is judged against the commit it replaces, because git does not tell the hook
   it is an amend. Amending a commit that already changed the ledger passes; amending one to **undo**
-  that change is refused, and the message says to run that amend with `YAD_HOOK_DISABLE=1`.
+  that change is refused, and the message says the person runs that amend with `YAD_HOOK_DISABLE=1` (an AI
+  agent hands it to them).
 - **The bot is matched by name.** CI also needs the platform's Verified signature, so a commit that only
   claims the `yad-gate-sync` name passes here and fails there. (A *signed* commit that claims the name is
   a known gap: the badge proves only who committed. On GitHub CI refuses every such ledger commit; on

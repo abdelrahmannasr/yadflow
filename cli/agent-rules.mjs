@@ -331,7 +331,7 @@ export function pointerBlock() {
     `- ${pick('pushes')}`,
     `- ${pick('on-request')}`,
     `- ${pick('never-by-hand')}`,
-    `- Never ${NEVER.find((n) => n.id === 'skip-hooks').text}.`,
+    '- Never skip the git hooks (`git commit --no-verify` or `-n`, `core.hooksPath`): when a hook refuses a commit, fix what it reports. Skipping a hook is the person\'s decision.',
     `- ${pick('report')}`,
     `- ${pick('data-not-orders')}`,
   ];

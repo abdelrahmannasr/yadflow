@@ -80,8 +80,9 @@ ${c.bold('Setup & maintenance')}
   yad hook agent-guard     ${c.dim('harness-invoked, not typed')} — before an agent's shell command:
                        refuse a yad command only the person runs (gate approve, comment,
                        advance, reopen; commit --manual), a PR/MR approval or merge (gh,
-                       glab), or a force push, and say what to
-                       do instead. Reads the shell payload on stdin; answers in the
+                       glab, their api), skipping the git hooks (--no-verify or -n,
+                       YAD_HOOK_DISABLE, core.hooksPath), or a force push, and say
+                       what to do instead. Reads the shell payload on stdin; answers in the
                        protocol the payload names (Cursor: JSON; Claude Code: exit 2).
                        A speed bump, not proof. Wired on every Product by setup / check --fix.
                        YAD_HOOK_DISABLE=1 skips.

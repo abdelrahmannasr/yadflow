@@ -1457,14 +1457,25 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
 // and `yad check` print it.
 export const GIT_HOOK_MARKER = '# yadflow ledger-guard (E48)';
 const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-export function gitPreCommitScript(prefix = '') {
+// The last two comment lines of the script, today's first. The earlier ones are kept so a copy yad wrote
+// before is still known as yad's own (`orphanGitHookActions` removes only yad's bytes).
+const PRE_COMMIT_NOTES = [
+  ['# node, or no guard script, it allows. A person can skip it once with YAD_HOOK_DISABLE=1 (never an AI',
+    '# agent). Git runs it from the top of the repo. yad rewrites this file; to stop it, delete the file.'],
+  // Up to E158.
+  ['# node, or no guard script, it allows. Skip it once with YAD_HOOK_DISABLE=1. Git runs it from the top',
+    '# of the repo. yad rewrites this file; to stop it, delete the file.'],
+];
+export const gitPreCommitScript = (prefix = '') => preCommitScript(prefix, PRE_COMMIT_NOTES[0]);
+// Every text yad has written for this hook, today's first.
+export const gitPreCommitScripts = (prefix = '') => PRE_COMMIT_NOTES.map((notes) => preCommitScript(prefix, notes));
+function preCommitScript(prefix, notes) {
   return [
     '#!/bin/sh',
     `${GIT_HOOK_MARKER} — installed in this clone by \`yad check --fix\`.`,
     '# Refuses a commit that changes a file only CI may change on a verified Product (the gate ledger and',
     '# the Product index), the same files the `ledger-guard` check in CI refuses. It fails open: with no',
-    '# node, or no guard script, it allows. Skip it once with YAD_HOOK_DISABLE=1. Git runs it from the top',
-    '# of the repo. yad rewrites this file; to stop it, delete the file.',
+    ...notes,
     `guard=${shQuote(`${prefix}hooks/ledger-guard.mjs`)}`,
     'command -v node >/dev/null 2>&1 || exit 0',
     '[ -f "$guard" ] || exit 0',
@@ -1533,9 +1544,9 @@ export function gitHookActions(root) {
   const status = st.state === 'missing' ? 'new' : st.state;
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
   // the same rule `wiredFileAction` keeps for content it cannot prove it wrote. Not when only the execute
-  // bit is missing: nothing of anyone's is being replaced then.
-  const sameBytes = st.state === 'outdated' && (() => { try { return fs.readFileSync(st.file, 'utf8') === st.expected; } catch { return false; } })();
-  const backup = st.state === 'outdated' && !sameBytes ? backupPathFor(st.file) : null;
+  // bit is missing, nor when it is a text an earlier yad wrote: nothing of anyone's is being replaced then.
+  const yadsOwn = st.state === 'outdated' && (() => { try { return gitPreCommitScripts(st.prefix).includes(fs.readFileSync(st.file, 'utf8')); } catch { return false; } })();
+  const backup = st.state === 'outdated' && !yadsOwn ? backupPathFor(st.file) : null;
   return [{
     scope: 'product',
     item: 'pre-commit git hook (this clone)',
@@ -1562,7 +1573,7 @@ export function orphanGitHookActions(root) {
   const file = path.resolve(root, hookRel);
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  if (text !== gitPreCommitScript(prefix)) return [];
+  if (!gitPreCommitScripts(prefix).includes(text)) return [];
   return [{ scope: 'product', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
 }
 
