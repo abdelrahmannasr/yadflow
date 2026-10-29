@@ -417,7 +417,7 @@ const PLATFORM_VALUE_OPTIONS = new Set(['-R', '--repo', '-b', '--body', '-F', '-
 function apiMethod(w) {
   for (let i = 1; i < w.length; i++) {
     if ((w[i] === '-X' || w[i] === '--method') && i + 1 < w.length) return w[i + 1].toUpperCase();
-    const m = /^(?:-X|--method=)(.+)$/.exec(w[i]);
+    const m = /^(?:-X=?|--method=)(.+)$/.exec(w[i]);
     if (m) return m[1].toUpperCase();
   }
   return w.some((x) => /^(-f|-F|--field|--raw-field|--input)$/.test(x) || /^(--(raw-)?field=|-[fF].)/.test(x)) ? 'POST' : 'GET';
@@ -435,7 +435,7 @@ function apiApproval(prog, w, rest) {
       || (method === 'POST' && /merge_requests\/\d+\/approve(\?|$)/.test(path));
   }
   if (method === 'PUT' && /\/pulls\/\d+\/merge(\?|$)/.test(path)) return true;
-  return /\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^(?:--(?:raw-)?field=|-[fF])?event=APPROVE$/i.test(x));
+  return /\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^(?:--(?:raw-)?field=|-[fF]=?)?event=APPROVE$/i.test(x));
 }
 function platformApproval(words) {
   const w = stripPrefix(words);

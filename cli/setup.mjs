@@ -664,7 +664,8 @@ export async function runSetup(root, opts = {}) {
   const agentFiles = agentFileActions(root, ideTargets);
   log(`  ${c.bold('product')} ${c.dim('(AGENTS.md rules for AI agents)')}`);
   applyActions(agentFiles, { force: true });
-  // E158: the agent guard — refuses a human-only yad command or a force push before the agent's shell runs it.
+  // E158: the agent guard — refuses a human-only yad command, a PR/MR approval or merge, skipping the git hooks or
+  // a force push before the agent's shell runs it.
   const agentGuard = agentGuardActions(root, ideTargets);
   if (agentGuard.length) {
     log(`  ${c.bold('product')} ${c.dim('(agent guard)')}`);

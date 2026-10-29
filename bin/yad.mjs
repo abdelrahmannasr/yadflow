@@ -1075,7 +1075,7 @@ async function main() {
     case 'ship':
       // The ledger override is its own act (E49): recorded in its own commit, never folded into a
       // commit-and-open-PR run. Refused, never ignored.
-      if (o.manual || o.reason !== undefined) { refuse('yad ship takes no --manual/--reason: commit with `yad commit --manual --reason "<why>" …`, then `yad open-pr`'); break; }
+      if (o.manual || o.reason !== undefined) { refuse('yad ship takes no --manual/--reason: the person commits with `yad commit --manual --reason "<why>" …` (an AI agent hands it to them, `!` in front in Claude Code), then `yad open-pr`'); break; }
       // Opening on the standing approval follows the checks, not the commit (#356): its own command.
       if (o.via !== undefined) { refuse('yad ship takes no --via: commit, run the checks, then `yad open-pr --via auto`'); break; }
       // A commit body (#357: the Decisions: paragraph) is written by `yad commit`; ship never drops it unseen.

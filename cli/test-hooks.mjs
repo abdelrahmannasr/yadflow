@@ -963,7 +963,7 @@ test('E158 review 12: a hook text an earlier yad wrote is brought up to date wit
     assert.equal(gitHookState(product).why, 'earlier');
     // E158 review 13: doctor promises no backup for it.
     const hookCheck = collectDoctor(product).checks.find((c) => c.id === 'git-hook');
-    assert.match(hookCheck.message, /an earlier yad's text/);
+    assert.match(hookCheck.message, /written by an earlier yad version and not edited since/);
     assert.doesNotMatch(hookCheck.hint, /saves the current file/);
     a.apply();
     assert.equal(gitHookState(product).state, 'ok');
