@@ -1004,6 +1004,9 @@ test('E48 review 2: the agent\'s refusal and the commit refusal say the same thi
     assert.match(m, /yad commit --manual --reason "<why>"/, `${name}: the door for people (E49)`);
     assert.match(m, /check on the pull request\s+still fails it/, `${name}: and what it does not open`);
     assert.doesNotMatch(m, /reach the default branch|CI still refuses/, `${name}: the check runs on pull requests only`);
+    // E158 review 14: each row an AI agent may not simply run says so.
+    assert.match(m, /yad gate repair EP-a --push\n\s+\(it pushes to the default branch: an AI agent asks the person first\)/, `${name}: repair is asked first`);
+    assert.match(m, /yad gate reopen EP-a <step> --reason "<why>" --push\n\s+\(the person's: an AI agent hands it to them/, `${name}: reopen is the person's`);
     assert.doesNotMatch(m, /\n\n\n/, `${name}: no double blank line`);
   }
 });
@@ -1051,6 +1054,7 @@ test('E49: yad ship refuses --manual and --reason rather than ignoring them', ()
     const r = spawnSync(process.execPath, [YAD, 'ship', '--type', 'fix', '-m', 'x', ...flags], { cwd: os.tmpdir(), encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
     assert.notEqual(r.status, 0, flags.join(' '));
     assert.match(r.stdout + r.stderr, /yad ship takes no --manual\/--reason/);
+    assert.match(r.stdout + r.stderr, /the person commits with `yad commit --manual/, 'E158: the door is the person\'s');
   }
 });
 

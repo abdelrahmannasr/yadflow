@@ -170,8 +170,9 @@ the files your commit is about to record. If one of them is a file only CI may c
 or the Product index `.sdlc/index.json` — the commit is refused, and the message names:
 
 - every refused file, and the `git restore --staged` line that takes them out of the commit;
-- the yad command that owns the change (`yad gate open`, `yad gate repair <epic> --push`,
-  `yad gate reopen <epic> <step>` — the person's; an AI agent hands it to them — or CI at merge);
+- the yad command that owns the change: `yad gate open`; `yad gate repair <epic> --push` (it pushes to the
+  default branch, so an AI agent asks the person first); `yad gate reopen <epic> <step> --reason "<why>"
+  --push` (the person's: an AI agent hands it to them); or CI at merge;
 - the way through, when you have decided the change must land anyway:
   `yad commit --manual --reason "<why>" --type <type> -m "<subject>"` (E49; add `--force` when more
   than 3 files are staged). It is refused when nothing staged is a file this hook refuses. It commits past this hook

@@ -29000,6 +29000,7 @@ test('E122: on a verified Product, settling an epic\'s PR-ledger pair says how t
     const all = `${out}\n${said.join('\n')}`;
     assert.match(all, /epics\/EP-x\/\.sdlc\/hub-prs\.json is CI-owned on this verified Product/);
     assert.match(all, /yad commit --manual --reason/);
+    assert.match(all, /the person commits the repair with .* \(an AI agent hands it to them/, 'E158: the door is the person\'s');
     assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), 'utf8'), '[]\n', 'the repair is still made');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
