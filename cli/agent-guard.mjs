@@ -198,9 +198,51 @@ const stripPrefix = (words) => {
 };
 const programOf = (word) => word.split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i, '');
 
+// How package runners start a program. `npx [-y] yadflow[@v] …` or `npx yad …` (and pnpx, bunx), `npx -p
+// yadflow yad …`, `npm [opts] exec|x yadflow|yad -- …`, `pnpm [opts] exec|dlx …`, `pnpm yad …`, `yarn [opts]
+// [workspace <name>] [exec|dlx|run] yad …`, `bun x|run yad …`. `yad` is the program the yadflow package
+// installs, so a local install runs it as `npx yad`.
+const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C']);
+const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--prefix']);
+// The options that take a value and may come before the subcommand or the program (`pnpm -C x yad …`). pnpm's
+// `-c` is `--shell-mode`, which takes none.
+const RUNNER_VALUE_OPTIONS = new Set([...NPX_VALUE_OPTIONS, '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '--filter-prod']);
+const PNPM_VALUE_OPTIONS = new Set([...RUNNER_VALUE_OPTIONS].filter((o) => o !== '-c'));
+const isYadflow = (x) => /^yadflow(@.*)?$/.test(x);
+const dropDashDash = (args) => (args[0] === '--' ? args.slice(1) : args);
+// The first plain word of `w` at or after `from`, past options and the value of an option that takes one.
+const plainAfter = (w, from, valued) => {
+  let i = from;
+  while (i < w.length && w[i].startsWith('-')) i += valued.has(w[i]) ? 2 : 1;
+  return i;
+};
+
+// A package runner's parts: `{prog, start, valued}`, where `start` is the index its options before the program
+// begin at (just past `exec`, `dlx`, `run`, `x` or `workspace <name>`), or null when `w` is not a runner that
+// starts a program.
+function runnerOf(w) {
+  if (!w.length) return null;
+  const prog = programOf(w[0]);
+  const valued = prog === 'pnpm' ? PNPM_VALUE_OPTIONS : RUNNER_VALUE_OPTIONS;
+  if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') return { prog, start: 1, valued };
+  if (prog === 'bun') return w[1] === 'x' || w[1] === 'run' ? { prog, start: 2, valued } : null;
+  if (prog === 'npm') {
+    const k = plainAfter(w, 1, valued);
+    return w[k] === 'exec' || w[k] === 'x' ? { prog, start: k + 1, valued, sub: w[k] } : null;
+  }
+  if (prog === 'pnpm' || prog === 'yarn') {
+    let k = plainAfter(w, 1, valued);
+    // `yarn workspace <name> <program> …` runs the program in that workspace.
+    if (prog === 'yarn' && w[k] === 'workspace') k = plainAfter(w, k + 2, valued);
+    const subs = prog === 'yarn' ? ['exec', 'dlx', 'run'] : ['exec', 'dlx'];
+    return subs.includes(w[k]) ? { prog, start: k + 1, valued, sub: w[k] } : { prog, start: k, valued };
+  }
+  return null;
+}
+
 // The command line a shell runs from its `-c` argument (`bash -c "yad gate approve …"`), or null. A package
-// runner's `-c`/`--call` is one too (`npx -c '<line>'`, `npm exec -c '<line>'`), and `pnpm exec -c` runs the
-// rest of its words as a shell line.
+// runner's `-c`/`--call` before its program is one too (`npx -c '<line>'`, `npm exec -c '<line>'`), and
+// `pnpm exec|dlx -c` runs the rest of its words as a shell line. A program's own `-c` (`vitest -c x`) is not.
 function shellC(words) {
   const w = stripPrefix(words);
   if (!w.length) return null;
@@ -209,59 +251,42 @@ function shellC(words) {
     const c = w.findIndex((x, n) => n > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(x));
     return c > 0 && c + 1 < w.length ? w[c + 1] : null;
   }
-  if (prog === 'pnpm') {
-    const c = w.findIndex((x) => x === '-c' || x === '--shell-mode');
-    return w.includes('exec') && c > 0 && c + 1 < w.length ? w.slice(c + 1).join(' ') : null;
-  }
-  if (prog === 'npx' || prog === 'pnpx' || (prog === 'npm' && (w[1] === 'exec' || w[1] === 'x'))) {
+  const r = runnerOf(w);
+  if (!r) return null;
+  if (r.prog === 'pnpm') {
+    if (r.sub !== 'exec' && r.sub !== 'dlx') return null;
+    // pnpm reads `-c` before or after `exec`: every option up to the program.
     for (let i = 1; i < w.length; i++) {
-      if (w[i] === '-c' || w[i] === '--call') return i + 1 < w.length ? w[i + 1] : null;
-      if (/^--call=/.test(w[i])) return w[i].slice('--call='.length);
+      if (w[i] === r.sub && i === r.start - 1) continue;
+      if (!w[i].startsWith('-')) return null;
+      if (w[i] === '-c' || w[i] === '--shell-mode') return i + 1 < w.length ? w.slice(i + 1).join(' ') : null;
+      if (r.valued.has(w[i])) i++;
     }
+    return null;
+  }
+  if (!['npx', 'pnpx', 'npm'].includes(r.prog)) return null;
+  for (let i = r.start; i < w.length && w[i].startsWith('-'); i++) {
+    if (w[i] === '-c' || w[i] === '--call') return i + 1 < w.length ? w[i + 1] : null;
+    if (/^(--call|-c)=/.test(w[i])) return w[i].slice(w[i].indexOf('=') + 1);
+    if (r.valued.has(w[i])) i++;
   }
   return null;
 }
 
 // The yad argv after the program, or null when the part does not run yad: `yad …` (any path, `yad.mjs` too),
-// `npx [-y] yadflow[@v] …` or `npx yad …` (and pnpx, bunx), `npx -p yadflow yad …`, `npm exec|x yadflow|yad -- …`,
-// `pnpm exec|dlx …`, `pnpm yad …`, `yarn [workspace <name>] [exec|dlx] yad …`, `bun x|run yad …`,
-// `node [options] …/yad.mjs …`. `yad` is the
-// program the yadflow package installs, so a local install runs it as `npx yad`.
-const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C']);
-const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--prefix']);
-// The pnpm and yarn options that take a value and may come before `exec`/`dlx` or the program (`pnpm -C x yad …`).
-const RUNNER_VALUE_OPTIONS = new Set([...NPX_VALUE_OPTIONS, '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '--filter-prod']);
-const isYadflow = (x) => /^yadflow(@.*)?$/.test(x);
-const dropDashDash = (args) => (args[0] === '--' ? args.slice(1) : args);
+// yadflow's `yad` through a package runner (`runnerOf`), or `node [options] …/yad.mjs …`.
 function yadArgs(words) {
   const w = stripPrefix(words);
   if (!w.length) return null;
   const prog = programOf(w[0]);
   if (prog === 'yad' || prog === 'yad.mjs') return w.slice(1);
-  // The first plain word after `from`, past options, and the value of an option that takes one.
-  const plainAfter = (from, valued) => {
-    let i = from;
-    while (i < w.length && w[i].startsWith('-')) i += valued.has(w[i]) ? 2 : 1;
-    return i;
-  };
-  // Where a package runner's program word is: `npx …`, `npm exec …`, `pnpm exec|dlx …`, `pnpm <bin>`,
-  // `yarn [exec|dlx] …`.
-  let from = -1;
-  if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') from = 1;
-  else if (prog === 'bun' && (w[1] === 'x' || w[1] === 'run')) from = 2;
-  else if (prog === 'npm' && (w[1] === 'exec' || w[1] === 'x')) from = 2;
-  else if (prog === 'pnpm' || prog === 'yarn') {
-    let k = plainAfter(1, RUNNER_VALUE_OPTIONS);
-    // `yarn workspace <name> <program> …` runs the program in that workspace.
-    if (prog === 'yarn' && w[k] === 'workspace') k = plainAfter(k + 2, RUNNER_VALUE_OPTIONS);
-    from = ['exec', 'dlx'].includes(w[k]) ? k + 1 : k;
-  }
-  if (from > 0) {
-    const i = plainAfter(from, RUNNER_VALUE_OPTIONS);
+  const r = runnerOf(w);
+  if (r) {
+    const i = plainAfter(w, r.start, r.valued);
     return i < w.length && (isYadflow(w[i]) || programOf(w[i]) === 'yad') ? dropDashDash(w.slice(i + 1)) : null;
   }
   if (prog === 'node') {
-    const i = plainAfter(1, NODE_VALUE_OPTIONS);
+    const i = plainAfter(w, 1, NODE_VALUE_OPTIONS);
     return i < w.length && programOf(w[i]) === 'yad.mjs' ? w.slice(i + 1) : null;
   }
   return null;

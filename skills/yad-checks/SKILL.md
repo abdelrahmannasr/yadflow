@@ -123,8 +123,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     command only the person may run (`gate approve`, `comment`, `advance`, `reopen`, `commit --manual`),
     approving or merging a PR/MR (`gh pr review --approve`, `gh pr merge`, `glab mr approve|merge|accept`), and a
     force push (`--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), and tells the agent to hand it to the person. Wired as a `PreToolUse` entry on `Bash` in
-    `.claude/settings.json` and a `beforeShellExecution` entry in `.cursor/hooks.json`. Fails OPEN, and is
-    a speed bump, not proof: a command inside a script is not seen, and Codex has no hooks.
+    `.claude/settings.json` and a `beforeShellExecution` entry in `.cursor/hooks.json`, so it runs only in
+    a session opened at the Product folder; a code repo has none. Fails OPEN, and is a speed bump, not
+    proof: a command inside a script is not seen, and Codex has no hooks.
   - `templates/hooks/yad-capture.mjs` → **Product-only**, in **both** ledger modes (E43): the post-edit
     harness hook that runs `yad capture --hook`, which snapshots every changed Shape artifact onto the
     person's private `yad/wip/<name>/<epic>` branches without touching the checkout. Wired as a
@@ -201,8 +202,10 @@ Copy from this skill's `templates/`:
   - The legacy standalone `templates/gitlab/.gitlab-ci.yml` is retained only for a clean greenfield repo
     that prefers a single self-contained file; the include path above is the default.
   - **CI/CD variables, tokens and branch protection are the person's (E158).** An AI agent gives them
-    the steps below, never sets one itself, and confirms by reading (`yad doctor`) once they say it is
-    done. It runs `yad update --overwrite-local` only when the person asks.
+    the steps below, never sets one itself, and confirms by reading once they say it is done.
+    `yad doctor` reads branch protection and where `YAD_PRODUCT_TOKEN` is set; it cannot read the
+    `YAD_RUNNER_TAGS` or `YAD_NODE_VERSION` values, so for those, ask the person and take the next
+    green pipeline as the proof. It runs `yad update --overwrite-local` only when the person asks.
   - **Tag-locked runners** (`run_untagged: false`, common on self-hosted): the fragment's jobs run a
     docker image, so set a `YAD_RUNNER_TAGS` CI/CD variable (e.g. `dind_runner`) to route them — every
     GitLab fragment's jobs carry `tags: [$YAD_RUNNER_TAGS]`. When unset, current GitLab (≥15) drops the
@@ -239,9 +242,9 @@ Copy from this skill's `templates/`:
 
 Re-running `wire` is **idempotent** — markers (`# yad-managed: yad-checks`,
 `# yad-managed-include: yad-checks`) and the include-entry check make a second run a no-op.
-Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff):
-`yad check --fix --open-pr` opens a PR/MR with it without asking; a commit or push straight to the
-default branch needs the person's yes each time (E158).
+The wiring belongs on the repo's default branch (it is shared infrastructure, not a task diff). Get it
+there with `yad check --fix --open-pr`, which opens a PR/MR without asking; a commit or push straight
+to the default branch needs the person's yes each time (E158).
 
 **The Product is wired the same way.** `repo: product` wires the Product repo itself (platform from `.sdlc/product.json`)
 with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.

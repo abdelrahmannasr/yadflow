@@ -321,6 +321,16 @@ test('the agent guard refuses every human-only yad command and every force push,
     'pnpm exec -c yad gate approve EP-x analysis',
     'yarn workspace web yad gate approve EP-x analysis',
     'bun x yad gate approve EP-x analysis',
+    // Review 6: pnpm dlx's shell mode, yarn run, npm options before exec.
+    'pnpm dlx -c \'yad gate approve EP-x analysis\'',
+    'pnpm --package=yadflow dlx -c \'yad gate approve EP-x analysis\'',
+    'pnpm dlx --shell-mode \'yad gate approve EP-x analysis\'',
+    'pnpm --shell-mode exec yad gate approve EP-x analysis',
+    'yarn run yad gate approve EP-x analysis',
+    'yarn workspace web run yad gate approve EP-x analysis',
+    'npm --yes exec -c \'yad gate approve EP-x analysis\'',
+    'npm --yes exec yadflow gate approve EP-x analysis',
+    'npx -c="yad gate approve EP-x analysis"',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -364,6 +374,12 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'cat <<E"OF" > n.md\nyad gate approve EP-x analysis\nEOF',
     'npx -c \'yad status\'',
     'yarn workspace web test',
+    // Review 6: a program's own -c is its own.
+    'pnpm exec vitest -c vitest.config.ts',
+    'npx eslint -c \'git push -f\' src',
+    'pnpm -c exec echo hi',
+    'npx -c \'eslint .\'',
+    'yarn run build',
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);

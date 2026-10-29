@@ -352,7 +352,8 @@ to reject.
 **In verified mode `gate sync` stays advisory even with `--pr`** — it prints the predicate and writes
 nothing, because CI owns the ledger. The recovery that actually writes is the command CI itself runs,
 on the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged`, which the person runs
-(an AI agent gives the command and confirms with `yad gate status <epic>`, E158).
+(an AI agent gives the command and confirms with `yad gate status <epic>` after `git pull --ff-only` on
+the default branch, E158).
 
 **Serialization.** Both wired jobs push the ledger to the default branch, and on GitLab the scheduled
 sweep's recent-MR window overlaps whatever the merge-push pipeline is handling — so they are pinned to

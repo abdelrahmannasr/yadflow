@@ -159,7 +159,7 @@ hook is a small script the agent's tool runs before each shell command. It refus
 command when the agent runs them:
 
 - a yad command only you may run (a gate approve, comment, advance or reopen, or `commit --manual`,
-  a commit that skips the ledger check);
+  a commit past the local ledger check, which CI still checks);
 - approving or merging a pull request (GitHub) or merge request (GitLab), a PR/MR, with `gh` or `glab`;
 - a force push, which overwrites commits already on the server.
 

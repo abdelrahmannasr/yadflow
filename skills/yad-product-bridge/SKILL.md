@@ -108,11 +108,14 @@ same write at the moment it tries it, instead of letting it surface as a CI fail
 Revoke-on-change is enforced at merge: on **GitHub** in code (an approval whose commit ≠ the merged
 head is dropped — no setting needed); on **GitLab** it has no per-approval commit SHA, so enabling the
 platform's **"remove all approvals when commits are added to the source branch"** is **required** for
-the guarantee (a platform setting: the person turns it on, E158). Either way it is safe because CI never pushes the review branch — only the owner's own
-artifact pushes dismiss approvals. In verified mode `yad gate sync` is advisory (read-only) and is **not**
-a recovery path; if a merge-time run fails, the scheduled reconcile job re-advances it automatically, or
-a maintainer can force it with `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the
-default branch — the person's to run, never an AI agent's (it pushes to the default branch, E158). (local mode keeps `yad gate sync` as the local writer.)
+the guarantee. It is a platform setting, so the person turns it on (E158); confirm it with
+`glab api projects/:id/approvals` (`reset_approvals_on_push: true`). Either way it is safe because CI
+never pushes the review branch — only the owner's own artifact pushes dismiss approvals. In verified
+mode `yad gate sync` is advisory (read-only) and is **not** a recovery path; if a merge-time run fails,
+the scheduled reconcile job re-advances it automatically, or a maintainer can force it with
+`yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default branch. That is the
+person's to run, never an AI agent's: it pushes to the default branch (E158). (local mode keeps
+`yad gate sync` as the local writer.)
 
 1. Run `yad check --fix` (the wiring is manifest-driven, like `yad-checks`): with a platform +
    enabled bridge in `.sdlc/product.json` it installs
@@ -130,11 +133,16 @@ default branch — the person's to run, never an AI agent's (it pushes to the de
      deliberate act (`yad update`); if the resolved pin predates 3.15.3, upgrade or disable the
      schedule. Never edit a version into the wired file — `yad check --fix` rewrites it byte-for-byte
      from the template. See `references/bridge.md`.
-2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes). These are
-   project settings, schedules, tokens and variables, so they are the person's (E158): an AI agent gives
-   them the steps below, never sets one itself, and confirms by reading (`yad doctor`).
+2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes):
    - add `include: - local: '.gitlab/ci/yad-gate-sync.yml'` to the root `.gitlab-ci.yml`, or write
-     `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists;
+     `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists. This is a file in the
+     repo: an AI agent adds it on its own branch and opens a PR/MR, or asks before committing it to the
+     default branch (E158);
+   - the rest of this step (the schedule, the token, the CI/CD variables) is project settings, so it is
+     the person's (E158): an AI agent gives them the steps, never sets one itself, then confirms by
+     reading. `glab api projects/:id/pipeline_schedules` shows the schedule. yad cannot read a masked
+     variable, so for the token and the variables ask the person, and take the first green scheduled
+     `yad-gate-sync` run as the proof. `yad doctor` does not check these;
    - create the 15-minute pipeline **schedule** (variable `SDLC_GATE_SYNC=true`) and the masked
      `SDLC_GATE_TOKEN` project-access-token variable (`read_api` + `write_repository`). GitLab fires no
      pipeline on an approval alone, and a squash merge can drop the branch name, so the schedule is the
@@ -171,7 +179,7 @@ default branch — the person's to run, never an AI agent's (it pushes to the de
    runs automatically (no setup) as the safety net that recovers a merge whose run failed transiently.
    If the default branch is protected, see the workflow header for the bypass / PAT options; until then
    the run fails visibly. The person recovers it (E158: an AI agent gives the steps, then confirms with
-   `yad gate status <epic>`): grant the push path (a branch-protection or ruleset setting), then re-run
+   `yad gate status <epic>` after `git pull --ff-only` on the default branch): grant the push path (a branch-protection or ruleset setting), then re-run
    the workflow or run `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default
    branch (advisory `yad gate sync` cannot recover a bridge gate).
 
@@ -194,13 +202,15 @@ default branch — the person's to run, never an AI agent's (it pushes to the de
   ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`
   project access token because `CI_JOB_TOKEN` can neither read the approvals API nor push — say so
   when wiring, and scope it to `read_api` + `write_repository` only. Making the token and setting it
-  are the person's (E158): give them these steps, then confirm by reading (`yad doctor`).
+  are the person's (E158): give them these steps. yad cannot read a masked variable, so ask the person,
+  and take the first green scheduled `yad-gate-sync` run as the proof.
 - **Protect the Product default branch.** Require that `epics/**` artifacts change only through a review
   PR/MR (branch protection). This keeps revoke-on-change sound: it removes the only window where a
   delayed reconcile could advance on an out-of-band post-merge artifact change (see `references/bridge.md`,
   "Known limitation"). Safe to require: a new epic's `.sdlc/` seed rides its first review PR/MR, so
   nobody needs a direct push to the default branch to start an epic (#162). Branch protection is a
-  platform setting, so it is the person's (E158): give them the steps and confirm by reading.
+  platform setting, so it is the person's (E158): give them the steps and confirm by reading
+  (`yad doctor`'s branch-protection check).
 - **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs local with no error.
 
 ## Reference
