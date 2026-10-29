@@ -581,19 +581,24 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
 
 ## 9. Handy anytime
 
-- **Run it from your AI agent.** In Claude Code or Codex, say "follow the yad-guide rules". The agent
-  runs `yad guide --json` before each step, tells you what the step is for and who does it, does its
-  own part, and hands you yours (approvals and merges, logins, secrets, signing keys, repository
-  settings) with the exact steps, then checks they were done. The rules live in a yad-written block in
-  `AGENTS.md` — the file AI coding agents read at the start of a session — and in `CLAUDE.md`, which
-  loads it. Your own text around the block is kept. In Claude Code and Cursor a hook (a small script
-  the tool runs before each shell command) refuses three kinds of command the agent tries to run: a yad
-  command only you may run (a gate approve, comment, advance or reopen, or `commit --manual`);
-  approving or merging a PR/MR (a pull request or merge request) with `gh` or `glab`; and a force push,
-  which overwrites commits already on the server. It reads only the command line, so it catches
-  mistakes, not tricks. Codex has no hooks. The read-only commands, typed as `yad …`, run in Claude Code without a permission prompt (an
-  `npx yadflow …` call still asks). When the agent finds a yadflow
-  bug or idea, it shows you the exact report text and posts it only after your yes.
+- **Run it from your AI agent.** In Claude Code or Codex, say "follow the yad-guide rules".
+  - **What the agent does:** it runs `yad guide --json` before each step, tells you what the step is
+    for and who does it, and does its own part. It hands you yours (approvals and merges, logins,
+    secrets, signing keys, repository settings) with the exact steps, then checks they were done.
+  - **Where the rules live:** in a yad-written block in `AGENTS.md` — the file AI coding agents read at
+    the start of a session — and in `CLAUDE.md`, which loads it. Your own text around the block is
+    kept. Each code repo gets a short version of the block.
+  - **The hook:** in Claude Code and Cursor, in a session opened at the Product folder, a hook (a small
+    script the tool runs before each shell command) refuses three kinds of command the agent tries to
+    run: a yad command only you may run (a gate approve, comment, advance or reopen, or
+    `commit --manual`); approving or merging a PR/MR (a pull request or merge request) with `gh` or
+    `glab`; and a force push, which overwrites commits already on the server. It reads only the
+    command line, so it catches mistakes, not tricks. In a code repo, and in Codex, which has no hooks,
+    only the rules apply.
+  - **No prompt for reads:** at the Product folder, the read-only commands, typed as `yad …`, run in
+    Claude Code without a permission prompt (an `npx yadflow …` call still asks).
+  - **Reports:** when the agent finds a yadflow bug or idea, it shows you the exact report text and
+    posts it only after your yes.
 - **See what's blocking:** `yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole
   chain, every step's status, the contract lock, and which approvals a gate is still waiting on. Start
   here when stuck.

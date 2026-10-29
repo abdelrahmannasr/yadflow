@@ -16,6 +16,11 @@
 import { classify } from './agent-rules.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
 
+// A heredoc's `<<` and its end word: bare (`EOF`), quoted (`'EOF'`, `"EOF"`, `E"OF"`) or escaped (`\EOF`). Any
+// quote or `\` in the word makes the text plain text, as bash reads it: nothing in it runs.
+const HEREDOC = /^<<(-?)[ \t]*((?:\\.|'[^'\n]*'|"[^"\n]*"|[A-Za-z0-9_.-])+)/;
+const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] === '-', quoted: /['"\\]/.test(m[2]) });
+
 // One command line split into its simple commands: on `;`, `&`, `&&`, `||`, `|` and newlines, outside
 // quotes. Each part is a list of words, with quotes removed and `\` escapes applied. Read as the shell reads it
 // in the ways an agent's commands use most: a `\` at the end of a line joins the next line on, a `#` that
@@ -81,8 +86,8 @@ export function shellParts(line) {
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); i += 2; continue; }
     if (ch === '<' && line[i + 1] === '<') {
       // A heredoc: its delimiter, bare or quoted, with `<<-` stripping leading tabs from the lines.
-      const m = /^<<(-?)[ \t]*(['"]?)([A-Za-z0-9_.-]+)\2/.exec(line.slice(i));
-      if (m) { heredocs.push({ word: m[3], tabs: m[1] === '-', quoted: !!m[2] }); endWord(); i += m[0].length - 1; continue; }
+      const m = HEREDOC.exec(line.slice(i));
+      if (m) { heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       endPart();
@@ -116,8 +121,8 @@ function substitutionEnd(line, from) {
     if (ch === '\\') { i++; continue; }
     if (ch === '\'' || ch === '"') { quote = ch; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
-      const m = /^<<(-?)[ \t]*(['"]?)([A-Za-z0-9_.-]+)\2/.exec(line.slice(i));
-      if (m) { heredocs.push({ word: m[3], tabs: m[1] === '-' }); i += m[0].length - 1; continue; }
+      const m = HEREDOC.exec(line.slice(i));
+      if (m) { heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       // Skip each heredoc's text to its end line; one that never ends is not a heredoc.
@@ -193,17 +198,34 @@ const stripPrefix = (words) => {
 };
 const programOf = (word) => word.split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i, '');
 
-// The command line a shell runs from its `-c` argument (`bash -c "yad gate approve …"`), or null.
+// The command line a shell runs from its `-c` argument (`bash -c "yad gate approve …"`), or null. A package
+// runner's `-c`/`--call` is one too (`npx -c '<line>'`, `npm exec -c '<line>'`), and `pnpm exec -c` runs the
+// rest of its words as a shell line.
 function shellC(words) {
   const w = stripPrefix(words);
-  if (!w.length || !['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(programOf(w[0]))) return null;
-  const c = w.findIndex((x, n) => n > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(x));
-  return c > 0 && c + 1 < w.length ? w[c + 1] : null;
+  if (!w.length) return null;
+  const prog = programOf(w[0]);
+  if (['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(prog)) {
+    const c = w.findIndex((x, n) => n > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(x));
+    return c > 0 && c + 1 < w.length ? w[c + 1] : null;
+  }
+  if (prog === 'pnpm') {
+    const c = w.findIndex((x) => x === '-c' || x === '--shell-mode');
+    return w.includes('exec') && c > 0 && c + 1 < w.length ? w.slice(c + 1).join(' ') : null;
+  }
+  if (prog === 'npx' || prog === 'pnpx' || (prog === 'npm' && (w[1] === 'exec' || w[1] === 'x'))) {
+    for (let i = 1; i < w.length; i++) {
+      if (w[i] === '-c' || w[i] === '--call') return i + 1 < w.length ? w[i + 1] : null;
+      if (/^--call=/.test(w[i])) return w[i].slice('--call='.length);
+    }
+  }
+  return null;
 }
 
 // The yad argv after the program, or null when the part does not run yad: `yad …` (any path, `yad.mjs` too),
 // `npx [-y] yadflow[@v] …` or `npx yad …` (and pnpx, bunx), `npx -p yadflow yad …`, `npm exec|x yadflow|yad -- …`,
-// `pnpm exec|dlx …`, `pnpm yad …`, `yarn [exec|dlx] yad …`, `node [options] …/yad.mjs …`. `yad` is the
+// `pnpm exec|dlx …`, `pnpm yad …`, `yarn [workspace <name>] [exec|dlx] yad …`, `bun x|run yad …`,
+// `node [options] …/yad.mjs …`. `yad` is the
 // program the yadflow package installs, so a local install runs it as `npx yad`.
 const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--input-type', '--conditions', '-C']);
 const NPX_VALUE_OPTIONS = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--prefix']);
@@ -226,9 +248,12 @@ function yadArgs(words) {
   // `yarn [exec|dlx] …`.
   let from = -1;
   if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') from = 1;
+  else if (prog === 'bun' && (w[1] === 'x' || w[1] === 'run')) from = 2;
   else if (prog === 'npm' && (w[1] === 'exec' || w[1] === 'x')) from = 2;
   else if (prog === 'pnpm' || prog === 'yarn') {
-    const k = plainAfter(1, RUNNER_VALUE_OPTIONS);
+    let k = plainAfter(1, RUNNER_VALUE_OPTIONS);
+    // `yarn workspace <name> <program> …` runs the program in that workspace.
+    if (prog === 'yarn' && w[k] === 'workspace') k = plainAfter(k + 2, RUNNER_VALUE_OPTIONS);
     from = ['exec', 'dlx'].includes(w[k]) ? k + 1 : k;
   }
   if (from > 0) {

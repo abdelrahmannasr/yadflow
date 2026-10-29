@@ -322,7 +322,7 @@ export function pointerBlock() {
   return [
     '## yadflow — rules for AI coding agents',
     '',
-    'This repo is built with yadflow (the `yad` command). The full rules are in the AGENTS.md of the Product repo, and the `yad-guide` skill. In short:',
+    'This repo is built with yadflow (the `yad` command). The full rules are in the AGENTS.md of the Product repo, and in the `yad-guide` skill installed there (`yad guide --json`, run here, finds the Product). No hook guards this repo, so these rules are what stop a slip. In short:',
     '',
     `- ${pick('rules-win')}`,
     `- ${pick('read-first')}`,

@@ -108,11 +108,11 @@ same write at the moment it tries it, instead of letting it surface as a CI fail
 Revoke-on-change is enforced at merge: on **GitHub** in code (an approval whose commit ≠ the merged
 head is dropped — no setting needed); on **GitLab** it has no per-approval commit SHA, so enabling the
 platform's **"remove all approvals when commits are added to the source branch"** is **required** for
-the guarantee. Either way it is safe because CI never pushes the review branch — only the owner's own
+the guarantee (a platform setting: the person turns it on, E158). Either way it is safe because CI never pushes the review branch — only the owner's own
 artifact pushes dismiss approvals. In verified mode `yad gate sync` is advisory (read-only) and is **not**
 a recovery path; if a merge-time run fails, the scheduled reconcile job re-advances it automatically, or
 a maintainer can force it with `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the
-default branch. (local mode keeps `yad gate sync` as the local writer.)
+default branch — the person's to run, never an AI agent's (it pushes to the default branch, E158). (local mode keeps `yad gate sync` as the local writer.)
 
 1. Run `yad check --fix` (the wiring is manifest-driven, like `yad-checks`): with a platform +
    enabled bridge in `.sdlc/product.json` it installs
@@ -130,7 +130,9 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
      deliberate act (`yad update`); if the resolved pin predates 3.15.3, upgrade or disable the
      schedule. Never edit a version into the wired file — `yad check --fix` rewrites it byte-for-byte
      from the template. See `references/bridge.md`.
-2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes):
+2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes). These are
+   project settings, schedules, tokens and variables, so they are the person's (E158): an AI agent gives
+   them the steps below, never sets one itself, and confirms by reading (`yad doctor`).
    - add `include: - local: '.gitlab/ci/yad-gate-sync.yml'` to the root `.gitlab-ci.yml`, or write
      `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists;
    - create the 15-minute pipeline **schedule** (variable `SDLC_GATE_SYNC=true`) and the masked
@@ -168,9 +170,10 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
    PR and pushes the merge advance to the default branch, and the workflow's reconcile **schedule**
    runs automatically (no setup) as the safety net that recovers a merge whose run failed transiently.
    If the default branch is protected, see the workflow header for the bypass / PAT options; until then
-   the run fails visibly — recover by granting the push path, then re-run the workflow or run
-   `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default branch (advisory
-   `yad gate sync` cannot recover a bridge gate).
+   the run fails visibly. The person recovers it (E158: an AI agent gives the steps, then confirms with
+   `yad gate status <epic>`): grant the push path (a branch-protection or ruleset setting), then re-run
+   the workflow or run `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default
+   branch (advisory `yad gate sync` cannot recover a bridge gate).
 
 ## Hard rules
 

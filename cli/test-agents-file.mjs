@@ -314,6 +314,13 @@ test('the agent guard refuses every human-only yad command and every force push,
     'pnpm --dir x yad gate approve EP-a epic',
     'pnpm -C x exec yad gate approve EP-a epic',
     'yarn --cwd x yad gate approve EP-a epic',
+    // Review 5: a runner's -c holds a shell line; more runner forms.
+    'npx -c \'yad gate approve EP-x analysis\'',
+    'npm exec -c \'yad gate approve EP-x analysis\'',
+    'npx --call=\'yad gate advance EP-x analysis\'',
+    'pnpm exec -c yad gate approve EP-x analysis',
+    'yarn workspace web yad gate approve EP-x analysis',
+    'bun x yad gate approve EP-x analysis',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -352,6 +359,11 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'cat <<EOF\nescaped \\$(yad gate approve EP-a epic)\nEOF',
     'gh pr review 5 --comment --body "-a"',
     'pnpm --dir x test',
+    // Review 5: `<<\EOF` and `<<E"OF"` are quoted heredocs: their text is only text.
+    'cat <<\\EOF > n.md\nyad gate approve EP-x analysis\n$(yad gate advance EP-x analysis)\nEOF',
+    'cat <<E"OF" > n.md\nyad gate approve EP-x analysis\nEOF',
+    'npx -c \'yad status\'',
+    'yarn workspace web test',
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);

@@ -330,7 +330,7 @@ nothing, so it is **not** a recovery path when CI fails. If a merge-time run fai
 (can't push, API hiccup), recovery is the scheduled **reconcile** job (automatic; it re-advances merged
 reviews not yet `done`). To force it immediately, a maintainer runs the same command CI runs, locally on
 the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged` (this writes + pushes,
-unlike advisory `yad gate sync`). Local mode (no platform) keeps `yad gate sync` as the local writer.
+unlike advisory `yad gate sync`; the person runs it, never an AI agent, E158). Local mode (no platform) keeps `yad gate sync` as the local writer.
 The file ledger is still the source of truth.
 
 Because CI records the PR-ledger pointer (`product-prs.json` + `hub-prs.json`) only at merge, a review the ledger has never seen still
@@ -351,7 +351,8 @@ to reject.
 
 **In verified mode `gate sync` stays advisory even with `--pr`** — it prints the predicate and writes
 nothing, because CI owns the ledger. The recovery that actually writes is the command CI itself runs,
-on the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged`.
+on the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged`, which the person runs
+(an AI agent gives the command and confirms with `yad gate status <epic>`, E158).
 
 **Serialization.** Both wired jobs push the ledger to the default branch, and on GitLab the scheduled
 sweep's recent-MR window overlaps whatever the merge-push pipeline is handling — so they are pinned to
@@ -370,7 +371,8 @@ rather than failing inside `gh`/`glab`; an origin that cannot be reached at all 
 ### Manual end-to-end verification (GitHub)
 
 1. On a scratch Product: `yad setup` (platform github; a second account with write access to review) → `yad check --fix`
-   installs `.github/workflows/yad-gate-sync.yml`; commit + push it.
+   installs `.github/workflows/yad-gate-sync.yml`; commit + push it (an AI agent asks first: it is the
+   default branch, E158).
 2. Author an epic → `yad gate open EP-x epic.md` → the review PR opens. CI writes nothing yet — review
    state lives on the platform.
 3. Second account **approves** / **requests changes** → no CI run touches the branch; the PR's native

@@ -192,7 +192,7 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
   person first, every time: it pushes to the default branch (E158) — it
   commits the tracked code-maps + `.sdlc/repos.json` (never the gitignored `pack.md`) as one
   audit-trail commit `chore(product): sync code-context — <repos> by @<login> [skip ci]` and pushes it
-  straight to the Product's **default branch** (add `--allow-branch` to commit on a non-default branch).
+  straight to the Product's **default branch** (add `--allow-branch` to commit on a non-default branch, only when the person asks).
   This is the code-context analogue of `yad checkpoint` — human-owned machine state, no Task trailer,
   no Co-Authored-By.
 - **`list`** — print every registry entry with a **fresh/stale** flag: compare each repo's current HEAD

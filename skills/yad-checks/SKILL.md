@@ -239,7 +239,9 @@ Copy from this skill's `templates/`:
 
 Re-running `wire` is **idempotent** — markers (`# yad-managed: yad-checks`,
 `# yad-managed-include: yad-checks`) and the include-entry check make a second run a no-op.
-Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff).
+Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff):
+`yad check --fix --open-pr` opens a PR/MR with it without asking; a commit or push straight to the
+default branch needs the person's yes each time (E158).
 
 **The Product is wired the same way.** `repo: product` wires the Product repo itself (platform from `.sdlc/product.json`)
 with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
