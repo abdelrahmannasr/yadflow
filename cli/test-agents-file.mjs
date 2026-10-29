@@ -339,6 +339,11 @@ test('the agent guard refuses every human-only yad command and every force push,
     'npx --loglevel warn -c \'yad gate approve EP-x analysis\'',
     'pnpm --reporter silent exec yad gate approve EP-x analysis',
     'pnpm -w exec yad gate approve EP-x analysis',
+    // Review 8: bun's options before run or x.
+    'bun --filter web run yad gate approve EP-x analysis',
+    'bun --cwd web run yad gate approve EP-x analysis',
+    'bun --bun run yad gate approve EP-x analysis',
+    'bun --bun x yadflow gate approve EP-x analysis',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -390,6 +395,7 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'yarn run build',
     'pnpm -w add -D x',
     'npm -w web run build',
+    'bun --filter web run build',
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);

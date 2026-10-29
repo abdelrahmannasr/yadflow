@@ -226,7 +226,11 @@ function runnerOf(w) {
   const prog = programOf(w[0]);
   const valued = prog === 'pnpm' ? PNPM_VALUE_OPTIONS : RUNNER_VALUE_OPTIONS;
   if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') return { prog, start: 1, valued };
-  if (prog === 'bun') return w[1] === 'x' || w[1] === 'run' ? { prog, start: 2, valued } : null;
+  if (prog === 'bun') {
+    // bun's own options may come first: `bun --filter web run …`, `bun --bun x …`.
+    const k = plainAfter(w, 1, valued);
+    return w[k] === 'x' || w[k] === 'run' ? { prog, start: k + 1, valued, sub: w[k] } : null;
+  }
   if (prog === 'npm') {
     const k = plainAfter(w, 1, valued);
     return w[k] === 'exec' || w[k] === 'x' ? { prog, start: k + 1, valued, sub: w[k] } : null;
