@@ -961,7 +961,7 @@ test('E48 review 1: the refusal names the repair that commits, the amend-to-undo
   const top = path.join(os.tmpdir(), 'r');
   const m = commitDenyMessage({ top, hits: [{ kind: 'state', epic: 'EP-a', abs: path.join(top, 'epics/EP-a/.sdlc/state.json'), productRoot: top }] });
   assert.match(m, /yad gate repair EP-a --push/);
-  assert.match(m, /YAD_HOOK_DISABLE=1 git commit --amend/);
+  assert.match(m, /The person runs it as `YAD_HOOK_DISABLE=1 git commit --amend` \(an AI\nagent hands it to them/);
   assert.match(m, /without `-a`/);
   assert.doesNotMatch(m, /could not reach the default branch|CI still refuses/, 'the check runs on pull requests only');
 });

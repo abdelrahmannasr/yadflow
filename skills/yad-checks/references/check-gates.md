@@ -951,7 +951,8 @@ logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`; the scripts in `cli/test-h
 an unreadable `product.json` / `hub.json`, an unparseable payload, a `yad` that errors — every one of them ALLOWS,
 with a note on stderr. A local guardrail that failed closed would brick an agent's ability to edit
 anything the moment an install went sideways. The CI gate fails **closed** and is what actually
-protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` skips one command.
+protects the ledger; this only shortens the feedback loop. A person can skip it for one command with
+`YAD_HOOK_DISABLE=1`; never the agent (a NEVER rule, and the agent guard refuses it).
 The door for a PERSON is `yad commit --manual --reason "<why>"` (E49): it skips the local hook for that
 one commit and records the reason as a `Ledger-Override:` trailer. `ledger-guard` in CI still FAILS the
 commit — anyone can type a trailer — and prints the reason under the FAIL. Each line starts with the commit's sha, and every control character (a

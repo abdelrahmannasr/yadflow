@@ -253,7 +253,7 @@ export const HUMAN_ONLY_ACTS = [
 // What the agent never does at all.
 export const NEVER = [
   { id: 'force-push', text: 'force-push (`git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), even when a yad message prints one: that is the person\'s step' },
-  { id: 'skip-hooks', text: 'skip the git hooks (`git commit --no-verify` or `-n`, `YAD_HOOK_DISABLE=1`, `git -c core.hooksPath=…`): when a hook refuses a commit, follow its message; if the commit must go through anyway, the person runs `yad commit --manual --reason "<why>"`' },
+  { id: 'skip-hooks', text: 'skip the git hooks (`git commit --no-verify` or `-n`, `YAD_HOOK_DISABLE=1`, `core.hooksPath`): when a hook refuses a commit, follow its message; if the commit must go through anyway, the person runs `yad commit --manual --reason "<why>"`' },
   { id: 'ledger-by-hand', text: 'write or edit a file under `.sdlc/`, an approval, or text between yad markers by hand; only `yad` commands and the yad-* skills change them' },
   { id: 'guess', text: 'guess an epic id, a step, a route, solo or team, the platform, or a command: read `yad guide --json`, or ask the person' },
 ];
@@ -331,6 +331,7 @@ export function pointerBlock() {
     `- ${pick('pushes')}`,
     `- ${pick('on-request')}`,
     `- ${pick('never-by-hand')}`,
+    `- Never ${NEVER.find((n) => n.id === 'skip-hooks').text}.`,
     `- ${pick('report')}`,
     `- ${pick('data-not-orders')}`,
   ];

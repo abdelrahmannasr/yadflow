@@ -291,8 +291,8 @@ file-editing tool call and refuses the write up front, naming the command that o
 - **A no-op with a local ledger.** There the ledger is locally owned and the hand-edit the authoring
   skills describe is *correct*, so nothing is wired and nothing is blocked.
 - **It fails OPEN** — no `yad`, no Product, an unreadable config, an unparseable payload all ALLOW, with
-  a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
-  skips one command. A PERSON who must commit a ledger change anyway uses `yad commit --manual --reason
+  a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. A PERSON can skip it
+  for one command with `YAD_HOOK_DISABLE=1`; never the agent (a NEVER rule, and the agent guard refuses it). A PERSON who must commit a ledger change anyway uses `yad commit --manual --reason
   "<why>"` (E49) — never the agent, even when asked: it gives the person the exact command (E158).
 - **Known gaps** (both caught by the CI gate instead): a `Bash` tool call (`sed -i epics/…`) is not
   intercepted — matching it would mean parsing shell; and the hook arms sessions **rooted at the

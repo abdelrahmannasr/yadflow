@@ -360,7 +360,7 @@ function forcePush(words) {
 }
 
 // Does this part skip the git hooks, the ledger guard's door? `git commit --no-verify` or `-n` (alone or in a
-// cluster such as `-nm`), `git -c core.hooksPath=… <any>`, or `YAD_HOOK_DISABLE=…` set for the command or
+// cluster such as `-nm`), `git -c core.hooksPath=… <any>`, `git config [scope] core.hooksPath <path>`, or `YAD_HOOK_DISABLE=…` set for the command or
 // exported. That is what `yad commit --manual` does, with the reason recorded: the person's.
 const COMMIT_VALUE_OPTIONS = new Set(['-m', '--message', '-F', '--file', '-t', '--template', '-c', '--reedit-message', '-C',
   '--reuse-message', '--author', '--date', '--fixup', '--squash', '--trailer', '--cleanup']);
@@ -376,17 +376,23 @@ function hookSkip(words) {
     if (GIT_VALUE_OPTIONS.has(w[i])) i++;
   }
   const g = gitArgs(words);
-  if (!g || g[0] !== 'commit' || g.includes('--help') || g.includes('-h')) return false;
+  if (!g || g.includes('--help') || g.includes('-h')) return false;
+  // Setting it, not reading it: a value follows the key (`git config --unset core.hooksPath` puts it back).
+  if (g[0] === 'config') {
+    const k = g.findIndex((x) => /^core\.hookspath$/i.test(x));
+    return k > 0 && k + 1 < g.length && !g.slice(1, k).some((x) => /^--(unset|unset-all|get|get-all|get-regexp)$/.test(x));
+  }
+  if (g[0] !== 'commit') return false;
   for (let i = 1; i < g.length; i++) {
     const a = g[i];
     if (a === '--') break;
     if (COMMIT_VALUE_OPTIONS.has(a)) { i++; continue; }
     if (a === '--no-verify') return true;
     if (/^-[A-Za-z]+$/.test(a)) {
-      // A short cluster: the letters up to the first one that takes a value (`-mn` is `-m n`).
+      // A short cluster: the letters up to the first one that takes a value (`-mn` is `-m n`, `-uno` is `-u no`).
       for (const c of a.slice(1)) {
         if (c === 'n') return true;
-        if ('mFtcC'.includes(c)) break;
+        if ('mFtcCuS'.includes(c)) break;
       }
     }
   }
@@ -394,19 +400,37 @@ function hookSkip(words) {
 }
 
 // Is this part an approval or a merge of a PR/MR on the platform? `gh pr review … --approve|-a`, `gh pr merge`,
-// `glab mr approve`, `glab mr merge` (or `accept`), and the same through the API: `gh api …/pulls/<n>/merge`, an
-// approving review (`…/pulls/<n>/reviews` with `event=APPROVE`), `glab api …/merge_requests/<n>/merge|approve`,
-// and the GraphQL merge and approve mutations. The person's, even when the agent's login could do it. The options
+// `glab mr approve`, `glab mr merge` (or `accept`), and the same through the API: a PUT to `gh api …/pulls/<n>/merge`
+// (a plain GET there only asks whether it was merged), an approving review (`…/pulls/<n>/reviews` with
+// `event=APPROVE`), a PUT to `glab api …/merge_requests/<n>/merge` or a POST to `…/approve`, and the GraphQL merge
+// and approve mutations. The person's, even when the agent's login could do it. The options
 // that take a value (`-R <repo>`) are skipped with it, so `gh -R o/r pr merge 5` is read as `pr merge`.
 const PLATFORM_VALUE_OPTIONS = new Set(['-R', '--repo', '-b', '--body', '-F', '--body-file', '-t', '--subject', '-m', '--message', '--match-head-commit', '--author-email', '--sha',
-  '-f', '--field', '--raw-field', '-X', '--method', '-H', '--header', '--input', '-q', '--jq', '--template', '--hostname']);
+  '-f', '--field', '--raw-field', '-X', '--method', '-H', '--header', '--input', '-q', '--jq', '--template', '--hostname', '--cache']);
+// The HTTP method of a `gh api`/`glab api` call: `-X PUT`, `-XPUT`, `--method PUT` or `--method=PUT`; else POST
+// when fields are sent, as both tools do; else GET.
+function apiMethod(w) {
+  for (let i = 1; i < w.length; i++) {
+    if ((w[i] === '-X' || w[i] === '--method') && i + 1 < w.length) return w[i + 1].toUpperCase();
+    const m = /^(?:-X|--method=)(.+)$/.exec(w[i]);
+    if (m) return m[1].toUpperCase();
+  }
+  return w.some((x) => /^(-f|-F|--field|--raw-field|--input)$/.test(x) || /^--(raw-)?field=/.test(x)) ? 'POST' : 'GET';
+}
 function apiApproval(prog, w, rest) {
   if (rest[0] !== 'api') return false;
   const path = rest[1] || '';
-  if (prog === 'glab') return /merge_requests\/\d+\/(merge|approve)(\?|$)/.test(path);
-  if (/\/pulls\/\d+\/merge(\?|$)/.test(path)) return true;
-  if (/\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^event=APPROVE$/i.test(x))) return true;
-  return path === 'graphql' && w.some((x) => /\b(mergePullRequest|enablePullRequestAutoMerge)\b/.test(x) || /\baddPullRequestReview\b[\s\S]*\bAPPROVE\b/.test(x));
+  if (path === 'graphql') {
+    return w.some((x) => /\b(mergePullRequest|enablePullRequestAutoMerge|mergeRequestAccept|mergeRequestApprove)\b/.test(x)
+      || /\b(addPullRequestReview|submitPullRequestReview)\b[\s\S]*\bAPPROVE\b/.test(x));
+  }
+  const method = apiMethod(w);
+  if (prog === 'glab') {
+    return (method === 'PUT' && /merge_requests\/\d+\/merge(\?|$)/.test(path))
+      || (method === 'POST' && /merge_requests\/\d+\/approve(\?|$)/.test(path));
+  }
+  if (method === 'PUT' && /\/pulls\/\d+\/merge(\?|$)/.test(path)) return true;
+  return /\/pulls\/\d+\/reviews(\/\d+\/events)?(\?|$)/.test(path) && w.some((x) => /^event=APPROVE$/i.test(x));
 }
 function platformApproval(words) {
   const w = stripPrefix(words);
