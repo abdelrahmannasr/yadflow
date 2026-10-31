@@ -137,7 +137,8 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
      still open: ask those, then run it again.
   4. Joining: `npx -y yadflow@4 join <url> --ide-targets <a,b> --json`. When the person is not logged in
      to the platform, the result's `member.person` names the login command: hand it over (`!` in front in
-     Claude Code), then run `yad member add --json` after they say it is done.
+     Claude Code), then, after they say it is done, run `npx -y yadflow@4 member add --json --dir
+     <folder>/product` (the Product is the `product` folder inside the new workspace).
   5. Read `yad guide --json` again.
 - **Commit signing and CI settings** are the person's (a signing key, branch protection, rulesets). Give
   the exact steps from the guide and confirm by reading. (A later release, E160, will add commands that

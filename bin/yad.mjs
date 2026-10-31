@@ -23,7 +23,9 @@ ${c.bold('Start a workspace')} ${c.dim('(the folder holding product/ and the cod
                        every repo it registers; a failed repo clone is reported, never fatal. Then
                        only per-machine steps: git-ignored skill copies + the git pre-commit hook.
                        Last, \`yad member add\` (below): your member file, on a branch with its own
-                       PR/MR — the only shared change join makes. A problem there never fails join
+                       PR/MR — the only shared change join makes. A problem there never fails join.
+                       --ide-targets <a,b> picks the AI tools; under --json it is required (asked
+                       before the clone), and a missing platform login comes back as your step (E159)
 
 ${c.bold('Setup & maintenance')}
   yad setup            Guided first-run setup (profile interview, install, connect & wire repos,
@@ -110,7 +112,8 @@ ${c.bold('Parallel agents')} ${c.dim('(one git worktree per epic — #115)')}
 
 ${c.bold('Team members')} ${c.dim('(identity only — no roles, no reviewers, no allowlist)')}
   yad member add [--no-push]           Prove who you are and write .sdlc/members/<platform>-<login>.json:
-                                       your account on the Product's platform (logs you in if needed),
+                                       your account on the Product's platform (logs you in if needed;
+                                       under --json it never does: the login is the person's step),
                                        your other GitHub/GitLab accounts and git emails that the platform
                                        says are VERIFIED (stored hashed). One commit per email on
                                        yad/member/<login>, pushed, with a PR/MR. Never your checkout
@@ -180,7 +183,8 @@ ${c.bold('Where am I / what next')}
                                        step is for, mandatory or skippable, who does it, the skills
                                        that fit, what the agent runs, and what only the person can do
                                        (with the exact steps and the command that confirms it). With
-                                       no Product yet, how to start one. Read-only
+                                       no Product yet, the command to start one and the questions it
+                                       asks, each with its flag (E159). Read-only
   yad status [--brief] [--no-fetch] [--json]
                                        Where the work stands in ~20 lines, for after a context reset:
                                        this checkout's task and its Build step, each open epic and its
@@ -574,8 +578,10 @@ function parseArgs(argv) {
 const setupAnswers = (o) => ({
   noTools: o.noTools, reconfigure: o.reconfigure, gitInit: o.gitInit,
   platform: o.platform === undefined ? undefined : String(o.platform).toLowerCase(),
-  defaultBranch: o['default-branch'], design: o.design, designUrl: o['design-url'], testing: o.testing, testingUrl: o['testing-url'],
-  learning: o.learning, connect: o.connect, addRepo: o['add-repo'], coderabbit: o.coderabbit,
+  defaultBranch: o['default-branch'], designUrl: o['design-url'], testingUrl: o['testing-url'],
+  // The tool names are read as setup reads a typed answer: in lower case.
+  ...Object.fromEntries(['design', 'testing', 'learning'].map((k) => [k, o[k] === undefined ? undefined : String(o[k]).toLowerCase()])),
+  connect: o.connect, addRepo: o['add-repo'], coderabbit: o.coderabbit,
 });
 
 // The command `main` is running, for the error handler (set once the arguments are read).

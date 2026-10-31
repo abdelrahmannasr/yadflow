@@ -66,7 +66,9 @@ test('E159 cases 3 and 5: setup --json with no answers is refused before anythin
     assert.equal(r.code, 1, r.out + r.err);
     assert.equal(r.json.ok, false);
     assert.equal(r.json.code, 'YAD-CLI-001');
-    assert.deepEqual(ids(r), ['mode', 'codebase', 'layout', 'tools', 'git-init', 'ide-targets', 'platform', 'repos']);
+    assert.deepEqual(ids(r), ['mode', 'codebase', 'layout', 'tools', 'git-init', 'ide-targets', 'platform', 'default-branch', 'repos']);
+    // The default branch is asked with the platform, but needed only when the answer is github or gitlab.
+    assert.equal(r.json.questions.find((q) => q.id === 'default-branch').optional, true);
     for (const q of r.json.questions) {
       assert.ok(q.text && q.flag && Object.hasOwn(q, 'default') && Array.isArray(q.choices), JSON.stringify(q));
       assert.ok(!Object.hasOwn(q, 'given'), 'only the unanswered are listed, without the bookkeeping');
@@ -83,7 +85,11 @@ test('E159 cases 3 and 5: setup --json with no answers is refused before anythin
     const Q = path.join(T, 'q');
     fs.mkdirSync(Q);
     const some = yad(T, Q, ['setup', '--json', '--solo', '--greenfield', '--monorepo', '--no-git-init']);
-    assert.deepEqual(ids(some), ['tools', 'ide-targets', 'platform', 'repos']);
+    assert.deepEqual(ids(some), ['tools', 'ide-targets', 'platform', 'default-branch', 'repos']);
+    // --platform github makes the branch a question that must be answered.
+    const gh = yad(T, Q, ['setup', '--json', '--solo', '--greenfield', '--monorepo', '--no-git-init', '--no-tools', '--ide-targets', '.claude', '--platform', 'github', '--connect', 'none']);
+    assert.deepEqual(ids(gh), ['default-branch']);
+    assert.equal(gh.json.questions[0].optional, undefined);
     assert.deepEqual(fs.readdirSync(Q), []);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -124,6 +130,10 @@ test('E159 case 6: a bad flag value is refused before anything is written', () =
       [[...all, '--add-repo', 'api=../.git/x'], /\.git folder/],
       [[...all, '--add-repo', 'api=../api,bitbucket'], /platform bitbucket/],
       [[...all, '--coderabbit', 'ghost'], /no connected repo named ghost/],
+      // Review 1: the AI tools and the team size are checked before any write too.
+      [swap('--ide-targets', '.vscode'), /--ide-targets: unsupported IDE target/],
+      [[...all.filter((a) => a !== '--solo'), '--team', 'abc'], /--team abc: expected how many people/],
+      [[...all.filter((a) => a !== '--solo'), '--team', '0'], /--team 0: expected how many people/],
     ]) {
       const P = fs.mkdtempSync(path.join(T, 'p-'));
       const r = yad(T, P, ['setup', '--json', ...args]);
@@ -150,8 +160,8 @@ test('E159 case 7: a re-run asks whether to change the earlier settings; --no-re
     const kept = yad(T, P, ['setup', '--json', ...again, '--no-reconfigure']);
     assert.equal(kept.code, 0, kept.out + kept.err);
     assert.equal(read(path.join(P, '.sdlc/product.json')), before);
-    // --reconfigure asks the platform again (no origin here, so its default is none and no branch is asked).
-    assert.deepEqual(ids(yad(T, P, ['setup', '--json', ...again, '--reconfigure'])), ['platform']);
+    // --reconfigure asks the platform again, and the branch with it (needed only for github or gitlab).
+    assert.deepEqual(ids(yad(T, P, ['setup', '--json', ...again, '--reconfigure'])), ['platform', 'default-branch']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -166,9 +176,32 @@ test('E159 cases 8, 9, 10: init --connect picks the repos found; --add-repo regi
     assert.ok(missing.json.questions[0].choices.includes('a,b'), JSON.stringify(missing.json.questions[0]));
     assert.ok(!fs.existsSync(path.join(W, 'product')), 'the Product folder is not made');
     assert.match(yad(T, W, ['init', '--json', ...base, '--connect', 'ghost', '--coderabbit', 'none']).json.error, /no repo named ghost was found/);
+    // Review 1: --add-repo alone does not answer the repos found: refused, and nothing is made.
+    // (A repo in a sub-folder of the workspace: init offers only the ones directly beside the Product.)
+    gitRepo(T, path.join(W, 'nested/x'));
+    const addOnly = yad(T, W, ['init', '--json', ...base, '--add-repo', 'x=../nested/x', '--coderabbit', 'none']);
+    assert.deepEqual(ids(addOnly), ['repos']);
+    assert.ok(!fs.existsSync(path.join(W, 'product')), 'the Product folder is not made');
     const r = yad(T, W, ['init', '--json', ...base, '--connect', 'a', '--coderabbit', 'none']);
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(JSON.parse(read(path.join(W, 'product/.sdlc/repos.json'))).repos.map((x) => x.name), ['a']);
+    // A re-run asks only about the repo not registered yet.
+    const rerun = yad(T, W, ['init', '--json', '--no-tools', '--ide-targets', '.claude', '--no-reconfigure', '--coderabbit', 'none']);
+    assert.deepEqual(rerun.json.questions.map((q) => [q.id, q.choices.at(-1)]), [['repos', 'b']]);
+    // --connect all and none, in fresh workspaces.
+    for (const [connect, want] of [['all', ['a', 'b']], ['none', []]]) {
+      const X = path.join(T, `ws-${connect}`);
+      for (const n of ['a', 'b']) gitRepo(T, path.join(X, n));
+      const c = yad(T, X, ['init', '--json', ...base, '--connect', connect, '--coderabbit', 'none']);
+      assert.equal(c.code, 0, c.out + c.err);
+      const reg = path.join(X, 'product/.sdlc/repos.json');
+      assert.deepEqual(fs.existsSync(reg) ? JSON.parse(read(reg)).repos.map((x) => x.name) : [], want, connect);
+    }
+    // A monorepo connects one repo: CodeRabbit is asked about that one only.
+    const M = path.join(T, 'ws-mono');
+    for (const n of ['a', 'b']) gitRepo(T, path.join(M, n));
+    const mono = yad(T, M, ['init', '--json', ...base, '--monorepo', '--connect', 'all']);
+    assert.deepEqual(mono.json.questions.map((q) => [q.id, q.choices.at(-1)]), [['coderabbit', 'a']]);
     // setup --add-repo: two repos, one with its platform and branch; CodeRabbit in one of them only.
     const V = path.join(T, 'ws2');
     const P = path.join(V, 'product');
@@ -196,6 +229,17 @@ test('E159 case 11: a tool named by flag turns the tools step on; the others are
     const design = JSON.parse(read(path.join(P, '.sdlc/design.json')));
     assert.deepEqual([design.tool, design.project_url], ['figma', 'https://figma.example/f/1']);
     assert.equal(JSON.parse(read(path.join(P, '.sdlc/testing.json'))).tool, 'none');
+    // A tool name in capitals reads as setup reads a typed answer.
+    const U = path.join(T, 'u');
+    fs.mkdirSync(U);
+    const upper = yad(T, U, ['setup', '--json', ...base, '--design', 'Figma', '--testing', 'NONE', '--learning', 'none']);
+    assert.equal(upper.code, 0, upper.out + upper.err);
+    assert.equal(JSON.parse(read(path.join(U, '.sdlc/design.json'))).tool, 'figma');
+    // --no-tools records all three as none, and asks none of them.
+    const N = path.join(T, 'n');
+    fs.mkdirSync(N);
+    assert.equal(yad(T, N, ['setup', '--json', ...base, '--no-tools']).code, 0);
+    for (const f of ['design', 'testing', 'learning']) assert.equal(JSON.parse(read(path.join(N, `.sdlc/${f}.json`))).tool, 'none', f);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -273,5 +317,30 @@ test('E159 case 15: under --json the old skills in the person\'s home folder are
     assert.equal(r.code, 0, r.out + r.err);
     assert.ok(fs.existsSync(path.join(old, 'SKILL.md')), 'left as it is');
     assert.ok((r.json.notes || []).some((n) => /global ~\/\.claude\/skills/.test(n)), JSON.stringify(r.json.notes));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E159 case 13 (join): join --json never starts a login; its member step is the person\'s', { skip: process.platform === 'win32' && 'a shell-script gh' }, () => {
+  const T = tmp();
+  try {
+    // A Product on GitHub, as a bare repo to clone.
+    const src = path.join(T, 'src');
+    gitRepo(T, src);
+    put(path.join(src, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/p.git', default_branch: 'main' });
+    execFileSync('git', ['add', '-A'], { cwd: src, env: env(T) });
+    execFileSync('git', ['commit', '-q', '-m', 'chore: product'], { cwd: src, env: env(T) });
+    const bare = path.join(T, 'acme.git');
+    execFileSync('git', ['clone', '-q', '--bare', src, bare], { env: env(T) });
+    const bin = path.join(T, 'bin');
+    put(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n');
+    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+    const J = path.join(T, 'join');
+    fs.mkdirSync(J);
+    assert.match(yad(T, J, ['join', bare, '--json', '--ide-targets', '.vscode']).json.error, /--ide-targets: unsupported/);
+    assert.deepEqual(fs.readdirSync(J), [], 'a bad value is refused before the clone');
+    const r = yad(T, J, ['join', bare, '--json', '--ide-targets', '.claude'], { PATH: `${bin}${path.delimiter}${process.env.PATH}`, YAD_PLATFORM_LOGIN: undefined });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(r.json.member.written, false);
+    assert.deepEqual(r.json.member.person.commands, ['gh auth login --hostname github.com --scopes user:email']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

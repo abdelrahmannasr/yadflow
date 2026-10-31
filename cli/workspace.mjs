@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal, inJSON } from './lib.mjs';
 import { err } from './errors.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets, assertSetupAnswered, ideTargetsQuestion } from './setup.mjs';
+import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets, assertSetupAnswered, ideTargetsQuestion, checkSetupFlags } from './setup.mjs';
 import { moduleActions, gitHookActions, agentFileActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
@@ -472,6 +472,8 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   if (typeof url !== 'string' || !url.trim() || url.startsWith('-')) return refuse('usage: yad join <the Product\'s clone URL> [folder]');
   // E159: join's one question, the AI tools to install for, is answered by flag under --json — checked
   // before anything is cloned.
+  // A bad --ide-targets is refused here too, never after the clone.
+  if (opts.ideTargets !== undefined) checkSetupFlags(cwd, { ideTargets: opts.ideTargets });
   if (inJSON() && !process.env.SDLC_NONINTERACTIVE && opts.ideTargets === undefined) {
     const e = err('YAD-CLI-001', 'join needs 1 answer before it can run: ide-targets', 'ask the person, then run it again with --ide-targets <a,b>');
     const q = ideTargetsQuestion(path.join(cwd, folder ?? workspaceNameFromUrl(url) ?? '', PRODUCT_DIR));

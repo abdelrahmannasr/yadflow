@@ -12,7 +12,7 @@ import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, D
 import {
   moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
-  safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
+  safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites, canonicalIdeTargets,
 } from './plan.mjs';
 import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
@@ -287,13 +287,23 @@ const toolsGiven = (opts) => has_(opts.design) || has_(opts.testing) || has_(opt
 const toolsOn = (opts) => opts.tools === true || toolsGiven(opts);
 // The code repos this run would end with: the registered ones, those `--add-repo` adds, and those `yad init`
 // found that `--connect` picks.
+// A monorepo connects one repo per step, as `runSetup` does (it stops after the first).
 function reposAfter(root, opts) {
-  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] }) || { repos: [] };
-  const out = (registry.repos || []).map((r) => ({ name: r.name, rpath: r.path }));
-  for (const d of opts.discovered || []) if (connects(opts.connect, d.name) !== false) out.push(d);
-  for (const r of (opts.addRepo || []).map(parseAddRepo)) out.push({ name: r.name, rpath: r.rpath });
+  const out = registeredRepos(root).map((r) => ({ name: r.name, rpath: r.path }));
+  const mono = isMonorepo(root, opts);
+  const fresh = newlyFound(root, opts).filter((d) => connects(opts.connect, d.name) !== false);
+  out.push(...(mono ? fresh.slice(0, 1) : fresh));
+  const added = (opts.addRepo || []).map(parseAddRepo).filter((r) => !out.some((o) => o.name === r.name));
+  out.push(...(mono ? added.slice(0, 1) : added).map((r) => ({ name: r.name, rpath: r.rpath })));
   return out;
 }
+const registeredRepos = (root) => (readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] }) || { repos: [] }).repos || [];
+// The repos `yad init` found that are not registered yet: the ones `runSetup` asks about.
+const newlyFound = (root, opts) => {
+  const known = new Set(registeredRepos(root).map((r) => r.name));
+  return (opts.discovered || []).filter((d) => !known.has(d.name));
+};
+const isMonorepo = (root, opts) => (opts.monorepo ? true : opts.separate ? false : readJSON(productConfigPath(root), null)?.profile?.repo_layout === 'monorepo');
 // `--connect all|none|<name,name>` for one repo: true, false, or undefined when not answered.
 function connects(connect, name) {
   if (!has_(connect)) return undefined;
@@ -338,7 +348,9 @@ export function setupQuestions(root, opts = {}) {
     const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root });
     const platformDefault = detectPlatform(remote.ok ? remote.stdout : '') || 'none';
     add({ id: 'platform', text: 'Where does the Product live: GitHub, GitLab, or nowhere yet (a local gate)?', choices: ['github', 'gitlab', 'none'], default: platformDefault, flag: '--platform <github|gitlab|none>', given: has_(opts.platform) });
-    if ((opts.platform ?? platformDefault) !== 'none') add({ id: 'default-branch', text: 'The Product\'s default branch?', choices: [], default: 'main', flag: '--default-branch <name>', given: has_(opts.defaultBranch) });
+    // Asked only for a platform. With the platform not answered yet it is listed too, so both are asked at
+    // once, but it is required only once the answer is github or gitlab.
+    if (!has_(opts.platform) || opts.platform !== 'none') add({ id: 'default-branch', text: 'The Product\'s default branch? (only for GitHub or GitLab)', choices: [], default: 'main', flag: '--default-branch <name>', given: has_(opts.defaultBranch), ...(has_(opts.platform) ? {} : { optional: true }) });
   }
   if (toolsOn(opts)) {
     const tool = (id, file, tools, primary) => {
@@ -349,14 +361,16 @@ export function setupQuestions(root, opts = {}) {
     tool('testing', PROJECT_FILES.testingConfig, TESTING_TOOLS, TESTING_PRIMARY);
     tool('learning', PROJECT_FILES.learningConfig, LEARNING_TOOLS, LEARNING_PRIMARY);
   }
-  const found = (opts.discovered || []).map((d) => d.name);
+  const found = newlyFound(root, opts).map((d) => d.name);
   add({
     id: 'repos',
     text: found.length ? `Connect and wire the repos found beside the Product (${found.join(', ')}), and any other code repo?` : 'Connect a code repo (its name, path, platform and default branch)?',
     choices: found.length ? ['all', 'none', found.join(',')] : ['none', '<name>=<path>[,<platform>[,<branch>]]'],
     default: found.length ? 'all' : 'none',
     flag: found.length ? '--connect <all|none|name,name> [--add-repo <name>=<path>[,<platform>[,<branch>]]]' : '--add-repo <name>=<path>[,<platform>[,<branch>]] | --connect none',
-    given: has_(opts.connect) || (opts.addRepo || []).length > 0,
+    // Repos found beside the Product are asked one by one unless `--connect` answers them: `--add-repo` alone
+    // does not.
+    given: has_(opts.connect) || (!found.length && (opts.addRepo || []).length > 0),
   });
   const noCr = reposAfter(root, opts).filter((r) => !exists(path.join(path.resolve(root, r.rpath), '.coderabbit.yaml'))).map((r) => r.name);
   if (noCr.length) add({ id: 'coderabbit', text: `Wire CodeRabbit (an advisory AI review of each PR/MR) in: ${noCr.join(', ')}?`, choices: ['all', 'none', noCr.join(',')], default: 'none', flag: '--coderabbit <all|none|name,name>', given: has_(opts.coderabbit) });
@@ -368,6 +382,10 @@ export function checkSetupFlags(root, opts = {}) {
   if (opts.tools === true && opts.noTools === true) throw setupFlagError('--tools and --no-tools say opposite things — pick one');
   if (opts.noTools === true && toolsGiven(opts)) throw setupFlagError('--no-tools and a tool flag (--design, --testing, --learning) say opposite things — pick one');
   if (opts.solo && has_(opts.team)) throw setupFlagError('--solo and --team say opposite things — pick one');
+  if (has_(opts.team) && !/^[1-9]\d*$/.test(String(opts.team))) throw setupFlagError(`--team ${opts.team}: expected how many people, a whole number from 1`);
+  if (has_(opts.ideTargets)) {
+    try { canonicalIdeTargets(opts.ideTargets); } catch (e) { throw setupFlagError(`--ide-targets: ${e.message}`); }
+  }
   if (has_(opts.platform) && !['github', 'gitlab', 'none'].includes(opts.platform)) throw setupFlagError(`--platform ${opts.platform}: expected github, gitlab or none`);
   const branchOk = (b) => /^[A-Za-z0-9._/-]+$/.test(b) && !b.startsWith('-') && !b.includes('..');
   if (has_(opts.defaultBranch) && !branchOk(opts.defaultBranch)) throw setupFlagError(`--default-branch ${opts.defaultBranch}: not a plain branch name`);
@@ -391,6 +409,7 @@ export function checkSetupFlags(root, opts = {}) {
     if (r.default_branch && !branchOk(r.default_branch)) throw setupFlagError(`--add-repo ${spec}: ${r.default_branch} is not a plain branch name`);
   }
   if (has_(opts.coderabbit) && !['all', 'none'].includes(opts.coderabbit)) {
+    // Only a repo this run ends with, and in a monorepo only the one it connects.
     const known = reposAfter(root, opts).map((r) => r.name);
     const unknown = parseList(opts.coderabbit).filter((n) => !known.includes(n));
     if (unknown.length) throw setupFlagError(`--coderabbit: no connected repo named ${unknown.join(', ')}`);
@@ -402,11 +421,13 @@ export function checkSetupFlags(root, opts = {}) {
 export function assertSetupAnswered(root, opts = {}) {
   checkSetupFlags(root, opts);
   if (!inJSON() || process.env.SDLC_NONINTERACTIVE) return;
-  const missing = setupQuestions(root, opts).filter((q) => !q.given);
+  const open = setupQuestions(root, opts).filter((q) => !q.given);
+  const missing = open.filter((q) => !q.optional);
   if (!missing.length) return;
   const e = err('YAD-CLI-001', `setup needs ${missing.length} answer(s) before it can run: ${missing.map((q) => q.id).join(', ')}`,
     'ask the person each question in `questions`, then run it again with those flags (or SDLC_NONINTERACTIVE=1 to take every default)');
-  e.questions = missing.map(({ given: _given, ...q }) => q);
+  // Every open question, the optional ones too (a default branch, asked with the platform), so they are asked at once.
+  e.questions = open.map(({ given: _given, ...q }) => q);
   throw e;
 }
 
