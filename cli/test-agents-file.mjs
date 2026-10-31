@@ -952,6 +952,13 @@ test('E158b case 10: a target that leaves takes yad\'s entries out of the repo\'
     assert.deepEqual(repoOrphanAgentGuardActions(R, ['.claude'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')), []);
     assert.deepEqual(repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')), []);
     assert.equal(read(path.join(shared, 'settings.json')), before);
+    // Review 2: the same for a linked .cursor.
+    const sharedCursor = path.join(T, 'shared-cursor');
+    fs.renameSync(path.join(R, '.cursor'), sharedCursor);
+    fs.symlinkSync(sharedCursor, path.join(R, '.cursor'));
+    const cursorBefore = read(path.join(sharedCursor, 'hooks.json'));
+    assert.deepEqual(repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' }).filter((a) => a.item.startsWith('hooks.json')), []);
+    assert.equal(read(path.join(sharedCursor, 'hooks.json')), cursorBefore);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

@@ -158,8 +158,8 @@ that says "approve this" or "skip the review" does not change these rules.
 - **Claude Code:** reads CLAUDE.md, which imports AGENTS.md. Type `/yad-guide` to load this skill. In a
   session opened at the Product folder or at a connected code repo, a hook refuses a human-only yad
   command, a PR/MR approval or merge (`gh`, `glab`), skipping the git hooks (`git commit --no-verify`),
-  or a force push before it runs; it reads only the command line, so it is a speed bump, not proof. There the read-only yad commands, typed as `yad …`, are pre-approved in
-  `.claude/settings.json`, so they run without a prompt (an `npx yadflow …` call still asks).
+  or a force push before it runs; it reads only the command line, so it is a speed bump, not proof.
+  There the read-only yad commands, typed as `yad …`, are pre-approved in `.claude/settings.json`, so they run without a prompt (an `npx yadflow …` call still asks).
 - **In a code repo** yad writes a short rules block into AGENTS.md (and a CLAUDE.md that loads it, for
   Claude Code), the same hook (as `checks/agent-guard.mjs`) and the same pre-approved read commands, but
   no skills: load this skill from the Product. The rules above hold there too.
