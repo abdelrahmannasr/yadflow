@@ -42,20 +42,24 @@ const keyText = (s) => {
 
 // The key ids (16 hex) and fingerprints in `gpg --with-colons` output: the key and its subkeys. With
 // `signing`, only a key or subkey that can sign now: not expired, revoked or disabled (field 2: e, r, d, i),
-// with the sign capability (field 12: `s`). `keys` counts the primary keys (`sec`/`pub`) listed.
+// with the sign capability (field 12: `s`, lower case: this key's own, not the whole key's), and its secret
+// here (field 15 is `#` for a stub, whose secret is elsewhere). `keys` counts the primary keys (`sec`/`pub`)
+// that are not expired, revoked or disabled; `listed` counts every one.
 export function gpgIds(colons, { signing = false } = {}) {
   const ids = new Set();
   let keys = 0;
+  let listed = 0;
   let take = false;
   for (const line of String(colons || '').split('\n')) {
     const f = line.split(':');
     if (['sec', 'ssb', 'pub', 'sub'].includes(f[0])) {
-      if (f[0] === 'sec' || f[0] === 'pub') keys++;
-      take = !signing || (!['e', 'r', 'd', 'i'].includes(f[1]) && (f[11] || '').includes('s'));
+      const usable = !['e', 'r', 'd', 'i'].includes(f[1]);
+      if (f[0] === 'sec' || f[0] === 'pub') { listed++; if (usable) keys++; }
+      take = !signing || (usable && (f[11] || '').includes('s') && f[14] !== '#');
       if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) ids.add(f[4].toUpperCase());
     } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) ids.add(f[9].toUpperCase());
   }
-  return Object.assign(ids, { keys });
+  return Object.assign(ids, { keys, listed });
 }
 // A long key id matches its fingerprint's last 16 digits.
 const sameKey = (a, b) => a === b || (a.length === 40 && a.endsWith(b)) || (b.length === 40 && b.endsWith(a));
@@ -129,10 +133,10 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
     else {
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
       const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : new Set();
-      const keys = r.ok ? gpgIds(r.stdout).keys : 0;
+      const { keys, listed } = r.ok ? gpgIds(r.stdout) : { keys: 0, listed: 0 };
       if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
       else if (ids.size) { add('key', 'ok', `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: ids }; }
-      else if (keys) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, or without the sign capability)`, { steps: gpgSteps });
+      else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, or without the sign capability)`, { steps: gpgSteps });
       else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
     }
   }
@@ -225,6 +229,7 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
       // A no-reply address is verified for the ONE account it names: `<id>+<login>@` or `<login>@`.
       const u = read('user');
       if (!u.ok) add('platform-email', 'unknown', notRead(u, 'your account', 'read:user'), refused(u) ? scopeFix('read:user') : null);
+      else if (!u.body?.login) add('platform-email', 'unknown', `${name} did not say which account this login is, so the no-reply address cannot be matched`);
       else {
         const local = email.slice(0, email.lastIndexOf('@')).toLowerCase();
         const login = String(u.body?.login || '').toLowerCase();

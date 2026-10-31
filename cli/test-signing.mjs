@@ -267,6 +267,8 @@ test('E160 review 1: a GitHub no-reply address counts only when it is this accou
     assert.match(other.fix.steps[0], /42\+me@users\.noreply\.github\.com/);
     execFileSync('git', ['config', 'user.email', '42+me@users.noreply.github.com'], { cwd: s.dir, env: s.env });
     assert.equal(byId(check(s, { runner: platform({ calls }).runner }))['platform-email'].status, 'ok');
+    // An answer with no login: unknown, never a gap or an ok.
+    assert.equal(byId(check(s, { runner: platform({ calls: { '^user/ssh_signing_keys': [200, [{ key: PUB }]], '^user$': [200, {}] } }).runner }))['platform-email'].status, 'unknown');
     // The account could not be read: unknown, never ok.
     assert.equal(byId(check(s, { runner: platform({ calls: { '^user/ssh_signing_keys': [200, [{ key: PUB }]] } }).runner }))['platform-email'].status, 'unknown');
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
@@ -288,6 +290,14 @@ test('E160 review 1: a GPG key is looked up by the exact email; several keys, or
       assert.match(k.message, /cannot sign now/, why);
     }
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
+});
+
+test('E160 review 2: only a key that can sign here counts: a certify-only primary with a signing subkey, a stub', () => {
+  const certifyOnly = 'sec:u:255:22:AAAABBBBCCCCDDDD:1::::::cSC:::+:\nfpr:::::::::0123456789ABCDEF0123456789ABCDEFAAAABBBB:\nssb:u:255:22:5555666677778888:1::::::s:::+:\nfpr:::::::::FEDCBA9876543210FEDCBA987654321055556666:';
+  assert.deepEqual([...gpgIds(certifyOnly, { signing: true })].sort(), ['5555666677778888', 'FEDCBA9876543210FEDCBA987654321055556666'], 'the subkey signs, the primary only certifies');
+  assert.equal(gpgIds(certifyOnly).keys, 1);
+  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::#:', { signing: true }).size, 0, 'a stub: its secret is not here');
+  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:r:255:22:1111222233334444:1::::::scSC:').keys, 1, 'a revoked key is not one git may pick');
 });
 
 test('E160 review 1: the older ssh- form, a relative key path, and a key command', () => {
