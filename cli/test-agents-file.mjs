@@ -942,6 +942,16 @@ test('E158b case 10: a target that leaves takes yad\'s entries out of the repo\'
     assert.equal(JSON.parse(read(path.join(R, '.cursor/hooks.json'))).hooks?.beforeShellExecution, undefined);
     assert.ok(fs.existsSync(path.join(R, REPO_AGENT_GUARD_DEST)), 'the script stays');
     assert.deepEqual(repoOrphanAgentGuardActions(path.join(T, 'nowhere'), ['.agents'], { scope: 'web' }), []);
+    // Review 1: a repo whose .claude is a link to another folder: nothing is removed through it, a target or not.
+    guardItems(repoActions(P, repo)).forEach((a) => a.apply());
+    assert.equal(repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')).length, 2, 'yad\'s entries are back, so there is something to remove');
+    const shared = path.join(T, 'shared');
+    fs.renameSync(path.join(R, '.claude'), shared);
+    fs.symlinkSync(shared, path.join(R, '.claude'));
+    const before = read(path.join(shared, 'settings.json'));
+    assert.deepEqual(repoOrphanAgentGuardActions(R, ['.claude'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')), []);
+    assert.deepEqual(repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')), []);
+    assert.equal(read(path.join(shared, 'settings.json')), before);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

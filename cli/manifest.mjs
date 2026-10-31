@@ -753,8 +753,9 @@ export const CAPTURE_ADAPTERS = Object.freeze({
 // The agent guard (E158): BEFORE an agent's shell command runs, `hooks/agent-guard.mjs` asks
 // `yad hook agent-guard` whether it is a yad command only the person may run (an approval, a gate comment,
 // advance or reopen, `commit --manual`), a PR/MR approval or merge, skipping the git hooks, or a force push,
-// and refuses it with what to do instead. Wired on every Product, in both ledger modes: it is about the agent's rules, not about who owns the ledger. A
-// speed bump, not proof (cli/agent-guard.mjs). Codex has no hooks: there, only the rules in AGENTS.md apply.
+// and refuses it with what to do instead. Wired on every Product and every connected code repo cloned here
+// (E158b), in both ledger modes: it is about the agent's rules, not about who owns the ledger. A speed bump,
+// not proof (cli/agent-guard.mjs). Codex has no hooks: there, only the rules in AGENTS.md apply.
 //
 // ONE script for both harnesses. It reads the payload and answers in the protocol the payload names:
 // Cursor's `beforeShellExecution` is a permission hook (a JSON verdict on stdout, always), Claude Code's

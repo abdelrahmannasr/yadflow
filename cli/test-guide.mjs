@@ -1224,3 +1224,42 @@ test('E158b case 9: with nothing of the team\'s pending, the code repo\'s settin
     assert.equal(git(A, ['status', '--porcelain', '--', '.claude', 'checks/agent-guard.mjs']), '', 'nothing of the guard left behind');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
+
+test('E158b cases 8 and 10 through yad itself: --push stages the script, never the repo\'s settings; a target that leaves takes yad\'s entries out', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  try {
+    for (const d of [T, A]) {
+      const r = path.join(P, `${path.basename(d)}.git`);
+      git(P, ['init', '-q', '--bare', '-b', 'main', r]);
+      fs.mkdirSync(d);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]); git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0', ideTargets: ['.claude'] });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: settings']); git(T, ['push', '-q']);
+    put(path.join(A, 'checks/spec-link.sh'), '#!/usr/bin/env bash\n');
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(npm test)'] } });
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: wired']); git(A, ['push', '-q']);
+    // Case 8: the push commits the script, and leaves the repo's own settings file for its people.
+    await reconcile(T, { fix: true, scope: 'changed', push: true });
+    const pushed = git(A, ['show', '--name-only', '--format=', 'origin/main']).split('\n');
+    assert.ok(pushed.includes('checks/agent-guard.mjs'), pushed.join(', '));
+    assert.ok(!pushed.includes('.claude/settings.json'), pushed.join(', '));
+    const settings = path.join(A, '.claude/settings.json');
+    assert.ok(JSON.parse(fs.readFileSync(settings, 'utf8')).permissions.allow.includes('Bash(yad guide:*)'), 'written, not committed');
+    process.exitCode = 0;
+    // Case 10: Claude Code leaves the targets; check --fix takes yad's entries out of the repo's file.
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0', ideTargets: ['.agents'] });
+    await reconcile(T, { fix: true, scope: 'all' });
+    const after = JSON.parse(fs.readFileSync(settings, 'utf8'));
+    assert.deepEqual(after.permissions.allow, ['Bash(npm test)']);
+    assert.equal(after.hooks?.PreToolUse, undefined);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});

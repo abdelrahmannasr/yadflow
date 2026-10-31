@@ -1805,12 +1805,16 @@ export function repoAgentGuardActions(repoRoot, ideTargets, { scope, ledger = re
 }
 
 // The same entries for a target that left, in a connected code repo: only yad's come out. The script stays.
+// A tool folder that is a link or not a folder is never written through — a target or not: removing an entry
+// would change the file the link points at (the Product's own, when it points there).
 export function repoOrphanAgentGuardActions(repoRoot, ideTargets, { scope }) {
   if (!isDirectory(repoRoot)) return [];
   const kept = new Set(repoTargets(repoRoot, ideTargets, null));
+  const linked = (ide) => { const st = lstatIfPresent(path.join(repoRoot, ide)); return !!st && (st.isSymbolicLink() || !st.isDirectory()); };
+  const adapters = Object.fromEntries(Object.entries(agentGuardAdapters(REPO_AGENT_GUARD_DEST)).filter(([ide]) => !linked(ide)));
   return [
-    ...agentGuardOrphans(repoRoot, kept, agentGuardAdapters(REPO_AGENT_GUARD_DEST), scope),
-    ...allowListOrphans(repoRoot, kept.has('.claude'), scope),
+    ...agentGuardOrphans(repoRoot, kept, adapters, scope),
+    ...(linked('.claude') ? [] : allowListOrphans(repoRoot, kept.has('.claude'), scope)),
   ];
 }
 

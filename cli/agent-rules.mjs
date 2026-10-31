@@ -323,7 +323,7 @@ export function pointerBlock() {
   return [
     '## yadflow — rules for AI coding agents',
     '',
-    'This repo is built with yadflow (the `yad` command). The full rules are in the AGENTS.md of the Product repo, and in the `yad-guide` skill installed there (`yad guide --json`, run here, finds the Product). In Claude Code and Cursor a hook here (`checks/agent-guard.mjs`) refuses the person-only acts before they run; it is a speed bump, not proof, and Codex has no hooks, so these rules are what stop a slip. In short:',
+    'This repo is built with yadflow (the `yad` command). The full rules are in the AGENTS.md of the Product repo, and in the `yad-guide` skill installed there (`yad guide --json`, run here, finds the Product). Where yad wired it for Claude Code or Cursor, a hook here (`checks/agent-guard.mjs`) refuses the person-only acts and a force push before they run; it is a speed bump, not proof, and Codex has no hooks, so these rules are what stop a slip. In short:',
     '',
     `- ${pick('rules-win')}`,
     `- ${pick('read-first')}`,

@@ -14,8 +14,8 @@
 // A SPEED BUMP, NOT PROOF: a command hidden in a script or an alias is not seen. The platform, and CI's
 // ledger guard, are what prove an approval. Codex has no hooks: there only the rules in AGENTS.md apply.
 //
-// A NODE SCRIPT (E113), importing nothing outside Node, because it runs from the Product, where yadflow may
-// not be installed at all.
+// A NODE SCRIPT (E113), importing nothing outside Node, because it runs from the Product (`hooks/`) or a
+// connected code repo (`checks/`, E158b), where yadflow may not be installed at all.
 //
 // FAIL-OPEN: if no `yad` can be found, or it cannot run, the command is ALLOWED and this says why on stderr.
 import { spawnSync } from 'node:child_process';
