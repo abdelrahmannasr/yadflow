@@ -614,12 +614,23 @@ export async function runSetup(root, opts = {}) {
   // Every managed file this step writes is recorded (sha per repo root) so a LATER `yad update` can
   // tell a stale copy from one the team edited, instead of silently rewriting both (#164).
   const wired = [];
+  // E158 (#353): the read-only yad commands Claude Code may run without asking are shown before they are first
+  // written — in a code repo (E158b) or the Product — and named again after that. Not when nothing is written.
+  let allowListShown = false;
+  const showAllowList = (who, actions) => {
+    if (!actions.some((a) => a.allowList && a.status !== 'ok' && !a.writesNothing)) return;
+    log(`  ${c.bold(who)} ${c.dim('(read-only yad commands Claude Code runs without asking, in .claude/settings.json)')}`);
+    if (allowListShown) { log(`    ${c.dim('the same list as above')}`); return; }
+    for (const e of readAllowList()) log(`    ${c.dim(e)}`);
+    allowListShown = true;
+  };
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
     // Migrate renamed wired CI (marker-owned sdlc-*.yml -> yad-*.yml); a user-authored same-named file is
     // never touched, and an edited one is kept without its new name beside it (E123, `withoutKeptRenames`).
     const repoLegacy = legacyRepoActions(root, repo);
     const repoWiring = withoutKeptRenames([...repoActions(root, repo), ...repoLegacy]).filter((a) => !repoLegacy.includes(a));
+    showAllowList(repo.name, repoWiring);
     applyActions(repoWiring, { force: true });
     wired.push(...repoWiring);
     applyActions(repoLegacy, { force: true });
@@ -676,8 +687,7 @@ export async function runSetup(root, opts = {}) {
   const allowList = allowListActions(root, ideTargets);
   // Shown only when it will be written: a settings file that does not parse writes nothing, and says so.
   if (allowList.some((a) => a.status !== 'ok' && !a.writesNothing)) {
-    log(`  ${c.bold('product')} ${c.dim('(read-only yad commands Claude Code runs without asking, in .claude/settings.json)')}`);
-    for (const e of readAllowList()) log(`    ${c.dim(e)}`);
+    showAllowList('product', allowList);
     applyActions(allowList);
   }
   // E113: the shell-script hooks a re-run replaces, once the entries above no longer name them.

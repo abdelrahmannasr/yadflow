@@ -1154,3 +1154,73 @@ test('yad guide prints the brief a person would read', async () => {
     assert.match(said, /who: the agent drafts, the person decides/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E158b case 9: a code repo\'s settings ride the update PR when the change is yad\'s alone; with the team\'s own edit, a row', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { VERSION } = await import('./manifest.mjs');
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  try {
+    for (const d of [T, A]) {
+      const r = path.join(P, `${path.basename(d)}.git`);
+      git(P, ['init', '-q', '--bare', '-b', 'main', r]);
+      fs.mkdirSync(d);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]); git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0', ideTargets: ['.claude'] });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: settings']); git(T, ['push', '-q']);
+    // The app is wired (a gate script is there) and has its own committed settings.
+    put(path.join(A, 'checks/spec-link.sh'), '#!/usr/bin/env bash\n');
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(npm test)'] } });
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: wired']); git(A, ['push', '-q']);
+    const branch = `chore/yad-update-v${VERSION}`;
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/app/pull/7' });
+    // The team's own uncommitted edit: the file stays out of the PR, and a row says so.
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(npm test)', 'Bash(npm run lint)'] } });
+    const mixed = await reconcile(T, { fix: true, scope: 'changed', openPr: true, creator });
+    const row = mixed.commits.find((c) => c.label === 'app' && c.reason === 'settings-uncommitted');
+    assert.ok(row, JSON.stringify(mixed.commits));
+    const files = git(A, ['diff', '--name-only', 'main', branch]).split('\n');
+    assert.ok(files.includes('checks/agent-guard.mjs'), files.join(', '));
+    assert.ok(!files.includes('.claude/settings.json'), files.join(', '));
+    assert.match(fs.readFileSync(path.join(A, '.claude/settings.json'), 'utf8'), /npm run lint/, 'their edit is still there');
+    process.exitCode = 0;
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('E158b case 9: with nothing of the team\'s pending, the code repo\'s settings ride the update PR', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { VERSION } = await import('./manifest.mjs');
+  const P = tmp();
+  const T = path.join(P, 'product');
+  const A = path.join(P, 'app');
+  try {
+    for (const d of [T, A]) {
+      const r = path.join(P, `${path.basename(d)}.git`);
+      git(P, ['init', '-q', '--bare', '-b', 'main', r]);
+      fs.mkdirSync(d);
+      git(d, ['init', '-q', '-b', 'main']);
+      git(d, ['config', 'user.name', 'Alice Smith']); git(d, ['config', 'user.email', 'alice@work.com']); git(d, ['config', 'commit.gpgsign', 'false']); git(d, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+      git(d, ['commit', '-q', '--allow-empty', '-m', 'chore: start']);
+      git(d, ['remote', 'add', 'origin', r]); git(d, ['push', '-q', '-u', 'origin', 'main']);
+    }
+    put(path.join(T, '.sdlc/product.json'), { platform: 'github', git_url: 'git@github.com:acme/product.git', default_branch: 'main' });
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0', ideTargets: ['.claude'] });
+    put(path.join(T, '.sdlc/repos.json'), { repos: [{ name: 'app', path: '../app', platform: 'github', default_branch: 'main' }] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: settings']); git(T, ['push', '-q']);
+    put(path.join(A, 'checks/spec-link.sh'), '#!/usr/bin/env bash\n');
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(npm test)'] } });
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: wired']); git(A, ['push', '-q']);
+    const r = await reconcile(T, { fix: true, scope: 'changed', openPr: true, creator: () => ({ ok: true, url: 'https://github.com/acme/app/pull/8' }) });
+    assert.ok(!r.commits.some((c) => c.reason === 'settings-uncommitted'), JSON.stringify(r.commits));
+    const files = git(A, ['diff', '--name-only', 'main', `chore/yad-update-v${VERSION}`]).split('\n');
+    assert.ok(files.includes('checks/agent-guard.mjs') && files.includes('.claude/settings.json'), `the script and the entry that runs it land together: ${files.join(', ')}`);
+    assert.equal(git(A, ['status', '--porcelain', '--', '.claude', 'checks/agent-guard.mjs']), '', 'nothing of the guard left behind');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});

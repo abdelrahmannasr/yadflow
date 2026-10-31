@@ -762,7 +762,11 @@ export const CAPTURE_ADAPTERS = Object.freeze({
 export const AGENT_GUARD_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/agent-guard.mjs', dest: 'hooks/agent-guard.mjs' },
 ];
-export const AGENT_GUARD_ADAPTERS = Object.freeze({
+// In a connected code repo the script goes in `checks/`, the folder yad already owns there (E158b): a root
+// `hooks/` folder is often the app's own. The script finds yad from its grandparent, the repo's root, either way.
+export const REPO_AGENT_GUARD_DEST = 'checks/agent-guard.mjs';
+// The Claude and Cursor entries that run the script at `dest` (a path from the project's root).
+export const agentGuardAdapters = (dest) => Object.freeze({
   '.claude': Object.freeze({
     target: '.claude',
     label: 'agent guard',
@@ -774,7 +778,7 @@ export const AGENT_GUARD_ADAPTERS = Object.freeze({
     matcher: 'Bash',
     projectDirEnv: CLAUDE_PROJECT_DIR_ENV,
     // Quoted and anchored on the project root, for the reason the ledger guard's entry is (see above).
-    command: `node "$${CLAUDE_PROJECT_DIR_ENV}/hooks/agent-guard.mjs"`,
+    command: `node "$${CLAUDE_PROJECT_DIR_ENV}/${dest}"`,
     wiring: Object.freeze([]),
     legacyCommands: Object.freeze([]),
   }),
@@ -789,13 +793,14 @@ export const AGENT_GUARD_ADAPTERS = Object.freeze({
     matcher: null,
     projectDirEnv: CURSOR_PROJECT_DIR_ENV,
     // Relative and unquoted, for the reason the ledger guard's Cursor entry is (see above).
-    command: 'node hooks/agent-guard.mjs',
+    command: `node ${dest}`,
     // A permission hook: an empty or off-schema answer BLOCKS, so the script always prints a verdict.
     requiresJsonVerdict: true,
     wiring: Object.freeze([]),
     legacyCommands: Object.freeze([]),
   }),
 });
+export const AGENT_GUARD_ADAPTERS = agentGuardAdapters(AGENT_GUARD_WIRING[0].dest);
 
 // The Claude adapter's fields under their original names. Kept because they are what the shipped
 // error text and the existing tests name, and renaming a constant buys nothing; new code should read

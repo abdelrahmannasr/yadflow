@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
-  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS, AGENT_GUARD_WIRING, AGENT_GUARD_ADAPTERS,
+  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS, AGENT_GUARD_WIRING, AGENT_GUARD_ADAPTERS, REPO_AGENT_GUARD_DEST, agentGuardAdapters,
   legacySkillPairs, REMOVED_SKILLS, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
@@ -912,7 +912,11 @@ export function repoActions(root, repo) {
   // E158: the short rules block, in a repo cloned here that is not the Product itself (a monorepo entry has
   // the Product's full block in the same file). Not relabelled here: like the wiring, it is `new` for `yad
   // update` only on a wired repo (below), so update never does a repo's one-time setup.
-  if (!samePath(repoRoot, path.resolve(root)) && isDirectory(repoRoot)) actions.push(...agentFileActions(repoRoot, ideTargetsFor(root), { scope: repo.name, lines: pointerBlock(), relabel: false }));
+  if (!samePath(repoRoot, path.resolve(root)) && isDirectory(repoRoot)) {
+    actions.push(...agentFileActions(repoRoot, ideTargetsFor(root), { scope: repo.name, lines: pointerBlock(), relabel: false }));
+    // E158b: the agent guard and the read-only allow list, so a session opened in the code repo has them too.
+    actions.push(...repoAgentGuardActions(repoRoot, ideTargetsFor(root), { scope: repo.name, ledger }));
+  }
   if (!wired) return actions;
   // The record is not a template: an absent one on a wired repo is always `new` (nothing to respect).
   const neverWritten = (a) => !a.managed || !ledger[rel(a.managed.root, a.managed.dest)];
@@ -1189,9 +1193,11 @@ export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
 // deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
 // byte-matches its src); the marker above is its provenance instead.
 const unparsedSaid = new Set();
-function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(obj, adapter)) {
+// `where` names a connected code repo in the warnings (E158b); the Product's own files need no name.
+function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(obj, adapter), where = null) {
   const ide = adapter.target;
   const relDest = adapter.settings;
+  const named = where ? `${where}/${relDest}` : relDest;
   const dest = path.join(root, relDest);
   const raw = exists(dest) ? fs.readFileSync(dest, 'utf8') : null;
   let parsed = null;
@@ -1227,7 +1233,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
     // Said once per file, not once per action: up to four share `.claude/settings.json` (E158 review 1).
     if (!unparsedSaid.has(`${dest}\0${raw}`)) {
       unparsedSaid.add(`${dest}\0${raw}`);
-      warn(`${relDest} does not parse — yad's entries in it (hooks, the read-only allow list) cannot be written; fix the JSON, then re-run \`yad check --fix\``);
+      warn(`${named} does not parse — yad's entries in it (hooks, the read-only allow list) cannot be written; fix the JSON, then re-run \`yad check --fix\``);
     }
     return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
@@ -1235,7 +1241,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   // Same treatment as a file that does not parse, and for the same reason: everything in it is the
   // team's, there is no shipped template to restore, and `--overwrite-local` must not invent one.
   if (unmergeable) {
-    warn(`${relDest}: ${unmergeable} — the ${adapter.label || 'ledger guard'} cannot be wired without discarding what is there; fix it by hand, then re-run \`yad check --fix\``);
+    warn(`${named}: ${unmergeable} — the ${adapter.label || 'ledger guard'} cannot be wired without discarding what is there; fix it by hand, then re-run \`yad check --fix\``);
     return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
   return {
@@ -1258,12 +1264,12 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
         let current;
         try { current = JSON.parse(fs.readFileSync(dest, 'utf8')); } catch { /* unreadable — refused below */ }
         if (!current || typeof current !== 'object' || Array.isArray(current)) {
-          warn(`${relDest} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
+          warn(`${named} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
           return;
         }
         const merged = merge(current);
         if (merged.unreadable) {
-          warn(`${relDest}: ${merged.unreadable} — left untouched; fix it by hand, then re-run \`yad check --fix\``);
+          warn(`${named}: ${merged.unreadable} — left untouched; fix it by hand, then re-run \`yad check --fix\``);
           return;
         }
         writeJSON(dest, merged.settings);
@@ -1680,8 +1686,10 @@ export function mergeAllowList(input) {
 export const ALLOW_LIST_ADAPTER = Object.freeze({ target: '.claude', settings: '.claude/settings.json', label: 'read-only yad allow list' });
 export function allowListActions(root, ideTargets = ideTargetsFor(root)) {
   if (!exists(productConfigPath(root)) || !safeIdeTargetsFor(root, ideTargets).includes('.claude')) return [];
-  return [asNew({ ...hookSettingsAction(root, ALLOW_LIST_ADAPTER, mergeAllowList), item: `${path.basename(ALLOW_LIST_ADAPTER.settings)} (read-only yad commands)` })];
+  return [asNew(allowListAction(root))];
 }
+// `allowList` marks it for setup, which shows the list before it is first written.
+const allowListAction = (at) => ({ ...hookSettingsAction(at, ALLOW_LIST_ADAPTER, mergeAllowList), item: `${path.basename(ALLOW_LIST_ADAPTER.settings)} (read-only yad commands)`, allowList: true });
 
 // yad's allow-list entries that should no longer be there: all of them once `.claude` has left the IDE targets,
 // and, while it is a target, those a later yadflow stopped pre-approving (`RETIRED_ALLOW_ENTRIES`). Only these
@@ -1692,10 +1700,14 @@ export function allowListActions(root, ideTargets = ideTargetsFor(root)) {
 // `check --fix` brought up to date, `SHIPPED_ALLOW_LISTS`): that is yad's list, not a hand-picked line.
 export function orphanAllowListActions(root, ideTargets = ideTargetsFor(root)) {
   if (!exists(productConfigPath(root))) return [];
+  return allowListOrphans(root, safeIdeTargetsFor(root, ideTargets).includes('.claude'));
+}
+// `kept`: `.claude` is still a target. `scope`: the line's scope in the report (a code repo's name, E158b).
+function allowListOrphans(root, kept, scope = ALLOW_LIST_ADAPTER.target) {
   const file = path.join(root, ALLOW_LIST_ADAPTER.settings);
   if (!exists(file)) return [];
   let wholeList = false;
-  if (!safeIdeTargetsFor(root, ideTargets).includes('.claude')) {
+  if (!kept) {
     try {
       const allow = JSON.parse(fs.readFileSync(file, 'utf8'))?.permissions?.allow;
       wholeList = Array.isArray(allow) && [readAllowList(), ...SHIPPED_ALLOW_LISTS].some((list) => list.every((e) => allow.includes(e)));
@@ -1712,7 +1724,7 @@ export function orphanAllowListActions(root, ideTargets = ideTargetsFor(root)) {
   try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
   if (!without(parsed)) return [];
   return [{
-    scope: ALLOW_LIST_ADAPTER.target,
+    scope,
     item: `${path.basename(file)} (read-only yad commands removed)`,
     status: 'removed',
     root,
@@ -1747,9 +1759,11 @@ export function agentGuardActions(root, ideTargets = ideTargetsFor(root)) {
 // may still run it; with none, it is one file nothing runs, and `yad check` names nothing wrong with it).
 export function orphanAgentGuardActions(root, ideTargets = ideTargetsFor(root)) {
   if (!exists(productConfigPath(root))) return [];
-  const kept = new Set(safeIdeTargetsFor(root, ideTargets));
+  return agentGuardOrphans(root, new Set(safeIdeTargetsFor(root, ideTargets)), AGENT_GUARD_ADAPTERS);
+}
+function agentGuardOrphans(root, kept, adapters, scope = null) {
   const actions = [];
-  for (const adapter of Object.values(AGENT_GUARD_ADAPTERS)) {
+  for (const adapter of Object.values(adapters)) {
     if (kept.has(adapter.target)) continue;
     const settingsPath = path.join(root, adapter.settings);
     if (!exists(settingsPath)) continue;
@@ -1757,7 +1771,7 @@ export function orphanAgentGuardActions(root, ideTargets = ideTargetsFor(root)) 
     try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
     if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
     actions.push({
-      scope: adapter.target,
+      scope: scope || adapter.target,
       item: `${path.basename(adapter.settings)} (agent guard entry removed)`,
       status: 'removed',
       root,
@@ -1772,6 +1786,45 @@ export function orphanAgentGuardActions(root, ideTargets = ideTargetsFor(root)) 
     });
   }
   return actions;
+}
+
+// E158b: the agent guard and the read-only allow list in a connected code repo, so a session opened there has
+// them too. The script goes in `checks/` (REPO_AGENT_GUARD_DEST); the entries go in the repo's own settings
+// files, which stay the team's: `paths` is empty, so `--push` never stages them, and `--open-pr` stages one only
+// when the change is yad's alone (reconcile). The tools are the Product's IDE targets, as CLAUDE.md's are. A
+// target folder in the repo that is a link or a file is named and skipped, never written through. Not
+// relabelled here: `repoActions` makes them `new` for `yad update` only on a wired repo.
+export function repoAgentGuardActions(repoRoot, ideTargets, { scope, ledger = readManagedLedger(repoRoot) }) {
+  const targets = repoTargets(repoRoot, ideTargets, scope);
+  const adapters = agentGuardAdapters(REPO_AGENT_GUARD_DEST);
+  const settings = targets.filter((ide) => adapters[ide]).map((ide) => ({ ...hookSettingsAction(repoRoot, adapters[ide], undefined, scope), scope, item: `${adapters[ide].settings} (agent guard)` }));
+  if (targets.includes('.claude')) settings.push({ ...hookSettingsAction(repoRoot, ALLOW_LIST_ADAPTER, mergeAllowList, scope), scope, item: `${ALLOW_LIST_ADAPTER.settings} (read-only yad commands)`, allowList: true });
+  if (!settings.length) return [];
+  const script = AGENT_GUARD_WIRING[0];
+  return [wiredFileAction(scope, REPO_AGENT_GUARD_DEST, asset(script.src), path.join(repoRoot, REPO_AGENT_GUARD_DEST), { root: repoRoot, ledger }), ...settings];
+}
+
+// The same entries for a target that left, in a connected code repo: only yad's come out. The script stays.
+export function repoOrphanAgentGuardActions(repoRoot, ideTargets, { scope }) {
+  if (!isDirectory(repoRoot)) return [];
+  const kept = new Set(repoTargets(repoRoot, ideTargets, null));
+  return [
+    ...agentGuardOrphans(repoRoot, kept, agentGuardAdapters(REPO_AGENT_GUARD_DEST), scope),
+    ...allowListOrphans(repoRoot, kept.has('.claude'), scope),
+  ];
+}
+
+// The Product's IDE targets that are safe to write through in a code repo. An unsafe one is named once (when
+// `scope` is given) and left out.
+const unsafeRepoSaid = new Set();
+function repoTargets(repoRoot, ideTargets, scope) {
+  const { targets, unsafe } = safeIdeTargetStateFor(repoRoot, ideTargets);
+  for (const u of unsafe) {
+    if (!scope || unsafeRepoSaid.has(`${repoRoot}\0${u.target}`)) continue;
+    unsafeRepoSaid.add(`${repoRoot}\0${u.target}`);
+    warn(`${scope}: ${u.message} — the agent guard and the read-only allow list are not written there`);
+  }
+  return targets;
 }
 
 // ---- the shell-script hooks, retired (E113) -----------------------------------------------------------

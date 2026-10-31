@@ -588,15 +588,17 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   - **Where the rules live:** in a yad-written block in `AGENTS.md` — the file AI coding agents read at
     the start of a session — and in `CLAUDE.md`, which loads it. Your own text around the block is
     kept. Each code repo gets a short version of the block.
-  - **The hook:** in Claude Code and Cursor, in a session opened at the Product folder, a hook (a small
+  - **The hook:** in Claude Code and Cursor, in a session opened at the Product folder or at a
+    connected code repo, a hook (a small
     script the tool runs before each shell command) refuses four kinds of command the agent tries to
     run: a yad command only you may run (a gate approve, comment, advance or reopen, or
     `commit --manual`); approving or merging a PR/MR (a pull request or merge request) with `gh` or
     `glab`; skipping the git hooks (`git commit --no-verify`), which would pass the local ledger check;
     and a force push, which overwrites commits already on the server. It reads only the
-    command line, so it catches mistakes, not tricks. In a code repo, and in Codex, which has no hooks,
-    only the rules apply.
-  - **No prompt for reads:** at the Product folder, the read-only commands, typed as `yad …`, run in
+    command line, so it catches mistakes, not tricks. In Codex, which has no hooks, only the rules
+    apply.
+  - **No prompt for reads:** at the Product folder and in each connected code repo, the read-only
+    commands, typed as `yad …`, run in
     Claude Code without a permission prompt (an `npx yadflow …` call still asks).
   - **Reports:** when the agent finds a yadflow bug or idea, it shows you the exact report text and
     posts it only after your yes.

@@ -1109,7 +1109,7 @@ yad next                          # the CLI's own answer: the one next action to
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad guide --json                    # what the agent reads before each step
 /yad-guide                          # load the skill in Claude Code</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Whenever an AI agent drives yadflow. In a session opened at the Product folder, a hook — a small script Claude Code or Cursor runs before each shell command — also stops the agent from running a yad command only you may run (a gate approve, comment, advance or reopen, or <code>commit --manual</code>), approving or merging a PR/MR, skipping the git hooks (<code>git commit --no-verify</code>), which would pass the local ledger check, or a force push (a push that overwrites commits already on the server). It is a speed bump, not proof. In a code repo, and in Codex, only the rules apply.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Whenever an AI agent drives yadflow. In a session opened at the Product folder or at a connected code repo, a hook — a small script Claude Code or Cursor runs before each shell command — also stops the agent from running a yad command only you may run (a gate approve, comment, advance or reopen, or <code>commit --manual</code>), approving or merging a PR/MR, skipping the git hooks (<code>git commit --no-verify</code>), which would pass the local ledger check, or a force push (a push that overwrites commits already on the server). It is a speed bump, not proof. In Codex, which has no hooks, only the rules apply.</div>
   </div>
 
   <div class="skillcard" id="sk-report">

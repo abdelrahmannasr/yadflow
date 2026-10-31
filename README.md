@@ -154,7 +154,8 @@ checks they were done before it goes on. Setup writes the rules into `AGENTS.md`
 agents read at the start of a session — and into a `CLAUDE.md` that loads it, so every new session
 starts with them.
 
-In Claude Code and Cursor, in a session opened at the Product folder, a hook also stops the agent. A
+In Claude Code and Cursor, in a session opened at the Product folder or at any connected code repo, a
+hook also stops the agent. A
 hook is a small script the agent's tool runs before each shell command. It refuses four kinds of
 command when the agent runs them:
 
@@ -164,8 +165,8 @@ command when the agent runs them:
 - skipping the git hooks (`git commit --no-verify`), which would pass the local ledger check;
 - a force push, which overwrites commits already on the server.
 
-The hook reads only the command line, so it catches mistakes, not tricks. In a code repo, and in Codex,
-which has no hooks, only the rules apply.
+The hook reads only the command line, so it catches mistakes, not tricks. In Codex, which has no hooks,
+only the rules apply.
 
 **Other ways in:**
 
