@@ -49,8 +49,11 @@ const keyText = (s) => {
 // revoked, disabled or invalid (a platform's copy of a key, which signs nothing here). `keys` counts the
 // primary keys (`sec`/`pub`) with a part that can sign now; `listed` counts every one; `card` is true when a
 // part that signs is on a smartcard (gpg signs with the newest signing subkey, which may be that one).
+// `parts` holds each part taken, as a Set of its id and fingerprint, with `sub` (a subkey) and `created`
+// (field 6): gpg signs with ONE of them.
 export function gpgIds(colons, { signing = false, live = false } = {}) {
   const ids = new Set();
+  const parts = [];
   const signers = new Set();
   let listed = 0;
   let primary = null;
@@ -67,10 +70,11 @@ export function gpgIds(colons, { signing = false, live = false } = {}) {
       const signs = primary !== null && !dead && !primaryDead && (f[11] || '').includes('s') && f[14] !== '#';
       if (signs) { signers.add(primary); if (f[14] && f[14] !== '+') onCard++; }
       take = primary !== null && (signing ? signs : !live || (!dead && !primaryDead));
-      if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) ids.add(f[4].toUpperCase());
-    } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) ids.add(f[9].toUpperCase());
+      if (take) parts.push(Object.assign(new Set(), { sub: f[0] === 'ssb' || f[0] === 'sub', created: Number(f[5]) || 0 }));
+      if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) { ids.add(f[4].toUpperCase()); parts.at(-1).add(f[4].toUpperCase()); }
+    } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) { ids.add(f[9].toUpperCase()); parts.at(-1).add(f[9].toUpperCase()); }
   }
-  return Object.assign(ids, { keys: signers.size, listed, card: onCard > 0 });
+  return Object.assign(ids, { keys: signers.size, listed, card: onCard > 0, parts: parts.filter((x) => x.size) });
 }
 // A long key id matches its fingerprint's last 16 digits.
 const sameKey = (a, b) => a === b || (a.length === 40 && a.endsWith(b)) || (b.length === 40 && b.endsWith(a));
@@ -145,8 +149,16 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
       const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, card: false });
       const { keys, listed, card } = ids;
+      // The part gpg signs with: the one a key id ending in `!` names; else the newest signing subkey (several
+      // made at the same second all count); the primary only when no subkey signs.
+      const pinned = /^(?:0x)?([0-9A-F]{16}|[0-9A-F]{40})!$/i.exec(signingkey || '');
+      const all = ids.parts || [];
+      const subs = all.filter((part) => part.sub);
+      const newest = Math.max(0, ...subs.map((part) => part.created));
+      const parts = pinned ? all.filter((part) => [...part].some((id) => sameKey(id, pinned[1].toUpperCase())))
+        : subs.length ? subs.filter((part) => part.created === newest) : all;
       if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
-      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign; a part of it is on a smartcard, so gpg may need the card inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: ids }; }
+      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign; a part of it is on a smartcard, so gpg may need the card inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: parts.length ? parts : [ids], ids }; }
       else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine)`, { steps: gpgSteps });
       else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
     }
@@ -220,15 +232,27 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
       // marks new commits Unverified even when the key here was renewed.
       let remote = new Set();
       let live = new Set();
+      const unclear = new Set(); // an expiry date yad cannot read: neither in force nor out
       let readable = true;
       const now = Date.now();
+      // 'live', 'dead', or 'unclear' for one GitHub key or subkey.
+      const state = (k) => {
+        if (k?.revoked === true) return 'dead';
+        if (!k?.expires_at) return 'live';
+        const t = Date.parse(k.expires_at);
+        return Number.isNaN(t) ? 'unclear' : t <= now ? 'dead' : 'live';
+      };
       if (platform === 'github') {
         for (const k of list) {
-          const keyLive = k?.revoked !== true && !(k?.expires_at && Date.parse(k.expires_at) <= now);
+          const top = state(k);
           for (const sub of [k, ...(Array.isArray(k?.subkeys) ? k.subkeys : [])]) {
             if (typeof sub?.key_id !== 'string') continue;
-            remote.add(sub.key_id.toUpperCase());
-            if (keyLive && sub.revoked !== true && !(sub.expires_at && Date.parse(sub.expires_at) <= now)) live.add(sub.key_id.toUpperCase());
+            const id = sub.key_id.toUpperCase();
+            const own = sub === k ? top : state(sub);
+            remote.add(id);
+            if (top === 'dead' || own === 'dead') continue;
+            if (top === 'unclear' || own === 'unclear') unclear.add(id);
+            else live.add(id);
           }
         }
       } else if (haveTool('gpg')) {
@@ -240,9 +264,14 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
           live = new Set([...live, ...gpgIds(out, { live: true })]);
         }
       } else readable = false;
-      const matches = (ids) => [...localKey.gpg].some((a) => [...ids].some((b) => sameKey(a, b)));
-      if (matches(live)) add('platform-key', 'ok', `${name} lists your GPG key`);
-      else if (matches(remote)) add('platform-key', 'gap', `${name} lists your GPG key, but its copy there has expired or was revoked: new commits show as Unverified`, { url: keysPage, steps: ['Export it again: gpg --armor --export <your key id>', `Open ${keysPage} → remove the old copy → New GPG key → paste it.`, 'Then run `yad signing check` again.'] });
+      // The part gpg signs with (see the key row) must be listed and in force, or commits show as Unverified.
+      const has = (set) => (part) => [...part].some((a) => [...set].some((b) => sameKey(a, b)));
+      const parts = localKey.gpg;
+      const reupload = { url: keysPage, steps: ['Export it again: gpg --armor --export <your key id>', `Open ${keysPage} → remove the old copy → New GPG key → paste it.`, 'Then run `yad signing check` again.'] };
+      if (parts.every(has(live))) add('platform-key', 'ok', `${name} lists your GPG key`);
+      else if (parts.some((p) => has(remote)(p) && !has(live)(p) && !has(unclear)(p))) add('platform-key', 'gap', `${name} lists your GPG key, but its copy there has expired, was revoked or is not valid: new commits show as Unverified`, reupload);
+      else if (parts.some(has(unclear))) add('platform-key', 'unknown', `${name} lists your GPG key with an expiry date yad cannot read`);
+      else if (has(remote)(localKey.ids)) add('platform-key', 'gap', `${name} lists your GPG key, but not the part gpg signs with (a subkey added after the upload?)`, reupload);
       else if (!readable) add('platform-key', 'unknown', `${name} lists GPG keys yad cannot read without gpg`);
       else if (list.length >= PAGE) add('platform-key', 'unknown', `${name}: your account has ${PAGE} or more GPG keys and only the first ${PAGE} were read`);
       else add('platform-key', 'gap', `${name} does not list your GPG key`, { url: keysPage, steps: [`Export it: gpg --armor --export <your key id>`, `Open ${keysPage} → New GPG key → paste it.`, 'Then run `yad signing check` again.'] });

@@ -125,7 +125,7 @@ test('E160 case 4: a GPG key found and not found; a subkey matches the account',
     for (const copy of [{ key_id: '9999999999999999', expires_at: '2000-01-01T00:00:00Z', subkeys: [{ key_id: '5555666677778888' }] }, { key_id: '9999999999999999', revoked: true, subkeys: [{ key_id: '5555666677778888' }] }, { key_id: '9999999999999999', subkeys: [{ key_id: '5555666677778888', expires_at: '2000-01-01T00:00:00Z' }] }]) {
       const old = byId(check(s, { gitRun: gpg(true), haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [copy]], '^user/emails': [200, [{ email: 'me@example.com', verified: true }]] } }).runner }))['platform-key'];
       assert.equal(old.status, 'gap', JSON.stringify(copy));
-      assert.match(old.message, /expired or was revoked/);
+      assert.match(old.message, /expired, was revoked or is not valid/);
     }
     assert.equal(byId(check(s, { gitRun: gpg(true), haveTool: tools('gh') })).key.status, 'gap', 'no gpg: a gap, with the SSH way named');
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
@@ -194,7 +194,9 @@ test('E160 case 8: GitLab — a key for signing, GPG keys read through gpg, conf
     const { runner } = platform({ calls: { '^user/gpg_keys': [200, [{ key: 'ARMORED' }]], '^user$': [200, { email: 'me@example.com' }], '^user/emails': [200, []] } });
     assert.equal(byId(check(g, { gitRun, haveTool: tools('glab', 'gpg'), runner }))['platform-key'].status, 'ok');
     const expiredCopy = (c, a, o = {}) => (c === 'gpg' && a.includes('--import') ? { ok: true, stdout: 'pub:e:255:22:AAAABBBBCCCCDDDD:1::::::scESC:' } : gitRun(c, a, o));
-    assert.equal(byId(check(g, { gitRun: expiredCopy, haveTool: tools('glab', 'gpg'), runner }))['platform-key'].status, 'gap', 'GitLab\'s copy expired');
+    const gone = byId(check(g, { gitRun: expiredCopy, haveTool: tools('glab', 'gpg'), runner }))['platform-key'];
+    assert.equal(gone.status, 'gap', 'GitLab\'s copy expired');
+    assert.match(gone.message, /expired, was revoked or is not valid/);
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 
@@ -316,6 +318,7 @@ test('E160 review 2: only a key that can sign here counts: a certify-only primar
   const expired = 'pub:e:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nfpr:::::::::0123456789ABCDEF0123456789ABCDEFAAAABBBB:\nsub:e:255:22:5555666677778888:1::::::s:';
   assert.deepEqual([...gpgIds(expired)].sort(), ['0123456789ABCDEF0123456789ABCDEFAAAABBBB', '5555666677778888', 'AAAABBBBCCCCDDDD']);
   assert.deepEqual([...gpgIds(expired, { live: true })], []);
+  assert.deepEqual([...gpgIds('pub:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsub:e:255:22:5555666677778888:1::::::s:', { live: true })], ['AAAABBBBCCCCDDDD'], 'only the expired subkey drops');
   assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSCD:', { signing: true }).size, 0, 'a disabled key (D in field 12)');
 });
 
@@ -394,5 +397,34 @@ test('E160 review 1: GitLab — a refused read asks for a read_user token; an un
     const pending = byId(check(s, { runner: platform({ calls: { '^user/keys': [200, [{ key: PUB, usage_type: 'signing' }]], '^user$': [200, { email: 'other@example.com' }], '^user/emails': [200, [{ email: 'me@example.com', confirmed_at: null }]] } }).runner }))['platform-email'];
     assert.equal(pending.status, 'gap');
     assert.match(pending.message, /not verified/);
+  } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
+});
+
+test('E160 review 6: the part gpg signs with must be on the account and in force', () => {
+  const s = setup({ config: { 'commit.gpgsign': 'true', 'user.email': 'me@example.com', 'user.signingkey': 'AAAABBBBCCCCDDDD' }, product: GH });
+  try {
+    // The primary can sign here, and so can a subkey: gpg signs with the subkey.
+    const local = 'sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::+:\nssb:u:255:22:5555666677778888:1::::::s:::+:';
+    const gitRun = (c, a, o = {}) => (c === 'gpg' ? { ok: true, stdout: local } : run(c, a, { ...o, env: s.env }));
+    const row = (copy) => byId(check(s, { gitRun, haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [copy]], '^user/emails': [200, [{ email: 'me@example.com', verified: true }]] } }).runner }))['platform-key'];
+    const later = new Date(Date.now() + 864e5 * 365).toISOString();
+    assert.equal(row({ key_id: 'AAAABBBBCCCCDDDD', expires_at: null, subkeys: [{ key_id: '5555666677778888', expires_at: later }] }).status, 'ok', 'never expires, or expires later');
+    const subExpired = row({ key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '5555666677778888', expires_at: '2000-01-01T00:00:00Z' }] });
+    assert.equal(subExpired.status, 'gap', 'the primary is in force, but gpg signs with the expired subkey');
+    assert.match(subExpired.message, /expired/);
+    assert.equal(row({ key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '5555666677778888', revoked: true }] }).status, 'gap', 'a revoked subkey');
+    const missing = row({ key_id: 'AAAABBBBCCCCDDDD', subkeys: [] });
+    assert.equal(missing.status, 'gap', 'the subkey was added after the upload');
+    assert.match(missing.message, /not the part gpg signs with/);
+    // Only the newest signing subkey counts: an older one expired on the account does not matter.
+    const two = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::scSC:::+:\nssb:u:255:22:1111222233334444:200::::::s:::+:\nssb:u:255:22:5555666677778888:300::::::s:::+:';
+    const twoRun = (c, a, o = {}) => (c === 'gpg' ? { ok: true, stdout: two } : run(c, a, { ...o, env: s.env }));
+    const rowTwo = (copy) => byId(check(s, { gitRun: twoRun, haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [copy]], '^user/emails': [200, [{ email: 'me@example.com', verified: true }]] } }).runner }))['platform-key'];
+    assert.equal(rowTwo({ key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '1111222233334444', expires_at: '2000-01-01T00:00:00Z' }, { key_id: '5555666677778888' }] }).status, 'ok');
+    assert.equal(rowTwo({ key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '1111222233334444' }, { key_id: '5555666677778888', expires_at: '2000-01-01T00:00:00Z' }] }).status, 'gap');
+    assert.equal(row({ key_id: 'AAAABBBBCCCCDDDD', expires_at: 'soon', subkeys: [{ key_id: '5555666677778888' }] }).status, 'unknown', 'a date yad cannot read');
+    // `<id>!` pins the part gpg signs with: only that part counts.
+    execFileSync('git', ['config', 'user.signingkey', 'AAAABBBBCCCCDDDD!'], { cwd: s.dir, env: s.env });
+    assert.equal(row({ key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '5555666677778888', expires_at: '2000-01-01T00:00:00Z' }] }).status, 'ok', 'pinned to the primary');
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
