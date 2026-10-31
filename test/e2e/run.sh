@@ -126,6 +126,18 @@ say "yad check is clean after setup"
 CHECK_OUT="$(yad check --dir "$PRODUCT")" || die "yad check failed"
 echo "$CHECK_OUT" | grep -q "summary: 0 missing, 0 new, 0 outdated, 0 modified, 0 stale, 0 legacy" \
   || die "yad check reports drift right after setup: $(echo "$CHECK_OUT" | grep summary)"
+
+say "an agent's setup: refused with the questions before anything is written, then run with every answer as a flag (E159)"
+AGENT_P="$WORK/agent-product"
+mkdir -p "$AGENT_P"
+REFUSED="$( (cd "$AGENT_P" && env -u SDLC_NONINTERACTIVE yad setup --json) || true)"
+J_OUT="$REFUSED" node -e 'const j = JSON.parse(process.env.J_OUT); if (j.ok || j.code !== "YAD-CLI-001" || !j.questions.some((q) => q.id === "platform")) { console.error(process.env.J_OUT); process.exit(1); }' \
+  || die "setup --json with no answers was not refused with its questions"
+[ -z "$(ls -A "$AGENT_P")" ] || die "a refused setup wrote files: $(ls -A "$AGENT_P")"
+(cd "$AGENT_P" && env -u SDLC_NONINTERACTIVE yad setup --json --solo --greenfield --monorepo --no-tools --git-init \
+  --ide-targets .claude --platform none --connect none >/dev/null) || die "setup --json with every answer failed"
+yad check --dir "$AGENT_P" | grep -q "summary: 0 missing, 0 new, 0 outdated, 0 modified, 0 stale, 0 legacy" \
+  || die "yad check reports drift after the agent's setup"
 # Land the wiring on the code repo's main (as a real team would) so feature branches diff clean.
 # This moves HEAD past syncedHead — `yad check` would now rightly call the code-context stale.
 ( cd "$BACKEND" && git add -A && git commit -qm "chore: wire yad check gates" )

@@ -147,6 +147,12 @@ Run yadflow here: run `npx -y yadflow@4 guide --json` and follow the yad-guide r
 The rules call the command `yad`. Install it once (`npm install -g yadflow`) so `yad …` works; without it
 the agent runs `npx yadflow …`, which Claude Code asks you to allow each time.
 
+In a folder with no Product yet, the agent asks you the setup questions in the chat: solo or team, new
+or existing code, where the Product lives, which repos to connect, and the others. You can tell it to
+take the defaults. It then runs `new`, `init` or `setup` with your answers. If it misses one, yad refuses
+before writing anything and lists the questions still open. When you join a team, the agent runs
+`yad join`; if you are not logged in to GitHub or GitLab, it gives you the login command to run yourself.
+
 The agent reads `yad guide` before each step. It tells you what the step is for, whether you can skip
 it, and who does it. Then it does its own part. The parts that are yours (approvals and merges, logins,
 secrets, signing keys, repository settings) it hands to you with the exact command or steps, and it

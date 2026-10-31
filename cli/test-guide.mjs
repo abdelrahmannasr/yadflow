@@ -113,7 +113,7 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   // A run's verdict is the person's judgement; the skills record it once given (yad-spec, yad-implement,
   // yad-engineer-review), so the agent may run it, never decide it.
   assert.equal(classify(['build', 'trust'], ['uid']), 'on-request');
-  // Setting a Product up chooses its mode (a run with no answers takes solo): the person's, until E159.
+  // Setting a Product up chooses its mode (a run with no answers takes solo): run only with the person's answers (E159).
   for (const c of ['setup', 'new', 'init']) for (const f of [[], ['solo'], ['team']]) assert.equal(classify([c], f), 'on-request', `${c} ${f.join(' ')}`);
   assert.equal(classify(['join']), 'open-pr', 'a joined Product\'s mode is already set');
   for (const w of [['skill', 'bind'], ['skill', 'unbind'], ['toolbox', 'add'], ['toolbox', 'remove']]) assert.equal(classify(w), 'on-request', w.join(' '));
@@ -1134,7 +1134,9 @@ test('yad guide --json: with no Product it says how to start one, and carries th
     assert.equal(out.ok, true);
     assert.equal(out.situation.stage, 'no-product');
     assert.deepEqual(out.rules, RULES);
-    assert.ok(out.person[0].commands.includes('npx -y yadflow@4 new <name>'));
+    assert.ok(out.person[0].commands.includes('npx -y yadflow@4 new <name> --json <flags>'), JSON.stringify(out.person[0].commands));
+    assert.equal(out.agent[0].run, 'npx -y yadflow@4 new <name> --json');
+    assert.equal(out.agent[0].class, 'on-request');
     assert.equal(out.stage, undefined, 'the stage is in situation only');
     const bad = spawnSync(process.execPath, [YAD, 'guide', 'not-an-epic', '--json'], { cwd: T, encoding: 'utf8' });
     assert.equal(bad.status, 1);

@@ -30,6 +30,8 @@ import { productGit } from './productcommit.mjs';
 import { updateTargets } from './update-commit.mjs';
 import { RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor, reaches } from './agent-rules.mjs';
 import { seededSlugs } from './hook.mjs';
+import { setupQuestions } from './setup.mjs';
+import { reposBeside, insideGitRepo, PRODUCT_DIR } from './workspace.mjs';
 
 export const GUIDE_VERSION = 1;
 
@@ -309,21 +311,50 @@ function lanesOf(a) {
   }));
 }
 
-// The answer before any Product exists here. Agent-driven setup is E159; until then the person runs the
-// setup command, which asks its questions in a terminal.
-function noProduct() {
+// The answer before any Product exists here (E159): the command this folder calls for, and the questions it
+// asks, each with the flag that answers it. The agent asks the person each one in chat (they may take the
+// defaults), then runs the command with `--json` and the flags; a missing answer is refused before anything is
+// written, with the same list. `root` is a Product folder not set up yet, if there is one.
+//   - a Product folder not set up yet: `yad setup` there;
+//   - inside one git repo: `yad setup` (one repo holding all the code);
+//   - beside git repos: `yad init`, which offers each of them;
+//   - anywhere else: `yad new <name>`, which makes the workspace.
+// Joining a team that already uses yadflow is `yad join <url>`, whose one question is the AI tools.
+function noProduct(cwd, root = null) {
+  let command;
+  let questions;
+  if (root) {
+    command = 'setup';
+    questions = setupQuestions(root, {});
+  } else if (insideGitRepo(cwd).ok) {
+    command = 'setup';
+    questions = setupQuestions(cwd, {});
+  } else {
+    const { discovered } = reposBeside(cwd);
+    command = discovered.length ? 'init' : 'new <name>';
+    const product = discovered.length ? path.join(cwd, PRODUCT_DIR) : path.join(cwd, '<name>', PRODUCT_DIR);
+    // The answers each command gives itself: `new` is greenfield, `init` brownfield with separate repos (unless told).
+    questions = setupQuestions(product, { ...(discovered.length ? { brownfield: true, separate: true, discovered } : { greenfield: true }), gitInit: true });
+  }
+  // Only what the person must answer: a question the command answers itself (`new` is greenfield) is left out.
+  questions = questions.filter((q) => !q.given).map(({ given: _given, ...q }) => ({ ...q, text: clean(q.text) }));
+  // yadflow may not be installed yet: the commands run it through npx. Classed as the yad command it is.
+  const npx = 'npx -y yadflow@4';
+  const agent = agentRun(`yad ${command} --json`, 'with a flag for each answer in `questions`, only once the person has answered them (or said to take the defaults)');
+  agent.run = `${npx} ${command} --json`;
   return {
     step: null,
-    agent: [],
+    questions,
+    agent: [agent],
     person: [{
-      act: 'choose',
+      act: 'answer',
       why: 'how yadflow is set up is the person\'s decision: ask, never assume',
       steps: [
-        'Ask the person which applies: a new project (greenfield), existing code (brownfield), or joining a team that already uses yadflow.',
-        'New project: `npx -y yadflow@4 new <name>`. Existing code: `npx -y yadflow@4 init` from the folder that holds the repos. Joining: `npx -y yadflow@4 join <the Product\'s git URL>`.',
-        'These ask their questions in a terminal: the person runs the command in their own terminal, then tells the agent.',
+        `Ask the person which applies: ${command === 'init' ? 'connect the repos found here (`init`)' : command === 'setup' ? 'set up yadflow in this folder (`setup`)' : 'a new project (`new <name>`)'}, or joining a team that already uses yadflow (\`${npx} join <the Product's git URL> --ide-targets <a,b> --json\`).`,
+        'Ask each question in `questions`, one at a time, showing its default; the person may say to take the defaults.',
+        'Run the command with `--json` and the flag for each answer. A refusal lists any question still unanswered.',
       ],
-      commands: ['npx -y yadflow@4 new <name>', 'npx -y yadflow@4 init', 'npx -y yadflow@4 join <url>'],
+      commands: [`${npx} ${command} --json <flags>`, `${npx} join <url> --ide-targets <a,b> --json`],
       verify: 'yad guide --json',
     }],
     then: 'run `yad guide --json` again once the Product exists',
@@ -399,7 +430,7 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
       agent: [agentRun(`yad guide --dir ${q} --json`, 'the Product is one folder away: read it from there, never start a second one')],
       person: [], then: `work from the Product (cd ${q}), or pass --dir ${q}` };
   }
-  if (!root) return { ...base, situation: { stage: 'no-product', product: null }, ...noProduct() };
+  if (!root) return { ...base, situation: { stage: 'no-product', product: null }, ...noProduct(cwd) };
   const productConfig = readJSON(productConfigPath(root), null);
   const platform = typeof productConfig?.platform === 'string' && productConfig.platform ? productConfig.platform : null;
   const solo = soloOf(productConfig);
@@ -408,7 +439,7 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   const rel = path.relative(cwd, root) || '.';
   const install = installState(root, VERSION);
   const situation = { stage: 'ready', product: rel, platform, ledger: platform && verified ? 'verified' : 'local', solo, here: m.here ?? null, install };
-  if (!m.setUp) return { ...base, situation: { ...situation, stage: 'no-product' }, ...noProduct() };
+  if (!m.setUp) return { ...base, situation: { ...situation, stage: 'no-product' }, ...noProduct(cwd, root) };
   // Upkeep rides every answer about this Product until it is done.
   base.upkeep = upkeepFor(install, { platform });
 
