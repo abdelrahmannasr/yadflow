@@ -45,30 +45,32 @@ const keyText = (s) => {
 // r, d, i; a disabled key is also `D` in field 12, printed on the primary only), with the sign capability
 // (field 12: `s`, lower case: this key's own, not the whole key's), and its secret here (field 15 is `#` for
 // a stub, whose secret is elsewhere; a card's serial number when the secret is on a smartcard). A primary that
-// cannot be used makes its subkeys unusable too. `keys` counts the primary keys (`sec`/`pub`) with a part
-// that can sign now; `listed` counts every one; `card` is true when every part that signs is on a smartcard.
-export function gpgIds(colons, { signing = false } = {}) {
+// cannot be used makes its subkeys unusable too. With `live`, every key and subkey that is not expired,
+// revoked, disabled or invalid (a platform's copy of a key, which signs nothing here). `keys` counts the
+// primary keys (`sec`/`pub`) with a part that can sign now; `listed` counts every one; `card` is true when a
+// part that signs is on a smartcard (gpg signs with the newest signing subkey, which may be that one).
+export function gpgIds(colons, { signing = false, live = false } = {}) {
   const ids = new Set();
   const signers = new Set();
   let listed = 0;
   let primary = null;
   let primaryDead = false;
   let onCard = 0;
-  let parts = 0;
   let take = false;
   for (const line of String(colons || '').split('\n')) {
     const f = line.split(':');
     if (['sec', 'ssb', 'pub', 'sub'].includes(f[0])) {
+      // gpg prints `D` on the primary only; reading it on every line costs nothing.
       const dead = ['e', 'r', 'd', 'i'].includes(f[1]) || (f[11] || '').includes('D');
       if (f[0] === 'sec' || f[0] === 'pub') { primary = ++listed; primaryDead = dead; }
       // A subkey before any primary belongs to no key: skipped.
       const signs = primary !== null && !dead && !primaryDead && (f[11] || '').includes('s') && f[14] !== '#';
-      if (signs) { signers.add(primary); parts++; if (f[14] && f[14] !== '+') onCard++; }
-      take = primary !== null && (!signing || signs);
+      if (signs) { signers.add(primary); if (f[14] && f[14] !== '+') onCard++; }
+      take = primary !== null && (signing ? signs : !live || (!dead && !primaryDead));
       if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) ids.add(f[4].toUpperCase());
     } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) ids.add(f[9].toUpperCase());
   }
-  return Object.assign(ids, { keys: signers.size, listed, card: parts > 0 && onCard === parts });
+  return Object.assign(ids, { keys: signers.size, listed, card: onCard > 0 });
 }
 // A long key id matches its fingerprint's last 16 digits.
 const sameKey = (a, b) => a === b || (a.length === 40 && a.endsWith(b)) || (b.length === 40 && b.endsWith(a));
@@ -144,7 +146,7 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
       const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, card: false });
       const { keys, listed, card } = ids;
       if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
-      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign from a smartcard, while the card is inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: ids }; }
+      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign; a part of it is on a smartcard, so gpg may need the card inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: ids }; }
       else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine)`, { steps: gpgSteps });
       else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
     }
@@ -214,16 +216,33 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
     if (!res.ok) add('platform-key', 'unknown', notRead(res, 'your GPG keys', 'read:gpg_key'), refused(res) ? scopeFix('read:gpg_key') : null);
     else {
       const list = Array.isArray(res.body) ? res.body : [];
+      // Every id the account lists, and those of copies still in force: an expired or revoked copy there
+      // marks new commits Unverified even when the key here was renewed.
       let remote = new Set();
+      let live = new Set();
       let readable = true;
+      const now = Date.now();
       if (platform === 'github') {
-        for (const k of list) for (const id of [k?.key_id, ...(k?.subkeys || []).map((s) => s?.key_id)]) if (typeof id === 'string') remote.add(id.toUpperCase());
+        for (const k of list) {
+          const keyLive = k?.revoked !== true && !(k?.expires_at && Date.parse(k.expires_at) <= now);
+          for (const sub of [k, ...(Array.isArray(k?.subkeys) ? k.subkeys : [])]) {
+            if (typeof sub?.key_id !== 'string') continue;
+            remote.add(sub.key_id.toUpperCase());
+            if (keyLive && sub.revoked !== true && !(sub.expires_at && Date.parse(sub.expires_at) <= now)) live.add(sub.key_id.toUpperCase());
+          }
+        }
       } else if (haveTool('gpg')) {
         // GitLab lists the armored key only: gpg reads its ids without importing it.
-        for (const k of list) if (typeof k?.key === 'string') remote = new Set([...remote, ...gpgIds(gitRun('gpg', ['--with-colons', '--import-options', 'show-only', '--import'], { input: k.key, env }).stdout)]);
+        for (const k of list) {
+          if (typeof k?.key !== 'string') continue;
+          const out = gitRun('gpg', ['--with-colons', '--import-options', 'show-only', '--import'], { input: k.key, env }).stdout;
+          remote = new Set([...remote, ...gpgIds(out)]);
+          live = new Set([...live, ...gpgIds(out, { live: true })]);
+        }
       } else readable = false;
-      const hit = [...localKey.gpg].some((a) => [...remote].some((b) => sameKey(a, b)));
-      if (hit) add('platform-key', 'ok', `${name} lists your GPG key`);
+      const matches = (ids) => [...localKey.gpg].some((a) => [...ids].some((b) => sameKey(a, b)));
+      if (matches(live)) add('platform-key', 'ok', `${name} lists your GPG key`);
+      else if (matches(remote)) add('platform-key', 'gap', `${name} lists your GPG key, but its copy there has expired or was revoked: new commits show as Unverified`, { url: keysPage, steps: ['Export it again: gpg --armor --export <your key id>', `Open ${keysPage} → remove the old copy → New GPG key → paste it.`, 'Then run `yad signing check` again.'] });
       else if (!readable) add('platform-key', 'unknown', `${name} lists GPG keys yad cannot read without gpg`);
       else if (list.length >= PAGE) add('platform-key', 'unknown', `${name}: your account has ${PAGE} or more GPG keys and only the first ${PAGE} were read`);
       else add('platform-key', 'gap', `${name} does not list your GPG key`, { url: keysPage, steps: [`Export it: gpg --armor --export <your key id>`, `Open ${keysPage} → New GPG key → paste it.`, 'Then run `yad signing check` again.'] });

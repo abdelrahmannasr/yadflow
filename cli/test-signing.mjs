@@ -121,6 +121,12 @@ test('E160 case 4: a GPG key found and not found; a subkey matches the account',
     const r = check(s, { gitRun: gpg(true), haveTool: tools('gh', 'gpg'), runner });
     assert.equal(byId(r).key.status, 'ok');
     assert.equal(byId(r)['platform-key'].status, 'ok', 'matched by the subkey');
+    // The account's copy expired or was revoked: a gap, never ok, even when the key here is in force.
+    for (const copy of [{ key_id: '9999999999999999', expires_at: '2000-01-01T00:00:00Z', subkeys: [{ key_id: '5555666677778888' }] }, { key_id: '9999999999999999', revoked: true, subkeys: [{ key_id: '5555666677778888' }] }, { key_id: '9999999999999999', subkeys: [{ key_id: '5555666677778888', expires_at: '2000-01-01T00:00:00Z' }] }]) {
+      const old = byId(check(s, { gitRun: gpg(true), haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [copy]], '^user/emails': [200, [{ email: 'me@example.com', verified: true }]] } }).runner }))['platform-key'];
+      assert.equal(old.status, 'gap', JSON.stringify(copy));
+      assert.match(old.message, /expired or was revoked/);
+    }
     assert.equal(byId(check(s, { gitRun: gpg(true), haveTool: tools('gh') })).key.status, 'gap', 'no gpg: a gap, with the SSH way named');
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
@@ -187,6 +193,8 @@ test('E160 case 8: GitLab — a key for signing, GPG keys read through gpg, conf
     };
     const { runner } = platform({ calls: { '^user/gpg_keys': [200, [{ key: 'ARMORED' }]], '^user$': [200, { email: 'me@example.com' }], '^user/emails': [200, []] } });
     assert.equal(byId(check(g, { gitRun, haveTool: tools('glab', 'gpg'), runner }))['platform-key'].status, 'ok');
+    const expiredCopy = (c, a, o = {}) => (c === 'gpg' && a.includes('--import') ? { ok: true, stdout: 'pub:e:255:22:AAAABBBBCCCCDDDD:1::::::scESC:' } : gitRun(c, a, o));
+    assert.equal(byId(check(g, { gitRun: expiredCopy, haveTool: tools('glab', 'gpg'), runner }))['platform-key'].status, 'gap', 'GitLab\'s copy expired');
   } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
 });
 
@@ -300,10 +308,14 @@ test('E160 review 1: a GPG key is looked up by the exact email; several keys, or
 test('E160 review 2: only a key that can sign here counts: a certify-only primary with a signing subkey, a stub', () => {
   const certifyOnly = 'sec:u:255:22:AAAABBBBCCCCDDDD:1::::::cSC:::+:\nfpr:::::::::0123456789ABCDEF0123456789ABCDEFAAAABBBB:\nssb:u:255:22:5555666677778888:1::::::s:::+:\nfpr:::::::::FEDCBA9876543210FEDCBA987654321055556666:';
   assert.deepEqual([...gpgIds(certifyOnly, { signing: true })].sort(), ['5555666677778888', 'FEDCBA9876543210FEDCBA987654321055556666'], 'the subkey signs, the primary only certifies');
-  assert.equal(gpgIds(certifyOnly).keys, 1);
+  assert.equal(gpgIds(certifyOnly, { signing: true }).keys, 1);
   assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::#:', { signing: true }).size, 0, 'a stub: its secret is not here');
-  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:r:255:22:1111222233334444:1::::::scSC:').keys, 1, 'a revoked key is not one git may pick');
-  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:u:255:22:1111222233334444:1::::::eE:').keys, 1, 'an encrypt-only key is not one git may pick');
+  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:r:255:22:1111222233334444:1::::::scSC:', { signing: true }).keys, 1, 'a revoked key is not one git may pick');
+  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:u:255:22:1111222233334444:1::::::eE:', { signing: true }).keys, 1, 'an encrypt-only key is not one git may pick');
+  // Without `signing`, every id is listed, dead keys too; with `live`, only keys still in force.
+  const expired = 'pub:e:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nfpr:::::::::0123456789ABCDEF0123456789ABCDEFAAAABBBB:\nsub:e:255:22:5555666677778888:1::::::s:';
+  assert.deepEqual([...gpgIds(expired)].sort(), ['0123456789ABCDEF0123456789ABCDEFAAAABBBB', '5555666677778888', 'AAAABBBBCCCCDDDD']);
+  assert.deepEqual([...gpgIds(expired, { live: true })], []);
   assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSCD:', { signing: true }).size, 0, 'a disabled key (D in field 12)');
 });
 
@@ -330,9 +342,10 @@ test('E160 review 3: an offline primary, a stub or a smartcard through the whole
     assert.deepEqual([...gpgIds('ssb:u:255:22:5555666677778888:1::::::s:::+:', { signing: true })], []);
     const card = key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:');
     assert.equal(card.status, 'ok');
-    assert.match(card.message, /smartcard, while the card is inserted/);
-    // A primary on a card and a signing subkey here: not "on a smartcard".
-    assert.doesNotMatch(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:\nssb:u:255:22:5555666677778888:1::::::s:::+:').message, /smartcard/);
+    assert.match(card.message, /smartcard, so gpg may need the card inserted/);
+    // Any signing part on a card: gpg may pick it (the newest signing subkey), so the card is named.
+    assert.match(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::+:\nssb:u:255:22:5555666677778888:1::::::s:::D2760001240100000006:').message, /smartcard/);
+    assert.match(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:\nssb:u:255:22:5555666677778888:1::::::s:::+:').message, /smartcard/);
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
 
