@@ -843,3 +843,151 @@ test('a PR/MR approval or merge in a skill is always handed to the person', () =
   }
   assert.deepEqual(bad, []);
 });
+
+// ---- E158b: the agent guard and the allow list in a connected code repo -------------------------------
+// The case list is in the E158b roadmap row; each test names the cases it covers.
+
+const { repoOrphanAgentGuardActions } = await import('./plan.mjs');
+const { REPO_AGENT_GUARD_DEST } = await import('./manifest.mjs');
+const guardRepo = () => {
+  const T = tmp();
+  const P = path.join(T, 'product');
+  const R = path.join(T, 'api');
+  fs.mkdirSync(P); fs.mkdirSync(R);
+  put(path.join(P, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+  return { T, P, R, repo: { name: 'api', path: '../api', platform: 'github' } };
+};
+const stamp = (P, ideTargets) => put(path.join(P, '.sdlc/cli-version.json'), JSON.stringify({ version: '4.8.0', ideTargets }));
+const guardItems = (actions) => actions.filter((a) => a.item.startsWith(REPO_AGENT_GUARD_DEST) || a.item.includes('(agent guard)') || a.allowList);
+
+test('E158b cases 1, 2, 5, 7: a cloned code repo gets the guard and the allow list beside its own entries; a second run is all ok', () => {
+  const { T, P, R, repo } = guardRepo();
+  try {
+    stamp(P, ['.claude', '.cursor']);
+    const theirs = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'theirs.sh' }] }] }, permissions: { allow: ['Bash(npm test)'] } };
+    put(path.join(R, '.claude/settings.json'), JSON.stringify(theirs));
+    const actions = guardItems(repoActions(P, repo));
+    assert.deepEqual(actions.map((a) => `${a.scope}/${a.item}`), [
+      'api/checks/agent-guard.mjs', 'api/.claude/settings.json (agent guard)', 'api/.cursor/hooks.json (agent guard)', 'api/.claude/settings.json (read-only yad commands)',
+    ]);
+    // The team's files are never staged by --push; the script is a wired file like the other checks/ files.
+    assert.deepEqual(actions.map((a) => a.paths), [[REPO_AGENT_GUARD_DEST], [], [], []]);
+    for (const a of actions) a.apply();
+    const claude = JSON.parse(read(path.join(R, '.claude/settings.json')));
+    const commands = claude.hooks.PreToolUse.flatMap((e) => e.hooks.map((h) => h.command));
+    assert.ok(commands.includes('theirs.sh'), 'the team\'s hook is kept');
+    assert.ok(commands.includes('node "$CLAUDE_PROJECT_DIR/checks/agent-guard.mjs"'), commands.join(', '));
+    assert.equal(claude.permissions.allow[0], 'Bash(npm test)', 'the team\'s entry is kept, first');
+    assert.deepEqual(claude.permissions.allow.slice(1), readAllowList());
+    assert.equal(JSON.parse(read(path.join(R, '.cursor/hooks.json'))).hooks.beforeShellExecution[0].command, 'node checks/agent-guard.mjs');
+    assert.ok(fs.existsSync(path.join(R, REPO_AGENT_GUARD_DEST)));
+    assert.ok(guardItems(repoActions(P, repo)).every((a) => a.status === 'ok'), 'a second run changes nothing');
+    // Case 5: Claude Code only, or Cursor only — only that tool's files.
+    stamp(P, ['.claude']);
+    assert.ok(!guardItems(repoActions(P, repo)).some((a) => a.item.startsWith('.cursor')));
+    stamp(P, ['.cursor']);
+    assert.deepEqual(guardItems(repoActions(P, repo)).map((a) => a.item), ['checks/agent-guard.mjs', '.cursor/hooks.json (agent guard)']);
+    stamp(P, ['.agents']);
+    assert.deepEqual(guardItems(repoActions(P, repo)), [], 'no tool with hooks: no script either');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E158b cases 3, 4, 6: a settings file that does not parse, a repo not cloned, the Product itself, a linked target folder', () => {
+  const { T, P, R, repo } = guardRepo();
+  const said = [];
+  const orig = console.error;
+  try {
+    stamp(P, ['.claude']);
+    put(path.join(R, '.claude/settings.json'), '{ not json');
+    console.error = (...a) => said.push(a.join(' '));
+    const actions = guardItems(repoActions(P, repo)).filter((a) => a.item.startsWith('.claude'));
+    console.error = orig;
+    assert.ok(actions.length === 2 && actions.every((a) => a.status === 'modified' && a.writesNothing), JSON.stringify(actions.map((a) => a.status)));
+    assert.equal(said.filter((l) => /api\/\.claude\/settings\.json does not parse/.test(l)).length, 1, `said once, naming the repo: ${said.join(' | ')}`);
+    actions.forEach((a) => a.apply());
+    assert.equal(read(path.join(R, '.claude/settings.json')), '{ not json');
+    // Case 4: a repo not cloned here, and the Product registered as a repo.
+    assert.deepEqual(guardItems(repoActions(P, { name: 'web', path: '../web', platform: 'github' })), []);
+    assert.deepEqual(guardItems(repoActions(P, { name: 'product', path: '.', platform: 'github' })), []);
+    // Case 6: the repo's .claude is a link: named, and nothing is written through it.
+    fs.rmSync(path.join(R, '.claude'), { recursive: true });
+    const elsewhere = path.join(T, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    fs.symlinkSync(elsewhere, path.join(R, '.claude'));
+    said.length = 0;
+    console.error = (...a) => said.push(a.join(' '));
+    const linked = repoActions(P, repo);
+    console.error = orig;
+    assert.deepEqual(guardItems(linked), []);
+    assert.ok(said.some((l) => /api: unsafe IDE target '\.claude'/.test(l)), said.join(' | '));
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+  } finally { console.error = orig; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E158b case 10: a target that leaves takes yad\'s entries out of the repo\'s files; the team\'s stay, and so does the script', () => {
+  const { T, P, R, repo } = guardRepo();
+  try {
+    stamp(P, ['.claude', '.cursor']);
+    put(path.join(R, '.claude/settings.json'), JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }));
+    guardItems(repoActions(P, repo)).forEach((a) => a.apply());
+    assert.deepEqual(repoOrphanAgentGuardActions(R, ['.claude', '.cursor'], { scope: 'api' }), [], 'nothing while both are targets');
+    const gone = repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' });
+    assert.deepEqual(gone.map((a) => `${a.scope}/${a.item}`).sort(), [
+      'api/hooks.json (agent guard entry removed)', 'api/settings.json (agent guard entry removed)', 'api/settings.json (read-only yad commands removed)',
+    ]);
+    gone.forEach((a) => a.apply());
+    const claude = JSON.parse(read(path.join(R, '.claude/settings.json')));
+    assert.deepEqual(claude.permissions.allow, ['Bash(npm test)']);
+    assert.equal(claude.hooks?.PreToolUse, undefined);
+    assert.equal(JSON.parse(read(path.join(R, '.cursor/hooks.json'))).hooks?.beforeShellExecution, undefined);
+    assert.ok(fs.existsSync(path.join(R, REPO_AGENT_GUARD_DEST)), 'the script stays');
+    assert.deepEqual(repoOrphanAgentGuardActions(path.join(T, 'nowhere'), ['.agents'], { scope: 'web' }), []);
+    // Review 1: a repo whose .claude is a link to another folder: nothing is removed through it, a target or not.
+    guardItems(repoActions(P, repo)).forEach((a) => a.apply());
+    assert.equal(repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')).length, 2, 'yad\'s entries are back, so there is something to remove');
+    const shared = path.join(T, 'shared');
+    fs.renameSync(path.join(R, '.claude'), shared);
+    fs.symlinkSync(shared, path.join(R, '.claude'));
+    const before = read(path.join(shared, 'settings.json'));
+    assert.deepEqual(repoOrphanAgentGuardActions(R, ['.claude'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')), []);
+    assert.deepEqual(repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' }).filter((a) => a.item.startsWith('settings.json')), []);
+    assert.equal(read(path.join(shared, 'settings.json')), before);
+    // Review 2: the same for a linked .cursor.
+    const sharedCursor = path.join(T, 'shared-cursor');
+    fs.renameSync(path.join(R, '.cursor'), sharedCursor);
+    fs.symlinkSync(sharedCursor, path.join(R, '.cursor'));
+    const cursorBefore = read(path.join(sharedCursor, 'hooks.json'));
+    assert.deepEqual(repoOrphanAgentGuardActions(R, ['.agents'], { scope: 'api' }).filter((a) => a.item.startsWith('hooks.json')), []);
+    assert.equal(read(path.join(sharedCursor, 'hooks.json')), cursorBefore);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E158b cases 11, 12: checks/agent-guard.mjs in a code repo refuses and allows as in the Product, and fails open', () => {
+  const T = tmp();
+  try {
+    put(path.join(T, REPO_AGENT_GUARD_DEST), read(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'skills/yad-checks/templates/hooks/agent-guard.mjs')));
+    const run = (payload, env = {}) => {
+      const r = spawnSync(process.execPath, [path.join(T, REPO_AGENT_GUARD_DEST)], {
+        input: JSON.stringify(payload), encoding: 'utf8', cwd: T,
+        env: { ...process.env, YAD_BIN: `"${process.execPath}" "${YAD_MJS}"`, YAD_HOOK_DISABLE: '', ...env }, timeout: 30_000,
+      });
+      return { code: r.status, out: (r.stdout || '').trim() };
+    };
+    assert.equal(run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'yad gate approve EP-x epic' } }).code, 2);
+    assert.equal(run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'yad status' } }).code, 0);
+    assert.equal(JSON.parse(run({ hook_event_name: 'beforeShellExecution', command: 'gh pr merge 5' }).out).permission, 'deny');
+    assert.deepEqual(JSON.parse(run({ hook_event_name: 'beforeShellExecution', command: 'npm test' }).out), { permission: 'allow' });
+    // Case 12: no yad reachable from the repo — allowed.
+    assert.deepEqual(JSON.parse(run({ hook_event_name: 'beforeShellExecution', command: 'git push -f' }, { YAD_BIN: '', PATH: '' }).out), { permission: 'allow' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E158b case 14: on a repo wired before E158b the guard files are new, so yad update adds them; on an unwired repo they stay missing', () => {
+  const { T, P, R, repo } = guardRepo();
+  try {
+    stamp(P, ['.claude']);
+    assert.ok(guardItems(repoActions(P, repo)).every((a) => a.status === 'missing'), 'update never does a repo\'s one-time setup');
+    put(path.join(R, 'checks/spec-link.sh'), '#!/usr/bin/env bash\n');
+    assert.deepEqual(guardItems(repoActions(P, repo)).map((a) => a.status), ['new', 'new', 'new']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

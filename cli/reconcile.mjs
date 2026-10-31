@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -13,7 +13,7 @@ const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch {
 import { preflightGuardReadiness } from './productcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, orphanAgentGuardActions, allowListActions, orphanAllowListActions,
+  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, orphanAgentGuardActions, allowListActions, orphanAllowListActions, repoOrphanAgentGuardActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
@@ -88,7 +88,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     });
   }
   for (const repo of registry.repos) {
-    const own = withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]);
+    const repoRoot = path.resolve(root, repo.path);
+    // E158b: a target that left takes yad's guard and allow-list entries out of the repo's own settings too.
+    const orphans = samePath(repoRoot, path.resolve(root)) ? [] : repoOrphanAgentGuardActions(repoRoot, ideTargets, { scope: repo.name });
+    const own = withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]).concat(orphans);
     // Set on the action itself: later steps compare actions by identity. `true`, not the name, which may be empty.
     for (const a of own) { a.fromRepo = true; if (repo.name === 'product') a.shownScope = repoShown(repo); }
     actions.push(...own);

@@ -110,6 +110,9 @@ grep -q "yadflow:end" "$BACKEND/AGENTS.md" || die "the code repo has no yadflow 
 [ -f "$PRODUCT/.claude/skills/yad-guide/SKILL.md" ] || die "the yad-guide skill is not installed"
 [ -f "$PRODUCT/hooks/agent-guard.mjs" ] || die "the agent guard is not installed"
 jassert "$PRODUCT/.claude/settings.json" 'j.permissions.allow.includes("Bash(yad guide:*)") && !j.permissions.allow.some((e) => /gate approve|--push/.test(e))'
+# E158b: the same guard and allow list in the code repo, so a session opened there has them too.
+[ -f "$BACKEND/checks/agent-guard.mjs" ] || die "the code repo has no agent guard"
+jassert "$BACKEND/.claude/settings.json" 'j.permissions.allow.includes("Bash(yad guide:*)") && j.hooks.PreToolUse.some((e) => e.hooks.some((h) => h.command.includes("checks/agent-guard.mjs")))'
 [ -f "$BACKEND/checks/spec-link.sh" ] || die "code repo not wired with check gates"
 [ -x "$BACKEND/checks/spec-link.sh" ] || die "spec-link.sh not executable"
 # No author allowlist is generated any more: the verified-commits gate checks signatures only (E62).

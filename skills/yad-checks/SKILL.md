@@ -118,14 +118,15 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     `templates/hooks/ledger-guard-cursor.mjs` and a `preToolUse` entry in `.cursor/hooks.json`.
     Fails OPEN; see "Step 2b" below. Every hook is a Node script the entry runs as `node <script>`, so
     it needs no bash and no execute bit and runs on Windows too (E113).
-  - `templates/hooks/agent-guard.mjs` → **Product-only**, in **both** ledger modes (E158): the harness
+  - `templates/hooks/agent-guard.mjs` → the Product (`hooks/agent-guard.mjs`) **and every connected code
+    repo** (`checks/agent-guard.mjs`, E158b), in **both** ledger modes (E158): the harness
     hook that runs `yad hook agent-guard` before every shell command an AI agent sends. It refuses a yad
     command only the person may run (`gate approve`, `comment`, `advance`, `reopen`, `commit --manual`),
     approving or merging a PR/MR (`gh pr review --approve`, `gh pr merge`, `glab mr approve|merge|accept`, or the
     same through `gh api`/`glab api`), skipping the git hooks (`git commit --no-verify` or `-n`,
     `YAD_HOOK_DISABLE=…`, `core.hooksPath`), and a force push (`--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+` refspec), and tells the agent to hand it to the person. Wired as a `PreToolUse` entry on `Bash` in
-    `.claude/settings.json` and a `beforeShellExecution` entry in `.cursor/hooks.json`, so it runs only in
-    a session opened at the Product folder; a code repo has none. Fails OPEN, and is a speed bump, not
+    `.claude/settings.json` and a `beforeShellExecution` entry in `.cursor/hooks.json` of each of those
+    folders, so it runs in a session opened at either. Fails OPEN, and is a speed bump, not
     proof: a command inside a script is not seen, and Codex has no hooks.
   - `templates/hooks/yad-capture.mjs` → **Product-only**, in **both** ledger modes (E43): the post-edit
     harness hook that runs `yad capture --hook`, which snapshots every changed Shape artifact onto the
