@@ -45,6 +45,7 @@ export { runDocs } from '../cli/docs.mjs';
 export { runDetect } from '../cli/detect.mjs';
 export { runToolboxAdd, runToolboxCheck, runToolboxList, runToolboxRemove } from '../cli/toolbox.mjs';
 export { runDoctor } from '../cli/doctor.mjs';
+export { runSigningCheck } from '../cli/signing.mjs';
 export { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';
 export { runNext } from '../cli/next.mjs';
 export { runSkip, runDefer, runUnblock, runLaneSkip } from '../cli/skip.mjs';

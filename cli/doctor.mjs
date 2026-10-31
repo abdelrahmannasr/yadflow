@@ -29,6 +29,7 @@ import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { readOwners } from './owners.mjs';
 import { readMembers, judgedMemberFiles } from './members.mjs';
 import { loadChoices, readToolboxFile } from './toolbox.mjs';
+import { signingDoctorLine } from './signing.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
 // entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
@@ -98,6 +99,13 @@ export function envChecks(checks) {
     if (tool === 'bash' ? hasBash() : has(tool)) check(checks, tool, 'environment', 'ok', `${name} present`);
     else check(checks, tool, 'environment', 'warn', name === 'Git Bash' ? 'Git Bash not found' : `${tool} not found on PATH`, tool === 'npx' ? 'repomix packing will be skipped' : bashMissingHint());
   }
+}
+
+// E160a: whether commits made here are signed — this machine's git config only, so doctor makes no network
+// call for it. `yad signing check` reads the account too.
+export function signingChecks(checks, root) {
+  const line = signingDoctorLine(root);
+  check(checks, 'signing', 'environment', line.status, line.message, line.hint, { alwaysHint: true });
 }
 
 // `headCount` is a count of people the caller already read (E74); the CLI passes none, a test passes one.
@@ -2707,6 +2715,7 @@ export function indexChecks(checks, root) {
 export function collectDoctor(root, { headCount = null } = {}) {
   const checks = [];
   envChecks(checks);
+  signingChecks(checks, root);
   projectChecks(checks, root, { headCount });
   riskMapChecks(checks, root);
   codeownersChecks(checks, root);
