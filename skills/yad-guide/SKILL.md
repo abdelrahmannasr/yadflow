@@ -131,7 +131,8 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
   the flag that answers it. These choose the Product's mode and route, which are the person's:
   1. Ask whether this is a new project, existing code, or joining a team that already uses yadflow.
   2. Ask each question in `questions`, one at a time, showing its default. The person may say "take the
-     defaults"; never pick an answer for them.
+     defaults"; never pick an answer for them. A question marked `optional` is needed only for some
+     answers (the default branch, only for GitHub or GitLab): skip it when the answer makes it moot.
   3. Run the command with `--json` and a flag for each answer (`npx -y yadflow@4 new <name> --json
      --solo --no-tools …`). A missing answer is refused before anything is written, with the questions
      still open: ask those, then run it again.

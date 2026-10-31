@@ -407,6 +407,8 @@ export function checkSetupFlags(root, opts = {}) {
     if (!insideWorkspace(root, r.rpath)) throw setupFlagError(`--add-repo ${spec}: ${r.rpath} resolves outside the workspace (the Product's parent folder)`);
     if (r.platform && !['github', 'gitlab'].includes(r.platform)) throw setupFlagError(`--add-repo ${spec}: platform ${r.platform} — expected github or gitlab`);
     if (r.default_branch && !branchOk(r.default_branch)) throw setupFlagError(`--add-repo ${spec}: ${r.default_branch} is not a plain branch name`);
+    // What `registerRepo` refuses, refused here first: a skipped repo would change which one a monorepo connects.
+    if (gitHead(path.resolve(root, r.rpath)) === null) throw setupFlagError(`--add-repo ${spec}: ${r.rpath} is not a git repository`);
   }
   if (has_(opts.coderabbit) && !['all', 'none'].includes(opts.coderabbit)) {
     // Only a repo this run ends with, and in a monorepo only the one it connects.

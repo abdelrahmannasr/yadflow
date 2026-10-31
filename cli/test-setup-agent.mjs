@@ -117,6 +117,8 @@ test('E159 case 6: a bad flag value is refused before anything is written', () =
   const T = tmp();
   try {
     const all = ['--solo', '--greenfield', '--monorepo', '--no-tools', '--no-git-init', '--ide-targets', '.claude', '--platform', 'none', '--connect', 'none'];
+    // A plain folder beside the Products, with a .coderabbit.yaml: no CodeRabbit question would be asked about it.
+    put(path.join(T, 'plain/.coderabbit.yaml'), 'reviews: {}\n');
     const swap = (flag, value) => { const a = [...all]; const i = a.indexOf(flag); a[i + 1] = value; return a; };
     for (const [args, said] of [
       [swap('--platform', 'bitbucket'), /--platform bitbucket: expected github, gitlab or none/],
@@ -129,6 +131,8 @@ test('E159 case 6: a bad flag value is refused before anything is written', () =
       [[...all, '--add-repo', 'api=../../../outside'], /outside the workspace/],
       [[...all, '--add-repo', 'api=../.git/x'], /\.git folder/],
       [[...all, '--add-repo', 'api=../api,bitbucket'], /platform bitbucket/],
+      // Review 2: a folder that is not a git repo (registerRepo would skip it, and a monorepo would connect the next).
+      [[...all, '--add-repo', 'api=../plain'], /\.\.\/plain is not a git repository/],
       [[...all, '--coderabbit', 'ghost'], /no connected repo named ghost/],
       // Review 1: the AI tools and the team size are checked before any write too.
       [swap('--ide-targets', '.vscode'), /--ide-targets: unsupported IDE target/],
@@ -136,10 +140,12 @@ test('E159 case 6: a bad flag value is refused before anything is written', () =
       [[...all.filter((a) => a !== '--solo'), '--team', '0'], /--team 0: expected how many people/],
     ]) {
       const P = fs.mkdtempSync(path.join(T, 'p-'));
+      const before = fs.readdirSync(path.join(T, 'plain'));
       const r = yad(T, P, ['setup', '--json', ...args]);
       assert.equal(r.code, 1, args.join(' '));
       assert.match(r.json.error, said, args.join(' '));
       assert.deepEqual(fs.readdirSync(P), [], `nothing written: ${args.join(' ')}`);
+      assert.deepEqual(fs.readdirSync(path.join(T, 'plain')), before);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
