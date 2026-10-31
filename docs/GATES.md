@@ -598,7 +598,7 @@ author commits is decided by write access to the repo, not by a list.
 
 | Message (after `FAIL [verified-commits]: <sha> …`) | What to change |
 |---|---|
-| `signature missing/unverified — sign commits with a GPG or SSH key added to your <platform> account (…). (`yad signing check` says what is missing on your machine and account.) On a pull request branch, re-sign the commits already made: git rebase --exec 'git commit --amend --no-edit -S' <base>, and force-push. On the default branch, do not force-push: revert the commit, then land the change again through a pull request of signed commits.` | As it says. On GitLab the message adds: if the commits are signed, set the `GITLAB_TOKEN` variable, because GitLab answers "no signature" and "no access" the same way. |
+| `signature missing/unverified — sign commits with a GPG or SSH key added to your <platform> account (…). On a pull request branch, re-sign the commits already made: git rebase --exec 'git commit --amend --no-edit -S' <base>, and force-push. On the default branch, do not force-push: revert the commit, then land the change again through a pull request of signed commits.` | As it says; `yad signing check` names what is missing on your machine and your account. On GitLab the message adds: if the commits are signed, set the `GITLAB_TOKEN` variable, because GitLab answers "no signature" and "no access" the same way. |
 | `— the job could not ask GitHub for the commit's signature (gh api failed). The job needs GH_TOKEN …` | Set `GH_TOKEN: ${{ github.token }}` on the job, as the `yad` workflows do, then run it again. On your own machine, install `gh` and run `gh auth login`. |
 | `unknown platform '<x>' (SDLC_PLATFORM must be github\|gitlab\|none).` | Fix `SDLC_PLATFORM`. |
 

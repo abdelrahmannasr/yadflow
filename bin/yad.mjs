@@ -840,7 +840,10 @@ async function main() {
       const [, action = 'check', extra] = o._;
       if (action !== 'check' || extra) { refuse(`unknown signing action: ${[action, extra].filter(Boolean).join(' ')}`, 'usage: yad signing check [--json] [--dir <folder>]'); break; }
       const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
-      result = commands.runSigningCheck(dirGiven ? o.dir : shellCwd(), { root: found?.root ?? null, json: o.json });
+      // Why no Product was found is said, as every Product command says it: the account is then not checked.
+      if (found?.problem) warn(`${found.problem} — your account is not checked`);
+      else if (found?.elsewhere) warn(`this folder is not in a repo the Product registers (the Product is ${path.relative(process.cwd(), found.elsewhere) || '.'}) — your account is not checked; run it from there, or pass --dir`);
+      result = commands.runSigningCheck(dirGiven ? o.dir : shellCwd(), { root: found?.problem || found?.elsewhere ? null : found?.root ?? null, json: o.json });
       break;
     }
     case 'toolbox': {

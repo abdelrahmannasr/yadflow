@@ -358,14 +358,15 @@ You can start without any of them.
    ```
 
    Then add the `.pub` file to your account **as a signing key**: on GitHub, Settings → SSH and GPG keys
-   → New SSH key → Key type: *Signing Key*; on GitLab, Preferences → SSH Keys → Usage type:
+   → New SSH key → Key type: *Signing Key*; on GitLab, Edit profile → SSH Keys → Usage type:
    *Authentication & Signing*. Your `user.email` must be a **verified** email on that account. Prefer GPG?
    Make a key with `gpg --full-generate-key`, set `user.signingkey` to its id, and add
    `gpg --armor --export <id>` as a GPG key instead.
 
    `yad signing check` tells you what is still missing, on this machine and on your account (E160). It
-   only reads. If it says "not known" about your account, it names the login or `gh auth refresh` scope
-   that lets it look.
+   only reads. If it says "not known" about your account, it names what lets it look: a login, or a
+   `gh auth refresh` with the missing **scope** (a permission your login token has). On GitLab it asks for
+   a token with the `read_user` scope.
 3. **A repo added after you joined?** Run `yad repo clone` in the Product. It clones every registered
    repo that is missing on this machine. `yad repo list` shows which ones are **not cloned**.
 4. That's it. Open your agent **in the Product** to work on epics; open it **in a code repo** to
@@ -745,8 +746,10 @@ ledger (see the table in section 3, step d2):
 
 - `ledger: local` — your machine writes it. It works offline and needs no CI.
 - `ledger: verified` — only CI writes it, at the merge of a review PR/MR, in a commit by the
-  `yad-gate-sync` bot. That commit is not signed: CI pushes it straight to the default branch, where no
-  pull-request check runs (so never turn on "reject unsigned pushes" there). A guard
+  `yad-gate-sync` bot. That commit is not signed: CI pushes it straight to the default branch with
+  `[skip ci]` in its message, so no check runs on it — the pull-request checks never see it, and the push
+  check skips it. So never require signed commits on the Product's default branch (GitHub's "Require
+  signed commits" rule, GitLab's "Reject unsigned commits" push rule): the bot's commit would be refused. A guard
   stops anyone else: the `ledger-guard` check in CI, an agent hook (Claude Code and Cursor), and a git
   pre-commit hook in each clone. (One gap is still open on GitLab — see
   [Branch protection](docs/branch-protection.md).)

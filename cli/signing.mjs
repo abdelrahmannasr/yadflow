@@ -8,6 +8,7 @@
 // (one key, no extra program), GPG second.
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { c, log, ok, warn, fail, info, hand, run, has, forTerminal } from './lib.mjs';
 import { api, loggedIn, whyFailed, PAGE, PLATFORM_NAME } from './protection.mjs';
 import { productIdentity } from './members.mjs';
@@ -16,10 +17,13 @@ const SSH_MIN_GIT = [2, 34];
 
 // The public key a `user.signingkey` names for SSH, as `<type> <base64>`, or `{ problem }`. A `key::` value is
 // the key itself; a path names the public key, or the private key with its `.pub` beside it.
-export function sshPublicKey(signingkey, { home = os.homedir() } = {}) {
+export function sshPublicKey(signingkey, { home = os.homedir(), dir = process.cwd() } = {}) {
   if (!signingkey) return { problem: 'no key is named (user.signingkey is not set)' };
   if (signingkey.startsWith('key::')) return { key: keyText(signingkey.slice(5)) };
-  const file = signingkey.replace(/^~(?=$|[\\/])/, home);
+  // The older form git still reads: the public key itself, with no `key::` in front.
+  if (keyText(signingkey)) return { key: keyText(signingkey) };
+  // A relative path is read from the repo's folder, as git reads it there.
+  const file = path.resolve(dir, signingkey.replace(/^~(?=$|[\\/])/, home));
   if (!fs.existsSync(file)) return { problem: `${file} does not exist` };
   const pub = file.endsWith('.pub') ? file : `${file}.pub`;
   for (const f of [pub, file]) {
@@ -36,15 +40,22 @@ const keyText = (s) => {
   return m ? `${m[1]} ${m[2]}` : '';
 };
 
-// The key ids (16 hex) and fingerprints in `gpg --with-colons` output: the key and its subkeys.
-export function gpgIds(colons) {
+// The key ids (16 hex) and fingerprints in `gpg --with-colons` output: the key and its subkeys. With
+// `signing`, only a key or subkey that can sign now: not expired, revoked or disabled (field 2: e, r, d, i),
+// with the sign capability (field 12: `s`). `keys` counts the primary keys (`sec`/`pub`) listed.
+export function gpgIds(colons, { signing = false } = {}) {
   const ids = new Set();
+  let keys = 0;
+  let take = false;
   for (const line of String(colons || '').split('\n')) {
     const f = line.split(':');
-    if (['sec', 'ssb', 'pub', 'sub'].includes(f[0]) && /^[0-9A-F]{16}$/i.test(f[4] || '')) ids.add(f[4].toUpperCase());
-    if (f[0] === 'fpr' && /^[0-9A-F]{40}$/i.test(f[9] || '')) ids.add(f[9].toUpperCase());
+    if (['sec', 'ssb', 'pub', 'sub'].includes(f[0])) {
+      if (f[0] === 'sec' || f[0] === 'pub') keys++;
+      take = !signing || (!['e', 'r', 'd', 'i'].includes(f[1]) && (f[11] || '').includes('s'));
+      if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) ids.add(f[4].toUpperCase());
+    } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) ids.add(f[9].toUpperCase());
   }
-  return ids;
+  return Object.assign(ids, { keys });
 }
 // A long key id matches its fingerprint's last 16 digits.
 const sameKey = (a, b) => a === b || (a.length === 40 && a.endsWith(b)) || (b.length === 40 && b.endsWith(a));
@@ -92,8 +103,10 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
     const v = gitVersion(gitRun);
     if (atLeast(v, SSH_MIN_GIT)) add('git-version', 'ok', `git ${v.join('.')} can sign with SSH`);
     else add('git-version', 'gap', `git ${v ? v.join('.') : '(unknown version)'} cannot sign with an SSH key: it needs 2.34 or later`, { steps: ['Install a newer git (https://git-scm.com/downloads), then run `yad signing check` again.'] });
-    const pub = sshPublicKey(signingkey, { home });
-    if (!haveTool('ssh-keygen')) add('key', 'gap', 'ssh-keygen is not on PATH: git signs SSH commits with it', { steps: ['Install OpenSSH (it comes with git on Windows, and with macOS and Linux).'] });
+    const pub = sshPublicKey(signingkey, { home, dir });
+    const keyCommand = !signingkey && cfg('gpg.ssh.defaultKeyCommand');
+    if (keyCommand) add('key', 'unknown', `git asks gpg.ssh.defaultKeyCommand (${forTerminal(keyCommand)}) for the key each time: yad cannot tell which key it is`);
+    else if (!haveTool('ssh-keygen')) add('key', 'gap', 'ssh-keygen is not on PATH: git signs SSH commits with it', { steps: ['Install OpenSSH (it comes with git on Windows, and with macOS and Linux).'] });
     else if (pub.problem) add('key', 'gap', `the SSH signing key: ${forTerminal(pub.problem)}`, { steps: sshSteps });
     else { add('key', 'ok', `the SSH signing key is ${forTerminal(pub.file || 'given in user.signingkey')}`); localKey = { ssh: pub.key }; }
     if (cfg('gpg.ssh.allowedSignersFile')) add('allowed-signers', 'ok', 'gpg.ssh.allowedSignersFile is set, so git can check signatures here too');
@@ -109,13 +122,17 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
       'Tell git: git config --global user.signingkey <that id>, then git config --global commit.gpgsign true',
       'Add it to your account: gpg --armor --export <that id>, pasted as a GPG key on the platform\'s settings page (below).',
     ];
-    const target = signingkey || email;
+    // By email, gpg matches any user id that CONTAINS it: `<email>` asks for that address exactly.
+    const target = signingkey || (email ? `<${email}>` : '');
     if (!haveTool('gpg')) add('key', 'gap', 'gpg is not on PATH: git signs with it (or switch to an SSH key, which needs no extra program)', { steps: ['Install GnuPG (https://gnupg.org/download/), or use an SSH key:', ...sshSteps] });
     else if (!target) add('key', 'gap', 'no key is named (user.signingkey is not set) and there is no email to find one by', { steps: gpgSteps });
     else {
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
-      const ids = r.ok ? gpgIds(r.stdout) : new Set();
-      if (ids.size) { add('key', 'ok', `the GPG key ${forTerminal(target)} is on this machine`); localKey = { gpg: ids }; }
+      const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : new Set();
+      const keys = r.ok ? gpgIds(r.stdout).keys : 0;
+      if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
+      else if (ids.size) { add('key', 'ok', `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: ids }; }
+      else if (keys) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, or without the sign capability)`, { steps: gpgSteps });
       else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
     }
   }
@@ -129,7 +146,8 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
   }
 
   const count = (s) => findings.filter((f) => f.status === s).length;
-  const summary = { gaps: count('gap'), suggestions: count('suggest'), unknown: count('unknown'), complete: count('unknown') === 0 };
+  // Complete only when the account was read too: with no platform, half the question is open.
+  const summary = { gaps: count('gap'), suggestions: count('suggest'), unknown: count('unknown'), complete: count('unknown') === 0 && !!identity?.platform, accountChecked: !!identity?.platform };
   return { method, platform: identity?.platform ?? null, host: identity?.host ?? null, findings, summary, ...(notes.length ? { notes } : {}) };
 }
 
@@ -203,21 +221,35 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
   if (!email) add('platform-email', 'unknown', `${name}: no commit email to look for (set user.email above)`);
   else if (platform === 'github') {
     const noreply = `users.noreply.${host === 'github.com' ? 'github.com' : host}`;
-    if (email.toLowerCase().endsWith(`@${noreply}`)) add('platform-email', 'ok', `${forTerminal(email)} is your ${name} no-reply address`);
-    else {
+    if (email.toLowerCase().endsWith(`@${noreply}`)) {
+      // A no-reply address is verified for the ONE account it names: `<id>+<login>@` or `<login>@`.
+      const u = read('user');
+      if (!u.ok) add('platform-email', 'unknown', notRead(u, 'your account', 'read:user'), refused(u) ? scopeFix('read:user') : null);
+      else {
+        const local = email.slice(0, email.lastIndexOf('@')).toLowerCase();
+        const login = String(u.body?.login || '').toLowerCase();
+        const mine = login && (local === login || local === `${u.body?.id}+${login}`);
+        if (mine) add('platform-email', 'ok', `${forTerminal(email)} is your ${name} no-reply address`);
+        else add('platform-email', 'gap', `${forTerminal(email)} is a ${name} no-reply address, but not this account's (${forTerminal(u.body?.login || '?')})`, { url: `https://${host}/settings/emails`, steps: [`Use your own: git config --global user.email "${u.body?.id ? `${u.body.id}+` : ''}${u.body?.login || '<login>'}@${noreply}"`] });
+      }
+    } else {
       const res = read(`user/emails?per_page=${PAGE}`);
       if (!res.ok) add('platform-email', 'unknown', notRead(res, 'your email addresses', 'user:email'), refused(res) ? scopeFix('user:email') : null);
-      else emailRow(add, name, email, (res.body || []).filter((e) => e?.verified).map((e) => e.email), (res.body || []).map((e) => e?.email), res.body?.length >= PAGE, `https://${host}/settings/emails`);
+      else {
+        const list = Array.isArray(res.body) ? res.body : [];
+        emailRow(add, name, email, list.filter((e) => e?.verified).map((e) => e.email), list.map((e) => e?.email), list.length >= PAGE, `https://${host}/settings/emails`);
+      }
     }
   } else {
     const u = read('user');
     const e = read(`user/emails?per_page=${PAGE}`);
     if (!u.ok) add('platform-email', 'unknown', notRead(u, 'your account', 'read_user'), refused(u) ? scopeFix('read_user') : null);
     else {
-      const confirmed = [u.body?.email, u.body?.commit_email, ...(e.ok ? (e.body || []).filter((x) => x?.confirmed_at).map((x) => x.email) : [])];
-      const all = [...confirmed, ...(e.ok ? (e.body || []).map((x) => x?.email) : [])];
+      const others = e.ok && Array.isArray(e.body) ? e.body : [];
+      const confirmed = [u.body?.email, u.body?.commit_email, ...others.filter((x) => x?.confirmed_at).map((x) => x.email)];
+      const all = [...confirmed, ...others.map((x) => x?.email)];
       if (!e.ok && !confirmed.some((x) => sameEmail(x, email))) add('platform-email', 'unknown', `${name}: your other email addresses could not be read — the token needs the read_user scope`, scopeFix('read_user'));
-      else emailRow(add, name, email, confirmed, all, e.ok && e.body?.length >= PAGE, `https://${host}/-/profile/emails`);
+      else emailRow(add, name, email, confirmed, all, others.length >= PAGE, `https://${host}/-/profile/emails`);
     }
   }
 }
@@ -232,9 +264,12 @@ function emailRow(add, name, email, verified, all, full, url) {
 // The doctor line: this machine only (no network), so `yad doctor` stays quick.
 export function signingDoctorLine(dir, { gitRun = run } = {}) {
   const cfg = (key, bool = false) => { const r = gitRun('git', ['config', ...(bool ? ['--bool'] : []), '--get', key], { cwd: dir }); return r.ok ? r.stdout : ''; };
-  if (cfg('commit.gpgsign', true) !== 'true') return { status: 'warn', message: 'commits made here are not signed', hint: '`yad signing check` says what to set up' };
-  const method = (cfg('gpg.format') || 'openpgp') === 'ssh' ? 'SSH' : 'GPG';
-  if (method === 'SSH' && !cfg('user.signingkey')) return { status: 'warn', message: 'commits made here are set to be signed with SSH, but no key is named', hint: '`yad signing check` says what to set up' };
+  const hint = '`yad signing check` says what to set up';
+  if (cfg('commit.gpgsign', true) !== 'true') return { status: 'warn', message: 'commits made here are not signed', hint };
+  const format = cfg('gpg.format') || 'openpgp';
+  const method = { ssh: 'SSH', openpgp: 'GPG', x509: 'X.509' }[format];
+  if (!method) return { status: 'warn', message: `gpg.format is "${forTerminal(format)}", which git does not know`, hint };
+  if (method === 'SSH' && !cfg('user.signingkey') && !cfg('gpg.ssh.defaultKeyCommand')) return { status: 'warn', message: 'commits made here are set to be signed with SSH, but no key is named', hint };
   return { status: 'ok', message: `commits made here are signed (${method})`, hint: '`yad signing check` also confirms your account lists the key' };
 }
 
@@ -254,6 +289,7 @@ export function runSigningCheck(dir, { root = null, json = false } = {}) {
     log('');
     if (gaps) log(c.bold(`${gaps} thing(s) to set up: these are yours (a key is a secret, and the account is yours) — then run \`yad signing check\` again.`));
     else if (unknown) log(c.bold(`${unknown} item(s) not read — not cleared.`));
+    else if (!r.summary.accountChecked) ok('this machine is set to sign your commits — your account was not checked (see the note above)');
     else ok('your commits will be signed, and your account can verify them');
   }
   if (r.summary.gaps) process.exitCode = 1;
