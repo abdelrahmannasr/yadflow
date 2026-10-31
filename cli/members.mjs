@@ -43,7 +43,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
-import { c, log, ok, info, warn, fail, hand, run, readJSON, forTerminal, isPlainObject, asset } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, readJSON, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { LOGIN_RE, hostFromGitUrl, plainHost } from './platform.mjs';
 import { repoPathFromGitUrl, httpStatus } from './protection.mjs';
@@ -670,18 +670,31 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
     return accounts;
   };
   let accounts = discover();
+  // E159: under --json (an agent's run) no login is started — the person runs it, and this says how.
+  const startLogin = interactive(env) && !noLogin && !inJSON();
+  const loginStep = (cmd) => ({
+    act: 'login',
+    why: `a member file needs an account the platform can prove, and logging in to ${identity.platform === 'github' ? 'GitHub' : 'GitLab'} is the person's (a secret)`,
+    commands: [cmd],
+    verify: 'yad member add --json',
+  });
+  const noLoginYet = (msg, cmd) => {
+    if (!inJSON()) return refuse(msg, `run \`${cmd}\`, then \`yad member add\``);
+    if (soft) { warn(msg); hand(`run \`${cmd}\`, then \`yad member add\``); return { written: false, person: loginStep(cmd) }; }
+    return refuseJSON(msg, `the person runs \`${cmd}\` (\`!\` in front in Claude Code), then \`yad member add\``, { person: loginStep(cmd) });
+  };
   const onProduct = () => accounts.some((a) => a.platform === identity.platform && a.host === identity.host && (a.platform === 'gitlab' || validLogin(a.login)));
   if (identity.platform === 'github' && !onProduct()) {
-    if (interactive(env) && !noLogin) {
+    if (startLogin) {
       info(`not logged in to GitHub on ${identity.host} — starting \`gh auth login\``);
       spawnSync('gh', ['auth', 'login', '--hostname', identity.host, '--scopes', 'user:email'], { stdio: 'inherit' });
       accounts = discover();
     }
-    if (!onProduct()) return refuse(`not logged in to GitHub on ${identity.host}`, `run \`gh auth login --hostname ${identity.host} --scopes user:email\`, then \`yad member add\``);
+    if (!onProduct()) return noLoginYet(`not logged in to GitHub on ${identity.host}`, `gh auth login --hostname ${identity.host} --scopes user:email`);
   }
   let proofs = accounts.map((a) => accountProof(a, { runner, env }));
   if (identity.platform === 'gitlab' && !proofs.some((p) => p.account.platform === 'gitlab' && p.account.host === identity.host && validLogin(p.account.login))) {
-    if (interactive(env) && !noLogin) {
+    if (startLogin) {
       info(`not logged in to GitLab on ${identity.host} — starting \`glab auth login\``);
       spawnSync('glab', ['auth', 'login', '--hostname', identity.host], { stdio: 'inherit' });
       proofs = discover().map((a) => accountProof(a, { runner, env }));
@@ -706,7 +719,8 @@ export async function runMemberAdd(root, { soft = false, noPush = false, runner 
   const existingAll = membersAt(root, baseRef, identity);
   const mine = existingAll.members.find((m) => proofs.some((p) => p.account.platform === identity.platform && p.account.host === identity.host && p.account.login.toLowerCase() === m.primary.login.toLowerCase()));
   const built = buildRecord({ identity, proofs, git, today, existing: mine || null, proved: now.replace(/\.\d+Z$/, 'Z') });
-  if (built.problem) return refuse(built.problem, built.hint || (built.login ? `run \`${cli} auth login --hostname ${identity.host}\`, then \`yad member add\`` : null));
+  if (built.problem && built.login) return noLoginYet(built.problem, `${cli} auth login --hostname ${identity.host}`);
+  if (built.problem) return refuse(built.problem, built.hint || null);
   const { record, primary, plainByHash } = built;
   if (!Number.isSafeInteger(primary.id)) return refuse(`the platform did not give the numeric id of ${accountLabel(primary)} — the member-check gate needs it`, 'run `yad member add` again; if it keeps failing, report it with `yad report`');
   // A login renamed away and registered again by someone else is another account: the old file is not theirs.

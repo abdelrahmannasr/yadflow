@@ -29,9 +29,10 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal, inJSON } from './lib.mjs';
+import { err } from './errors.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets } from './setup.mjs';
+import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets, assertSetupAnswered, ideTargetsQuestion, checkSetupFlags } from './setup.mjs';
 import { moduleActions, gitHookActions, agentFileActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
@@ -84,7 +85,7 @@ function throughLink(productRoot, target) {
   }
   return false;
 }
-const insideGitRepo = (dir) => run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
+export const insideGitRepo = (dir) => run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
 
 // The folder `join` makes from a remote URL: its last path segment without `.git`. So the remote
 // `new acme` tells you to create (`acme`) joins back into `acme/`.
@@ -364,6 +365,8 @@ export async function runNew(cwd, name, opts = {}) {
   const workspace = path.join(cwd, name);
   if (exists(workspace) && !isEmptyDir(workspace)) return refuse(`${workspace} already exists and is not empty — pick another name, or run \`yad init\` inside it to connect what is there`);
   const product = path.join(workspace, PRODUCT_DIR);
+  // E159: setup's answers are checked before the folder is made — `new` runs git init itself, so that is no question.
+  assertSetupAnswered(product, { ...opts, greenfield: !opts.brownfield, gitInit: true });
   fs.mkdirSync(product, { recursive: true });
   if (!gitInit(product)) return refuse(`git init failed in ${product}`);
   ok(`created ${path.join(name, PRODUCT_DIR)}/ (git, branch main)`);
@@ -389,6 +392,15 @@ export async function runNew(cwd, name, opts = {}) {
 }
 
 // ---- yad init ------------------------------------------------------------------------------------
+// The repos `yad init` offers: each git repo in `cwd` beside the Product folder. A linked worktree (an epic's,
+// #115: `.git` is a file pointing into another repo's `worktrees/`) is a second folder of a repo already here,
+// never a repo of its own. Shared with `yad guide`, which lists init's questions for them (E159).
+export function reposBeside(cwd, productName = PRODUCT_DIR) {
+  const children = fs.readdirSync(cwd, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name).sort();
+  const repos = children.filter((n) => n !== productName && exists(path.join(cwd, n, '.git')) && !linkedGitDir(path.join(cwd, n)));
+  const found = repos.filter(validFolderName);
+  return { found, odd: repos.filter((n) => !validFolderName(n)), discovered: found.map((n) => ({ name: n, rpath: `../${n}` })) };
+}
 export async function runInit(cwd, opts = {}) {
   log(c.bold('\nyad init'));
   const inside = insideGitRepo(cwd);
@@ -410,22 +422,20 @@ export async function runInit(cwd, opts = {}) {
   if (exists(product) && !exists(productConfigPath(product)) && !isBareStart(product)) {
     return refuse(`${productName}/ already holds files and is not a Product — name a new folder for the Product with --path <folder>`);
   }
+
+  const { found, odd, discovered } = reposBeside(cwd, productName);
+  const layout = opts.monorepo ? {} : { separate: true };
+  // E159: setup's answers are checked before anything is made here (init runs git init itself).
+  assertSetupAnswered(product, { ...opts, brownfield: !opts.greenfield, ...layout, discovered, gitInit: true });
   if (!exists(product)) {
     fs.mkdirSync(product);
     if (!gitInit(product)) return refuse(`git init failed in ${product}`);
     ok(`created ${productName}/ (git, branch main)`);
   } else info(`Product folder: ${productName}/`);
 
-  // A linked worktree (an epic's, #115: `.git` is a file pointing into another repo's `worktrees/`) is a
-  // second folder of a repo already here, never a repo of its own.
-  const repos = children.filter((n) => n !== productName && exists(path.join(cwd, n, '.git')) && !linkedGitDir(path.join(cwd, n)));
-  const found = repos.filter(validFolderName);
-  const odd = repos.filter((n) => !validFolderName(n));
   if (odd.length) warn(`not offered (a repo name must be letters, digits, ".", "_" or "-"): ${odd.map(shown).join(', ')} — connect them with \`yad setup\` under another name`);
   if (found.length) info(`found ${found.length} repo(s) beside it: ${found.join(', ')}`);
   else info('found no repos beside it — connect them later with `yad setup`');
-  const discovered = found.map((n) => ({ name: n, rpath: `../${n}` }));
-  const layout = opts.monorepo ? {} : { separate: true };
   const setup = await runSetup(product, { ...opts, brownfield: !opts.greenfield, ...layout, discovered });
   if (process.exitCode) return null;
   noteWorkspaceFile(product);
@@ -460,6 +470,17 @@ function installLocalSkills(product, ideTargets) {
 export async function runJoin(cwd, url, folder, opts = {}) {
   log(c.bold('\nyad join'));
   if (typeof url !== 'string' || !url.trim() || url.startsWith('-')) return refuse('usage: yad join <the Product\'s clone URL> [folder]');
+  // E159: join's one question, the AI tools to install for, is answered by flag under --json — checked
+  // before anything is cloned.
+  // A bad --ide-targets is refused here too, never after the clone.
+  if (opts.ideTargets !== undefined) checkSetupFlags(cwd, { ideTargets: opts.ideTargets });
+  if (inJSON() && !process.env.SDLC_NONINTERACTIVE && opts.ideTargets === undefined) {
+    const e = err('YAD-CLI-001', 'join needs 1 answer before it can run: ide-targets', 'ask the person, then run it again with --ide-targets <a,b>');
+    const q = ideTargetsQuestion(path.join(cwd, folder ?? workspaceNameFromUrl(url) ?? '', PRODUCT_DIR));
+    delete q.given;
+    e.questions = [q];
+    throw e;
+  }
   const wsName = folder ?? workspaceNameFromUrl(url);
   if (!validFolderName(wsName)) return refuse(`cannot make a folder name from ${JSON.stringify(shown(url))} — pass one: yad join <url> <folder>`);
   const inside = insideGitRepo(cwd);
@@ -502,7 +523,8 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   // E131: the person's member file — proven by the platform, on its own branch and PR/MR. Never fatal.
   log('');
   let member = null;
-  try { member = await runMemberAdd(product, { soft: true, noPush: !!opts.noPush }) ?? null; }
+  // Under --json the platform login is never started here: a missing one comes back as the person's step (E159).
+  try { member = await runMemberAdd(product, { soft: true, noPush: !!opts.noPush, noLogin: inJSON() }) ?? null; }
   catch (e) { warn(`member file not written: ${shown(e.message)} — run \`yad member add\` from the Product later`); }
 
   // Under a heading of its own, so these lines do not read as part of the toolbox list above.

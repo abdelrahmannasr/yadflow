@@ -585,6 +585,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   - **What the agent does:** it runs `yad guide --json` before each step, tells you what the step is
     for and who does it, and does its own part. It hands you yours (approvals and merges, logins,
     secrets, signing keys, repository settings) with the exact steps, then checks they were done.
+  - **Setting up from the chat:** with no Product yet, the agent asks you each setup question (you can
+    say "take the defaults"), then runs `new`, `init` or `setup` with your answers as flags. A missing
+    answer is refused before anything is written. On `yad join`, a missing GitHub or GitLab login is
+    handed to you as the command to run.
   - **Where the rules live:** in a yad-written block in `AGENTS.md` — the file AI coding agents read at
     the start of a session — and in `CLAUDE.md`, which loads it. Your own text around the block is
     kept. Each code repo gets a short version of the block.
