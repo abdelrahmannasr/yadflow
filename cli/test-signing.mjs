@@ -320,9 +320,19 @@ test('E160 review 3: an offline primary, a stub or a smartcard through the whole
     assert.equal(stub.status, 'gap');
     assert.match(stub.message, /cannot sign now .*not on this machine/);
     assert.equal(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:r:255:22:1111222233334444:1::::::scSC:').status, 'ok', 'a revoked key beside it is not "several keys"');
+    assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:r:255:22:1111222233334444:1::::::scSC:', { signing: true }).keys, 1);
+    // A disabled, revoked or expired primary takes its signing subkey with it.
+    for (const head of ['sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSCD:::+:', 'sec:r:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::+:', 'sec:e:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::+:']) {
+      assert.equal(key(`${head}\nssb:u:255:22:5555666677778888:1::::::s:::+:`).status, 'gap', head);
+    }
+    // A subkey listed before any primary belongs to no key.
+    assert.equal(gpgIds('ssb:u:255:22:5555666677778888:1::::::s:::+:\nsec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::+:', { signing: true }).keys, 1);
+    assert.deepEqual([...gpgIds('ssb:u:255:22:5555666677778888:1::::::s:::+:', { signing: true })], []);
     const card = key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:');
     assert.equal(card.status, 'ok');
     assert.match(card.message, /smartcard, while the card is inserted/);
+    // A primary on a card and a signing subkey here: not "on a smartcard".
+    assert.doesNotMatch(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:\nssb:u:255:22:5555666677778888:1::::::s:::+:').message, /smartcard/);
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
 

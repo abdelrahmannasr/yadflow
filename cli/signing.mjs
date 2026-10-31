@@ -42,28 +42,33 @@ const keyText = (s) => {
 
 // The key ids (16 hex) and fingerprints in `gpg --with-colons` output: the key and its subkeys. With
 // `signing`, only a key or subkey that can sign now: not expired, revoked, disabled or invalid (field 2: e,
-// r, d, i; a disabled key is also `D` in field 12), with the sign capability (field 12: `s`, lower case: this
-// key's own, not the whole key's), and its secret here (field 15 is `#` for a stub, whose secret is
-// elsewhere; a card's serial number when the secret is on a smartcard). `keys` counts the primary keys
-// (`sec`/`pub`) with a part that can sign now; `listed` counts every one; `card` is true when a part that
-// signs is on a smartcard.
+// r, d, i; a disabled key is also `D` in field 12, printed on the primary only), with the sign capability
+// (field 12: `s`, lower case: this key's own, not the whole key's), and its secret here (field 15 is `#` for
+// a stub, whose secret is elsewhere; a card's serial number when the secret is on a smartcard). A primary that
+// cannot be used makes its subkeys unusable too. `keys` counts the primary keys (`sec`/`pub`) with a part
+// that can sign now; `listed` counts every one; `card` is true when every part that signs is on a smartcard.
 export function gpgIds(colons, { signing = false } = {}) {
   const ids = new Set();
   const signers = new Set();
   let listed = 0;
-  let card = false;
+  let primary = null;
+  let primaryDead = false;
+  let onCard = 0;
+  let parts = 0;
   let take = false;
   for (const line of String(colons || '').split('\n')) {
     const f = line.split(':');
     if (['sec', 'ssb', 'pub', 'sub'].includes(f[0])) {
-      if (f[0] === 'sec' || f[0] === 'pub') listed++;
-      const signs = !['e', 'r', 'd', 'i'].includes(f[1]) && !(f[11] || '').includes('D') && (f[11] || '').includes('s') && f[14] !== '#';
-      if (signs) { signers.add(listed); if (f[14] && f[14] !== '+') card = true; }
-      take = !signing || signs;
+      const dead = ['e', 'r', 'd', 'i'].includes(f[1]) || (f[11] || '').includes('D');
+      if (f[0] === 'sec' || f[0] === 'pub') { primary = ++listed; primaryDead = dead; }
+      // A subkey before any primary belongs to no key: skipped.
+      const signs = primary !== null && !dead && !primaryDead && (f[11] || '').includes('s') && f[14] !== '#';
+      if (signs) { signers.add(primary); parts++; if (f[14] && f[14] !== '+') onCard++; }
+      take = primary !== null && (!signing || signs);
       if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) ids.add(f[4].toUpperCase());
     } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) ids.add(f[9].toUpperCase());
   }
-  return Object.assign(ids, { keys: signers.size, listed, card });
+  return Object.assign(ids, { keys: signers.size, listed, card: parts > 0 && onCard === parts });
 }
 // A long key id matches its fingerprint's last 16 digits.
 const sameKey = (a, b) => a === b || (a.length === 40 && a.endsWith(b)) || (b.length === 40 && b.endsWith(a));
