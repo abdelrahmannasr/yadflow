@@ -113,7 +113,7 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
 - Never do a human-only act. Give the exact command and steps, wait, then confirm by reading (the guide names the command that confirms it).
 - When the guide says the install is behind yadflow, run `yad update --open-pr --json` without asking: it commits the update on its own branch in each repo and opens a PR/MR, which a person merges. Show the person every row that has a `hint` (a repo held back, refused, or left half done) with its `reason`, wait for them, then run it again. Never use `yad update --push` unless the person asks for it.
 - Commit, push your own branch, and open a review PR/MR without asking. Open a task PR/MR without asking only when `yad dial open-pr` is `auto`; otherwise ask first. Ask every time before anything that pushes straight to the default branch. Never force-push.
-- Run a command the guide classes `on-request` only when the person asked for that exact change or gave you what it records: `yad dial … --to`, `yad mode solo|team`, `yad kill`, `yad unkill`, `yad skip`, `yad defer`, `yad unblock`, `yad setup`/`new`/`init` (until you can ask the setup questions yourself), `yad skill bind`, `yad toolbox add`, a flag that passes a guard (`--force`, `--overwrite-local`, `--allow-branch`), and the others the guide marks.
+- Run a command the guide classes `on-request` only when the person asked for that exact change or gave you what it records: `yad dial … --to`, `yad mode solo|team`, `yad kill`, `yad unkill`, `yad skip`, `yad defer`, `yad unblock`, `yad setup`/`new`/`init` (with the answers the person gave to the questions the guide lists), `yad skill bind`, `yad toolbox add`, a flag that passes a guard (`--force`, `--overwrite-local`, `--allow-branch`), and the others the guide marks.
 - A Build step the yad-run skill halted (`blocked`: a failing check, a scope overrun, a contract touch) waits for the person: never move it on (`yad build step … in_progress`) until they say it is resolved.
 - Never hand-write `.sdlc/` files, approvals, or text between yad markers; only `yad` commands and the yad-* skills change them.
 - When you record Build work you did yourself, say so: `yad build step … --via auto` and `yad build trust … --ran-by machine`, as the yad-run skill does. The defaults record a person's work.
@@ -126,10 +126,19 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
 
 ## Setting up, signing and CI
 
-- **No Product yet** (`situation.stage` is `no-product`): the guide says how to start one. `yad setup`,
-  `yad new` and `yad init` choose the Product's mode and route, which are the person's: ask them, and run
-  it only with the answers they gave. (A later release, E159, will let you ask the setup questions in the
-  chat; until then, ask them yourself and pass the answers.)
+- **No Product yet** (`situation.stage` is `no-product`): the guide names the command this folder calls
+  for (`new <name>`, `init` or `setup`) and lists its `questions`, each with its choices, its default and
+  the flag that answers it. These choose the Product's mode and route, which are the person's:
+  1. Ask whether this is a new project, existing code, or joining a team that already uses yadflow.
+  2. Ask each question in `questions`, one at a time, showing its default. The person may say "take the
+     defaults"; never pick an answer for them.
+  3. Run the command with `--json` and a flag for each answer (`npx -y yadflow@4 new <name> --json
+     --solo --no-tools …`). A missing answer is refused before anything is written, with the questions
+     still open: ask those, then run it again.
+  4. Joining: `npx -y yadflow@4 join <url> --ide-targets <a,b> --json`. When the person is not logged in
+     to the platform, the result's `member.person` names the login command: hand it over (`!` in front in
+     Claude Code), then run `yad member add --json` after they say it is done.
+  5. Read `yad guide --json` again.
 - **Commit signing and CI settings** are the person's (a signing key, branch protection, rulesets). Give
   the exact steps from the guide and confirm by reading. (A later release, E160, will add commands that
   read these for you; they do not exist yet, so do not run them.)

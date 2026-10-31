@@ -29,7 +29,14 @@ ${c.bold('Setup & maintenance')}
   yad setup            Guided first-run setup (profile interview, install, connect & wire repos,
                        then the tools this project uses that are missing — offered, never installed)
                        profile flags: --solo | --team <n>, --greenfield | --brownfield,
-                       --monorepo | --separate, --tools (configure design/testing/learning now)
+                       --monorepo | --separate, --tools | --no-tools (configure design/testing/learning now)
+                       every other answer: --ide-targets <a,b>, --platform <github|gitlab|none>,
+                       --default-branch <name>, --design|--testing|--learning <tool|none>
+                       (--design-url, --testing-url), --reconfigure | --no-reconfigure,
+                       --git-init | --no-git-init, --connect <all|none|names>,
+                       --add-repo <name>=<path>[,<platform>[,<branch>]] (repeat it),
+                       --coderabbit <all|none|names>. Under --json a missing answer is refused before
+                       anything is written, with the questions to ask (E159)
   yad check            Report what is missing / drifted / modified / stale / legacy (read-only)
   yad check --fix      Reconcile: fill what is missing, update what changed
   yad update           Apply drift only (alias for: check --fix --scope=changed);
@@ -513,6 +520,12 @@ function parseArgs(argv) {
     else if (a === '--monorepo') o.monorepo = true;
     else if (a === '--separate') o.separate = true;
     else if (a === '--tools') o.tools = true;
+    // E159: the yes/no setup answers, both ways, so an agent can pass what the person said.
+    else if (a === '--no-tools') o.noTools = true;
+    else if (a === '--reconfigure') o.reconfigure = true;
+    else if (a === '--no-reconfigure') o.reconfigure = false;
+    else if (a === '--git-init') o.gitInit = true;
+    else if (a === '--no-git-init') o.gitInit = false;
     else if (a === '--refresh') o.refresh = true;
     else if (a === '--repos') o.repos = true;
     else if (a === '--wire') o.wire = true;
@@ -556,6 +569,14 @@ function parseArgs(argv) {
   }
   return o;
 }
+
+// E159: the setup answers beyond the profile flags, as `runSetup` reads them.
+const setupAnswers = (o) => ({
+  noTools: o.noTools, reconfigure: o.reconfigure, gitInit: o.gitInit,
+  platform: o.platform === undefined ? undefined : String(o.platform).toLowerCase(),
+  defaultBranch: o['default-branch'], design: o.design, designUrl: o['design-url'], testing: o.testing, testingUrl: o['testing-url'],
+  learning: o.learning, connect: o.connect, addRepo: o['add-repo'], coderabbit: o.coderabbit,
+});
 
 // The command `main` is running, for the error handler (set once the arguments are read).
 let runningCmd = null;
@@ -755,6 +776,7 @@ async function main() {
         today, force: o.force,
         solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
         monorepo: o.monorepo, separate: o.separate, tools: o.tools,
+        ...setupAnswers(o),
         // The agent directories to install into, as a pre-answer for CI/scripts exactly like `--solo`
         // above (E11). Until this flag existed, `ideTargets` was reachable only programmatically: a
         // non-interactive run took `ask`'s default and had NO way to choose. That was survivable while
@@ -775,11 +797,12 @@ async function main() {
         today, force: o.force,
         solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
         monorepo: o.monorepo, separate: o.separate, tools: o.tools,
+        ...setupAnswers(o),
         ideTargets: o['ide-targets'] === undefined ? undefined : String(o['ide-targets']).split(',').map((t) => t.trim()).filter(Boolean),
       };
       if (cmd === 'new') result = await commands.runNew(o.dir, o._[1], setupFlags);
       else if (cmd === 'init') result = await commands.runInit(o.dir, { ...setupFlags, path: o.path });
-      else result = await commands.runJoin(o.dir, o._[1], o._[2], { ideTargets: setupFlags.ideTargets });
+      else result = await commands.runJoin(o.dir, o._[1], o._[2], { ideTargets: setupFlags.ideTargets, noPush: !!o.noPush });
       break;
     }
     case 'check':
@@ -1296,7 +1319,8 @@ main()
     if (inJSON() && !jsonEmitted()) {
       if (err?.parsedCmd !== undefined && runningCmd === null) beginJSON(commandName(err.parsedWords ?? []));
       const hint = err?.hint || (/expects a value$/.test(String(err?.message)) ? '`yad --help` lists the flags of each command' : null);
-      refuse(String(err?.message || err), hint, { code: err?.code && /^YAD-/.test(err.code) ? err.code : null });
+      // E159: a setup refused for unanswered questions lists them, so an agent can ask the person.
+      refuse(String(err?.message || err), hint, { code: err?.code && /^YAD-/.test(err.code) ? err.code : null, ...(Array.isArray(err?.questions) ? { questions: err.questions } : {}) });
       return;
     }
     const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';

@@ -5,8 +5,9 @@ import os from 'node:os';
 import {
   c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, runLauncher, has,
   exists, readJSON, readJSONStrict, writeJSON,
-  writeProductConfig, forTerminal,
+  writeProductConfig, forTerminal, inJSON,
 } from './lib.mjs';
+import { err } from './errors.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
@@ -273,6 +274,142 @@ function applyActions(actions, { force = false } = {}) {
   return changed;
 }
 
+// ---- E159: every setup question as data, so an AI agent can ask them in chat ---------------------------
+//
+// `setupQuestions` lists the questions THIS run would ask, in the order `runSetup` asks them, each with the
+// flag that answers it and whether that flag was given. It only reads (the disk and the flags) and follows
+// the same branches `runSetup` takes, so a question appears only where the run would really ask it. Under
+// `--json` (without SDLC_NONINTERACTIVE, which takes every default) `runSetup` refuses with the unanswered
+// ones BEFORE it writes anything (`assertSetupAnswered`), and `yad guide --json` shows the same list.
+const has_ = (v) => v !== undefined && v !== null;
+const toolsGiven = (opts) => has_(opts.design) || has_(opts.testing) || has_(opts.learning);
+// The tools step runs: `--tools`, or any one tool named. `--no-tools` turns it off; unanswered, it is asked.
+const toolsOn = (opts) => opts.tools === true || toolsGiven(opts);
+// The code repos this run would end with: the registered ones, those `--add-repo` adds, and those `yad init`
+// found that `--connect` picks.
+function reposAfter(root, opts) {
+  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] }) || { repos: [] };
+  const out = (registry.repos || []).map((r) => ({ name: r.name, rpath: r.path }));
+  for (const d of opts.discovered || []) if (connects(opts.connect, d.name) !== false) out.push(d);
+  for (const r of (opts.addRepo || []).map(parseAddRepo)) out.push({ name: r.name, rpath: r.rpath });
+  return out;
+}
+// `--connect all|none|<name,name>` for one repo: true, false, or undefined when not answered.
+function connects(connect, name) {
+  if (!has_(connect)) return undefined;
+  if (connect === 'all') return true;
+  if (connect === 'none') return false;
+  return parseList(connect).includes(name);
+}
+// `--add-repo <name>=<path>[,<platform>[,<branch>]]`.
+export function parseAddRepo(spec) {
+  const m = /^([^=]+)=([^,]+)(?:,([^,]*))?(?:,([^,]*))?$/.exec(String(spec));
+  if (!m) throw setupFlagError(`--add-repo ${spec}: expected <name>=<path>[,<platform>[,<branch>]]`);
+  return { name: m[1].trim(), rpath: m[2].trim(), platform: (m[3] || '').trim().toLowerCase() || null, default_branch: (m[4] || '').trim() || null };
+}
+const setupFlagError = (message) => Object.assign(new Error(message), { hint: '`yad --help` lists the setup flags and their values' });
+
+// The AI tools to install the skills for: setup's question, and `yad join`'s only one.
+export function ideTargetsQuestion(root, opts = {}) {
+  const detected = exists(root) ? detectedIdeTargetStateFor(root).targets : [];
+  return { id: 'ide-targets', text: 'Which AI tools to install the skills for?', choices: IDE_TARGETS.map((t) => `${t} (${(IDE_AGENTS[t] || []).join(', ')})`), default: (detected.length ? detected : DEFAULT_IDE_TARGETS).join(','), flag: '--ide-targets <a,b>', given: has_(opts.ideTargets) };
+}
+
+export function setupQuestions(root, opts = {}) {
+  const productConfig = readJSON(productConfigPath(root), null);
+  const prev = productConfig?.profile || {};
+  const qs = [];
+  const add = (q) => qs.push(q);
+  const modeCarried = typeof productConfig?.solo === 'boolean' || productConfig?.review_gate?.solo === true;
+  if (!modeCarried) {
+    const known = prev.team_size ?? (productConfig ? 2 : 1);
+    add({ id: 'mode', text: 'Solo or team? For a team, how many people?', choices: ['solo', 'team <n>'], default: known > 1 ? `team ${Math.max(2, known)}` : 'solo', flag: '--solo | --team <n>', given: !!opts.solo || has_(opts.team) });
+  }
+  if (!prev.codebase) add({ id: 'codebase', text: 'Greenfield (new code) or brownfield (existing code)?', choices: ['greenfield', 'brownfield'], default: 'greenfield', flag: '--greenfield | --brownfield', given: !!(opts.greenfield || opts.brownfield) });
+  if (!prev.repo_layout) add({ id: 'layout', text: 'Monorepo (one repo) or separate repos?', choices: ['monorepo', 'separate'], default: 'monorepo', flag: '--monorepo | --separate', given: !!(opts.monorepo || opts.separate) });
+  add({ id: 'tools', text: 'Configure the design, testing and learning tools now (else connect them later)?', choices: ['yes', 'no'], default: 'no', flag: '--tools | --no-tools', given: opts.tools === true || opts.noTools === true || toolsGiven(opts) });
+  if (!exists(path.join(root, '.git'))) add({ id: 'git-init', text: 'This folder is not a git repo. Run `git init` here?', choices: ['yes', 'no'], default: 'yes', flag: '--git-init | --no-git-init', given: has_(opts.gitInit) });
+  add(ideTargetsQuestion(root, opts));
+  const productExists = exists(productConfigPath(root));
+  const toolFile = (f) => exists(path.join(root, f));
+  const anyToolFile = toolsOn(opts) && [PROJECT_FILES.designConfig, PROJECT_FILES.testingConfig, PROJECT_FILES.learningConfig].some(toolFile);
+  if (productExists || anyToolFile) add({ id: 'reconfigure', text: 'Settings from an earlier setup are here. Change them (platform, default branch, tools)?', choices: ['yes', 'no'], default: 'no', flag: '--reconfigure | --no-reconfigure', given: has_(opts.reconfigure) });
+  if (!productExists || opts.reconfigure === true) {
+    const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root });
+    const platformDefault = detectPlatform(remote.ok ? remote.stdout : '') || 'none';
+    add({ id: 'platform', text: 'Where does the Product live: GitHub, GitLab, or nowhere yet (a local gate)?', choices: ['github', 'gitlab', 'none'], default: platformDefault, flag: '--platform <github|gitlab|none>', given: has_(opts.platform) });
+    if ((opts.platform ?? platformDefault) !== 'none') add({ id: 'default-branch', text: 'The Product\'s default branch?', choices: [], default: 'main', flag: '--default-branch <name>', given: has_(opts.defaultBranch) });
+  }
+  if (toolsOn(opts)) {
+    const tool = (id, file, tools, primary) => {
+      if (toolFile(file) && opts.reconfigure !== true) return;
+      add({ id, text: `Which ${id} tool?`, choices: [...tools, 'none'], default: primary, flag: `--${id} <${[...tools, 'none'].join('|')}>`, given: has_(opts[id]) });
+    };
+    tool('design', PROJECT_FILES.designConfig, DESIGN_TOOLS, DESIGN_PRIMARY);
+    tool('testing', PROJECT_FILES.testingConfig, TESTING_TOOLS, TESTING_PRIMARY);
+    tool('learning', PROJECT_FILES.learningConfig, LEARNING_TOOLS, LEARNING_PRIMARY);
+  }
+  const found = (opts.discovered || []).map((d) => d.name);
+  add({
+    id: 'repos',
+    text: found.length ? `Connect and wire the repos found beside the Product (${found.join(', ')}), and any other code repo?` : 'Connect a code repo (its name, path, platform and default branch)?',
+    choices: found.length ? ['all', 'none', found.join(',')] : ['none', '<name>=<path>[,<platform>[,<branch>]]'],
+    default: found.length ? 'all' : 'none',
+    flag: found.length ? '--connect <all|none|name,name> [--add-repo <name>=<path>[,<platform>[,<branch>]]]' : '--add-repo <name>=<path>[,<platform>[,<branch>]] | --connect none',
+    given: has_(opts.connect) || (opts.addRepo || []).length > 0,
+  });
+  const noCr = reposAfter(root, opts).filter((r) => !exists(path.join(path.resolve(root, r.rpath), '.coderabbit.yaml'))).map((r) => r.name);
+  if (noCr.length) add({ id: 'coderabbit', text: `Wire CodeRabbit (an advisory AI review of each PR/MR) in: ${noCr.join(', ')}?`, choices: ['all', 'none', noCr.join(',')], default: 'none', flag: '--coderabbit <all|none|name,name>', given: has_(opts.coderabbit) });
+  return qs;
+}
+
+// The setup flags' values, checked before anything is written: a bad value is refused, never guessed at.
+export function checkSetupFlags(root, opts = {}) {
+  if (opts.tools === true && opts.noTools === true) throw setupFlagError('--tools and --no-tools say opposite things — pick one');
+  if (opts.noTools === true && toolsGiven(opts)) throw setupFlagError('--no-tools and a tool flag (--design, --testing, --learning) say opposite things — pick one');
+  if (opts.solo && has_(opts.team)) throw setupFlagError('--solo and --team say opposite things — pick one');
+  if (has_(opts.platform) && !['github', 'gitlab', 'none'].includes(opts.platform)) throw setupFlagError(`--platform ${opts.platform}: expected github, gitlab or none`);
+  const branchOk = (b) => /^[A-Za-z0-9._/-]+$/.test(b) && !b.startsWith('-') && !b.includes('..');
+  if (has_(opts.defaultBranch) && !branchOk(opts.defaultBranch)) throw setupFlagError(`--default-branch ${opts.defaultBranch}: not a plain branch name`);
+  for (const [id, tools] of [['design', DESIGN_TOOLS], ['testing', TESTING_TOOLS], ['learning', LEARNING_TOOLS]]) {
+    if (has_(opts[id]) && ![...tools, 'none'].includes(opts[id])) throw setupFlagError(`--${id} ${opts[id]}: expected one of ${[...tools, 'none'].join(', ')}`);
+  }
+  const found = (opts.discovered || []).map((d) => d.name);
+  if (has_(opts.connect) && !['all', 'none'].includes(opts.connect)) {
+    const unknown = parseList(opts.connect).filter((n) => !found.includes(n));
+    if (unknown.length) throw setupFlagError(`--connect: no repo named ${unknown.join(', ')} was found beside the Product${found.length ? ` (found: ${found.join(', ')})` : ''}`);
+  }
+  const names = new Set();
+  for (const spec of opts.addRepo || []) {
+    const r = parseAddRepo(spec);
+    if (!/^[A-Za-z0-9._-]+$/.test(r.name)) throw setupFlagError(`--add-repo ${spec}: a repo name is letters, digits, ".", "_" or "-"`);
+    if (names.has(r.name) || found.includes(r.name)) throw setupFlagError(`--add-repo ${spec}: ${r.name} is named twice`);
+    names.add(r.name);
+    if (throughGitDir(root, r.rpath)) throw setupFlagError(`--add-repo ${spec}: ${r.rpath} runs through a .git folder — not a code repo`);
+    if (!insideWorkspace(root, r.rpath)) throw setupFlagError(`--add-repo ${spec}: ${r.rpath} resolves outside the workspace (the Product's parent folder)`);
+    if (r.platform && !['github', 'gitlab'].includes(r.platform)) throw setupFlagError(`--add-repo ${spec}: platform ${r.platform} — expected github or gitlab`);
+    if (r.default_branch && !branchOk(r.default_branch)) throw setupFlagError(`--add-repo ${spec}: ${r.default_branch} is not a plain branch name`);
+  }
+  if (has_(opts.coderabbit) && !['all', 'none'].includes(opts.coderabbit)) {
+    const known = reposAfter(root, opts).map((r) => r.name);
+    const unknown = parseList(opts.coderabbit).filter((n) => !known.includes(n));
+    if (unknown.length) throw setupFlagError(`--coderabbit: no connected repo named ${unknown.join(', ')}`);
+  }
+}
+
+// Under --json, every question this run would ask needs its flag: refused with the unanswered ones, before
+// anything is written. SDLC_NONINTERACTIVE takes every default instead, as it always has.
+export function assertSetupAnswered(root, opts = {}) {
+  checkSetupFlags(root, opts);
+  if (!inJSON() || process.env.SDLC_NONINTERACTIVE) return;
+  const missing = setupQuestions(root, opts).filter((q) => !q.given);
+  if (!missing.length) return;
+  const e = err('YAD-CLI-001', `setup needs ${missing.length} answer(s) before it can run: ${missing.map((q) => q.id).join(', ')}`,
+    'ask the person each question in `questions`, then run it again with those flags (or SDLC_NONINTERACTIVE=1 to take every default)');
+  e.questions = missing.map(({ given: _given, ...q }) => q);
+  throw e;
+}
+
 // Step 0 — resolve the setup profile that branches the rest of the wizard. Flags pre-answer each
 // question (CI/scripts); an existing hub.json carries prior answers forward (idempotent re-run);
 // otherwise we prompt with a default. Pure of side effects — it only reads. Returns
@@ -312,8 +449,8 @@ export async function resolveProfile(root, opts = {}) {
   else repo_layout = (await ask('Monorepo (one repo) or separate repos?', 'monorepo')).toLowerCase().startsWith('s') ? 'separate' : 'monorepo';
 
   // 4. Configure the optional tools now, or defer (records them as none, connect later).
-  const configureTools = opts.tools === true ? true
-    : process.env.SDLC_NONINTERACTIVE ? false
+  const configureTools = toolsOn(opts) ? true
+    : opts.noTools === true || process.env.SDLC_NONINTERACTIVE ? false
       : await askYesNo('Configure design/testing/learning tools now? (else connect them later)', false);
 
   return { solo, team_size, codebase, repo_layout, configureTools };
@@ -324,6 +461,9 @@ export async function resolveProfile(root, opts = {}) {
 export async function runSetup(root, opts = {}) {
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}`));
+  // E159: a bad flag value, or (under --json) an unanswered question, is refused here — before anything is written.
+  assertSetupAnswered(root, opts);
+  const notes = [];
 
   // 0. Profile interview — branch the wizard to the user's situation (solo/team, code, repo layout).
   const { solo, team_size, codebase, repo_layout, configureTools } = await resolveProfile(root, opts);
@@ -343,7 +483,7 @@ export async function runSetup(root, opts = {}) {
   // Preflight
   S('Preflight');
   if (!exists(path.join(root, '.git'))) {
-    if (await askYesNo('Not a git repo. Run `git init` here?', true)) {
+    if (opts.gitInit ?? await askYesNo('Not a git repo. Run `git init` here?', true)) {
       run('git', ['init'], { cwd: root });
       ok('git initialized');
     } else warn('continuing without git — the Product platform will not be detected');
@@ -373,7 +513,12 @@ export async function runSetup(root, opts = {}) {
   // so touching the home dir requires an interactive yes — never auto-fire it in SDLC_NONINTERACTIVE
   // (scripted/CI) mode, where the prompt would otherwise return its default. Silent when there is
   // nothing to migrate.
-  const globalLegacy = process.env.SDLC_NONINTERACTIVE ? [] : legacyModuleActions(os.homedir(), ['.claude']);
+  // Under --json (an agent's run, E159) the person's home folder is not the agent's to tidy: left, and said.
+  const homeAsk = !process.env.SDLC_NONINTERACTIVE && !inJSON();
+  if (!process.env.SDLC_NONINTERACTIVE && inJSON() && (legacyModuleActions(os.homedir(), ['.claude']).length || removedModuleActions(os.homedir(), ['.claude']).length)) {
+    notes.push('old yad skills are in your global ~/.claude/skills — run `yad setup` in a terminal to migrate or delete them');
+  }
+  const globalLegacy = homeAsk ? legacyModuleActions(os.homedir(), ['.claude']) : [];
   if (globalLegacy.length) {
     if (await askYesNo(`Found ${globalLegacy.length} legacy sdlc-* skill(s) in your global ~/.claude/skills (pre-2.0 install). Migrate them to yad-*?`, true)) {
       applyActions(globalLegacy, { force: true });
@@ -385,7 +530,7 @@ export async function runSetup(root, opts = {}) {
 
   // Same opt-in pass for skills removed in a later release (REMOVED_SKILLS) that linger in the
   // global ~/.claude/skills — purge them so a global install also drops the dead command.
-  const globalRemoved = process.env.SDLC_NONINTERACTIVE ? [] : removedModuleActions(os.homedir(), ['.claude']);
+  const globalRemoved = homeAsk ? removedModuleActions(os.homedir(), ['.claude']) : [];
   if (globalRemoved.length) {
     if (await askYesNo(`Found ${globalRemoved.length} removed skill(s) in your global ~/.claude/skills. Delete them?`, true)) {
       applyActions(globalRemoved, { force: true });
@@ -409,18 +554,18 @@ export async function runSetup(root, opts = {}) {
       'It also reports how many people it would like: 3 on a contract review, 2 where auth or payments is touched, 1 elsewhere. That extra number is advisory for now.',
     ]);
   const productPath = productConfigPath(root);
-  if (exists(productPath) && !(await askYesNo(`${path.relative(root, productPath)} exists — reconfigure?`, false))) {
+  if (exists(productPath) && !(opts.reconfigure ?? await askYesNo(`${path.relative(root, productPath)} exists — reconfigure?`, false))) {
     info(`keeping the existing ${path.relative(root, productPath)}`);
   } else {
     const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root });
     if (!remote.ok && exists(path.join(root, '.git'))) info('no origin remote — platform detection skipped');
     let platform = detectPlatform(remote.ok ? remote.stdout : '');
-    platform = (await ask('Product platform (github/gitlab/none)', platform || 'none')).toLowerCase();
+    platform = (opts.platform ?? await ask('Product platform (github/gitlab/none)', platform || 'none')).toLowerCase();
     if (!['github', 'gitlab', 'none'].includes(platform)) {
       warn(`unknown platform '${platform}' — using none (local gate)`);
       platform = 'none';
     }
-    const default_branch = platform === 'none' ? 'main' : await ask('Product default branch', 'main');
+    const default_branch = platform === 'none' ? 'main' : opts.defaultBranch ?? await ask('Product default branch', 'main');
     // `ledger` is the canonical switch (shape 2): "verified" = CI writes the ledger, "local" = this
     // machine does. The two booleans below say the same thing in the older spelling and are written
     // ALONGSIDE it, not instead of it — add before you remove (rule 3). They are what a check gate
@@ -482,15 +627,16 @@ export async function runSetup(root, opts = {}) {
       'Where yad-ui materializes real screens. figma (confirm the MCP later) or none for markdown-only.',
       'Skipping is safe — the UI step degrades to ui-design.md.',
     ]);
-    if (exists(designPath) && !(await askYesNo('design.json exists — reconfigure?', false))) {
+    if (exists(designPath) && !(opts.reconfigure ?? await askYesNo('design.json exists — reconfigure?', false))) {
       info('keeping existing .sdlc/design.json');
     } else {
-      let tool = (await ask(`Design tool (${DESIGN_TOOLS.join('/')}/none)`, DESIGN_PRIMARY)).toLowerCase();
+      let tool = (opts.design ?? await ask(`Design tool (${DESIGN_TOOLS.join('/')}/none)`, DESIGN_PRIMARY)).toLowerCase();
       if (![...DESIGN_TOOLS, 'none'].includes(tool)) {
         warn(`unknown design tool '${tool}' — using ${DESIGN_PRIMARY}`);
         tool = DESIGN_PRIMARY;
       }
-      const project_url = tool === 'none' ? null : (await ask('  project/file URL (blank to set later)', '')) || null;
+      // A tool named by flag takes its URL by flag too (blank when not given): no prompt.
+      const project_url = tool === 'none' ? null : (has_(opts.design) ? opts.designUrl : await ask('  project/file URL (blank to set later)', '')) || null;
       registerDesign(root, { tool, project_url, today: opts.today ?? null });
       ok(tool === 'none'
         ? `wrote ${PROJECT_FILES.designConfig} (markdown-only)`
@@ -506,15 +652,15 @@ export async function runSetup(root, opts = {}) {
       `Where yad-test-cases generates automation. ${TESTING_TOOLS.join('/')}, or none for artifacts-only.`,
       'Skipping is safe — test-cases authors test-cases.md only.',
     ]);
-    if (exists(testingPath) && !(await askYesNo('testing.json exists — reconfigure?', false))) {
+    if (exists(testingPath) && !(opts.reconfigure ?? await askYesNo('testing.json exists — reconfigure?', false))) {
       info('keeping existing .sdlc/testing.json');
     } else {
-      let tool = (await ask(`Testing tool (${TESTING_TOOLS.join('/')}/none)`, TESTING_PRIMARY)).toLowerCase();
+      let tool = (opts.testing ?? await ask(`Testing tool (${TESTING_TOOLS.join('/')}/none)`, TESTING_PRIMARY)).toLowerCase();
       if (![...TESTING_TOOLS, 'none'].includes(tool)) {
         warn(`unknown testing tool '${tool}' — using ${TESTING_PRIMARY}`);
         tool = TESTING_PRIMARY;
       }
-      const project_url = tool === 'none' ? null : (await ask('  project/config reference (blank to set later)', '')) || null;
+      const project_url = tool === 'none' ? null : (has_(opts.testing) ? opts.testingUrl : await ask('  project/config reference (blank to set later)', '')) || null;
       registerTesting(root, { tool, project_url, today: opts.today ?? null });
       ok(tool === 'none'
         ? `wrote ${PROJECT_FILES.testingConfig} (artifacts-only)`
@@ -527,10 +673,10 @@ export async function runSetup(root, opts = {}) {
       'Lets any team member invoke yad-learn to be tutored in-context. deeptutor (a CLI), or none.',
       'Skipping is safe — yad-learn tutors via the harness model (harness-native).',
     ]);
-    if (exists(learningPath) && !(await askYesNo('learning.json exists — reconfigure?', false))) {
+    if (exists(learningPath) && !(opts.reconfigure ?? await askYesNo('learning.json exists — reconfigure?', false))) {
       info('keeping existing .sdlc/learning.json');
     } else {
-      let tool = (await ask(`Learning tool (${LEARNING_TOOLS.join('/')}/none)`, LEARNING_PRIMARY)).toLowerCase();
+      let tool = (opts.learning ?? await ask(`Learning tool (${LEARNING_TOOLS.join('/')}/none)`, LEARNING_PRIMARY)).toLowerCase();
       if (![...LEARNING_TOOLS, 'none'].includes(tool)) {
         warn(`unknown learning tool '${tool}' — using ${LEARNING_PRIMARY}`);
         tool = LEARNING_PRIMARY;
@@ -576,7 +722,7 @@ export async function runSetup(root, opts = {}) {
     const default_branch = detectDefaultBranch(repoRoot);
     // "Connect" means what it means in the loop below: register it, and the wiring step then writes the
     // CI gates and the PR template into it. Said here, because init asks for every repo at once.
-    if (!(await askYesNo(`Connect and wire ${d.name} (${d.rpath}, ${platform}, default branch ${default_branch}) — writes its CI gates + PR template?`, true))) continue;
+    if (!(connects(opts.connect, d.name) ?? await askYesNo(`Connect and wire ${d.name} (${d.rpath}, ${platform}, default branch ${default_branch}) — writes its CI gates + PR template?`, true))) continue;
     const repo = registerRepo(root, registry, { name: d.name, rpath: d.rpath, platform, default_branch, today: opts.today ?? null, pack: !greenfield });
     if (!repo) continue;
     known.add(d.name);
@@ -585,7 +731,22 @@ export async function runSetup(root, opts = {}) {
     else packRepo(root, repo);
     if (mono) { info('monorepo — one repo connected'); break; }
   }
-  if (await askYesNo(`Connect a code repo? ${c.dim(`(${registry.repos.length} already registered)`)}`, registry.repos.length === 0)) {
+  // E159: repos named by flag (`--add-repo`, checked before anything was written), and no question when the
+  // repos were answered by flag (`--connect` or `--add-repo`).
+  for (const r of (opts.addRepo || []).map(parseAddRepo)) {
+    if (known.has(r.name)) { warn(`${r.name} already registered — skipping`); continue; }
+    const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, r.rpath) });
+    const platform = r.platform || detectPlatform(detected.ok ? detected.stdout : '') || 'github';
+    const repo = registerRepo(root, registry, { name: r.name, rpath: r.rpath, platform, default_branch: r.default_branch || 'main', today: opts.today ?? null, pack: !greenfield });
+    if (!repo) continue;
+    known.add(r.name);
+    ok(`registered ${r.name}`);
+    if (greenfield) info(`${r.name}: greenfield — skipped repomix pack (run \`yad repo refresh ${r.name}\` once it has code)`);
+    else packRepo(root, repo);
+    if (mono) { info('monorepo — one repo connected'); break; }
+  }
+  const reposAnswered = has_(opts.connect) || (opts.addRepo || []).length > 0;
+  if (!reposAnswered && await askYesNo(`Connect a code repo? ${c.dim(`(${registry.repos.length} already registered)`)}`, registry.repos.length === 0)) {
     for (;;) {
       const name = await ask('  repo name (blank to finish)', '');
       if (!name) break;
@@ -703,7 +864,7 @@ export async function runSetup(root, opts = {}) {
   for (const repo of registry.repos) {
     const cr = path.join(path.resolve(root, repo.path), '.coderabbit.yaml');
     if (exists(cr)) { info(`${repo.name}: .coderabbit.yaml present`); continue; }
-    if (await askYesNo(`Wire CodeRabbit (advisory) in ${repo.name}?`, false)) {
+    if (connects(opts.coderabbit, repo.name) ?? await askYesNo(`Wire CodeRabbit (advisory) in ${repo.name}?`, false)) {
       fs.writeFileSync(cr, 'reviews:\n  high_level_summary: true\n  poem: false\n');
       ok(`${repo.name}: wrote .coderabbit.yaml`);
     }
@@ -752,12 +913,12 @@ export async function runSetup(root, opts = {}) {
   }
   log('');
   log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));
-  // The --json answer (E1). A --json setup never prompts: every answer comes from a flag, or the run is
-  // refused (YAD-CLI-001) at the first question it would have asked — which can come after an earlier
-  // step has written, so a scripted setup passes every flag (or SDLC_NONINTERACTIVE for the defaults).
+  // The --json answer (E1). A --json setup never prompts: every answer comes from a flag, or the run was
+  // refused (YAD-CLI-001, with `questions`) before anything was written (E159, `assertSetupAnswered`).
   return {
     profile: { solo, team_size, codebase, repo_layout }, ideTargets,
     repos: registry.repos.map((r) => r.name ?? null), next: epicSkill, toolbox,
+    ...(notes.length ? { notes } : {}),
   };
 }
 

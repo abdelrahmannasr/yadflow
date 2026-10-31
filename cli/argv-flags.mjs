@@ -1,5 +1,7 @@
 // The flags `yad` reads a value after (`--dir <path>`), and those it reads a list of (`--approver a --approver b`).
 // Shared by the parser in bin/yad.mjs and the agent guard (cli/agent-guard.mjs), which must read a command line
 // the way yad does: `yad --dir ../product gate approve …` is still `gate approve`. `-m` takes a value too.
-export const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source', '--tz', '--verdict', '--ran-by', '--note', '--uid', '--run', '--via', '--kind', '--confirm']);
-export const LIST_FLAGS = new Set(['--signal', '--approver']);
+export const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source', '--tz', '--verdict', '--ran-by', '--note', '--uid', '--run', '--via', '--kind', '--confirm',
+  // E159: the setup answers an agent passes after asking the person.
+  '--default-branch', '--design', '--design-url', '--testing', '--testing-url', '--learning', '--connect', '--coderabbit']);
+export const LIST_FLAGS = new Set(['--signal', '--approver', '--add-repo']);
