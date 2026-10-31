@@ -41,25 +41,29 @@ const keyText = (s) => {
 };
 
 // The key ids (16 hex) and fingerprints in `gpg --with-colons` output: the key and its subkeys. With
-// `signing`, only a key or subkey that can sign now: not expired, revoked or disabled (field 2: e, r, d, i),
-// with the sign capability (field 12: `s`, lower case: this key's own, not the whole key's), and its secret
-// here (field 15 is `#` for a stub, whose secret is elsewhere). `keys` counts the primary keys (`sec`/`pub`)
-// that are not expired, revoked or disabled; `listed` counts every one.
+// `signing`, only a key or subkey that can sign now: not expired, revoked, disabled or invalid (field 2: e,
+// r, d, i; a disabled key is also `D` in field 12), with the sign capability (field 12: `s`, lower case: this
+// key's own, not the whole key's), and its secret here (field 15 is `#` for a stub, whose secret is
+// elsewhere; a card's serial number when the secret is on a smartcard). `keys` counts the primary keys
+// (`sec`/`pub`) with a part that can sign now; `listed` counts every one; `card` is true when a part that
+// signs is on a smartcard.
 export function gpgIds(colons, { signing = false } = {}) {
   const ids = new Set();
-  let keys = 0;
+  const signers = new Set();
   let listed = 0;
+  let card = false;
   let take = false;
   for (const line of String(colons || '').split('\n')) {
     const f = line.split(':');
     if (['sec', 'ssb', 'pub', 'sub'].includes(f[0])) {
-      const usable = !['e', 'r', 'd', 'i'].includes(f[1]);
-      if (f[0] === 'sec' || f[0] === 'pub') { listed++; if (usable) keys++; }
-      take = !signing || (usable && (f[11] || '').includes('s') && f[14] !== '#');
+      if (f[0] === 'sec' || f[0] === 'pub') listed++;
+      const signs = !['e', 'r', 'd', 'i'].includes(f[1]) && !(f[11] || '').includes('D') && (f[11] || '').includes('s') && f[14] !== '#';
+      if (signs) { signers.add(listed); if (f[14] && f[14] !== '+') card = true; }
+      take = !signing || signs;
       if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) ids.add(f[4].toUpperCase());
     } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) ids.add(f[9].toUpperCase());
   }
-  return Object.assign(ids, { keys, listed });
+  return Object.assign(ids, { keys: signers.size, listed, card });
 }
 // A long key id matches its fingerprint's last 16 digits.
 const sameKey = (a, b) => a === b || (a.length === 40 && a.endsWith(b)) || (b.length === 40 && b.endsWith(a));
@@ -132,11 +136,11 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
     else if (!target) add('key', 'gap', 'no key is named (user.signingkey is not set) and there is no email to find one by', { steps: gpgSteps });
     else {
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
-      const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : new Set();
-      const { keys, listed } = r.ok ? gpgIds(r.stdout) : { keys: 0, listed: 0 };
+      const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, card: false });
+      const { keys, listed, card } = ids;
       if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
-      else if (ids.size) { add('key', 'ok', `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: ids }; }
-      else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, or without the sign capability)`, { steps: gpgSteps });
+      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign from a smartcard, while the card is inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: ids }; }
+      else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine)`, { steps: gpgSteps });
       else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
     }
   }
@@ -232,10 +236,12 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
       else if (!u.body?.login) add('platform-email', 'unknown', `${name} did not say which account this login is, so the no-reply address cannot be matched`);
       else {
         const local = email.slice(0, email.lastIndexOf('@')).toLowerCase();
-        const login = String(u.body?.login || '').toLowerCase();
-        const mine = login && (local === login || local === `${u.body?.id}+${login}`);
-        if (mine) add('platform-email', 'ok', `${forTerminal(email)} is your ${name} no-reply address`);
-        else add('platform-email', 'gap', `${forTerminal(email)} is a ${name} no-reply address, but not this account's (${forTerminal(u.body?.login || '?')})`, { url: `https://${host}/settings/emails`, steps: [`Use your own: git config --global user.email "${u.body?.id ? `${u.body.id}+` : ''}${u.body?.login || '<login>'}@${noreply}"`] });
+        const login = String(u.body.login).toLowerCase();
+        const { id } = u.body;
+        if (local === login || (id != null && local === `${id}+${login}`)) add('platform-email', 'ok', `${forTerminal(email)} is your ${name} no-reply address`);
+        // `<id>+<login>@` with no id in the answer: it may be this account's.
+        else if (id == null && local.endsWith(`+${login}`)) add('platform-email', 'unknown', `${name} did not give this account's id, so ${forTerminal(email)} cannot be matched`);
+        else add('platform-email', 'gap', `${forTerminal(email)} is a ${name} no-reply address, but not this account's (${forTerminal(u.body.login)})`, { url: `https://${host}/settings/emails`, steps: [`Use your own: git config --global user.email "${id != null ? `${id}+` : ''}${u.body.login}@${noreply}"`] });
       }
     } else {
       const res = read(`user/emails?per_page=${PAGE}`);

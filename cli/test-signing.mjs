@@ -267,6 +267,11 @@ test('E160 review 1: a GitHub no-reply address counts only when it is this accou
     assert.match(other.fix.steps[0], /42\+me@users\.noreply\.github\.com/);
     execFileSync('git', ['config', 'user.email', '42+me@users.noreply.github.com'], { cwd: s.dir, env: s.env });
     assert.equal(byId(check(s, { runner: platform({ calls }).runner }))['platform-email'].status, 'ok');
+    // A login but no id: `42+me@` may be this account's (unknown); `me@` still matches.
+    assert.equal(byId(check(s, { runner: platform({ calls: { '^user/ssh_signing_keys': [200, [{ key: PUB }]], '^user$': [200, { login: 'me' }] } }).runner }))['platform-email'].status, 'unknown');
+    execFileSync('git', ['config', 'user.email', 'me@users.noreply.github.com'], { cwd: s.dir, env: s.env });
+    assert.equal(byId(check(s, { runner: platform({ calls: { '^user/ssh_signing_keys': [200, [{ key: PUB }]], '^user$': [200, { login: 'me' }] } }).runner }))['platform-email'].status, 'ok');
+    execFileSync('git', ['config', 'user.email', '42+me@users.noreply.github.com'], { cwd: s.dir, env: s.env });
     // An answer with no login: unknown, never a gap or an ok.
     assert.equal(byId(check(s, { runner: platform({ calls: { '^user/ssh_signing_keys': [200, [{ key: PUB }]], '^user$': [200, {}] } }).runner }))['platform-email'].status, 'unknown');
     // The account could not be read: unknown, never ok.
@@ -298,6 +303,27 @@ test('E160 review 2: only a key that can sign here counts: a certify-only primar
   assert.equal(gpgIds(certifyOnly).keys, 1);
   assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::#:', { signing: true }).size, 0, 'a stub: its secret is not here');
   assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:r:255:22:1111222233334444:1::::::scSC:').keys, 1, 'a revoked key is not one git may pick');
+  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:u:255:22:1111222233334444:1::::::eE:').keys, 1, 'an encrypt-only key is not one git may pick');
+  assert.equal(gpgIds('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSCD:', { signing: true }).size, 0, 'a disabled key (D in field 12)');
+});
+
+test('E160 review 3: an offline primary, a stub or a smartcard through the whole check; a valid key beside a revoked one', () => {
+  const s = setup({ config: { 'commit.gpgsign': 'true', 'user.email': 'me@example.com' }, product: GH });
+  try {
+    const gpg = (out) => (c, a, o = {}) => (c === 'gpg' ? { ok: true, stdout: out } : run(c, a, { ...o, env: s.env }));
+    const key = (out) => byId(check(s, { gitRun: gpg(out), haveTool: tools('gh', 'gpg'), runner: platform().runner })).key;
+    // The usual offline-primary setup: the primary is a stub, the signing subkey is here.
+    const offline = 'sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::#:\nssb:u:255:22:5555666677778888:1::::::s:::+:';
+    assert.equal(gpgIds(offline, { signing: true }).size, 1);
+    assert.equal(key(offline).status, 'ok');
+    const stub = key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::#:');
+    assert.equal(stub.status, 'gap');
+    assert.match(stub.message, /cannot sign now .*not on this machine/);
+    assert.equal(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:\nsec:r:255:22:1111222233334444:1::::::scSC:').status, 'ok', 'a revoked key beside it is not "several keys"');
+    const card = key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:');
+    assert.equal(card.status, 'ok');
+    assert.match(card.message, /smartcard, while the card is inserted/);
+  } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
 
 test('E160 review 1: the older ssh- form, a relative key path, and a key command', () => {
