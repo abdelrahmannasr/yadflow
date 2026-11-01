@@ -86,7 +86,8 @@ It is large, so open it full size.
 
 **You need:**
 
-- Node.js 18 or newer
+- Node.js 22 or newer. Node 18 and 20 still run yadflow 4, with a warning: they are end of life and get
+  no security fixes, so yadflow 5 will need Node 22.
 - git
 - an AI assistant from the list above
 

@@ -736,8 +736,8 @@ with Node and installs the exact npm or pnpm version `packageManager` names.
 
 | Message (after `FAIL [package-manager]: …`) | What to change |
 |---|---|
-| `package.json#packageManager is set but corepack is not on PATH (Node 25+ no longer bundles it) — …` | Set the `YAD_NODE_VERSION` CI variable to a 20, 22 or 24 line, or run `npm install -g corepack` in the job. |
-| `corepack could not activate <spec>. A Corepack older than 0.31 cannot verify packages signed after the 2025 npm registry key rotation — …` | Use a newer Node line (`YAD_NODE_VERSION` 20, 22 or 24) or `npm install -g corepack`. Otherwise check that the version exists and the registry can be reached. |
+| `package.json#packageManager is set but corepack is not on PATH (Node 25+ no longer bundles it) — …` | Set the `YAD_NODE_VERSION` CI variable to a 22 or 24 line, or run `npm install -g corepack` in the job. |
+| `corepack could not activate <spec>. A Corepack older than 0.31 cannot verify packages signed after the 2025 npm registry key rotation — …` | Use a newer Node line (`YAD_NODE_VERSION` 22 or 24) or `npm install -g corepack`. Otherwise check that the version exists and the registry can be reached. |
 | `packageManager "<x>" must name an exact semantic version …` | Use a value like `pnpm@9.15.0`. |
 | `packageManager holds a line break — …` | Remove the line break, so the value is one line like `pnpm@9.15.0`. |
 | `packageManager holds an invisible or control character — …` | Remove it. The value must be plain text like `pnpm@9.15.0`. Such a character is hard to spot in an editor: a tab, the ESC code that starts a terminal colour, a zero-width space, or a mark that flips the direction of the text. Retyping the value by hand removes it. |

@@ -53,7 +53,7 @@ jobs:
     if: github.event.action != 'edited'
     env:
       YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
-      YAD_NODE_VERSION: ${{ vars.YAD_NODE_VERSION || '22' }} # repo variable; a current 20, 22 or 24 line (Node 25+ has no Corepack)
+      YAD_NODE_VERSION: ${{ vars.YAD_NODE_VERSION || '22' }} # repo variable; a current 22 or 24 line (Node 25+ has no Corepack; 18 and 20 are end of life)
       NX_BASE: ${{ github.event.pull_request.base.sha }}
       NX_HEAD: ${{ github.event.pull_request.head.sha }}
       COREPACK_HOME: ${{ github.workspace }}/.corepack-cache # pinned-manager downloads, cached below

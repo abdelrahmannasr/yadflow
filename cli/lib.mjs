@@ -219,6 +219,33 @@ export function copyDir(src, dest) {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(src, dest, { recursive: true });
 }
+// E161 — which Node line this is. Below 18 yadflow does not run (YAD-ENV-003). 18 and 20 are end of life:
+// yadflow 4 still runs on them, with a warning (YAD-ENV-004), and yadflow 5 needs 22. 22 and later are ok.
+export const NODE_FLOOR = 18;
+export const NODE_SUPPORTED = 22;
+export function nodeSupport(version = process.versions.node) {
+  const major = Number(String(version).replace(/^v/, '').split('.')[0]);
+  return !(major >= NODE_FLOOR) ? 'unsupported' : major < NODE_SUPPORTED ? 'end-of-life' : 'ok';
+}
+export const nodeEndOfLife = (version) => `Node ${version} is end of life and gets no security fixes. yadflow 4 still runs on it; yadflow 5 will need Node ${NODE_SUPPORTED} or newer. Upgrade: https://nodejs.org`;
+
+// Copy a folder into another, joining folders and never replacing a file: a file that is already there is
+// an EEXIST error. `fs.cpSync(…, { errorOnExist: true, force: false })` did this up to Node 22; Node 24
+// refuses a folder that exists too, even an empty one, so a move into a folder with the user's own files
+// failed. Links are copied as links.
+export function cpMerge(src, dest) {
+  const st = fs.lstatSync(src);
+  if (st.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const name of fs.readdirSync(src)) cpMerge(path.join(src, name), path.join(dest, name));
+    return;
+  }
+  let there = true;
+  try { fs.lstatSync(dest); } catch { there = false; }
+  if (there) throw Object.assign(new Error(`EEXIST: ${dest} already exists, and a copy never replaces a file`), { code: 'EEXIST' });
+  if (st.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(src), dest);
+  else fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+}
 // Recursive list of file paths relative to `dir`.
 export function listFiles(dir, base = dir) {
   if (!fs.existsSync(dir)) return [];

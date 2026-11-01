@@ -1,7 +1,7 @@
 import { Icon } from '../shared/Icon';
 
 // The `yad` CLI surface (published to npm as `yadflow`). Zero-dependency; run
-// with npx from your Product. Requires Node >= 18.
+// with npx from your Product. Needs Node 22 or newer (18 and 20 still run yadflow 4, with a warning).
 const GROUPS = [
   {
     phase: 'Setup & reconcile',

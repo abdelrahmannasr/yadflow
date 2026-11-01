@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -468,7 +468,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
 // `copy` is a seam for the tests, which need a copy that fails or corrupts on demand.
 // `backup: false` is for the gate bot. In CI the old folder is in git history, a `.yad-orig` copy would be
 // an untracked directory on a throwaway runner, and `yad migrate` is not there to add it to .gitignore.
-export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = fs.cpSync, backup: keepBackup = true } = {}) {
+export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = cpMerge, backup: keepBackup = true } = {}) {
   const from = path.join(root, move.from);
   const to = path.join(root, move.to);
   const backup = path.join(root, move.backup);
@@ -482,9 +482,10 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
   const toExisted = exists(to);
   try {
     const before = artifactHash(from, 'discovery/');
-    if (keepBackup) copy(from, backup, { recursive: true, errorOnExist: true, force: false });
-    fs.mkdirSync(to, { recursive: true });
-    copy(from, to, { recursive: true, errorOnExist: true, force: false });
+    // Folders are joined and a file that is already there is refused (cpMerge: Node 24's cpSync refuses
+    // a folder that exists, even with the user's own files in it).
+    if (keepBackup) copy(from, backup);
+    copy(from, to);
     if (artifactHash(to, 'discovery/') !== before) {
       throw new Error(`the copy in ${move.to}/ does not fingerprint like the original`);
     }
@@ -1010,7 +1011,7 @@ function printNotRenamedHere(root) {
 // which means no backup, no row in the report, and a preview that under-reports what an apply does. It
 // would also be free to overwrite the one file the same run had just declared corrupt or newer than
 // this engine. What shape a file is in is recorded in that file, which is the whole point of rule 1.
-export async function runMigrate(root, { apply = false, json = false, keep = null } = {}, { migrations = MIGRATIONS, copy = fs.cpSync, choose = null } = {}) {
+export async function runMigrate(root, { apply = false, json = false, keep = null } = {}, { migrations = MIGRATIONS, copy = cpMerge, choose = null } = {}) {
   if (keep != null && !KEEP_CHOICES.includes(keep)) {
     throw err('YAD-STATE-008', `--keep takes product or hub, not "${keep}"`, '`--keep product` keeps .sdlc/product.json (and each product-prs.json); `--keep hub` keeps the old names');
   }

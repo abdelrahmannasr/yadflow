@@ -14,7 +14,7 @@ readonly YAD_NPM_SHRINKWRAP="npm-shrinkwrap.json"
 # 20.19 / 22.14 — predates the 2025 npm registry key rotation and rejects anything published since
 # with a raw "Cannot find matching keyid". A declared packageManager without a working Corepack must
 # say so instead of dying with "command not found" or that error in the middle of the job.
-readonly YAD_COREPACK_LINES="set YAD_NODE_VERSION to a current 20, 22 or 24 line, or install a current Corepack first (npm install -g corepack)"
+readonly YAD_COREPACK_LINES="set YAD_NODE_VERSION to a current 22 or 24 line, or install a current Corepack first (npm install -g corepack)"
 yad_require_corepack() {
   if command -v corepack >/dev/null 2>&1; then return 0; fi
   echo "FAIL [package-manager]: package.json#packageManager is set but corepack is not on PATH (Node 25+ no longer bundles it) — $YAD_COREPACK_LINES." >&2

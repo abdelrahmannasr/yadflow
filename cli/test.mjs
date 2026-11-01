@@ -16048,9 +16048,12 @@ test('yad --version prints a prerelease version as-is (what `npm publish` sees o
   }
 });
 
-test('yad still succeeds on a runtime with no global fetch (--no-experimental-fetch)', () => {
+test('yad still succeeds on a runtime with no global fetch (--no-experimental-fetch)', (t) => {
   // The end-to-end proof of the above: the real binary, fetch removed, must exit 0 and still print.
   // Run from a .git-less copy so the dev-checkout guard does not mask the code path.
+  // Node 24 removed the flag (fetch can no longer be turned off); the in-process test above still covers
+  // a missing global there.
+  if (spawnSync(process.execPath, ['--no-experimental-fetch', '-e', '0']).status !== 0) { t.skip('this Node has no --no-experimental-fetch'); return; }
   const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-nofetch-'));
   try {
     for (const d of ['bin', 'cli']) fs.cpSync(path.join(ROOT, d), path.join(pkg, d), { recursive: true });

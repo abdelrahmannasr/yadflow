@@ -16,12 +16,15 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        node-version: [18, 20, 22]
-        # One macOS leg (Node 22) confirms the bash gates + git plumbing behave on the
+        # 24 is the line we build and release on; 22 is the other supported LTS. 18 and 20 are end of life
+        # (no security fixes): they stay as test-only legs, so 4.x keeps proving it still runs there, and
+        # leave in yadflow 5, which needs Node 22 (E161).
+        node-version: [18, 20, 22, 24]
+        # One macOS leg (Node 24) confirms the bash gates + git plumbing behave on the
         # other POSIX target without paying for a full os×node cross-product.
         include:
           - os: macos-latest
-            node-version: 22
+            node-version: 24
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -35,20 +38,20 @@ jobs:
 
       # Bug net, not a style check (no formatter) — runs once on the canonical leg.
       - name: Lint
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 22
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
         run: npm run lint
 
       - name: Test
         run: npm test
 
-      # Threshold flags need Node >= 22.8 — gate on the 22 leg only. Floors, not targets:
+      # Threshold flags need Node >= 22.8 — gate on the 24 leg only. Floors, not targets:
       # raise them as coverage grows, never lower them to make a change pass.
       - name: Coverage gate (lines >= 70%, branches >= 70%)
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 22
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
         run: npm run coverage
 
       - name: Pack smoke (tarball contents)
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 22
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
         run: |
           files=$(npm pack --dry-run --json | node -e "const f=JSON.parse(require('fs').readFileSync(0)).flatMap(x=>x.files.map(y=>y.path)); console.log(f.join('\n'))")
           echo "$files"
@@ -69,8 +72,8 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        # 18 is the oldest Node yadflow supports; 22 is current.
-        node-version: [18, 22]
+        # 18 is the oldest Node yadflow 4 still runs on (end of life: test-only); 24 is current.
+        node-version: [18, 24]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -94,10 +97,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
 
       # Packs the real tarball, installs it into a throwaway prefix, and drives the installed
       # binary through setup -> check -> gate open/sync -> commit -> check gates (pass + fail).
@@ -112,10 +115,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Use Node.js 20
+      - name: Use Node.js 24
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Build the overview site
         working-directory: docs/sdlc-site
