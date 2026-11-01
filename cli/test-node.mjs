@@ -100,6 +100,17 @@ test('E161: cpMerge joins folders and never replaces a file (Node 24\'s cpSync r
       assert.equal(fs.statSync(path.join(T, 'q/run.sh')).mode & 0o777, 0o755);
       assert.equal(fs.readlinkSync(path.join(T, 'q/link')), 'run.sh', 'a relative link stays relative');
       assert.deepEqual(made.map((p) => path.relative(T, p)).sort(), ['q', 'q/link', 'q/private', 'q/run.sh']);
+      // A read-only folder still takes its files, and is read-only after the copy.
+      fs.mkdirSync(path.join(T, 'ro/locked'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'ro/locked/f.txt'), 'z');
+      fs.chmodSync(path.join(T, 'ro/locked'), 0o555);
+      try {
+        cpMerge(path.join(T, 'ro'), path.join(T, 'rw'));
+        assert.equal(fs.readFileSync(path.join(T, 'rw/locked/f.txt'), 'utf8'), 'z');
+        assert.equal(fs.statSync(path.join(T, 'rw/locked')).mode & 0o777, 0o555);
+      } finally {
+        for (const d of ['ro/locked', 'rw/locked']) if (fs.existsSync(path.join(T, d))) fs.chmodSync(path.join(T, d), 0o755);
+      }
       // A named pipe is refused, never read (copying one would wait forever).
       fs.mkdirSync(path.join(T, 'r'));
       spawnSync('mkfifo', [path.join(T, 'r/pipe')]);
@@ -115,3 +126,4 @@ test('E161: the error catalogue, docs/CLI.md and the docs site list the same YAD
   assert.deepEqual(cli, env);
   assert.deepEqual(site, env);
 });
+

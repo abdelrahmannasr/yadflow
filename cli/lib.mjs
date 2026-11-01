@@ -229,6 +229,18 @@ export function nodeSupport(version = process.versions.node) {
 }
 export const nodeEndOfLife = (version) => `Node ${version} is end of life and gets no security fixes. yadflow 4 still runs on it; yadflow 5 will need Node ${NODE_SUPPORTED} or newer. Upgrade: https://nodejs.org`;
 
+// Remove a file or a folder tree, read-only folders too: each folder is opened (its owner may write) first,
+// since a folder whose mode forbids writing keeps its files from `rmSync`. A path that is not there is fine.
+export function rmTree(p) {
+  let st;
+  try { st = fs.lstatSync(p); } catch { return; }
+  if (st.isDirectory()) {
+    try { fs.chmodSync(p, (st.mode & 0o7777) | 0o700); } catch { /* not ours to open: rmSync says why */ }
+    for (const name of fs.readdirSync(p)) rmTree(path.join(p, name));
+  }
+  fs.rmSync(p, { recursive: true, force: true });
+}
+
 // Copy a folder into another, joining folders and never replacing a file: a file that is already there is
 // an EEXIST error. `fs.cpSync(…, { errorOnExist: true, force: false })` did this up to Node 22; Node 24
 // refuses a folder that exists too, even an empty one, so a move into a folder with the user's own files
@@ -241,8 +253,10 @@ export function cpMerge(src, dest, created = null) {
   let there = true;
   try { fs.lstatSync(dest); } catch { there = false; }
   if (st.isDirectory()) {
-    if (!there) { fs.mkdirSync(dest, { mode: st.mode & 0o7777 }); created?.push(dest); }
+    // The source's mode is set after the folder is filled: a read-only folder must still take its files.
+    if (!there) { fs.mkdirSync(dest); created?.push(dest); }
     for (const name of fs.readdirSync(src)) cpMerge(path.join(src, name), path.join(dest, name), created);
+    if (!there) fs.chmodSync(dest, st.mode & 0o7777);
     return;
   }
   if (there) throw Object.assign(new Error(`EEXIST: ${dest} already exists, and a copy never replaces a file`), { code: 'EEXIST' });

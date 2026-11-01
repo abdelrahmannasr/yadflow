@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -500,17 +500,20 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
       writeJSON(file, stamped(obj, version));
     }
   } catch (e) {
+    // rmTree: a folder this copy made may carry a read-only mode copied from the source.
     if (!toExisted) {
-      fs.rmSync(to, { recursive: true, force: true });
+      rmTree(to);
     } else {
       // Only what this copy made: a file that came into foundation/ after the plan is the user's, and stays.
-      for (const p of [...created].reverse()) fs.rmSync(p, { recursive: true, force: true });
+      // Its folders are opened first: a file inside a read-only folder it made goes before that folder does.
+      for (const p of created) { try { if (fs.lstatSync(p).isDirectory()) fs.chmodSync(p, 0o700); } catch { /* gone */ } }
+      for (const p of [...created].reverse()) rmTree(p);
     }
     // Only a backup THIS run made. Without one, the path may still hold an earlier run's copy — the user's.
-    if (keepBackup) fs.rmSync(backup, { recursive: true, force: true });
+    if (keepBackup) rmTree(backup);
     throw new Error(`nothing was moved — ${e.message}`, { cause: e });
   }
-  fs.rmSync(from, { recursive: true, force: true });
+  rmTree(from);
   return productMoveFiles(move);
 }
 
