@@ -1558,12 +1558,14 @@ test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as i
     try {
       const move = planMigration(T).product;
       assert.equal(move.action, 'move', name);
+      fs.writeFileSync(path.join(T, 'foundation/late.md'), '# put here after the plan\n');
       assert.throws(() => applyProductMove(T, move, { copy: make({ n: 0 }) }), /nothing was moved/, name);
       assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), `${name}: the original is whole`);
       assert.equal(fs.existsSync(path.join(T, `${LEGACY}.yad-orig`)), false, `${name}: no stray backup`);
       assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc')), false, `${name}: no stray ledger folder`);
       assert.equal(fs.existsSync(path.join(T, 'foundation/roadmap.md')), false, `${name}: no stray copy`);
       assert.ok(fs.existsSync(path.join(T, 'foundation/notes/keep.md')), `${name}: the user's own file is kept`);
+      assert.ok(fs.existsSync(path.join(T, 'foundation/late.md')), `${name}: a file put there after the plan is kept`);
       assert.equal(planMigration(T).product.action, 'move', `${name}: so a re-run can simply try again`);
     } finally { cleanup(T); }
   }
@@ -1594,11 +1596,19 @@ test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as i
         fs.chmodSync(locked, 0o555);
         const move = planMigration(T).product;
         if (fail) {
-          fs.writeFileSync(path.join(T, 'foundation/roadmap.md'), '# written after the plan\n');
-          assert.throws(() => applyProductMove(T, move), /nothing was moved/);
+          // The copy into foundation/ runs in full (so foundation/locked is made, and read-only), then fails —
+          // whatever order the disk lists the files in.
+          let calls = 0;
+          let seen = false;
+          const copyThenFail = (src, dest, created) => {
+            cpMerge(src, dest, created);
+            if (++calls === 2) { seen = (created || []).some((p) => p.endsWith(`${path.sep}foundation${path.sep}locked`)); throw new Error('EIO'); }
+          };
+          assert.throws(() => applyProductMove(T, move, { copy: copyThenFail }), /nothing was moved/);
+          assert.ok(seen, 'the copy made foundation/locked before it failed');
           assert.equal(fs.existsSync(path.join(T, 'foundation/locked')), false, 'the read-only copy it made is gone');
           assert.equal(fs.existsSync(path.join(T, `${LEGACY}.yad-orig`)), false, 'and so is the backup');
-          assert.equal(fs.readFileSync(path.join(T, 'foundation/roadmap.md'), 'utf8'), '# written after the plan\n');
+          assert.ok(fs.existsSync(path.join(T, 'foundation/notes/keep.md')), 'the user\'s own file is kept');
           assert.ok(fs.existsSync(path.join(locked, 'f.md')), 'the original is whole');
         } else {
           applyProductMove(T, move);
