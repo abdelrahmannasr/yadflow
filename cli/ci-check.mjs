@@ -52,14 +52,45 @@ function githubJobs(root, t) {
   return [...REQUIRED_CHECKS.github.product, ...(verified ? REQUIRED_CHECKS.github.productVerified : [])];
 }
 
-// GitLab runs a fragment only when the project's CI file includes it: the path the project sets
-// (`ci_config_path`), or `.gitlab-ci.yml` at the top of the git repo when that setting is empty. Read as
-// text, as it is on disk here, with comments taken off: an include is a line that is nothing but the
-// fragment's path, as a list item or a `local:` value (`- local: '<path>'`, `local: <path>`, `- '<path>'`,
-// `include: '<path>'`). An include made another way (a nested or remote include, a one-line list) is not
-// seen, and reads as missing — a gap, never a false ok. A CI file kept in another project or at a URL, or a
-// setting that was not read, cannot be followed here: `unreadable`.
-const includeLine = (f) => new RegExp(`^\\s*(?:-\\s*)?(?:include:\\s*)?(?:-\\s*)?(?:local:\\s*)?(['"]?)/?${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1\\s*$`, 'm');
+// GitLab runs a fragment in the merge request pipeline only when the project's CI file includes it: the path
+// the project sets (`ci_config_path`), or `.gitlab-ci.yml` at the top of the git repo when that setting is
+// empty. Read as text, as it is on disk here, with comments taken off, and only its TOP-LEVEL `include:`
+// (a line at column 0): a single value (`include: '<path>'`), or the block under it — each list item that
+// is a local path (`- local: '<path>'`, `- '<path>'`), or a `local:` map. The same path anywhere else (a child
+// pipeline's `trigger: include:`, `rules: changes:`, a script) is not an include, and an item that names
+// another project, a URL, a template or a component is not this repo's fragment: each reads as missing — a
+// gap, never a false ok. An item with its own `rules:` runs only when they match: `gated`, not known. A CI
+// file kept in another project or at a URL, or a setting that was not read, cannot be followed: `unreadable`.
+const bare = (v) => v.trim().replace(/^(['"])(.*)\1$/, '$2').replace(/^\//, '');
+export function topIncludes(text) {
+  const lines = text.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '').replace(/\s+$/, ''));
+  const at = lines.findIndex((l) => /^include:/.test(l));
+  const included = new Set();
+  const gated = new Set();
+  if (at < 0) return { included, gated };
+  const inline = lines[at].slice('include:'.length).trim();
+  // A single value on the key's own line; a one-line list (`[a, b]`) is not read, and reads as missing.
+  if (inline) { if (!inline.startsWith('[') && !inline.startsWith('{')) included.add(bare(inline)); return { included, gated }; }
+  const block = [];
+  // The block: indented lines, or list items at column 0 (YAML allows a list level with its key).
+  for (const l of lines.slice(at + 1)) { if (l && !/^\s/.test(l) && !/^-/.test(l)) break; if (l) block.push(l); }
+  // Split into items: a line starting `-` at the block's own depth begins one; a block with none is one map.
+  const depth = Math.min(...block.map((l) => l.match(/^\s*/)[0].length));
+  const items = [];
+  for (const l of block) {
+    if (l.match(/^\s*/)[0].length === depth && /^\s*-/.test(l)) items.push([l.replace(/^\s*-\s?/, ' '.repeat(depth + 2))]);
+    else if (items.length) items[items.length - 1].push(l);
+    else items.push([l]);
+  }
+  for (const item of items) {
+    const text = item.join('\n');
+    if (/^\s*(project|remote|template|component|file):/m.test(text)) continue;
+    const local = text.match(/^\s*local:\s*(.+)$/m)?.[1] ?? (item.length === 1 && !/:/.test(item[0]) ? item[0] : null);
+    if (!local) continue;
+    (/^\s*rules:/m.test(text) ? gated : included).add(bare(local));
+  }
+  return { included, gated };
+}
 function missingIncludes(dir, fragments, ciPath) {
   // Not read: GitLab may read another file than the one here.
   if (ciPath === undefined) return { unreadable: 'not known (the project\'s settings were not read)', missing: fragments };
@@ -68,9 +99,9 @@ function missingIncludes(dir, fragments, ciPath) {
   const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
   const file = custom || '.gitlab-ci.yml';
   let text;
-  try { text = fs.readFileSync(path.join(top.ok ? top.stdout.trim() : dir, file), 'utf8'); } catch { return { noRoot: true, file, missing: fragments }; }
-  const lines = text.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).join('\n');
-  return { noRoot: false, file, missing: fragments.filter((f) => !includeLine(f).test(lines)) };
+  try { text = fs.readFileSync(path.join(top.ok ? top.stdout.trim() : dir, file), 'utf8'); } catch { return { noRoot: true, file, missing: fragments, gated: [] }; }
+  const { included, gated } = topIncludes(text);
+  return { noRoot: false, file, missing: fragments.filter((f) => !included.has(f) && !gated.has(f)), gated: fragments.filter((f) => !included.has(f) && gated.has(f)) };
 }
 
 // yad's CI files, from the same plan `yad check` makes. Nothing is written. The files are read on disk here:
@@ -86,7 +117,12 @@ function filesRow(add, root, t, s) {
       });
       return;
     }
-    if (!t.wired) { add('files', 'ok', 'the Product keeps its ledger locally, so yad runs no CI on it'); return; }
+    if (!t.wired) {
+      add('files', 'ok', t.wantsVerified
+        ? 'the Product\'s ledger is set to verified, but with no platform set it is kept locally, so yad runs no CI on it'
+        : 'the Product keeps its ledger locally, so yad runs no CI on it');
+      return;
+    }
     actions = productActions(root);
   } else {
     const judged = judgeRepo(root, t.entry);
@@ -135,6 +171,11 @@ function filesRow(add, root, t, s) {
       noInclude = true;
       add('files', 'unknown', `which CI file GitLab reads is ${forTerminal(inc.unreadable)}, so whether it includes yad's jobs is not known here`, {
         actor: 'agent', steps: ['Check that the pipeline of a merge request runs yad\'s jobs (their names start with yad-).'],
+      });
+    } else if (inc.gated.length && !inc.missing.length) {
+      noInclude = true;
+      add('files', 'unknown', `${forTerminal(inc.file)} includes ${few(inc.gated.map(forTerminal))} only under its own \`rules:\`, so whether GitLab runs those jobs depends on a condition yad does not read`, {
+        actor: 'agent', steps: ['Include yad\'s files with no `rules:` of their own, or check that the pipeline of every merge request runs yad\'s jobs.'],
       });
     } else if (inc.missing.length) {
       noInclude = true;
@@ -243,8 +284,10 @@ function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, p
   }
 
   const row = (id, ruleType, classicKey, okText, gapText, unknownText, step) => {
-    const blocked = either(inRules(s, (r) => r?.type === ruleType), inClassic(s, (cl) => (typeof cl[classicKey]?.enabled === 'boolean' ? !cl[classicKey].enabled : null)));
-    if (blocked === true) add(id, 'ok', `${okText} (who is on a ruleset's bypass list is not read${adminsFree ? '; classic protection lets admins bypass it' : ''})`);
+    const byRules = inRules(s, (r) => r?.type === ruleType);
+    const blocked = either(byRules, inClassic(s, (cl) => (typeof cl[classicKey]?.enabled === 'boolean' ? !cl[classicKey].enabled : null)));
+    // Admins pass classic protection's block only when no ruleset blocks it too.
+    if (blocked === true) add(id, 'ok', `${okText} (who is on a ruleset's bypass list is not read${adminsFree && byRules !== true ? '; classic protection lets admins bypass it' : ''})`);
     else if (blocked === false) add(id, 'gap', gapText, settings(rulesPage, [step]));
     else add(id, 'unknown', `${unknownText} (${why})`, settings(rulesPage, [step]));
   };

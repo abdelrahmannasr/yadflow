@@ -478,7 +478,9 @@ test('E160b round 3: an unread CI file setting, a path named outside an include,
     // The project's settings were not read, or the answer left the CI file setting out: not "the default".
     const at = /^projects\/acme%2Fapp$/;
     const noKey = gl('app').map((c) => (c[0].source === at.source ? [c[0], 200, { default_branch: 'main', namespace: { kind: 'user' }, only_allow_merge_if_pipeline_succeeds: true }] : c));
-    assert.equal(byId(check(w, [...gl('p'), ...noKey]).r, 'app').files.status, 'unknown');
+    const unread = byId(check(w, [...gl('p'), ...noKey]).r, 'app').files;
+    assert.equal(unread.status, 'unknown');
+    assert.match(unread.message, /settings were not read/);
     // The path appears in a script line, not in an include: GitLab runs none of those jobs.
     put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  - local: '.gitlab/ci/yad-update-guard.yml'\ncheck:\n  script: cat .gitlab/ci/yad-checks.yml\n");
     const scripted = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
@@ -501,4 +503,24 @@ test('E160b round 3: an unread CI file setting, a path named outside an include,
     const row = byId(check(g, [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: [PR_RULE()], classic: [200, classic] })]).r, 'app');
     for (const id of ['force-push', 'deletion']) assert.match(row[id].message, /admins bypass/, id);
   } finally { done(g); }
+});
+
+test('E160b round 4: only the top-level include counts — not a child pipeline, rules: changes, another project, a text block', () => {
+  const w = workspace({ platform: 'gitlab' });
+  const file = (text) => { put(path.join(w.root, '../app/.gitlab-ci.yml'), text); return byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files; };
+  const guard = "include:\n  - local: '.gitlab/ci/yad-update-guard.yml'\n";
+  try {
+    for (const [why, text] of [
+      ['a child pipeline', `${guard}yad-child:\n  trigger:\n    include:\n      - local: .gitlab/ci/yad-checks.yml\n`],
+      ['rules: changes', `${guard}job:\n  rules:\n    - changes:\n      - .gitlab/ci/yad-checks.yml\n`],
+      ['another project\'s file', `${guard}  - project: other/x\n    file:\n      - .gitlab/ci/yad-checks.yml\n`],
+      ['a text block', `${guard}job:\n  script:\n    - |\n      .gitlab/ci/yad-checks.yml\n`],
+    ]) assert.equal(file(text).status, 'gap', why);
+    // Included only under its own rules: whether it runs is not known.
+    const gated = file(`${guard}  - local: .gitlab/ci/yad-checks.yml\n    rules:\n      - if: $CI_PIPELINE_SOURCE == "push"\n`);
+    assert.equal(gated.status, 'unknown');
+    assert.match(gated.message, /only under its own `rules:`/);
+    // A list at the key's own column, and a map form.
+    assert.equal(file("include:\n- local: .gitlab/ci/yad-update-guard.yml\n- .gitlab/ci/yad-checks.yml\nstages: [test]\n").status, 'ok');
+  } finally { done(w); }
 });
