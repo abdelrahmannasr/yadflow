@@ -57,8 +57,8 @@ function githubJobs(root, t) {
 // empty. Read as text, as it is on disk here, with comments taken off, and only its TOP-LEVEL `include:`
 // (a line at column 0): a single value (`include: '<path>'`), or the block under it — each list item that
 // is a local path (`- local: '<path>'`, `- '<path>'`), or a `local:` map. The same path anywhere else (a child
-// pipeline's `trigger: include:`, `rules: changes:`, a script) is not an include; an `include:` written on one
-// line in [ ] or { } is not read (unknown), and an item that names
+// pipeline's `trigger: include:`, `rules: changes:`, a script) is not an include; an `include:` (or an item of
+// it) written in [ ] or { } — YAML's flow style — is not read (unknown), and an item that names
 // another project, a URL, a template or a component is not this repo's fragment: each reads as missing — a
 // gap, never a false ok. An item with its own `rules:` runs only when they match: `gated`, not known. A CI
 // file kept in another project or at a URL, or a setting that was not read, cannot be followed: `unreadable`.
@@ -73,8 +73,8 @@ export function topIncludes(text) {
   // untangle — not known.
   if (lines.filter((l) => /^include:/.test(l)).length > 1) return { included, gated, twice: true };
   const inline = lines[at].slice('include:'.length).trim();
-  // A single value on the key's own line. A one-line list or map (`[a, b]`, `{local: a}`) is not read: not
-  // known, with no rewrite to get wrong.
+  // A single value on the key's own line. A list or map in flow style (`[a, b]`, `{local: a}`) is not read:
+  // not known, with no rewrite to get wrong.
   if (inline) {
     if (inline.startsWith('[') || inline.startsWith('{')) return { included, gated, flow: true };
     included.add(bare(inline));
@@ -91,6 +91,8 @@ export function topIncludes(text) {
     else if (items.length) items[items.length - 1].push(l);
     else items.push([l]);
   }
+  // Flow style anywhere in the block (`[a, b]` or `{local: a}` on the next line, or as a list item): not read.
+  if (items.some((item) => /^[[{]/.test(item[0].trim()))) return { included, gated, flow: true };
   for (const item of items) {
     const text = item.join('\n');
     if (/^\s*(project|remote|template|component|file):/m.test(text)) continue;
@@ -102,16 +104,16 @@ export function topIncludes(text) {
 }
 function missingIncludes(dir, fragments, ciPath) {
   // Not read: GitLab may read another file than the one here.
-  if (ciPath === undefined) return { unreadable: 'not known (the project\'s settings were not read)', missing: fragments };
+  if (ciPath === undefined) return { unreadable: 'which CI file GitLab reads is not known (the project\'s settings were not read)', missing: fragments };
   const custom = typeof ciPath === 'string' && ciPath.trim() && ciPath.trim() !== '.gitlab-ci.yml' ? ciPath.trim() : null;
-  if (custom && (/@|:\/\//.test(custom) || path.isAbsolute(custom) || custom.split(/[\\/]/).includes('..'))) return { unreadable: custom, missing: fragments };
+  if (custom && (/@|:\/\//.test(custom) || path.isAbsolute(custom) || custom.split(/[\\/]/).includes('..'))) return { unreadable: `GitLab reads the CI file ${custom}, which yad cannot read here`, missing: fragments };
   const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
   const file = custom || '.gitlab-ci.yml';
   let text;
   try { text = fs.readFileSync(path.join(top.ok ? top.stdout.trim() : dir, file), 'utf8'); } catch { return { noRoot: true, file, missing: fragments, gated: [] }; }
   const { included, gated, twice, flow } = topIncludes(text);
-  if (twice) return { unreadable: `${file}, which has two top-level \`include:\` keys (GitLab reads only the last)`, missing: fragments };
-  if (flow) return { unreadable: `${file}, whose top-level \`include:\` is written on one line in [ ] or { }, which yad does not read`, missing: fragments };
+  if (twice) return { unreadable: `${file} has two top-level \`include:\` keys (GitLab reads only the last), which yad does not untangle`, missing: fragments };
+  if (flow) return { unreadable: `${file} writes its top-level \`include:\` (or an item of it) in [ ] or { } — YAML's flow style, which yad does not read`, missing: fragments };
   return { noRoot: false, file, missing: fragments.filter((f) => !included.has(f) && !gated.has(f)), gated: fragments.filter((f) => !included.has(f) && gated.has(f)) };
 }
 
@@ -185,7 +187,7 @@ function filesRow(add, root, t, s) {
     const inc = fragments.length ? missingIncludes(dir, fragments, ciPath) : { missing: [] };
     if (inc.unreadable) {
       noInclude = true;
-      add('files', 'unknown', `which CI file GitLab reads is ${forTerminal(inc.unreadable)}, so whether it includes yad's jobs is not known here`, {
+      add('files', 'unknown', `${forTerminal(inc.unreadable)}, so whether it includes yad's jobs is not known here`, {
         actor: 'agent', steps: ['Check that the pipeline of a merge request runs yad\'s jobs (their names start with yad-).'],
       });
     } else if (inc.gated.length && !inc.missing.length) {
