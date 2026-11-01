@@ -119,7 +119,7 @@ retries every 15 minutes and fails the same way until the token is there.
 |---|---|---|
 | Protected branch (Settings → Repository → Protected branches) | protect the default branch | Without it a direct push skips the merge request |
 | Allowed to merge | Developers + Maintainers (or Maintainers) | Who may press merge |
-| Allowed to push and merge | No one — or, in verified mode, the role the gate token has (see below) | A change arrives through a merge request. Everyone with the role you pick here can also push directly, so pick the narrowest one the token can have |
+| Allowed to push and merge | No one — or, in verified mode, the role the gate token has (see below) | A change arrives through a merge request. Everyone with the role you pick here can also push directly, so pick the narrowest one the token can have. With No one, `yad update --push` cannot push to a code repo: use `yad update --open-pr` |
 | Allowed to force push | off | |
 | Pipelines must succeed (Settings → Merge requests) | on | Makes yad's checks block a merge — only the jobs the root `.gitlab-ci.yml` includes run |
 | Skipped pipelines are considered successful (Settings → Merge requests) | off | When on, a skipped pipeline lets a merge through without yad's checks |

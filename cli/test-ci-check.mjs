@@ -237,13 +237,13 @@ test('E160b case 6: no login, no CLI, reads off, or no platform — the platform
     // Read nothing: every row the repo would have is unknown, the suggestions too.
     const off = byId(check(w, allSet(), { env: { ...ON, YAD_PLATFORM_READ: '0' } }).r, 'Product');
     for (const id of ['protected', 'required-checks', 'force-push', 'deletion', 'stale-approvals', 'signed-commits']) assert.equal(off[id].status, 'unknown', id);
-    // No platform at all: nothing to protect, so no platform rows — a note says why.
+    // No platform at all: nothing holds a merge there — one `platform` row, unknown, never a quiet ok.
     const none = workspace({ product: { platform: null, git_url: null }, repos: [] });
     try {
       const { r } = check(none, []);
-      assert.deepEqual(Object.keys(byId(r, 'Product')), ['files']);
-      assert.match(r.repos[0].notes[0], /no platform/);
-      assert.equal(r.summary.complete, true);
+      assert.deepEqual(Object.keys(byId(r, 'Product')), ['files', 'platform']);
+      assert.equal(byId(r, 'Product').platform.status, 'unknown');
+      assert.equal(r.summary.complete, false);
     } finally { done(none); }
   } finally { done(w); }
 });
@@ -395,12 +395,13 @@ test('E160b round 1: GitLab — yad\'s jobs must be in the root pipeline; direct
     const calls = [...gl('p'), ...gl('app')];
     const files = byId(check(w, calls).r, 'app').files;
     assert.equal(files.status, 'gap', 'no root .gitlab-ci.yml: no yad job runs');
-    assert.match(files.message, /no root \.gitlab-ci\.yml/);
+    assert.match(files.message, /there is no \.gitlab-ci\.yml/);
     put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  # - local: '.gitlab/ci/yad-checks.yml'\n  - local: '.gitlab/ci/yad-update-guard.yml'\n");
     const partial = byId(check(w, calls).r, 'app').files;
     assert.equal(partial.status, 'gap', 'a commented-out include does not count');
     assert.match(partial.message, /does not include \.gitlab\/ci\/yad-checks\.yml/);
-    assert.match(partial.fix.steps[0], /- local: '\.gitlab\/ci\/yad-checks\.yml'/);
+    assert.match(partial.fix.steps[0], /under its top-level `include:` list/);
+    assert.ok(partial.fix.steps.includes("  - local: '.gitlab/ci/yad-checks.yml'"));
     // Maintainers may push straight to main: a gap on a code repo (a suggestion in solo mode).
     const push = byId(check(w, [...gl('p'), ...gl('app', { protectedBranches: [{ ...NO_ONE, push_access_levels: [{ access_level: 40 }] }] })]).r, 'app')['direct-push'];
     assert.equal(push.status, 'gap');
@@ -425,5 +426,48 @@ test('E160b round 1: a refused registry entry says why; a gap exits 1 under --js
     assert.equal(r.status, 0, 'unknown rows alone do not fail the run');
     assert.equal(gap.status, 1, 'a missing file is a gap');
     assert.equal(JSON.parse(gap.stdout).ok, false);
+  } finally { done(w); }
+});
+
+test('E160b round 2: GitLab — an entry with no platform, a custom CI file, a full page of rules, rules that disagree', () => {
+  const w = workspace({ platform: 'gitlab' });
+  try {
+    // The entry names no platform; GitLab is told from the URL. yad wired no GitLab files: a gap, never ok.
+    const reg = path.join(w.root, '.sdlc/repos.json');
+    const entry = JSON.parse(fs.readFileSync(reg, 'utf8')).repos[0];
+    put(reg, { repos: [{ ...entry, platform: null }] });
+    const unnamed = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
+    assert.equal(unnamed.status, 'gap');
+    assert.match(unnamed.fix.steps[0], /"platform": "gitlab"/);
+    put(reg, { repos: [entry] });
+    // The project runs another CI file: the root one is not what GitLab reads.
+    const custom = byId(check(w, [...gl('p'), ...gl('app', { project: { ci_config_path: 'ci/main.yml' } })]).r, 'app').files;
+    assert.equal(custom.status, 'gap');
+    assert.match(custom.message, /no ci\/main\.yml/);
+    put(path.join(w.root, '../app/ci/main.yml'), fs.readFileSync(path.join(w.root, '../app/.gitlab-ci.yml'), 'utf8'));
+    assert.equal(byId(check(w, [...gl('p'), ...gl('app', { project: { ci_config_path: 'ci/main.yml' } })]).r, 'app').files.status, 'ok');
+    assert.equal(byId(check(w, [...gl('p'), ...gl('app', { project: { ci_config_path: 'ci.yml@acme/shared' } })]).r, 'app').files.status, 'unknown', 'a CI file in another project');
+    // A fragment named only in a trailing comment does not count; the steps give one YAML line per file.
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  - local: '.gitlab/ci/yad-update-guard.yml'\nstages: [test] # .gitlab/ci/yad-checks.yml\n");
+    const trailing = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
+    assert.equal(trailing.status, 'gap');
+    assert.ok(trailing.fix.steps.includes("  - local: '.gitlab/ci/yad-checks.yml'"));
+    // 100 protected branches: page one says "No one" and no force push, but page two could say otherwise.
+    const many = [NO_ONE, ...Array.from({ length: 99 }, (_, i) => ({ name: `rel-${i}`, allow_force_push: false, push_access_levels: [{ access_level: 0 }] }))];
+    const full = byId(check(w, [...gl('p'), ...gl('app', { protectedBranches: many })]).r, 'app');
+    assert.equal(full['force-push'].status, 'unknown');
+    assert.equal(full['direct-push'].status, 'unknown');
+    // Two rules match main and disagree about force push: which one applies is not read.
+    const mixed = byId(check(w, [...gl('p'), ...gl('app', { protectedBranches: [NO_ONE, { ...NO_ONE, name: 'ma*', allow_force_push: true }] })]).r, 'app');
+    assert.equal(mixed['force-push'].status, 'unknown');
+  } finally { done(w); }
+});
+
+test('E160b round 2: each platform path is asked once per repo', () => {
+  const w = workspace();
+  try {
+    const { asked } = check(w, allSet());
+    const api = asked.filter((x) => x.startsWith('gh api'));
+    assert.equal(new Set(api).size, api.length, api.join('\n'));
   } finally { done(w); }
 });
