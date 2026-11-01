@@ -14,6 +14,12 @@ one per connected code repo. See [the `protection` section in CLI.md](CLI.md#the
 for what each line means. A line that says **not known** is not "fine" and not "unprotected": yad could
 not read the answer, and the line says why.
 
+`yad ci check` reads the settings on this page, for the Product and each code repo: protection and the
+approvals, the checks required before a merge, force pushes, deletion, signed commits, and on GitLab
+"Pipelines must succeed", skipped pipelines and who may push directly. It suggests the optional ones
+(stale approvals, resolved threads). For each gap it names the settings page and the clicks, or the yad
+command when the gap is in yad's own files. It only reads (E160).
+
 ## Where yad's safety comes from
 
 | Layer | What it does | How strong |
@@ -51,6 +57,7 @@ to many repos from an organization. Set these on the default branch:
 | Require status checks to pass | on, with the checks listed below | Makes yad's checks block a merge instead of only reporting |
 | Block force pushes | on | A force-push can rewrite the ledger's history |
 | Restrict deletions | on | |
+| Require signed commits | **off** on the Product; your choice on a code repo | On the Product, yad's CI writes the ledger in unsigned commits, so this rule would refuse them (#432) |
 | Require review from Code Owners | your choice | yad treats CODEOWNERS as a hint, never as the rule ([E69](roadmap-idea-1.md)) |
 
 ### The status checks to require
@@ -112,9 +119,12 @@ retries every 15 minutes and fails the same way until the token is there.
 |---|---|---|
 | Protected branch (Settings → Repository → Protected branches) | protect the default branch | Without it a direct push skips the merge request |
 | Allowed to merge | Developers + Maintainers (or Maintainers) | Who may press merge |
-| Allowed to push and merge | No one — or, in verified mode, the role the gate token has (see below) | A change arrives through a merge request. Everyone with the role you pick here can also push directly, so pick the narrowest one the token can have |
+| Allowed to push and merge | No one — or, in verified mode, the role the gate token has (see below) | A change arrives through a merge request. Everyone with the role you pick here can also push directly, so pick the narrowest one the token can have. With No one, `yad update --push` cannot push to a code repo: use `yad update --open-pr` |
 | Allowed to force push | off | |
-| Pipelines must succeed (Settings → Merge requests) | on | Makes yad's checks block a merge |
+| Pipelines must succeed (Settings → Merge requests) | on | Makes yad's checks block a merge — only the jobs the root `.gitlab-ci.yml` includes run |
+| Skipped pipelines are considered successful (Settings → Merge requests) | off | When on, a skipped pipeline lets a merge through without yad's checks |
+| All threads must be resolved (Settings → Merge requests) | your choice | Suggested: a reviewer's open question is not merged past |
+| Reject unsigned commits (Settings → Repository → Push rules) | **off** on the Product; your choice on a code repo | As on GitHub (#432). Push rules are GitLab Premium |
 | Merge request approval rules (Settings → Merge requests) | 1 or more approvals for a team, 0 in solo mode | **Premium and Ultimate only.** On GitLab Free an approval never blocks a merge |
 | Remove all approvals when commits are added to the source branch | on | Safe with yad, for the same reason as on GitHub |
 

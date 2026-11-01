@@ -269,7 +269,8 @@ The record is worth trusting because people approve what goes into it.
 - **Checks on every change.** Each change must name its task (spec-link). A contract change must be
   declared and locked again (contract-check). Commits must carry a signature that GitHub or GitLab
   marks as verified (verified-commits; it is skipped, with a warning, when there is no platform).
-  To make these checks block a merge, see [branch protection](docs/branch-protection.md). Every
+  To make these checks block a merge, see [branch protection](docs/branch-protection.md); `yad ci check`
+  reads whether they do. Every
   check's rules, exemptions and failure messages are listed in [CI gates](docs/GATES.md).
 - **Pair review.** The `yad-pair-review` skill walks you through a change one risky part at a time.
   It asks you questions and keeps a private log of how your reviewing improves. It never blocks a

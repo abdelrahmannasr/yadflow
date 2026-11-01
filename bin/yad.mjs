@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
-import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, ENVELOPE_KEYS } from '../cli/lib.mjs';
+import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, forTerminal, ENVELOPE_KEYS } from '../cli/lib.mjs';
 import { runLedgerGuardHook, runStagedLedgerGuard, runAgentGuardHook } from '../cli/hook.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from '../cli/argv-flags.mjs';
 
@@ -64,6 +64,12 @@ ${c.bold('Setup & maintenance')}
                        Will your commits be signed and marked Verified? Reads this folder's git
                        config, the key it names, and your account on the Product's platform (the
                        key listed for signing, a verified email). Read-only; exit 1 on a gap (E160)
+  yad ci check [--repo <name> | --all] [--json] [--dir <Product>]
+                       Will yad's checks hold a merge? For the Product and each registered repo
+                       (from inside one repo: that repo; --repo picks one code repo, --all every
+                       one — not both): yad's CI files, the default branch's protection, the
+                       checks required before a merge, force pushes, deletion. Read-only; each
+                       gap names the settings page or the yad command; exit 1 on a gap (E160)
   yad migrate [--apply] [--keep product|hub] [--json]   Move this project's state files onto the shape
                        this yadflow expects. Prints what WOULD change and writes
                        nothing until --apply, which copies each file it rewrites to
@@ -611,6 +617,7 @@ const ACTIONS = {
   hook: { known: ['ledger-guard', 'agent-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove'], default: 'list' },
   signing: { known: ['check'], default: 'check' },
+  ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
@@ -623,7 +630,7 @@ const PRODUCT_CMDS = new Set([
   'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
-  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build', 'worktree',
+  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build', 'worktree', 'ci',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
@@ -749,6 +756,11 @@ async function main() {
         const hit = commands.registryEntryFor(found.root, dirGiven ? o.dir : shellCwd());
         if (typeof hit?.meta?.name === 'string') o._[2] = hit.meta.name;
       }
+      // `yad ci check` the same way: that repo, unless --repo or --all says otherwise.
+      if (cmd === 'ci' && o.repo === undefined && !o.all) {
+        const hit = commands.registryEntryFor(found.root, dirGiven ? o.dir : shellCwd());
+        if (typeof hit?.meta?.name === 'string') o.repo = hit.meta.name;
+      }
     }
   }
   // A command that WRITES the Product never writes into a folder that is not one (a code repo, say).
@@ -844,6 +856,21 @@ async function main() {
       if (found?.problem) warn(`${found.problem} — your account is not checked`);
       else if (found?.elsewhere) warn(`this folder is not in a repo the Product registers (the Product is ${path.relative(process.cwd(), found.elsewhere) || '.'}) — your account is not checked; run it from there, or pass --dir`);
       result = commands.runSigningCheck(dirGiven ? o.dir : shellCwd(), { root: found?.problem || found?.elsewhere ? null : found?.root ?? null, json: o.json });
+      break;
+    }
+    case 'ci': {
+      // E160b. Read-only: yad's CI files on disk, and the platform's rules on each default branch.
+      const [, action = 'check', extra] = o._;
+      const usage = 'usage: yad ci check [--repo <name> | --all] [--json] [--dir <folder>]';
+      if (action !== 'check' || extra) { refuse(`unknown ci action: ${[action, extra].filter(Boolean).join(' ')}`, usage); break; }
+      if (o.repo !== undefined && o.all) { refuse('--repo and --all name different repos: pass one of them', usage); break; }
+      if (!commands.hasProduct(o.dir)) { refuse(`no Product here (${o.dir}) — yad ci check reads the repos a Product registers`, 'run it from the Product, from inside a repo it registers, or pass --dir <the Product> (with --repo <name> for one repo)'); break; }
+      result = commands.runCiCheck(o.dir, { repo: o.all ? null : o.repo ?? null, json: o.json });
+      if (result?.unknownRepo !== undefined) {
+        const names = result.names.map(forTerminal);
+        refuse(`no repo named ${forTerminal(result.unknownRepo)} is registered`, names.length ? `the registered repos: ${names.join(', ')} (or --all)` : 'this Product registers no code repos');
+        result = undefined;
+      }
       break;
     }
     case 'toolbox': {

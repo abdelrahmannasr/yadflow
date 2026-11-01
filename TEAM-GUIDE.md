@@ -703,7 +703,7 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   parses and points at real repos, and that every epic ledger loads. It also asks GitHub or GitLab, with
   your own login, whether each repo's branch requires an approval before a merge — and says **not known**,
   with the reason, when it cannot read that (for example, only a repo admin can read GitHub's classic
-  branch protection). yad never holds a merge itself; the platform does. It prints a fix-it hint for each
+  branch protection; `yad ci check` reads the rest of the merge rules). yad never holds a merge itself; the platform does. It prints a fix-it hint for each
   problem, and exits with an error if any check fails. Add `--json` when you file a bug. Environment and
   state-file failures carry a stable code (such as `YAD-STATE-001`), listed in [docs/CLI.md](docs/CLI.md).
 - **Keep the install in sync with the CLI** (run from the Product):
@@ -758,7 +758,9 @@ ledger (see the table in section 3, step d2):
 <type> -m "<subject>"` commits past the local hook and records your reason in the commit as a
 `Ledger-Override: <why>` line. The CI check still fails that commit, and shows your reason, so someone
 allowed to bypass the rules must merge it. What to switch on in GitHub or GitLab so the checks really
-hold a merge: [`docs/branch-protection.md`](docs/branch-protection.md).
+hold a merge: [`docs/branch-protection.md`](docs/branch-protection.md). `yad ci check` reads whether those
+settings are on, for the Product and each code repo. For each gap it names the settings page, or the yad
+command when the gap is in yad's own files (E160). It only reads.
 
 **Reading the record** (writes nothing to your work):
 
