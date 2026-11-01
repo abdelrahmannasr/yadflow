@@ -576,7 +576,9 @@ test('E160b round 6: the fix lines are pure YAML; the map form is named; a repo 
   try {
     put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  local: .gitlab/ci/yad-checks.yml\n");
     const map = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
-    assert.match(map.fix.steps[0], /a `local:` map with no dash, first turn it into one list item/);
+    assert.match(map.fix.steps[0], /one list item of the same kind/);
+    assert.match(map.fix.steps[0], /`remote:`, `template:`, `project:`/);
+    assert.doesNotMatch(map.fix.steps[0], /- local: '<its path>'/, 'a URL or a template must keep its own kind');
     for (const line of map.fix.steps.filter((x) => x.startsWith('- local:'))) assert.match(line, /^- local: '[^']+'$/, line);
     fs.rmSync(path.join(w.root, '../app/.gitlab-ci.yml'));
     const none = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;

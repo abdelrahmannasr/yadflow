@@ -141,7 +141,7 @@ function filesRow(add, root, t, s) {
     const seen = s.protection.platform;
     // No platform named and none in the URL: yad wired only the gate scripts, with no workflow to run them.
     if (!t.target.platform && !seen) {
-      add('files', 'unknown', 'no platform is set for this repo, so yad wired only its gate scripts and no workflow runs them (the platform row says more)');
+      add('files', 'unknown', 'no platform is set for this repo, so yad wires only gate scripts here and no workflow runs them (the platform row says more)');
       return;
     }
     if (!t.target.platform && seen) {
@@ -195,7 +195,7 @@ function filesRow(add, root, t, s) {
         actor: 'agent',
         steps: [inc.noRoot
           ? `Create ${file}, through a pull request, with a top-level \`include:\` key and these lines under it, each indented two spaces:`
-          : `In ${file}, through a pull request: under its top-level \`include:\` (add the key if there is none), add these lines as list items, at the same indent as any items already there. If \`include:\` holds a single value on its own line, or a \`local:\` map with no dash, first turn it into one list item (\`- local: '<its path>'\`).`,
+          : `In ${file}, through a pull request: under its top-level \`include:\` (add the key if there is none), add these lines as list items, at the same indent as any items already there. If \`include:\` holds one include that is not a list yet, first turn it into one list item of the same kind: a single value on the key's line becomes \`- '<that value>'\` on its own line; a map with no dash (\`local:\`, \`remote:\`, \`template:\`, \`project:\`…) gets \`- \` before its first key, with its other keys indented to match.`,
           ...inc.missing.map((f) => `- local: '${forTerminal(f)}'`),
           'If it is included another way (a nested or remote include), yad cannot see it: check the pipeline of a merge request runs yad\'s jobs.'],
       });
