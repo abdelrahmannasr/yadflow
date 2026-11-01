@@ -51,7 +51,7 @@ Go through this list first. Each item avoids a known problem.
 
 - [ ] **Upgrade the whole team at the same time.** A 3.x `yad` cannot read a 4.x project correctly. It
       reads some values wrongly, and it sees new approvals as out of date.
-- [ ] **Check your Node version.** Run `node --version`. yadflow 4.x needs Node 18 or newer.
+- [ ] **Check your Node version.** Run `node --version`. yadflow 4.x needs Node 18 or newer, and Node 22 or newer is the one to use: 18 and 20 are end of life (no security fixes), yadflow warns on them, and yadflow 5 will need 22.
 - [ ] **Start from a clean working tree** in the Product and in every code repo. (The working tree is
       the set of files you have checked out.) Commit or stash any open changes. This makes the
       upgrade's changes easy to review.

@@ -775,8 +775,8 @@ async function main() {
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
   if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'detect', 'toolbox', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
-  // E161: an end-of-life Node, once per run, on stderr (so --json stays clean). Not under `hook`, whose
-  // stderr is the channel a block reason reaches a model on; `doctor` says it in its own node row.
+  // E161: an end-of-life Node, once per run, on stderr (so --json stays clean). `hook` has returned above
+  // (its stderr is the channel a block reason reaches a model on); `doctor` says it in its own node row.
   // YAD_TEST_NODE_VERSION stands in for the running version in tests only.
   const nodeNow = process.env.YAD_TEST_NODE_VERSION || process.versions.node;
   if (!['hook', 'doctor'].includes(cmd) && nodeSupport(nodeNow) === 'end-of-life') process.stderr.write(`${c.yellow(`! ${nodeEndOfLife(nodeNow)}`)}\n`);

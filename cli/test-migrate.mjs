@@ -1521,7 +1521,7 @@ test('migrate 7 -> 8: on a verified ledger only the gate bot may move it, and it
     const move = planProductMove(U, { verified: true, ci: true });
     fs.mkdirSync(path.join(U, `${LEGACY}.yad-orig`), { recursive: true });
     fs.writeFileSync(path.join(U, `${LEGACY}.yad-orig/keep.md`), '# an earlier run\'s copy\n');
-    const failing = (src, dest) => { if (dest.endsWith('foundation')) throw new Error('EACCES'); cpMerge(src, dest); };
+    const failing = (src, dest, created) => { if (dest.endsWith('foundation')) throw new Error('EACCES'); cpMerge(src, dest, created); };
     assert.throws(() => applyProductMove(U, move, { backup: false, copy: failing }), /nothing was moved/);
     assert.ok(fs.existsSync(path.join(U, `${LEGACY}.yad-orig/keep.md`)), 'the existing backup is untouched');
     assert.ok(fs.existsSync(path.join(U, LEGACY, '.sdlc/state.json')), 'and the original is whole');
@@ -1546,10 +1546,10 @@ test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as i
   const { applyProductMove } = await import('./migrate.mjs');
   const failures = {
     // The copy into foundation/ fails (a read-only folder, a full disk).
-    'a copy that fails': (calls) => (src, dest) => { if (++calls.n === 2) throw new Error('EACCES'); cpMerge(src, dest); },
+    'a copy that fails': (calls) => (src, dest, created) => { if (++calls.n === 2) throw new Error('EACCES'); cpMerge(src, dest, created); },
     // The copy completes but a file comes out different.
-    'a copy that corrupts': (calls) => (src, dest) => {
-      cpMerge(src, dest);
+    'a copy that corrupts': (calls) => (src, dest, created) => {
+      cpMerge(src, dest, created);
       if (++calls.n === 2) fs.appendFileSync(path.join(dest, 'roadmap.md'), 'x');
     },
   };
@@ -1558,13 +1558,29 @@ test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as i
     try {
       const move = planMigration(T).product;
       assert.equal(move.action, 'move', name);
+      fs.writeFileSync(path.join(T, 'foundation/late.md'), '# put here after the plan\n');
       assert.throws(() => applyProductMove(T, move, { copy: make({ n: 0 }) }), /nothing was moved/, name);
       assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), `${name}: the original is whole`);
       assert.equal(fs.existsSync(path.join(T, `${LEGACY}.yad-orig`)), false, `${name}: no stray backup`);
       assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc')), false, `${name}: no stray ledger folder`);
       assert.equal(fs.existsSync(path.join(T, 'foundation/roadmap.md')), false, `${name}: no stray copy`);
       assert.ok(fs.existsSync(path.join(T, 'foundation/notes/keep.md')), `${name}: the user's own file is kept`);
+      assert.ok(fs.existsSync(path.join(T, 'foundation/late.md')), `${name}: a file that came after the plan is kept`);
       assert.equal(planMigration(T).product.action, 'move', `${name}: so a re-run can simply try again`);
+    } finally { cleanup(T); }
+  }
+
+  // A file put at a path the move writes, after the plan: the copy refuses it (EEXIST), and the failed move
+  // removes only what it made — the user's file stays, word for word.
+  {
+    const { T } = await legacyProductLevel({ extra: { 'foundation/notes/keep.md': '# the user\'s own\n' } });
+    try {
+      const move = planMigration(T).product;
+      fs.writeFileSync(path.join(T, 'foundation/roadmap.md'), '# written after the plan\n');
+      assert.throws(() => applyProductMove(T, move), /nothing was moved/);
+      assert.equal(fs.readFileSync(path.join(T, 'foundation/roadmap.md'), 'utf8'), '# written after the plan\n');
+      assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the original is whole');
+      assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc')), false, 'no stray ledger folder');
     } finally { cleanup(T); }
   }
 
@@ -1573,7 +1589,7 @@ test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as i
   const { T } = await legacyProductLevel();
   try {
     const code = process.exitCode;
-    const out = await grabOut(() => runMigrate(T, { apply: true }, { copy: (src, dest) => { if (dest.endsWith('foundation')) throw new Error('EACCES'); cpMerge(src, dest); } }));
+    const out = await grabOut(() => runMigrate(T, { apply: true }, { copy: (src, dest, created) => { if (dest.endsWith('foundation')) throw new Error('EACCES'); cpMerge(src, dest, created); } }));
     assert.equal(process.exitCode, 1);
     process.exitCode = code;
     assert.match(out, /the product level was not moved: nothing was moved — EACCES/);

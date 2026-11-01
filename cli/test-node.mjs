@@ -54,7 +54,10 @@ test('E161: the CLI warns once on an end-of-life Node, on stderr only, and never
     assert.doesNotMatch(old.stdout, /end of life/, 'stdout stays clean JSON');
     JSON.parse(old.stdout);
     assert.doesNotMatch(yad(['detect', '--json'], '24.22.1').stderr, /end of life/);
-    assert.doesNotMatch(yad(['detect', '--json']).stderr, /end of life/, 'this Node (22 or later) gets no warning');
+    // The running Node, with no stand-in: on the CI legs for 18 and 20 it warns, on 22 and later it does not.
+    const real = yad(['detect', '--json']).stderr;
+    if (nodeSupport() === 'end-of-life') assert.match(real, /is end of life/, 'this Node is end of life');
+    else assert.doesNotMatch(real, /end of life/, 'this Node (22 or later) gets no warning');
     assert.doesNotMatch(yad(['hook', 'agent-guard'], '20.19.5').stderr, /end of life/, 'a hook\'s stderr reaches the model');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -85,5 +88,30 @@ test('E161: cpMerge joins folders and never replaces a file (Node 24\'s cpSync r
     assert.equal(fs.readFileSync(path.join(T, 'b/keep.txt'), 'utf8'), 'mine', 'the folder\'s own files are kept');
     assert.throws(() => cpMerge(path.join(T, 'a'), path.join(T, 'b')), /EEXIST/, 'a file already there is never replaced');
     assert.equal(fs.readFileSync(path.join(T, 'b/f.txt'), 'utf8'), 'x');
+    // A new folder keeps its source's permissions; a file keeps its mode; a link stays the link it is.
+    if (process.platform !== 'win32') {
+      fs.mkdirSync(path.join(T, 'p/private'), { recursive: true, mode: 0o700 });
+      fs.chmodSync(path.join(T, 'p/private'), 0o700);
+      fs.writeFileSync(path.join(T, 'p/run.sh'), '#!/bin/sh\n', { mode: 0o755 });
+      fs.symlinkSync('run.sh', path.join(T, 'p/link'));
+      const made = [];
+      cpMerge(path.join(T, 'p'), path.join(T, 'q'), made);
+      assert.equal(fs.statSync(path.join(T, 'q/private')).mode & 0o777, 0o700);
+      assert.equal(fs.statSync(path.join(T, 'q/run.sh')).mode & 0o777, 0o755);
+      assert.equal(fs.readlinkSync(path.join(T, 'q/link')), 'run.sh', 'a relative link stays relative');
+      assert.deepEqual(made.map((p) => path.relative(T, p)).sort(), ['q', 'q/link', 'q/private', 'q/run.sh']);
+      // A named pipe is refused, never read (copying one would wait forever).
+      fs.mkdirSync(path.join(T, 'r'));
+      spawnSync('mkfifo', [path.join(T, 'r/pipe')]);
+      if (fs.existsSync(path.join(T, 'r/pipe'))) assert.throws(() => cpMerge(path.join(T, 'r'), path.join(T, 's')), /not a file, a folder or a link/);
+    }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E161: the error catalogue, docs/CLI.md and the docs site list the same YAD-ENV codes', () => {
+  const env = Object.keys(CODES).filter((k) => k.startsWith('YAD-ENV-')).sort();
+  const cli = [...fs.readFileSync(path.join(ROOT, 'docs/CLI.md'), 'utf8').matchAll(/^\| `(YAD-ENV-\d+)` \|/gm)].map((m) => m[1]).sort();
+  const site = [...fs.readFileSync(path.join(ROOT, 'docs/sdlc-site/src/data/referenceData.ts'), 'utf8').matchAll(/code: '(YAD-ENV-\d+)'/g)].map((m) => m[1]).sort();
+  assert.deepEqual(cli, env);
+  assert.deepEqual(site, env);
 });

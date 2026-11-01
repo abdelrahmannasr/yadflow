@@ -232,19 +232,24 @@ export const nodeEndOfLife = (version) => `Node ${version} is end of life and ge
 // Copy a folder into another, joining folders and never replacing a file: a file that is already there is
 // an EEXIST error. `fs.cpSync(…, { errorOnExist: true, force: false })` did this up to Node 22; Node 24
 // refuses a folder that exists too, even an empty one, so a move into a folder with the user's own files
-// failed. Links are copied as links.
-export function cpMerge(src, dest) {
+// failed. A new folder keeps its source's permissions, and a file its mode (copyFileSync). A link is copied
+// as the link it is (cpSync made a relative link absolute, into the source the move then deletes).
+// Anything else (a named pipe, a device) is refused, as cpSync did. `created`, when given, collects every
+// path this copy made, so a failed move removes those and nothing that was there before.
+export function cpMerge(src, dest, created = null) {
   const st = fs.lstatSync(src);
-  if (st.isDirectory()) {
-    fs.mkdirSync(dest, { recursive: true });
-    for (const name of fs.readdirSync(src)) cpMerge(path.join(src, name), path.join(dest, name));
-    return;
-  }
   let there = true;
   try { fs.lstatSync(dest); } catch { there = false; }
+  if (st.isDirectory()) {
+    if (!there) { fs.mkdirSync(dest, { mode: st.mode & 0o7777 }); created?.push(dest); }
+    for (const name of fs.readdirSync(src)) cpMerge(path.join(src, name), path.join(dest, name), created);
+    return;
+  }
   if (there) throw Object.assign(new Error(`EEXIST: ${dest} already exists, and a copy never replaces a file`), { code: 'EEXIST' });
   if (st.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(src), dest);
-  else fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+  else if (st.isFile()) fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+  else throw Object.assign(new Error(`${src} is not a file, a folder or a link, so it is not copied`), { code: 'EINVAL' });
+  created?.push(dest);
 }
 // Recursive list of file paths relative to `dir`.
 export function listFiles(dir, base = dir) {

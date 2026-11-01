@@ -472,20 +472,14 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
   const from = path.join(root, move.from);
   const to = path.join(root, move.to);
   const backup = path.join(root, move.backup);
-  // The folders under `foundation/` the copy will create, deepest first — computed BEFORE copying.
-  const made = new Set();
-  for (const m of move.moves) {
-    for (let d = path.posix.dirname(m.to); d !== move.to && d !== '.'; d = path.posix.dirname(d)) {
-      if (!exists(path.join(root, d))) made.add(d);
-    }
-  }
   const toExisted = exists(to);
+  const created = []; // every path the copy into `to` made: a failure removes these, and only these
   try {
     const before = artifactHash(from, 'discovery/');
     // Folders are joined and a file that is already there is refused (cpMerge: Node 24's cpSync refuses
     // a folder that exists, even with the user's own files in it).
     if (keepBackup) copy(from, backup);
-    copy(from, to);
+    copy(from, to, created);
     if (artifactHash(to, 'discovery/') !== before) {
       throw new Error(`the copy in ${move.to}/ does not fingerprint like the original`);
     }
@@ -509,8 +503,8 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     if (!toExisted) {
       fs.rmSync(to, { recursive: true, force: true });
     } else {
-      for (const m of move.moves) fs.rmSync(path.join(root, m.to), { force: true });
-      for (const d of [...made].sort((a, b) => b.length - a.length)) fs.rmSync(path.join(root, d), { recursive: true, force: true });
+      // Only what this copy made: a file that came into foundation/ after the plan is the user's, and stays.
+      for (const p of [...created].reverse()) fs.rmSync(p, { recursive: true, force: true });
     }
     // Only a backup THIS run made. Without one, the path may still hold an earlier run's copy — the user's.
     if (keepBackup) fs.rmSync(backup, { recursive: true, force: true });
