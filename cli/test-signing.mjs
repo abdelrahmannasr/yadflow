@@ -512,6 +512,10 @@ test('E160 review 8: a pin by short id, fingerprint or 0x picks that part; anoth
     assert.match(noBang.fix.steps[0], /typo/);
     // By email: key A signs; an old expired key B has the same email. The account has only B: "does not list".
     execFileSync('git', ['config', '--unset', 'user.signingkey'], { cwd: s.dir, env: s.env });
+    // Looked up by email and not found: no user.signingkey to check for a typo.
+    const byEmail = byId(check(s, { gitRun: (c, a, o = {}) => (c === 'gpg' ? { ok: false, stdout: '' } : run(c, a, { ...o, env: s.env })), haveTool: tools('gh', 'gpg'), runner: platform().runner })).key;
+    assert.match(byEmail.message, /no secret key/);
+    assert.match(byEmail.fix.steps[0], /^Make a key/);
     const twoKeys = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::scSC:::+:\nsec:e:255:22:9999000011112222:50::::::scSC:::+:';
     const r = rows(twoKeys, { key_id: '9999000011112222' })['platform-key'];
     assert.equal(r.status, 'gap');

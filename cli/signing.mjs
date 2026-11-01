@@ -138,7 +138,7 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
     const gpgSteps = [
       'Make a key (once): gpg --full-generate-key (an RSA 4096 or ed25519 key, with your account\'s email).',
       'Find its id: gpg --list-secret-keys --keyid-format=long (the part after the slash on the "sec" line).',
-      'Tell git: git config --global user.signingkey <that id>, then git config --global commit.gpgsign true',
+      'Tell git: git config --global user.signingkey <that id> (end it with "!" to sign with that exact part), then git config --global commit.gpgsign true',
       'Add it to your account: gpg --armor --export <that id>, pasted as a GPG key on the platform\'s settings page (below).',
     ];
     // By email, gpg matches any user id that CONTAINS it: `<email>` asks for that address exactly.
@@ -147,7 +147,7 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
     else if (!target) add('key', 'gap', 'no key is named (user.signingkey is not set) and there is no email to find one by', { steps: gpgSteps });
     else {
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
-      // A key named in user.signingkey that gpg does not have is most often a typo (its ids: the "Find its id" step).
+      // A key named in user.signingkey that gpg does not have is most often a typo.
       const noKeySteps = signingkey ? ['Check user.signingkey for a typo against the ids gpg lists (the "Find its id" step below).', ...gpgSteps] : gpgSteps;
       const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, parts: [] });
       const { keys, listed } = ids;
