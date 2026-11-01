@@ -14,6 +14,10 @@ one per connected code repo. See [the `protection` section in CLI.md](CLI.md#the
 for what each line means. A line that says **not known** is not "fine" and not "unprotected": yad could
 not read the answer, and the line says why.
 
+`yad ci check` reads the rest of this page's settings, for the Product and each code repo: the checks
+required before a merge, force pushes, deletion, and on GitLab "Pipelines must succeed" and skipped
+pipelines. Each gap names the settings page and the clicks. It only reads (E160).
+
 ## Where yad's safety comes from
 
 | Layer | What it does | How strong |

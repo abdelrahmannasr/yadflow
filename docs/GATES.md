@@ -101,6 +101,9 @@ Two more scripts run as steps inside the jobs above:
   reconcile-debt. It checks the Product out so those gates can read it.
 - [install-deps](#install-deps) (`install-deps.sh`) runs first in build/test/lint. It installs the repo's packages.
 
+A gate holds a merge only when the platform requires its job. `yad ci check` reads whether it does, for
+each repo, and names the settings page when it does not ([branch-protection.md](branch-protection.md)).
+
 **On a direct push to the default branch** (no pull request), the `yad-update-guard` workflow (GitHub)
 or the `yad-update-guard-verified-commits` and `yad-update-guard-commit-message` jobs (GitLab) run only
 two gates over the pushed commits: [verified-commits](#verified-commits) and

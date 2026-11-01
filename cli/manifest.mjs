@@ -570,6 +570,26 @@ export const PRODUCT_WIRING = {
 // The branch-protection setup guide (E48), linked from `yad doctor`'s `protection` section. A URL, not a
 // path: the reader is in their own repo, where `docs/` is not yadflow's.
 export const PROTECTION_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/blob/main/docs/branch-protection.md';
+// E160b — the checks a team requires before a merge, by the name the platform gives each one: on GitHub a
+// check is named after its job (the jobs set no `name:`), on GitLab a job is the job's key. `yad ci check`
+// reads the GitHub list against the branch's required checks; on GitLab "Pipelines must succeed" covers
+// every job, so the list there is for the docs only. `productVerified` is the Product's verified-commits
+// workflow, required when that file is there. Tests hold this equal to the templates' jobs and to the table
+// in docs/branch-protection.md.
+export const REQUIRED_CHECKS = Object.freeze({
+  github: Object.freeze({
+    product: Object.freeze(['commit-message', 'pr-title', 'pr-template', 'ledger-guard', 'member-check']),
+    productVerified: Object.freeze(['verified-commits']),
+    code: Object.freeze(['spec-link', 'contract-check', 'risk-map', 'build-test-lint', 'lineage-check', 'epic-open', 'reconcile-debt',
+      'commit-message', 'pr-title', 'pr-template', 'verified-commits']),
+  }),
+  gitlab: Object.freeze({
+    product: Object.freeze(['yad-product-commit-message', 'yad-product-pr-title', 'yad-product-pr-template', 'yad-product-ledger-guard', 'yad-product-member-check']),
+    productVerified: Object.freeze(['yad-product-verified-commits']),
+    code: Object.freeze(['yad-spec-link', 'yad-contract-check', 'yad-risk-map', 'yad-build-test-lint', 'yad-lineage-check', 'yad-epic-open',
+      'yad-reconcile-debt', 'yad-commit-message', 'yad-pr-title', 'yad-pr-template', 'yad-verified-commits']),
+  }),
+});
 // The hub -> Product hand-change guide (E124), linked from `yad migrate`'s last line while `.sdlc/hub.json` is on
 // disk. A URL for the same reason.
 export const PRODUCT_RENAME_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/blob/main/docs/migrations/hub-to-product.md';

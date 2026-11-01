@@ -69,7 +69,7 @@ Only the person does these:
 
 `yad guide --json` gives each command its `class` and `ask`. In short:
 
-- **read** — run it without asking. `yad guide`, `yad help`, `yad check` (not with `--fix`, `--push`, `--open-pr`, `--overwrite-local`, `--allow-branch`), `yad doctor`, `yad migrate` (not with `--apply`), `yad detect`, `yad signing check`, `yad toolbox list`, `yad toolbox check`, `yad skill list`, `yad skill recommend`, `yad report` (not with `--post`), `yad foundation status`, `yad status`, `yad next`, `yad dial` (not with `--to`), `yad mode`, `yad gate status`, `yad gate review`, `yad gate walkthrough`, `yad review context`, `yad review chat`, `yad review cards`, `yad review walkthrough`, `yad build merged` (not with `--ship`), `yad member list`, `yad worktree list`, `yad standup`, `yad claims`, `yad owners`, `yad history list`, `yad history show`, `yad history search`, `yad repo list`, `yad risk-map check`, `yad codeowners check`, `yad docs list`, `yad thread`, `yad reconcile check`.
+- **read** — run it without asking. `yad guide`, `yad help`, `yad check` (not with `--fix`, `--push`, `--open-pr`, `--overwrite-local`, `--allow-branch`), `yad doctor`, `yad migrate` (not with `--apply`), `yad detect`, `yad signing check`, `yad ci check`, `yad toolbox list`, `yad toolbox check`, `yad skill list`, `yad skill recommend`, `yad report` (not with `--post`), `yad foundation status`, `yad status`, `yad next`, `yad dial` (not with `--to`), `yad mode`, `yad gate status`, `yad gate review`, `yad gate walkthrough`, `yad review context`, `yad review chat`, `yad review cards`, `yad review walkthrough`, `yad build merged` (not with `--ship`), `yad member list`, `yad worktree list`, `yad standup`, `yad claims`, `yad owners`, `yad history list`, `yad history show`, `yad history search`, `yad repo list`, `yad risk-map check`, `yad codeowners check`, `yad docs list`, `yad thread`, `yad reconcile check`.
 - **local-write** — run it without asking. `yad check --fix`, `yad update` (not with `--push`, `--open-pr`, `--overwrite-local`, `--allow-branch`), `yad migrate --apply`, `yad usage`, `yad sync-status`, `yad epic new`, `yad foundation new`, `yad gate comments`, `yad gate repair` (not with `--push`, `--allow-branch`), `yad review reconcile`, `yad commit` (not with `--manual`, `--force`, `--ai`), `yad build start`, `yad build step`, `yad build trust` (not with `--uid`), `yad build ship` (not with `--merge-commit`, `--approver`), `yad build merged --ship`, `yad build done`, `yad build sync`, `yad run checks`, `yad checkpoint` (not with `--push`, `--retro-ship`, `--allow-branch`), `yad member remove` (not with `--reason`), `yad worktree add`, `yad worktree remove`, `yad assign` (not with `--force`), `yad unassign` (not with `--force`), `yad fold`, `yad tidy up` (not with `--push`, `--allow-branch`), `yad index`, `yad repo refresh` (not with `--push`, `--allow-branch`), `yad repo sync`, `yad repo clone`, `yad risk-map draft`, `yad docs build`, `yad docs sync`, `yad docs deploy`, `yad reconcile refresh`, `yad reconcile wire`.
 - **open-pr** — run it without asking. `yad join`, `yad check --open-pr`, `yad update --open-pr`, `yad gate open`, `yad gate sync`, `yad gate trailer`, `yad review trailer`, `yad review nudge`, `yad capture`, `yad member add`.
 - **task-pr** — ask first, unless `yad dial open-pr` is `auto`. `yad open-pr`, `yad ship` (not with `--force`, `--ai`).
@@ -146,9 +146,12 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
   commands to type with `!` in front in Claude Code, the steps and the settings page. Wait, then run the
   check again: go on only when it shows no `gap`. An `unknown` row names what would let yad look (a login,
   or `gh auth refresh -h <host> -s <scope>`, which is the person's too); never read it as done.
-- **CI settings** (branch protection, rulesets, required checks) are the person's. Give the exact steps
-  and confirm by reading. (A later release, E160b, adds `yad ci check`; it does not exist yet, so do not
-  run it.)
+- **CI settings** (branch protection, rulesets, required checks) are the person's. Run `yad ci check
+  --json` (a read: no need to ask). A `gap` whose `fix.actor` is `person` is a platform setting: hand
+  over its `url` and `steps`, wait, then run the check again. A `gap` whose `fix.actor` is `agent` is
+  yad's own files: run the command it names (`yad check --fix`, `yad update`), but ask first before
+  `--overwrite-local`, and never edit a yad-managed file — report it with `yad report`. Go on only when
+  it shows no `gap`. An `unknown` row is not done: it names what would let yad read it.
 
 ## When yadflow itself breaks, or could do better
 

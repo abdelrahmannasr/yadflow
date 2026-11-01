@@ -758,7 +758,9 @@ ledger (see the table in section 3, step d2):
 <type> -m "<subject>"` commits past the local hook and records your reason in the commit as a
 `Ledger-Override: <why>` line. The CI check still fails that commit, and shows your reason, so someone
 allowed to bypass the rules must merge it. What to switch on in GitHub or GitLab so the checks really
-hold a merge: [`docs/branch-protection.md`](docs/branch-protection.md).
+hold a merge: [`docs/branch-protection.md`](docs/branch-protection.md). `yad ci check` reads whether it is
+switched on, for the Product and each code repo, and names the settings page for each gap (E160). It
+only reads.
 
 **Reading the record** (writes nothing to your work):
 

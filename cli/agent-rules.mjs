@@ -78,6 +78,9 @@ export const COMMAND_CLASS = {
   detect: { class: 'read' },
   // E160: reads the git config, the key and the account, and writes nothing: the agent runs it to confirm a hand-off.
   'signing check': { class: 'read' },
+  // E160b: reads yad's CI files and the platform's branch rules, and writes nothing: the agent's confirmation
+  // after it hands the platform settings over.
+  'ci check': { class: 'read' },
   'toolbox list': { class: 'read' },
   'toolbox check': { class: 'read' },
   // Which tools the team uses, and which skill runs a step, are team-wide settings committed to the Product.
@@ -206,7 +209,7 @@ const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 // A test holds this to bin/yad.mjs.
 export const DEFAULT_ACTION = {
   skill: 'list', history: 'list', repo: 'list', 'risk-map': 'check', codeowners: 'check', docs: 'list',
-  toolbox: 'list', member: 'list', worktree: 'list', signing: 'check',
+  toolbox: 'list', member: 'list', worktree: 'list', signing: 'check', ci: 'check',
 };
 
 // The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>` (or its default action).
@@ -366,7 +369,7 @@ export function readAllowList() {
 // wrote, never brought up to date, still comes out (orphanAllowListActions in cli/plan.mjs).
 export const SHIPPED_ALLOW_LISTS = Object.freeze([
   // 4.8.0 (E158)
-  ['guide', 'help', 'doctor', 'detect', 'signing check', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
+  ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
     'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
     'worktree list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'docs list',
     'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),

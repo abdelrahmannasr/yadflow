@@ -714,3 +714,44 @@ function unknownHint(r) {
     default: return 'fix what the message names, then run `yad doctor` again; nothing about this repo\'s protection is assumed meanwhile';
   }
 }
+
+// E160b — what `yad ci check` reads beyond protection and approvals: the rules that make yad's checks hold a
+// merge. Read-only, the same calls `readProtection` makes plus a few GETs, and the same trap: a failed call is
+// never "none". `readProtection` runs first, so a repo that cannot be read (no platform, reads turned off,
+// no login…) comes back with only `protection`, and every platform row is "not known" with its reason.
+//   GitHub — `rules`: the active rules on the branch (null when not read; `full` when a whole page came
+//            back, which proves nothing about what is past it). `classic`: classic branch protection, the
+//            string 'none' when PROVEN absent (the branch reads `protected: false`, or GitHub answers 404 with
+//            exactly "Branch not protected"), or null — GitHub answers a bare 404 to anyone who is not an
+//            admin, even on a protected branch.
+//   GitLab — the project's merge settings, the protected-branch entries that match the branch (null when not
+//            read), the approval settings (Premium) and the push rule (Premium; a 404 is "no push rule").
+export function readCiSettings(target, { runner = run, env = process.env, authCache = new Map() } = {}) {
+  const protection = readProtection(target, { runner, env, authCache });
+  if (!protection.known) return { protection };
+  const { platform, host, repo, branch } = protection;
+  if (platform === 'github') {
+    const at = `repos/${repo.split('/').map(encodeURIComponent).join('/')}`;
+    const r = api(runner, 'gh', host, `${at}/rules/branches/${segment(branch)}?per_page=${PAGE}`);
+    const rules = r.ok && Array.isArray(r.body) ? r.body : null;
+    let classic = null;
+    if (protection.protected === false) classic = 'none';
+    else {
+      const c = api(runner, 'gh', host, `${at}/branches/${segment(branch)}/protection`);
+      if (c.ok && c.body && typeof c.body === 'object' && !Array.isArray(c.body)) classic = c.body;
+      else if (c.status === 404 && c.body?.message === 'Branch not protected') classic = 'none';
+    }
+    return { protection, rules, rulesFull: !!rules && rules.length >= PAGE, classic };
+  }
+  const at = `projects/${encodeURIComponent(repo)}`;
+  const obj = (res) => (res.ok && res.body && typeof res.body === 'object' && !Array.isArray(res.body) ? res.body : null);
+  const project = obj(api(runner, 'glab', host, at));
+  const pb = api(runner, 'glab', host, `${at}/protected_branches?per_page=${PAGE}`);
+  const list = pb.ok && Array.isArray(pb.body) ? pb.body : null;
+  const matched = list ? list.filter((p) => branchMatches(p?.name, branch)) : null;
+  const approvals = obj(api(runner, 'glab', host, `${at}/approvals`));
+  const pr = api(runner, 'glab', host, `${at}/push_rule`);
+  // No push rule is set: GitLab answers 404, or (on some versions) 200 with an empty body.
+  const pushRule = obj(pr) ?? (pr.ok || pr.status === 404 ? 'none' : null);
+  return { protection, project, matched, matchedFull: !!list && list.length >= PAGE, approvals, pushRule };
+}
