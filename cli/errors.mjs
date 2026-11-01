@@ -16,6 +16,7 @@ export const CODES = {
   'YAD-ENV-001': 'git is not installed or not on PATH',
   'YAD-ENV-002': 'the platform CLI (gh/glab) is missing or not authenticated',
   'YAD-ENV-003': 'Node.js is older than the supported range (>=18)',
+  'YAD-ENV-004': 'Node.js is end of life (18 to 21): yadflow 4 still runs on it, but it gets no security fixes, and yadflow 5 needs Node 22 or newer',
   'YAD-STATE-001': 'a ledger/config JSON file exists but does not parse',
   'YAD-STATE-002': 'a ledger/config JSON file parses but has the wrong shape',
   'YAD-STATE-003': 'a registered repo path is missing or not a git repository',

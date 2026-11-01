@@ -21,7 +21,7 @@ yad-product-verified-commits:
   variables:
     GIT_DEPTH: "0" # full history so the gate can diff against the target branch
     # A project/group CI/CD variable overrides this YAML value, so the Node line can be changed in project
-    # settings without editing the managed fragment (a current 20, 22 or 24 line). A shell-executor runner
+    # settings without editing the managed fragment (a current 22 or 24 line). A shell-executor runner
     # ignores `image:` — Node must then be on the runner host's PATH, and this value has no effect.
     YAD_NODE_VERSION: "22"
   rules:

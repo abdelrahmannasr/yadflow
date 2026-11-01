@@ -92,9 +92,9 @@ Auth is the `id-token: write` permission in the workflow plus the npm trusted-pu
 no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs on every pull request into `main` and
 every push to `main`:
 
-- the test matrix — Linux on Node 18, 20 and 22, and macOS on Node 22;
+- the test matrix — Linux on Node 18, 20, 22 and 24, and macOS on Node 24 (18 and 20 are end of life: test-only legs, so yadflow 4 keeps proving it still runs there; yadflow 5 drops them);
 - the end-to-end harness against the packed tarball, on Linux and macOS;
-- lint, the 70% coverage gate, and the tarball-leak smoke (Linux, Node 22);
+- lint, the 70% coverage gate, and the tarball-leak smoke (Linux, Node 24);
 - `npm audit` of production dependencies (failing on high severity), and a check of the registry
   signatures.
 

@@ -219,6 +219,52 @@ export function copyDir(src, dest) {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(src, dest, { recursive: true });
 }
+// E161 — which Node line this is. Below 18 yadflow does not run (YAD-ENV-003). 18 and 20 are end of life:
+// yadflow 4 still runs on them, with a warning (YAD-ENV-004), and yadflow 5 needs 22. 22 and later are ok.
+export const NODE_FLOOR = 18;
+export const NODE_SUPPORTED = 22;
+export function nodeSupport(version = process.versions.node) {
+  const major = Number(String(version).replace(/^v/, '').split('.')[0]);
+  return !(major >= NODE_FLOOR) ? 'unsupported' : major < NODE_SUPPORTED ? 'end-of-life' : 'ok';
+}
+export const nodeEndOfLife = (version) => `Node ${version} is end of life and gets no security fixes. yadflow 4 still runs on it; yadflow 5 will need Node ${NODE_SUPPORTED} or newer. Upgrade: https://nodejs.org`;
+
+// Remove a file or a folder tree, read-only folders too: each folder is opened (its owner may write) first,
+// since a folder whose mode forbids writing keeps its files from `rmSync`. A path that is not there is fine.
+export function rmTree(p) {
+  let st;
+  try { st = fs.lstatSync(p); } catch { return; }
+  if (st.isDirectory()) {
+    try { fs.chmodSync(p, (st.mode & 0o7777) | 0o700); } catch { /* not ours to open: rmSync says why */ }
+    for (const name of fs.readdirSync(p)) rmTree(path.join(p, name));
+  }
+  fs.rmSync(p, { recursive: true, force: true });
+}
+
+// Copy a folder into another, joining folders and never replacing a file: a file that is already there is
+// an EEXIST error. `fs.cpSync(…, { errorOnExist: true, force: false })` did this up to Node 22; Node 24
+// refuses a folder that exists too, even an empty one, so a move into a folder with the user's own files
+// failed. A new folder keeps its source's permissions, and a file its mode (copyFileSync). A link is copied
+// as the link it is (cpSync made a relative link absolute, into the source the move then deletes).
+// Anything else (a named pipe, a device) is refused, as cpSync did. `created`, when given, collects every
+// path this copy made, so a failed move removes those and nothing that was there before.
+export function cpMerge(src, dest, created = null) {
+  const st = fs.lstatSync(src);
+  let there = true;
+  try { fs.lstatSync(dest); } catch { there = false; }
+  if (st.isDirectory()) {
+    // The source's mode is set after the folder is filled: a read-only folder must still take its files.
+    if (!there) { fs.mkdirSync(dest); created?.push(dest); }
+    for (const name of fs.readdirSync(src)) cpMerge(path.join(src, name), path.join(dest, name), created);
+    if (!there) fs.chmodSync(dest, st.mode & 0o7777);
+    return;
+  }
+  if (there) throw Object.assign(new Error(`EEXIST: ${dest} already exists, and a copy never replaces a file`), { code: 'EEXIST' });
+  if (st.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(src), dest);
+  else if (st.isFile()) fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+  else throw Object.assign(new Error(`${src} is not a file, a folder or a link, so it is not copied`), { code: 'EINVAL' });
+  created?.push(dest);
+}
 // Recursive list of file paths relative to `dir`.
 export function listFiles(dir, base = dir) {
   if (!fs.existsSync(dir)) return [];

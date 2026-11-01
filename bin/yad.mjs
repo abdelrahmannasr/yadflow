@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
-import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, forTerminal, ENVELOPE_KEYS } from '../cli/lib.mjs';
+import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, forTerminal, nodeSupport, nodeEndOfLife, ENVELOPE_KEYS } from '../cli/lib.mjs';
 import { runLedgerGuardHook, runStagedLedgerGuard, runAgentGuardHook } from '../cli/hook.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from '../cli/argv-flags.mjs';
 
@@ -775,6 +775,11 @@ async function main() {
   // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
   // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
   if (!['hook', 'doctor', 'migrate', 'setup', 'report', 'detect', 'toolbox', 'new', 'init', 'join'].includes(cmd)) commands.warnIfProjectAhead(o.dir || process.cwd());
+  // E161: an end-of-life Node, once per run, on stderr (so --json stays clean). `hook` has returned above
+  // (its stderr is the channel a block reason reaches a model on); `doctor` says it in its own node row.
+  // YAD_TEST_NODE_VERSION stands in for the running version in tests only.
+  const nodeNow = process.env.YAD_TEST_NODE_VERSION || process.versions.node;
+  if (!['hook', 'doctor'].includes(cmd) && nodeSupport(nodeNow) === 'end-of-life') process.stderr.write(`${c.yellow(`! ${nodeEndOfLife(nodeNow)}`)}\n`);
   // E122: the Product's settings (or an epic's PR ledger) under two names that say different things.
   // Every command refuses rather than pick one — whichever it picked, somebody's edit would be silently
   // ignored. Not `doctor` (it reports the drift), `migrate` (it ends it) or `report` (it files a bug

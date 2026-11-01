@@ -222,7 +222,7 @@ Copy from this skill's `templates/`:
     project variable wins over the fragment's value, so the fragment itself is never edited.
   - **Shell-executor runners** ignore `image:`. The jobs then run on the runner host as they are, so
     the host needs `bash`, `git`, `curl` (the signature gates read the GitLab API with it; without it
-    every commit reads as unverified) and Node (any current 20, 22 or 24 line — for example from nvm)
+    every commit reads as unverified) and Node (any current 22 or 24 line — for example from nvm)
     on the runner user's `PATH`, plus whatever the repo's own build needs (Corepack, pnpm, …) for
     `build-test-lint`. `YAD_NODE_VERSION` has no effect there. Point `YAD_RUNNER_TAGS` at that
     runner's tag.

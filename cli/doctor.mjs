@@ -5,7 +5,7 @@
 // `--json` emits the checks for CI / bug reports.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
@@ -40,7 +40,7 @@ const isCheckout = (root, repo) => runnable(judgeRepo(root, repo));
 // `;`, `|`, `$(` or start a path part with `-` (E81 review 11), so only a plain one is printed.
 const branchArg = (b) => (typeof b === 'string' && /^\w[\w./-]*$/.test(b) && !b.includes('..') ? b : '<default-branch>');
 
-const MIN_NODE = 18;
+const MIN_NODE = NODE_FLOOR;
 
 // Solo mode (a lone developer): approval waived, merge + resolved threads still gate. Persisted in
 // hub.json. Mirrors gate.mjs / next.mjs.
@@ -85,10 +85,12 @@ export function hasBash({ platform = process.platform, env = process.env, runner
   return where.stdout.split(/\r?\n/).some((gitExe) => exists(path.join(path.dirname(path.dirname(gitExe.trim())), 'bin', 'bash.exe')));
 }
 
-export function envChecks(checks) {
-  const major = Number(process.versions.node.split('.')[0]);
-  if (major >= MIN_NODE) check(checks, 'node', 'environment', 'ok', `node ${process.versions.node}`);
-  else check(checks, 'node', 'environment', 'fail', `node ${process.versions.node} is below the supported range [YAD-ENV-003]`, `install Node.js >= ${MIN_NODE}`);
+export function envChecks(checks, { nodeVersion = process.versions.node } = {}) {
+  const support = nodeSupport(nodeVersion);
+  if (support === 'ok') check(checks, 'node', 'environment', 'ok', `node ${nodeVersion}`);
+  // E161: end of life still runs yadflow 4, so a warning, not a failure.
+  else if (support === 'end-of-life') check(checks, 'node', 'environment', 'warn', `${nodeEndOfLife(nodeVersion)} [YAD-ENV-004]`, `install Node.js ${NODE_SUPPORTED} or newer (an LTS line)`);
+  else check(checks, 'node', 'environment', 'fail', `node ${nodeVersion} is below the supported range [YAD-ENV-003]`, `install Node.js ${NODE_SUPPORTED} or newer (yadflow 4 runs on ${MIN_NODE} and later)`);
 
   if (has('git')) check(checks, 'git', 'environment', 'ok', 'git present');
   else check(checks, 'git', 'environment', 'fail', 'git not found on PATH [YAD-ENV-001]', 'install git — every yad command needs it');

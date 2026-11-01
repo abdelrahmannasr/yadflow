@@ -272,7 +272,7 @@ Every gate stops on its failure except **risk-map**, which is advisory: there a 
   pinned Node. A declared `packageManager` needs
   Corepack, which ships with Node 18 through 24 (Node 25+ dropped it) and, before 18.20.7 / 20.19 /
   22.14, carries registry keys too old to verify anything published since 2025 — so the override
-  should stay on a current 20, 22 or 24 line (or install a current Corepack first). The installer
+  should stay on a current 22 or 24 line (or install a current Corepack first). The installer
   checks for the binary and wraps `corepack prepare`, so both an absent and a stale Corepack fail
   with that guidance instead of a bare "command not found" or "Cannot find matching keyid".
 - Tests must actually exercise behavior (build plan §C) — an empty or trivially-passing suite does not

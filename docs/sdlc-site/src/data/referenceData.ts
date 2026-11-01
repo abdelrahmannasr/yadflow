@@ -402,8 +402,15 @@ export const ERROR_CODES: ErrorCode[] = [
   {
     code: 'YAD-ENV-003',
     cause: 'Node.js older than the supported range.',
-    resolution: 'Install Node >= 18.',
+    resolution: 'Install Node 22 or newer (yadflow 4 runs on 18 and later).',
     severity: 'critical',
+    visibleTo: ALL,
+  },
+  {
+    code: 'YAD-ENV-004',
+    cause: 'Node.js is end of life (18 to 21): yadflow 4 still runs on it, but it gets no security fixes, and yadflow 5 needs Node 22 or newer.',
+    resolution: 'Install Node 22 or newer (an LTS line).',
+    severity: 'warn',
     visibleTo: ALL,
   },
   {
