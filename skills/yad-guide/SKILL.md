@@ -149,9 +149,11 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
 - **CI settings** (branch protection, rulesets, required checks) are the person's. Run `yad ci check
   --json` (a read: no need to ask). A `gap` whose `fix.actor` is `person` is a platform setting: hand
   over its `url` and `steps`, wait, then run the check again. A `gap` whose `fix.actor` is `agent` is
-  yad's own files: run the command it names (`yad check --fix`, `yad update`), but ask first before
-  `--overwrite-local`, and never edit a yad-managed file — report it with `yad report`. Go on only when
-  it shows no `gap`. An `unknown` row is not done: it names what would let yad read it.
+  yad's own files: run the command it names (`yad check --fix`, `yad update`), then follow its steps (a
+  pull request for the changed files). Ask first before `--overwrite-local`, and never edit a
+  yad-managed file — report it with `yad report`. Go on only when it shows no `gap`. A `suggest` row is
+  optional: tell the person; it does not block. An `unknown` row names what would let yad look (a login,
+  or `gh auth refresh`, which is the person's too); never read it as done.
 
 ## When yadflow itself breaks, or could do better
 

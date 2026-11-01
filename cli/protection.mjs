@@ -726,7 +726,16 @@ function unknownHint(r) {
 //            admin, even on a protected branch.
 //   GitLab — the project's merge settings, the protected-branch entries that match the branch (null when not
 //            read), the approval settings (Premium) and the push rule (Premium; a 404 is "no push rule").
-export function readCiSettings(target, { runner = run, env = process.env, authCache = new Map() } = {}) {
+export function readCiSettings(target, { runner: ask = run, env = process.env, authCache = new Map() } = {}) {
+  // One answer per call for this repo: `readProtection` and the reads below ask some of the same paths, and
+  // two answers to one question could disagree.
+  const answers = new Map();
+  const runner = (cmd, args, opts) => {
+    if (args[0] !== 'api') return ask(cmd, args, opts);
+    const key = [cmd, ...args].join('\0');
+    if (!answers.has(key)) answers.set(key, ask(cmd, args, opts));
+    return answers.get(key);
+  };
   const protection = readProtection(target, { runner, env, authCache });
   if (!protection.known) return { protection };
   const { platform, host, repo, branch } = protection;

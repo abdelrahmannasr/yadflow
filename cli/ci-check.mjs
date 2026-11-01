@@ -10,26 +10,32 @@
 // The rules it reads, and how (cli/protection.mjs `readCiSettings`):
 //   GitHub — a required check is named after its job. The checks required = those in the branch's active
 //            rulesets plus classic branch protection's. Classic protection is readable by admins only, so a
-//            job seen in neither is "not known" unless both were read.
-//   GitLab — "Pipelines must succeed" covers every job; a skipped pipeline must not count as passed.
+//            job seen in neither is "not known" unless both were read. Who may bypass a ruleset is not read.
+//   GitLab — "Pipelines must succeed" covers every job in the pipeline, so yad's jobs must be IN it: the
+//            root `.gitlab-ci.yml` must include each of yad's fragments (the `files` row reads that). A
+//            skipped pipeline must not count as passed. A group's protected-branch rule is not in the
+//            project's list and wins over it, so a project entry saying "no" proves nothing in a group's
+//            project; in a person's own namespace there is no group rule, and the entry is the whole answer.
 // "Require signed commits" is never suggested on the Product: CI's ledger commits are unsigned (#432), so it
 // would stop every gate. On the Product it is a gap when it is on; on a code repo it is a suggestion.
+import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, warn, fail, info, hand, run, exists, readJSON, isPlainObject, forTerminal, asArg } from './lib.mjs';
-import { REQUIRED_CHECKS, REPO_WIRING, PRODUCT_WIRING, PROJECT_FILES, productConfigPath, isVerifiedLedger } from './manifest.mjs';
-import { readCiSettings, protectionLine, PLATFORM_NAME } from './protection.mjs';
+import { REQUIRED_CHECKS, REPO_WIRING, PRODUCT_WIRING, PROJECT_FILES, PRODUCT_LINK, productConfigPath, isVerifiedLedger } from './manifest.mjs';
+import { readCiSettings, protectionLine } from './protection.mjs';
 import { repoActions, productActions } from './plan.mjs';
 import { judgeRepo, runnable } from './workspace.mjs';
 import { isSolo } from './gate.mjs';
 
-// yad's CI files: the workflows (or GitLab fragments) and the gate scripts they run — the wiring's files,
-// not the pull request template beside them, nor the agent guard (which only a session runs).
-const CI_FILES = new Set(Object.values({ ...REPO_WIRING, ...Object.fromEntries(Object.entries(PRODUCT_WIRING).map(([k, v]) => [`product-${k}`, v])) })
+// yad's CI files: the workflows (or GitLab fragments), the gate scripts they run, and the record that tells a
+// code repo's CI where the Product is — not the pull request template beside them, nor the agent guard
+// (which only a session runs).
+const CI_FILES = new Set([...Object.values(REPO_WIRING), ...Object.values(PRODUCT_WIRING)]
   .flat().map((w) => w.dest).filter((d) => /^(\.github\/workflows\/|\.gitlab\/ci\/|checks\/)/.test(d)));
+CI_FILES.add(PRODUCT_LINK);
 const isCiItem = (item) => CI_FILES.has(item);
 // A list of files, short: the first three, then how many more.
 const few = (items) => (items.length > 3 ? `${items.slice(0, 3).join(', ')} and ${items.length - 3} more` : items.join(', '));
-const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 // Three answers: true, false, or null (not known). A rule list read in full proves a rule is absent; a full
 // page proves nothing past it. Classic protection proven absent ('none') holds nothing.
@@ -46,17 +52,35 @@ function githubJobs(root, t) {
   return [...REQUIRED_CHECKS.github.product, ...(verified ? REQUIRED_CHECKS.github.productVerified : [])];
 }
 
-// yad's CI files, from the same plan `yad check` makes. Nothing is written.
+// GitLab runs a fragment only when the root `.gitlab-ci.yml` of the git repo includes it. Read as text: a
+// line (not a comment) that names the fragment's path. An include made another way (a nested or remote
+// include) is not seen, and reads as missing — a gap, never a false ok.
+function missingIncludes(dir, fragments) {
+  const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
+  const rootCi = path.join(top.ok ? top.stdout.trim() : dir, '.gitlab-ci.yml');
+  let text;
+  try { text = fs.readFileSync(rootCi, 'utf8'); } catch { return { noRoot: true, missing: fragments }; }
+  const lines = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  return { noRoot: false, missing: fragments.filter((f) => !lines.includes(f)) };
+}
+
+// yad's CI files, from the same plan `yad check` makes. Nothing is written. The files are read on disk here:
+// CI reads them from the branch, so they must be committed too.
 function filesRow(add, root, t) {
   let actions;
+  let dir = root;
   if (t.kind === 'product') {
     if (!t.wired) { add('files', 'ok', 'the Product keeps its ledger locally, so yad runs no CI on it'); return; }
     actions = productActions(root);
   } else {
-    if (!runnable(judgeRepo(root, t.entry))) {
-      add('files', 'unknown', 'this repo is not cloned here, so its workflow files were not read', { actor: 'agent', commands: [`yad repo clone ${asArg(t.name)}`] });
+    const judged = judgeRepo(root, t.entry);
+    if (!runnable(judged)) {
+      // A clone yad can make is offered; an entry yad refuses (no path, outside the workspace…) says why.
+      if (judged.state === 'refused') add('files', 'unknown', `its workflow files were not read: ${forTerminal(judged.reason)}`);
+      else add('files', 'unknown', 'this repo is not cloned here, so its workflow files were not read', { actor: 'agent', commands: [`yad repo clone ${asArg(t.name)}`] });
       return;
     }
+    dir = path.resolve(root, t.entry.path);
     actions = repoActions(root, t.entry);
   }
   const ci = actions.filter((a) => isCiItem(a.item));
@@ -65,8 +89,9 @@ function filesRow(add, root, t) {
   const outdated = of('outdated');
   const modified = of('modified');
   const other = ci.filter((a) => !['ok', 'missing', 'new', 'outdated', 'modified'].includes(a.status)).map((a) => forTerminal(a.item));
-  if (missing.length) add('files', 'gap', `yad's CI files are missing: ${few(missing)}`, { actor: 'agent', commands: ['yad check --fix'], steps: ['Commit and push them through a pull request (or `yad check --fix --open-pr`).'] });
-  if (outdated.length) add('files', 'gap', `yad's CI files are older than this yadflow: ${few(outdated)}`, { actor: 'agent', commands: ['yad update'] });
+  const commit = 'Commit and push them through a pull request (or `yad check --fix --open-pr`).';
+  if (missing.length) add('files', 'gap', `yad's CI files are missing: ${few(missing)}`, { actor: 'agent', commands: ['yad check --fix'], steps: [commit] });
+  if (outdated.length) add('files', 'gap', `yad's CI files are older than this yadflow: ${few(outdated)}`, { actor: 'agent', commands: ['yad update'], steps: [commit] });
   if (modified.length) {
     add('files', 'gap', `yad's CI files were edited by hand: ${few(modified)}`, {
       actor: 'agent',
@@ -74,22 +99,51 @@ function filesRow(add, root, t) {
     });
   }
   if (other.length) add('files', 'gap', `yad's CI files need attention: ${few(other)}`, { actor: 'agent', commands: ['yad check'] });
-  if (!missing.length && !outdated.length && !modified.length && !other.length) add('files', 'ok', ci.length ? `yad's ${ci.length} CI files are here and current` : 'yad has no CI files for this repo');
+  // GitLab: the fragments are on disk; the root pipeline must include them, or no yad job runs.
+  let noInclude = false;
+  if (t.target.platform === 'gitlab') {
+    const fragments = ci.filter((a) => a.item.startsWith('.gitlab/ci/') && !missing.includes(forTerminal(a.item))).map((a) => a.item);
+    const inc = fragments.length ? missingIncludes(dir, fragments) : { missing: [] };
+    if (inc.missing.length) {
+      noInclude = true;
+      add('files', 'gap', inc.noRoot
+        ? 'there is no root .gitlab-ci.yml, so GitLab runs none of yad\'s jobs'
+        : `the root .gitlab-ci.yml does not include ${few(inc.missing.map(forTerminal))}, so GitLab does not run those jobs`, {
+        actor: 'agent',
+        steps: [`Add to the root .gitlab-ci.yml, through a pull request: include: ${inc.missing.map((f) => `- local: '${forTerminal(f)}'`).join(' ')}`,
+          'If it is included another way (a nested or remote include), yad cannot see it: check the pipeline of a merge request runs yad\'s jobs.'],
+      });
+    }
+  }
+  if (!missing.length && !outdated.length && !modified.length && !other.length && !noInclude) {
+    add('files', 'ok', ci.length ? `yad's ${ci.length} CI files are current on disk here (CI reads them from the branch: commit them)` : 'yad has no CI files for this repo');
+  }
+}
+
+// Every row a repo would have, for a run that could not read the platform: each is `unknown` with the reason.
+function rowIds(t, platform, solo) {
+  return [
+    'protected',
+    ...(t.ciRuns ? ['required-checks'] : []),
+    ...(platform === 'gitlab' && t.ciRuns ? ['skipped-pipelines'] : []),
+    ...(platform === 'gitlab' && !(t.kind === 'product' && t.ciRuns) ? ['direct-push'] : []),
+    'force-push', 'deletion',
+    ...(!solo ? ['stale-approvals'] : []),
+    ...(platform === 'gitlab' ? ['discussions'] : []),
+    ...(t.kind === 'code' || t.ciRuns ? ['signed-commits'] : []),
+  ];
 }
 
 // The platform's rows for one repo.
-function platformRows(add, root, t, s, { solo }) {
+function platformRows(add, root, t, s, { solo, note }) {
   const p = s.protection;
-  const name = PLATFORM_NAME[p.platform] || 'the platform';
   if (!p.known) {
+    // No platform at all: nothing to protect, and nothing to read.
+    if (p.kind === 'no-platform' && !t.target.platform) { note('no platform (GitHub or GitLab) is set, so there are no branch rules to read'); return; }
     // The hint is doctor's, which names itself; here the command to run again is this one.
     const hint = protectionLine(p, { name: t.name, solo }).hint?.replaceAll('`yad doctor`', '`yad ci check`');
     const why = forTerminal(p.why || 'the platform could not be read');
-    add('protected', 'unknown', why, hint ? { actor: 'person', steps: [hint] } : null);
-    for (const id of ['required-checks', 'force-push', 'deletion']) {
-      if (id === 'required-checks' && !t.ciRuns) continue;
-      add(id, 'unknown', why);
-    }
+    for (const id of rowIds(t, p.platform, solo)) add(id, 'unknown', why, id === 'protected' && hint ? { actor: 'person', steps: [hint] } : null);
     return;
   }
   const branch = forTerminal(p.branch);
@@ -98,12 +152,16 @@ function platformRows(add, root, t, s, { solo }) {
   const rulesPage = gh ? `${web}/settings/rules` : `${web}/-/settings/repository`;
   const mrPage = `${web}/-/settings/merge_requests`;
   const settings = (url, steps) => ({ actor: 'person', where: 'settings', url, steps: [...steps, 'Then run `yad ci check` again.'] });
+  // A verified Product's gate bot pushes the ledger commit straight to the default branch.
+  const bot = t.kind === 'product' && t.ciRuns;
   const protectSteps = gh
-    ? [`Open ${rulesPage} → New ruleset → New branch ruleset: target the default branch (${branch}), set Enforcement to Active.`]
-    : [`Open ${rulesPage} → Protected branches → protect ${branch}: allowed to push and merge "No one", allowed to merge Developers + Maintainers.`];
+    ? [`Open ${rulesPage} → New ruleset → New branch ruleset: target the default branch (${branch}), set Enforcement to Active, and turn on the rules the other rows name ("Require a pull request before merging", "Require status checks to pass", "Block force pushes", "Restrict deletions").`,
+      ...(bot ? ['Add the owner of the gate-sync token (a GitHub App, or the person whose token SDLC_GATE_TOKEN is) to the ruleset\'s bypass list, or the ledger never advances — see "The gate bot must be able to push" in docs/branch-protection.md.'] : [])]
+    : [`Open ${rulesPage} → Protected branches → protect ${branch}: "Allowed to merge" Developers + Maintainers; "Allowed to push and merge" ${bot ? 'the role the gate token (SDLC_GATE_TOKEN) has, and no wider — the gate bot pushes the ledger there' : 'No one'}; "Allowed to force push" off.`];
 
-  // Protected, and the approvals the mode asks for.
+  // Protected, and the approvals the mode asks for. A protection GitHub's own answers disagree about is not known.
   if (p.protected === false) add('protected', 'gap', `${branch} is not protected: anyone with write access can push to it`, settings(rulesPage, protectSteps));
+  else if (p.protected !== true) add('protected', 'unknown', `whether ${branch} is protected is not known: ${forTerminal(p.protectedWhy || 'the platform\'s answers disagree')}`, settings(rulesPage, protectSteps));
   else if (p.approvals === null) add('protected', 'unknown', `${branch} is protected; the approval rules were not read: ${forTerminal(p.approvalsWhy || 'no answer')}`);
   else if (solo && p.approvals > 0) add('protected', 'gap', `${branch} needs ${p.approvals} approval(s) before a merge: in solo mode that blocks your own merge`, settings(gh ? rulesPage : mrPage, ['Set the required approvals to 0 (solo mode).']));
   else if (!solo && p.approvals === 0) {
@@ -112,11 +170,11 @@ function platformRows(add, root, t, s, { solo }) {
       : ['Merge request approvals → an approval rule with 1 or more approvals (GitLab Premium; on Free an approval never blocks a merge).']));
   } else add('protected', 'ok', solo ? `${branch} is protected (solo mode: no approval needed)` : `${branch} is protected; ${p.atLeast ? 'at least ' : ''}${p.approvals} approval(s) needed before a merge`);
 
-  if (gh) githubRows(add, root, t, s, { branch, rulesPage, settings, solo });
-  else gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo, name });
+  if (gh) githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, protectSteps });
+  else gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo });
 }
 
-function githubRows(add, root, t, s, { branch, rulesPage, settings, solo }) {
+function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, protectSteps }) {
   const noClassic = 'classic branch protection is readable by a repo admin only';
   const why = [s.rules === null ? 'the branch\'s rules were not read' : s.rulesFull ? 'the branch has 100 or more rules and only the first 100 were read' : null, s.classic === null ? noClassic : null].filter(Boolean).join('; ');
 
@@ -127,14 +185,17 @@ function githubRows(add, root, t, s, { branch, rulesPage, settings, solo }) {
       if (r?.type !== 'required_status_checks') continue;
       for (const x of Array.isArray(r.parameters?.required_status_checks) ? r.parameters.required_status_checks : []) if (typeof x?.context === 'string') required.add(x.context);
     }
-    if (isObject(s.classic)) {
+    if (isPlainObject(s.classic)) {
       const rs = s.classic.required_status_checks;
       for (const x of Array.isArray(rs?.contexts) ? rs.contexts : []) if (typeof x === 'string') required.add(x);
       for (const x of Array.isArray(rs?.checks) ? rs.checks : []) if (typeof x?.context === 'string') required.add(x.context);
     }
     const missing = jobs.filter((j) => !required.has(j));
-    const steps = [`In the branch ruleset, turn on "Require status checks to pass" and add: ${missing.join(', ')}.`, 'GitHub offers a check only after it has run once: open one pull request first.'];
-    if (!missing.length) add('required-checks', 'ok', `all ${jobs.length} of yad's checks must pass before a merge`);
+    const steps = [`In the branch ruleset, turn on "Require status checks to pass" and add: ${missing.join(', ')}.`, 'GitHub offers a check only after it has run once: open one pull request first.',
+      ...(t.kind === 'product' ? protectSteps.slice(1) : [])];
+    // Who may bypass: a ruleset's bypass list is not read; classic protection says whether admins are held.
+    const adminsFree = isPlainObject(s.classic) && s.classic.enforce_admins?.enabled === false;
+    if (!missing.length) add('required-checks', 'ok', `all ${jobs.length} of yad's checks must pass before a merge (who is on a ruleset's bypass list is not read${adminsFree ? '; classic protection lets admins bypass them' : ''})`);
     else if (why) add('required-checks', 'unknown', `not seen as required: ${missing.join(', ')} (${why})`, settings(rulesPage, steps));
     else add('required-checks', 'gap', `not required before a merge: ${missing.join(', ')} — a pull request can merge with these failing`, settings(rulesPage, steps));
   }
@@ -150,24 +211,27 @@ function githubRows(add, root, t, s, { branch, rulesPage, settings, solo }) {
 
   if (!solo) {
     const stale = either(inRules(s, (r) => r?.type === 'pull_request' && r.parameters?.dismiss_stale_reviews_on_push === true),
-      inClassic(s, (cl) => (isObject(cl.required_pull_request_reviews) ? cl.required_pull_request_reviews.dismiss_stale_reviews === true : false)));
+      inClassic(s, (cl) => (isPlainObject(cl.required_pull_request_reviews) ? cl.required_pull_request_reviews.dismiss_stale_reviews === true : false)));
     const step = 'In the branch ruleset\'s pull request rule, turn on "Dismiss stale pull request approvals when new commits are pushed".';
     if (stale === true) add('stale-approvals', 'ok', 'an approval is dismissed when new commits are pushed');
     else add('stale-approvals', 'suggest', stale === false ? 'an approval stays after new commits are pushed' : `not known whether an approval is dismissed on a new push (${why})`, settings(rulesPage, [step]));
   }
 
   signedRow(add, t, either(inRules(s, (r) => r?.type === 'required_signatures'), inClassic(s, (cl) => bool(cl.required_signatures?.enabled))), {
-    url: rulesPage, settings, why, on: 'In the branch ruleset, turn on "Require signed commits".', off: 'In the branch ruleset (and classic branch protection), turn off "Require signed commits".',
+    url: rulesPage, settings, why, on: 'In the branch ruleset, turn on "Require signed commits".',
+    off: `In the branch ruleset (${rulesPage}) and in classic branch protection (${web}/settings/branches), turn off "Require signed commits".`,
   });
 }
 
 function gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo }) {
   const pr = s.project;
+  const p = s.protection;
   const unread = 'the project\'s settings were not read';
   if (t.ciRuns) {
     const v = bool(pr?.only_allow_merge_if_pipeline_succeeds);
     const step = 'Merge checks → turn on "Pipelines must succeed".';
-    if (v === true) add('required-checks', 'ok', 'a merge needs a passing pipeline, which runs all of yad\'s checks');
+    // Which jobs the pipeline runs is the `files` row's (the root .gitlab-ci.yml must include yad's).
+    if (v === true) add('required-checks', 'ok', 'a merge needs a passing pipeline (the files row says whether yad\'s jobs are in it)');
     else if (v === false) add('required-checks', 'gap', '"Pipelines must succeed" is off: a merge request can merge with yad\'s checks failing', settings(mrPage, [step]));
     else add('required-checks', 'unknown', `not known whether "Pipelines must succeed" is on (${unread})`, settings(mrPage, [step]));
     const skipped = bool(pr?.allow_merge_on_skipped_pipeline);
@@ -177,17 +241,40 @@ function gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo }) {
     else add('skipped-pipelines', 'unknown', `not known whether a skipped pipeline counts as passed (${unread})`, settings(mrPage, [skipStep]));
   }
 
-  const p = s.protection;
-  const fpStep = `Protected branches → ${branch}: turn off "Allowed to force push".`;
-  if (p.protected === false) add('force-push', 'gap', `${branch} is not protected, so a force push is allowed`, settings(rulesPage, [fpStep]));
-  else if (s.matched === null) add('force-push', 'unknown', 'not known whether a force push is allowed (the protected branches were not read)', settings(rulesPage, [fpStep]));
-  else if (s.matched.some((m) => m?.allow_force_push === true)) add('force-push', 'gap', `${branch} allows a force push: history on it can be rewritten`, settings(rulesPage, [fpStep]));
-  else if (s.matched.length && s.matched.every((m) => m?.allow_force_push === false)) add('force-push', 'ok', `force pushes to ${branch} are blocked`);
-  // Protected, with no entry in the project's list: a group-level rule, which the project's list leaves out.
-  else add('force-push', 'unknown', `not known whether a force push is allowed (${branch} is protected by a rule this project's list does not show, such as a group's)`, settings(rulesPage, [fpStep]));
+  // The project's protected-branch entries for this branch. In a person's own namespace they are the whole
+  // answer; in a group's project a group rule (not in this list) can say otherwise, so "no" proves nothing.
+  const ownNamespace = pr?.namespace?.kind === 'user';
+  const entries = s.matched;
+  const listed = entries !== null && !(s.matchedFull && !entries.length);
+  const groupWhy = ownNamespace ? null : 'a group\'s protected-branch rule, which this project\'s list does not show, can allow it';
+  const protectFirst = `Protected branches → protect ${branch}`;
 
-  if (p.protected === true) add('deletion', 'ok', `${branch} is protected, so it cannot be deleted`);
-  else add('deletion', 'gap', `${branch} is not protected, so it can be deleted`, settings(rulesPage, [`Protected branches → protect ${branch}.`]));
+  // Force push: allowed when any matching rule allows it; blocked only when every rule is read and blocks it.
+  const fpStep = p.protected === false ? `${protectFirst}, with "Allowed to force push" off.` : `Protected branches → ${branch}: turn off "Allowed to force push".`;
+  if (p.protected === false) add('force-push', 'gap', `${branch} is not protected, so a force push is allowed`, settings(rulesPage, [fpStep]));
+  else if (!listed) add('force-push', 'unknown', 'not known whether a force push is allowed (the protected branches were not read)', settings(rulesPage, [fpStep]));
+  else if (entries.some((m) => m?.allow_force_push === true)) add('force-push', 'gap', `${branch} allows a force push: history on it can be rewritten`, settings(rulesPage, [fpStep]));
+  else if (entries.length && entries.every((m) => m?.allow_force_push === false) && ownNamespace) add('force-push', 'ok', `force pushes to ${branch} are blocked`);
+  else add('force-push', 'unknown', `not known whether a force push is allowed (${entries.length ? groupWhy : `${branch} is protected by a rule this project's list does not show, such as a group's`})`, settings(rulesPage, [fpStep]));
+
+  // Direct push: a protected branch still lets "Allowed to push and merge" push past every merge check. The
+  // most permissive matching rule wins. A verified Product's gate token must push there, so it is not asked.
+  if (!(t.kind === 'product' && t.ciRuns)) {
+    const pushStep = p.protected === false ? `${protectFirst}, with "Allowed to push and merge" No one.` : `Protected branches → ${branch}: set "Allowed to push and merge" to No one.`;
+    const levels = listed ? entries.flatMap((m) => (Array.isArray(m?.push_access_levels) ? m.push_access_levels : [])) : [];
+    const someone = levels.some((l) => (typeof l?.access_level === 'number' && l.access_level > 0) || l?.user_id || l?.group_id || l?.deploy_key_id);
+    const noOne = listed && entries.length && entries.every((m) => Array.isArray(m?.push_access_levels) && m.push_access_levels.length && m.push_access_levels.every((l) => l?.access_level === 0 && !l.user_id && !l.group_id && !l.deploy_key_id));
+    const status = solo ? 'suggest' : 'gap';
+    if (p.protected === false) add('direct-push', status, `${branch} is not protected: anyone with write access can push to it, past every merge check`, settings(rulesPage, [pushStep]));
+    else if (someone) add('direct-push', status, `"Allowed to push and merge" on ${branch} lets someone push straight to it, past every merge check`, settings(rulesPage, [pushStep]));
+    else if (noOne && ownNamespace) add('direct-push', 'ok', `no one can push straight to ${branch}: every change comes through a merge request`);
+    else add('direct-push', 'unknown', `not known who can push straight to ${branch} (${!listed ? 'the protected branches were not read' : entries.length ? groupWhy : 'it is protected by a rule this project\'s list does not show, such as a group\'s'})`, settings(rulesPage, [pushStep]));
+  }
+
+  // GitLab never deletes a project's default branch; a protected branch is deleted only by a Maintainer, by hand.
+  if (p.platformDefault && p.branch === p.platformDefault) add('deletion', 'ok', `${branch} is the project's default branch, which GitLab does not let anyone delete`);
+  else if (p.protected === true) add('deletion', 'ok', `${branch} is protected: only a Maintainer can delete it, by hand in GitLab`);
+  else add('deletion', 'gap', `${branch} is not protected, so it can be deleted`, settings(rulesPage, [`${protectFirst}.`]));
 
   if (!solo) {
     const reset = bool(s.approvals?.reset_approvals_on_push);
@@ -256,10 +343,11 @@ export function ciCheck(root, { repo = null, runner, env } = {}) {
   const opts = { ...(runner ? { runner } : {}), ...(env ? { env } : {}), authCache: new Map() };
   const repos = picked.targets.map((t) => {
     const findings = [];
+    const notes = [];
     const add = (id, status, message, fix = null) => findings.push({ id, status, message, ...(fix ? { fix } : {}) });
     filesRow(add, root, t);
-    platformRows(add, root, t, readCiSettings(t.target, opts), { solo });
-    return { name: t.name, kind: t.kind, findings };
+    platformRows(add, root, t, readCiSettings(t.target, opts), { solo, note: (n) => notes.push(n) });
+    return { name: t.name, kind: t.kind, findings, ...(notes.length ? { notes } : {}) };
   });
   const all = repos.flatMap((r) => r.findings);
   const count = (st) => all.filter((f) => f.status === st).length;
@@ -280,6 +368,7 @@ export function runCiCheck(root, { repo = null, json = false, runner, env } = {}
         for (const cmd of f.fix?.commands || []) hand(cmd);
         for (const s of f.fix?.steps || []) log(c.dim(`    ${s}`));
       }
+      for (const n of repoResult.notes || []) info(n);
     }
     const { gaps, unknown } = r.summary;
     log('');

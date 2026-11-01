@@ -30,13 +30,13 @@ const { classify, readAllowList } = await import('./agent-rules.mjs');
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-ci-')));
 const put = (file, data) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data)); };
-const isCi = (item) => /^(\.github\/workflows\/|\.gitlab\/ci\/|checks\/)/.test(item);
+const isCi = (item) => /^(\.github\/workflows\/|\.gitlab\/ci\/|checks\/)/.test(item) || item === '.sdlc/product-link.json';
 const GIT_ENV = { GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
 const ON = { ...process.env, YAD_PLATFORM_READ: '' };
 
 // A workspace: the Product and one code repo beside it, each a git repo; yad's CI files written as yad
 // writes them (unless `wire` is false).
-function workspace({ platform = 'github', product = {}, repos, wire = true, clone = true } = {}) {
+function workspace({ platform = 'github', product = {}, repos, wire = true, clone = true, include = true } = {}) {
   const T = tmp();
   const root = path.join(T, 'product');
   fs.mkdirSync(root);
@@ -49,6 +49,13 @@ function workspace({ platform = 'github', product = {}, repos, wire = true, clon
   if (wire) {
     for (const a of productActions(root)) if (isCi(a.item) && a.status !== 'ok') a.apply();
     if (clone) for (const r of list) for (const a of repoActions(root, r)) if (isCi(a.item) && a.status !== 'ok') a.apply();
+    // GitLab runs a fragment only when the root pipeline includes it.
+    if (platform === 'gitlab' && include) {
+      for (const dir of [root, ...(clone ? list.map((r) => path.resolve(root, r.path)) : [])]) {
+        const frags = fs.existsSync(path.join(dir, '.gitlab/ci')) ? fs.readdirSync(path.join(dir, '.gitlab/ci')).map((f) => `.gitlab/ci/${f}`) : [];
+        put(path.join(dir, '.gitlab-ci.yml'), `# yad\ninclude:\n${frags.map((f) => `  - local: '${f}'\n`).join('')}`);
+      }
+    }
   }
   return { T, root };
 }
@@ -165,12 +172,14 @@ test('E160b case 4: force push or deletion allowed is a gap; a full page of rule
 });
 
 // GitLab, for one project: the project and its settings, the branch, protected branches, approvals, push rule.
-function gl(repo, { project = {}, prot = true, protectedBranches = [{ name: 'main', allow_force_push: false }], approvals = [200, { reset_approvals_on_push: true }], pushRule = [404, { message: '404 Not found' }] } = {}) {
+// The project is in a person's own namespace unless `project.namespace` says a group's.
+const NO_ONE = { name: 'main', allow_force_push: false, push_access_levels: [{ access_level: 0 }] };
+function gl(repo, { project = {}, prot = true, protectedBranches = [NO_ONE], branchesFail = null, approvals = [200, { reset_approvals_on_push: true }], pushRule = [404, { message: '404 Not found' }] } = {}) {
   const at = `projects/acme%2F${repo}`;
   return [
-    [new RegExp(`^${at}$`), 200, { default_branch: 'main', only_allow_merge_if_pipeline_succeeds: true, allow_merge_on_skipped_pipeline: false, only_allow_merge_if_all_discussions_are_resolved: true, ...project }],
+    [new RegExp(`^${at}$`), 200, { default_branch: 'main', namespace: { kind: 'user' }, only_allow_merge_if_pipeline_succeeds: true, allow_merge_on_skipped_pipeline: false, only_allow_merge_if_all_discussions_are_resolved: true, ...project }],
     [new RegExp(`^${at}/repository/branches/main$`), 200, { protected: prot }],
-    [new RegExp(`^${at}/protected_branches`), 200, protectedBranches],
+    [new RegExp(`^${at}/protected_branches`), ...(branchesFail ?? [200, protectedBranches])],
     [new RegExp(`^${at}/approval_rules`), 200, [{ name: 'All', rule_type: 'any_approver', approvals_required: 1, protected_branches: [] }]],
     [new RegExp(`^${at}/approvals$`), ...approvals],
     [new RegExp(`^${at}/push_rule$`), ...pushRule],
@@ -184,7 +193,7 @@ test('E160b case 5: GitLab — pipelines must succeed, skipped pipelines, thread
     for (const repo of good.repos) for (const f of repo.findings) assert.equal(f.status, 'ok', `${repo.name} ${f.id}: ${f.message}`);
     const { r } = check(w, [...gl('p'), ...gl('app', {
       project: { only_allow_merge_if_pipeline_succeeds: false, allow_merge_on_skipped_pipeline: true, only_allow_merge_if_all_discussions_are_resolved: false },
-      protectedBranches: [{ name: 'main', allow_force_push: true }], approvals: [403, { message: '403 Forbidden' }],
+      protectedBranches: [{ ...NO_ONE, allow_force_push: true }], approvals: [403, { message: '403 Forbidden' }],
     })]);
     const row = byId(r, 'app');
     assert.equal(row['required-checks'].status, 'gap');
@@ -198,10 +207,20 @@ test('E160b case 5: GitLab — pipelines must succeed, skipped pipelines, thread
     // Protected by a group's rule, which the project's list leaves out: not known.
     const group = check(w, [...gl('p'), ...gl('app', { protectedBranches: [] })]).r;
     assert.equal(byId(group, 'app')['force-push'].status, 'unknown');
-    // Not protected: force push and deletion are both gaps.
+    // A group's project: its own entry saying "no" proves nothing, since a group's rule wins over it.
+    const inGroup = byId(check(w, [...gl('p'), ...gl('app', { project: { namespace: { kind: 'group' } } })]).r, 'app');
+    assert.equal(inGroup['force-push'].status, 'unknown');
+    assert.match(inGroup['force-push'].message, /group's protected-branch rule/);
+    assert.equal(inGroup['direct-push'].status, 'unknown');
+    // The protected branches could not be read.
+    assert.equal(byId(check(w, [...gl('p'), ...gl('app', { branchesFail: [500, { message: '500' }] })]).r, 'app')['force-push'].status, 'unknown');
+    // Not protected: force push and direct push are gaps; the default branch still cannot be deleted.
     const bare = check(w, [...gl('p'), ...gl('app', { prot: false, protectedBranches: [] })]).r;
     assert.equal(byId(bare, 'app')['force-push'].status, 'gap');
-    assert.equal(byId(bare, 'app').deletion.status, 'gap');
+    assert.match(byId(bare, 'app')['force-push'].fix.steps[0], /protect main/);
+    assert.equal(byId(bare, 'app')['direct-push'].status, 'gap');
+    assert.equal(byId(bare, 'app').deletion.status, 'ok');
+    assert.match(byId(bare, 'app').deletion.message, /default branch/);
   } finally { done(w); }
 });
 
@@ -215,11 +234,16 @@ test('E160b case 6: no login, no CLI, reads off, or no platform — the platform
       assert.equal(row.files.status, 'ok', `${why}: the files are read from disk`);
       assert.equal(r.summary.complete, false, why);
     }
-    const none = workspace({ product: { platform: null }, repos: [{ name: 'app', path: '../app', git_url: 'git@github.com:acme/app.git' }] });
+    // Read nothing: every row the repo would have is unknown, the suggestions too.
+    const off = byId(check(w, allSet(), { env: { ...ON, YAD_PLATFORM_READ: '0' } }).r, 'Product');
+    for (const id of ['protected', 'required-checks', 'force-push', 'deletion', 'stale-approvals', 'signed-commits']) assert.equal(off[id].status, 'unknown', id);
+    // No platform at all: nothing to protect, so no platform rows — a note says why.
+    const none = workspace({ product: { platform: null, git_url: null }, repos: [] });
     try {
       const { r } = check(none, []);
-      assert.equal(byId(r, 'Product').protected.status, 'unknown');
-      assert.equal(byId(r, 'Product').files.status, 'ok', 'a Product with no platform keeps its ledger locally');
+      assert.deepEqual(Object.keys(byId(r, 'Product')), ['files']);
+      assert.match(r.repos[0].notes[0], /no platform/);
+      assert.equal(r.summary.complete, true);
     } finally { done(none); }
   } finally { done(w); }
 });
@@ -342,5 +366,64 @@ test('E160b case 12: `ci check` is a read the agent runs without asking; solo mo
     // Classic protection not readable: zero approvals cannot be proven, so it is not known.
     const hidden = [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: [PR_RULE(0)], classic: [404, { message: 'Not Found' }] })];
     assert.equal(byId(check(w, hidden).r, 'app').protected.status, 'unknown');
+  } finally { done(w); }
+});
+
+test('E160b round 1: a protection GitHub\'s answers disagree about is not known; the bot\'s steps on a verified Product', () => {
+  const w = workspace();
+  try {
+    // The branch flag says "not protected" while GitHub lists an active rule on it.
+    const odd = byId(check(w, [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: [{ type: 'deletion' }], prot: false })]).r, 'app');
+    assert.equal(odd.protected.status, 'unknown');
+    // The Product's checks: the steps say to put the gate token's owner on the bypass list.
+    const product = byId(check(w, [...gh('p', { rules: [PR_RULE(), { type: 'non_fast_forward' }, { type: 'deletion' }] }), ...gh('app', { rules: ALL_RULES(REQUIRED_CHECKS.github.code) })]).r, 'Product');
+    assert.equal(product['required-checks'].status, 'gap');
+    assert.match(product['required-checks'].fix.steps.join(' '), /bypass list/);
+    // Turning "Require signed commits" off names the classic protection page too.
+    const signed = byId(check(w, [...gh('p', { rules: [...ALL_RULES(productJobs), { type: 'required_signatures' }] }), ...gh('app', { rules: ALL_RULES(REQUIRED_CHECKS.github.code) })]).r, 'Product');
+    assert.match(signed['signed-commits'].fix.steps[0], /settings\/branches/);
+    // Classic protection that lets admins bypass: the ok says so.
+    const admins = byId(check(w, [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: [PR_RULE()], classic: [200, { required_status_checks: { contexts: REQUIRED_CHECKS.github.code }, allow_force_pushes: { enabled: false }, allow_deletions: { enabled: false }, enforce_admins: { enabled: false } }] })]).r, 'app');
+    assert.equal(admins['required-checks'].status, 'ok');
+    assert.match(admins['required-checks'].message, /admins bypass/);
+  } finally { done(w); }
+});
+
+test('E160b round 1: GitLab — yad\'s jobs must be in the root pipeline; direct push; the gate token on a verified Product', () => {
+  const w = workspace({ platform: 'gitlab', include: false });
+  try {
+    const calls = [...gl('p'), ...gl('app')];
+    const files = byId(check(w, calls).r, 'app').files;
+    assert.equal(files.status, 'gap', 'no root .gitlab-ci.yml: no yad job runs');
+    assert.match(files.message, /no root \.gitlab-ci\.yml/);
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  # - local: '.gitlab/ci/yad-checks.yml'\n  - local: '.gitlab/ci/yad-update-guard.yml'\n");
+    const partial = byId(check(w, calls).r, 'app').files;
+    assert.equal(partial.status, 'gap', 'a commented-out include does not count');
+    assert.match(partial.message, /does not include \.gitlab\/ci\/yad-checks\.yml/);
+    assert.match(partial.fix.steps[0], /- local: '\.gitlab\/ci\/yad-checks\.yml'/);
+    // Maintainers may push straight to main: a gap on a code repo (a suggestion in solo mode).
+    const push = byId(check(w, [...gl('p'), ...gl('app', { protectedBranches: [{ ...NO_ONE, push_access_levels: [{ access_level: 40 }] }] })]).r, 'app')['direct-push'];
+    assert.equal(push.status, 'gap');
+    assert.match(push.fix.steps[0], /No one/);
+    // A verified Product: its gate token must push, so direct push is not asked, and the protect step says so.
+    const product = byId(check(w, [...gl('p', { prot: false, protectedBranches: [] }), ...gl('app')]).r, 'Product');
+    assert.equal(product['direct-push'], undefined);
+    assert.match(product.protected.fix.steps[0], /gate token \(SDLC_GATE_TOKEN\)/);
+  } finally { done(w); }
+});
+
+test('E160b round 1: a refused registry entry says why; a gap exits 1 under --json', () => {
+  const w = workspace({ repos: [{ name: 'far', path: '../../far', platform: 'github', git_url: 'git@github.com:acme/far.git' }], clone: false });
+  try {
+    const far = byId(check(w, []).r, 'far').files;
+    assert.equal(far.status, 'unknown');
+    assert.match(far.message, /outside the workspace/);
+    assert.equal(far.fix, undefined, 'no clone command for an entry yad refuses');
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'ci', 'check', '--json'], { cwd: w.root, env: { ...process.env, NO_COLOR: '1', YAD_PLATFORM_READ: '0' }, encoding: 'utf8' });
+    fs.rmSync(path.join(w.root, '.github'), { recursive: true, force: true });
+    const gap = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'ci', 'check', '--json'], { cwd: w.root, env: { ...process.env, NO_COLOR: '1', YAD_PLATFORM_READ: '0' }, encoding: 'utf8' });
+    assert.equal(r.status, 0, 'unknown rows alone do not fail the run');
+    assert.equal(gap.status, 1, 'a missing file is a gap');
+    assert.equal(JSON.parse(gap.stdout).ok, false);
   } finally { done(w); }
 });

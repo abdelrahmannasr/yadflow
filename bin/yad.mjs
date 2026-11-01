@@ -64,11 +64,12 @@ ${c.bold('Setup & maintenance')}
                        Will your commits be signed and marked Verified? Reads this folder's git
                        config, the key it names, and your account on the Product's platform (the
                        key listed for signing, a verified email). Read-only; exit 1 on a gap (E160)
-  yad ci check [--repo <name> | --all] [--json]
+  yad ci check [--repo <name> | --all] [--json] [--dir <Product>]
                        Will yad's checks hold a merge? For the Product and each registered repo
-                       (from inside one repo: that repo): yad's CI files, the default branch's
-                       protection, the checks required before a merge, force pushes, deletion.
-                       Read-only; each gap names the settings page; exit 1 on a gap (E160)
+                       (from inside one repo: that repo; --repo picks one code repo, --all every
+                       one — not both): yad's CI files, the default branch's protection, the
+                       checks required before a merge, force pushes, deletion. Read-only; each
+                       gap names the settings page or the yad command; exit 1 on a gap (E160)
   yad migrate [--apply] [--keep product|hub] [--json]   Move this project's state files onto the shape
                        this yadflow expects. Prints what WOULD change and writes
                        nothing until --apply, which copies each file it rewrites to
@@ -863,7 +864,7 @@ async function main() {
       const usage = 'usage: yad ci check [--repo <name> | --all] [--json] [--dir <folder>]';
       if (action !== 'check' || extra) { refuse(`unknown ci action: ${[action, extra].filter(Boolean).join(' ')}`, usage); break; }
       if (o.repo !== undefined && o.all) { refuse('--repo and --all name different repos: pass one of them', usage); break; }
-      if (!commands.hasProduct(o.dir)) { refuse(`no Product here (${o.dir}) — yad ci check reads the repos a Product registers`, 'run it from the Product, from inside a repo it registers, or pass --dir <the Product>'); break; }
+      if (!commands.hasProduct(o.dir)) { refuse(`no Product here (${o.dir}) — yad ci check reads the repos a Product registers`, 'run it from the Product, from inside a repo it registers, or pass --dir <the Product> (with --repo <name> for one repo)'); break; }
       result = commands.runCiCheck(o.dir, { repo: o.all ? null : o.repo ?? null, json: o.json });
       if (result?.unknownRepo !== undefined) {
         const names = result.names.map(forTerminal);
