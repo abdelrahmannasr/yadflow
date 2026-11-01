@@ -195,7 +195,7 @@ function filesRow(add, root, t, s) {
         actor: 'agent',
         steps: [inc.noRoot
           ? `Create ${file}, through a pull request, with a top-level \`include:\` key and these lines under it, each indented two spaces:`
-          : `In ${file}, through a pull request: under its top-level \`include:\` (add the key if there is none), add these lines as list items, at the same indent as any items already there. If \`include:\` holds one include that is not a list yet, first turn it into one list item of the same kind: a single value on the key's line becomes \`- '<that value>'\` on its own line; a map with no dash (\`local:\`, \`remote:\`, \`template:\`, \`project:\`…) gets \`- \` before its first key, with its other keys indented to match.`,
+          : `In ${file}, through a pull request: under its top-level \`include:\` (add the key if there is none), add these lines as list items, at the same indent as any items already there. If \`include:\` is not a list yet, first make it one without changing what it includes: move its value, exactly as written (quotes and braces too), to the first list item — a value on the key's own line goes on the next line after \`- \` (\`include: 'a.yml'\` becomes \`include:\` then \`  - 'a.yml'\`); a map spread over several lines gets \`- \` before its first line, and every other line of it moves two more spaces in.`,
           ...inc.missing.map((f) => `- local: '${forTerminal(f)}'`),
           'If it is included another way (a nested or remote include), yad cannot see it: check the pipeline of a merge request runs yad\'s jobs.'],
       });
