@@ -47,10 +47,10 @@ const keyText = (s) => {
 // a stub, whose secret is elsewhere; a card's serial number when the secret is on a smartcard). A primary that
 // cannot be used makes its subkeys unusable too. With `live`, every key and subkey that is not expired,
 // revoked, disabled or invalid (a platform's copy of a key, which signs nothing here). `keys` counts the
-// primary keys (`sec`/`pub`) with a part that can sign now; `listed` counts every one; `card` is true when a
-// part that signs is on a smartcard (gpg signs with the newest signing subkey, which may be that one).
-// `parts` holds each part taken, as a Set of its id and fingerprint, with `sub` (a subkey) and `created`
-// (field 6): gpg signs with ONE of them.
+// primary keys (`sec`/`pub`) with a part that can sign now; `listed` counts every one.
+// `parts` holds each part taken, as a Set of its id and fingerprint, with `sub` (a subkey), `created`
+// (field 6), `primary` (which key it belongs to, counted in listing order) and `card` (its secret is on a
+// smartcard): gpg signs with ONE of them.
 export function gpgIds(colons, { signing = false, live = false } = {}) {
   const ids = new Set();
   const parts = [];
@@ -58,7 +58,6 @@ export function gpgIds(colons, { signing = false, live = false } = {}) {
   let listed = 0;
   let primary = null;
   let primaryDead = false;
-  let onCard = 0;
   let take = false;
   for (const line of String(colons || '').split('\n')) {
     const f = line.split(':');
@@ -68,14 +67,14 @@ export function gpgIds(colons, { signing = false, live = false } = {}) {
       if (f[0] === 'sec' || f[0] === 'pub') { primary = ++listed; primaryDead = dead; }
       // A subkey before any primary belongs to no key: skipped.
       const signs = primary !== null && !dead && !primaryDead && (f[11] || '').includes('s') && f[14] !== '#';
-      if (signs) { signers.add(primary); if (f[14] && f[14] !== '+') onCard++; }
+      if (signs) signers.add(primary);
       take = primary !== null && (signing ? signs : !live || (!dead && !primaryDead));
-      if (take) parts.push(Object.assign(new Set(), { sub: f[0] === 'ssb' || f[0] === 'sub', created: Number(f[5]) || 0 }));
+      if (take) parts.push(Object.assign(new Set(), { sub: f[0] === 'ssb' || f[0] === 'sub', created: Number(f[5]) || 0, primary, card: signs && !!f[14] && f[14] !== '+' }));
       // (Field 6 is seconds today; GnuPG may switch it to an ISO date, read as 0: then the first subkey wins.)
       if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) { ids.add(f[4].toUpperCase()); parts.at(-1).add(f[4].toUpperCase()); }
     } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) { ids.add(f[9].toUpperCase()); parts.at(-1).add(f[9].toUpperCase()); }
   }
-  return Object.assign(ids, { keys: signers.size, listed, card: onCard > 0, parts: parts.filter((x) => x.size) });
+  return Object.assign(ids, { keys: signers.size, listed, parts: parts.filter((x) => x.size) });
 }
 // A long key id matches its fingerprint's last 16 digits.
 const sameKey = (a, b) => a === b || (a.length === 40 && a.endsWith(b)) || (b.length === 40 && b.endsWith(a));
@@ -148,8 +147,8 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
     else if (!target) add('key', 'gap', 'no key is named (user.signingkey is not set) and there is no email to find one by', { steps: gpgSteps });
     else {
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
-      const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, card: false });
-      const { keys, listed, card } = ids;
+      const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, parts: [] });
+      const { keys, listed } = ids;
       // The part gpg signs with (GnuPG's finish_lookup): the one a key id ending in `!` names, and no other;
       // else the newest signing subkey (the first listed, on a tie); the primary only when no subkey signs.
       const bang = String(signingkey || '').endsWith('!');
@@ -157,12 +156,21 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
       const all = ids.parts || [];
       const subs = all.filter((part) => part.sub);
       const newest = Math.max(0, ...subs.map((part) => part.created));
-      const parts = pinned ? all.filter((part) => [...part].some((id) => id.endsWith(pinned[1].toUpperCase())))
+      const pin = pinned?.[1].toUpperCase();
+      // A short id is the end of the long id and of the fingerprint; a fingerprint ends with the long id.
+      const parts = pinned ? all.filter((part) => [...part].some((id) => id.endsWith(pin) || (pin.length === 40 && pin.endsWith(id))))
         : subs.length ? [subs.find((part) => part.created === newest)] : all;
       if (bang && !pinned && ids.size) add('key', 'unknown', `user.signingkey (${forTerminal(signingkey)}) ends in "!" but is not a key id, so yad cannot tell which part gpg signs with`);
-      else if (pinned && !parts.length && listed) add('key', 'gap', `the part user.signingkey names (${forTerminal(signingkey)}) cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine): gpg signs with that part only`, { steps: ['List the parts: gpg --list-secret-keys --keyid-format=long (the "ssb" lines with [S] are subkeys that sign)', 'Name one that signs: git config --global user.signingkey <its id>! (or drop the "!" to let gpg pick)'] });
-      else if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
-      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign; a part of it is on a smartcard, so gpg may need the card inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: parts, all: r.ok ? gpgIds(r.stdout) : ids }; }
+      else if (pinned && !parts.length) add('key', 'gap', `the part user.signingkey names (${forTerminal(signingkey)}) cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine): gpg signs with that part only`, { steps: ['List the parts: gpg --list-secret-keys --keyid-format=long (the "ssb" lines with [S] are subkeys that sign)', 'Name one that signs: git config --global user.signingkey <its id>! (or drop the "!" to let gpg pick)'] });
+      // A pin to one part settles which key, even when the email finds several.
+      else if (keys > 1 && !(pinned && parts.length === 1)) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
+      else if (ids.size) {
+        add('key', 'ok', parts.some((part) => part.card) ? `the GPG key ${forTerminal(target)} can sign; the part gpg signs with is on a smartcard, so the card must be inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`);
+        // Every id of the key gpg signs with (dead parts too), for the "not the part" message: never another
+        // key that only shares the email.
+        const owners = new Set(parts.map((part) => part.primary));
+        localKey = { gpg: parts, all: new Set(gpgIds(r.stdout).parts.filter((part) => owners.has(part.primary)).flatMap((part) => [...part])) };
+      }
       else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine)`, { steps: gpgSteps });
       else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
     }
@@ -272,7 +280,7 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
       const has = (set) => (part) => [...part].some((a) => [...set].some((b) => sameKey(a, b)));
       const parts = localKey.gpg;
       const reupload = { url: keysPage, steps: ['Export it again: gpg --armor --export <your key id>', `Open ${keysPage} → remove the old copy → New GPG key → paste it.`, 'Then run `yad signing check` again.'] };
-      if (parts.every(has(live))) add('platform-key', 'ok', `${name} lists your GPG key`);
+      if (parts.length && parts.every(has(live))) add('platform-key', 'ok', `${name} lists your GPG key`);
       else if (parts.some((p) => has(remote)(p) && !has(live)(p) && !has(unclear)(p))) add('platform-key', 'gap', `${name} lists your GPG key, but its copy there has expired, was revoked or is not valid: new commits show as Unverified`, reupload);
       else if (parts.some(has(unclear))) add('platform-key', 'unknown', `${name} lists your GPG key with an expiry date yad cannot read`);
       else if (has(remote)(localKey.all)) add('platform-key', 'gap', `${name} lists your GPG key, but not the part gpg signs with (a subkey added after the upload?)`, reupload);

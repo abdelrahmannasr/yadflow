@@ -345,10 +345,10 @@ test('E160 review 3: an offline primary, a stub or a smartcard through the whole
     assert.deepEqual([...gpgIds('ssb:u:255:22:5555666677778888:1::::::s:::+:', { signing: true })], []);
     const card = key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:');
     assert.equal(card.status, 'ok');
-    assert.match(card.message, /smartcard, so gpg may need the card inserted/);
-    // Any signing part on a card: gpg may pick it (the newest signing subkey), so the card is named.
+    assert.match(card.message, /on a smartcard, so the card must be inserted/);
+    // The card is named only when the part gpg signs with (the newest signing subkey) is on it.
     assert.match(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::+:\nssb:u:255:22:5555666677778888:1::::::s:::D2760001240100000006:').message, /smartcard/);
-    assert.match(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:\nssb:u:255:22:5555666677778888:1::::::s:::+:').message, /smartcard/);
+    assert.doesNotMatch(key('sec:u:255:22:AAAABBBBCCCCDDDD:1::::::scSC:::D2760001240100000006:\nssb:u:255:22:5555666677778888:1::::::s:::+:').message, /smartcard/);
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
 
@@ -443,7 +443,7 @@ test('E160 review 7: a pinned part that cannot sign is a gap; one subkey wins a 
     assert.equal(r.key.status, 'gap');
     assert.match(r.key.message, /gpg signs with that part only/);
     assert.equal(r['platform-key'].status, 'unknown', 'no key to match');
-    cfg('6677778888!'.slice(2)); // an 8-digit short id, pinned
+    cfg('77778888!'); // an 8-digit short id, pinned
     assert.equal(rows(expiredSub).key.status, 'gap', 'a short id with "!"');
     // A pinned primary that only certifies.
     cfg('AAAABBBBCCCCDDDD!');
@@ -463,5 +463,36 @@ test('E160 review 7: a pinned part that cannot sign is a gap; one subkey wins a 
     // GitHub: a dead primary takes a live subkey with it; a copy unclear here and dead there is unknown.
     assert.equal(rows(fresh, { key_id: 'AAAABBBBCCCCDDDD', revoked: true, subkeys: [{ key_id: '5555666677778888' }] })['platform-key'].status, 'gap');
     assert.equal(byId(check(s, { gitRun: on(fresh), haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [{ key_id: 'AAAABBBBCCCCDDDD', expires_at: 'soon', subkeys: [{ key_id: '5555666677778888' }] }, { key_id: 'AAAABBBBCCCCDDDD', revoked: true, subkeys: [{ key_id: '5555666677778888' }] }]], ...emails } }).runner }))['platform-key'].status, 'unknown');
+  } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
+});
+
+test('E160 review 8: a pin by short id, fingerprint or 0x picks that part; another key with the same email is not "the part"', () => {
+  const s = setup({ config: { 'commit.gpgsign': 'true', 'user.email': 'me@example.com' }, product: GH });
+  const cfg = (v) => execFileSync('git', ['config', 'user.signingkey', v], { cwd: s.dir, env: s.env });
+  try {
+    const on = (out) => (c, a, o = {}) => (c === 'gpg' ? { ok: true, stdout: out } : run(c, a, { ...o, env: s.env }));
+    const emails = { '^user/emails': [200, [{ email: 'me@example.com', verified: true }]] };
+    const rows = (out, copy) => byId(check(s, { gitRun: on(out), haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [copy]], ...emails } }).runner }));
+    // Two signing subkeys; the account has only the OLDER one. Unpinned, gpg signs with the newer: a gap.
+    const key = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::cSC:::+:\nssb:u:255:22:1111222233334444:200::::::s:::+:\nfpr:::::::::0123456789ABCDEF012345671111222233334444:\nssb:u:255:22:5555666677778888:300::::::s:::+:';
+    const older = { key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '1111222233334444' }] };
+    cfg('AAAABBBBCCCCDDDD');
+    assert.equal(rows(key, older)['platform-key'].status, 'gap');
+    // Pinned to the older one, by short id, long id with 0x, or fingerprint: ok.
+    for (const pin of ['33334444!', '0x1111222233334444!', '0123456789ABCDEF012345671111222233334444!']) {
+      cfg(pin);
+      const r = rows(key, older);
+      assert.equal(r.key.status, 'ok', pin);
+      assert.equal(r['platform-key'].status, 'ok', pin);
+    }
+    // A fingerprint pin on a part listed with no fingerprint line (older gpg): the long id still matches.
+    cfg('0123456789ABCDEF012345675555666677778888!');
+    assert.equal(rows(key, older).key.status, 'ok');
+    // By email: key A signs; an old expired key B has the same email. The account has only B: "does not list".
+    execFileSync('git', ['config', '--unset', 'user.signingkey'], { cwd: s.dir, env: s.env });
+    const twoKeys = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::scSC:::+:\nsec:e:255:22:9999000011112222:50::::::scSC:::+:';
+    const r = rows(twoKeys, { key_id: '9999000011112222' })['platform-key'];
+    assert.equal(r.status, 'gap');
+    assert.match(r.message, /does not list your GPG key/);
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
