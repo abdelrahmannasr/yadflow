@@ -401,7 +401,7 @@ test('E160b round 1: GitLab — yad\'s jobs must be in the root pipeline; direct
     assert.equal(partial.status, 'gap', 'a commented-out include does not count');
     assert.match(partial.message, /does not include \.gitlab\/ci\/yad-checks\.yml/);
     assert.match(partial.fix.steps[0], /under its top-level `include:` list/);
-    assert.ok(partial.fix.steps.includes("  - local: '.gitlab/ci/yad-checks.yml'"));
+    assert.ok(partial.fix.steps.some((x) => x.startsWith("- local: '.gitlab/ci/yad-checks.yml'")));
     // Maintainers may push straight to main: a gap on a code repo (a suggestion in solo mode).
     const push = byId(check(w, [...gl('p'), ...gl('app', { protectedBranches: [{ ...NO_ONE, push_access_levels: [{ access_level: 40 }] }] })]).r, 'app')['direct-push'];
     assert.equal(push.status, 'gap');
@@ -451,7 +451,7 @@ test('E160b round 2: GitLab — an entry with no platform, a custom CI file, a f
     put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  - local: '.gitlab/ci/yad-update-guard.yml'\nstages: [test] # .gitlab/ci/yad-checks.yml\n");
     const trailing = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
     assert.equal(trailing.status, 'gap');
-    assert.ok(trailing.fix.steps.includes("  - local: '.gitlab/ci/yad-checks.yml'"));
+    assert.ok(trailing.fix.steps.some((x) => x.startsWith("- local: '.gitlab/ci/yad-checks.yml'")));
     // 100 protected branches: page one says "No one" and no force push, but page two could say otherwise.
     const many = [NO_ONE, ...Array.from({ length: 99 }, (_, i) => ({ name: `rel-${i}`, allow_force_push: false, push_access_levels: [{ access_level: 0 }] }))];
     const full = byId(check(w, [...gl('p'), ...gl('app', { protectedBranches: many })]).r, 'app');
@@ -514,13 +514,59 @@ test('E160b round 4: only the top-level include counts — not a child pipeline,
       ['a child pipeline', `${guard}yad-child:\n  trigger:\n    include:\n      - local: .gitlab/ci/yad-checks.yml\n`],
       ['rules: changes', `${guard}job:\n  rules:\n    - changes:\n      - .gitlab/ci/yad-checks.yml\n`],
       ['another project\'s file', `${guard}  - project: other/x\n    file:\n      - .gitlab/ci/yad-checks.yml\n`],
+      ['another project, with a local: key too', `${guard}  - project: other/x\n    local: .gitlab/ci/yad-checks.yml\n`],
+      ['-local: with no space (a key named -local)', `${guard}  -local: .gitlab/ci/yad-checks.yml\n`],
       ['a text block', `${guard}job:\n  script:\n    - |\n      .gitlab/ci/yad-checks.yml\n`],
     ]) assert.equal(file(text).status, 'gap', why);
     // Included only under its own rules: whether it runs is not known.
     const gated = file(`${guard}  - local: .gitlab/ci/yad-checks.yml\n    rules:\n      - if: $CI_PIPELINE_SOURCE == "push"\n`);
     assert.equal(gated.status, 'unknown');
     assert.match(gated.message, /only under its own `rules:`/);
-    // A list at the key's own column, and a map form.
+    // A list at the key's own column.
     assert.equal(file("include:\n- local: .gitlab/ci/yad-update-guard.yml\n- .gitlab/ci/yad-checks.yml\nstages: [test]\n").status, 'ok');
+    // Two top-level include keys: GitLab keeps only the last, so it is not known.
+    const twice = file("include:\n  - local: .gitlab/ci/yad-checks.yml\n  - local: .gitlab/ci/yad-update-guard.yml\nstages: [a]\ninclude:\n  - local: other.yml\n");
+    assert.equal(twice.status, 'unknown');
+    assert.match(twice.message, /two top-level `include:` keys/);
+  } finally { done(w); }
+});
+
+test('E160b round 5: the map form of include; the admin note only when classic protection is the block; a verified Product with no platform at all', () => {
+  const w = workspace({ platform: 'gitlab', repos: [{ name: 'app', path: '../app', platform: 'gitlab', git_url: 'git@gitlab.com:acme/app.git', default_branch: 'main' }] });
+  try {
+    // yad's code repo has two fragments; the map form takes one `local:`, so name the other in a list item first.
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  local: .gitlab/ci/yad-checks.yml\n");
+    const map = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
+    assert.equal(map.status, 'gap', 'the map form names one file: the other is missing');
+    assert.match(map.message, /yad-update-guard/);
+    assert.doesNotMatch(map.message, /yad-checks\.yml/, 'the map form\'s file counts');
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  local: .gitlab/ci/yad-checks.yml\n  rules:\n    - if: $X\n");
+    assert.match(byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files.message, /yad-update-guard/, 'still missing the other one');
+  } finally { done(w); }
+  const g = workspace();
+  try {
+    // A ruleset blocks force pushes and deletion; classic protection lets admins bypass. The ruleset holds them.
+    const classic = { required_status_checks: { contexts: REQUIRED_CHECKS.github.code }, allow_force_pushes: { enabled: false }, allow_deletions: { enabled: false }, enforce_admins: { enabled: false } };
+    const row = byId(check(g, [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: ALL_RULES(REQUIRED_CHECKS.github.code), classic: [200, classic] })]).r, 'app');
+    for (const id of ['force-push', 'deletion']) {
+      assert.equal(row[id].status, 'ok', id);
+      assert.doesNotMatch(row[id].message, /admins bypass/, id);
+    }
+  } finally { done(g); }
+  // Verified asked for, no platform set and none in the git URL: files ok (kept locally), platform unknown.
+  const none = workspace({ product: { platform: null, git_url: null }, repos: [] });
+  try {
+    const r = byId(check(none, []).r, 'Product');
+    assert.equal(r.files.status, 'ok');
+    assert.match(r.files.message, /set to verified, but with no platform set it is kept locally/);
+    assert.equal(r.platform.status, 'unknown');
+  } finally { done(none); }
+});
+
+test('E160b round 5: a list item with its own rules is gated', () => {
+  const w = workspace({ platform: 'gitlab' });
+  try {
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  - local: .gitlab/ci/yad-update-guard.yml\n  - local: .gitlab/ci/yad-checks.yml\n    rules:\n      - if: $X\n");
+    assert.equal(byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files.status, 'unknown');
   } finally { done(w); }
 });

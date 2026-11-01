@@ -68,6 +68,9 @@ export function topIncludes(text) {
   const included = new Set();
   const gated = new Set();
   if (at < 0) return { included, gated };
+  // Two top-level `include:` keys: GitLab's YAML reader keeps only the last, a merge accident yad does not
+  // untangle — not known.
+  if (lines.filter((l) => /^include:/.test(l)).length > 1) return { included, gated, twice: true };
   const inline = lines[at].slice('include:'.length).trim();
   // A single value on the key's own line; a one-line list (`[a, b]`) is not read, and reads as missing.
   if (inline) { if (!inline.startsWith('[') && !inline.startsWith('{')) included.add(bare(inline)); return { included, gated }; }
@@ -78,7 +81,7 @@ export function topIncludes(text) {
   const depth = Math.min(...block.map((l) => l.match(/^\s*/)[0].length));
   const items = [];
   for (const l of block) {
-    if (l.match(/^\s*/)[0].length === depth && /^\s*-/.test(l)) items.push([l.replace(/^\s*-\s?/, ' '.repeat(depth + 2))]);
+    if (l.match(/^\s*/)[0].length === depth && /^\s*-(\s|$)/.test(l)) items.push([l.replace(/^\s*-\s?/, ' '.repeat(depth + 2))]);
     else if (items.length) items[items.length - 1].push(l);
     else items.push([l]);
   }
@@ -100,7 +103,8 @@ function missingIncludes(dir, fragments, ciPath) {
   const file = custom || '.gitlab-ci.yml';
   let text;
   try { text = fs.readFileSync(path.join(top.ok ? top.stdout.trim() : dir, file), 'utf8'); } catch { return { noRoot: true, file, missing: fragments, gated: [] }; }
-  const { included, gated } = topIncludes(text);
+  const { included, gated, twice } = topIncludes(text);
+  if (twice) return { unreadable: `${file}, which has two top-level \`include:\` keys (GitLab reads only the last)`, missing: fragments };
   return { noRoot: false, file, missing: fragments.filter((f) => !included.has(f) && !gated.has(f)), gated: fragments.filter((f) => !included.has(f) && gated.has(f)) };
 }
 
@@ -187,7 +191,7 @@ function filesRow(add, root, t, s) {
         steps: [inc.noRoot
           ? `Create ${file}, through a pull request, with an \`include:\` list of one line for each file:`
           : `In ${file}, through a pull request: under its top-level \`include:\` list (add one if there is none; if \`include:\` holds a single value, make it a list first), add one line for each file:`,
-          ...inc.missing.map((f) => `  - local: '${forTerminal(f)}'`),
+          ...inc.missing.map((f) => `- local: '${forTerminal(f)}'   (at the same indent as the list's other items)`),
           'If it is included another way (a nested or remote include), yad cannot see it: check the pipeline of a merge request runs yad\'s jobs.'],
       });
     }
