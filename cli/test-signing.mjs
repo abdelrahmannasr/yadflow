@@ -488,6 +488,19 @@ test('E160 review 8: a pin by short id, fingerprint or 0x picks that part; anoth
     // A fingerprint pin on a part listed with no fingerprint line (older gpg): the long id still matches.
     cfg('0123456789ABCDEF012345675555666677778888!');
     assert.equal(rows(key, older).key.status, 'ok');
+    // A short id that two keys share (gpg lists both). Only A's matching part signs: gpg signs with it.
+    cfg('33334444!');
+    const shared = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::cSC:::+:\nssb:u:255:22:1111222233334444:200::::::s:::+:\nsec:u:255:22:9999000011112222:100::::::cSC:::+:\nssb:u:255:22:7777888833334444:200::::::e:::+:\nssb:u:255:22:6666777788889999:300::::::s:::+:';
+    const one = rows(shared, older);
+    assert.equal(one.key.status, 'ok', 'the pin settles which key');
+    assert.equal(one['platform-key'].status, 'ok', 'judged on the pinned part of A only');
+    // Both keys have a matching part that signs: gpg may pick either.
+    const both = rows(shared.replace('7777888833334444:200::::::e:', '7777888833334444:200::::::s:'), older).key;
+    assert.equal(both.status, 'gap');
+    assert.match(both.message, /2 secret keys/);
+    // A pin to a key gpg does not have: "no secret key".
+    cfg('ABABABABABABABAB!');
+    assert.match(rows('', older).key.message, /no secret key/);
     // By email: key A signs; an old expired key B has the same email. The account has only B: "does not list".
     execFileSync('git', ['config', '--unset', 'user.signingkey'], { cwd: s.dir, env: s.env });
     const twoKeys = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::scSC:::+:\nsec:e:255:22:9999000011112222:50::::::scSC:::+:';
