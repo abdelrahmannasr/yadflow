@@ -71,6 +71,7 @@ export function gpgIds(colons, { signing = false, live = false } = {}) {
       if (signs) { signers.add(primary); if (f[14] && f[14] !== '+') onCard++; }
       take = primary !== null && (signing ? signs : !live || (!dead && !primaryDead));
       if (take) parts.push(Object.assign(new Set(), { sub: f[0] === 'ssb' || f[0] === 'sub', created: Number(f[5]) || 0 }));
+      // (Field 6 is seconds today; GnuPG may switch it to an ISO date, read as 0: then the first subkey wins.)
       if (take && /^[0-9A-F]{16}$/i.test(f[4] || '')) { ids.add(f[4].toUpperCase()); parts.at(-1).add(f[4].toUpperCase()); }
     } else if (f[0] === 'fpr' && take && /^[0-9A-F]{40}$/i.test(f[9] || '')) { ids.add(f[9].toUpperCase()); parts.at(-1).add(f[9].toUpperCase()); }
   }
@@ -149,16 +150,19 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
       const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, card: false });
       const { keys, listed, card } = ids;
-      // The part gpg signs with: the one a key id ending in `!` names; else the newest signing subkey (several
-      // made at the same second all count); the primary only when no subkey signs.
-      const pinned = /^(?:0x)?([0-9A-F]{16}|[0-9A-F]{40})!$/i.exec(signingkey || '');
+      // The part gpg signs with (GnuPG's finish_lookup): the one a key id ending in `!` names, and no other;
+      // else the newest signing subkey (the first listed, on a tie); the primary only when no subkey signs.
+      const bang = String(signingkey || '').endsWith('!');
+      const pinned = /^(?:0x)?([0-9A-F]{8}|[0-9A-F]{16}|[0-9A-F]{40})!$/i.exec(signingkey || '');
       const all = ids.parts || [];
       const subs = all.filter((part) => part.sub);
       const newest = Math.max(0, ...subs.map((part) => part.created));
-      const parts = pinned ? all.filter((part) => [...part].some((id) => sameKey(id, pinned[1].toUpperCase())))
-        : subs.length ? subs.filter((part) => part.created === newest) : all;
-      if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
-      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign; a part of it is on a smartcard, so gpg may need the card inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: parts.length ? parts : [ids], ids }; }
+      const parts = pinned ? all.filter((part) => [...part].some((id) => id.endsWith(pinned[1].toUpperCase())))
+        : subs.length ? [subs.find((part) => part.created === newest)] : all;
+      if (bang && !pinned && ids.size) add('key', 'unknown', `user.signingkey (${forTerminal(signingkey)}) ends in "!" but is not a key id, so yad cannot tell which part gpg signs with`);
+      else if (pinned && !parts.length && listed) add('key', 'gap', `the part user.signingkey names (${forTerminal(signingkey)}) cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine): gpg signs with that part only`, { steps: ['List the parts: gpg --list-secret-keys --keyid-format=long (the "ssb" lines with [S] are subkeys that sign)', 'Name one that signs: git config --global user.signingkey <its id>! (or drop the "!" to let gpg pick)'] });
+      else if (keys > 1) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
+      else if (ids.size) { add('key', 'ok', card ? `the GPG key ${forTerminal(target)} can sign; a part of it is on a smartcard, so gpg may need the card inserted` : `the GPG key ${forTerminal(target)} is on this machine and can sign`); localKey = { gpg: parts, all: r.ok ? gpgIds(r.stdout) : ids }; }
       else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine)`, { steps: gpgSteps });
       else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
     }
@@ -271,7 +275,7 @@ function platformRows({ identity, method, localKey, email, runner, gitRun, haveT
       if (parts.every(has(live))) add('platform-key', 'ok', `${name} lists your GPG key`);
       else if (parts.some((p) => has(remote)(p) && !has(live)(p) && !has(unclear)(p))) add('platform-key', 'gap', `${name} lists your GPG key, but its copy there has expired, was revoked or is not valid: new commits show as Unverified`, reupload);
       else if (parts.some(has(unclear))) add('platform-key', 'unknown', `${name} lists your GPG key with an expiry date yad cannot read`);
-      else if (has(remote)(localKey.ids)) add('platform-key', 'gap', `${name} lists your GPG key, but not the part gpg signs with (a subkey added after the upload?)`, reupload);
+      else if (has(remote)(localKey.all)) add('platform-key', 'gap', `${name} lists your GPG key, but not the part gpg signs with (a subkey added after the upload?)`, reupload);
       else if (!readable) add('platform-key', 'unknown', `${name} lists GPG keys yad cannot read without gpg`);
       else if (list.length >= PAGE) add('platform-key', 'unknown', `${name}: your account has ${PAGE} or more GPG keys and only the first ${PAGE} were read`);
       else add('platform-key', 'gap', `${name} does not list your GPG key`, { url: keysPage, steps: [`Export it: gpg --armor --export <your key id>`, `Open ${keysPage} → New GPG key → paste it.`, 'Then run `yad signing check` again.'] });

@@ -428,3 +428,40 @@ test('E160 review 6: the part gpg signs with must be on the account and in force
     assert.equal(row({ key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '5555666677778888', expires_at: '2000-01-01T00:00:00Z' }] }).status, 'ok', 'pinned to the primary');
   } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
 });
+
+test('E160 review 7: a pinned part that cannot sign is a gap; one subkey wins a tie; the hint reads every id', () => {
+  const s = setup({ config: { 'commit.gpgsign': 'true', 'user.email': 'me@example.com' }, product: GH });
+  const cfg = (v) => execFileSync('git', ['config', 'user.signingkey', v], { cwd: s.dir, env: s.env });
+  try {
+    const on = (out) => (c, a, o = {}) => (c === 'gpg' ? { ok: true, stdout: out } : run(c, a, { ...o, env: s.env }));
+    const emails = { '^user/emails': [200, [{ email: 'me@example.com', verified: true }]] };
+    const rows = (out, copy = { key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '5555666677778888' }] }) => byId(check(s, { gitRun: on(out), haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [copy]], ...emails } }).runner }));
+    // The pinned subkey expired here; the primary still signs, but gpg never falls back to it.
+    const expiredSub = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::scSC:::+:\nssb:e:255:22:5555666677778888:200::::::s:::+:';
+    cfg('5555666677778888!');
+    let r = rows(expiredSub);
+    assert.equal(r.key.status, 'gap');
+    assert.match(r.key.message, /gpg signs with that part only/);
+    assert.equal(r['platform-key'].status, 'unknown', 'no key to match');
+    cfg('6677778888!'.slice(2)); // an 8-digit short id, pinned
+    assert.equal(rows(expiredSub).key.status, 'gap', 'a short id with "!"');
+    // A pinned primary that only certifies.
+    cfg('AAAABBBBCCCCDDDD!');
+    assert.equal(rows('sec:u:255:22:AAAABBBBCCCCDDDD:100::::::cSC:::+:\nssb:u:255:22:5555666677778888:200::::::s:::+:').key.status, 'gap');
+    // A "!" on something that is not a key id: unknown, never ok.
+    cfg('me@example.com!');
+    assert.equal(rows('sec:u:255:22:AAAABBBBCCCCDDDD:100::::::scSC:::+:').key.status, 'unknown');
+    // Two signing subkeys made in the same second: gpg takes the first listed.
+    cfg('AAAABBBBCCCCDDDD');
+    const tie = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::cSC:::+:\nssb:u:255:22:1111222233334444:200::::::s:::+:\nssb:u:255:22:5555666677778888:200::::::s:::+:';
+    assert.equal(rows(tie, { key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '1111222233334444' }, { key_id: '5555666677778888', revoked: true }] })['platform-key'].status, 'ok');
+    // A certify-only primary with a new subkey never uploaded: the account has the key, not that part.
+    const fresh = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::cSC:::+:\nssb:u:255:22:5555666677778888:300::::::s:::+:';
+    const notPart = rows(fresh, { key_id: 'AAAABBBBCCCCDDDD', subkeys: [{ key_id: '1111222233334444' }] })['platform-key'];
+    assert.equal(notPart.status, 'gap');
+    assert.match(notPart.message, /not the part gpg signs with/);
+    // GitHub: a dead primary takes a live subkey with it; a copy unclear here and dead there is unknown.
+    assert.equal(rows(fresh, { key_id: 'AAAABBBBCCCCDDDD', revoked: true, subkeys: [{ key_id: '5555666677778888' }] })['platform-key'].status, 'gap');
+    assert.equal(byId(check(s, { gitRun: on(fresh), haveTool: tools('gh', 'gpg'), runner: platform({ calls: { '^user/gpg_keys': [200, [{ key_id: 'AAAABBBBCCCCDDDD', expires_at: 'soon', subkeys: [{ key_id: '5555666677778888' }] }, { key_id: 'AAAABBBBCCCCDDDD', revoked: true, subkeys: [{ key_id: '5555666677778888' }] }]], ...emails } }).runner }))['platform-key'].status, 'unknown');
+  } finally { fs.rmSync(s.T, { recursive: true, force: true }); }
+});
