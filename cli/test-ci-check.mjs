@@ -400,7 +400,7 @@ test('E160b round 1: GitLab — yad\'s jobs must be in the root pipeline; direct
     const partial = byId(check(w, calls).r, 'app').files;
     assert.equal(partial.status, 'gap', 'a commented-out include does not count');
     assert.match(partial.message, /does not include \.gitlab\/ci\/yad-checks\.yml/);
-    assert.match(partial.fix.steps[0], /under its top-level `include:` list/);
+    assert.match(partial.fix.steps[0], /under its top-level `include:`/);
     assert.ok(partial.fix.steps.some((x) => x.startsWith("- local: '.gitlab/ci/yad-checks.yml'")));
     // Maintainers may push straight to main: a gap on a code repo (a suggestion in solo mode).
     const push = byId(check(w, [...gl('p'), ...gl('app', { protectedBranches: [{ ...NO_ONE, push_access_levels: [{ access_level: 40 }] }] })]).r, 'app')['direct-push'];
@@ -569,4 +569,24 @@ test('E160b round 5: a list item with its own rules is gated', () => {
     put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  - local: .gitlab/ci/yad-update-guard.yml\n  - local: .gitlab/ci/yad-checks.yml\n    rules:\n      - if: $X\n");
     assert.equal(byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files.status, 'unknown');
   } finally { done(w); }
+});
+
+test('E160b round 6: the fix lines are pure YAML; the map form is named; a repo with no platform anywhere', () => {
+  const w = workspace({ platform: 'gitlab' });
+  try {
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  local: .gitlab/ci/yad-checks.yml\n");
+    const map = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
+    assert.match(map.fix.steps[0], /a `local:` map with no dash, first turn it into one list item/);
+    for (const line of map.fix.steps.filter((x) => x.startsWith('- local:'))) assert.match(line, /^- local: '[^']+'$/, line);
+    fs.rmSync(path.join(w.root, '../app/.gitlab-ci.yml'));
+    const none = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
+    assert.match(none.fix.steps[0], /^Create \.gitlab-ci\.yml/);
+    assert.doesNotMatch(none.fix.steps.join(' '), /already there/);
+  } finally { done(w); }
+  const x = workspace({ repos: [{ name: 'app', path: '../app', git_url: 'git@git.example.org:acme/app.git', default_branch: 'main' }] });
+  try {
+    const row = byId(check(x, gh('p', { rules: ALL_RULES(productJobs) })).r, 'app');
+    assert.equal(row.files.status, 'unknown', 'gate scripts with no workflow are not an ok');
+    assert.equal(row.platform.status, 'unknown');
+  } finally { done(x); }
 });

@@ -139,6 +139,11 @@ function filesRow(add, root, t, s) {
     dir = path.resolve(root, t.entry.path);
     // yad wires a repo's CI by the platform its entry names; one told only from the git URL got none.
     const seen = s.protection.platform;
+    // No platform named and none in the URL: yad wired only the gate scripts, with no workflow to run them.
+    if (!t.target.platform && !seen) {
+      add('files', 'unknown', 'no platform is set for this repo, so yad wired only its gate scripts and no workflow runs them (the platform row says more)');
+      return;
+    }
     if (!t.target.platform && seen) {
       add('files', 'gap', `this repo's entry in .sdlc/repos.json names no platform, so yad wired none of its ${seen === 'gitlab' ? 'GitLab' : 'GitHub'} CI files`, {
         actor: 'agent',
@@ -189,9 +194,9 @@ function filesRow(add, root, t, s) {
         : `${file} does not include ${few(inc.missing.map(forTerminal))}, so GitLab does not run those jobs (as ${file} is on disk here)`, {
         actor: 'agent',
         steps: [inc.noRoot
-          ? `Create ${file}, through a pull request, with an \`include:\` list of one line for each file:`
-          : `In ${file}, through a pull request: under its top-level \`include:\` list (add one if there is none; if \`include:\` holds a single value, make it a list first), add one line for each file:`,
-          ...inc.missing.map((f) => `- local: '${forTerminal(f)}'   (at the same indent as the list's other items)`),
+          ? `Create ${file}, through a pull request, with a top-level \`include:\` key and these lines under it, each indented two spaces:`
+          : `In ${file}, through a pull request: under its top-level \`include:\` (add the key if there is none), add these lines as list items, at the same indent as any items already there. If \`include:\` holds a single value on its own line, or a \`local:\` map with no dash, first turn it into one list item (\`- local: '<its path>'\`).`,
+          ...inc.missing.map((f) => `- local: '${forTerminal(f)}'`),
           'If it is included another way (a nested or remote include), yad cannot see it: check the pipeline of a merge request runs yad\'s jobs.'],
       });
     }
