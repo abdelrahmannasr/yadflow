@@ -147,6 +147,8 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
     else if (!target) add('key', 'gap', 'no key is named (user.signingkey is not set) and there is no email to find one by', { steps: gpgSteps });
     else {
       const r = gitRun('gpg', ['--with-colons', '--list-secret-keys', target], { env });
+      // A key named in user.signingkey that gpg does not have is most often a typo (its ids: the "Find its id" step).
+      const noKeySteps = signingkey ? ['Check user.signingkey for a typo against the ids gpg lists (the "Find its id" step below).', ...gpgSteps] : gpgSteps;
       const ids = r.ok ? gpgIds(r.stdout, { signing: true }) : Object.assign(new Set(), { keys: 0, listed: 0, parts: [] });
       const { keys, listed } = ids;
       // The part gpg signs with (GnuPG's finish_lookup): the one a key id ending in `!` names, and no other;
@@ -162,7 +164,7 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
       const parts = pinned ? all.filter((part) => [...part].some((id) => id.endsWith(pin) || (pin.length === 40 && pin.endsWith(id))))
         : subs.length ? [subs.find((part) => part.created === newest)] : all;
       if (bang && !pinned && ids.size) add('key', 'unknown', `user.signingkey (${forTerminal(signingkey)}) ends in "!" but is not a key id, so yad cannot tell which part gpg signs with`);
-      else if (pinned && !parts.length && !listed) add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: ['Check user.signingkey for a typo: gpg --list-secret-keys --keyid-format=long lists the ids you have.', ...gpgSteps] });
+      else if (pinned && !parts.length && !listed) add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: noKeySteps });
       else if (pinned && !parts.length) add('key', 'gap', `the part user.signingkey names (${forTerminal(signingkey)}) cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine): gpg signs with that part only`, { steps: ['List the parts: gpg --list-secret-keys --keyid-format=long (the "ssb" lines with [S] are subkeys that sign)', 'Name one that signs: git config --global user.signingkey <its id>! (or drop the "!" to let gpg pick)'] });
       // A pin to one part settles which key, even when the email finds several.
       else if (keys > 1 && !(pinned && parts.length === 1)) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
@@ -174,7 +176,7 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
         localKey = { gpg: parts, all: new Set(gpgIds(r.stdout).parts.filter((part) => owners.has(part.primary)).flatMap((part) => [...part])) };
       }
       else if (listed) add('key', 'gap', `the GPG key ${forTerminal(target)} cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine)`, { steps: gpgSteps });
-      else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
+      else add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: noKeySteps });
     }
   }
 
