@@ -592,3 +592,16 @@ test('E160b round 6: the fix lines are pure YAML; the map form is named; a repo 
     assert.equal(row.platform.status, 'unknown');
   } finally { done(x); }
 });
+
+test('E160b round 9: an include written on one line in [ ] or { } is not read — unknown, with no rewrite step', () => {
+  const w = workspace({ platform: 'gitlab' });
+  try {
+    for (const text of ["include: ['.gitlab/ci/yad-update-guard.yml', other.yml]\n", 'include: {local: other.yml}\n']) {
+      put(path.join(w.root, '../app/.gitlab-ci.yml'), text);
+      const row = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
+      assert.equal(row.status, 'unknown', text);
+      assert.match(row.message, /written on one line/, text);
+      assert.doesNotMatch(row.fix.steps.join(' '), /- local:/, 'no rewrite to get wrong');
+    }
+  } finally { done(w); }
+});

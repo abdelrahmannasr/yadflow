@@ -57,7 +57,8 @@ function githubJobs(root, t) {
 // empty. Read as text, as it is on disk here, with comments taken off, and only its TOP-LEVEL `include:`
 // (a line at column 0): a single value (`include: '<path>'`), or the block under it — each list item that
 // is a local path (`- local: '<path>'`, `- '<path>'`), or a `local:` map. The same path anywhere else (a child
-// pipeline's `trigger: include:`, `rules: changes:`, a script) is not an include, and an item that names
+// pipeline's `trigger: include:`, `rules: changes:`, a script) is not an include; an `include:` written on one
+// line in [ ] or { } is not read (unknown), and an item that names
 // another project, a URL, a template or a component is not this repo's fragment: each reads as missing — a
 // gap, never a false ok. An item with its own `rules:` runs only when they match: `gated`, not known. A CI
 // file kept in another project or at a URL, or a setting that was not read, cannot be followed: `unreadable`.
@@ -72,8 +73,13 @@ export function topIncludes(text) {
   // untangle — not known.
   if (lines.filter((l) => /^include:/.test(l)).length > 1) return { included, gated, twice: true };
   const inline = lines[at].slice('include:'.length).trim();
-  // A single value on the key's own line; a one-line list (`[a, b]`) is not read, and reads as missing.
-  if (inline) { if (!inline.startsWith('[') && !inline.startsWith('{')) included.add(bare(inline)); return { included, gated }; }
+  // A single value on the key's own line. A one-line list or map (`[a, b]`, `{local: a}`) is not read: not
+  // known, with no rewrite to get wrong.
+  if (inline) {
+    if (inline.startsWith('[') || inline.startsWith('{')) return { included, gated, flow: true };
+    included.add(bare(inline));
+    return { included, gated };
+  }
   const block = [];
   // The block: indented lines, or list items at column 0 (YAML allows a list level with its key).
   for (const l of lines.slice(at + 1)) { if (l && !/^\s/.test(l) && !/^-/.test(l)) break; if (l) block.push(l); }
@@ -103,8 +109,9 @@ function missingIncludes(dir, fragments, ciPath) {
   const file = custom || '.gitlab-ci.yml';
   let text;
   try { text = fs.readFileSync(path.join(top.ok ? top.stdout.trim() : dir, file), 'utf8'); } catch { return { noRoot: true, file, missing: fragments, gated: [] }; }
-  const { included, gated, twice } = topIncludes(text);
+  const { included, gated, twice, flow } = topIncludes(text);
   if (twice) return { unreadable: `${file}, which has two top-level \`include:\` keys (GitLab reads only the last)`, missing: fragments };
+  if (flow) return { unreadable: `${file}, whose top-level \`include:\` is written on one line in [ ] or { }, which yad does not read`, missing: fragments };
   return { noRoot: false, file, missing: fragments.filter((f) => !included.has(f) && !gated.has(f)), gated: fragments.filter((f) => !included.has(f) && gated.has(f)) };
 }
 
