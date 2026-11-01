@@ -107,6 +107,11 @@ jobs:
       - name: E2E against the packed tarball
         run: npm run test:e2e
 
+      # The agent acceptance run's checks, with scripted agents (no credit, no login): a well-behaved run
+      # must pass and a misbehaving one must be caught. The real run is opt-in (docs/agent-acceptance.md).
+      - name: Agent acceptance checks (selftest)
+        run: npm run test:agents:selftest
+
   # The Pages deploy (yad-docs.yml) builds these sites only after a merge, so a pull request that
   # breaks one was found only when the live site lost its page. Same Node as the deploy.
   docs-sites:
