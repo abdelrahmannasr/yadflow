@@ -177,7 +177,7 @@ const NO_ONE = { name: 'main', allow_force_push: false, push_access_levels: [{ a
 function gl(repo, { project = {}, prot = true, protectedBranches = [NO_ONE], branchesFail = null, approvals = [200, { reset_approvals_on_push: true }], pushRule = [404, { message: '404 Not found' }] } = {}) {
   const at = `projects/acme%2F${repo}`;
   return [
-    [new RegExp(`^${at}$`), 200, { default_branch: 'main', namespace: { kind: 'user' }, only_allow_merge_if_pipeline_succeeds: true, allow_merge_on_skipped_pipeline: false, only_allow_merge_if_all_discussions_are_resolved: true, ...project }],
+    [new RegExp(`^${at}$`), 200, { default_branch: 'main', namespace: { kind: 'user' }, ci_config_path: '', only_allow_merge_if_pipeline_succeeds: true, allow_merge_on_skipped_pipeline: false, only_allow_merge_if_all_discussions_are_resolved: true, ...project }],
     [new RegExp(`^${at}/repository/branches/main$`), 200, { protected: prot }],
     [new RegExp(`^${at}/protected_branches`), ...(branchesFail ?? [200, protectedBranches])],
     [new RegExp(`^${at}/approval_rules`), 200, [{ name: 'All', rule_type: 'any_approver', approvals_required: 1, protected_branches: [] }]],
@@ -470,4 +470,35 @@ test('E160b round 2: each platform path is asked once per repo', () => {
     const api = asked.filter((x) => x.startsWith('gh api'));
     assert.equal(new Set(api).size, api.length, api.join('\n'));
   } finally { done(w); }
+});
+
+test('E160b round 3: an unread CI file setting, a path named outside an include, a verified Product with no platform, admins on classic protection', () => {
+  const w = workspace({ platform: 'gitlab' });
+  try {
+    // The project's settings were not read, or the answer left the CI file setting out: not "the default".
+    const at = /^projects\/acme%2Fapp$/;
+    const noKey = gl('app').map((c) => (c[0].source === at.source ? [c[0], 200, { default_branch: 'main', namespace: { kind: 'user' }, only_allow_merge_if_pipeline_succeeds: true }] : c));
+    assert.equal(byId(check(w, [...gl('p'), ...noKey]).r, 'app').files.status, 'unknown');
+    // The path appears in a script line, not in an include: GitLab runs none of those jobs.
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  - local: '.gitlab/ci/yad-update-guard.yml'\ncheck:\n  script: cat .gitlab/ci/yad-checks.yml\n");
+    const scripted = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
+    assert.equal(scripted.status, 'gap');
+    // Every include form yad reads: a list item, a local: value, a bare quoted path.
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  - local: \"/.gitlab/ci/yad-update-guard.yml\"\n  - '.gitlab/ci/yad-checks.yml'\n");
+    assert.equal(byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files.status, 'ok');
+  } finally { done(w); }
+  // A Product asked to keep a verified ledger, with no platform set: yad wired none of its CI.
+  const p = workspace({ product: { platform: null }, repos: [] });
+  try {
+    const files = byId(check(p, gh('p', { rules: [] })).r, 'Product').files;
+    assert.equal(files.status, 'gap');
+    assert.match(files.fix.steps[0], /"platform": "github"/);
+  } finally { done(p); }
+  // Classic protection that lets admins bypass: the force-push and deletion oks say so.
+  const g = workspace();
+  try {
+    const classic = { required_status_checks: { contexts: REQUIRED_CHECKS.github.code }, allow_force_pushes: { enabled: false }, allow_deletions: { enabled: false }, enforce_admins: { enabled: false } };
+    const row = byId(check(g, [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: [PR_RULE()], classic: [200, classic] })]).r, 'app');
+    for (const id of ['force-push', 'deletion']) assert.match(row[id].message, /admins bypass/, id);
+  } finally { done(g); }
 });

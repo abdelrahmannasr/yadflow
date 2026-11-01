@@ -52,12 +52,17 @@ function githubJobs(root, t) {
   return [...REQUIRED_CHECKS.github.product, ...(verified ? REQUIRED_CHECKS.github.productVerified : [])];
 }
 
-// GitLab runs a fragment only when the project's CI file includes it: `.gitlab-ci.yml` at the top of the git
-// repo, or the path the project sets instead (`ci_config_path`). Read as text, as it is on disk here: a line
-// that names the fragment's path, with comments taken off. An include made another way (a nested or remote
-// include) is not seen, and reads as missing — a gap, never a false ok. A CI file kept in another project
-// or at a URL cannot be read here: `unreadable`.
+// GitLab runs a fragment only when the project's CI file includes it: the path the project sets
+// (`ci_config_path`), or `.gitlab-ci.yml` at the top of the git repo when that setting is empty. Read as
+// text, as it is on disk here, with comments taken off: an include is a line that is nothing but the
+// fragment's path, as a list item or a `local:` value (`- local: '<path>'`, `local: <path>`, `- '<path>'`,
+// `include: '<path>'`). An include made another way (a nested or remote include, a one-line list) is not
+// seen, and reads as missing — a gap, never a false ok. A CI file kept in another project or at a URL, or a
+// setting that was not read, cannot be followed here: `unreadable`.
+const includeLine = (f) => new RegExp(`^\\s*(?:-\\s*)?(?:include:\\s*)?(?:-\\s*)?(?:local:\\s*)?(['"]?)/?${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1\\s*$`, 'm');
 function missingIncludes(dir, fragments, ciPath) {
+  // Not read: GitLab may read another file than the one here.
+  if (ciPath === undefined) return { unreadable: 'not known (the project\'s settings were not read)', missing: fragments };
   const custom = typeof ciPath === 'string' && ciPath.trim() && ciPath.trim() !== '.gitlab-ci.yml' ? ciPath.trim() : null;
   if (custom && (/@|:\/\//.test(custom) || path.isAbsolute(custom) || custom.split(/[\\/]/).includes('..'))) return { unreadable: custom, missing: fragments };
   const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
@@ -65,7 +70,7 @@ function missingIncludes(dir, fragments, ciPath) {
   let text;
   try { text = fs.readFileSync(path.join(top.ok ? top.stdout.trim() : dir, file), 'utf8'); } catch { return { noRoot: true, file, missing: fragments }; }
   const lines = text.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).join('\n');
-  return { noRoot: false, file, missing: fragments.filter((f) => !lines.includes(f)) };
+  return { noRoot: false, file, missing: fragments.filter((f) => !includeLine(f).test(lines)) };
 }
 
 // yad's CI files, from the same plan `yad check` makes. Nothing is written. The files are read on disk here:
@@ -74,6 +79,13 @@ function filesRow(add, root, t, s) {
   let actions;
   let dir = root;
   if (t.kind === 'product') {
+    // A verified ledger with no platform set: yad wired none of the Product's CI, though a platform is there.
+    if (!t.wired && t.wantsVerified && s.protection.platform) {
+      add('files', 'gap', `the Product's ledger is set to verified, but .sdlc/product.json names no platform, so yad wired none of its CI files`, {
+        actor: 'agent', steps: [`Set "platform": "${s.protection.platform}" in the Product's .sdlc/product.json (through a pull request), then run \`yad check --fix\`.`],
+      });
+      return;
+    }
     if (!t.wired) { add('files', 'ok', 'the Product keeps its ledger locally, so yad runs no CI on it'); return; }
     actions = productActions(root);
   } else {
@@ -116,10 +128,12 @@ function filesRow(add, root, t, s) {
   let noInclude = false;
   if (t.target.platform === 'gitlab') {
     const fragments = ci.filter((a) => a.item.startsWith('.gitlab/ci/') && !missing.includes(forTerminal(a.item))).map((a) => a.item);
-    const inc = fragments.length ? missingIncludes(dir, fragments, s.project?.ci_config_path) : { missing: [] };
+    // The setting counts only as GitLab gave it: absent (not read, or left out of the answer) is not "empty".
+    const ciPath = s.project && Object.hasOwn(s.project, 'ci_config_path') ? (s.project.ci_config_path ?? '') : undefined;
+    const inc = fragments.length ? missingIncludes(dir, fragments, ciPath) : { missing: [] };
     if (inc.unreadable) {
       noInclude = true;
-      add('files', 'unknown', `the project's CI file is ${forTerminal(inc.unreadable)}, which yad cannot read here, so whether it includes yad's jobs is not known`, {
+      add('files', 'unknown', `which CI file GitLab reads is ${forTerminal(inc.unreadable)}, so whether it includes yad's jobs is not known here`, {
         actor: 'agent', steps: ['Check that the pipeline of a merge request runs yad\'s jobs (their names start with yad-).'],
       });
     } else if (inc.missing.length) {
@@ -129,7 +143,9 @@ function filesRow(add, root, t, s) {
         ? `there is no ${file}, so GitLab runs none of yad's jobs`
         : `${file} does not include ${few(inc.missing.map(forTerminal))}, so GitLab does not run those jobs (as ${file} is on disk here)`, {
         actor: 'agent',
-        steps: [`In ${file}, through a pull request: under its top-level \`include:\` list (add one if there is none), add one line for each file:`,
+        steps: [inc.noRoot
+          ? `Create ${file}, through a pull request, with an \`include:\` list of one line for each file:`
+          : `In ${file}, through a pull request: under its top-level \`include:\` list (add one if there is none; if \`include:\` holds a single value, make it a list first), add one line for each file:`,
           ...inc.missing.map((f) => `  - local: '${forTerminal(f)}'`),
           'If it is included another way (a nested or remote include), yad cannot see it: check the pipeline of a merge request runs yad\'s jobs.'],
       });
@@ -158,11 +174,10 @@ function rowIds(t, platform, solo) {
 function platformRows(add, root, t, s, { solo }) {
   const p = s.protection;
   if (!p.known) {
-    // No platform at all: nothing to protect, and nothing to read.
     // No platform at all: nothing holds a merge there — never a quiet ok.
     if (p.kind === 'no-platform' && !t.target.platform) {
       add('platform', 'unknown', 'no platform (GitHub or GitLab) is set, and none can be told from the git URL: nothing on a platform holds a merge here', {
-        actor: 'person', steps: [t.kind === 'product' ? 'Set "platform" and "git_url" in the Product\'s .sdlc/product.json (or keep the Product local, with no merge to hold).' : 'Set "platform" for this repo in the Product\'s .sdlc/repos.json.'],
+        actor: 'agent', steps: [t.kind === 'product' ? 'Ask the person which platform the Product is on, then set "platform" and "git_url" in its .sdlc/product.json through a pull request (or keep the Product local, with no merge to hold).' : 'Set "platform" and "git_url" for this repo in the Product\'s .sdlc/repos.json, through a pull request.'],
       });
       return;
     }
@@ -202,6 +217,8 @@ function platformRows(add, root, t, s, { solo }) {
 
 function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, protectSteps }) {
   const noClassic = 'classic branch protection is readable by a repo admin only';
+  // Classic protection holds admins only when "Do not allow bypassing the above settings" is on.
+  const adminsFree = isPlainObject(s.classic) && s.classic.enforce_admins?.enabled === false;
   const why = [s.rules === null ? 'the branch\'s rules were not read' : s.rulesFull ? 'the branch has 100 or more rules and only the first 100 were read' : null, s.classic === null ? noClassic : null].filter(Boolean).join('; ');
 
   if (t.ciRuns) {
@@ -220,7 +237,6 @@ function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, p
     const steps = [`In the branch ruleset, turn on "Require status checks to pass" and add: ${missing.join(', ')}.`, 'GitHub offers a check only after it has run once: open one pull request first.',
       ...(t.kind === 'product' ? protectSteps.slice(1) : [])];
     // Who may bypass: a ruleset's bypass list is not read; classic protection says whether admins are held.
-    const adminsFree = isPlainObject(s.classic) && s.classic.enforce_admins?.enabled === false;
     if (!missing.length) add('required-checks', 'ok', `all ${jobs.length} of yad's checks must pass before a merge (who is on a ruleset's bypass list is not read${adminsFree ? '; classic protection lets admins bypass them' : ''})`);
     else if (why) add('required-checks', 'unknown', `not seen as required: ${missing.join(', ')} (${why})`, settings(rulesPage, steps));
     else add('required-checks', 'gap', `not required before a merge: ${missing.join(', ')} — a pull request can merge with these failing`, settings(rulesPage, steps));
@@ -228,7 +244,7 @@ function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, p
 
   const row = (id, ruleType, classicKey, okText, gapText, unknownText, step) => {
     const blocked = either(inRules(s, (r) => r?.type === ruleType), inClassic(s, (cl) => (typeof cl[classicKey]?.enabled === 'boolean' ? !cl[classicKey].enabled : null)));
-    if (blocked === true) add(id, 'ok', `${okText} (who is on a ruleset's bypass list is not read)`);
+    if (blocked === true) add(id, 'ok', `${okText} (who is on a ruleset's bypass list is not read${adminsFree ? '; classic protection lets admins bypass it' : ''})`);
     else if (blocked === false) add(id, 'gap', gapText, settings(rulesPage, [step]));
     else add(id, 'unknown', `${unknownText} (${why})`, settings(rulesPage, [step]));
   };
@@ -281,8 +297,8 @@ function gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo }) {
   if (p.protected === false) add('force-push', 'gap', `${branch} is not protected, so a force push is allowed`, settings(rulesPage, [fpStep]));
   else if (!listed) add('force-push', 'unknown', `not known whether a force push is allowed (${entries === null ? 'the protected branches were not read' : 'the project has 100 or more protected branches and only the first 100 were read'})`, settings(rulesPage, [fpStep]));
   else if (entries.length && entries.every((m) => m?.allow_force_push === true)) add('force-push', 'gap', `${branch} allows a force push: history on it can be rewritten`, settings(rulesPage, [fpStep]));
-  // Several rules that disagree: which one GitLab applies is not read here.
-  else if (entries.some((m) => m?.allow_force_push === true)) add('force-push', 'unknown', `not known whether a force push is allowed: the rules that match ${branch} disagree`, settings(rulesPage, [fpStep]));
+  // Several rules that disagree: yad does not decide which one GitLab applies.
+  else if (entries.some((m) => m?.allow_force_push === true)) add('force-push', 'unknown', `not known whether a force push is allowed: the rules that match ${branch} disagree, and yad does not decide which one GitLab applies`, settings(rulesPage, [fpStep]));
   else if (entries.length && entries.every((m) => m?.allow_force_push === false) && ownNamespace) add('force-push', 'ok', `force pushes to ${branch} are blocked`);
   else add('force-push', 'unknown', `not known whether a force push is allowed (${entries.length ? groupWhy : `${branch} is protected by a rule this project's list does not show, such as a group's`})`, settings(rulesPage, [fpStep]));
 
@@ -360,6 +376,8 @@ export function ciTargets(root, { repo = null } = {}) {
   const wired = isVerifiedLedger(config);
   const product = {
     name: 'Product', kind: 'product', wired, ciRuns: wired,
+    // The verified ledger asked for, by its name or its older spellings, whether or not a platform is set.
+    wantsVerified: config.ledger === 'verified' || (typeof config.ledger !== 'string' && (config.bridge_enabled === true || config.bridge === true)),
     target: { platform: config.platform || null, gitUrl: config.git_url || origin(root), branch: branchOf(config) },
   };
   return { targets: [product, ...entries.map(code)] };
