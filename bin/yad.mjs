@@ -60,6 +60,10 @@ ${c.bold('Setup & maintenance')}
                        there. Also 'yad check --fix --open-pr'
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
+  yad signing check [--json]
+                       Will your commits be signed and marked Verified? Reads this folder's git
+                       config, the key it names, and your account on the Product's platform (the
+                       key listed for signing, a verified email). Read-only; exit 1 on a gap (E160)
   yad migrate [--apply] [--keep product|hub] [--json]   Move this project's state files onto the shape
                        this yadflow expects. Prints what WOULD change and writes
                        nothing until --apply, which copies each file it rewrites to
@@ -606,6 +610,7 @@ const ACTIONS = {
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove'], default: 'list' },
+  signing: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
@@ -829,6 +834,18 @@ async function main() {
     case 'migrate':
       result = await commands.runMigrate(o.dir, { apply: o.apply, json: o.json, keep: o.keep ?? null });
       break;
+    case 'signing': {
+      // E160a. Read-only: the git config in this folder, the key it names, and the account on the Product's
+      // platform (found as every Product command finds it, from this folder or a repo the Product registers).
+      const [, action = 'check', extra] = o._;
+      if (action !== 'check' || extra) { refuse(`unknown signing action: ${[action, extra].filter(Boolean).join(' ')}`, 'usage: yad signing check [--json] [--dir <folder>]'); break; }
+      const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
+      // Why no Product was found is said, as every Product command says it: the account is then not checked.
+      if (found?.problem) warn(`${found.problem} — your account is not checked`);
+      else if (found?.elsewhere) warn(`this folder is not in a repo the Product registers (the Product is ${path.relative(process.cwd(), found.elsewhere) || '.'}) — your account is not checked; run it from there, or pass --dir`);
+      result = commands.runSigningCheck(dirGiven ? o.dir : shellCwd(), { root: found?.problem || found?.elsewhere ? null : found?.root ?? null, json: o.json });
+      break;
+    }
     case 'toolbox': {
       // E84 + E86. Finding a tool reads the folder yad runs in (a code repo's own skills count); the
       // team's choices are the Product's `.sdlc/toolbox.json`, found the way every Product command finds

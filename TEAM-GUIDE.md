@@ -346,9 +346,30 @@ You can start without any of them.
    request for it, so it never touches your checkout. If anything goes
    wrong there, join still finishes and tells you to run `yad member add` later. The file only says
    "these accounts and emails are one person"; it gives no access and no role.
-2. **A repo added after you joined?** Run `yad repo clone` in the Product. It clones every registered
+2. **Sign your commits.** The `verified-commits` check in CI fails a commit that GitHub or GitLab does
+   not mark **Verified** (signed with a key on your account). Set signing up once per machine. An SSH
+   key is the simplest (one key, no extra program):
+
+   ```bash
+   ssh-keygen -t ed25519 -C "you@example.com"          # make a key (press Enter for the default file)
+   git config --global gpg.format ssh
+   git config --global user.signingkey ~/.ssh/id_ed25519.pub
+   git config --global commit.gpgsign true
+   ```
+
+   Then add the `.pub` file to your account **as a signing key**: on GitHub, Settings → SSH and GPG keys
+   → New SSH key → Key type: *Signing Key*; on GitLab, Edit profile → SSH Keys → Usage type:
+   *Authentication & Signing*. Your `user.email` must be a **verified** email on that account. Prefer GPG?
+   Make a key with `gpg --full-generate-key`, set `user.signingkey` to its id, and add
+   `gpg --armor --export <id>` as a GPG key instead.
+
+   `yad signing check` tells you what is still missing, on this machine and on your account (E160). It
+   only reads. If it says "not known" about your account, it names what lets it look: a login, or a
+   `gh auth refresh` with the missing **scope** (a permission your login token has). On GitLab it asks for
+   a token with the `read_user` scope.
+3. **A repo added after you joined?** Run `yad repo clone` in the Product. It clones every registered
    repo that is missing on this machine. `yad repo list` shows which ones are **not cloned**.
-3. That's it. Open your agent **in the Product** to work on epics; open it **in a code repo** to
+4. That's it. Open your agent **in the Product** to work on epics; open it **in a code repo** to
    build stories. `yad next` tells you what to do first.
 
 To run a skill, just ask your agent by name — e.g. *"run `yad-epic`"*. All state is plain files
@@ -724,7 +745,11 @@ machine: `yad gate comment <epic> <artifact> --by <name>` records who commented,
 ledger (see the table in section 3, step d2):
 
 - `ledger: local` — your machine writes it. It works offline and needs no CI.
-- `ledger: verified` — only CI writes it, at the merge of a review PR/MR, with a signed commit. A guard
+- `ledger: verified` — only CI writes it, at the merge of a review PR/MR, in a commit by the
+  `yad-gate-sync` bot. That commit is not signed: CI pushes it straight to the default branch with
+  `[skip ci]` in its message, so no check runs on it — the pull-request checks never see it, and the push
+  check skips it. So never require signed commits on the Product's default branch (GitHub's "Require
+  signed commits" rule, GitLab's "Reject unsigned commits" push rule): the bot's commit would be refused. A guard
   stops anyone else: the `ledger-guard` check in CI, an agent hook (Claude Code and Cursor), and a git
   pre-commit hook in each clone. (One gap is still open on GitLab — see
   [Branch protection](docs/branch-protection.md).)
