@@ -597,12 +597,20 @@ test('E160b round 9: an include written in [ ] or { } (flow style) is not read â
   const w = workspace({ platform: 'gitlab' });
   try {
     for (const text of ["include: ['.gitlab/ci/yad-update-guard.yml', other.yml]\n", 'include: {local: other.yml}\n',
-      'include:\n  [a.yml, b.yml]\n', 'include:\n  {local: a.yml}\n', 'include:\n- [a.yml]\n', "include:\n  - local: '.gitlab/ci/yad-update-guard.yml'\n  - {local: a.yml}\n"]) {
+      'include:\n  [a.yml, b.yml]\n', 'include:\n  {local: a.yml}\n', 'include:\n- [a.yml]\n', 'include:\n  -\n    {local: a.yml}\n', 'include:\n-\n  [a.yml]\n', "include:\n  - local: '.gitlab/ci/yad-update-guard.yml'\n  - {local: a.yml}\n"]) {
       put(path.join(w.root, '../app/.gitlab-ci.yml'), text);
       const row = byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files;
       assert.equal(row.status, 'unknown', text);
       assert.match(row.message, /flow style/, text);
       assert.doesNotMatch(row.fix.steps.join(' '), /- local:/, 'no rewrite to get wrong');
     }
+  } finally { done(w); }
+});
+
+test('E160b round 11: a list item whose dash stands alone is read from its next line', () => {
+  const w = workspace({ platform: 'gitlab' });
+  try {
+    put(path.join(w.root, '../app/.gitlab-ci.yml'), "include:\n  -\n    local: .gitlab/ci/yad-update-guard.yml\n  -\n    '.gitlab/ci/yad-checks.yml'\n");
+    assert.equal(byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files.status, 'ok');
   } finally { done(w); }
 });

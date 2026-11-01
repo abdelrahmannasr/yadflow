@@ -92,11 +92,14 @@ export function topIncludes(text) {
     else items.push([l]);
   }
   // Flow style anywhere in the block (`[a, b]` or `{local: a}` on the next line, or as a list item): not read.
-  if (items.some((item) => /^[[{]/.test(item[0].trim()))) return { included, gated, flow: true };
+  // An item's value starts on its first line that is not blank (a `-` may stand alone on its own line).
+  const first = (item) => item.map((l) => l.trim()).find(Boolean) ?? '';
+  if (items.some((item) => /^[[{]/.test(first(item)))) return { included, gated, flow: true };
   for (const item of items) {
     const text = item.join('\n');
     if (/^\s*(project|remote|template|component|file):/m.test(text)) continue;
-    const local = text.match(/^\s*local:\s*(.+)$/m)?.[1] ?? (item.length === 1 && !/:/.test(item[0]) ? item[0] : null);
+    const filled = item.filter((l) => l.trim());
+    const local = text.match(/^\s*local:\s*(.+)$/m)?.[1] ?? (filled.length === 1 && !/:/.test(filled[0]) ? filled[0] : null);
     if (!local) continue;
     (/^\s*rules:/m.test(text) ? gated : included).add(bare(local));
   }
