@@ -501,6 +501,10 @@ test('E160 review 8: a pin by short id, fingerprint or 0x picks that part; anoth
     // A pin to a key gpg does not have: "no secret key".
     cfg('ABABABABABABABAB!');
     assert.match(rows('', older).key.message, /no secret key/);
+    // Real gpg exits 2 when it has no such key.
+    const missing = byId(check(s, { gitRun: (c, a, o = {}) => (c === 'gpg' ? { ok: false, stdout: '' } : run(c, a, { ...o, env: s.env })), haveTool: tools('gh', 'gpg'), runner: platform().runner })).key;
+    assert.match(missing.message, /no secret key/);
+    assert.match(missing.fix.steps[0], /typo/);
     // By email: key A signs; an old expired key B has the same email. The account has only B: "does not list".
     execFileSync('git', ['config', '--unset', 'user.signingkey'], { cwd: s.dir, env: s.env });
     const twoKeys = 'sec:u:255:22:AAAABBBBCCCCDDDD:100::::::scSC:::+:\nsec:e:255:22:9999000011112222:50::::::scSC:::+:';

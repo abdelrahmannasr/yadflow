@@ -158,11 +158,11 @@ export function signingCheck(dir, { root = null, runner = run, gitRun = run, hav
       const newest = Math.max(0, ...subs.map((part) => part.created));
       const pin = pinned?.[1].toUpperCase();
       // A short id is the end of the long id and of the fingerprint; a fingerprint ends with the long id (gpg
-      // listed by that fingerprint, so a part with the same long id but another fingerprint is not here).
+      // listed by that fingerprint, so a part with the same long id but another fingerprint is not here in practice).
       const parts = pinned ? all.filter((part) => [...part].some((id) => id.endsWith(pin) || (pin.length === 40 && pin.endsWith(id))))
         : subs.length ? [subs.find((part) => part.created === newest)] : all;
       if (bang && !pinned && ids.size) add('key', 'unknown', `user.signingkey (${forTerminal(signingkey)}) ends in "!" but is not a key id, so yad cannot tell which part gpg signs with`);
-      else if (pinned && !parts.length && !listed) add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: gpgSteps });
+      else if (pinned && !parts.length && !listed) add('key', 'gap', `gpg has no secret key for ${forTerminal(target)}`, { steps: ['Check user.signingkey for a typo: gpg --list-secret-keys --keyid-format=long lists the ids you have.', ...gpgSteps] });
       else if (pinned && !parts.length) add('key', 'gap', `the part user.signingkey names (${forTerminal(signingkey)}) cannot sign now (expired, revoked, without the sign capability, or its secret is not on this machine): gpg signs with that part only`, { steps: ['List the parts: gpg --list-secret-keys --keyid-format=long (the "ssb" lines with [S] are subkeys that sign)', 'Name one that signs: git config --global user.signingkey <its id>! (or drop the "!" to let gpg pick)'] });
       // A pin to one part settles which key, even when the email finds several.
       else if (keys > 1 && !(pinned && parts.length === 1)) add('key', 'gap', `gpg has ${keys} secret keys for ${forTerminal(target)}: git may sign with any of them`, { commands: ['git config --global user.signingkey <the key id to sign with>'], steps: ['List them: gpg --list-secret-keys --keyid-format=long'] });
