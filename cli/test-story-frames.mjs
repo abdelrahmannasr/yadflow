@@ -238,6 +238,53 @@ test('#354 review 2: a misspelled key beside the right one is said; `""` is not 
   assert.match(frameFindings({ [FRAMES_KEY]: ['"12:34"'] }, ok).findings[0].message, /should be written without quotes/);
 });
 
+const { designPreflight, readDesignConfig } = await import('./story-frames.mjs');
+const { TOOLBOX, toolProblems, reachFor } = await import('./toolbox.mjs');
+
+test('#358: designPreflight — Pencil is read through the app; Figma only through its desktop server', () => {
+  const frames = [{ id: '99:1', found: false }, { id: '12:34', found: true }];
+  const links = { state: 'ok', fileUrl: 'design/app.pen', screens: [] };
+  const pencil = designPreflight({ state: 'ok', data: { tool: 'pencil', provider: 'pencil-mcp' } }, links, frames);
+  assert.deepEqual([pencil.reachable, pencil.appBound, pencil.frame, pencil.file], ['check', true, '12:34', 'design/app.pen'], 'the first frame that resolves is the one probed');
+  assert.match(pencil.stop, /^Open the Pencil desktop app with `design\/app\.pen` loaded/);
+  assert.match(pencil.probe, /get_app_state/);
+  const desk = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-desktop' } }, links, frames);
+  assert.deepEqual([desk.appBound, /desktop app/.test(desk.stop)], [true, true]);
+  const cloud = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-mcp' } }, links, frames);
+  assert.deepEqual([cloud.appBound, /^Sign in to Figma/.test(cloud.stop)], [false, true]);
+  assert.match(cloud.probe, /`12:34`/);
+  const noFile = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'missing' }, frames);
+  assert.match(noFile.stop, /the design file/, 'no file anywhere: it says so plainly, never an empty name');
+});
+
+test('#358: designPreflight — nothing to probe is not-checkable, and no frame means no preflight', () => {
+  const frames = [{ id: '12:34', found: true }];
+  const links = { state: 'ok', fileUrl: 'f', screens: [] };
+  for (const design of [{ state: 'missing' }, { state: 'unreadable' }, { state: 'ok', data: { tool: 'none' } }, { state: 'ok', data: { tool: 'pencil', source: 'unavailable' } }, { state: 'ok', data: { tool: 'sketch' } }]) {
+    assert.equal(designPreflight(design, links, frames).reachable, 'not-checkable', JSON.stringify(design));
+  }
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, []), null);
+  const dirty = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'ok', fileUrl: 'a\x1b[31mb', screens: [] }, frames);
+  assert.ok(!dirty.stop.includes('\x1b') && !dirty.probe.includes('\x1b'));
+});
+
+test('#358: readDesignConfig, the reach data, and preflight through the command', () => {
+  for (const t of TOOLBOX.filter((x) => x.reach)) assert.deepEqual(toolProblems(t), [], t.id);
+  assert.deepEqual(toolProblems({ ...TOOLBOX.find((x) => x.id === 'figma'), reach: { app: 'F', probe: 'p', open: 'o', appBound: ['x'] } }), ['reach.signIn says what to do when the provider needs no app']);
+  assert.equal(reachFor('repomix'), null);
+  const T = product({ 'EP-shop-S01': `${FRAMES_KEY}: [12:34]`, 'EP-shop-S02': `${FRAMES_KEY}: []` });
+  try {
+    assert.equal(readDesignConfig(T).state, 'missing');
+    put(path.join(T, '.sdlc', 'design.json'), '{ nope');
+    assert.equal(readDesignConfig(T).state, 'unreadable');
+    put(path.join(T, '.sdlc', 'design.json'), { tool: 'pencil', provider: 'pencil-mcp', source: 'pencil-mcp', auth: 'user' });
+    const j = JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S01', '--json').stdout);
+    assert.deepEqual([j.preflight.reachable, j.preflight.tool, j.preflight.appBound], ['check', 'pencil', true]);
+    assert.match(yad(T, 'story', 'frames', 'EP-shop-S01').stdout, /before UI work: .* if that fails, stop: Open the Pencil desktop app/);
+    assert.equal(JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S02', '--json').stdout).preflight, null, 'no screens, no probe');
+  } finally { done(T); }
+});
+
 test('#354: the stories, spec and implement skills all name `yad story frames`', () => {
   for (const skill of ['yad-stories', 'yad-spec', 'yad-implement']) {
     const body = fs.readFileSync(path.join(REPO, 'skills', skill, 'SKILL.md'), 'utf8');

@@ -21,9 +21,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, emitJSON, forTerminal, info, log, ok, readJSONStrict, refuse, stripAnsi, warn } from './lib.mjs';
+import { c, emitJSON, forTerminal, hand, info, log, ok, readJSONStrict, refuse, stripAnsi, warn } from './lib.mjs';
 import { epicRoot, parseFrontmatter } from './epic-state.mjs';
 import { STORY_RE, storyEpic } from './build.mjs';
+import { PROJECT_FILES } from './manifest.mjs';
+import { reachFor } from './toolbox.mjs';
 
 export const FRAMES_KEY = 'design-frames';
 export const DESIGN_LINKS_FILE = path.join('.sdlc', 'design-links.json');
@@ -132,6 +134,48 @@ export function readStoryFrontmatter(file) {
   return parseFrontmatter(text);
 }
 
+// The Product's design.json as { state: 'missing' | 'unreadable' | 'ok', data }. Read safely, like
+// design-links.json: a file that does not parse is said, never thrown out of the command.
+export function readDesignConfig(root) {
+  const file = path.join(root, PROJECT_FILES.designConfig);
+  if (!fs.existsSync(file)) return { state: 'missing' };
+  try {
+    const data = readJSONStrict(file, null);
+    return data && typeof data === 'object' && !Array.isArray(data) ? { state: 'ok', data } : { state: 'unreadable' };
+  } catch {
+    return { state: 'unreadable' };
+  }
+}
+
+// #358 — before UI work, can the agent reach the design tool with the right file open? yad cannot ask:
+// an MCP server belongs to the agent's session. So this says HOW to ask, and what to tell the person
+// when the answer is no; the yad-spec and yad-implement skills make the call and stop on a failure.
+// null when the story names no frame (no UI task, nothing to check). `reachable` is `check` (probe, and
+// stop when it fails) or `not-checkable` (no tool, or none yad knows how to check: go on with the links).
+export function designPreflight(design, links, frames) {
+  if (!frames.length) return null;
+  const d = design.state === 'ok' ? design.data : null;
+  const str = (v) => (typeof v === 'string' && v.length > 0 ? v : null);
+  const tool = str(d?.tool);
+  const notCheckable = (why) => ({ tool, reachable: 'not-checkable', why });
+  if (design.state === 'missing') return notCheckable('no .sdlc/design.json: no design tool is connected');
+  if (design.state === 'unreadable') return notCheckable('.sdlc/design.json cannot be read');
+  if (!tool || tool === 'none') return notCheckable('design.json connects no design tool');
+  if (d.source === 'unavailable') return notCheckable(`design.json records ${forTerminal(tool)} as unavailable (source: unavailable)`);
+  const reach = reachFor(tool);
+  if (!reach) return notCheckable(`yad has no reachability check for ${forTerminal(tool)}`);
+  const provider = str(d.provider) ?? str(d.source);
+  const appBound = reach.appBound === true || (Array.isArray(reach.appBound) && provider !== null && reach.appBound.includes(provider));
+  const file = (links.state === 'ok' ? links.fileUrl : null) ?? str(d.project_url);
+  const frame = (frames.find((f) => f.found) ?? frames[0]).id;
+  const fill = (s) => s.replace(/<file>/g, file ? `\`${forTerminal(file)}\`` : 'the design file').replace(/<frame>/g, `\`${forTerminal(frame)}\``);
+  return {
+    tool, provider, reachable: 'check', appBound, file, frame,
+    probe: fill(reach.probe),
+    stop: fill(appBound || !reach.signIn ? reach.open : reach.signIn),
+  };
+}
+
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 
 // One story's frames. Throws { message, hint } only for the command line: a word that is not a story
@@ -156,6 +200,7 @@ export function readStoryFrames(root, story) {
     tool: links.state === 'ok' ? links.tool : null,
     fileUrl: links.state === 'ok' ? links.fileUrl : null,
     ...r,
+    preflight: designPreflight(readDesignConfig(root), links, r.frames),
   };
 }
 
@@ -210,7 +255,7 @@ export async function runStory(root, { action, story, json = false } = {}) {
   const warnings = r.findings.map((f) => f.message);
   if (json) {
     emitJSON({
-      ok: true, story: r.story, epic: r.epic, tool: r.tool, fileUrl: r.fileUrl, recorded: r.recorded,
+      ok: true, story: r.story, epic: r.epic, tool: r.tool, fileUrl: r.fileUrl, recorded: r.recorded, preflight: r.preflight,
       frames: r.frames, findings: r.findings.map((f) => ({ kind: f.kind, message: stripAnsi(f.message) })), warnings,
     });
     return { ok: true, ...r };
@@ -225,5 +270,8 @@ export async function runStory(root, { action, story, json = false } = {}) {
     if (f.url) log(`      ${c.dim(forTerminal(f.url))}`);
   }
   for (const w of warnings) warn(w);
+  const p = r.preflight;
+  if (p?.reachable === 'check') hand(`before UI work: ${p.probe} — if that fails, stop: ${p.stop}`);
+  else if (p) info(`before UI work: the design tool is not checked (${p.why}) — build from the frame links`);
   return { ok: true, ...r };
 }
