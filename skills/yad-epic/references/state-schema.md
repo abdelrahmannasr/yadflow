@@ -724,6 +724,12 @@ chain is unchanged — this is an *output enrichment*, mirrored by the `design:`
   "source": "<mcp id>" }
 ```
 
+**Who reads it (#354):** each story lists the `nodeId`s of the screens it builds in its own
+`design-frames: [<id>, …]` frontmatter field (written by `yad-stories`). `yad story frames <story>` looks
+each ID up here for its name, platform and link; `yad-spec` and `yad-implement` run it, and `yad doctor`
+warns (`stories:design-frames`) on an ID this file does not hold. So keep a frame's `nodeId` the same when
+the design changes.
+
 ## `test-links.json`
 Present only when the `test-cases` step materialized automation in a connected testing tool
 (`yad-connect-testing` → `.sdlc/testing.json`). Written by `yad-test-cases`, the machine-readable

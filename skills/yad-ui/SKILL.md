@@ -216,6 +216,11 @@ When Step 3b generated or linked a design, write the machine-readable screen→f
 Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. When Step 3b degraded
 (`design: none`), do **not** write `design-links.json`.
 
+Each `nodeId` is what a story records later: the stories step lists the frame IDs each story builds in
+its `design-frames:` field, and the spec and implement steps read them with `yad story frames <story>`
+(#354). So record every screen with its real `nodeId`, keep a frame's ID the same when you edit it, and
+give a frame a plain ID — one with a comma, a space, `#` or a bracket cannot be read back from a story.
+
 ### Step 5 — Advance the authoring step (NOT the gate)
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name):
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.

@@ -32,6 +32,7 @@ import { readMembers, judgedMemberFiles } from './members.mjs';
 import { loadChoices, readToolboxFile } from './toolbox.mjs';
 import { signingDoctorLine } from './signing.mjs';
 import { nodePins, satisfies, nodeFix, dockerReasons, dockerState, glabConfigs } from './machine.mjs';
+import { allStoryFrames, FRAMES_KEY } from './story-frames.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
 // entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
@@ -1659,6 +1660,35 @@ export function themeChecks(checks, root) {
   }
 }
 
+// #354 — the design frames each story records (`design-frames: [id, …]`). The rule is `frameFindings` in
+// cli/story-frames.mjs, the same one `yad story frames` prints, and every finding is a warning there too,
+// so the two never disagree. No row at all when no story records frames: most Products have no design
+// tool, and a line saying so on every run would teach people to skip the section.
+export function storyFrameChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const stories = allStoryFrames(root, epicIds(root).sort());
+  if (!stories.length) return;
+  const problems = stories.flatMap((s) => s.findings.map((f) => `${forTerminal(s.story)}: ${f.message}`));
+  if (!problems.length) {
+    const withFrames = stories.filter((s) => s.frames > 0).length;
+    const noScreens = stories.length - withFrames;
+    const parts = [
+      ...(withFrames ? [`${withFrames} story(ies) record design frames, and every frame ID is in its epic's design-links.json`] : []),
+      ...(noScreens ? [`${noScreens} story(ies) say they have no screens (\`${FRAMES_KEY}: []\`)`] : []),
+    ];
+    check(checks, 'stories:design-frames', 'shape', 'ok', parts.join('; '));
+    return;
+  }
+  const shownN = 3;
+  const list = `${problems.slice(0, shownN).join('; ')}${problems.length > shownN ? ` (+${problems.length - shownN} more)` : ''}`;
+  check(
+    checks, 'stories:design-frames', 'shape', 'warn',
+    `${problems.length} problem(s) with the design frames stories record: ${list}`,
+    `run \`yad story frames <story>\` for one story's frames and findings, and rename a story file whose name is not \`<epic>-S<n>.md\` (the command cannot read it). Fixing \`${FRAMES_KEY}\` changes the story file, so a stories review that already passed must approve it again`,
+  );
+}
+
 // A project's chain against the step catalogue (E4). `phaseChecks` below asks whether a step id is
 // KNOWN; this asks whether a known step is set up the way the catalogue says it is.
 //
@@ -2789,6 +2819,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   legacyModuleChecks(checks, root);
   typeChecks(checks, root);
   themeChecks(checks, root);
+  storyFrameChecks(checks, root);
   catalogueChecks(checks, root);
   profileChecks(checks, root);
   skipChecks(checks, root);

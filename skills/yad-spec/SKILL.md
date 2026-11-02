@@ -117,6 +117,14 @@ The **`test-cases` track may still be `in_progress`**: it is parallel and non-bl
 and point the user at `yad-status`. **Do not mutate Shape state** — `ready-for-build` semantics
 stay intact.
 
+**Read the story's design frames (#354).** From the Product, run `yad story frames <story> --json`. Its
+`frames` list holds each design-tool frame the story builds: `id`, `name`, `platform` and `url`, read
+from the epic's `design-links.json`. When it has frames, `spec.md` (full or light) gets a
+`## Design frames` section with one line per frame — `- <name> (<platform>) — <id> — <url>` — so the
+spec and the tasks name the screens and nobody has to ask which ones belong to this story. A finding it
+prints (an ID it cannot find, say) is a warning: copy it into that section as an open question, and do
+not guess a frame. `recorded: false` or an empty list means no frames: write no section.
+
 ### Step 2 — Resolve the target code repo
 Map `repo` → `{project-root}/demo-repos/<repo>/`. Confirm it exists and is its own git repo
 (`demo-repos/<repo>/.git` present). If missing, STOP and point the user at `demo-repos/README.md`

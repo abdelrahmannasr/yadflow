@@ -108,6 +108,13 @@ light spec has only `spec.md`: its `## Plan` section is the plan, and it has no 
 contract slice is **quoted** from the product repo's locked `contract.md` — implement to it, never
 change it here.
 
+**For a task with UI, read its design frames (#354).** Run `yad story frames <story> --json` (yad finds
+the Product from the code repo). Its `frames` list names each design-tool frame the story builds, with
+its `name`, `platform` and `url`; `spec.md`'s `## Design frames` section, when there is one, says the
+same. Build to those frames: open them through the connected design tool's MCP when there is one, and
+read them from their `url` otherwise. Never pick a frame by its look or its name alone. An ID it cannot
+find is an open question for the batch below, not a guess.
+
 **Then ask the batch (#357)** that **Ask the human-only questions first** above describes, before
 writing any code. Read `spec.md`'s `## Clarifications` first: `yad-spec` recorded its answers there.
 Ask only what is still open for THIS task, from its block in `tasks.md`, `plan.md` and the contract

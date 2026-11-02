@@ -74,6 +74,19 @@ Phase 3 build (Spec Kit per repo) accurate anchors instead of invented ones.
   `code-context: stale` in the story frontmatter.
 - **Traceability:** record the loaded maps in each story's `code-context:` frontmatter field.
 
+### Step 2c — Load the design frames (so no one has to ask which screens a story builds)
+When the UI step drew the screens in a design tool, it recorded them in
+`{project-root}/epics/EP-<slug>/.sdlc/design-links.json`: a `screens` list, each with `name`, `platform`,
+`nodeId` and `url`. Read it. In Step 5 each story lists the `nodeId`s of the screens it builds in its
+`design-frames:` field, so the spec and implement steps read them with `yad story frames <story>`.
+
+- **No file, no field:** with no `design-links.json` (no design tool, or the UI step skipped), leave
+  the `design-frames:` line out of every story and name the screens in "Notes for build" as before.
+  `[]` means "this story has no screens", which is not the same as "no frames were recorded".
+- **IDs only, copied exactly, no quotes.** Copy each `nodeId` character for character, without quote
+  marks. The name and link stay in `design-links.json`, so they are written down once. A frame ID holding a comma, a space, `#` or a
+  bracket cannot be read back: ask for that frame to get a plain ID in the design tool.
+
 ### Step 3 — Break down the epic (assist: pm)
 Adopt the **pm** lens. Decompose the epic into the smallest set of
 independently reviewable, independently buildable stories. For each story decide which repos it touches
@@ -96,6 +109,7 @@ status: draft
 owner: <inherit from epic.md owner>   # the epic owner carries through; not retyped
 repos: [<subset of epic.repos this story implements>]
 code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # code-maps anchoring "Notes for build" (Step 2b)
+design-frames: []
 ---
 
 ## Story
@@ -111,6 +125,14 @@ As a <role>, I want <capability>, so that <outcome>.
 ```
 
 `repos` is the field the later build phase reads to know where to scaffold specs — set it precisely.
+
+`design-frames` lists the design-tool frame IDs (`nodeId`s from `design-links.json`, Step 2c) of the
+screens this story builds, on ONE line: `design-frames: [12:34, 56:78]`. Leave it `[]` for a story with
+no screens, and take the line out when the epic has no `design-links.json` (Step 2c). **Never put a `# comment` after it**, and never write it as a `- id` list on the lines
+below: this frontmatter reader keeps the rest of the line, so either one makes the list unreadable.
+Before the review, run `yad story frames <story>` for each story: it prints every frame's name and link,
+and warns on an ID it cannot find. The field is part of the story, so the stories review approves it
+like `repos`, and changing it after that review passed means the review must approve it again.
 
 ### Step 6 — Advance the authoring step (NOT the gate)
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/product.json` (`.sdlc/hub.json` on an older Product that has only that name):

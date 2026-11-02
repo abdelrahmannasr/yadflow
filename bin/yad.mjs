@@ -319,6 +319,9 @@ ${c.bold('Build helpers')}
                                        Commit by convention (trailers, atomic guard); --body adds a
                                        body above the trailers; --manual is
                                        the door past the Product's ledger hook, reason recorded
+  yad story frames <story> [--json]    Show the design frames a story records (its design-frames
+                                       list), with each frame's name, platform and link from the
+                                       epic's design-links.json; warns on an ID it cannot find
   yad build start <story> --repo <r>   ${c.dim('(on the Product)')} Begin a story's Build lane in one repo
   yad build step <story> --repo <r> <step> in_progress|in_review|done|blocked [--reason <text>] [--run <uid>] [--via auto|human] [--task <T>]
                                        Move the lane's current step; done records how it closed.
@@ -612,6 +615,7 @@ const ACTIONS = {
   repo: { known: ['list', 'refresh', 'sync', 'clone'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
+  story: { known: ['frames'] },
   docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
@@ -631,6 +635,7 @@ const PRODUCT_CMDS = new Set([
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build', 'worktree', 'ci',
+  'story',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
@@ -1303,6 +1308,12 @@ async function main() {
       const [, action, name] = o._;
       // `--write` was dropped (E69); wherever it is typed, it is refused with the reason — never ignored.
       result = await commands.runCodeowners(o.dir, { action: action || 'check', name, json: o.json, platform: o.platform, write: o._.some((a) => a === '--write' || a.startsWith('--write=')) });
+      break;
+    }
+    case 'story': {
+      if (o._.length > 3) { refuse(`unexpected argument(s): ${o._.slice(3).join(' ')}`, 'use: yad story frames <story-id> — one story at a time'); break; }
+      const [, action, story] = o._;
+      result = await commands.runStory(o.dir, { action, story, json: o.json });
       break;
     }
     case 'roster':

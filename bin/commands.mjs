@@ -41,6 +41,7 @@ export { runHistory, HISTORY_FLAGS } from '../cli/history.mjs';
 export { runRepo } from '../cli/repo.mjs';
 export { runRiskMap } from '../cli/riskmap-command.mjs';
 export { runCodeowners } from '../cli/codeowners-command.mjs';
+export { runStory } from '../cli/story-frames.mjs';
 export { runDocs } from '../cli/docs.mjs';
 export { runDetect } from '../cli/detect.mjs';
 export { runToolboxAdd, runToolboxCheck, runToolboxList, runToolboxRemove } from '../cli/toolbox.mjs';
