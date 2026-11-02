@@ -396,7 +396,10 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    says `low` — the larger step wins. That directory also asks for an approval from someone who has
    committed there in the last 30 days, and the same scripts name who that is.
 5. **AI review → engineer review → merge** — `yad-engineer-review`: CodeRabbit is an advisory first pass
-   (never the authority); a human engineer approves (one approver holds the merge; risk raises the reported count); on
+   (never the authority). For a UI change, a live design check (the page at several screen widths) runs
+   at the PR's preview address — from the repo's pattern (`yad repo preview <repo> 'https://pr-{pr}.myapp.dev'`)
+   or the deployment GitHub/GitLab records — or the review says plainly it ran locally only (#359).
+   A human engineer approves (one approver holds the merge; risk raises the reported count); on
    merge (`yad build merged … --ship` asks the platform, so nobody has to say it merged; `yad build sync`
    records every merge the code repos show at once, then sets finished stories shipped) `yad build ship`
    records the ship in the build ledger from the merged PR (a later fix to the task, from
