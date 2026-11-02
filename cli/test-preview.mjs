@@ -247,9 +247,14 @@ test('platformPreview (GitLab): a merge-request pipeline\'s deployment counts, w
 
 test('resolvePreview: GitLab without --pr, and a --pr that is not a number, both say pass --pr', () => {
   const head = { sha: SHA, branch: 'feat/x' };
-  const none = () => ({ url: null, why: 'GitLab lists nothing' });
+  const none = () => ({ url: null, why: 'GitLab lists no successful, running review deployment' });
   const gl = resolvePreview({ meta: { name: 'web' }, platform: 'gitlab', pr: null, head, lookup: none });
   assert.match(gl.why, /found only with --pr — pass --pr <n>$/);
+  const glBroken = resolvePreview({ meta: { name: 'web', preview_url: 'http://x' }, platform: 'gitlab', pr: null, head, lookup: () => ({ url: null, why: 'GitLab lists no successful, running review deployment' }) });
+  assert.match(glBroken.why, /found only with --pr — set it again with `yad repo preview <repo> <pattern>`$/, 'a broken pattern is the fix to name first');
+  const glDown = resolvePreview({ meta: { name: 'web' }, platform: 'gitlab', pr: null, head, lookup: () => ({ url: null, why: 'GitLab could not be asked for deployments (glab not signed in, offline, or no GitLab remote)' }) });
+  assert.doesNotMatch(glDown.why, /found only with --pr/, '--pr would not help a GitLab that cannot be asked');
+  assert.match(glDown.why, / — set one with `yad repo preview <repo> <pattern>`$/);
   const bad = resolvePreview({ meta: { name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, platform: 'github', pr: 'abc', head, lookup: none });
   assert.match(bad.why, /--pr\) is not a number.* — pass --pr <n>$/);
   assert.equal(urlProblem(''), 'is not a URL');

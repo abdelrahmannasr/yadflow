@@ -88,6 +88,7 @@ export function budget(now = Date.now, total = PLATFORM_BUDGET) {
   const until = now() + total;
   return { now, left: () => Math.min(PLATFORM_TIMEOUT, until - now()), spent: () => until - now() < MIN_CALL };
 }
+export const isPrNumber = (pr) => pr != null && /^\d+$/.test(String(pr));
 const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{7,64}$/i.test(s);
 // A production environment is the live site, never a PR's preview — however the integration marked it.
 // `production`, `prod`, and names that start with them: Vercel's `Production – app`, `production-eu`, `prod_us`.
@@ -140,8 +141,8 @@ export function platformPreview(platform, { cwd, sha, branch, pr = null, runner 
     const seen = new Set();
     // A merge-request pipeline deploys from `refs/merge-requests/<iid>/head` (a merged-results one, a
     // merge commit whose id is not the MR head's): for that ref the commit is not compared. The skills
-    // still treat a page that does not show the change as local-only — and, newest first, an older
-    // pipeline's deployment of the MR counts only when no newer one is there.
+    // still treat a page that does not show the change as local-only. Newest first: the answer is the
+    // newest one whose environment is still running.
     const mrRef = pr ? `refs/merge-requests/${pr}/head` : null;
     const candidates = list.filter((x) => env(x) && ((x.ref === branch && (!sha || x.sha === sha)) || (mrRef && x.ref === mrRef))
       && Number.isInteger(env(x).id) && !isProduction(env(x).name) && !seen.has(env(x).id) && seen.add(env(x).id));
@@ -157,7 +158,7 @@ export function platformPreview(platform, { cwd, sha, branch, pr = null, runner 
       return { url: full.external_url };
     }
     if (asked && failed === asked) return { url: null, why: 'GitLab could not be asked about the review environments' };
-    return { url: null, why: 'GitLab lists no successful, running review deployment with an address for this branch among its newest 100 deployments' };
+    return { url: null, why: 'GitLab lists no successful, running review deployment with an address for this branch or MR among its newest 100 deployments' };
   }
   return { url: null, why: 'the platform is not GitHub or GitLab' };
 }
@@ -178,7 +179,7 @@ export function prHead(platform, pr, { cwd, runner = run, clock = budget(), base
     return { sha: isSha(sha) ? sha : null, branch: b };
   }
   const none = (why) => ({ sha: null, branch: null, why });
-  if (!/^\d+$/.test(String(pr))) return none('the PR number given (--pr) is not a number');
+  if (!isPrNumber(pr)) return none('the PR number given (--pr) is not a number');
   if (clock.spent()) return none('the platform was too slow to answer');
   const opts = { cwd, timeout: clock.left() };
   if (platform === 'github') {
@@ -209,7 +210,7 @@ export function resolvePreview({ meta, platform, pr, base = null, cwd, runner = 
     const h = needs(pat.pattern, 'branch') ? getHead() : {};
     const url = fillPattern(pat.pattern, { pr, branch: h.branch, repo });
     if (url) return { url, source: 'pattern' };
-    if (needs(pat.pattern, 'pr') && pr && !/^\d+$/.test(String(pr))) tried.push('the PR number given (--pr) is not a number');
+    if (needs(pat.pattern, 'pr') && pr && !isPrNumber(pr)) tried.push('the PR number given (--pr) is not a number');
     else if (needs(pat.pattern, 'pr') && !pr) tried.push('the repo\'s preview_url pattern needs the PR number ({pr}), and none was given (--pr)');
     else if (needs(pat.pattern, 'branch') && !h.branch) tried.push(`the repo's preview_url pattern needs the PR's branch ({branch}), and it is not known: ${h.why || 'no branch'}`);
     else tried.push('the repo\'s preview_url pattern could not be filled');
@@ -222,14 +223,18 @@ export function resolvePreview({ meta, platform, pr, base = null, cwd, runner = 
   const p = h.sha || h.branch ? lookup(platform, { cwd, sha: h.sha, branch: h.branch, pr, runner, clock }) : { url: null, why: h.why };
   if (p?.url) return { url: p.url, source: 'platform' };
   if (p?.why && !tried.some((t) => t === p.why || t.endsWith(p.why))) tried.push(p.why);
-  // GitLab's merge-request pipelines deploy under the MR's own ref, which only its number finds.
-  const gitlabNoPr = !pr && platform === 'gitlab';
+  // GitLab's merge-request pipelines deploy under the MR's own ref, which only its number finds — said
+  // only when GitLab was asked and listed nothing (a GitLab it could not ask, --pr would not help).
+  const gitlabNoPr = !pr && platform === 'gitlab' && /^GitLab lists no/.test(p?.why || '');
   if (gitlabNoPr) tried.push('a merge-request pipeline\'s deployment is found only with --pr');
   const fix = repo ? 'set one with `yad repo preview <repo> <pattern>`' : 'register the repo, then set one with `yad repo preview <repo> <pattern>`';
-  // One next step, chosen here: a missing --pr is the fix whenever it is what stopped the answer.
-  const badPr = pr && !/^\d+$/.test(String(pr));
-  const next = badPr || (!pr && (gitlabNoPr || (pat.pattern && needs(pat.pattern, 'pr')) || (head && !head.branch && !head.sha))) ? 'pass --pr <n>'
-    : pat.pattern ? 'check the pattern with `yad repo preview <repo>`' : pat.problems ? 'set it again with `yad repo preview <repo> <pattern>`' : fix;
+  // One next step, chosen here, the one that most likely unblocks the answer: a --pr that is missing
+  // or wrong when it is what stopped it, then a pattern to fix, then --pr for GitLab's MR pipelines.
+  const badPr = pr && !isPrNumber(pr);
+  const next = badPr || (!pr && ((pat.pattern && needs(pat.pattern, 'pr')) || (head && !head.branch && !head.sha))) ? 'pass --pr <n>'
+    : pat.pattern ? 'check the pattern with `yad repo preview <repo>`'
+    : pat.problems ? 'set it again with `yad repo preview <repo> <pattern>`'
+    : gitlabNoPr ? 'pass --pr <n>' : fix;
   return { url: null, source: 'local-only', why: `${tried.join('; ')} — ${next}` };
 }
 
