@@ -47,7 +47,9 @@ say "1/9  tests + coverage"
 # Coverage carries its own thresholds (package.json) and runs the whole suite, so it subsumes `npm
 # test`. Running both would double the slowest step of this script for no extra signal.
 npm run coverage >"$WORK/coverage.log" 2>&1 || { cat "$WORK/coverage.log"; die "tests or coverage thresholds"; }
-grep -E '^# (tests|pass|fail)' "$WORK/coverage.log" | sed 's/^# /   /'
+# The coverage script asks for the TAP reporter (from Node 23 the default is `spec`, which prints no `# pass`
+# lines); the summary is shown when it is there, and its absence never stops the check (`set -e`).
+grep -E '^# (tests|pass|fail)' "$WORK/coverage.log" | sed 's/^# /   /' || true
 pass "suite green at the configured coverage floors"
 
 # ---------------------------------------------------------------------------------------------
