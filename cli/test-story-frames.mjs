@@ -295,3 +295,13 @@ test('#354: the stories, spec and implement skills all name `yad story frames`',
   const template = fs.readFileSync(path.join(REPO, 'skills', 'yad-stories', 'SKILL.md'), 'utf8');
   assert.match(template, new RegExp(`^${FRAMES_KEY}: \\[\\]$`, 'm'), 'the template ships the key bare, with no trailing comment');
 });
+
+test('#358: spec and implement probe the design tool first, stop on a failure, and record an override', () => {
+  for (const [skill, where] of [['yad-spec', '## Clarifications'], ['yad-implement', 'Decisions:']]) {
+    const body = fs.readFileSync(path.join(REPO, 'skills', skill, 'SKILL.md'), 'utf8');
+    for (const word of ['preflight.probe', 'not-checkable', where]) assert.ok(body.includes(word), `${skill} lacks ${word}`);
+    assert.match(body, /STOP\W+print `preflight\.stop` word for word/i, `${skill} does not stop with the message`);
+  }
+  const ctx = fs.readFileSync(path.join(REPO, 'skills', 'yad-connect-design', 'references', 'design-context.md'), 'utf8');
+  assert.ok(ctx.includes('Reachable before Build (#358)'));
+});
