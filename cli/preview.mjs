@@ -78,32 +78,43 @@ export function fillPattern(p, { pr, branch, repo } = {}) {
 export const needs = (p, key) => typeof p === 'string' && p.includes(`{${key}}`);
 
 const parse = (s) => { try { return JSON.parse(s); } catch { return undefined; } };
-// A review must not stall on a slow or unreachable host: each call is bounded, and the whole lookup
-// stops asking once its budget is spent (the answer is then local-only, with why).
+// A review must not stall on a slow or unreachable host: one budget covers every call the lookup makes
+// (the PR's head, the deployments, their statuses), and each call gets only the time that is left.
+// Spent, the answer is local-only, with why.
 const PLATFORM_TIMEOUT = 8000;
-const PLATFORM_BUDGET = 15000;
+export const PLATFORM_BUDGET = 15000;
+const MIN_CALL = 500;
+export function budget(now = Date.now, total = PLATFORM_BUDGET) {
+  const until = now() + total;
+  return { now, left: () => Math.min(PLATFORM_TIMEOUT, until - now()), spent: () => until - now() < MIN_CALL };
+}
+const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{7,64}$/i.test(s);
+// A production environment is the live site, never a PR's preview — however the integration marked it.
+const isProduction = (name) => typeof name === 'string' && /^prod(uction)?$/i.test(name.trim());
 
 // The newest successful, non-production deployment the platform records for the PR's head commit
 // (GitHub) or branch (GitLab). Never throws: { url } or { url: null, why }.
-export function platformPreview(platform, { cwd, sha, branch, runner = run, now = Date.now } = {}) {
-  const until = now() + PLATFORM_BUDGET;
-  const opts = { cwd, timeout: PLATFORM_TIMEOUT };
+export function platformPreview(platform, { cwd, sha, branch, runner = run, clock = budget() } = {}) {
+  const opts = () => ({ cwd, timeout: clock.left() });
+  const slow = (host) => ({ url: null, why: `${host} was too slow to answer about deployments` });
   if (platform === 'github') {
-    if (!sha) return { url: null, why: 'the head commit is not known' };
-    const r = runner('gh', ['api', `repos/{owner}/{repo}/deployments?sha=${sha}&per_page=20`], opts);
+    if (!isSha(sha)) return { url: null, why: 'the PR\'s head commit is not known' };
+    if (clock.spent()) return slow('GitHub');
+    const r = runner('gh', ['api', `repos/{owner}/{repo}/deployments?sha=${sha}&per_page=20`], opts());
     if (!r.ok) return { url: null, why: 'GitHub could not be asked for deployments (gh not signed in, offline, or no GitHub remote)' };
     const list = parse(r.stdout);
     if (!Array.isArray(list)) return { url: null, why: 'GitHub gave an answer yad cannot read' };
-    // Newest first, as GitHub lists them. A production deployment of this commit is the live site, not
-    // the PR's preview.
-    const candidates = list.filter((d) => d && typeof d === 'object' && Number.isInteger(d.id) && d.production_environment !== true);
+    // Newest first, as GitHub lists them.
+    const candidates = list.filter((d) => d && typeof d === 'object' && Number.isInteger(d.id)
+      && d.production_environment !== true && !isProduction(d.environment));
+    let asked = 0, failed = 0;
     for (const d of candidates.slice(0, 3)) {
-      if (now() > until) return { url: null, why: 'GitHub was too slow to answer about deployments' };
-      const s = runner('gh', ['api', `repos/{owner}/{repo}/deployments/${d.id}/statuses?per_page=20`], opts);
-      if (!s.ok) continue;
-      const statuses = parse(s.stdout);
-      if (!Array.isArray(statuses)) continue;
-      // The newest status decides: a deployment whose latest status is not success is not live now.
+      if (clock.spent()) return slow('GitHub');
+      asked++;
+      const s = runner('gh', ['api', `repos/{owner}/{repo}/deployments/${d.id}/statuses?per_page=20`], opts());
+      const statuses = s.ok ? parse(s.stdout) : undefined;
+      if (!Array.isArray(statuses)) { failed++; continue; }
+      // The newest status decides (GitHub lists them newest first): not success now is not live now.
       const latest = statuses.find((x) => x && typeof x === 'object' && typeof x.state === 'string');
       if (!latest || latest.state !== 'success') continue;
       const url = latest.environment_url;
@@ -111,74 +122,94 @@ export function platformPreview(platform, { cwd, sha, branch, runner = run, now 
       if (urlProblem(url)) return { url: null, why: 'GitHub reports a deployment address yad will not use (not https, or an odd character in it)' };
       return { url };
     }
+    if (asked && failed === asked) return { url: null, why: 'GitHub could not be asked for the deployments\' status' };
     return { url: null, why: candidates.length ? 'GitHub lists no successful deployment with an address for this commit' : 'GitHub lists no preview deployment for this commit' };
   }
   if (platform === 'gitlab') {
-    if (!branch) return { url: null, why: 'the branch is not known' };
-    const r = runner('glab', ['api', `projects/:id/deployments?ref=${encodeURIComponent(branch)}&status=success&order_by=created_at&sort=desc&per_page=20`], opts);
+    if (!branch) return { url: null, why: 'the PR\'s branch is not known' };
+    if (clock.spent()) return slow('GitLab');
+    const r = runner('glab', ['api', `projects/:id/deployments?ref=${encodeURIComponent(branch)}&status=success&order_by=created_at&sort=desc&per_page=20`], opts());
     if (!r.ok) return { url: null, why: 'GitLab could not be asked for deployments (glab not signed in, offline, or no GitLab remote)' };
     const list = parse(r.stdout);
     if (!Array.isArray(list)) return { url: null, why: 'GitLab gave an answer yad cannot read' };
-    const d = list.find((x) => x && typeof x === 'object' && x.environment && typeof x.environment === 'object'
-      && x.environment.tier !== 'production' && x.environment.name !== 'production' && x.environment.external_url
+    const env = (x) => (x && typeof x === 'object' && x.environment && typeof x.environment === 'object' ? x.environment : null);
+    const d = list.find((x) => env(x) && env(x).external_url
+      && !isProduction(env(x).tier) && !isProduction(env(x).name) && env(x).state !== 'stopped'
       && (!sha || x.sha === sha));
-    if (!d) return { url: null, why: 'GitLab lists no successful review deployment with an address for this branch' };
+    if (!d) return { url: null, why: 'GitLab lists no successful, running review deployment with an address for this branch' };
     if (urlProblem(d.environment.external_url)) return { url: null, why: 'GitLab reports a deployment address yad will not use (not https, or an odd character in it)' };
     return { url: d.environment.external_url };
   }
   return { url: null, why: 'the platform is not GitHub or GitLab' };
 }
 
-// The PR/MR's head commit and branch, asked of the platform; else this checkout's. A review may run
-// from any checkout, so the PR's own head is what its preview was deployed from.
-export function prHead(platform, pr, { cwd, runner = run } = {}) {
-  const local = () => ({
-    sha: runner('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null,
-    branch: runner('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }).stdout || null,
-  });
-  if (!pr || !/^\d+$/.test(String(pr))) return local();
-  const opts = { cwd, timeout: PLATFORM_TIMEOUT };
+// The PR/MR's head commit and branch. With a PR number they are asked of the platform, and only the
+// platform's answer counts: this checkout may be on another branch (main, a detached worktree), and its
+// preview is not the PR's. Without one, this checkout's (the review of the branch you are on).
+// { sha, branch } or { sha: null, branch: null, why }.
+export function prHead(platform, pr, { cwd, runner = run, clock = budget() } = {}) {
+  if (!pr) {
+    const sha = runner('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
+    const b = runner('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }).stdout || null;
+    return { sha: isSha(sha) ? sha : null, branch: b && b !== 'HEAD' ? b : null, ...(b === 'HEAD' ? { why: 'this checkout is on no branch (detached)' } : {}) };
+  }
+  const none = (why) => ({ sha: null, branch: null, why });
+  if (!/^\d+$/.test(String(pr))) return none('the PR number is not a number');
+  if (clock.spent()) return none('the platform was too slow to answer');
+  const opts = { cwd, timeout: clock.left() };
   if (platform === 'github') {
     const r = runner('gh', ['pr', 'view', String(pr), '--json', 'headRefOid,headRefName'], opts);
     const j = r.ok ? parse(r.stdout) : null;
-    if (j && typeof j.headRefOid === 'string') return { sha: j.headRefOid, branch: typeof j.headRefName === 'string' ? j.headRefName : null };
-  } else if (platform === 'gitlab') {
+    if (j && isSha(j.headRefOid)) return { sha: j.headRefOid, branch: typeof j.headRefName === 'string' && j.headRefName ? j.headRefName : null };
+    return none(`GitHub could not be asked for PR #${pr}'s head branch (gh not signed in, offline, or no such PR)`);
+  }
+  if (platform === 'gitlab') {
     const r = runner('glab', ['mr', 'view', String(pr), '-F', 'json'], opts);
     const j = r.ok ? parse(r.stdout) : null;
-    if (j && typeof j.sha === 'string') return { sha: j.sha, branch: typeof j.source_branch === 'string' ? j.source_branch : null };
+    if (j && isSha(j.sha)) return { sha: j.sha, branch: typeof j.source_branch === 'string' && j.source_branch ? j.source_branch : null };
+    return none(`GitLab could not be asked for MR !${pr}'s source branch (glab not signed in, offline, or no such MR)`);
   }
-  return local();
+  return none('the platform is not GitHub or GitLab');
 }
 
 // The answer a review step uses: { url, source: 'pattern'|'platform' } or
 // { url: null, source: 'local-only', why }. `why` says what was tried and how to set a pattern.
-export function resolvePreview({ meta, platform, pr, branch, sha, cwd, runner = run, lookup = platformPreview } = {}) {
+// The PR's head is asked only when it is needed: a {pr} or {repo} pattern answers with no network call.
+export function resolvePreview({ meta, platform, pr, cwd, runner = run, lookup = platformPreview, clock = budget(), head: given } = {}) {
   const repo = meta?.name;
-  if (branch === undefined && sha === undefined) ({ branch, sha } = prHead(platform, pr, { cwd, runner }));
+  let head = given || null;
+  const getHead = () => (head ||= prHead(platform, pr, { cwd, runner, clock }));
   const tried = [];
   const pat = previewPattern(meta);
   if (pat.pattern) {
-    const url = fillPattern(pat.pattern, { pr, branch, repo });
+    const h = needs(pat.pattern, 'branch') ? getHead() : {};
+    const url = fillPattern(pat.pattern, { pr, branch: h.branch, repo });
     if (url) return { url, source: 'pattern' };
-    tried.push(needs(pat.pattern, 'pr') && !pr ? 'the repo\'s preview_url pattern needs the PR number ({pr}), and none was given (--pr)' : 'the repo\'s preview_url pattern could not be filled');
+    if (needs(pat.pattern, 'pr') && !pr) tried.push('the repo\'s preview_url pattern needs the PR number ({pr}), and none was given (--pr)');
+    else if (needs(pat.pattern, 'branch') && !h.branch) tried.push(`the repo's preview_url pattern needs the PR's branch ({branch}), and it is not known: ${h.why || 'no branch'}`);
+    else tried.push('the repo\'s preview_url pattern could not be filled');
   } else if (pat.problems) {
     tried.push(`the repo's preview_url pattern cannot be used: it ${pat.problems.join('; ')}`);
   } else {
     tried.push(`no preview_url pattern is recorded for ${repo ? 'this repo' : 'a repo outside the registry'}`);
   }
-  const p = lookup(platform, { cwd, sha, branch, runner });
+  const h = getHead();
+  const p = h.sha || h.branch ? lookup(platform, { cwd, sha: h.sha, branch: h.branch, runner, clock }) : { url: null, why: h.why };
   if (p?.url) return { url: p.url, source: 'platform' };
-  if (p?.why) tried.push(p.why);
+  if (p?.why && !tried.some((t) => t.includes(p.why))) tried.push(p.why);
   const fix = repo ? 'set one with `yad repo preview <repo> <pattern>`' : 'register the repo, then set one with `yad repo preview <repo> <pattern>`';
-  return { url: null, source: 'local-only', why: `${tried.join('; ')} — ${fix}` };
+  const next = pat.pattern ? 'check the pattern with `yad repo preview <repo>`' : pat.problems ? 'set it again with `yad repo preview <repo> <pattern>`' : fix;
+  return { url: null, source: 'local-only', why: `${tried.join('; ')} — ${next}` };
 }
 
-// The PR/MR description's Preview line, at open time: a pattern that can be filled now, else a note.
-// A {pr} pattern is filled after the PR exists (`runOpenPr` edits the body then).
+// The PR/MR description's Preview line, at open time: a pattern that can be filled now, else a note
+// that says which case it is. A {pr} pattern is filled after the PR exists (`runOpenPr` edits the body).
 export const PREVIEW_NONE = 'none recorded — a live design check runs locally only, unless the platform reports a deployment for this PR';
+export const PREVIEW_UNFILLED = 'a preview_url pattern is recorded but could not be filled here — `yad review context --pr <n>` gives the address';
 export function previewLine(meta, { pr, branch } = {}) {
   const pat = previewPattern(meta);
+  if (pat.problems) return PREVIEW_UNFILLED;
   if (!pat.pattern) return PREVIEW_NONE;
   const url = fillPattern(pat.pattern, { pr, branch, repo: meta?.name });
-  return url ? `<${url}>` : PREVIEW_NONE;
+  return url ? `<${url}>` : PREVIEW_UNFILLED;
 }

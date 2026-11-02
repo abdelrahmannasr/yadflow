@@ -116,13 +116,22 @@ export function templateBody(repoRoot, platform, { task, summary, risk, contract
   return out;
 }
 
-// The PR/MR description with its Preview line set (#359): the template's `**Preview:**` line when it
-// has one, else a line added under `## Testing` (a template committed before #359). A template with
-// neither is the team's own shape and is left as it is.
+// The PR/MR description with its Preview line set (#359), looked for only in the `## Testing` section
+// (the Summary, taken from the commit, may hold a line of its own that reads the same): the template's
+// `**Preview:**` line there, else a line added at the top of that section (a template committed before
+// #359). A template with no `## Testing` is the team's own shape and is left as it is.
 export function withPreviewLine(body, preview) {
-  const re = /^([-*]\s+)?(\*\*Preview:\*\*)[^\r\n]*/m;
-  if (re.test(body)) return body.replace(re, (_m, b, g) => `${b || ''}${g} ${preview}`);
-  return body.replace(/(^## Testing[ \t]*\r?\n(?:<!--[\s\S]*?-->[ \t]*\r?\n)?)/m, (_m, g1) => `${g1}- **Preview:** ${preview}\n`);
+  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const head = /^## Testing[ \t]*\r?\n/m.exec(body);
+  if (!head) return body;
+  const start = head.index + head[0].length;
+  const next = body.slice(start).search(/^## /m);
+  const end = next < 0 ? body.length : start + next;
+  const section = body.slice(start, end);
+  const line = /^([-*][ \t]+)?(\*\*Preview:\*\*)[^\r\n]*/m;
+  if (line.test(section)) return body.slice(0, start) + section.replace(line, (_m, b, g) => `${b || ''}${g} ${preview}`) + body.slice(end);
+  const lead = /^(?:<!--[\s\S]*?-->[ \t]*\r?\n)?/.exec(section)[0];
+  return `${body.slice(0, start)}${lead}- **Preview:** ${preview}${eol}${section.slice(lead.length)}${body.slice(end)}`;
 }
 
 // E66 — how many approvers this PR asks for, printed once it is open: the body's own level and contract
@@ -403,6 +412,7 @@ export async function runOpenPr(root, opts = {}) {
   // The Preview line (#359), on a code task only: the repo's pattern filled now, or a note. A pattern
   // that needs the PR number is filled once the PR exists (below).
   const preview = stage === 'code-repo' ? previewLine(meta, { branch }) : undefined;
+  if (stage === 'code-repo' && previewPattern(meta).problems) warn(`this repo's preview_url pattern cannot be used: it ${previewPattern(meta).problems.join('; ')} — set it again with \`yad repo preview <repo> <pattern>\``);
   const body = templateBody(repoRoot, platform, {
     task: bodyTask, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage, preview,
   });
@@ -425,8 +435,10 @@ export async function runOpenPr(root, opts = {}) {
   if (pat && needs(pat, 'pr')) {
     const n = Number(prNumberFromUrl(r.url)) || null;
     const url = n ? fillPattern(pat, { pr: n, branch, repo: meta?.name }) : null;
-    if (url) {
-      const edit = (opts.editBody || editPrBody)(platform, n, withPreviewLine(body, `<${url}>`), { cwd: repoRoot });
+    const filled = url ? withPreviewLine(body, `<${url}>`) : null;
+    if (url && filled === body) info(`this repo's PR/MR template has no Preview line and no ## Testing section, so the preview address was not written: ${url}`);
+    else if (url) {
+      const edit = (opts.editBody || editPrBody)(platform, n, filled, { cwd: repoRoot });
       if (edit?.ok) ok(`preview ${url}`);
       else warn(`the PR/MR is open, but its Preview line could not be filled (${String(edit?.reason || 'unknown').split('\n')[0]}) — the preview should be at ${url}`);
     } else warn('the PR/MR is open, but its number could not be read from the URL, so the Preview line was left as "none recorded"');

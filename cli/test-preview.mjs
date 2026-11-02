@@ -18,7 +18,7 @@ if (process.env.NODE_TEST_CONTEXT) {
 }
 process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
-const { patternProblems, fillPattern, previewPattern, platformPreview, resolvePreview, prHead, previewLine, urlProblem, PREVIEW_NONE, slug } = await import('./preview.mjs');
+const { patternProblems, fillPattern, previewPattern, platformPreview, resolvePreview, prHead, previewLine, urlProblem, budget, PREVIEW_NONE, PREVIEW_UNFILLED, slug } = await import('./preview.mjs');
 const { templateBody, withPreviewLine, runOpenPr } = await import('./openpr.mjs');
 const { reviewContext } = await import('./review.mjs');
 const { previewChecks } = await import('./doctor.mjs');
@@ -109,6 +109,13 @@ test('platformPreview (GitHub): the newest successful non-production deployment 
   });
   assert.deepEqual(platformPreview('github', { sha: SHA, runner }), { url: 'https://pr-7.x.vercel.app' });
   assert.ok(!runner.calls.some((c) => c.includes('deployments/3/')), 'a production deployment is the live site, never asked');
+  const named = fakeRunner({
+    [`gh api repos/{owner}/{repo}/deployments?sha=${SHA}`]: deployments([{ id: 5, environment: 'Production' }, { id: 6, environment: 'prod' }]),
+    'gh api repos/{owner}/{repo}/deployments/': deployments([{ state: 'success', environment_url: 'https://live.x.dev' }]),
+  });
+  assert.match(platformPreview('github', { sha: SHA, runner: named }).why, /no preview deployment/, 'an environment named production is production, flag or not');
+  const failing = fakeRunner({ [`gh api repos/{owner}/{repo}/deployments?sha=${SHA}`]: deployments([{ id: 1 }, { id: 2 }]) });
+  assert.match(platformPreview('github', { sha: SHA, runner: failing }).why, /could not be asked for the deployments' status/, 'failed status calls are not "no deployment"');
 });
 
 test('platformPreview (GitHub): no deployment, a failed gh, an odd address, an unreadable answer', () => {
@@ -116,6 +123,7 @@ test('platformPreview (GitHub): no deployment, a failed gh, an odd address, an u
   assert.match(platformPreview('github', { sha: SHA, runner: fakeRunner({}) }).why, /could not be asked/);
   assert.match(platformPreview('github', { sha: SHA, runner: fakeRunner({ 'gh api': '{' }) }).why, /cannot read/);
   assert.match(platformPreview('github', { sha: null, runner: fakeRunner({}) }).why, /head commit is not known/);
+  assert.match(platformPreview('github', { sha: 'x&y', runner: fakeRunner({}) }).why, /head commit is not known/, 'a sha is hex only before it goes into the API path');
   const odd = fakeRunner({
     [`gh api repos/{owner}/{repo}/deployments?sha=${SHA}`]: deployments([{ id: 1 }]),
     'gh api repos/{owner}/{repo}/deployments/1/statuses': deployments([{ state: 'success', environment_url: 'javascript:alert(1)' }]),
@@ -134,56 +142,90 @@ test('platformPreview (GitHub): stops asking once its time budget is spent', () 
     if (line.includes('/statuses')) return { ok: true, stdout: '[{"state":"failure"}]' };
     return { ok: true, stdout: deployments([{ id: 1 }, { id: 2 }, { id: 3 }]) };
   };
-  assert.match(platformPreview('github', { sha: SHA, runner, now }).why, /too slow/);
+  assert.match(platformPreview('github', { sha: SHA, runner, clock: budget(now) }).why, /too slow/);
+  // Each call is handed only the time that is left, never a fresh 8 s.
+  const seen = [];
+  let t2 = 0;
+  const clock = budget(() => t2);
+  const timed = (cmd, args, o) => { seen.push(o.timeout); t2 += 6000; return { ok: true, stdout: deployments([{ id: 1 }, { id: 2 }]) }; };
+  platformPreview('github', { sha: SHA, runner: timed, clock });
+  assert.deepEqual(seen, [8000, 8000, 3000], 'a hard total of 15 s');
 });
 
 test('platformPreview (GitLab): a successful review deployment of the branch, never production', () => {
   const runner = fakeRunner({
     'glab api projects/:id/deployments?ref=feat%2Fx': deployments([
       { sha: SHA, environment: { name: 'production', external_url: 'https://x.dev' } },
+      { sha: SHA, environment: { name: 'Production', external_url: 'https://x.dev' } },
+      { sha: SHA, environment: { name: 'review/old', state: 'stopped', external_url: 'https://dead.review.x.dev' } },
       { sha: SHA, environment: { name: 'review/feat-x', tier: 'development', external_url: 'https://feat-x.review.x.dev' } },
     ]),
   });
   assert.deepEqual(platformPreview('gitlab', { sha: SHA, branch: 'feat/x', runner }), { url: 'https://feat-x.review.x.dev' });
   assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({}) }).why, /could not be asked/);
-  assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({ 'glab api': '[]' }) }).why, /no successful review deployment/);
+  assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({ 'glab api': '[]' }) }).why, /no successful, running review deployment/);
   assert.match(platformPreview('gitlab', { branch: null, runner: fakeRunner({}) }).why, /branch is not known/);
   assert.match(platformPreview('bitbucket', {}).why, /not GitHub or GitLab/);
 });
 
-test('prHead: the PR head from the platform, else this checkout', () => {
+test('prHead: with a PR number only the platform answers; without one, this checkout', () => {
   const gh = fakeRunner({ 'gh pr view 9': JSON.stringify({ headRefOid: SHA, headRefName: 'feat/x' }) });
   assert.deepEqual(prHead('github', 9, { runner: gh }), { sha: SHA, branch: 'feat/x' });
   const gl = fakeRunner({ 'glab mr view 9': JSON.stringify({ sha: SHA, source_branch: 'feat/y' }) });
   assert.deepEqual(prHead('gitlab', 9, { runner: gl }), { sha: SHA, branch: 'feat/y' });
-  const local = fakeRunner({ 'git rev-parse HEAD': 'b'.repeat(40), 'git rev-parse --abbrev-ref HEAD': 'here' });
-  assert.deepEqual(prHead('github', 9, { runner: local }), { sha: 'b'.repeat(40), branch: 'here' }, 'a gh failure falls back to the checkout');
-  assert.deepEqual(prHead('github', null, { runner: local }), { sha: 'b'.repeat(40), branch: 'here' });
-  assert.ok(!local.calls.some((c) => c.startsWith('gh pr view null')));
+  const local = fakeRunner({ 'git rev-parse HEAD': 'b'.repeat(40), 'git rev-parse --abbrev-ref HEAD': 'main' });
+  const failed = prHead('github', 9, { runner: local });
+  assert.equal(failed.branch, null, 'a gh failure never falls back to this checkout: main is not the PR');
+  assert.equal(failed.sha, null);
+  assert.match(failed.why, /PR #9's head branch/);
+  assert.ok(!local.calls.some((c) => c.startsWith('git')), 'git is not asked when a PR is named');
+  assert.deepEqual(prHead('github', null, { runner: local }), { sha: 'b'.repeat(40), branch: 'main' });
+  const detached = prHead('github', null, { runner: fakeRunner({ 'git rev-parse HEAD': 'b'.repeat(40), 'git rev-parse --abbrev-ref HEAD': 'HEAD' }) });
+  assert.equal(detached.branch, null, 'a detached checkout has no branch, never "HEAD"');
+  assert.match(detached.why, /detached/);
 });
 
 test('resolvePreview: the pattern wins, the platform is the fallback, else local-only with why and the fix', () => {
+  const head = { sha: SHA, branch: 'b' };
   const never = () => { throw new Error('the platform is not asked when the pattern answers'); };
-  assert.deepEqual(resolvePreview({ meta: { name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, platform: 'github', pr: 4, branch: 'b', sha: SHA, lookup: never }), { url: 'https://pr-4.x.dev', source: 'pattern' });
+  const noNet = fakeRunner({});
+  assert.deepEqual(resolvePreview({ meta: { name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, platform: 'github', pr: 4, runner: noNet, lookup: never }), { url: 'https://pr-4.x.dev', source: 'pattern' });
+  assert.deepEqual(noNet.calls, [], 'a {pr} pattern answers with no call at all');
   const plat = () => ({ url: 'https://dep.x.dev' });
-  assert.deepEqual(resolvePreview({ meta: { name: 'web' }, platform: 'github', pr: 4, branch: 'b', sha: SHA, lookup: plat }), { url: 'https://dep.x.dev', source: 'platform' });
+  assert.deepEqual(resolvePreview({ meta: { name: 'web' }, platform: 'github', pr: 4, head, lookup: plat }), { url: 'https://dep.x.dev', source: 'platform' });
   const none = () => ({ url: null, why: 'GitHub lists no preview deployment for this commit' });
-  const r = resolvePreview({ meta: { name: 'web' }, platform: 'github', pr: 4, branch: 'b', sha: SHA, lookup: none });
+  const r = resolvePreview({ meta: { name: 'web' }, platform: 'github', pr: 4, head, lookup: none });
   assert.equal(r.url, null);
   assert.equal(r.source, 'local-only');
   assert.match(r.why, /no preview_url pattern is recorded for this repo; GitHub lists no preview deployment/);
-  assert.match(r.why, /yad repo preview <repo> <pattern>/);
-  const noPr = resolvePreview({ meta: { name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, platform: 'github', pr: null, branch: 'b', sha: SHA, lookup: none });
+  assert.match(r.why, /set one with `yad repo preview <repo> <pattern>`/);
+  const noPr = resolvePreview({ meta: { name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, platform: 'github', pr: null, head, lookup: none });
   assert.match(noPr.why, /needs the PR number \(\{pr\}\), and none was given \(--pr\)/);
-  const badPat = resolvePreview({ meta: { name: 'web', preview_url: 'http://x.dev' }, platform: 'github', pr: 1, branch: 'b', sha: SHA, lookup: none });
-  assert.match(badPat.why, /cannot be used: it must start with https/);
-  const outside = resolvePreview({ meta: null, platform: 'github', pr: 1, branch: 'b', sha: SHA, lookup: none });
+  const badPat = resolvePreview({ meta: { name: 'web', preview_url: 'http://x.dev' }, platform: 'github', pr: 1, head, lookup: none });
+  assert.match(badPat.why, /cannot be used: it must start with https.*set it again/);
+  const outside = resolvePreview({ meta: null, platform: 'github', pr: 1, head, lookup: none });
   assert.match(outside.why, /register the repo/);
+});
+
+test('resolvePreview: a {branch} pattern never fills from the wrong branch', () => {
+  // gh offline, the reviewer on main: the old fallback answered https://main--web… as "the PR's preview".
+  const runner = fakeRunner({ 'git rev-parse HEAD': 'b'.repeat(40), 'git rev-parse --abbrev-ref HEAD': 'main' });
+  const lookup = () => { throw new Error('nothing to ask the platform about'); };
+  const r = resolvePreview({ meta: { name: 'web', preview_url: 'https://{branch}--web.netlify.app' }, platform: 'github', pr: 12, runner, lookup });
+  assert.equal(r.url, null);
+  assert.equal(r.source, 'local-only');
+  assert.match(r.why, /needs the PR's branch \(\{branch\}\), and it is not known: GitHub could not be asked for PR #12's head branch/);
+  assert.equal((r.why.match(/head branch/g) || []).length, 1, 'the reason is said once');
+  const ok = resolvePreview({ meta: { name: 'web', preview_url: 'https://{branch}--web.netlify.app' }, platform: 'github', pr: 12,
+    runner: fakeRunner({ 'gh pr view 12': JSON.stringify({ headRefOid: SHA, headRefName: 'feat/cart' }) }), lookup });
+  assert.deepEqual(ok, { url: 'https://feat-cart--web.netlify.app', source: 'pattern' });
 });
 
 test('previewLine: the filled pattern in angle brackets, else the note', () => {
   assert.equal(previewLine({ name: 'web', preview_url: 'https://{branch}.x.dev' }, { branch: 'feat/a' }), '<https://feat-a.x.dev>');
-  assert.equal(previewLine({ name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, { branch: 'feat/a' }), PREVIEW_NONE, '{pr} is filled after the PR exists');
+  assert.equal(previewLine({ name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, { branch: 'feat/a' }), PREVIEW_UNFILLED, '{pr} is filled after the PR exists, never "none recorded"');
+  assert.equal(previewLine({ name: 'web', preview_url: 'http://x.dev' }, {}), PREVIEW_UNFILLED, 'a recorded pattern is never "none recorded"');
+  assert.equal(previewLine({ name: 'web', preview_url: 'https://{branch}.x.dev' }, { branch: '///' }), PREVIEW_UNFILLED);
   assert.equal(previewLine({ name: 'web' }, {}), PREVIEW_NONE);
   assert.match(PREVIEW_NONE, /locally only/);
 });
@@ -194,18 +236,22 @@ test('templateBody: the shipped templates carry the Preview line, and it is fill
     for (const platform of ['github', 'gitlab']) {
       const body = templateBody(T, platform, { task: 'EP-a-S01-T01', risk: 'low', preview: '<https://pr.x.dev>' });
       assert.match(body, /## Testing\n<!--[^\n]*-->\n- \*\*Preview:\*\* <https:\/\/pr\.x\.dev>\n/, platform);
-      assert.doesNotMatch(body, /\*\*Preview:\*\* <none>/);
-      assert.match(templateBody(T, platform, { task: 'EP-a-S01-T01', risk: 'low' }), /\*\*Preview:\*\* <none>/, 'no preview given: the template is left as it is');
+      assert.doesNotMatch(body, /\*\*Preview:\*\* none\n/);
+      assert.match(templateBody(T, platform, { task: 'EP-a-S01-T01', risk: 'low' }), /\*\*Preview:\*\* none\n/, 'no preview given: the template is left as it is');
     }
   } finally { done(T); }
 });
 
-test('withPreviewLine: an older template gets the line under Testing; a template without Testing is left alone', () => {
+test('withPreviewLine: only the Testing section; an older template gets the line there; no Testing is left alone', () => {
   assert.equal(withPreviewLine('## Summary\nx\n\n## Testing\n<!-- how -->\nran it\n', 'P'), '## Summary\nx\n\n## Testing\n<!-- how -->\n- **Preview:** P\nran it\n');
-  assert.equal(withPreviewLine('## Testing\r\nran it\r\n', 'P'), '## Testing\r\n- **Preview:** P\nran it\r\n');
+  assert.equal(withPreviewLine('## Testing\r\nran it\r\n', 'P'), '## Testing\r\n- **Preview:** P\r\nran it\r\n', 'a CRLF template keeps CRLF');
   assert.equal(withPreviewLine('## Summary\nx\n', 'P'), '## Summary\nx\n');
-  assert.equal(withPreviewLine('- **Preview:** old\n', '$&'), '- **Preview:** $&\n', 'replaced in place, a $ kept');
-  assert.equal(withPreviewLine('**Preview:** old\n', 'new'), '**Preview:** new\n');
+  assert.equal(withPreviewLine('**Preview:** mine\n', 'P'), '**Preview:** mine\n', 'no Testing section: nothing is touched');
+  assert.equal(withPreviewLine('## Testing\n- **Preview:** old\n', '$&'), '## Testing\n- **Preview:** $&\n', 'replaced in place, a $ kept');
+  // The Summary comes from the commit and may hold a line of its own that reads the same.
+  assert.equal(withPreviewLine('## Summary\n**Preview:** my notes\n\n## Testing\n- **Preview:** none\n\n## Checklist\n', 'P'),
+    '## Summary\n**Preview:** my notes\n\n## Testing\n- **Preview:** P\n\n## Checklist\n');
+  assert.equal(withPreviewLine('## Testing\nran it\n\n## Checklist\n- **Preview:** x\n', 'P'), '## Testing\n- **Preview:** P\nran it\n\n## Checklist\n- **Preview:** x\n', 'never past the next heading');
 });
 
 // A Product with one registered code repo on a task branch, pushable to a bare remote.
@@ -244,7 +290,7 @@ test('runOpenPr: a {pr} pattern is filled once the PR has its number', async () 
     const creator = (_p, o) => { seen = o; return { ok: true, url: 'https://github.com/o/r/pull/41' }; };
     const editBody = (platform, n, body) => { edit = { platform, n, body }; return { ok: true }; };
     await runOpenPr(P, { repo: 'web', platform: 'github', creator, editBody, runner: fakeRunner({}) });
-    assert.match(seen.body, /\*\*Preview:\*\* none recorded/, 'at open time the number is not known');
+    assert.match(seen.body, /\*\*Preview:\*\* a preview_url pattern is recorded but could not be filled/, 'at open time the number is not known');
     assert.equal(edit.n, 41);
     assert.match(edit.body, /\*\*Preview:\*\* <https:\/\/pr-41\.x\.dev>/);
     assert.equal(edit.body.replace(/\*\*Preview:\*\*[^\n]*/, ''), seen.body.replace(/\*\*Preview:\*\*[^\n]*/, ''), 'only the Preview line changes');
@@ -270,6 +316,28 @@ test('runOpenPr: a failed edit is said, and the PR stays open; no pattern writes
     let seen;
     await runOpenPr(P, { repo: 'web', platform: 'github', creator: (_p, o) => { seen = o; return { ok: true, url: 'https://github.com/o/r/pull/2' }; }, runner: fakeRunner({}) });
     assert.match(seen.body, /\*\*Preview:\*\* none recorded — a live design check runs locally only/);
+  } finally { process.exitCode = prev; done(P, bare); }
+});
+
+test('runOpenPr: an unusable pattern warns and the body says a pattern is recorded; a template with no place skips the edit', async () => {
+  const prev = process.exitCode;
+  let { P, bare } = productWithRepo({ preview_url: 'http://x.dev' });
+  let R;
+  const quiet = async (fn) => { const out = []; const orig = console.log; console.log = (...a) => out.push(a.join(' ')); try { await fn(); } finally { console.log = orig; } return out.join('\n'); };
+  try {
+    let seen;
+    const out = await quiet(() => runOpenPr(P, { repo: 'web', platform: 'github', creator: (_p, o) => { seen = o; return { ok: true, url: 'https://github.com/o/r/pull/3' }; }, runner: fakeRunner({}) }));
+    assert.match(out, /preview_url pattern cannot be used: it must start with https/);
+    assert.match(seen.body, /\*\*Preview:\*\* a preview_url pattern is recorded but could not be filled/);
+  } finally { process.exitCode = prev; done(P, bare); }
+  ({ P, R, bare } = productWithRepo({ preview_url: 'https://pr-{pr}.x.dev' }));
+  try {
+    put(path.join(R, '.github/pull_request_template.md'), '## Summary\n\n## Impact & Risk\n- **Risk level:** low\n\n## Checklist\n');
+    let edited = false;
+    const out = await quiet(() => runOpenPr(P, { repo: 'web', platform: 'github', creator: () => ({ ok: true, url: 'https://github.com/o/r/pull/8' }), editBody: () => { edited = true; return { ok: true }; }, runner: fakeRunner({}) }));
+    assert.equal(edited, false, 'nothing to change: no edit is sent');
+    assert.match(out, /no Preview line and no ## Testing section.*https:\/\/pr-8\.x\.dev/);
+    assert.doesNotMatch(out, /✓ preview/);
   } finally { process.exitCode = prev; done(P, bare); }
 });
 

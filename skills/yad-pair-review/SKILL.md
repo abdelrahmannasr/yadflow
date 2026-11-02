@@ -54,7 +54,8 @@ Run the walkthrough grounding for the half you're on:
   tier that set it), and `step.cap` — an object `{ active, limit, to, capped }`: `to` is the count capped by the active people (E72), `capped` is true when the cap lowered it, and the whole field is `null` when the people were not counted — useful context for how hard a step is being reviewed, never a pass/fail input.
 
 For a UI change, the Build bundle's `preview` field (#359) says where a live design check (the page at
-several screen widths) runs: at `preview.url` when set; on `source: local-only`, check on the engineer's
+several screen widths) runs: at `preview.url` when set (a page that does not load or does not show
+this change yet counts as local-only); on `source: local-only`, check on the engineer's
 machine and say at that stop that the design check ran locally only (`preview.why` says why).
 
 **Read the real material yourself** — run the bundle's `diffCmd`, and read the named `codeMap` / `pack` /

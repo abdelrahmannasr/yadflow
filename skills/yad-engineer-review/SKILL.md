@@ -64,7 +64,9 @@ at it at several screen widths (phone, tablet, desktop). `yad review context --r
 carries a `preview` field that says where to run it:
 - `preview.url` set (`source: pattern` from the repo's `yad repo preview` pattern, or `source: platform`
   from the deployment GitHub/GitLab records for the PR): run the check against `preview.url`, and name it
-  in the review ("checked live on <url> at 375, 768 and 1280 px").
+  in the review ("checked live on <url> at 375, 768 and 1280 px"). The address is where the preview
+  should be, not proof that it is there: if the page does not load, or does not show this PR's change
+  yet, treat it as `local-only` and say so.
 - `source: local-only`: there is no preview deployment. Run the check on the developer's machine if you
   can, and say plainly, in the review and in a PR comment, **"design check ran locally only: <preview.why>"**.
   Never present a local check as a check of the deployed page. `preview.why` names the fix
