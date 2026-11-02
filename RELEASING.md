@@ -93,7 +93,7 @@ no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs on every pu
 every push to `main`:
 
 - the test matrix — Linux on Node 18, 20, 22 and 24, and macOS on Node 24 (18 and 20 are end of life: test-only legs, so yadflow 4 keeps proving it still runs there; yadflow 5 drops them);
-- the end-to-end harness against the packed tarball, on Linux and macOS;
+- the end-to-end harness against the packed tarball, on Linux and macOS, and the agent acceptance run's checks with scripted agents (the real run is opt-in);
 - lint, the 70% coverage gate, and the tarball-leak smoke (Linux, Node 24);
 - `npm audit` of production dependencies (failing on high severity), and a check of the registry
   signatures.
@@ -256,6 +256,16 @@ release:
 ```bash
 npm run release-check
 ```
+
+**Before a minor or major release, or one that changes what an AI agent reads** (the AGENTS.md block,
+the `yad-guide` skill, `yad guide`), also run the [agent acceptance run](docs/agent-acceptance.md). It
+drives the real Claude Code and Codex, so it spends API credit and is never automatic:
+
+```bash
+YAD_ACCEPTANCE=1 npm run test:agents
+```
+
+Then read each agent's last message against the checklist on that page.
 
 ## The `next` channel — shipping a major without moving anyone onto it
 
