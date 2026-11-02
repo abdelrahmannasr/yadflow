@@ -101,7 +101,9 @@ export function templateBody(repoRoot, platform, { task, summary, risk, contract
   // Fill the obvious fields; leave the rest of the committed template intact for the author.
   // Function replacers (not string replacements) so a `$` in interpolated free text — a commit-derived
   // summary or a repo name — is inserted verbatim, never read as a `$1`/`$&` replacement token.
-  let out = base
+  // The Preview line first, while the template is the only text: the summary, inserted below, is
+  // free text from the commit and may hold a `## Testing` of its own.
+  let out = (preview != null ? withPreviewLine(base, preview) : base)
     .replace(/EP-<slug>-S0N-T0N/g, () => task || 'EP-<slug>-S0N-T0N')
     .replace(/specs\/EP-<slug>-S0N\//g, () => `specs/${story || 'EP-<slug>-S0N'}/`)
     .replace(/(\*\*Risk level:\*\*)\s*\w+/i, (_m, g1) => `${g1} ${risk}`)
@@ -112,7 +114,6 @@ export function templateBody(repoRoot, platform, { task, summary, risk, contract
     // `\r?\n` tolerates a CRLF-checked-out template (Windows core.autocrlf) so the fill never no-ops.
     out = out.replace(/(## Summary\r?\n)(?:<!--[\s\S]*?-->\r?\n)?/, (_m, g1) => `${g1}${summary}\n`);
   }
-  if (preview != null) out = withPreviewLine(out, preview);
   return out;
 }
 
@@ -412,10 +413,10 @@ export async function runOpenPr(root, opts = {}) {
   // The Preview line (#359), on a code task only: the repo's pattern filled now, or a note. A pattern
   // that needs the PR number is filled once the PR exists (below).
   const preview = stage === 'code-repo' ? previewLine(meta, { branch }) : undefined;
-  if (stage === 'code-repo' && previewPattern(meta).problems) warn(`this repo's preview_url pattern cannot be used: it ${previewPattern(meta).problems.join('; ')} — set it again with \`yad repo preview <repo> <pattern>\``);
-  const body = templateBody(repoRoot, platform, {
-    task: bodyTask, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage, preview,
-  });
+  const patProblems = stage === 'code-repo' ? previewPattern(meta).problems : null;
+  if (patProblems) warn(`this repo's preview_url pattern cannot be used: it ${patProblems.join('; ')} — set it again with \`yad repo preview <repo> <pattern>\``);
+  const bodyOpts = { task: bodyTask, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage };
+  const body = templateBody(repoRoot, platform, { ...bodyOpts, preview });
 
   // Assignee = the committer: `@me` on GitHub (buildPrArgs sends it when no assignee is named, and `gh`
   // resolves it on the repo's own host), the login `glab` reports on GitLab. No reviewers are requested (E62): the roster that named them is gone. The team requests them
@@ -435,13 +436,14 @@ export async function runOpenPr(root, opts = {}) {
   if (pat && needs(pat, 'pr')) {
     const n = Number(prNumberFromUrl(r.url)) || null;
     const url = n ? fillPattern(pat, { pr: n, branch, repo: meta?.name }) : null;
-    const filled = url ? withPreviewLine(body, `<${url}>`) : null;
-    if (url && filled === body) info(`this repo's PR/MR template has no Preview line and no ## Testing section, so the preview address was not written: ${url}`);
+    // The same body, built again with the address: only the Preview line can differ.
+    const filled = url ? templateBody(repoRoot, platform, { ...bodyOpts, preview: `<${url}>` }) : null;
+    if (url && filled === body) info(`this repo's PR/MR template has no ## Testing section, so the preview address was not written: ${url}`);
     else if (url) {
       const edit = (opts.editBody || editPrBody)(platform, n, filled, { cwd: repoRoot });
       if (edit?.ok) ok(`preview ${url}`);
       else warn(`the PR/MR is open, but its Preview line could not be filled (${String(edit?.reason || 'unknown').split('\n')[0]}) — the preview should be at ${url}`);
-    } else warn('the PR/MR is open, but its number could not be read from the URL, so the Preview line was left as "none recorded"');
+    } else warn('the PR/MR is open, but its number could not be read from the URL, so the Preview line was left unfilled (`yad review context --pr <n>` gives the address)');
   }
   if (auto) {
     // The PR is open whatever happens next: a record that cannot be written is said, never a failure.

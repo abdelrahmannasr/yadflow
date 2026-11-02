@@ -71,7 +71,7 @@ function contextBundle(root, { repo, dir, product, pr, runner = run } = {}) {
     contract: meta?.contract || null,
     // Where a live design check (the page at several screen widths) runs (#359): the PR's preview
     // address, or `local-only` with why — the review then says the check ran locally only.
-    preview: resolvePreview({ meta, platform, pr: pr || null, cwd: repoRoot, runner }),
+    preview: resolvePreview({ meta, platform, pr: pr || null, base, cwd: repoRoot, runner }),
     markers: {
       trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->',
       engagementVerified: '<!-- yad:engagement verified -->', pair: '<!-- yad:pair -->',

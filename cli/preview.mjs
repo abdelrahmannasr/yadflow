@@ -90,7 +90,8 @@ export function budget(now = Date.now, total = PLATFORM_BUDGET) {
 }
 const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{7,64}$/i.test(s);
 // A production environment is the live site, never a PR's preview — however the integration marked it.
-const isProduction = (name) => typeof name === 'string' && /^prod(uction)?$/i.test(name.trim());
+// `production`, `prod`, and names that start with them: Vercel's `Production – app`, `production-eu`.
+const isProduction = (name) => typeof name === 'string' && /^prod(uction)?\b/i.test(name.trim());
 
 // The newest successful, non-production deployment the platform records for the PR's head commit
 // (GitHub) or branch (GitLab). Never throws: { url } or { url: null, why }.
@@ -128,17 +129,30 @@ export function platformPreview(platform, { cwd, sha, branch, runner = run, cloc
   if (platform === 'gitlab') {
     if (!branch) return { url: null, why: 'the PR\'s branch is not known' };
     if (clock.spent()) return slow('GitLab');
-    const r = runner('glab', ['api', `projects/:id/deployments?ref=${encodeURIComponent(branch)}&status=success&order_by=created_at&sort=desc&per_page=20`], opts());
+    // The deployments list has no branch filter: the newest 100 successful ones are read, and only this
+    // branch's (at its head commit, when known) are kept. A deployment's environment there is a short
+    // record, so the environment itself is asked whether it is still running and not production.
+    const r = runner('glab', ['api', 'projects/:id/deployments?status=success&order_by=id&sort=desc&per_page=100'], opts());
     if (!r.ok) return { url: null, why: 'GitLab could not be asked for deployments (glab not signed in, offline, or no GitLab remote)' };
     const list = parse(r.stdout);
     if (!Array.isArray(list)) return { url: null, why: 'GitLab gave an answer yad cannot read' };
     const env = (x) => (x && typeof x === 'object' && x.environment && typeof x.environment === 'object' ? x.environment : null);
-    const d = list.find((x) => env(x) && env(x).external_url
-      && !isProduction(env(x).tier) && !isProduction(env(x).name) && env(x).state !== 'stopped'
-      && (!sha || x.sha === sha));
-    if (!d) return { url: null, why: 'GitLab lists no successful, running review deployment with an address for this branch' };
-    if (urlProblem(d.environment.external_url)) return { url: null, why: 'GitLab reports a deployment address yad will not use (not https, or an odd character in it)' };
-    return { url: d.environment.external_url };
+    const seen = new Set();
+    const candidates = list.filter((x) => env(x) && x.ref === branch && (!sha || x.sha === sha)
+      && Number.isInteger(env(x).id) && !isProduction(env(x).name) && !seen.has(env(x).id) && seen.add(env(x).id));
+    let asked = 0, failed = 0;
+    for (const d of candidates.slice(0, 3)) {
+      if (clock.spent()) return slow('GitLab');
+      asked++;
+      const e = runner('glab', ['api', `projects/:id/environments/${env(d).id}`], opts());
+      const full = e.ok ? parse(e.stdout) : undefined;
+      if (!full || typeof full !== 'object') { failed++; continue; }
+      if (full.state !== 'available' || isProduction(full.tier) || isProduction(full.name) || !full.external_url) continue;
+      if (urlProblem(full.external_url)) return { url: null, why: 'GitLab reports a deployment address yad will not use (not https, or an odd character in it)' };
+      return { url: full.external_url };
+    }
+    if (asked && failed === asked) return { url: null, why: 'GitLab could not be asked about the review environments' };
+    return { url: null, why: 'GitLab lists no successful, running review deployment with an address for this branch among its newest 100 deployments' };
   }
   return { url: null, why: 'the platform is not GitHub or GitLab' };
 }
@@ -147,11 +161,14 @@ export function platformPreview(platform, { cwd, sha, branch, runner = run, cloc
 // platform's answer counts: this checkout may be on another branch (main, a detached worktree), and its
 // preview is not the PR's. Without one, this checkout's (the review of the branch you are on).
 // { sha, branch } or { sha: null, branch: null, why }.
-export function prHead(platform, pr, { cwd, runner = run, clock = budget() } = {}) {
+export function prHead(platform, pr, { cwd, runner = run, clock = budget(), base = null } = {}) {
   if (!pr) {
     const sha = runner('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
     const b = runner('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }).stdout || null;
-    return { sha: isSha(sha) ? sha : null, branch: b && b !== 'HEAD' ? b : null, ...(b === 'HEAD' ? { why: 'this checkout is on no branch (detached)' } : {}) };
+    // The default branch is not a PR's branch: its deployment is the main site, never a preview.
+    if (b && base && b === base) return { sha: null, branch: null, why: `this checkout is on the default branch (${base}), not the PR's — pass --pr <n>` };
+    if (!b || b === 'HEAD') return { sha: null, branch: null, why: 'this checkout is on no branch (detached) — pass --pr <n>' };
+    return { sha: isSha(sha) ? sha : null, branch: b };
   }
   const none = (why) => ({ sha: null, branch: null, why });
   if (!/^\d+$/.test(String(pr))) return none('the PR number is not a number');
@@ -175,10 +192,10 @@ export function prHead(platform, pr, { cwd, runner = run, clock = budget() } = {
 // The answer a review step uses: { url, source: 'pattern'|'platform' } or
 // { url: null, source: 'local-only', why }. `why` says what was tried and how to set a pattern.
 // The PR's head is asked only when it is needed: a {pr} or {repo} pattern answers with no network call.
-export function resolvePreview({ meta, platform, pr, cwd, runner = run, lookup = platformPreview, clock = budget(), head: given } = {}) {
+export function resolvePreview({ meta, platform, pr, base = null, cwd, runner = run, lookup = platformPreview, clock = budget(), head: given } = {}) {
   const repo = meta?.name;
   let head = given || null;
-  const getHead = () => (head ||= prHead(platform, pr, { cwd, runner, clock }));
+  const getHead = () => (head ||= prHead(platform, pr, { cwd, runner, clock, base }));
   const tried = [];
   const pat = previewPattern(meta);
   if (pat.pattern) {
@@ -196,9 +213,10 @@ export function resolvePreview({ meta, platform, pr, cwd, runner = run, lookup =
   const h = getHead();
   const p = h.sha || h.branch ? lookup(platform, { cwd, sha: h.sha, branch: h.branch, runner, clock }) : { url: null, why: h.why };
   if (p?.url) return { url: p.url, source: 'platform' };
-  if (p?.why && !tried.some((t) => t.includes(p.why))) tried.push(p.why);
+  if (p?.why && !tried.some((t) => t === p.why || t.endsWith(p.why))) tried.push(p.why);
   const fix = repo ? 'set one with `yad repo preview <repo> <pattern>`' : 'register the repo, then set one with `yad repo preview <repo> <pattern>`';
-  const next = pat.pattern ? 'check the pattern with `yad repo preview <repo>`' : pat.problems ? 'set it again with `yad repo preview <repo> <pattern>`' : fix;
+  const next = pat.pattern && needs(pat.pattern, 'pr') && !pr ? 'pass --pr <n>'
+    : pat.pattern ? 'check the pattern with `yad repo preview <repo>`' : pat.problems ? 'set it again with `yad repo preview <repo> <pattern>`' : fix;
   return { url: null, source: 'local-only', why: `${tried.join('; ')} — ${next}` };
 }
 
@@ -206,9 +224,10 @@ export function resolvePreview({ meta, platform, pr, cwd, runner = run, lookup =
 // that says which case it is. A {pr} pattern is filled after the PR exists (`runOpenPr` edits the body).
 export const PREVIEW_NONE = 'none recorded — a live design check runs locally only, unless the platform reports a deployment for this PR';
 export const PREVIEW_UNFILLED = 'a preview_url pattern is recorded but could not be filled here — `yad review context --pr <n>` gives the address';
+export const PREVIEW_UNUSABLE = 'the recorded preview_url pattern cannot be used — a live design check runs locally only, unless the platform reports a deployment for this PR; fix it with `yad repo preview <repo> <pattern>`';
 export function previewLine(meta, { pr, branch } = {}) {
   const pat = previewPattern(meta);
-  if (pat.problems) return PREVIEW_UNFILLED;
+  if (pat.problems) return PREVIEW_UNUSABLE;
   if (!pat.pattern) return PREVIEW_NONE;
   const url = fillPattern(pat.pattern, { pr, branch, repo: meta?.name });
   return url ? `<${url}>` : PREVIEW_UNFILLED;

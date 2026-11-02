@@ -18,7 +18,7 @@ if (process.env.NODE_TEST_CONTEXT) {
 }
 process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
-const { patternProblems, fillPattern, previewPattern, platformPreview, resolvePreview, prHead, previewLine, urlProblem, budget, PREVIEW_NONE, PREVIEW_UNFILLED, slug } = await import('./preview.mjs');
+const { patternProblems, fillPattern, previewPattern, platformPreview, resolvePreview, prHead, previewLine, urlProblem, budget, PREVIEW_NONE, PREVIEW_UNFILLED, PREVIEW_UNUSABLE, slug } = await import('./preview.mjs');
 const { templateBody, withPreviewLine, runOpenPr } = await import('./openpr.mjs');
 const { reviewContext } = await import('./review.mjs');
 const { previewChecks } = await import('./doctor.mjs');
@@ -110,7 +110,7 @@ test('platformPreview (GitHub): the newest successful non-production deployment 
   assert.deepEqual(platformPreview('github', { sha: SHA, runner }), { url: 'https://pr-7.x.vercel.app' });
   assert.ok(!runner.calls.some((c) => c.includes('deployments/3/')), 'a production deployment is the live site, never asked');
   const named = fakeRunner({
-    [`gh api repos/{owner}/{repo}/deployments?sha=${SHA}`]: deployments([{ id: 5, environment: 'Production' }, { id: 6, environment: 'prod' }]),
+    [`gh api repos/{owner}/{repo}/deployments?sha=${SHA}`]: deployments([{ id: 5, environment: 'Production' }, { id: 6, environment: 'prod' }, { id: 7, environment: 'Production – myapp' }, { id: 8, environment: 'production-eu' }]),
     'gh api repos/{owner}/{repo}/deployments/': deployments([{ state: 'success', environment_url: 'https://live.x.dev' }]),
   });
   assert.match(platformPreview('github', { sha: SHA, runner: named }).why, /no preview deployment/, 'an environment named production is production, flag or not');
@@ -152,16 +152,27 @@ test('platformPreview (GitHub): stops asking once its time budget is spent', () 
   assert.deepEqual(seen, [8000, 8000, 3000], 'a hard total of 15 s');
 });
 
-test('platformPreview (GitLab): a successful review deployment of the branch, never production', () => {
+test('platformPreview (GitLab): this branch\'s deployment whose environment is running and not production', () => {
+  const list = deployments([
+    { ref: 'main', sha: SHA, environment: { id: 1, name: 'review/main' } },
+    { ref: 'feat/x', sha: SHA, environment: { id: 2, name: 'Production' } },
+    { ref: 'feat/x', sha: SHA, environment: { id: 3, name: 'review/old' } },
+    { ref: 'feat/x', sha: 'c'.repeat(40), environment: { id: 9, name: 'review/older-commit' } },
+    { ref: 'feat/x', sha: SHA, environment: { id: 4, name: 'review/feat-x' } },
+  ]);
   const runner = fakeRunner({
-    'glab api projects/:id/deployments?ref=feat%2Fx': deployments([
-      { sha: SHA, environment: { name: 'production', external_url: 'https://x.dev' } },
-      { sha: SHA, environment: { name: 'Production', external_url: 'https://x.dev' } },
-      { sha: SHA, environment: { name: 'review/old', state: 'stopped', external_url: 'https://dead.review.x.dev' } },
-      { sha: SHA, environment: { name: 'review/feat-x', tier: 'development', external_url: 'https://feat-x.review.x.dev' } },
-    ]),
+    'glab api projects/:id/deployments?': list,
+    'glab api projects/:id/environments/3': JSON.stringify({ id: 3, name: 'review/old', state: 'stopped', external_url: 'https://dead.review.x.dev' }),
+    'glab api projects/:id/environments/4': JSON.stringify({ id: 4, name: 'review/feat-x', state: 'available', tier: 'development', external_url: 'https://feat-x.review.x.dev' }),
   });
   assert.deepEqual(platformPreview('gitlab', { sha: SHA, branch: 'feat/x', runner }), { url: 'https://feat-x.review.x.dev' });
+  assert.ok(!runner.calls.some((c) => /environments\/(1|2|9)$/.test(c)), 'another branch, production and another commit are never asked');
+  assert.ok(!runner.calls[0].includes('ref='), 'the list has no branch filter: yad filters it');
+  const prodTier = fakeRunner({ 'glab api projects/:id/deployments?': deployments([{ ref: 'feat/x', environment: { id: 5, name: 'live' } }]),
+    'glab api projects/:id/environments/5': JSON.stringify({ state: 'available', tier: 'production', external_url: 'https://x.dev' }) });
+  assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: prodTier }).why, /no successful, running review deployment/);
+  const envFails = fakeRunner({ 'glab api projects/:id/deployments?': deployments([{ ref: 'feat/x', environment: { id: 5, name: 'r' } }]) });
+  assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: envFails }).why, /could not be asked about the review environments/);
   assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({}) }).why, /could not be asked/);
   assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({ 'glab api': '[]' }) }).why, /no successful, running review deployment/);
   assert.match(platformPreview('gitlab', { branch: null, runner: fakeRunner({}) }).why, /branch is not known/);
@@ -183,6 +194,9 @@ test('prHead: with a PR number only the platform answers; without one, this chec
   const detached = prHead('github', null, { runner: fakeRunner({ 'git rev-parse HEAD': 'b'.repeat(40), 'git rev-parse --abbrev-ref HEAD': 'HEAD' }) });
   assert.equal(detached.branch, null, 'a detached checkout has no branch, never "HEAD"');
   assert.match(detached.why, /detached/);
+  const onMain = prHead('github', null, { runner: local, base: 'main' });
+  assert.equal(onMain.branch, null, 'the default branch is no PR\'s branch');
+  assert.match(onMain.why, /default branch \(main\).*pass --pr/);
 });
 
 test('resolvePreview: the pattern wins, the platform is the fallback, else local-only with why and the fix', () => {
@@ -200,7 +214,7 @@ test('resolvePreview: the pattern wins, the platform is the fallback, else local
   assert.match(r.why, /no preview_url pattern is recorded for this repo; GitHub lists no preview deployment/);
   assert.match(r.why, /set one with `yad repo preview <repo> <pattern>`/);
   const noPr = resolvePreview({ meta: { name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, platform: 'github', pr: null, head, lookup: none });
-  assert.match(noPr.why, /needs the PR number \(\{pr\}\), and none was given \(--pr\)/);
+  assert.match(noPr.why, /needs the PR number \(\{pr\}\), and none was given \(--pr\).* — pass --pr <n>$/);
   const badPat = resolvePreview({ meta: { name: 'web', preview_url: 'http://x.dev' }, platform: 'github', pr: 1, head, lookup: none });
   assert.match(badPat.why, /cannot be used: it must start with https.*set it again/);
   const outside = resolvePreview({ meta: null, platform: 'github', pr: 1, head, lookup: none });
@@ -224,7 +238,8 @@ test('resolvePreview: a {branch} pattern never fills from the wrong branch', () 
 test('previewLine: the filled pattern in angle brackets, else the note', () => {
   assert.equal(previewLine({ name: 'web', preview_url: 'https://{branch}.x.dev' }, { branch: 'feat/a' }), '<https://feat-a.x.dev>');
   assert.equal(previewLine({ name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, { branch: 'feat/a' }), PREVIEW_UNFILLED, '{pr} is filled after the PR exists, never "none recorded"');
-  assert.equal(previewLine({ name: 'web', preview_url: 'http://x.dev' }, {}), PREVIEW_UNFILLED, 'a recorded pattern is never "none recorded"');
+  assert.equal(previewLine({ name: 'web', preview_url: 'http://x.dev' }, {}), PREVIEW_UNUSABLE, 'an unusable pattern says so, never "none recorded"');
+  assert.match(PREVIEW_UNUSABLE, /yad repo preview <repo> <pattern>/);
   assert.equal(previewLine({ name: 'web', preview_url: 'https://{branch}.x.dev' }, { branch: '///' }), PREVIEW_UNFILLED);
   assert.equal(previewLine({ name: 'web' }, {}), PREVIEW_NONE);
   assert.match(PREVIEW_NONE, /locally only/);
@@ -282,6 +297,16 @@ test('runOpenPr: a {branch} pattern is in the body as the PR is opened', async (
   } finally { process.exitCode = prev; done(P, bare); }
 });
 
+test('templateBody: a summary with a ## Testing of its own never takes the Preview line', () => {
+  const T = tmp();
+  try {
+    const body = templateBody(T, 'github', { task: 'EP-a-S01-T01', risk: 'low', summary: 'fix x\n\n## Testing\nran it by hand', preview: '<https://p.x.dev>' });
+    const summaryPart = body.slice(0, body.indexOf('## Impact'));
+    assert.doesNotMatch(summaryPart, /Preview/, 'the summary is left as the commit wrote it');
+    assert.match(body.slice(body.indexOf('## Impact')), /\*\*Preview:\*\* <https:\/\/p\.x\.dev>/);
+  } finally { done(T); }
+});
+
 test('runOpenPr: a {pr} pattern is filled once the PR has its number', async () => {
   const { P, bare } = productWithRepo({ preview_url: 'https://pr-{pr}.x.dev' });
   const prev = process.exitCode;
@@ -328,7 +353,7 @@ test('runOpenPr: an unusable pattern warns and the body says a pattern is record
     let seen;
     const out = await quiet(() => runOpenPr(P, { repo: 'web', platform: 'github', creator: (_p, o) => { seen = o; return { ok: true, url: 'https://github.com/o/r/pull/3' }; }, runner: fakeRunner({}) }));
     assert.match(out, /preview_url pattern cannot be used: it must start with https/);
-    assert.match(seen.body, /\*\*Preview:\*\* a preview_url pattern is recorded but could not be filled/);
+    assert.match(seen.body, /\*\*Preview:\*\* the recorded preview_url pattern cannot be used/);
   } finally { process.exitCode = prev; done(P, bare); }
   ({ P, R, bare } = productWithRepo({ preview_url: 'https://pr-{pr}.x.dev' }));
   try {
@@ -336,7 +361,7 @@ test('runOpenPr: an unusable pattern warns and the body says a pattern is record
     let edited = false;
     const out = await quiet(() => runOpenPr(P, { repo: 'web', platform: 'github', creator: () => ({ ok: true, url: 'https://github.com/o/r/pull/8' }), editBody: () => { edited = true; return { ok: true }; }, runner: fakeRunner({}) }));
     assert.equal(edited, false, 'nothing to change: no edit is sent');
-    assert.match(out, /no Preview line and no ## Testing section.*https:\/\/pr-8\.x\.dev/);
+    assert.match(out, /no ## Testing section.*https:\/\/pr-8\.x\.dev/);
     assert.doesNotMatch(out, /✓ preview/);
   } finally { process.exitCode = prev; done(P, bare); }
 });
