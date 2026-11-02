@@ -17,6 +17,7 @@ import {
 } from './platform.mjs';
 import { upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { sequenceDiff } from './walkthrough.mjs';
+import { resolvePreview } from './preview.mjs';
 
 const NUDGE_CMD = 'yad review chat';
 
@@ -68,6 +69,9 @@ function contextBundle(root, { repo, dir, product, pr, runner = run } = {}) {
     codeMap: meta?.name ? path.join(rr.productRoot, '.sdlc/code-context', meta.name, 'code-map.md') : null,
     pack: meta?.name ? path.join(rr.productRoot, '.sdlc/code-context', meta.name, 'pack.md') : null,
     contract: meta?.contract || null,
+    // Where a live design check (the page at several screen widths) runs (#359): the PR's preview
+    // address, or `local-only` with why — the review then says the check ran locally only.
+    preview: resolvePreview({ meta, platform, pr: pr || null, cwd: repoRoot, runner }),
     markers: {
       trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->',
       engagementVerified: '<!-- yad:engagement verified -->', pair: '<!-- yad:pair -->',

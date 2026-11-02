@@ -59,6 +59,17 @@ asking questions, answering theirs, until both are satisfied — then records th
 growth in the local-only learning log. Still soft: it rides the same `engagement: verified` signal and
 never gates. When a pair session backs the approve, you may set `companion.pair: true` on the ship record.
 
+**Live design check (a UI change only, #359).** A live design check opens the running page and looks
+at it at several screen widths (phone, tablet, desktop). `yad review context --repo <r> --pr <n> --json`
+carries a `preview` field that says where to run it:
+- `preview.url` set (`source: pattern` from the repo's `yad repo preview` pattern, or `source: platform`
+  from the deployment GitHub/GitLab records for the PR): run the check against `preview.url`, and name it
+  in the review ("checked live on <url> at 375, 768 and 1280 px").
+- `source: local-only`: there is no preview deployment. Run the check on the developer's machine if you
+  can, and say plainly, in the review and in a PR comment, **"design check ran locally only: <preview.why>"**.
+  Never present a local check as a check of the deployed page. `preview.why` names the fix
+  (`yad repo preview <repo> <pattern>`); offer it, never run it unasked.
+
 ### Step 2 — `approve` (the engineer review — the human gate)
 A human engineer reads the diff **against the spec** (`specs/<story>/`) and the acceptance criteria,
 and records an approval. Determine the count with `bash checks/risk-route.sh <pr-body-file> origin/<base>`,

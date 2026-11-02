@@ -33,6 +33,7 @@ import { loadChoices, readToolboxFile } from './toolbox.mjs';
 import { signingDoctorLine } from './signing.mjs';
 import { nodePins, satisfies, nodeFix, dockerReasons, dockerState, glabConfigs } from './machine.mjs';
 import { allStoryFrames, FRAMES_KEY } from './story-frames.mjs';
+import { previewPattern, PREVIEW_KEY } from './preview.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
 // entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
@@ -570,6 +571,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       else check(checks, `repo:${repo.name}`, 'project', 'ok', `${nm}: git repo, context fresh`);
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
+    previewChecks(checks, repoEntries);
     // Per-repo owners went with the roster (E62). Named only where a repo actually lists someone: every
     // repo an older setup connected carries an EMPTY `domain_owner`, which says nothing.
     const owned = repoEntries.filter((r) => (Array.isArray(r.domain_owners) && r.domain_owners.length) || (typeof r.domain_owner === 'string' && r.domain_owner));
@@ -3065,5 +3067,20 @@ function gitHookCheck(root, checks) {
       'run `yad check --fix` — it saves the current file beside it before replacing it');
   } else {
     check(checks, 'git-hook', 'project', 'ok', `git pre-commit ledger guard installed in this clone (${where})`);
+  }
+}
+
+// The preview address patterns (#359), by the same rule `yad repo preview` writes with. Said only when
+// some repo records one: a repo with no pattern is the normal case, and its review says "locally only".
+export function previewChecks(checks, repoEntries) {
+  const withPreview = repoEntries.filter((r) => PREVIEW_KEY in r && r[PREVIEW_KEY] != null);
+  if (!withPreview.length) return;
+  const bad = withPreview.map((r) => ({ r, problems: previewPattern(r).problems })).filter((x) => x.problems);
+  if (bad.length) {
+    check(checks, 'repos:preview', 'project', 'warn',
+      `${bad.length} preview address pattern${bad.length > 1 ? 's' : ''} in ${PROJECT_FILES.reposRegistry} cannot be used: ${bad.map((x) => `${forTerminal(x.r.name || '(unnamed)')}: it ${x.problems.join('; ')}`).join(', ')}`,
+      `set ${bad.length > 1 ? 'each' : 'it'} again with \`yad repo preview ${bad.length === 1 ? asArg(bad[0].r.name) : '<name>'} <pattern>\` (or --clear) — until then its review checks the page locally only`);
+  } else {
+    check(checks, 'repos:preview', 'project', 'ok', `${withPreview.length} repo${withPreview.length > 1 ? 's record' : ' records'} a preview address pattern`);
   }
 }

@@ -1,0 +1,184 @@
+// The preview address of a PR/MR (#359): a live copy of the app that a service (Vercel, Netlify, a
+// review app) deploys for each PR/MR, so a live design check — the page at several screen widths — can
+// run against it instead of only on the developer's machine.
+//
+// Where it comes from, in order (the user's decision, 2026-11-02):
+//   1. a per-repo pattern, `preview_url` in the Product's `.sdlc/repos.json`
+//      (`https://pr-{pr}.myapp.dev`), set with `yad repo preview`;
+//   2. else the platform: the newest successful, non-production deployment GitHub/GitLab records for
+//      the PR's head (what Vercel/Netlify/review apps report);
+//   3. else none — and the answer says the check runs locally only, and why.
+//
+// One rule (`patternProblems`) is shared by the command that writes a pattern, doctor that reads it and
+// the resolver that fills it, so the three never disagree.
+import { run } from './lib.mjs';
+
+export const PREVIEW_KEY = 'preview_url';
+export const PLACEHOLDERS = ['pr', 'branch', 'repo'];
+const MAX_LEN = 2048;
+
+// A name made safe for a host name or a path: lowercase, every run of other characters one `-`.
+export const slug = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+// Is this a URL yad may print and write into a PR/MR description? https, or http on this machine
+// (a local preview server). Printable ASCII only, and none of the characters that end a Markdown link
+// or an HTML attribute — the text comes from a shared file or a deployment service.
+export function urlProblem(u) {
+  if (typeof u !== 'string' || !u) return 'not a URL';
+  if (u.length > MAX_LEN) return `longer than ${MAX_LEN} characters`;
+  if (!/^[\x21-\x7e]+$/.test(u)) return 'has a space, a control character or a non-ASCII character';
+  if (/[<>"'`\\]/.test(u)) return 'has a character that is not allowed in it (< > " \' ` \\)';
+  let p;
+  try { p = new URL(u); } catch { return 'is not a URL'; }
+  if (p.username || p.password) return 'carries a user name or password';
+  if (p.protocol === 'https:') return null;
+  if (p.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(p.hostname)) return null;
+  return 'must start with https:// (or http://localhost)';
+}
+
+// Why a pattern cannot be used, or [] when it can. The placeholders are filled with harmless sample
+// values, so the URL check sees what a filled pattern would be.
+export function patternProblems(p) {
+  if (typeof p !== 'string') return ['is not text'];
+  const problems = [];
+  const unknown = [...p.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]).filter((n) => !PLACEHOLDERS.includes(n));
+  if (unknown.length) problems.push(`has an unknown placeholder ${[...new Set(unknown)].map((n) => `{${n}}`).join(', ')} (use {pr}, {branch} or {repo})`);
+  if (/[{}]/.test(p.replace(/\{(pr|branch|repo)\}/g, ''))) {
+    if (!unknown.length) problems.push('has a lone { or }');
+  }
+  const sample = p.replace(/\{pr\}/g, '1').replace(/\{branch\}/g, 'branch').replace(/\{repo\}/g, 'repo');
+  if (!unknown.length && !/[{}]/.test(sample)) {
+    const why = urlProblem(sample);
+    if (why) problems.push(why);
+  }
+  return problems;
+}
+
+// The pattern recorded for a repo entry: { pattern } when there is a usable one, { problems } when one
+// is recorded but cannot be used, {} when none is recorded.
+export function previewPattern(meta) {
+  if (!meta || typeof meta !== 'object' || !(PREVIEW_KEY in meta) || meta[PREVIEW_KEY] == null) return {};
+  const p = meta[PREVIEW_KEY];
+  const problems = patternProblems(p);
+  return problems.length ? { problems } : { pattern: p };
+}
+
+// The pattern with its placeholders filled, or null when it needs a value that is missing ({pr} before
+// the PR exists) or the result is not a URL yad would write.
+export function fillPattern(p, { pr, branch, repo } = {}) {
+  if (patternProblems(p).length) return null;
+  const vals = { pr: pr == null || pr === '' ? null : String(pr), branch: slug(branch) || null, repo: slug(repo) || null };
+  if (vals.pr != null && !/^\d+$/.test(vals.pr)) return null;
+  let missing = false;
+  const out = p.replace(/\{(pr|branch|repo)\}/g, (_m, k) => { if (vals[k] == null) { missing = true; return ''; } return vals[k]; });
+  if (missing) return null;
+  return urlProblem(out) ? null : out;
+}
+
+export const needs = (p, key) => typeof p === 'string' && p.includes(`{${key}}`);
+
+const parse = (s) => { try { return JSON.parse(s); } catch { return undefined; } };
+// A review must not stall on a slow or unreachable host: each call is bounded, and the whole lookup
+// stops asking once its budget is spent (the answer is then local-only, with why).
+const PLATFORM_TIMEOUT = 8000;
+const PLATFORM_BUDGET = 15000;
+
+// The newest successful, non-production deployment the platform records for the PR's head commit
+// (GitHub) or branch (GitLab). Never throws: { url } or { url: null, why }.
+export function platformPreview(platform, { cwd, sha, branch, runner = run, now = Date.now } = {}) {
+  const until = now() + PLATFORM_BUDGET;
+  const opts = { cwd, timeout: PLATFORM_TIMEOUT };
+  if (platform === 'github') {
+    if (!sha) return { url: null, why: 'the head commit is not known' };
+    const r = runner('gh', ['api', `repos/{owner}/{repo}/deployments?sha=${sha}&per_page=20`], opts);
+    if (!r.ok) return { url: null, why: 'GitHub could not be asked for deployments (gh not signed in, offline, or no GitHub remote)' };
+    const list = parse(r.stdout);
+    if (!Array.isArray(list)) return { url: null, why: 'GitHub gave an answer yad cannot read' };
+    // Newest first, as GitHub lists them. A production deployment of this commit is the live site, not
+    // the PR's preview.
+    const candidates = list.filter((d) => d && typeof d === 'object' && Number.isInteger(d.id) && d.production_environment !== true);
+    for (const d of candidates.slice(0, 3)) {
+      if (now() > until) return { url: null, why: 'GitHub was too slow to answer about deployments' };
+      const s = runner('gh', ['api', `repos/{owner}/{repo}/deployments/${d.id}/statuses?per_page=20`], opts);
+      if (!s.ok) continue;
+      const statuses = parse(s.stdout);
+      if (!Array.isArray(statuses)) continue;
+      // The newest status decides: a deployment whose latest status is not success is not live now.
+      const latest = statuses.find((x) => x && typeof x === 'object' && typeof x.state === 'string');
+      if (!latest || latest.state !== 'success') continue;
+      const url = latest.environment_url;
+      if (!url) continue;
+      if (urlProblem(url)) return { url: null, why: 'GitHub reports a deployment address yad will not use (not https, or an odd character in it)' };
+      return { url };
+    }
+    return { url: null, why: candidates.length ? 'GitHub lists no successful deployment with an address for this commit' : 'GitHub lists no preview deployment for this commit' };
+  }
+  if (platform === 'gitlab') {
+    if (!branch) return { url: null, why: 'the branch is not known' };
+    const r = runner('glab', ['api', `projects/:id/deployments?ref=${encodeURIComponent(branch)}&status=success&order_by=created_at&sort=desc&per_page=20`], opts);
+    if (!r.ok) return { url: null, why: 'GitLab could not be asked for deployments (glab not signed in, offline, or no GitLab remote)' };
+    const list = parse(r.stdout);
+    if (!Array.isArray(list)) return { url: null, why: 'GitLab gave an answer yad cannot read' };
+    const d = list.find((x) => x && typeof x === 'object' && x.environment && typeof x.environment === 'object'
+      && x.environment.tier !== 'production' && x.environment.name !== 'production' && x.environment.external_url
+      && (!sha || x.sha === sha));
+    if (!d) return { url: null, why: 'GitLab lists no successful review deployment with an address for this branch' };
+    if (urlProblem(d.environment.external_url)) return { url: null, why: 'GitLab reports a deployment address yad will not use (not https, or an odd character in it)' };
+    return { url: d.environment.external_url };
+  }
+  return { url: null, why: 'the platform is not GitHub or GitLab' };
+}
+
+// The PR/MR's head commit and branch, asked of the platform; else this checkout's. A review may run
+// from any checkout, so the PR's own head is what its preview was deployed from.
+export function prHead(platform, pr, { cwd, runner = run } = {}) {
+  const local = () => ({
+    sha: runner('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null,
+    branch: runner('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }).stdout || null,
+  });
+  if (!pr || !/^\d+$/.test(String(pr))) return local();
+  const opts = { cwd, timeout: PLATFORM_TIMEOUT };
+  if (platform === 'github') {
+    const r = runner('gh', ['pr', 'view', String(pr), '--json', 'headRefOid,headRefName'], opts);
+    const j = r.ok ? parse(r.stdout) : null;
+    if (j && typeof j.headRefOid === 'string') return { sha: j.headRefOid, branch: typeof j.headRefName === 'string' ? j.headRefName : null };
+  } else if (platform === 'gitlab') {
+    const r = runner('glab', ['mr', 'view', String(pr), '-F', 'json'], opts);
+    const j = r.ok ? parse(r.stdout) : null;
+    if (j && typeof j.sha === 'string') return { sha: j.sha, branch: typeof j.source_branch === 'string' ? j.source_branch : null };
+  }
+  return local();
+}
+
+// The answer a review step uses: { url, source: 'pattern'|'platform' } or
+// { url: null, source: 'local-only', why }. `why` says what was tried and how to set a pattern.
+export function resolvePreview({ meta, platform, pr, branch, sha, cwd, runner = run, lookup = platformPreview } = {}) {
+  const repo = meta?.name;
+  if (branch === undefined && sha === undefined) ({ branch, sha } = prHead(platform, pr, { cwd, runner }));
+  const tried = [];
+  const pat = previewPattern(meta);
+  if (pat.pattern) {
+    const url = fillPattern(pat.pattern, { pr, branch, repo });
+    if (url) return { url, source: 'pattern' };
+    tried.push(needs(pat.pattern, 'pr') && !pr ? 'the repo\'s preview_url pattern needs the PR number ({pr}), and none was given (--pr)' : 'the repo\'s preview_url pattern could not be filled');
+  } else if (pat.problems) {
+    tried.push(`the repo's preview_url pattern cannot be used: it ${pat.problems.join('; ')}`);
+  } else {
+    tried.push(`no preview_url pattern is recorded for ${repo ? 'this repo' : 'a repo outside the registry'}`);
+  }
+  const p = lookup(platform, { cwd, sha, branch, runner });
+  if (p?.url) return { url: p.url, source: 'platform' };
+  if (p?.why) tried.push(p.why);
+  const fix = repo ? 'set one with `yad repo preview <repo> <pattern>`' : 'register the repo, then set one with `yad repo preview <repo> <pattern>`';
+  return { url: null, source: 'local-only', why: `${tried.join('; ')} — ${fix}` };
+}
+
+// The PR/MR description's Preview line, at open time: a pattern that can be filled now, else a note.
+// A {pr} pattern is filled after the PR exists (`runOpenPr` edits the body then).
+export const PREVIEW_NONE = 'none recorded — a live design check runs locally only, unless the platform reports a deployment for this PR';
+export function previewLine(meta, { pr, branch } = {}) {
+  const pat = previewPattern(meta);
+  if (!pat.pattern) return PREVIEW_NONE;
+  const url = fillPattern(pat.pattern, { pr, branch, repo: meta?.name });
+  return url ? `<${url}>` : PREVIEW_NONE;
+}

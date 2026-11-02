@@ -12,6 +12,7 @@ import { PROJECT_FILES } from './manifest.mjs';
 import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPathOk, CODE_CONTEXT_DIR, runnable, shown } from './workspace.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { publishCodeContext, packOf, codeMapOf } from './repo-publish.mjs';
+import { PREVIEW_KEY, patternProblems } from './preview.mjs';
 
 // Why `refresh` will not pack this entry, or null when it will (E81): see the loop in `runRepo`.
 function notPackable(root, repo, j) {
@@ -59,7 +60,7 @@ function defaultBranch(cwd, repo) {
   return !/^[-+]/.test(b) && git(cwd, 'check-ref-format', `refs/heads/${b}`).ok ? b : null;
 }
 
-export async function runRepo(root, { action = 'list', name, today, push = false, allowBranch = false } = {}) {
+export async function runRepo(root, { action = 'list', name, pattern, clear = false, today, push = false, allowBranch = false } = {}) {
   const { regPath, registry, problem } = load(root);
   if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [] }; }
   if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { action, repos: [] }; }
@@ -88,7 +89,9 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       }
       const { head, stale, unknown, neverPacked } = staleness(root, repo);
       rows.push({ name: repo.name ?? null, path: repo.path ?? null, head: head || null, syncedHead: repo.syncedHead ?? null,
-        state: unknown ? 'unreadable' : neverPacked ? 'no-pack' : stale ? 'stale' : 'fresh' });
+        state: unknown ? 'unreadable' : neverPacked ? 'no-pack' : stale ? 'stale' : 'fresh',
+        ...(typeof repo[PREVIEW_KEY] === 'string' ? { preview_url: repo[PREVIEW_KEY] } : {}) });
+      if (typeof repo[PREVIEW_KEY] === 'string') info(`${j.name} ${c.dim('— preview')} ${shown(repo[PREVIEW_KEY])}`);
       if (unknown) { warn(`${j.name} ${c.dim(`(${j.path})`)} — HEAD unreadable`); continue; }
       if (neverPacked) { staleCount++; warn(`${j.name} ${c.dim(`(${j.path})`)} — ${c.yellow('no code-context pack yet')} (registered without one)`); }
       else if (stale) { staleCount++; warn(`${j.name} ${c.dim(`(${j.path})`)} — ${c.yellow('stale')} (HEAD moved since last pack)`); }
@@ -225,7 +228,65 @@ export async function runRepo(root, { action = 'list', name, today, push = false
     return { action, ...repos };
   }
 
-  fail(`unknown repo action: ${action} (list | refresh | sync | clone)`);
+  if (action === 'preview') return previewAction(root, entries, regPath, registry, { name, pattern, clear, push });
+
+  fail(`unknown repo action: ${action} (list | refresh | sync | clone | preview)`);
   process.exitCode = 1;
   return { action };
+}
+
+// `yad repo preview <name> [<pattern>] [--clear]` (#359): show, set or clear the repo's preview address
+// pattern — `https://pr-{pr}.myapp.dev`, filled per PR/MR so a live design check runs against the
+// deployed copy. A team setting in the Product's registry: written here, committed by the person.
+function previewAction(root, entries, regPath, registry, { name, pattern, clear, push }) {
+  const done = (extra) => ({ action: 'preview', name: name ?? null, ...extra });
+  const usage = 'yad repo preview <name> [<pattern>] [--clear]';
+  // It writes one shared file and commits nothing: `--push` would read as a promise it does not keep.
+  if (push) { fail(`--push does not apply to \`yad repo preview\` — it writes ${PROJECT_FILES.reposRegistry}; commit that in the Product`); process.exitCode = 1; return done({ preview_url: null }); }
+  if (!name) { fail(`usage: ${usage}`); process.exitCode = 1; return done({ preview_url: null }); }
+  const matches = entries.filter((r) => r.name === name);
+  if (!matches.length) { fail(`unknown repo: ${shown(name)}`); process.exitCode = 1; return done({ preview_url: null }); }
+  if (matches.length > 1) { fail(`${matches.length} entries in ${PROJECT_FILES.reposRegistry} are named ${shown(name)} — fix the registry first`); process.exitCode = 1; return done({ preview_url: null }); }
+  const repo = matches[0];
+  const current = typeof repo[PREVIEW_KEY] === 'string' ? repo[PREVIEW_KEY] : null;
+  if (clear && pattern !== undefined) { fail(`give a pattern or --clear, not both (${usage})`); process.exitCode = 1; return done({ preview_url: current }); }
+
+  if (!clear && pattern === undefined) {
+    if (repo[PREVIEW_KEY] == null) info(`${shown(name)} has no preview address pattern — set one with \`${usage}\``);
+    else {
+      const problems = patternProblems(repo[PREVIEW_KEY]);
+      if (problems.length) warn(`${shown(name)}'s preview_url cannot be used: it ${problems.join('; ')} — set it again with \`${usage}\``);
+      else ok(`${shown(name)} — preview ${shown(current)}`);
+    }
+    return done({ preview_url: current, problems: repo[PREVIEW_KEY] == null ? [] : patternProblems(repo[PREVIEW_KEY]) });
+  }
+
+  if (!clear) {
+    const problems = patternProblems(pattern);
+    if (problems.length) {
+      fail(`the preview address pattern ${problems.join('; ')} — nothing written`);
+      hand('a pattern is a URL that may hold {pr}, {branch} and {repo}, for example https://pr-{pr}.myapp.dev');
+      process.exitCode = 1;
+      return done({ preview_url: current, problems });
+    }
+  }
+  // Never through a `.sdlc` the Product commits as a link (as `refresh`): the write would land where it points.
+  let sdlcLinked = false;
+  try { sdlcLinked = fs.lstatSync(path.dirname(regPath)).isSymbolicLink(); } catch { /* not there */ }
+  if (sdlcLinked) {
+    fail(`${path.dirname(PROJECT_FILES.reposRegistry)} in the Product is a link — ${PROJECT_FILES.reposRegistry} was not written`);
+    process.exitCode = 1;
+    return done({ preview_url: current });
+  }
+  if (clear) {
+    if (!(PREVIEW_KEY in repo)) { info(`${shown(name)} has no preview address pattern — nothing to clear`); return done({ preview_url: null, changed: false }); }
+    delete repo[PREVIEW_KEY];
+  } else {
+    if (current === pattern) { info(`${shown(name)} already has that preview address pattern`); return done({ preview_url: current, changed: false }); }
+    repo[PREVIEW_KEY] = pattern;
+  }
+  writeJSON(regPath, registry);
+  ok(clear ? `${shown(name)} — preview address pattern cleared` : `${shown(name)} — preview ${shown(pattern)}`);
+  hand(`commit ${PROJECT_FILES.reposRegistry} in the Product so the team shares it`);
+  return done({ preview_url: clear ? null : pattern, changed: true });
 }
