@@ -67,8 +67,11 @@ Determine which tool is being connected from `tool` (default `figma`); reject a 
 - **pencil** → the `pencil` MCP (`batch_design` writes `.pen` web/mobile screens — generate-capable).
 - another adapter → its named MCP.
 
-Record `provider` (the concrete MCP, e.g. `figma-mcp` | `html-to-design` | `pencil-mcp`) and whether it
-is available. **Auth is the local user's own** — the user's authenticated MCP session. The skill
+Record `provider` (the concrete MCP) and whether it is available. For Figma, say which server it is,
+because a UI task checks it before it starts (#358): `figma-desktop` (the Dev Mode MCP server inside the
+running desktop app — the app must be open), `figma` (Figma's hosted server — a sign-in, no app), or
+`html-to-design` (writes screens only, cannot read a frame). For Pencil, `pencil-mcp`. The older value
+`figma-mcp` does not say which Figma server it is: on a refresh, record the exact one. **Auth is the local user's own** — the user's authenticated MCP session. The skill
 **stores no tokens**; `project_url`/`files` are plain references, never credentials.
 
 **Graceful degradation:** if no design-tool MCP is available, record `source: "unavailable"` and report

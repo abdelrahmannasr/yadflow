@@ -151,7 +151,8 @@ export function readDesignConfig(root) {
 // an MCP server belongs to the agent's session. So this says HOW to ask, and what to tell the person
 // when the answer is no; the yad-spec and yad-implement skills make the call and stop on a failure.
 // null when the story names no frame (no UI task, nothing to check). `reachable` is `check` (probe, and
-// stop when it fails) or `not-checkable` (no tool, or none yad knows how to check: go on with the links).
+// stop when it fails) or `not-checkable` (nothing to probe: go on with the links). `appBound` is true (read
+// through the running app), false (a hosted server: sign in) or null (yad cannot tell: `stop` names both).
 export function designPreflight(design, links, frames) {
   if (!frames.length) return null;
   const d = design.state === 'ok' ? design.data : null;
@@ -165,14 +166,24 @@ export function designPreflight(design, links, frames) {
   const reach = reachFor(tool);
   if (!reach) return notCheckable(`yad has no reachability check for ${forTerminal(tool)}`);
   const provider = str(d.provider) ?? str(d.source);
-  const appBound = reach.appBound === true || (Array.isArray(reach.appBound) && provider !== null && reach.appBound.includes(provider));
-  const file = (links.state === 'ok' ? links.fileUrl : null) ?? str(d.project_url);
-  const frame = (frames.find((f) => f.found) ?? frames[0]).id;
-  const fill = (s) => s.replace(/<file>/g, file ? `\`${forTerminal(file)}\`` : 'the design file').replace(/<frame>/g, `\`${forTerminal(frame)}\``);
+  // A provider that only writes (html-to-design) has no call that reads a frame: probing it would fail
+  // on every story and make the person override each time.
+  if (provider !== null && reach.readers !== true && !reach.readers.includes(provider)) {
+    return notCheckable(`the connected provider ${forTerminal(provider)} cannot read a frame`);
+  }
+  // Every recorded ID is unresolved: the bad IDs are the problem (the warnings name them), not the app.
+  const found = frames.find((f) => f.found);
+  if (!found) return notCheckable('no recorded frame is in design-links.json — fix the frame IDs first');
+  const appBound = reach.appBound === true || reach.appBound.includes(provider)
+    ? true : (reach.signInOnly ?? []).includes(provider) ? false : null;
+  // The file the UI step recorded, and only for THIS tool: after a switch of tools it names the old one.
+  // design.json's project_url is a project, not a file, so it is never compared against.
+  const file = links.state === 'ok' && (!links.tool || links.tool === tool) ? links.fileUrl : null;
+  const fill = (s) => s.replace(/<file>/g, file ? `\`${forTerminal(file)}\`` : 'the design file').replace(/<frame>/g, `\`${forTerminal(found.id)}\``);
   return {
-    tool, provider, reachable: 'check', appBound, file, frame,
+    tool, provider, reachable: 'check', appBound, file, frame: found.id,
     probe: fill(reach.probe),
-    stop: fill(appBound || !reach.signIn ? reach.open : reach.signIn),
+    stop: fill(appBound === true ? reach.open : appBound === false ? reach.signIn : reach.either),
   };
 }
 

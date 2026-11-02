@@ -132,7 +132,8 @@ through the running app, so a closed app or the wrong file open is found here an
 - **It answers, with the right file open:** go on.
 - **It fails, or another file is open: STOP.** Print `preflight.stop` word for word and wait. Go on
   without the design tool only when the person says so, and record that in `spec.md`'s
-  `## Clarifications` as `- Q: design tool not reachable → A: continue without it, from the frame links`.
+  `## Clarifications` as `- Q: design tool not reachable → A: continue without it, from the frame links`
+  (when `spec.md` is not written yet, add the line as soon as it is).
 - **`not-checkable`** (no design tool, or one yad has no check for): go on from the frame links, and say
   `preflight.why` once. **`preflight: null`** (no frames): nothing to check.
 

@@ -15,7 +15,7 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
 ```json
 {
   "tool": "figma",                                   // figma | pencil | <adapter id> | none (markdown-only)
-  "provider": "figma-mcp",                           // the concrete MCP: figma-mcp | html-to-design | pencil-mcp | null
+  "provider": "figma-desktop",                       // the concrete MCP: figma-desktop | figma | html-to-design | pencil-mcp | null (figma-mcp: older, either Figma server)
   "project_url": "https://www.figma.com/files/project/123/feature", // team/project/file reference; null if none yet
   "auth": "user",                                    // ALWAYS the user's own MCP session — never a token
   "files": { "web": null, "mobile": null },          // optional default file refs per platform
