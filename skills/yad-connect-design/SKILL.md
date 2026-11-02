@@ -84,13 +84,13 @@ Upsert into `{project-root}/.sdlc/design.json` (create the file + parent `.sdlc/
 ```json
 {
   "tool": "figma",
-  "provider": "figma-mcp",
+  "provider": "figma-desktop",
   "project_url": "https://www.figma.com/files/project/<id>/<name>",
   "auth": "user",
   "files": { "web": null, "mobile": null },
   "connectedAt": "<YYYY-MM-DD>",
   "lastSyncedAt": "<YYYY-MM-DD>",
-  "source": "figma-mcp"
+  "source": "figma-desktop"
 }
 ```
 

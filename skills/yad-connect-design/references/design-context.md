@@ -69,10 +69,11 @@ how to check and what to tell the person; the text for each tool is the toolbox 
 | `pencil` | `get_app_state` (or `get_editor_state`): the active canvas editor is the design file, compared by file name (the app shows the full path). A frame inside a container is not in the top-level list, so it is read by its ID before it counts as missing | open the Pencil desktop app with the file loaded, then continue |
 | `figma`, provider `figma-desktop` | `get_metadata` on one recorded frame | open the Figma desktop app with the file loaded and its Dev Mode MCP server on |
 | `figma`, provider `figma` (hosted) | `get_metadata` on one recorded frame | sign in to Figma in your agent; no app is needed |
-| `figma`, provider `figma-mcp` (older value) | `get_metadata` on one recorded frame | either of the two above — yad cannot tell which server it is |
+| `figma`, provider `figma-mcp` (older value), any other name, or none | `get_metadata` on one recorded frame | either of the two above — yad cannot tell which server it is |
 | `figma`, provider `html-to-design` | nothing: it writes screens and cannot read a frame | not checked; build from the frame links |
 
-Also not checked (build from the frame links): no `design.json`, tool `none`, source `unavailable`, and a
+Also not checked (build from the frame links): no `design.json`, tool `none`, source `unavailable`; no
+`design-links.json`, one that cannot be read, or one recorded for another tool (re-run the UI step); and a
 story whose recorded frame IDs are all missing from `design-links.json` — the bad IDs are the problem then.
 
 A failed check stops the step. The person may choose to go on from the frame links only; that choice is

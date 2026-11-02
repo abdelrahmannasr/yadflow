@@ -257,10 +257,14 @@ test('#358: designPreflight — Pencil is read through the app; Figma only throu
   assert.deepEqual([old.appBound, /desktop app.*or sign in/.test(old.stop)], [null, true], 'the older figma-mcp: yad cannot tell, so both');
   const viaSource = designPreflight({ state: 'ok', data: { tool: 'figma', source: 'figma-desktop' } }, links, frames);
   assert.deepEqual([viaSource.provider, viaSource.appBound], ['figma-desktop', true], 'no provider: source names the server');
-  const noFile = designPreflight({ state: 'ok', data: { tool: 'pencil', project_url: 'https://team/project' } }, { state: 'missing' }, frames);
+  const noFile = designPreflight({ state: 'ok', data: { tool: 'pencil', project_url: 'https://team/project' } }, { state: 'ok', tool: 'pencil', fileUrl: null, screens: [] }, frames);
   assert.match(noFile.stop, /the design file/, 'no file: said plainly — a project_url is a project, never compared as the file');
   const switched = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'ok', tool: 'figma', fileUrl: 'https://figma/f', screens: [] }, frames);
-  assert.equal(switched.file, null, 'a file recorded for another tool is not probed through this one');
+  assert.deepEqual([switched.reachable, /recorded for figma.*re-run the UI step/.test(switched.why)], ['not-checkable', true], 'frames of another tool are never probed through this one');
+  const odd = designPreflight({ state: 'ok', data: { tool: 'figma', source: 'figma-dev-mode-mcp-server' } }, links, frames);
+  assert.deepEqual([odd.reachable, odd.appBound], ['check', null], 'an MCP id yad does not know is still probed, with both messages');
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'Figma-Desktop' } }, links, frames).appBound, true, 'names are compared in lower case');
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'HTML-to-Design' } }, links, frames).reachable, 'not-checkable');
 });
 
 test('#358: designPreflight — nothing to probe is not-checkable, and no frame means no preflight', () => {
@@ -272,6 +276,9 @@ test('#358: designPreflight — nothing to probe is not-checkable, and no frame 
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, []), null);
   const writer = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'html-to-design' } }, links, frames);
   assert.deepEqual([writer.reachable, /cannot read a frame/.test(writer.why)], ['not-checkable', true]);
+  const gone = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'missing' }, [{ id: '9:9', found: false }]);
+  assert.match(gone.why, /no design-links\.json/, 'a missing file is named, not blamed on the IDs');
+  assert.match(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'unreadable', why: 'it does not parse as JSON' }, [{ id: '9:9', found: false }]).why, /cannot be read/);
   const unresolved = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, [{ id: '9:9', found: false }]);
   assert.deepEqual([unresolved.reachable, /fix the frame IDs/.test(unresolved.why)], ['not-checkable', true]);
   for (const data of [{ tool: 123 }, { tool: 'figma', provider: {} }, { tool: 'pencil', source: ['unavailable'] }]) {
@@ -324,4 +331,6 @@ test('#358: spec and implement probe the design tool first, stop on a failure, a
   assert.ok(ctx.includes('Reachable before Build (#358)'));
   const connect = fs.readFileSync(path.join(REPO, 'skills', 'yad-connect-design', 'SKILL.md'), 'utf8');
   for (const p of ['figma-desktop', '`figma`', 'html-to-design']) assert.ok(connect.includes(p), `yad-connect-design does not name the ${p} provider`);
+  const example = connect.slice(connect.indexOf('### Step 2'), connect.indexOf('### Step 3'));
+  assert.ok(example.includes('"provider": "figma-desktop"') && !example.includes('figma-mcp'), 'the registry example records a provider the preflight can read');
 });
