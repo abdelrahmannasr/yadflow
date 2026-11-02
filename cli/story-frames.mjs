@@ -66,7 +66,7 @@ export const recordsFrames = (fm = {}) => Object.hasOwn(fm, FRAMES_KEY) || keyVa
 
 // `"12:34"` and `'12:34'` — a YAML habit. The reader keeps the quote marks, so they are taken off here
 // (and said), rather than reported as an ID that is not in design-links.json.
-const unquote = (id) => (id.length >= 2 && /^(["']).*\1$/.test(id) ? id.slice(1, -1) : id);
+const unquote = (id) => (id.length >= 3 && /^(["']).+\1$/.test(id) ? id.slice(1, -1) : id);
 
 // The pure rule. `fm` is the story's parsed frontmatter, `links` what `readDesignLinks` returned.
 // Returns { recorded, ids, frames, findings }: `recorded` is false only when the key is absent;
@@ -79,6 +79,9 @@ export function frameFindings(fm = {}, links = { state: 'missing' }) {
   }
   const v = fm[FRAMES_KEY];
   const findings = [];
+  // The right key AND a misspelled one: the second is never read, so its IDs would be lost in silence.
+  const twin = keyVariant(fm);
+  if (twin !== undefined) findings.push({ kind: 'key-spelling', message: `\`${forTerminal(twin)}:\` is not read — only \`${FRAMES_KEY}\` is; move its IDs into that line and delete it` });
   if (!Array.isArray(v)) {
     const text = String(v ?? '');
     findings.push(text.includes('#')
@@ -89,7 +92,7 @@ export function frameFindings(fm = {}, links = { state: 'missing' }) {
     return { recorded: true, ids: [], frames: [], findings };
   }
   const quoted = v.filter((id) => unquote(id) !== id);
-  if (quoted.length) findings.push({ kind: 'quoted', message: `frame IDs are written without quotes: ${quoted.map(quote).join(', ')} — they are read without them` });
+  if (quoted.length) findings.push({ kind: 'quoted', message: `frame IDs should be written without quotes: ${quoted.map(quote).join(', ')} — they are read without them` });
   const ids = v.map(unquote);
   const seen = new Set();
   for (const id of ids) {
@@ -167,7 +170,8 @@ export function allStoryFrames(root, epicIds) {
     const dir = path.join(epicDir, 'stories');
     let names;
     try {
-      names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.md')).map((e) => e.name).sort();
+      // `isFile` follows a symlink, as the command's own check does, so the two read the same stories.
+      names = fs.readdirSync(dir).filter((n) => n.endsWith('.md') && isFile(path.join(dir, n))).sort();
     } catch {
       continue;
     }

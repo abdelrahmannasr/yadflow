@@ -1685,7 +1685,7 @@ export function storyFrameChecks(checks, root) {
   check(
     checks, 'stories:design-frames', 'shape', 'warn',
     `${problems.length} problem(s) with the design frames stories record: ${list}`,
-    `run \`yad story frames <story>\` for one story's frames and findings. Fixing \`${FRAMES_KEY}\` changes the story file, so a stories review that already passed must approve it again`,
+    `run \`yad story frames <story>\` for one story's frames and findings, and rename a story file whose name is not \`<epic>-S<n>.md\` (the command cannot read it). Fixing \`${FRAMES_KEY}\` changes the story file, so a stories review that already passed must approve it again`,
   );
 }
 

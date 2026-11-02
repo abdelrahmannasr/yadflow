@@ -213,6 +213,31 @@ test('#354 review 1: the ok row tells stories with frames from stories with no s
   } finally { done(T); }
 });
 
+test('#354 review 2: doctor reads what the command reads — a symlinked story, a misspelled key', () => {
+  const T = product({ 'EP-shop-S02': 'designFrames: [12:34]' });
+  try {
+    const dir = path.join(T, 'epics', 'EP-shop', 'stories');
+    put(path.join(T, 'elsewhere.md'), story('EP-shop-S01', `${FRAMES_KEY}: [9:9]`));
+    fs.symlinkSync(path.join(T, 'elsewhere.md'), path.join(dir, 'EP-shop-S01.md'));
+    assert.deepEqual(kinds(readStoryFrames(T, 'EP-shop-S01')), ['not-found']);
+    assert.deepEqual(allStoryFrames(T, ['EP-shop']).map((s) => [s.story, kinds(s)]), [['EP-shop-S01', ['not-found']], ['EP-shop-S02', ['key-spelling']]]);
+    const checks = [];
+    storyFrameChecks(checks, T);
+    assert.equal(checks[0].status, 'warn');
+    assert.match(checks[0].hint, /rename a story file/);
+  } finally { done(T); }
+});
+
+test('#354 review 2: a misspelled key beside the right one is said; `""` is not an empty ID', () => {
+  const both = frameFindings({ [FRAMES_KEY]: ['12:34'], designFrames: ['56:78'] }, ok);
+  assert.deepEqual(kinds(both), ['key-spelling']);
+  assert.match(both.findings[0].message, /move its IDs/);
+  const empty = frameFindings({ [FRAMES_KEY]: ['""'] }, ok);
+  assert.deepEqual(kinds(empty), ['not-found'], '`""` is left as it is, never turned into an empty ID');
+  assert.deepEqual(empty.ids, ['""']);
+  assert.match(frameFindings({ [FRAMES_KEY]: ['"12:34"'] }, ok).findings[0].message, /should be written without quotes/);
+});
+
 test('#354: the stories, spec and implement skills all name `yad story frames`', () => {
   for (const skill of ['yad-stories', 'yad-spec', 'yad-implement']) {
     const body = fs.readFileSync(path.join(REPO, 'skills', skill, 'SKILL.md'), 'utf8');
