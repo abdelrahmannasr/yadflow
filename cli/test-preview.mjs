@@ -91,7 +91,6 @@ test('urlProblem: an address from a deployment service must be https and plain',
   assert.match(urlProblem('http://pr-1.x.dev'), /https/);
   assert.match(urlProblem('javascript:alert(1)'), /https/);
   assert.match(urlProblem('https://x.dev/‮'), /non-ASCII/);
-  assert.match(urlProblem(''), /not a URL/);
 });
 
 const SHA = 'a'.repeat(40);
@@ -234,11 +233,26 @@ test('resolvePreview: on the default branch without --pr, one next step — pass
 
 test('platformPreview (GitLab): a merge-request pipeline\'s deployment counts, whatever its commit', () => {
   const runner = fakeRunner({
-    'glab api projects/:id/deployments?': deployments([{ ref: 'refs/merge-requests/7/head', sha: 'd'.repeat(40), environment: { id: 4, name: 'review/mr-7' } }]),
+    'glab api projects/:id/deployments?': deployments([
+      { ref: 'feat/x', sha: 'c'.repeat(40), environment: { id: 3, name: 'review/feat-x' } },
+      { ref: 'refs/merge-requests/7/head', sha: 'd'.repeat(40), environment: { id: 4, name: 'review/mr-7' } },
+    ]),
     'glab api projects/:id/environments/4': JSON.stringify({ state: 'available', external_url: 'https://mr-7.review.x.dev' }),
   });
   assert.deepEqual(platformPreview('gitlab', { sha: SHA, branch: 'feat/x', pr: 7, runner }), { url: 'https://mr-7.review.x.dev' });
+  assert.ok(!runner.calls.some((c) => c.endsWith('environments/3')), 'the branch deployment at another commit is still skipped');
   assert.match(platformPreview('gitlab', { sha: SHA, branch: 'feat/x', pr: 8, runner }).why, /no successful/, 'another MR\'s ref is not this one');
+  assert.deepEqual(platformPreview('gitlab', { sha: SHA, branch: null, pr: 7, runner }), { url: 'https://mr-7.review.x.dev' }, 'no source branch: the MR ref still counts');
+});
+
+test('resolvePreview: GitLab without --pr, and a --pr that is not a number, both say pass --pr', () => {
+  const head = { sha: SHA, branch: 'feat/x' };
+  const none = () => ({ url: null, why: 'GitLab lists nothing' });
+  const gl = resolvePreview({ meta: { name: 'web' }, platform: 'gitlab', pr: null, head, lookup: none });
+  assert.match(gl.why, /found only with --pr — pass --pr <n>$/);
+  const bad = resolvePreview({ meta: { name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, platform: 'github', pr: 'abc', head, lookup: none });
+  assert.match(bad.why, /--pr\) is not a number.* — pass --pr <n>$/);
+  assert.equal(urlProblem(''), 'is not a URL');
 });
 
 test('resolvePreview: a {branch} pattern never fills from the wrong branch', () => {
