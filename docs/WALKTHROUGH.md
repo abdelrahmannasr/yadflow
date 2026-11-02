@@ -256,7 +256,8 @@ side-effect). With no repos connected the steps proceed exactly as before (green
    `document|extract|craft` slash-commands when installed; otherwise authors directly). Optional:
    `yad skip` / `yad defer` it as in step 3 of the overview above.
 4. **`yad-stories`** (state 7) → one file per story `stories/EP-<slug>-S0N.md`, each tagged
-   with the `repos` it implements.
+   with the `repos` it implements, and — when the UI step drew screens in a design tool — the
+   `design-frames` it builds (frame IDs from `design-links.json`; `yad story frames <story>` shows them).
 
 Each author step ends with `yad fold <epic> <step>` — one commit holding only that step's files. With
 `ledger: verified`, fold never commits on the default branch: the artifacts reach it through the review

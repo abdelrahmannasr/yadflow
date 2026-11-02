@@ -23,6 +23,7 @@ const { storyFrameChecks } = await import('./doctor.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const YAD = path.join(HERE, '..', 'bin', 'yad.mjs');
+const REPO = path.join(HERE, '..');
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-frames-')));
 const put = (file, data) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data)); };
@@ -155,4 +156,15 @@ test('#354: doctor — no row without frames, an ok row with a count, one warn r
     assert.match(rows[0].message, /EP-shop-S02: .*77:1/);
     assert.deepEqual(allStoryFrames(T, ['EP-shop']).map((s) => s.findings[0].kind), ['commented', 'not-found']);
   } finally { done(T); }
+});
+
+test('#354: the stories, spec and implement skills all name `yad story frames`', () => {
+  for (const skill of ['yad-stories', 'yad-spec', 'yad-implement']) {
+    const body = fs.readFileSync(path.join(REPO, 'skills', skill, 'SKILL.md'), 'utf8');
+    assert.ok(body.includes('yad story frames'), `${skill} does not read the story's frames`);
+  }
+  const schema = fs.readFileSync(path.join(REPO, 'skills', 'yad-stories', 'references', 'story-schema.md'), 'utf8');
+  assert.ok(schema.includes(FRAMES_KEY), 'the story schema names the key');
+  const template = fs.readFileSync(path.join(REPO, 'skills', 'yad-stories', 'SKILL.md'), 'utf8');
+  assert.match(template, new RegExp(`^${FRAMES_KEY}: \\[\\]$`, 'm'), 'the template ships the key bare, with no trailing comment');
 });

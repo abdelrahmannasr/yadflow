@@ -398,7 +398,7 @@ commit, and refuses an epic that already has a chain.
 | 1 | `yad-epic` | `epic.md` (reads `analysis.md` when present; otherwise assigns the `EP-<slug>` ID and seeds state itself) | epic review |
 | 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(contract: count 3)* |
 | 3 *(optional)* | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review — skip N/A for a UI-less epic with `yad skip <epic> ui-design --reason …`, or `yad defer` it to design later (add `--debt` if it is owed back — `yad next` reminds you until it is paid) |
-| 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review |
+| 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches and the design frames it builds (`yad story frames <story>`) | stories review |
 | 5 *(parallel)* | `yad-test-cases` | `test-cases.md` covering the stories (+ the automation tests when a testing tool is connected) | test-cases review |
 
 Step 0 is **optional**: run `yad-analysis` first for a dedicated, gated discovery pass; skip it

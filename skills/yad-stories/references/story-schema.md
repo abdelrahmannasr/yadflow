@@ -13,6 +13,7 @@ Each story authored at Shape step 7 is one Markdown file under `epics/EP-<slug>/
 | `status` | `draft` \| `in-review` \| `approved`, then `in-build` \| `shipped` | Story lifecycle: the first three within the stories gate (`yad sync-status` moves them), the last two in Build (`yad build ship` sets `in-build`, `yad build done` sets `shipped`). |
 | `repos` | subset of the epic's `repos` | Which repos must implement this story. **Labels the stories review PR with the touched repos now and (Phase 3) decides where specs are scaffolded.** |
 | `code-context` | `{ repos: [<name@sha>], loaded: <date> }` | Optional. Which connected-repo code-maps anchored "Notes for build" (Shape step 7 Step 2b). The `@sha` (a repo's `syncedHead`) is recommended so freshness is recorded but may be omitted; the SKILL templates show the empty placeholder `{ repos: [], loaded: <date or none> }`. `none` / `[]` when no repos are connected. |
+| `design-frames` | `[<nodeId>, …]` or `[]` | The design-tool frames (Pencil, Figma) of the screens this story builds: each one a `nodeId` from the epic's `.sdlc/design-links.json`, copied exactly. `[]` = the story has no screens; no field = not recorded. IDs only: the name, platform and link are read from `design-links.json` by `yad story frames <story>`, which the spec and implement steps run (issue #354). Write it on one line with no `# comment` after it. Part of the reviewed story: changing it after the stories review passed needs that review again. `yad doctor` warns (`stories:design-frames`) on an ID it cannot find. |
 
 ## Body
 

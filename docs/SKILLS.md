@@ -127,7 +127,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   until the stories review opens). An epic that will have screens later can `yad defer` the step instead — with `--debt` when it is owed back — and `yad undefer` picks it up again at any time, even after the stories are done. On a verified Product these verbs refuse once the epic's first review PR has merged, because CI owns `state.json`.
 - **`yad-stories`** — Shape step 7. With the pm, break the approved epic into user stories, each
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
-  story under `stories/`. Reads epic + architecture + contract + UI.
+  story under `stories/`. Reads epic + architecture + contract + UI. When the UI step recorded design
+  frames (`design-links.json`), each story lists the frame IDs of the screens it builds in its
+  `design-frames:` field; `yad-spec` and `yad-implement` read them with `yad story frames <story>` (#354).
 - **`yad-test-cases`** — Shape step 9, a **parallel, non-blocking** track: it opens when the stories
   gate passes (the epic is already `ready-for-build`, so Build runs alongside it). With the
   test architect, author `test-cases.md` covering the approved stories (risk-based P0–P3 cases +
