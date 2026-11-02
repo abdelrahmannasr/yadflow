@@ -136,7 +136,6 @@ export function glabConfigs({ env = process.env, home = os.homedir(), platform =
         path.join(home, '.config', 'glab-cli', 'config.yml'),
         platform === 'darwin' && path.join(home, 'Library', 'Application Support', 'glab-cli', 'config.yml'),
         platform === 'win32' && env.APPDATA && path.join(env.APPDATA, 'glab-cli', 'config.yml'),
-        platform === 'win32' && env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'glab-cli', 'config.yml'),
       ].filter(Boolean);
   return [...new Set(places)].filter((f) => fs.existsSync(f));
 }
