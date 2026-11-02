@@ -129,7 +129,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
   story under `stories/`. Reads epic + architecture + contract + UI. When the UI step recorded design
   frames (`design-links.json`), each story lists the frame IDs of the screens it builds in its
-  `design-frames:` field; `yad-spec` and `yad-implement` read them with `yad story frames <story>` (#354).
+  `design-frames:` field; `yad-spec` and `yad-implement` read them with `yad story frames <story>` (#354),
+  and before UI work they check the design tool can be reached with the file open — Pencil and Figma's
+  desktop server are read through the running app — and stop with a clear message when it cannot (#358).
 - **`yad-test-cases`** — Shape step 9, a **parallel, non-blocking** track: it opens when the stories
   gate passes (the epic is already `ready-for-build`, so Build runs alongside it). With the
   test architect, author `test-cases.md` covering the approved stories (risk-based P0–P3 cases +

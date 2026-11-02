@@ -115,6 +115,13 @@ same. Build to those frames: open them through the connected design tool's MCP w
 read them from their `url` otherwise. Never pick a frame by its look or its name alone. An ID it cannot
 find is an open question for the batch below, not a guess.
 
+**Before any code for a task with UI, check the design tool can be reached (#358).** When that answer's
+`preflight.reachable` is `check`, make the MCP call `preflight.probe` describes. If it fails, or another
+file is open, **STOP**: print `preflight.stop` word for word and wait. Go on without the design tool, from
+the frame links only, only when the person says so, and record that in the commit's `Decisions:`
+paragraph (Step 6) as `design tool not reachable: continued from the frame links, on <person>'s word`.
+`not-checkable` means there is nothing to probe: go on from the links. `preflight: null` means no frames.
+
 **Then ask the batch (#357)** that **Ask the human-only questions first** above describes, before
 writing any code. Read `spec.md`'s `## Clarifications` first: `yad-spec` recorded its answers there.
 Ask only what is still open for THIS task, from its block in `tasks.md`, `plan.md` and the contract

@@ -56,6 +56,29 @@ it authors `ui-design.md` / `DESIGN.md` exactly as before and records `design: n
 with a one-line note (mirroring the `impeccable: not-installed` degrade). No error — the design tool is
 purely additive.
 
+## Reachable before Build (#358)
+
+A design tool read through its running desktop app — Pencil, or Figma's `figma-desktop` server — cannot be
+read while the app is closed or the design file is not open. So before a UI task, `yad-spec` and
+`yad-implement` check it first, and stop early when it fails. yad itself cannot call an MCP server (it
+belongs to the agent's session), so `yad story frames <story> --json` returns a `preflight` block that says
+how to check and what to tell the person; the text for each tool is the toolbox entry's `reach` field.
+
+| `tool` | What the agent checks | When it fails |
+|--------|-----------------------|---------------|
+| `pencil` | `get_app_state` (or `get_editor_state`): the active canvas editor is the design file, compared by file name (the app shows the full path). A frame inside a container is not in the top-level list, so it is read by its ID before it counts as missing | open the Pencil desktop app with the file loaded, then continue |
+| `figma`, provider `figma-desktop` | `get_metadata` on one recorded frame | open the Figma desktop app with the file loaded and its Dev Mode MCP server on |
+| `figma`, provider `figma` (hosted) | `get_metadata` on one recorded frame | sign in to Figma in your agent; no app is needed |
+| `figma`, provider `figma-mcp` (older value), any other name, or none | `get_metadata` on one recorded frame | either of the two above — yad cannot tell which server it is |
+| `figma`, provider `html-to-design` | nothing: it writes screens and cannot read a frame | not checked; build from the frame links |
+
+Also not checked (build from the frame links): no `design.json`, tool `none`, source `unavailable`; no
+`design-links.json`, one that cannot be read, or one recorded for another tool (re-run the UI step); and a
+story whose recorded frame IDs are all missing from `design-links.json` — the bad IDs are the problem then.
+
+A failed check stops the step. The person may choose to go on from the frame links only; that choice is
+recorded (in `spec.md`'s Clarifications, or the commit's Decisions paragraph).
+
 ## Staleness / refresh
 
 A re-generated or designer-edited file is like a moved code repo: `yad-ui` **flags** a divergence and

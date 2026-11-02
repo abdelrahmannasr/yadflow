@@ -125,6 +125,19 @@ spec and the tasks name the screens and nobody has to ask which ones belong to t
 prints (an ID it cannot find, say) is a warning: copy it into that section as an open question, and do
 not guess a frame. `recorded: false` or an empty list means no frames: write no section.
 
+**Check the design tool can be reached (#358), before anything else for a story with frames.** The same
+answer carries `preflight`. When `preflight.reachable` is `check`, make the MCP call `preflight.probe`
+describes, now, before the ceremony starts. Some design tools (Pencil, Figma's desktop server) are read
+through the running app, so a closed app or the wrong file open is found here and not half way through.
+- **It answers, with the right file open:** go on.
+- **It fails, or another file is open: STOP.** Print `preflight.stop` word for word and wait. Go on
+  without the design tool only when the person says so, and record that in `spec.md`'s
+  `## Clarifications` as `- Q: design tool not reachable → A: continue without it, from the frame links`
+  (when `spec.md` is not written yet, add the line as soon as it is).
+- **`not-checkable`** (nothing to probe — `preflight.why` says why: for example no design tool, one yad has
+  no check for, or design-links.json missing or recorded for another tool): go on from the frame links, and say
+  `preflight.why` once. **`preflight: null`** (no frames): nothing to check.
+
 ### Step 2 — Resolve the target code repo
 Map `repo` → `{project-root}/demo-repos/<repo>/`. Confirm it exists and is its own git repo
 (`demo-repos/<repo>/.git` present). If missing, STOP and point the user at `demo-repos/README.md`

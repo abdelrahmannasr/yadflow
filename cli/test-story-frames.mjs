@@ -238,6 +238,81 @@ test('#354 review 2: a misspelled key beside the right one is said; `""` is not 
   assert.match(frameFindings({ [FRAMES_KEY]: ['"12:34"'] }, ok).findings[0].message, /should be written without quotes/);
 });
 
+const { designPreflight, readDesignConfig } = await import('./story-frames.mjs');
+const { TOOLBOX, toolProblems, reachFor } = await import('./toolbox.mjs');
+
+test('#358: designPreflight — Pencil is read through the app; Figma only through its desktop server', () => {
+  const frames = [{ id: '99:1', found: false }, { id: '12:34', found: true }];
+  const links = { state: 'ok', fileUrl: 'design/app.pen', screens: [] };
+  const pencil = designPreflight({ state: 'ok', data: { tool: 'pencil', provider: 'pencil-mcp' } }, links, frames);
+  assert.deepEqual([pencil.reachable, pencil.appBound, pencil.frame, pencil.file], ['check', true, '12:34', 'design/app.pen'], 'the first frame that resolves is the one probed');
+  assert.match(pencil.stop, /^Open the Pencil desktop app with `design\/app\.pen` loaded/);
+  assert.match(pencil.probe, /get_app_state/);
+  const desk = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-desktop' } }, links, frames);
+  assert.deepEqual([desk.appBound, /desktop app/.test(desk.stop)], [true, true]);
+  const cloud = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma' } }, links, frames);
+  assert.deepEqual([cloud.appBound, /^Sign in to Figma/.test(cloud.stop)], [false, true]);
+  assert.match(cloud.probe, /`12:34`/);
+  const old = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-mcp' } }, links, frames);
+  assert.deepEqual([old.appBound, /desktop app.*or sign in/.test(old.stop)], [null, true], 'the older figma-mcp: yad cannot tell, so both');
+  const viaSource = designPreflight({ state: 'ok', data: { tool: 'figma', source: 'figma-desktop' } }, links, frames);
+  assert.deepEqual([viaSource.provider, viaSource.appBound], ['figma-desktop', true], 'no provider: source names the server');
+  const noFile = designPreflight({ state: 'ok', data: { tool: 'pencil', project_url: 'https://team/project' } }, { state: 'ok', tool: 'pencil', fileUrl: null, screens: [] }, frames);
+  assert.match(noFile.stop, /the design file/, 'no file: said plainly — a project_url is a project, never compared as the file');
+  const switched = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'ok', tool: 'figma', fileUrl: 'https://figma/f', screens: [] }, frames);
+  assert.deepEqual([switched.reachable, /recorded for figma.*re-run the UI step/.test(switched.why)], ['not-checkable', true], 'frames of another tool are never probed through this one');
+  const odd = designPreflight({ state: 'ok', data: { tool: 'figma', source: 'figma-dev-mode-mcp-server' } }, links, frames);
+  assert.deepEqual([odd.reachable, odd.appBound], ['check', null], 'an MCP id yad does not know is still probed, with both messages');
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'Figma-Desktop' } }, links, frames).appBound, true, 'names are compared in lower case');
+  for (const provider of ['HTML-to-Design', 'html.to.design', ' html_to_design ']) {
+    assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider } }, links, frames).reachable, 'not-checkable', provider);
+  }
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma' } }, { ...links, tool: 'Figma' }, frames).reachable, 'check', 'the same tool in other letters is not a switch');
+});
+
+test('#358: designPreflight — nothing to probe is not-checkable, and no frame means no preflight', () => {
+  const frames = [{ id: '12:34', found: true }];
+  const links = { state: 'ok', fileUrl: 'f', screens: [] };
+  for (const design of [{ state: 'missing' }, { state: 'unreadable' }, { state: 'ok', data: { tool: 'none' } }, { state: 'ok', data: { tool: 'pencil', source: 'unavailable' } }, { state: 'ok', data: { tool: 'sketch' } }]) {
+    assert.equal(designPreflight(design, links, frames).reachable, 'not-checkable', JSON.stringify(design));
+  }
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, []), null);
+  const writer = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'html-to-design' } }, links, frames);
+  assert.deepEqual([writer.reachable, /cannot read a frame/.test(writer.why)], ['not-checkable', true]);
+  const gone = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'missing' }, [{ id: '9:9', found: false }]);
+  assert.match(gone.why, /no design-links\.json/, 'a missing file is named, not blamed on the IDs');
+  assert.match(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'unreadable', why: 'it does not parse as JSON' }, [{ id: '9:9', found: false }]).why, /cannot be read/);
+  const unresolved = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, [{ id: '9:9', found: false }]);
+  assert.deepEqual([unresolved.reachable, /fix the frame IDs/.test(unresolved.why)], ['not-checkable', true]);
+  for (const data of [{ tool: 123 }, { tool: 'figma', provider: {} }, { tool: 'pencil', source: ['unavailable'] }]) {
+    const r = designPreflight({ state: 'ok', data }, links, frames);
+    assert.ok(r && ['check', 'not-checkable'].includes(r.reachable), JSON.stringify(data));
+  }
+  const dirty = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'ok', fileUrl: 'a\x1b[31mb', screens: [] }, frames);
+  assert.ok(!dirty.stop.includes('\x1b') && !dirty.probe.includes('\x1b'));
+});
+
+test('#358: readDesignConfig, the reach data, and preflight through the command', () => {
+  for (const t of TOOLBOX.filter((x) => x.reach)) assert.deepEqual(toolProblems(t), [], t.id);
+  const figma = TOOLBOX.find((x) => x.id === 'figma');
+  assert.deepEqual(toolProblems({ ...figma, reach: { app: 'F', probe: 'p', open: 'o', readers: true, appBound: ['x'] } }), ['reach.signIn and reach.either say what to do when the provider needs no app, or yad cannot tell']);
+  assert.ok(toolProblems({ ...figma, reach: { readers: true, appBound: true } }).includes('reach has app, probe and open'));
+  assert.ok(toolProblems({ ...figma, reach: null }).length > 0);
+  assert.ok(toolProblems({ ...figma, reach: { ...figma.reach, appBound: false } }).includes('reach.appBound is true, or the providers read through the app'));
+  assert.equal(reachFor('repomix'), null);
+  const T = product({ 'EP-shop-S01': `${FRAMES_KEY}: [12:34]`, 'EP-shop-S02': `${FRAMES_KEY}: []` });
+  try {
+    assert.equal(readDesignConfig(T).state, 'missing');
+    put(path.join(T, '.sdlc', 'design.json'), '{ nope');
+    assert.equal(readDesignConfig(T).state, 'unreadable');
+    put(path.join(T, '.sdlc', 'design.json'), { tool: 'pencil', provider: 'pencil-mcp', source: 'pencil-mcp', auth: 'user' });
+    const j = JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S01', '--json').stdout);
+    assert.deepEqual([j.preflight.reachable, j.preflight.tool, j.preflight.appBound], ['check', 'pencil', true]);
+    assert.match(yad(T, 'story', 'frames', 'EP-shop-S01').stdout, /before UI work: .* if that fails, stop: Open the Pencil desktop app/);
+    assert.equal(JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S02', '--json').stdout).preflight, null, 'no screens, no probe');
+  } finally { done(T); }
+});
+
 test('#354: the stories, spec and implement skills all name `yad story frames`', () => {
   for (const skill of ['yad-stories', 'yad-spec', 'yad-implement']) {
     const body = fs.readFileSync(path.join(REPO, 'skills', skill, 'SKILL.md'), 'utf8');
@@ -247,4 +322,18 @@ test('#354: the stories, spec and implement skills all name `yad story frames`',
   assert.ok(schema.includes(FRAMES_KEY), 'the story schema names the key');
   const template = fs.readFileSync(path.join(REPO, 'skills', 'yad-stories', 'SKILL.md'), 'utf8');
   assert.match(template, new RegExp(`^${FRAMES_KEY}: \\[\\]$`, 'm'), 'the template ships the key bare, with no trailing comment');
+});
+
+test('#358: spec and implement probe the design tool first, stop on a failure, and record an override', () => {
+  for (const [skill, where] of [['yad-spec', '## Clarifications'], ['yad-implement', 'Decisions:']]) {
+    const body = fs.readFileSync(path.join(REPO, 'skills', skill, 'SKILL.md'), 'utf8');
+    for (const word of ['preflight.probe', 'not-checkable', where]) assert.ok(body.includes(word), `${skill} lacks ${word}`);
+    assert.match(body, /STOP\W+print `preflight\.stop` word for word/i, `${skill} does not stop with the message`);
+  }
+  const ctx = fs.readFileSync(path.join(REPO, 'skills', 'yad-connect-design', 'references', 'design-context.md'), 'utf8');
+  assert.ok(ctx.includes('Reachable before Build (#358)'));
+  const connect = fs.readFileSync(path.join(REPO, 'skills', 'yad-connect-design', 'SKILL.md'), 'utf8');
+  for (const p of ['figma-desktop', '`figma`', 'html-to-design']) assert.ok(connect.includes(p), `yad-connect-design does not name the ${p} provider`);
+  const example = connect.slice(connect.indexOf('### Step 2'), connect.indexOf('### Step 3'));
+  assert.ok(example.includes('"provider": "figma-desktop"') && !example.includes('figma-mcp'), 'the registry example records a provider the preflight can read');
 });

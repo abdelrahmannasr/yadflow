@@ -254,6 +254,18 @@ export const TOOLBOX = Object.freeze([
     versions: null,
     fallback: 'markdown-only: yad-ui writes ui-design.md and DESIGN.md only',
     records: null, note: 'Sign-in is your own (OAuth); yadflow stores no token. The desktop server is named figma-desktop.',
+    // #358: how a UI task checks the tool can be reached before it starts. `provider` in design.json says
+    // which server: `figma-desktop` reads through the running app; `figma` (the hosted server) needs the
+    // person signed in, not an app; the older `figma-mcp` could be either, so its message names both.
+    // `html-to-design` only writes (import-html) and cannot read a frame. Any other provider name — the
+    // MCP id is free text — is probed, with the message that names both servers.
+    reach: {
+      app: 'Figma', writers: ['html-to-design'], appBound: ['figma-desktop'], signInOnly: ['figma'],
+      probe: 'read frame <frame> through the Figma MCP (get_metadata, with that node ID)',
+      open: 'Open the Figma desktop app with <file> loaded and its Dev Mode MCP server on, then continue',
+      signIn: 'Sign in to Figma in your agent (its Figma MCP server), check that you can open <file>, then continue',
+      either: 'Open the Figma desktop app with <file> loaded (if you use its desktop MCP server), or sign in to Figma in your agent (the hosted server), then continue',
+    },
     usedBy: ['yad-connect-design', 'yad-ui'],
   },
   {
@@ -271,6 +283,12 @@ export const TOOLBOX = Object.freeze([
     versions: null,
     fallback: 'markdown-only: yad-ui writes ui-design.md and DESIGN.md only',
     records: null, note: 'Set up inside the desktop app: open a .pen file, then Settings → MCP → enable your agent.',
+    // #358: Pencil is read through the running desktop app, so the app must be open with the file loaded.
+    reach: {
+      app: 'Pencil', appBound: true,
+      probe: 'read the app state through the Pencil MCP (get_app_state, or get_editor_state): the active canvas editor must be <file> — compare by file name, as the app shows the full path. Frame <frame> may sit inside a container frame, so if it is not in the top-level list, read it by its ID (batch_get, or the node-read tool your Pencil MCP has) before calling it missing',
+      open: 'Open the Pencil desktop app with <file> loaded, then continue',
+    },
     usedBy: ['yad-connect-design', 'yad-ui'],
   },
   {
@@ -405,6 +423,19 @@ export function toolProblems(t) {
   need(t?.manual === null || (typeof t?.manual === 'string' && /^https:\/\//.test(t.manual)), 'manual is null or an https URL');
   need(isStringList(t?.usedBy), 'usedBy lists the skills or commands that use it');
   need(t?.tier !== 'connector' || !isStringList(t?.usedBy) || connectorFile(t) !== null, 'a connector names the yad-connect-* skill that connects it');
+  // #358 reach: `appBound` is `true` (every provider) or a list of providers; `writers` (optional) lists the
+  // providers that cannot read a frame. Provider names are compared in lower case. A tool whose
+  // providers need no app writes `appBound: []`; then `signIn` (a provider in `signInOnly`) and `either`
+  // (a provider in neither list, so yad cannot tell) say what to do instead.
+  const r = t?.reach;
+  if (r !== undefined) {
+    const text = (v) => typeof v === 'string' && v.length > 0;
+    need(r && typeof r === 'object' && text(r.app) && text(r.probe) && text(r.open), 'reach has app, probe and open');
+    need(r?.writers === undefined || isStringList(r?.writers), 'reach.writers is absent or the providers that cannot read a frame');
+    need(r?.appBound === true || isStringList(r?.appBound), 'reach.appBound is true, or the providers read through the app');
+    need(r?.signInOnly === undefined || isStringList(r?.signInOnly), 'reach.signInOnly is absent or a list of providers');
+    need(r?.appBound === true || (text(r?.signIn) && text(r?.either)), 'reach.signIn and reach.either say what to do when the provider needs no app, or yad cannot tell');
+  }
   return out;
 }
 
@@ -771,6 +802,9 @@ export function connectorFile(tool) {
 }
 
 // The skills (folders under skills/, not `yad <command>`s) that use a tool.
+// #358 — how a UI task checks a design tool can be reached, or null when yad has no check for it.
+export const reachFor = (id) => TOOLBOX.find((t) => t.id === id)?.reach ?? null;
+
 export const skillsUsing = (tool) => tool.usedBy.filter((u) => !u.startsWith('yad '));
 
 // The line a skill writes when the tool was not used. `recordsElse` is the one case where the skill chose

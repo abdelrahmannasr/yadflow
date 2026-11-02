@@ -15,13 +15,13 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
 ```json
 {
   "tool": "figma",                                   // figma | pencil | <adapter id> | none (markdown-only)
-  "provider": "figma-mcp",                           // the concrete MCP: figma-mcp | html-to-design | pencil-mcp | null
+  "provider": "figma-desktop",                       // the concrete MCP: figma-desktop | figma | html-to-design | pencil-mcp | null (figma-mcp: older, either Figma server)
   "project_url": "https://www.figma.com/files/project/123/feature", // team/project/file reference; null if none yet
   "auth": "user",                                    // ALWAYS the user's own MCP session — never a token
   "files": { "web": null, "mobile": null },          // optional default file refs per platform
   "connectedAt": "2026-06-13",                       // first connect (YYYY-MM-DD)
   "lastSyncedAt": "2026-06-13",                      // last connect/refresh
-  "source": "figma-mcp"                              // the MCP detected at connect | unavailable (degraded)
+  "source": "figma-desktop"                          // the MCP detected at connect | unavailable (degraded)
 }
 ```
 
@@ -36,7 +36,7 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
   session.
 - **`connect` overwrites in place** — a project carries exactly one design connection at a time;
   switching tools is just another `connect`. There is no array (unlike `repos.json`).
-- **`source`** is the authority for availability: an MCP id (`figma-mcp` / `pencil-mcp` / …) means
+- **`source`** is the authority for availability: an MCP id (`figma-desktop` / `figma` / `pencil-mcp` / …) means
   `yad-ui` can generate/link; `unavailable` means `yad-ui` degrades to markdown-only. `refresh`
   re-detects and may flip it.
 - **`tool: "none"`** is a valid, deliberate state: a project that has chosen markdown-only. `yad-ui`
