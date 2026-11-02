@@ -412,9 +412,9 @@ export async function runOpenPr(root, opts = {}) {
   const summary = [subjectText, bodyText].filter(Boolean).join('\n\n') || undefined;
   // The Preview line (#359), on a code task only: the repo's pattern filled now, or a note. A pattern
   // that needs the PR number is filled once the PR exists (below).
+  const pp = stage === 'code-repo' ? previewPattern(meta) : {};
   const preview = stage === 'code-repo' ? previewLine(meta, { branch }) : undefined;
-  const patProblems = stage === 'code-repo' ? previewPattern(meta).problems : null;
-  if (patProblems) warn(`this repo's preview_url pattern cannot be used: it ${patProblems.join('; ')} — set it again with \`yad repo preview <repo> <pattern>\``);
+  if (pp.problems) warn(`this repo's preview_url pattern cannot be used: it ${pp.problems.join('; ')} — set it again with \`yad repo preview <repo> <pattern>\``);
   const bodyOpts = { task: bodyTask, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage };
   const body = templateBody(repoRoot, platform, { ...bodyOpts, preview });
 
@@ -432,7 +432,7 @@ export async function runOpenPr(root, opts = {}) {
   ok(`opened ${r.url}`);
   // A {pr} pattern can only be filled now the PR has a number: the description is edited once. The PR
   // is open whatever happens here — a failed edit is said, never a failure.
-  const pat = stage === 'code-repo' ? previewPattern(meta).pattern : null;
+  const pat = pp.pattern || null;
   if (pat && needs(pat, 'pr')) {
     const n = Number(prNumberFromUrl(r.url)) || null;
     const url = n ? fillPattern(pat, { pr: n, branch, repo: meta?.name }) : null;

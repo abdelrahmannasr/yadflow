@@ -90,12 +90,12 @@ export function budget(now = Date.now, total = PLATFORM_BUDGET) {
 }
 const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{7,64}$/i.test(s);
 // A production environment is the live site, never a PR's preview — however the integration marked it.
-// `production`, `prod`, and names that start with them: Vercel's `Production – app`, `production-eu`.
-const isProduction = (name) => typeof name === 'string' && /^prod(uction)?\b/i.test(name.trim());
+// `production`, `prod`, and names that start with them: Vercel's `Production – app`, `production-eu`, `prod_us`.
+const isProduction = (name) => typeof name === 'string' && /^prod(uction)?(?![a-z0-9])/i.test(name.trim());
 
 // The newest successful, non-production deployment the platform records for the PR's head commit
 // (GitHub) or branch (GitLab). Never throws: { url } or { url: null, why }.
-export function platformPreview(platform, { cwd, sha, branch, runner = run, clock = budget() } = {}) {
+export function platformPreview(platform, { cwd, sha, branch, pr = null, runner = run, clock = budget() } = {}) {
   const opts = () => ({ cwd, timeout: clock.left() });
   const slow = (host) => ({ url: null, why: `${host} was too slow to answer about deployments` });
   if (platform === 'github') {
@@ -138,7 +138,11 @@ export function platformPreview(platform, { cwd, sha, branch, runner = run, cloc
     if (!Array.isArray(list)) return { url: null, why: 'GitLab gave an answer yad cannot read' };
     const env = (x) => (x && typeof x === 'object' && x.environment && typeof x.environment === 'object' ? x.environment : null);
     const seen = new Set();
-    const candidates = list.filter((x) => env(x) && x.ref === branch && (!sha || x.sha === sha)
+    // A merge-request pipeline deploys from `refs/merge-requests/<iid>/head` (a merged-results one, a
+    // merge commit whose id is not the MR head's): for that ref the commit is not compared. The skills
+    // still treat a page that does not show the change as local-only.
+    const mrRef = pr ? `refs/merge-requests/${pr}/head` : null;
+    const candidates = list.filter((x) => env(x) && ((x.ref === branch && (!sha || x.sha === sha)) || (mrRef && x.ref === mrRef))
       && Number.isInteger(env(x).id) && !isProduction(env(x).name) && !seen.has(env(x).id) && seen.add(env(x).id));
     let asked = 0, failed = 0;
     for (const d of candidates.slice(0, 3)) {
@@ -166,8 +170,10 @@ export function prHead(platform, pr, { cwd, runner = run, clock = budget(), base
     const sha = runner('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
     const b = runner('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }).stdout || null;
     // The default branch is not a PR's branch: its deployment is the main site, never a preview.
-    if (b && base && b === base) return { sha: null, branch: null, why: `this checkout is on the default branch (${base}), not the PR's — pass --pr <n>` };
-    if (!b || b === 'HEAD') return { sha: null, branch: null, why: 'this checkout is on no branch (detached) — pass --pr <n>' };
+    // Detached is no PR's either: yad's worktrees are detached at the default branch (#115).
+    if (b && base && b === base) return { sha: null, branch: null, why: `this checkout is on the default branch (${base}), not the PR's` };
+    if (b === 'HEAD') return { sha: null, branch: null, why: 'this checkout is on no branch (detached)' };
+    if (!b) return { sha: null, branch: null, why: 'this checkout\'s branch could not be read' };
     return { sha: isSha(sha) ? sha : null, branch: b };
   }
   const none = (why) => ({ sha: null, branch: null, why });
@@ -211,11 +217,12 @@ export function resolvePreview({ meta, platform, pr, base = null, cwd, runner = 
     tried.push(`no preview_url pattern is recorded for ${repo ? 'this repo' : 'a repo outside the registry'}`);
   }
   const h = getHead();
-  const p = h.sha || h.branch ? lookup(platform, { cwd, sha: h.sha, branch: h.branch, runner, clock }) : { url: null, why: h.why };
+  const p = h.sha || h.branch ? lookup(platform, { cwd, sha: h.sha, branch: h.branch, pr, runner, clock }) : { url: null, why: h.why };
   if (p?.url) return { url: p.url, source: 'platform' };
   if (p?.why && !tried.some((t) => t === p.why || t.endsWith(p.why))) tried.push(p.why);
   const fix = repo ? 'set one with `yad repo preview <repo> <pattern>`' : 'register the repo, then set one with `yad repo preview <repo> <pattern>`';
-  const next = pat.pattern && needs(pat.pattern, 'pr') && !pr ? 'pass --pr <n>'
+  // One next step, chosen here: a missing --pr is the fix whenever it is what stopped the answer.
+  const next = !pr && ((pat.pattern && needs(pat.pattern, 'pr')) || (head && !head.branch && !head.sha)) ? 'pass --pr <n>'
     : pat.pattern ? 'check the pattern with `yad repo preview <repo>`' : pat.problems ? 'set it again with `yad repo preview <repo> <pattern>`' : fix;
   return { url: null, source: 'local-only', why: `${tried.join('; ')} — ${next}` };
 }

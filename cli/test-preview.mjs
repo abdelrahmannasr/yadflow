@@ -110,7 +110,7 @@ test('platformPreview (GitHub): the newest successful non-production deployment 
   assert.deepEqual(platformPreview('github', { sha: SHA, runner }), { url: 'https://pr-7.x.vercel.app' });
   assert.ok(!runner.calls.some((c) => c.includes('deployments/3/')), 'a production deployment is the live site, never asked');
   const named = fakeRunner({
-    [`gh api repos/{owner}/{repo}/deployments?sha=${SHA}`]: deployments([{ id: 5, environment: 'Production' }, { id: 6, environment: 'prod' }, { id: 7, environment: 'Production – myapp' }, { id: 8, environment: 'production-eu' }]),
+    [`gh api repos/{owner}/{repo}/deployments?sha=${SHA}`]: deployments([{ id: 5, environment: 'Production' }, { id: 6, environment: 'prod' }, { id: 7, environment: 'Production – myapp' }, { id: 8, environment: 'production-eu' }, { id: 10, environment: 'prod_us' }]),
     'gh api repos/{owner}/{repo}/deployments/': deployments([{ state: 'success', environment_url: 'https://live.x.dev' }]),
   });
   assert.match(platformPreview('github', { sha: SHA, runner: named }).why, /no preview deployment/, 'an environment named production is production, flag or not');
@@ -196,7 +196,7 @@ test('prHead: with a PR number only the platform answers; without one, this chec
   assert.match(detached.why, /detached/);
   const onMain = prHead('github', null, { runner: local, base: 'main' });
   assert.equal(onMain.branch, null, 'the default branch is no PR\'s branch');
-  assert.match(onMain.why, /default branch \(main\).*pass --pr/);
+  assert.match(onMain.why, /default branch \(main\), not the PR's$/, 'a fact; resolvePreview chooses the step');
 });
 
 test('resolvePreview: the pattern wins, the platform is the fallback, else local-only with why and the fix', () => {
@@ -219,6 +219,26 @@ test('resolvePreview: the pattern wins, the platform is the fallback, else local
   assert.match(badPat.why, /cannot be used: it must start with https.*set it again/);
   const outside = resolvePreview({ meta: null, platform: 'github', pr: 1, head, lookup: none });
   assert.match(outside.why, /register the repo/);
+});
+
+test('resolvePreview: on the default branch without --pr, one next step — pass --pr', () => {
+  const onMain = fakeRunner({ 'git rev-parse HEAD': 'b'.repeat(40), 'git rev-parse --abbrev-ref HEAD': 'main' });
+  const lookup = () => { throw new Error('no head, nothing to ask'); };
+  for (const meta of [{ name: 'web', preview_url: 'https://pr-{pr}.x.dev' }, { name: 'web', preview_url: 'https://{branch}.x.dev' }, { name: 'web' }, { name: 'web', preview_url: 'http://x.dev' }]) {
+    const r = resolvePreview({ meta, platform: 'github', pr: null, base: 'main', runner: onMain, lookup });
+    assert.equal(r.source, 'local-only', JSON.stringify(meta));
+    assert.equal(r.why.split(' — ').length, 2, `one next step: ${r.why}`);
+    assert.match(r.why, / — pass --pr <n>$/, r.why);
+  }
+});
+
+test('platformPreview (GitLab): a merge-request pipeline\'s deployment counts, whatever its commit', () => {
+  const runner = fakeRunner({
+    'glab api projects/:id/deployments?': deployments([{ ref: 'refs/merge-requests/7/head', sha: 'd'.repeat(40), environment: { id: 4, name: 'review/mr-7' } }]),
+    'glab api projects/:id/environments/4': JSON.stringify({ state: 'available', external_url: 'https://mr-7.review.x.dev' }),
+  });
+  assert.deepEqual(platformPreview('gitlab', { sha: SHA, branch: 'feat/x', pr: 7, runner }), { url: 'https://mr-7.review.x.dev' });
+  assert.match(platformPreview('gitlab', { sha: SHA, branch: 'feat/x', pr: 8, runner }).why, /no successful/, 'another MR\'s ref is not this one');
 });
 
 test('resolvePreview: a {branch} pattern never fills from the wrong branch', () => {
@@ -363,6 +383,20 @@ test('runOpenPr: an unusable pattern warns and the body says a pattern is record
     assert.equal(edited, false, 'nothing to change: no edit is sent');
     assert.match(out, /no ## Testing section.*https:\/\/pr-8\.x\.dev/);
     assert.doesNotMatch(out, /✓ preview/);
+  } finally { process.exitCode = prev; done(P, bare); }
+});
+
+test('runOpenPr: a PR URL with no readable number leaves the line unfilled and says so', async () => {
+  const { P, bare } = productWithRepo({ preview_url: 'https://pr-{pr}.x.dev' });
+  const prev = process.exitCode;
+  try {
+    let seen; let edited = false;
+    const out = []; const orig = console.log; console.log = (...a) => out.push(a.join(' '));
+    try { await runOpenPr(P, { repo: 'web', platform: 'github', creator: (_p, o) => { seen = o; return { ok: true, url: 'https://example.com/x' }; }, editBody: () => { edited = true; return { ok: true }; }, runner: fakeRunner({}) }); }
+    finally { console.log = orig; }
+    assert.equal(edited, false);
+    assert.match(out.join('\n'), /left unfilled \(`yad review context --pr <n>` gives the address\)/);
+    assert.ok(seen.body.includes(PREVIEW_UNFILLED));
   } finally { process.exitCode = prev; done(P, bare); }
 });
 
