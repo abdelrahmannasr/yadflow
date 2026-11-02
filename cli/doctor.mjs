@@ -118,31 +118,35 @@ export function signingChecks(checks, root) {
 export function machineChecks(checks, root, { nodeVersion = process.versions.node, env = process.env, home = os.homedir(), platform = process.platform, runner } = {}) {
   const tilde = (p) => (p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
   const folders = [];
-  if (exists(productConfigPath(root))) folders.push({ name: 'the Product', dir: root });
+  if (exists(productConfigPath(root))) folders.push({ name: 'the Product', dir: root, id: 'product' });
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
     if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
     const dir = path.resolve(root, repo.path);
     if (path.resolve(dir) === path.resolve(root) || !isCheckout(root, repo)) continue;
-    folders.push({ name: forTerminal(repo.name), dir });
+    folders.push({ name: forTerminal(repo.name), dir, id: `repo:${forTerminal(repo.name)}` });
   }
 
-  // Node: one warning per pin the running Node does not meet; one ok line when every readable pin is met.
-  let pinned = 0;
+  // Node: one warning per folder with the pins the running Node does not meet; one ok line when every pin
+  // read is met. A pin yad cannot read as a version is counted as skipped, never judged.
+  let read = 0;
+  let skipped = 0;
   let wrong = 0;
-  for (const { name, dir } of folders) {
+  for (const { name, dir, id } of folders) {
+    const unmet = [];
     for (const { source, want } of nodePins(dir)) {
       const meets = satisfies(nodeVersion, want);
-      if (meets === null) continue;
-      pinned += 1;
-      if (meets) continue;
-      wrong += 1;
-      check(checks, `node-version:${name}`, 'environment', 'warn',
-        `node ${nodeVersion} does not meet ${forTerminal(want)}, which ${name} pins (${source})`,
-        `${nodeFix(want, { env, home })} — the Node that runs yad is the active one (your version manager's default in a new shell)`);
+      if (meets === null) { skipped += 1; continue; }
+      read += 1;
+      if (!meets) unmet.push({ source, want });
     }
+    if (!unmet.length) continue;
+    wrong += 1;
+    check(checks, `node-version:${id}`, 'environment', 'warn',
+      `node ${nodeVersion} does not meet what ${name} pins: ${unmet.map((u) => `${forTerminal(u.want)} (${u.source})`).join(', ')}`,
+      `${nodeFix(unmet[0].want, { env, home })} — the Node that runs yad is the active one (your version manager's default in a new shell)`);
   }
-  if (pinned && !wrong) check(checks, 'node-version', 'environment', 'ok', `node ${nodeVersion} meets every Node version the repos pin (${pinned})`);
+  if (read && !wrong) check(checks, 'node-version', 'environment', 'ok', `node ${nodeVersion} meets every Node version the repos pin (${read} read${skipped ? `, ${skipped} not a version yad reads` : ''})`);
 
   // Docker: asked only where a repo names it.
   const needs = folders.map((f) => ({ ...f, why: dockerReasons(f.dir) })).filter((f) => f.why.length);
@@ -157,8 +161,8 @@ export function machineChecks(checks, root, { nodeVersion = process.versions.nod
   // glab: more than one config file.
   const confs = glabConfigs({ env, home, platform });
   if (confs.length > 1) {
-    check(checks, 'glab-config', 'environment', 'warn', `glab has ${confs.length} config files: ${confs.map(tilde).join(', ')}`,
-      'glab uses only one and prints a warning on every run, which breaks the JSON its API calls return — keep the file glab\'s warning names, copy into it any host it lacks from the other, then delete the other');
+    check(checks, 'glab-config', 'environment', 'warn', `glab has ${confs.length} config files: ${confs.map((f) => forTerminal(tilde(f))).join(', ')}`,
+      'glab reads only one of them and ignores the other (a login saved there is not used), and warns about it on every run, which also breaks JSON for any tool that reads glab\'s output and errors together — keep the file glab\'s warning says it uses, copy into it any host it lacks from the other, then delete the other');
   }
 }
 

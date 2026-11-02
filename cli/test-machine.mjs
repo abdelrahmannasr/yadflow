@@ -24,12 +24,13 @@ const put = (file, data) => { fs.mkdirSync(path.dirname(file), { recursive: true
 const done = (T) => fs.rmSync(T, { recursive: true, force: true });
 
 test('#352: satisfies reads the version forms repos pin, and says "not known" for the rest', () => {
-  const yes = [['24.22.1', '24'], ['24.22.1', 'v24.22.1'], ['24.22.1', '>=22'], ['24.22.1', '^24.1.0'], ['24.22.1', '~24.22.0'],
+  const yes = [['24.22.1', '>= 22'], ['24.22.1', '>=22.0.0 <25'], ['25.0.0', '>24'], ['0.0.3', '^0.0.3'], ['24.22.1', '24'], ['24.22.1', 'v24.22.1'], ['24.22.1', '>=22'], ['24.22.1', '^24.1.0'], ['24.22.1', '~24.22.0'],
     ['24.22.1', '22 || 24'], ['24.22.1', '>=20 <25'], ['24.22.1', '20 - 24.30'], ['24.22.1', '24.x'], ['24.22.1', '*'], ['22.8.0', '>=22.8'], ['24.22.1', '<=24']];
-  const no = [['20.19.5', '24'], ['20.19.5', '>=22'], ['25.0.0', '^24.1.0'], ['24.23.0', '~24.22.0'], ['24.22.1', '<24'], ['24.22.1', '18 || 20'], ['21.0.0', '>=20 <21']];
+  const no = [['22.8.0', '>22'], ['24.5.0', '>24.x'], ['24.1.9', '>24.1'], ['0.0.4', '^0.0.3'], ['20.19.5', '>= 22'], ['20.19.5', '24'], ['20.19.5', '>=22'], ['25.0.0', '^24.1.0'], ['24.23.0', '~24.22.0'], ['24.22.1', '<24'], ['24.22.1', '18 || 20'], ['21.0.0', '>=20 <21']];
   for (const [v, s] of yes) assert.equal(satisfies(v, s), true, `${v} ${s}`);
   for (const [v, s] of no) assert.equal(satisfies(v, s), false, `${v} ${s}`);
-  for (const s of ['lts/*', 'node', 'lts/iron', 'https://x']) assert.equal(satisfies('24.22.1', s), null, s);
+  for (const s of ['lts/*', 'node', 'lts/iron', 'https://x', '24.0.0-rc.1']) assert.equal(satisfies('24.22.1', s), null, s);
+  assert.equal(satisfies('25.0.0-nightly', '>=22'), null, 'a pre-release Node is not judged');
 });
 
 test('#352: nodePins reads .nvmrc, .node-version, .tool-versions, engines.node and volta.node', () => {
@@ -58,11 +59,14 @@ test('#352: Docker is asked about only where a repo names it', () => {
   const T = tmp();
   try {
     assert.deepEqual(dockerReasons(T), []);
-    put(path.join(T, 'package.json'), { scripts: { test: 'node --test', 'scan': 'docker run --rm zricethezav/gitleaks', notdocker: 'echo dockerfile' } });
-    assert.deepEqual(dockerReasons(T), ['package.json scripts: scan']);
+    put(path.join(T, 'package.json'), { scripts: {
+      test: 'node --test', scan: 'docker run --rm zricethezav/gitleaks', up: 'npm ci && docker compose up', full: '/usr/local/bin/docker build .',
+      notdocker: 'echo dockerfile', lint: 'eslint . --ignore-pattern docker', say: 'echo run docker', '\u001b]8;;x\u0007odd': 'docker ps' } });
+    assert.deepEqual(dockerReasons(T), ['package.json scripts: scan, up, full,  ]8;;x odd'], 'a script name is cleaned for the terminal');
     put(path.join(T, 'compose.yaml'), 'services: {}\n');
-    put(path.join(T, '.pre-commit-config.yaml'), 'repos:\n  - repo: local\n    hooks:\n      - id: x\n        language: docker_image\n');
-    assert.deepEqual(dockerReasons(T), ['compose.yaml', 'package.json scripts: scan', '.pre-commit-config.yaml (a docker hook)']);
+    put(path.join(T, 'Dockerfile.dev'), 'FROM node\n');
+    put(path.join(T, '.pre-commit-config.yaml'), 'repos:\n  - repo: local\n    hooks:\n      - id: x\n        language: "docker_image"  # the scanner\n');
+    assert.deepEqual(dockerReasons(T).sort(), ['.pre-commit-config.yaml (a docker hook)', 'Dockerfile.dev', 'compose.yaml', 'package.json scripts: scan, up, full,  ]8;;x odd'].sort());
     const runner = (answers) => (cmd, args) => ({ ok: answers[`${cmd} ${args[0]}`] ?? false });
     assert.equal(dockerState({ runner: runner({}) }), 'missing');
     assert.equal(dockerState({ runner: runner({ 'which docker': true }) }), 'stopped');
@@ -78,6 +82,11 @@ test('#352: more than one glab config file is found where glab looks', () => {
     put(path.join(T, 'Library/Application Support/glab-cli/config.yml'), 'hosts: {}\n');
     assert.equal(glabConfigs({ env: {}, home: T, platform: 'darwin' }).length, 2);
     assert.equal(glabConfigs({ env: {}, home: T, platform: 'linux' }).length, 1, 'not the macOS folder on Linux');
+    // GLAB_CONFIG_DIR or XDG_CONFIG_HOME names the one place glab reads: no duplicate is possible.
+    put(path.join(T, 'own/config.yml'), 'hosts: {}\n');
+    assert.deepEqual(glabConfigs({ env: { GLAB_CONFIG_DIR: path.join(T, 'own') }, home: T, platform: 'darwin' }), [path.join(T, 'own/config.yml')]);
+    put(path.join(T, 'xdg/glab-cli/config.yml'), 'hosts: {}\n');
+    assert.deepEqual(glabConfigs({ env: { XDG_CONFIG_HOME: path.join(T, 'xdg') }, home: T, platform: 'darwin' }), [path.join(T, 'xdg/glab-cli/config.yml')]);
   } finally { done(T); }
 });
 
@@ -87,6 +96,7 @@ test('#352: yad doctor rows — a Node a repo does not accept, Docker stopped wh
     const root = path.join(T, 'product');
     put(path.join(root, '.sdlc/product.json'), { platform: null });
     put(path.join(root, '.nvmrc'), '24\n');
+    put(path.join(root, 'package.json'), { engines: { node: '>=24.1' } });
     const app = path.join(T, 'app');
     put(path.join(app, 'package.json'), { engines: { node: '>=22' }, scripts: { scan: 'docker compose run gitleaks' } });
     execFileSync('git', ['init', '-q'], { cwd: app });
@@ -97,18 +107,23 @@ test('#352: yad doctor rows — a Node a repo does not accept, Docker stopped wh
     const runner = (cmd, args) => ({ ok: `${cmd} ${args[0]}` === 'which docker' });
     const rows = (nodeVersion) => { const checks = []; machineChecks(checks, root, { nodeVersion, env: { NVM_DIR: '/x' }, home, platform: 'darwin', runner }); return Object.fromEntries(checks.map((c) => [c.id, c])); };
     const old = rows('20.19.5');
-    assert.equal(old['node-version:the Product'].status, 'warn');
-    assert.match(old['node-version:the Product'].message, /node 20\.19\.5 does not meet 24, which the Product pins \(\.nvmrc\)/);
-    assert.match(old['node-version:the Product'].hint, /nvm install 24 && nvm use 24/);
-    assert.equal(old['node-version:app'].status, 'warn');
+    assert.equal(old['node-version:product'].status, 'warn');
+    assert.match(old['node-version:product'].message, /node 20\.19\.5 does not meet what the Product pins: 24 \(\.nvmrc\), >=24\.1 \(package\.json engines\.node\)/, 'both pins, one row');
+    assert.match(old['node-version:product'].hint, /nvm install 24 && nvm use 24/);
+    assert.equal(old['node-version:repo:app'].status, 'warn');
     assert.equal(old.docker.status, 'warn');
     assert.match(old.docker.message, /Docker is not running, and app \(package\.json scripts: scan\) asks for it/);
     assert.equal(old['glab-config'].status, 'warn');
     assert.match(old['glab-config'].message, /glab has 2 config files: ~\/\.config\/glab-cli\/config\.yml, ~\/Library\/Application Support\/glab-cli\/config\.yml/);
     const now = rows('24.22.1');
     assert.equal(now['node-version'].status, 'ok');
-    assert.match(now['node-version'].message, /meets every Node version the repos pin \(2\)/);
-    assert.equal(now['node-version:the Product'], undefined);
+    assert.match(now['node-version'].message, /meets every Node version the repos pin \(3 read\)/);
+    assert.equal(now['node-version:product'], undefined);
+    // The glab hint says what goes wrong: one file is ignored.
+    assert.match(old['glab-config'].hint, /reads only one of them and ignores the other/);
+    // A pin yad does not read is counted as skipped, never judged.
+    put(path.join(app, '.nvmrc'), 'lts/*\n');
+    assert.match(rows('24.22.1')['node-version'].message, /\(3 read, 1 not a version yad reads\)/);
   } finally { done(T); }
 });
 
