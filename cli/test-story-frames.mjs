@@ -264,7 +264,10 @@ test('#358: designPreflight — Pencil is read through the app; Figma only throu
   const odd = designPreflight({ state: 'ok', data: { tool: 'figma', source: 'figma-dev-mode-mcp-server' } }, links, frames);
   assert.deepEqual([odd.reachable, odd.appBound], ['check', null], 'an MCP id yad does not know is still probed, with both messages');
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'Figma-Desktop' } }, links, frames).appBound, true, 'names are compared in lower case');
-  assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'HTML-to-Design' } }, links, frames).reachable, 'not-checkable');
+  for (const provider of ['HTML-to-Design', 'html.to.design', ' html_to_design ']) {
+    assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider } }, links, frames).reachable, 'not-checkable', provider);
+  }
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma' } }, { ...links, tool: 'Figma' }, frames).reachable, 'check', 'the same tool in other letters is not a switch');
 });
 
 test('#358: designPreflight — nothing to probe is not-checkable, and no frame means no preflight', () => {

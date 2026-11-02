@@ -134,7 +134,8 @@ through the running app, so a closed app or the wrong file open is found here an
   without the design tool only when the person says so, and record that in `spec.md`'s
   `## Clarifications` as `- Q: design tool not reachable → A: continue without it, from the frame links`
   (when `spec.md` is not written yet, add the line as soon as it is).
-- **`not-checkable`** (no design tool, or one yad has no check for): go on from the frame links, and say
+- **`not-checkable`** (nothing to probe — `preflight.why` says why: for example no design tool, one yad has
+  no check for, or design-links.json missing or recorded for another tool): go on from the frame links, and say
   `preflight.why` once. **`preflight: null`** (no frames): nothing to check.
 
 ### Step 2 — Resolve the target code repo

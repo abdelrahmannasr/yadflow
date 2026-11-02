@@ -166,8 +166,11 @@ export function designPreflight(design, links, frames) {
   const reach = reachFor(tool);
   if (!reach) return notCheckable(`yad has no reachability check for ${forTerminal(tool)}`);
   const provider = str(d.provider) ?? str(d.source);
-  const key = provider?.toLowerCase() ?? null;   // the MCP id is free text: `Figma-Desktop` is figma-desktop
-  const listed = (list) => key !== null && Array.isArray(list) && list.some((p) => p.toLowerCase() === key);
+  // The MCP id is free text: `Figma-Desktop`, `html.to.design` and ` html_to_design ` are the names yad
+  // knows, so names are compared on their letters and digits alone.
+  const fold = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const key = provider === null ? null : fold(provider);
+  const listed = (list) => key !== null && Array.isArray(list) && list.some((p) => fold(p) === key);
   // A provider that only writes (html-to-design) has no call that reads a frame: probing it would fail
   // on every story and make the person override each time.
   if (listed(reach.writers)) return notCheckable(`the connected provider ${forTerminal(provider)} cannot read a frame`);
@@ -175,7 +178,7 @@ export function designPreflight(design, links, frames) {
   // the IDs belong to nothing this tool can open, and a probe would blame the app.
   if (links.state === 'missing') return notCheckable('there is no design-links.json for the frame IDs — re-run the UI step');
   if (links.state === 'unreadable') return notCheckable(`design-links.json cannot be read (${links.why})`);
-  if (links.tool && links.tool !== tool) {
+  if (links.tool && fold(links.tool) !== fold(tool)) {
     return notCheckable(`design-links.json was recorded for ${forTerminal(links.tool)}, but design.json now connects ${forTerminal(tool)} — re-run the UI step`);
   }
   // Every recorded ID is unresolved: the bad IDs are the problem (the warnings name them), not the app.
