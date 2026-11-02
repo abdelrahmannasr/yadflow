@@ -184,6 +184,7 @@ export const COMMAND_CLASS = {
   'risk-map check': { class: 'read' },
   'risk-map draft': { class: 'local-write' },
   'codeowners check': { class: 'read' },
+  'story frames': { class: 'read' },
   roster: { class: 'removed' },
   'docs list': { class: 'read' },
   'docs build': { class: 'local-write' },
@@ -372,6 +373,11 @@ export const SHIPPED_ALLOW_LISTS = Object.freeze([
   ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
     'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
     'worktree list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'docs list',
+    'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
+  // next release (#354): `story frames`
+  ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
+    'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
+    'worktree list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
     'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
 ].map((list) => Object.freeze(list)));
 

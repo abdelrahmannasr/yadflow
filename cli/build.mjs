@@ -31,7 +31,7 @@ import { sealedEpic } from './thread.mjs';
 import { worktreeAt, sameDir } from './worktree-record.mjs';
 
 const CODE = 'YAD-STATE-009';
-const STORY_RE = /^EP-[a-z0-9-]+-S\d+$/;
+export const STORY_RE = /^EP-[a-z0-9-]+-S\d+$/;
 const TASK_RE = /^T\d+$/;
 export const VERDICTS = ['approved-unchanged', 'approved-with-edits', 'rejected'];
 // The signals each step's trust entry may carry (state-schema.md, "Per-step signals fields").
