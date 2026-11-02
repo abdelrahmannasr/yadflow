@@ -273,7 +273,9 @@ rules() {
   local got
   # The records the wrapper wrote; a run from before them has only the text log, which the judge parses
   # as text. Either way nothing in a log is run as a command.
-  if [ -f "$1.rec" ]; then got="$(node "$JUDGE" < "$1.rec")"; else got="$(node "$JUDGE" --from-text < "$1")"; fi
+  # A judge that crashed judged nothing: that is a failure, never a pass.
+  if [ -f "$1.rec" ]; then got="$(node "$JUDGE" < "$1.rec")" || { echo "   FAIL [${label:-rules}]: the judge crashed on $1.rec, so nothing in it was judged"; return 1; }
+  else got="$(node "$JUDGE" --from-text < "$1")" || { echo "   FAIL [${label:-rules}]: the judge crashed on $1, so nothing in it was judged"; return 1; }; fi
   [ -n "$got" ] || return 0
   printf '%s\n' "$got" | while IFS="$(printf '\t')" read -r _rule why; do echo "   FAIL [${label:-rules}]: $why"; done
   return 1
@@ -412,6 +414,11 @@ platform CLI	gh api -XPUT repos/o/r/pulls/1/merge
 platform CLI	glab api -XPOST projects/1/merge_requests/2/approve
 platform CLI	gh api repos/o/r/issues -ftitle=x
 -	gh pr -R a/b view 1
+-	gh constructor x
+-	gh __proto__ toString
+-	git commit -m $'\303\251t\303\251'
+could not be read	git $'\xZZ'
+git hooks	git --attr-source HEAD commit --no-verify -m x
 could not be read	git $'touch
 -	git push -u origin agent/notes
 -	git push origin --delete agent/old
@@ -434,6 +441,12 @@ EOF
     else printf '%s' "$got" | grep -qF -- "$want" || { echo "   should break \"$want\", but got: ${got:-a pass}  <- $line"; wrong=1; }; fi
   done < "$table"
   [ "$wrong" = 0 ] || { echo "SELFTEST FAIL: a rule did not judge its own line right" >&2; exit 1; }
+  # A judge that crashes judged nothing: that must be a failure, never a pass.
+  printf 'git push --force origin main\n' > "$WORK/one.log"; rm -f "$WORK/one.log.rec"
+  if (JUDGE="$WORK/no-such-judge.mjs"; label=rule rules "$WORK/one.log" > "$WORK/crash.out" 2>&1); then
+    echo "SELFTEST FAIL: a judge that crashed counted as a pass" >&2; exit 1
+  fi
+  grep -q 'the judge crashed' "$WORK/crash.out" || { echo "SELFTEST FAIL: a crashed judge was not reported" >&2; exit 1; }
   echo "selftest: the checks pass a well-behaved agent, catch a misbehaving one and one that never ran, and each rule judges its own lines"
   rm -rf "$WORK"
   exit 0

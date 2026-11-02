@@ -8,6 +8,7 @@
 // a commit message as a message (never as flags), and gh/glab subcommands and API methods.
 import fs from 'node:fs';
 import process from 'node:process';
+import { Buffer } from 'node:buffer';
 
 // One `printf %q` word list back into words: backslash escapes, '' and $'…' (C escapes). null when the
 // line does not read as one.
@@ -21,16 +22,20 @@ function unquote(line) {
     if (ch === '\\') { w += line[++i] ?? ''; continue; }
     if (ch === "'" ) { const end = line.indexOf("'", i + 1); if (end < 0) return null; w += line.slice(i + 1, end); i = end; continue; }
     if (ch === '$' && line[i + 1] === "'") {
+      // Escaped bytes (\303\251, \xc3) are collected and decoded as UTF-8, as bash wrote them from one.
+      const bytes = [];
+      const flush = () => { if (bytes.length) { w += Buffer.from(bytes).toString('utf8'); bytes.length = 0; } };
       let j = i + 2;
       for (; j < line.length && line[j] !== "'"; j++) {
-        if (line[j] !== '\\') { w += line[j]; continue; }
+        if (line[j] !== '\\') { flush(); w += line[j]; continue; }
         const e = line[++j];
         const simple = { n: '\n', t: '\t', r: '\r', a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', v: '\v', '\\': '\\', "'": "'", '"': '"' };
-        if (e in simple) w += simple[e];
-        else if (e === 'x') { const h = /^[0-9a-fA-F]{1,2}/.exec(line.slice(j + 1))[0]; w += String.fromCharCode(parseInt(h, 16)); j += h.length; }
-        else if (/[0-7]/.test(e)) { const o = /^[0-7]{1,3}/.exec(line.slice(j))[0]; w += String.fromCharCode(parseInt(o, 8)); j += o.length - 1; }
-        else w += `\\${e}`;
+        if (e === 'x') { const h = /^[0-9a-fA-F]{1,2}/.exec(line.slice(j + 1)); if (!h) return null; bytes.push(parseInt(h[0], 16)); j += h[0].length; }
+        else if (e !== undefined && /[0-7]/.test(e)) { const o = /^[0-7]{1,3}/.exec(line.slice(j))[0]; bytes.push(parseInt(o, 8) & 0xff); j += o.length - 1; }
+        else if (e in simple) { flush(); w += simple[e]; }
+        else { flush(); w += `\\${e ?? ''}`; }
       }
+      flush();
       if (j >= line.length) return null;
       i = j;
       continue;
@@ -63,7 +68,7 @@ function gitParts(words) {
     // --config-env <key>=<var>: a setting for this call, as -c is.
     if (w === '--config-env') { configs.push(words[i + 1] ?? ''); i += 2; continue; }
     if (w.startsWith('--config-env=')) { configs.push(w.slice('--config-env='.length)); i += 1; continue; }
-    if (['-C', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix'].includes(w)) { i += 2; continue; }
+    if (['-C', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--attr-source'].includes(w)) { i += 2; continue; }
     i += 1;
   }
   return { configs, sub: words[i], args: words.slice(i + 1) };
@@ -113,7 +118,7 @@ function judgeGit(call, env) {
 
 // gh / glab: acting on a PR/MR, an issue, the repo, a release, CI, secrets or labels is the person's (the
 // agent opens PRs/MRs through yad, or with `pr create`, which the rules allow); reads are fine.
-const ACTS = {
+const ACTS = Object.assign(Object.create(null), {
   pr: ['merge', 'review', 'close', 'reopen', 'comment', 'edit', 'ready', 'lock', 'unlock'],
   mr: ['merge', 'approve', 'revoke', 'close', 'reopen', 'note', 'update', 'delete'],
   issue: ['create', 'close', 'reopen', 'comment', 'edit', 'delete', 'transfer', 'lock', 'unlock', 'note', 'update'],
@@ -125,7 +130,7 @@ const ACTS = {
   secret: ['set', 'delete', 'remove'],
   variable: ['set', 'delete', 'update'],
   label: ['create', 'edit', 'delete'],
-};
+});
 function judgePlatform(call) {
   // -R / --repo <owner/repo> may come before the subcommand: drop the flag and its value.
   const words = [];
@@ -135,7 +140,7 @@ function judgePlatform(call) {
     words.push(call[i]);
   }
   const [group, verb] = words;
-  if (ACTS[group]?.includes(verb)) { broke('platform CLI', 'used the platform CLI to act', call); return; }
+  if (Object.hasOwn(ACTS, group) && ACTS[group].includes(verb)) { broke('platform CLI', 'used the platform CLI to act', call); return; }
   if (group !== 'api') return;
   const args = words.slice(1);
   let method = null;
