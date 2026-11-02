@@ -1311,6 +1311,7 @@ async function main() {
       break;
     }
     case 'story': {
+      if (o._.length > 3) { refuse(`unexpected argument(s): ${o._.slice(3).join(' ')}`, 'use: yad story frames <story-id> — one story at a time'); break; }
       const [, action, story] = o._;
       result = await commands.runStory(o.dir, { action, story, json: o.json });
       break;

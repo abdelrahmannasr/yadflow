@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { c, emitJSON, forTerminal, info, log, ok, readJSONStrict, refuse, stripAnsi, warn } from './lib.mjs';
-import { epicRoot, readFrontmatter } from './epic-state.mjs';
+import { epicRoot, parseFrontmatter } from './epic-state.mjs';
 import { STORY_RE, storyEpic } from './build.mjs';
 
 export const FRAMES_KEY = 'design-frames';
@@ -59,11 +59,24 @@ export function readDesignLinks(epicDir) {
   };
 }
 
+// The key spelled another way — `Design-Frames`, `design_frames`, `designFrames`. It is never read as
+// the key, but it is said: a story that misspells it must not read as "nobody recorded frames".
+const keyVariant = (fm) => Object.keys(fm).find((k) => k !== FRAMES_KEY && k.toLowerCase().replace(/[_-]/g, '') === 'designframes');
+export const recordsFrames = (fm = {}) => Object.hasOwn(fm, FRAMES_KEY) || keyVariant(fm) !== undefined;
+
+// `"12:34"` and `'12:34'` — a YAML habit. The reader keeps the quote marks, so they are taken off here
+// (and said), rather than reported as an ID that is not in design-links.json.
+const unquote = (id) => (id.length >= 2 && /^(["']).*\1$/.test(id) ? id.slice(1, -1) : id);
+
 // The pure rule. `fm` is the story's parsed frontmatter, `links` what `readDesignLinks` returned.
 // Returns { recorded, ids, frames, findings }: `recorded` is false only when the key is absent;
 // `findings` are { kind, message } — every one a warning.
 export function frameFindings(fm = {}, links = { state: 'missing' }) {
-  if (!Object.hasOwn(fm, FRAMES_KEY)) return { recorded: false, ids: [], frames: [], findings: [] };
+  if (!Object.hasOwn(fm, FRAMES_KEY)) {
+    const k = keyVariant(fm);
+    const findings = k === undefined ? [] : [{ kind: 'key-spelling', message: `\`${forTerminal(k)}:\` is not read — the key is spelled \`${FRAMES_KEY}\`, exactly` }];
+    return { recorded: false, ids: [], frames: [], findings };
+  }
   const v = fm[FRAMES_KEY];
   const findings = [];
   if (!Array.isArray(v)) {
@@ -72,10 +85,12 @@ export function frameFindings(fm = {}, links = { state: 'missing' }) {
       ? { kind: 'commented', message: `\`${FRAMES_KEY}: ${forTerminal(text)}\` has a \`#\` after it, so it is read as text, not a list — write the list bare, with no comment on the line` }
       : text === ''
         ? { kind: 'not-a-list', message: `\`${FRAMES_KEY}:\` is blank — write the IDs on the same line, as \`${FRAMES_KEY}: [id, id]\` (a \`- id\` list on the lines below is not read), or \`${FRAMES_KEY}: []\` for a story with no screens` }
-        : { kind: 'not-a-list', message: `\`${FRAMES_KEY}: ${forTerminal(text)}\` is not a list — write \`${FRAMES_KEY}: [${forTerminal(text)}]\`` });
+        : { kind: 'not-a-list', message: `\`${FRAMES_KEY}: ${forTerminal(text)}\` is not a list — write the IDs inside one pair of brackets, as \`${FRAMES_KEY}: [id, id]\`` });
     return { recorded: true, ids: [], frames: [], findings };
   }
-  const ids = v;
+  const quoted = v.filter((id) => unquote(id) !== id);
+  if (quoted.length) findings.push({ kind: 'quoted', message: `frame IDs are written without quotes: ${quoted.map(quote).join(', ')} — they are read without them` });
+  const ids = v.map(unquote);
   const seen = new Set();
   for (const id of ids) {
     if (BAD_ID.test(id)) findings.push({ kind: 'bad-id', message: `frame ID ${quote(id)} holds a space, \`#\` or bracket, so it cannot be read back — give the frame a plain ID in the design tool` });
@@ -105,6 +120,17 @@ export function frameFindings(fm = {}, links = { state: 'missing' }) {
   return { recorded: true, ids, frames, findings };
 }
 
+// A story file's frontmatter, read the same way by both readers. A byte-order mark, Windows line endings
+// (git's `core.autocrlf` writes them on checkout) and spaces at the end of a line are taken out first:
+// the shared reader matches `---\n` and `[ … ]` to the end of the line, so without this a story checked
+// out on Windows would read as "nobody recorded frames", and `[12:34] ` as not a list.
+export function readStoryFrontmatter(file) {
+  const text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '');
+  return parseFrontmatter(text);
+}
+
+const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+
 // One story's frames. Throws { message, hint } only for the command line: a word that is not a story
 // id, or a story with no file. Everything about the frames themselves comes back in `findings`.
 export function readStoryFrames(root, story) {
@@ -117,11 +143,11 @@ export function readStoryFrames(root, story) {
   const epic = storyEpic(story);
   const epicDir = epicRoot(root, epic);
   const file = path.join(epicDir, 'stories', `${story}.md`);
-  if (!fs.existsSync(file)) {
+  if (!isFile(file)) {
     throw Object.assign(new Error(`no story file epics/${epic}/stories/${story}.md`), { hint: 'check the story id; the stories step writes one file per story' });
   }
   const links = readDesignLinks(epicDir);
-  const r = frameFindings(readFrontmatter(file), links);
+  const r = frameFindings(readStoryFrontmatter(file), links);
   return {
     story, epic,
     tool: links.state === 'ok' ? links.tool : null,
@@ -130,9 +156,10 @@ export function readStoryFrames(root, story) {
   };
 }
 
-// Every story of every epic under `epics/`, for `yad doctor`: [{ epic, story, recorded, findings }].
-// The epic folders are the caller's to pick (`isValidEpicId`), so this module does not decide which
-// folder is an epic.
+// Every story that records frames (or misspells the key), for `yad doctor`:
+// [{ epic, story, recorded, frames: <how many IDs>, findings }]. The epic folders are the caller's to
+// pick. A story file the command cannot reach — named for another epic, or not `EP-<slug>-S<n>.md` — is
+// reported as that, never with advice to run a command that would refuse it.
 export function allStoryFrames(root, epicIds) {
   const out = [];
   for (const epic of epicIds) {
@@ -140,18 +167,22 @@ export function allStoryFrames(root, epicIds) {
     const dir = path.join(epicDir, 'stories');
     let names;
     try {
-      if (!fs.statSync(dir).isDirectory()) continue;
-      names = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort();
+      names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.md')).map((e) => e.name).sort();
     } catch {
       continue;
     }
     let links = null;   // read once per epic, and only when a story there records frames
     for (const f of names) {
-      const fm = readFrontmatter(path.join(dir, f));
-      if (!Object.hasOwn(fm, FRAMES_KEY)) continue;
+      const fm = readStoryFrontmatter(path.join(dir, f));
+      if (!recordsFrames(fm)) continue;
+      const story = f.replace(/\.md$/, '');
+      if (!STORY_RE.test(story) || storyEpic(story) !== epic) {
+        out.push({ epic, story, recorded: true, frames: 0, findings: [{ kind: 'not-a-story-file', message: `stories/${forTerminal(f)} records design frames, but its name is not ${epic}-S<n>.md, so \`yad story frames\` cannot read it — rename the file` }] });
+        continue;
+      }
       links ??= readDesignLinks(epicDir);
       const r = frameFindings(fm, links);
-      out.push({ epic, story: f.replace(/\.md$/, ''), recorded: r.recorded, findings: r.findings });
+      out.push({ epic, story, recorded: r.recorded, frames: r.ids.length, findings: r.findings });
     }
   }
   return out;

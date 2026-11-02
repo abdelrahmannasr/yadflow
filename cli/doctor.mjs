@@ -1667,12 +1667,17 @@ export function themeChecks(checks, root) {
 export function storyFrameChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
-  const epics = fs.readdirSync(epicsDir).filter((e) => isValidEpicId(e)).sort();
-  const stories = allStoryFrames(root, epics);
+  const stories = allStoryFrames(root, epicIds(root).sort());
   if (!stories.length) return;
   const problems = stories.flatMap((s) => s.findings.map((f) => `${forTerminal(s.story)}: ${f.message}`));
   if (!problems.length) {
-    check(checks, 'stories:design-frames', 'shape', 'ok', `${stories.length} story(ies) record design frames, and every frame ID is in its epic's design-links.json`);
+    const withFrames = stories.filter((s) => s.frames > 0).length;
+    const noScreens = stories.length - withFrames;
+    const parts = [
+      ...(withFrames ? [`${withFrames} story(ies) record design frames, and every frame ID is in its epic's design-links.json`] : []),
+      ...(noScreens ? [`${noScreens} story(ies) say they have no screens (\`${FRAMES_KEY}: []\`)`] : []),
+    ];
+    check(checks, 'stories:design-frames', 'shape', 'ok', parts.join('; '));
     return;
   }
   const shownN = 3;

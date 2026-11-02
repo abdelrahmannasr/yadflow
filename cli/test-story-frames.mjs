@@ -38,6 +38,7 @@ const LINKS = {
 };
 const ok = { state: 'ok', tool: 'pencil', fileUrl: LINKS.fileUrl, screens: LINKS.screens };
 const kinds = (r) => r.findings.map((f) => f.kind);
+const BOM = String.fromCharCode(0xfeff);
 
 // A Product with one epic: its design-links.json (or none) and the given stories.
 function product(stories, links = LINKS) {
@@ -143,7 +144,7 @@ test('#354: doctor — no row without frames, an ok row with a count, one warn r
     const [row, ...rest] = run(T);
     assert.equal(rest.length, 0);
     assert.deepEqual([row.id, row.status], ['stories:design-frames', 'ok']);
-    assert.match(row.message, /^2 story/);
+    assert.match(row.message, /^1 story\(ies\) record design frames.*; 1 story\(ies\) say they have no screens/);
   } finally { done(T); }
 
   T = product({ 'EP-shop-S01': `${FRAMES_KEY}: [12:34] # cart`, 'EP-shop-S02': `${FRAMES_KEY}: [77:1]` });
@@ -155,6 +156,60 @@ test('#354: doctor — no row without frames, an ok row with a count, one warn r
     assert.match(rows[0].message, /EP-shop-S01: .*#/);
     assert.match(rows[0].message, /EP-shop-S02: .*77:1/);
     assert.deepEqual(allStoryFrames(T, ['EP-shop']).map((s) => s.findings[0].kind), ['commented', 'not-found']);
+  } finally { done(T); }
+});
+
+test('#354 review 1: Windows line endings, a byte-order mark and a trailing space still read the list', () => {
+  const T = product({});
+  try {
+    const dir = path.join(T, 'epics', 'EP-shop', 'stories');
+    put(path.join(dir, 'EP-shop-S01.md'), story('EP-shop-S01', `${FRAMES_KEY}: [12:34]`).replace(/\n/g, '\r\n'));
+    put(path.join(dir, 'EP-shop-S02.md'), BOM + story('EP-shop-S02', `${FRAMES_KEY}: [12:34]`));
+    put(path.join(dir, 'EP-shop-S03.md'), story('EP-shop-S03', `${FRAMES_KEY}: [12:34]  `));
+    for (const id of ['EP-shop-S01', 'EP-shop-S02', 'EP-shop-S03']) {
+      const r = readStoryFrames(T, id);
+      assert.deepEqual([r.recorded, r.frames.map((f) => f.found), r.findings], [true, [true], []], id);
+    }
+    assert.deepEqual(allStoryFrames(T, ['EP-shop']).map((s) => s.findings.length), [0, 0, 0], 'doctor reads them the same way');
+  } finally { done(T); }
+});
+
+test('#354 review 1: a misspelled key and quoted IDs are said, not read as "no frames" or "not found"', () => {
+  for (const k of ['Design-Frames', 'designFrames', 'design_frames']) {
+    const r = frameFindings({ [k]: ['12:34'] }, ok);
+    assert.deepEqual([r.recorded, kinds(r)], [false, ['key-spelling']], k);
+  }
+  const q = frameFindings({ [FRAMES_KEY]: ['"12:34"', "'aB3xQ'"] }, ok);
+  assert.deepEqual(kinds(q), ['quoted']);
+  assert.deepEqual(q.frames.map((f) => [f.id, f.found]), [['12:34', true], ['aB3xQ', true]]);
+  assert.doesNotMatch(frameFindings({ [FRAMES_KEY]: 'x y' }, ok).findings[0].message, /\[\[/, 'never advice to double the brackets');
+});
+
+test('#354 review 1: doctor never points at a command that would refuse the story', () => {
+  const T = product({ 'EP-shop-S01': `${FRAMES_KEY}: []` });
+  try {
+    const dir = path.join(T, 'epics', 'EP-shop', 'stories');
+    put(path.join(dir, 'EP-Shop-S04.md'), story('EP-Shop-S04', `${FRAMES_KEY}: [12:34]`));
+    put(path.join(dir, 'EP-other-S01.md'), story('EP-other-S01', `${FRAMES_KEY}: [12:34]`));
+    fs.mkdirSync(path.join(dir, 'EP-shop-S07.md'));
+    const rows = allStoryFrames(T, ['EP-shop']);
+    assert.deepEqual(rows.map((s) => [s.story, kinds(s)]), [['EP-Shop-S04', ['not-a-story-file']], ['EP-other-S01', ['not-a-story-file']], ['EP-shop-S01', []]]);
+    for (const s of rows.filter((x) => x.findings.length)) assert.match(s.findings[0].message, /rename the file/);
+    assert.throws(() => readStoryFrames(T, 'EP-shop-S07'), /no story file/, 'a folder named like a story is refused, not a crash');
+    const checks = [];
+    storyFrameChecks(checks, T);
+    assert.equal(checks[0].status, 'warn');
+  } finally { done(T); }
+});
+
+test('#354 review 1: the ok row tells stories with frames from stories with no screens', () => {
+  const T = product({ 'EP-shop-S01': `${FRAMES_KEY}: []` }, null);
+  try {
+    const checks = [];
+    storyFrameChecks(checks, T);
+    assert.equal(checks[0].status, 'ok');
+    assert.match(checks[0].message, /^1 story\(ies\) say they have no screens/);
+    assert.equal(yad(T, 'story', 'frames', 'EP-shop-S01', 'EP-shop-S02').status, 1, 'one story at a time');
   } finally { done(T); }
 });
 
