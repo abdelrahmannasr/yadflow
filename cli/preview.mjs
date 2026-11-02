@@ -158,7 +158,8 @@ export function platformPreview(platform, { cwd, sha, branch, pr = null, runner 
       return { url: full.external_url };
     }
     if (asked && failed === asked) return { url: null, why: 'GitLab could not be asked about the review environments' };
-    return { url: null, why: 'GitLab lists no successful, running review deployment with an address for this branch or MR among its newest 100 deployments' };
+    // `listedNone`: GitLab answered and listed nothing that fits — the one answer --pr could change.
+    return { url: null, listedNone: true, why: 'GitLab lists no successful, running review deployment with an address for this branch or MR among its newest 100 deployments' };
   }
   return { url: null, why: 'the platform is not GitHub or GitLab' };
 }
@@ -225,7 +226,7 @@ export function resolvePreview({ meta, platform, pr, base = null, cwd, runner = 
   if (p?.why && !tried.some((t) => t === p.why || t.endsWith(p.why))) tried.push(p.why);
   // GitLab's merge-request pipelines deploy under the MR's own ref, which only its number finds — said
   // only when GitLab was asked and listed nothing (a GitLab it could not ask, --pr would not help).
-  const gitlabNoPr = !pr && platform === 'gitlab' && /^GitLab lists no/.test(p?.why || '');
+  const gitlabNoPr = !pr && platform === 'gitlab' && p?.listedNone === true;
   if (gitlabNoPr) tried.push('a merge-request pipeline\'s deployment is found only with --pr');
   const fix = repo ? 'set one with `yad repo preview <repo> <pattern>`' : 'register the repo, then set one with `yad repo preview <repo> <pattern>`';
   // One next step, chosen here, the one that most likely unblocks the answer: a --pr that is missing

@@ -171,9 +171,14 @@ test('platformPreview (GitLab): this branch\'s deployment whose environment is r
     'glab api projects/:id/environments/5': JSON.stringify({ state: 'available', tier: 'production', external_url: 'https://x.dev' }) });
   assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: prodTier }).why, /no successful, running review deployment/);
   const envFails = fakeRunner({ 'glab api projects/:id/deployments?': deployments([{ ref: 'feat/x', environment: { id: 5, name: 'r' } }]) });
-  assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: envFails }).why, /could not be asked about the review environments/);
+  const envDown = platformPreview('gitlab', { branch: 'feat/x', runner: envFails });
+  assert.match(envDown.why, /could not be asked about the review environments/);
+  assert.equal(envDown.listedNone, undefined, 'environments it could not ask are not "none listed"');
   assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({}) }).why, /could not be asked/);
-  assert.match(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({ 'glab api': '[]' }) }).why, /no successful, running review deployment/);
+  const empty = platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({ 'glab api': '[]' }) });
+  assert.match(empty.why, /no successful, running review deployment/);
+  assert.equal(empty.listedNone, true, 'resolvePreview reads this flag, never the wording');
+  assert.equal(platformPreview('gitlab', { branch: 'feat/x', runner: fakeRunner({}) }).listedNone, undefined, 'a GitLab it could not ask listed nothing only in the sense that it was not asked');
   assert.match(platformPreview('gitlab', { branch: null, runner: fakeRunner({}) }).why, /branch is not known/);
   assert.match(platformPreview('bitbucket', {}).why, /not GitHub or GitLab/);
 });
@@ -247,10 +252,10 @@ test('platformPreview (GitLab): a merge-request pipeline\'s deployment counts, w
 
 test('resolvePreview: GitLab without --pr, and a --pr that is not a number, both say pass --pr', () => {
   const head = { sha: SHA, branch: 'feat/x' };
-  const none = () => ({ url: null, why: 'GitLab lists no successful, running review deployment' });
+  const none = () => ({ url: null, listedNone: true, why: 'GitLab lists no successful, running review deployment' });
   const gl = resolvePreview({ meta: { name: 'web' }, platform: 'gitlab', pr: null, head, lookup: none });
   assert.match(gl.why, /found only with --pr — pass --pr <n>$/);
-  const glBroken = resolvePreview({ meta: { name: 'web', preview_url: 'http://x' }, platform: 'gitlab', pr: null, head, lookup: () => ({ url: null, why: 'GitLab lists no successful, running review deployment' }) });
+  const glBroken = resolvePreview({ meta: { name: 'web', preview_url: 'http://x' }, platform: 'gitlab', pr: null, head, lookup: () => ({ url: null, listedNone: true, why: 'GitLab lists no successful, running review deployment' }) });
   assert.match(glBroken.why, /found only with --pr — set it again with `yad repo preview <repo> <pattern>`$/, 'a broken pattern is the fix to name first');
   const glDown = resolvePreview({ meta: { name: 'web' }, platform: 'gitlab', pr: null, head, lookup: () => ({ url: null, why: 'GitLab could not be asked for deployments (glab not signed in, offline, or no GitLab remote)' }) });
   assert.doesNotMatch(glDown.why, /found only with --pr/, '--pr would not help a GitLab that cannot be asked');
