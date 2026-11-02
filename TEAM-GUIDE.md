@@ -699,7 +699,8 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   So after `yad toolbox remove spec-kit`, `yad-spec` writes the spec files by hand, even where Spec Kit
   is installed. A design, testing or learning tool still follows what its connect skill recorded.
 - **Something not working? Run the doctor first:** `npx yadflow doctor`. It checks your environment (git,
-  Node, and whether `gh` or `glab` is installed and logged in — a warning if not), that the `.sdlc/` config
+  Node — against the version each repo pins, with the command to switch — Docker where a repo needs it,
+  and whether `gh` or `glab` is installed and logged in, with a warning for two glab config files), that the `.sdlc/` config
   parses and points at real repos, and that every epic ledger loads. It also asks GitHub or GitLab, with
   your own login, whether each repo's branch requires an approval before a merge — and says **not known**,
   with the reason, when it cannot read that (for example, only a repo admin can read GitHub's classic

@@ -3,6 +3,7 @@
 // real repos), shape (what schemaVersion the files are on vs the engine), epics (each ledger loads),
 // and threads (feature-thread lineage). Pure reporting: exit 1 on any FAIL, 0 with warnings.
 // `--json` emits the checks for CI / bug reports.
+import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
@@ -30,6 +31,7 @@ import { readOwners } from './owners.mjs';
 import { readMembers, judgedMemberFiles } from './members.mjs';
 import { loadChoices, readToolboxFile } from './toolbox.mjs';
 import { signingDoctorLine } from './signing.mjs';
+import { nodePins, satisfies, nodeFix, dockerReasons, dockerState, glabConfigs } from './machine.mjs';
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
 // entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
@@ -108,6 +110,56 @@ export function envChecks(checks, { nodeVersion = process.versions.node } = {}) 
 export function signingChecks(checks, root) {
   const line = signingDoctorLine(root);
   check(checks, 'signing', 'environment', line.status, line.message, line.hint, { alwaysHint: true });
+}
+
+// #352 — the machine setup local work depends on (cli/machine.mjs): the active Node against each repo's
+// pinned version, Docker where a repo asks for it, and duplicate glab config files. The Product folder and
+// every registered repo cloned here are read; the rest is not this machine's to judge.
+export function machineChecks(checks, root, { nodeVersion = process.versions.node, env = process.env, home = os.homedir(), platform = process.platform, runner } = {}) {
+  const tilde = (p) => (p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
+  const folders = [];
+  if (exists(productConfigPath(root))) folders.push({ name: 'the Product', dir: root });
+  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
+    if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
+    const dir = path.resolve(root, repo.path);
+    if (path.resolve(dir) === path.resolve(root) || !isCheckout(root, repo)) continue;
+    folders.push({ name: forTerminal(repo.name), dir });
+  }
+
+  // Node: one warning per pin the running Node does not meet; one ok line when every readable pin is met.
+  let pinned = 0;
+  let wrong = 0;
+  for (const { name, dir } of folders) {
+    for (const { source, want } of nodePins(dir)) {
+      const meets = satisfies(nodeVersion, want);
+      if (meets === null) continue;
+      pinned += 1;
+      if (meets) continue;
+      wrong += 1;
+      check(checks, `node-version:${name}`, 'environment', 'warn',
+        `node ${nodeVersion} does not meet ${forTerminal(want)}, which ${name} pins (${source})`,
+        `${nodeFix(want, { env, home })} — the Node that runs yad is the active one (your version manager's default in a new shell)`);
+    }
+  }
+  if (pinned && !wrong) check(checks, 'node-version', 'environment', 'ok', `node ${nodeVersion} meets every Node version the repos pin (${pinned})`);
+
+  // Docker: asked only where a repo names it.
+  const needs = folders.map((f) => ({ ...f, why: dockerReasons(f.dir) })).filter((f) => f.why.length);
+  if (needs.length) {
+    const who = needs.map((f) => `${f.name} (${f.why.join('; ')})`).join(', ');
+    const state = dockerState(runner ? { runner } : {});
+    if (state === 'running') check(checks, 'docker', 'environment', 'ok', `Docker is running, as ${who} needs`);
+    else check(checks, 'docker', 'environment', 'warn', state === 'missing' ? `Docker is not installed, and ${who} asks for it` : `Docker is not running, and ${who} asks for it`,
+      state === 'missing' ? 'install Docker (Docker Desktop, or the docker engine), start it, then run those local checks again' : 'start Docker (Docker Desktop, or the docker service), then run those local checks again — the CI runs them either way');
+  }
+
+  // glab: more than one config file.
+  const confs = glabConfigs({ env, home, platform });
+  if (confs.length > 1) {
+    check(checks, 'glab-config', 'environment', 'warn', `glab has ${confs.length} config files: ${confs.map(tilde).join(', ')}`,
+      'glab uses only one and prints a warning on every run, which breaks the JSON its API calls return — keep the file glab\'s warning names, copy into it any host it lacks from the other, then delete the other');
+  }
 }
 
 // `headCount` is a count of people the caller already read (E74); the CLI passes none, a test passes one.
@@ -2718,6 +2770,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   const checks = [];
   envChecks(checks);
   signingChecks(checks, root);
+  machineChecks(checks, root);
   projectChecks(checks, root, { headCount });
   riskMapChecks(checks, root);
   codeownersChecks(checks, root);
