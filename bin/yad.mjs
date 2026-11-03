@@ -424,6 +424,10 @@ ${c.bold('Build helpers')}
   yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
                        refreshed code-maps + registry as a chore(product): sync code-context … [skip ci]
                        audit commit and pushes it to the Product default branch (--allow-branch to override)
+  yad repo preview <name> [<pattern>] [--clear]
+                                       Show, set or clear a repo's preview address pattern (#359), e.g.
+                                       'https://pr-{pr}.myapp.dev' ({pr} {branch} {repo}). Review steps
+                                       check the live page there; with none, they say "locally only"
   yad risk-map check [repo] [--json]   Warn where a code repo's .sdlc/risk-map (a risk level per
                                        directory, no names) has gone stale — advisory, never blocks
   yad risk-map draft [repo]            Add an 'unset' line for every directory the map does not cover
@@ -510,6 +514,7 @@ function parseArgs(argv) {
     else if (a === '--open-pr') o.openPr = true;
     else if (a === '--post') o.post = true;
     else if (a === '--allow-branch') o.allowBranch = true;
+    else if (a === '--clear') o.clear = true;
     else if (a === '--overwrite-local') o.overwriteLocal = true;
     else if (a === '--merged') o.merged = true;
     else if (a === '--ship') o.ship = true;
@@ -612,7 +617,7 @@ const ACTIONS = {
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
   tidy: { known: ['up'] },
   history: { known: ['list', 'show', 'search'], default: 'list' },
-  repo: { known: ['list', 'refresh', 'sync', 'clone'], default: 'list' },
+  repo: { known: ['list', 'refresh', 'sync', 'clone', 'preview'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
   story: { known: ['frames'] },
@@ -1296,7 +1301,11 @@ async function main() {
     }
     case 'repo': {
       const [, action, name] = o._;
-      result = await commands.runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });
+      // `yad repo preview <name> [<pattern>]` (#359): the one action with a third word.
+      const pattern = action === 'preview' ? o._[3] : undefined;
+      if (action === 'preview' && o._.length > 4) { refuse(`unexpected argument(s): ${o._.slice(4).join(' ')}`, 'use: yad repo preview <name> [<pattern>] [--clear] — quote the pattern'); break; }
+      result = await commands.runRepo(o.dir, { action: action || 'list', name, pattern, clear: !!o.clear, today,
+        push: o.push, allowBranch: o.allowBranch });
       break;
     }
     case 'risk-map': {

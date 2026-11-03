@@ -27,7 +27,10 @@ the Product.
   `.gitlab/merge_request_templates/Default.md`) with the Summary (from the commit), the story/task id and
   its `specs/` path, `Risk level:`, `Contract surface touched:`, and `Domains` (the repo name when
   `--repo` is passed) prefilled; the rest is left for the author. This satisfies the `pr-template`
-  gate.
+  gate. The `**Preview:**` line under `## Testing` (#359) gets the repo's preview address, filled from
+  its `yad repo preview` pattern (a `{pr}` pattern once the PR has its number), or a note: none is
+  recorded (a live design check runs locally only), the recorded pattern cannot be used (fix it with
+  `yad repo preview`), or it cannot be filled yet (`yad review context --pr <n>` gives the address).
 - **Stage-aware on the Product** — `open-pr` mirrors the `--head` split the Product gates apply:
   - a **`review/EP-*/<artifact>`** branch is a Shape artifact-review PR → it **delegates to
     `yad gate open`** (artifact-review title `review: <artifact> (EP-<slug>)`, the Product artifact-review

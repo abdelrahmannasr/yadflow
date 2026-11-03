@@ -24,6 +24,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Idempotent and
   refreshable; staleness tracked by HEAD sha. Also drafts each code repo's **risk map**
   (`.sdlc/risk-map`, in the code repo): one line per directory saying `high`, `medium` or `low`, no names.
+  Optionally records a repo's **preview address** pattern (`preview_url`, #359) with `yad repo preview`.
   The AI reads the code — not folder names — and marks each level `guessed`; a person confirms it in a PR.
   One exception: `.sdlc/` is `high`, because it holds the map.
 - **`yad-sync-repos`** — Brings every connected repo up to date in one shot: switches each repo in
@@ -225,12 +226,15 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   default branch** (`--base` → `repos.json` → for a PR against the Product itself, `product.json`'s
   `default_branch` → the platform → `origin/HEAD` → `main`), and
   warns when the base is not the platform default — a mis-based PR silently gets no AI first pass.
-  Drives `yad open-pr`.
+  Fills the body's **Preview** line (#359) from the repo's preview address pattern, or notes that none
+  is recorded. Drives `yad open-pr`.
 - **`yad-ship`** — build helper. Commit **and** open the task PR/MR in one step (`yad commit` then
   `yad open-pr`; the PR step runs only if the commit lands). Drives `yad ship`.
 - **`yad-engineer-review`** — Step E. AI review (CodeRabbit, advisory) → engineer review (the human gate,
   one approver holds the merge, with the same reported count) → on merge, record the ship in the epic build-log and
-  update the story state so the epic → story → task → PR chain stays traceable.
+  update the story state so the epic → story → task → PR chain stays traceable. For a UI change it runs
+  the live design check (the page at several screen widths) at the PR's preview address from
+  `yad review context`'s `preview` field, or says plainly that the check ran locally only (#359).
 - **`yad-backfill`** — Step G. Generate specs for already-built features in an existing repo so new work
   doesn't break them: pack one feature at a time with Repomix, write a DRAFT spec, require human approval
   before it counts. A change is blocked only until the features it touches have approved specs. Its

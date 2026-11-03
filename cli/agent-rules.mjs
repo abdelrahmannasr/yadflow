@@ -181,6 +181,7 @@ export const COMMAND_CLASS = {
   'repo refresh': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
   'repo sync': { class: 'local-write' },
   'repo clone': { class: 'local-write' },
+  'repo preview': { class: 'local-write' },
   'risk-map check': { class: 'read' },
   'risk-map draft': { class: 'local-write' },
   'codeowners check': { class: 'read' },

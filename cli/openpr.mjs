@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
-  detectPlatform, createPr, platformLogin, resolveBaseBranch, prNumberFromUrl,
+  detectPlatform, createPr, platformLogin, resolveBaseBranch, prNumberFromUrl, editPrBody,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase, gateCapFor, capLimit, peopleWord, gateRuleSum, gateRuleEnforced, legacyLogins } from './epic-state.mjs';
@@ -22,6 +22,7 @@ import { autoOpenCheck, recordAutoOpen, branchTasks, rangeTasks, groupWarnings }
 import { productDriftError } from './epic-state.mjs';
 import { err } from './errors.mjs';
 import { recordActor } from './skip.mjs';
+import { previewLine, previewPattern, fillPattern, needs } from './preview.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd. `product` (E80) is
 // the Product found from a code repo beside it: the registry is read there, and a repo run without
@@ -81,7 +82,7 @@ function codeTaskTemplate(platform) {
   }
 }
 
-export function templateBody(repoRoot, platform, { task, summary, risk, contract, domains, stage }) {
+export function templateBody(repoRoot, platform, { task, summary, risk, contract, domains, stage, preview }) {
   // product-tooling: the Product's own template is artifact-review — use the bundled code-task template so the
   // body matches the shape the Product `pr-template` gate demands for a non-review head.
   let base;
@@ -100,7 +101,9 @@ export function templateBody(repoRoot, platform, { task, summary, risk, contract
   // Fill the obvious fields; leave the rest of the committed template intact for the author.
   // Function replacers (not string replacements) so a `$` in interpolated free text — a commit-derived
   // summary or a repo name — is inserted verbatim, never read as a `$1`/`$&` replacement token.
-  let out = base
+  // The Preview line first, while the template is the only text: the summary, inserted below, is
+  // free text from the commit and may hold a `## Testing` of its own.
+  let out = (preview != null ? withPreviewLine(base, preview) : base)
     .replace(/EP-<slug>-S0N-T0N/g, () => task || 'EP-<slug>-S0N-T0N')
     .replace(/specs\/EP-<slug>-S0N\//g, () => `specs/${story || 'EP-<slug>-S0N'}/`)
     .replace(/(\*\*Risk level:\*\*)\s*\w+/i, (_m, g1) => `${g1} ${risk}`)
@@ -112,6 +115,24 @@ export function templateBody(repoRoot, platform, { task, summary, risk, contract
     out = out.replace(/(## Summary\r?\n)(?:<!--[\s\S]*?-->\r?\n)?/, (_m, g1) => `${g1}${summary}\n`);
   }
   return out;
+}
+
+// The PR/MR description with its Preview line set (#359), looked for only in the `## Testing` section
+// (the Summary, taken from the commit, may hold a line of its own that reads the same): the template's
+// `**Preview:**` line there, else a line added at the top of that section (a template committed before
+// #359). A template with no `## Testing` is the team's own shape and is left as it is.
+export function withPreviewLine(body, preview) {
+  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const head = /^## Testing[ \t]*\r?\n/m.exec(body);
+  if (!head) return body;
+  const start = head.index + head[0].length;
+  const next = body.slice(start).search(/^## /m);
+  const end = next < 0 ? body.length : start + next;
+  const section = body.slice(start, end);
+  const line = /^([-*][ \t]+)?(\*\*Preview:\*\*)[^\r\n]*/m;
+  if (line.test(section)) return body.slice(0, start) + section.replace(line, (_m, b, g) => `${b || ''}${g} ${preview}`) + body.slice(end);
+  const lead = /^(?:<!--[\s\S]*?-->[ \t]*\r?\n)?/.exec(section)[0];
+  return `${body.slice(0, start)}${lead}- **Preview:** ${preview}${eol}${section.slice(lead.length)}${body.slice(end)}`;
 }
 
 // E66 — how many approvers this PR asks for, printed once it is open: the body's own level and contract
@@ -389,9 +410,13 @@ export async function runOpenPr(root, opts = {}) {
     .join('\n')
     .trim();
   const summary = [subjectText, bodyText].filter(Boolean).join('\n\n') || undefined;
-  const body = templateBody(repoRoot, platform, {
-    task: bodyTask, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage,
-  });
+  // The Preview line (#359), on a code task only: the repo's pattern filled now, or a note. A pattern
+  // that needs the PR number is filled once the PR exists (below).
+  const pp = stage === 'code-repo' ? previewPattern(meta) : {};
+  const preview = stage === 'code-repo' ? previewLine(meta, { branch }) : undefined;
+  if (pp.problems) warn(`this repo's preview_url pattern cannot be used: it ${pp.problems.join('; ')} — set it again with \`yad repo preview <repo> <pattern>\``);
+  const bodyOpts = { task: bodyTask, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage };
+  const body = templateBody(repoRoot, platform, { ...bodyOpts, preview });
 
   // Assignee = the committer: `@me` on GitHub (buildPrArgs sends it when no assignee is named, and `gh`
   // resolves it on the repo's own host), the login `glab` reports on GitLab. No reviewers are requested (E62): the roster that named them is gone. The team requests them
@@ -405,6 +430,21 @@ export async function runOpenPr(root, opts = {}) {
   const r = creator(platform, { title, body, base: baseBranch, head: branch, assignees, cwd: repoRoot });
   if (!r.ok) { fail(`could not open PR/MR — ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`opened ${r.url}`);
+  // A {pr} pattern can only be filled now the PR has a number: the description is edited once. The PR
+  // is open whatever happens here — a failed edit is said, never a failure.
+  const pat = pp.pattern || null;
+  if (pat && needs(pat, 'pr')) {
+    const n = Number(prNumberFromUrl(r.url)) || null;
+    const url = n ? fillPattern(pat, { pr: n, branch, repo: meta?.name }) : null;
+    // The same body, built again with the address: only the Preview line can differ.
+    const filled = url ? templateBody(repoRoot, platform, { ...bodyOpts, preview: `<${url}>` }) : null;
+    if (url && filled === body) info(`this repo's PR/MR template has no ## Testing section, so the preview address was not written: ${url}`);
+    else if (url) {
+      const edit = (opts.editBody || editPrBody)(platform, n, filled, { cwd: repoRoot });
+      if (edit?.ok) ok(`preview ${url}`);
+      else warn(`the PR/MR is open, but its Preview line could not be filled (${String(edit?.reason || 'unknown').split('\n')[0]}) — the preview should be at ${url}`);
+    } else warn('the PR/MR is open, but its number could not be read from the URL, so the Preview line was left unfilled (`yad review context --pr <n>` gives the address)');
+  }
   if (auto) {
     // The PR is open whatever happens next: a record that cannot be written is said, never a failure.
     try {

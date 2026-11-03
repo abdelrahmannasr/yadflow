@@ -27,6 +27,7 @@
 
 ## Testing
 <!-- How the acceptance criteria were exercised. Tests must exercise behavior, not just pass. -->
+- **Preview:** none
 
 ## Checklist
 - [ ] Commits carry a `Task: <story>-<task>` trailer (spec-link gate)

@@ -180,6 +180,14 @@ new repo later is the same `connect` action. Write no `domain_owner`/`domain_own
 release wrote with them is left as it is (nothing reads them, and `yad doctor` warns
 `people:domain-owners-unused`).
 
+**Preview address (optional, #359).** A repo whose PRs/MRs get a live preview deployment (Vercel,
+Netlify, a GitLab review app) can record its address pattern as `preview_url`, for example
+`"https://pr-{pr}.myapp.dev"` (placeholders `{pr}`, `{branch}`, `{repo}`; https only, or
+`http://localhost`). Ask the person for it; never guess one. Write it with
+`yad repo preview <repo> <pattern>` (it checks the pattern; `--clear` removes it), not by hand. With no
+pattern, review steps ask the platform for the PR's deployment, and else say the design check ran
+locally only.
+
 ### Step 5 — Report
 Report the connected repo, its `platform`, the pack + code-map paths, the secret-scan result, and that
 the Shape phases will now load this repo's code-map. Nothing auto-advances; this is setup.

@@ -4494,7 +4494,9 @@ test('review context: a configured default_branch answers WITHOUT any platform r
   const runner = fakeRunner({ 'gh repo view': 'staging' });
   const b = await reviewContext(T, { repo: 'backend', pr: 9, runner });
   assert.equal(b.base, 'develop');
-  assert.deepEqual(runner.calls, [], 'no gh/glab call — a slow or unreachable host cannot stall this');
+  // The base never asks the host. (The preview address does, bounded, when no pattern answers: #359.)
+  assert.deepEqual(runner.calls.filter((c) => !/deployments|pr view|rev-parse/.test(c)), [], 'no gh/glab call for the base — a slow or unreachable host cannot stall this');
+  assert.equal(b.preview.source, 'local-only');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
