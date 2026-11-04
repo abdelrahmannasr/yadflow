@@ -1397,10 +1397,12 @@ test('E123 review 2: an edited gate beside a kept old workflow that passes hub �
     const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'all' }));
     // The kept workflow passes hub, which the gate accepts. But the update installs yad-product-pr-text.yml
     // (#425), which runs pr-title with `--profile product` — so that edited gate now fails every Product PR.
-    assert.doesNotMatch(out, /yad-hub-checks\.yml pass/, 'the kept workflow passes hub, which the gate accepts');
+    assert.doesNotMatch(out, /which [^\n]*yad-hub-checks\.yml/, 'the kept workflow passes hub, which the gate accepts');
     assert.match(out, /product\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-pr-text\.yml passes/);
     const { collectDoctor } = await import('./doctor.mjs');
-    assert.deepEqual(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).map((x) => x.id), ['profile:checks/pr-title.sh'], 'doctor agrees');
+    const said = collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:'));
+    assert.deepEqual(said.map((x) => x.id), ['profile:checks/pr-title.sh'], 'doctor agrees');
+    assert.match(said[0].message, /, which \.github\/workflows\/yad-product-pr-text\.yml passes — /);
     // Without the PR-text file nothing passes `product`, and nothing is said.
     fs.rmSync(path.join(T, newProductPrText));
     assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0);
@@ -27426,7 +27428,7 @@ test('E114 doctor: a gate file is read one bash command at a time (review 2)', a
   assert.equal(blind('x="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "o/m...HEAD" > "$x"\n'), false);
   assert.equal(blind('  # we used to run git diff --name-only here\n'), false);
   for (const rel of ['skills/yad-checks/templates/checks/contract-check.sh', 'skills/yad-backfill/templates/checks/backfill-check.sh',
-    'skills/yad-checks/templates/github/yad-product-checks.yml', 'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml']) {
+    'skills/yad-checks/templates/github/yad-product-pr-text.yml', 'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml']) {
     assert.equal(blind(fs.readFileSync(path.join(ROOT, rel), 'utf8')), false, `${rel} as shipped is not blind`);
   }
 });

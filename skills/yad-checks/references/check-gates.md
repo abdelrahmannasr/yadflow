@@ -791,7 +791,7 @@ The Product is itself a repo on a platform (recorded in `.sdlc/product.json` by
 merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "thinking" repo (it has no
 `specs/` or `package.json` build). **What yadflow wires today** (`PRODUCT_WIRING`): `commit-message`,
 `ledger-guard` and `member-check` in `yad-product-checks`, `pr-title` and `pr-template` in
-`yad-product-pr-text` on GitHub (the only file that re-runs on an edit of the PR text, #425; on GitLab they
+`yad-product-pr-text` on GitHub (the only Product file that re-runs on an edit of the PR text, #425; on GitLab they
 are jobs in `yad-product-checks`), `verified-commits` in its own workflow,
 and the `yad-update-guard`. On GitHub the `ledger-guard` job is given **no** `GH_TOKEN` on purpose: its
 bot exemption checks the author text and the Verified badge, and the badge proves only that the
