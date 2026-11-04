@@ -628,13 +628,18 @@ test('#424: every job in every CI file yad installs has a time limit', async () 
       files.push({ name: `${dir}/${f}`, text: fs.readFileSync(path.join(ROOT, dir, f), 'utf8'), gitlab: dir.endsWith('gitlab') });
     }
   }
+  // This repo's own workflows too (yad-gate-sync.yml is a stale 3.x copy, removed by #430).
+  for (const f of fs.readdirSync(path.join(ROOT, '.github/workflows'))) {
+    if (!/\.ya?ml$/.test(f) || f === 'yad-gate-sync.yml') continue;
+    files.push({ name: `.github/workflows/${f}`, text: fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8'), gitlab: false });
+  }
   files.push({ name: 'yad docs (GitHub)', text: pagesWorkflow('github'), gitlab: false });
   files.push({ name: 'yad docs (GitLab)', text: pagesWorkflow('gitlab'), gitlab: true });
   let seen = 0;
   for (const { name, text, gitlab } of files) {
     if (!gitlab) {
       const body = text.slice(text.search(/^jobs:$/m));
-      const blocks = body.split(/^(?= {2}[A-Za-z0-9_-]+:$)/m).slice(1);
+      const blocks = body.split(/^(?= {2}['"]?[^\s#'"][^:]*['"]?:\s*(?:#.*)?$)/m).slice(1);
       assert.ok(blocks.length, `${name}: no jobs read`);
       for (const b of blocks) {
         seen++;
@@ -646,8 +651,8 @@ test('#424: every job in every CI file yad installs has a time limit', async () 
     // `default:`, its own block, a template it `extends`, or an anchor it merges (`<<: *x`) sets `timeout:`.
     const blocks = new Map();
     const anchors = new Map();
-    for (const b of text.split(/^(?=[A-Za-z.][A-Za-z0-9._-]*:)/m)) {
-      const m = b.match(/^([A-Za-z.][A-Za-z0-9._-]*):(?:\s*&([A-Za-z0-9_-]+))?/);
+    for (const b of text.split(/^(?=['"]?[^\s#'"-][^:]*['"]?:)/m)) {
+      const m = b.match(/^['"]?([^\s#'"-][^:'"]*)['"]?:(?:\s*&([A-Za-z0-9_-]+))?/);
       if (!m) continue;
       blocks.set(m[1], b);
       if (m[2]) anchors.set(m[2], m[1]);
@@ -668,5 +673,5 @@ test('#424: every job in every CI file yad installs has a time limit', async () 
       assert.ok(limited(key), `${name}: job ${key} has no timeout`);
     }
   }
-  assert.ok(seen >= 30, `read only ${seen} jobs — the reader missed some`);
+  assert.ok(seen >= 40, `read only ${seen} jobs — the reader missed some`);
 });

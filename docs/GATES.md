@@ -111,8 +111,12 @@ busy (GitHub's own limit is 6 hours; GitLab's is the project's, 1 hour by defaul
 | every other gate | 10 minutes |
 
 A job that hits its limit fails, like any other failure: push again, or run it again from the
-platform. If your build and tests really need longer, raise the limit by editing the managed file and
-keep the change in mind on `yad update`, which writes the file back from its template.
+platform. If a code repo's build and tests really need longer, raise `build-test-lint`'s limit in
+`yad-checks.yml` (GitHub) or `.gitlab/ci/yad-checks.yml` (GitLab). `yad update` then reports that file
+as `modified` and leaves it alone, so it stops getting template fixes until you run
+`yad update --overwrite-local`, which saves your copy as `<file>.yad-orig` and writes the template back.
+Do not edit the Product's `yad-product-checks` file: member-check trusts member files only while that
+file matches the shipped copy exactly.
 
 A gate holds a merge only when the platform requires its job. `yad ci check` reads whether it does, for
 each repo, and names the settings page when it does not ([branch-protection.md](branch-protection.md)).
