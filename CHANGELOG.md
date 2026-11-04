@@ -1,3 +1,30 @@
+# [4.9.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.8.0...v4.9.0) (2026-11-04)
+
+
+### Bug Fixes
+
+* **doctor:** [#352](https://github.com/abdelrahmannasr/yadflow/issues/352) review 1 — '>22' and '>= 22' read as npm reads them, glab duplicates only where glab looks, repo text cleaned, one Node row per folder ([5474a05](https://github.com/abdelrahmannasr/yadflow/commit/5474a052012a1bf7e2322d53e998654e171bb90f))
+* **doctor:** [#352](https://github.com/abdelrahmannasr/yadflow/issues/352) review 2 — look for glab's config only where glab is known to look on Windows ([35b9d67](https://github.com/abdelrahmannasr/yadflow/commit/35b9d67a93f5b7639f07492ac7bd63f503265134))
+* **preview:** review 1 — a {branch} pattern never fills from the wrong branch, one hard time budget, no false 'none recorded' ([#359](https://github.com/abdelrahmannasr/yadflow/issues/359)) ([d1688b0](https://github.com/abdelrahmannasr/yadflow/commit/d1688b0d23d9b88f6709b7a9921091e760b49f86))
+* **preview:** review 2 — the Preview line is set before the summary, GitLab environments asked for their state, the default branch is no PR's ([#359](https://github.com/abdelrahmannasr/yadflow/issues/359)) ([aa8b8b7](https://github.com/abdelrahmannasr/yadflow/commit/aa8b8b7b56222a2f9047691a3f7019ad30e44d94))
+* **preview:** review 3 — one next step in the why, GitLab merge-request pipeline deployments count ([#359](https://github.com/abdelrahmannasr/yadflow/issues/359)) ([98089df](https://github.com/abdelrahmannasr/yadflow/commit/98089dfeebc7ca590b71c883208f4bace61d178d))
+* **preview:** review 4 — GitLab without --pr and a non-number --pr both say pass --pr; the MR ref counts with no source branch ([#359](https://github.com/abdelrahmannasr/yadflow/issues/359)) ([86d65ae](https://github.com/abdelrahmannasr/yadflow/commit/86d65aea2a8b47d7f4a6fa3a2b3b3ec35534b8d2))
+* **preview:** review 5 — a broken pattern is named before --pr on GitLab, and --pr is never offered for a GitLab that cannot be asked ([#359](https://github.com/abdelrahmannasr/yadflow/issues/359)) ([04c4379](https://github.com/abdelrahmannasr/yadflow/commit/04c43798e2d6b4e97f7c6e4b5f27047fa654f55d))
+* **preview:** review 6 — the GitLab MR-pipeline step reads a flag, not the wording ([#359](https://github.com/abdelrahmannasr/yadflow/issues/359)) ([42fa00d](https://github.com/abdelrahmannasr/yadflow/commit/42fa00d8779f655eaeada77082c60ca02d3d25bd))
+* **story:** review 1 — the preflight never stops a person for the wrong reason ([#358](https://github.com/abdelrahmannasr/yadflow/issues/358)) ([5dcd98b](https://github.com/abdelrahmannasr/yadflow/commit/5dcd98b3244309b7ce2bb4a72c6504c357cf91eb))
+* **story:** review 1 — Windows line endings, misspelled keys and odd story files never read as "no frames" ([#354](https://github.com/abdelrahmannasr/yadflow/issues/354)) ([b130a56](https://github.com/abdelrahmannasr/yadflow/commit/b130a56c397d2ee6851ff9264bb93e950633eb2c))
+* **story:** review 2 — doctor follows symlinks like the command; a second, misspelled key is said ([#354](https://github.com/abdelrahmannasr/yadflow/issues/354)) ([c4a0570](https://github.com/abdelrahmannasr/yadflow/commit/c4a0570db90c28ec59d8d931fb81555ac450615c))
+* **story:** review 2 — frames of another tool, unknown MCP ids and a missing design-links.json never stop a person wrongly ([#358](https://github.com/abdelrahmannasr/yadflow/issues/358)) ([041c368](https://github.com/abdelrahmannasr/yadflow/commit/041c36867198a62843f4daf643b366f910e632d1))
+* **story:** review 3 — provider and tool names compared on their letters and digits ([#358](https://github.com/abdelrahmannasr/yadflow/issues/358)) ([edd1145](https://github.com/abdelrahmannasr/yadflow/commit/edd1145833792700a787b5c0795ddf441364321b))
+
+
+### Features
+
+* **doctor:** [#352](https://github.com/abdelrahmannasr/yadflow/issues/352) — check the machine: the Node each repo pins, Docker where a repo asks for it, duplicate glab config files ([fdabafc](https://github.com/abdelrahmannasr/yadflow/commit/fdabafc166d8fce0216023c885650b6362ca1de6))
+* **repo:** a preview address per PR/MR for live design checks ([#359](https://github.com/abdelrahmannasr/yadflow/issues/359)) ([225b646](https://github.com/abdelrahmannasr/yadflow/commit/225b646bbed8fd1422368279e2c03e1c348a95c5))
+* **story:** yad story frames reads a story's design frames; doctor warns on any it cannot read ([#354](https://github.com/abdelrahmannasr/yadflow/issues/354)) ([fda0a46](https://github.com/abdelrahmannasr/yadflow/commit/fda0a468b9c7213b308ad60bcabd653fd5bf231d))
+* **story:** yad story frames says how to check the design tool can be reached ([#358](https://github.com/abdelrahmannasr/yadflow/issues/358)) ([dd9bd94](https://github.com/abdelrahmannasr/yadflow/commit/dd9bd94c0a35b62e62416c9b5999c966de4bccb6))
+
 # [4.8.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.7.0...v4.8.0) (2026-11-02)
 
 
