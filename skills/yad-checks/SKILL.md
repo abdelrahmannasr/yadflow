@@ -140,7 +140,11 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);
     its quality job uses `install-deps.sh`, reads the optional `YAD_NODE_VERSION` repository variable,
     exports the PR's exact `NX_BASE`/`NX_HEAD`, and filters unrelated history blobs while preserving
-    the full commit graph.
+    the full commit graph. It never starts on `edited` (#425): a gate job skipped on an edit counts as
+    passed, so an edit of the PR text could turn a failed gate green.
+  - `templates/github/yad-pr-text.yml` → `.github/workflows/yad-pr-text.yml`: `pr-title` + `pr-template`,
+    the only checks that re-run on an edit of the PR title or body. The Product gets
+    `templates/github/yad-product-pr-text.yml` (`--profile product`) beside `yad-product-checks.yml`.
   - `templates/gitlab/yad-checks.gitlab-ci.yml` → includable fragment, installs to `.gitlab/ci/yad-checks.yml`;
     it uses the same installer, honors a project/group `YAD_NODE_VERSION` CI/CD variable, and exports
     the MR's exact `NX_BASE`/`NX_HEAD`.
@@ -183,6 +187,7 @@ Copy from this skill's `templates/`:
   - A **foreign** file occupies that path/name → write to a non-colliding filename
     (`yad-checks.gen.yml`) and ensure its `name:` does not clash. Never merge jobs into a foreign
     workflow; never edit one.
+  - Also install `templates/github/yad-pr-text.yml` → `.github/workflows/yad-pr-text.yml` the same way.
   - Also install `templates/github/yad-update-guard.yml` → `.github/workflows/yad-update-guard.yml`
     (marker `# yad-managed: yad-checks`) — the push-on-default integrity gate for direct-to-default
     commits (`yad update --push`); it runs only `verified-commits` + `commit-message`. Same

@@ -41,6 +41,7 @@ const GATE_GROUPS = [
     items: [
       { control: 'Code repos: .github/workflows/yad-checks.yml (GitHub) or the yad-checks include in .gitlab-ci.yml (GitLab)' },
       { control: 'The Product: .github/workflows/yad-product-checks.yml (or its GitLab include) — commit-message, pr-title, pr-template and ledger-guard (only CI may change the gate ledger), to check its artifact-review conventions' },
+      { control: 'On GitHub, pr-title and pr-template run from their own file (yad-pr-text.yml, or yad-product-pr-text.yml on the Product): the only checks an edit of the PR title or description re-runs, so an edit never turns a failed gate green' },
       { control: 'verified-commits runs on every code repo (a job in yad-checks.yml) and on the Product (its own yad-verified-commits.yml)' },
       { control: 'They fail closed on a bad base ref — never silently pass' },
     ],

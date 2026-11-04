@@ -7383,7 +7383,7 @@ test('E47 Product checks: an artifact renamed into .sdlc/owners/ is still an art
     g('checkout', '-q', 'chore/sneak');
     const changed = path.join(T, 'changed.txt');
     const templates = {
-      'skills/yad-checks/templates/github/yad-product-checks.yml': /git (.*?diff .*?--name-only) "origin\/\$\{BASE_REF\}\.\.\.HEAD"/g,
+      'skills/yad-checks/templates/github/yad-product-pr-text.yml': /git (.*?diff .*?--name-only) "origin\/\$\{BASE_REF\}\.\.\.HEAD"/g,
       'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml': /git (.*?diff .*?--name-only) "origin\/\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME\.\.\.HEAD"/g,
     };
     for (const [rel, re] of Object.entries(templates)) {

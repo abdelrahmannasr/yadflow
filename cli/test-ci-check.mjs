@@ -301,14 +301,17 @@ test('E160b case 9: REQUIRED_CHECKS equals the jobs in yad\'s workflow templates
   const jobs = (file, re) => [...fs.readFileSync(path.join(ROOT, file), 'utf8').matchAll(re)].map((m) => m[1]);
   const ghJob = /^ {2}([a-z][a-z0-9-]*):$/gm;
   const glJob = /^(yad-[a-z0-9-]+):$/gm;
-  assert.deepEqual(jobs('skills/yad-checks/templates/github/yad-checks.yml', ghJob), REQUIRED_CHECKS.github.code);
-  assert.deepEqual(jobs('skills/yad-checks/templates/github/yad-product-checks.yml', ghJob), REQUIRED_CHECKS.github.product);
+  // pr-title and pr-template run from their own file on GitHub (#425), so a list is the jobs of both files.
+  const sorted = (a) => [...a].sort();
+  const gh = (...files) => sorted(files.flatMap((f) => jobs(`skills/yad-checks/templates/github/${f}`, ghJob)));
+  assert.deepEqual(gh('yad-checks.yml', 'yad-pr-text.yml'), sorted(REQUIRED_CHECKS.github.code));
+  assert.deepEqual(gh('yad-product-checks.yml', 'yad-product-pr-text.yml'), sorted(REQUIRED_CHECKS.github.product));
   assert.deepEqual(jobs('skills/yad-checks/templates/github/yad-verified-commits.yml', ghJob), REQUIRED_CHECKS.github.productVerified);
   assert.deepEqual(jobs('skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml', glJob), REQUIRED_CHECKS.gitlab.code);
   assert.deepEqual(jobs('skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml', glJob), REQUIRED_CHECKS.gitlab.product);
   assert.deepEqual(jobs('skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml', glJob), REQUIRED_CHECKS.gitlab.productVerified);
   // No job sets `name:`, so GitHub names each check after its job.
-  for (const f of ['yad-checks.yml', 'yad-product-checks.yml', 'yad-verified-commits.yml']) assert.doesNotMatch(fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github', f), 'utf8'), /^ {4}name:/m, f);
+  for (const f of ['yad-checks.yml', 'yad-pr-text.yml', 'yad-product-checks.yml', 'yad-product-pr-text.yml', 'yad-verified-commits.yml']) assert.doesNotMatch(fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github', f), 'utf8'), /^ {4}name:/m, f);
   const doc = fs.readFileSync(path.join(ROOT, 'docs/branch-protection.md'), 'utf8');
   const row = (label) => [...doc.split('\n').find((l) => l.startsWith(`| ${label} |`)).split('|')[3].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
   assert.deepEqual(row('Product'), REQUIRED_CHECKS.github.product);

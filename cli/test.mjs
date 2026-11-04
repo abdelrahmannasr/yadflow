@@ -594,28 +594,67 @@ test('issue #134: a malformed top-level version stamp gets an accurate read-only
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// #125 — a PR body/title fix must re-run the pattern gates without a close/reopen. The code-repo
-// checks workflow needs the `edited` pull_request type; the commit-range jobs skip a bare edit.
-test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs skip it, pattern gates do not', () => {
-  const yml = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
-  assert.match(yml, /types:\s*\[opened,\s*synchronize,\s*reopened,\s*edited\]/, 'trigger carries the edited type');
-  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
-  // Extract a single job's YAML block: from its `  <name>:` header up to the next top-level job key.
-  const jobBlock = (name) => {
-    const start = yml.indexOf(`\n  ${name}:\n`);
-    const rest = yml.slice(start + 1);
-    const end = rest.search(/\n {2}\w[\w-]*:\n/);
-    return end >= 0 ? rest.slice(0, end) : rest;
-  };
-  const SKIP_GUARD = /if:\s*github\.event\.action != 'edited'/;
-  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
-  for (const gate of ['pr-title', 'pr-template']) {
-    assert.doesNotMatch(jobBlock(gate), SKIP_GUARD, `${gate} must re-run on an edit (no skip guard)`);
+// #125 — a PR body/title fix must re-run the pattern gates without a close/reopen, so pr-title and
+// pr-template start on `edited`. #425 — but no gate job may: a job skipped by `if:` counts as passed, so a
+// run started by an edit would turn a failed gate green. So the two PR-text checks have their own workflow.
+test('#425: only the PR-text workflows start on `edited`; they hold pr-title and pr-template, and nothing skips on an edit', async () => {
+  const { wiringFor, PRODUCT_WIRING } = await import('./manifest.mjs');
+  const DIR = path.join(ROOT, 'skills/yad-checks/templates/github');
+  const TEXT = { 'yad-pr-text.yml': 'code', 'yad-product-pr-text.yml': 'product' };
+  const files = [...fs.readdirSync(DIR).map((f) => path.join(DIR, f)), path.join(ROOT, 'skills/yad-product-bridge/templates/github/yad-gate-sync.yml')];
+  let seen = 0;
+  for (const file of files) {
+    const yml = fs.readFileSync(file, 'utf8');
+    const name = path.basename(file);
+    const trigger = yml.match(/^ {4}types:\s*\[([^\]]*)\]/m)?.[1].split(',').map((t) => t.trim());
+    assert.doesNotMatch(yml, /github\.event\.action/, `${name}: no job decides on the event action`);
+    if (TEXT[name]) {
+      seen++;
+      assert.deepEqual(trigger, ['opened', 'synchronize', 'reopened', 'edited'], `${name}: re-runs on an edit`);
+      assert.deepEqual([...yml.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]), ['pr-title', 'pr-template'], `${name}: the PR-text checks, and only those`);
+      assert.match(yml, new RegExp(`--profile ${TEXT[name]} `), `${name}: its profile`);
+      assert.match(yml, /^# yad-managed: yad-checks$/m, `${name}: owned by yad-checks`);
+    } else {
+      assert.ok(!trigger?.includes('edited'), `${name}: never starts on an edit`);
+      assert.doesNotMatch(yml, /^ {2}pr-(title|template):$/m, `${name}: the PR-text checks moved out`);
+    }
   }
-  // commit-range jobs must skip a bare edit
-  for (const job of ['spec-link', 'contract-check', 'build-test-lint', 'commit-message', 'verified-commits']) {
-    assert.match(jobBlock(job), SKIP_GUARD, `${job} must skip a bare edited event`);
-  }
+  assert.equal(seen, 2);
+  // Both are installed: one on code repos, one on the Product.
+  assert.ok(wiringFor('github').some((w) => w.dest === '.github/workflows/yad-pr-text.yml'));
+  assert.ok(PRODUCT_WIRING.github.some((w) => w.dest === '.github/workflows/yad-product-pr-text.yml'));
+});
+
+test('#425 doctor: a gate workflow that still starts on `edited` is checks:edit-run', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, editRunText } = await import('./doctor.mjs');
+    const hits = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:edit-run');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github', rel), 'utf8');
+    const put = (dir, rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    assert.deepEqual(hits(), [], 'no copies, nothing to say');
+    put(backend, '.github/workflows/yad-checks.yml', shipped('yad-checks.yml'));
+    put(backend, '.github/workflows/yad-pr-text.yml', shipped('yad-pr-text.yml'));
+    put(T, '.github/workflows/yad-product-checks.yml', shipped('yad-product-checks.yml'));
+    put(T, '.github/workflows/yad-product-pr-text.yml', shipped('yad-product-pr-text.yml'));
+    assert.deepEqual(hits(), [], 'the shipped workflows are fine — the PR-text ones are meant to start on an edit');
+    // A copy the team kept from before #425 (yad update leaves a hand-edited file alone).
+    const old = (rel) => shipped(rel).replace('types: [opened, synchronize, reopened]', 'types: [opened, synchronize, reopened, edited]');
+    put(backend, '.github/workflows/yad-checks.yml', old('yad-checks.yml'));
+    let hit = hits();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^\.github\/workflows\/yad-checks\.yml in backend starts on an edit of the PR text \(`edited`\) — /);
+    assert.match(hit[0].hint, /yad update --overwrite-local/);
+    put(T, '.github/workflows/yad-hub-checks.yml', old('yad-product-checks.yml'));
+    hit = hits();
+    assert.match(hit[0].message, /^\.github\/workflows\/yad-hub-checks\.yml in the Product, \.github\/workflows\/yad-checks\.yml in backend start on /);
+    // What counts as the trigger: a `types:` list, inline or as a block; a comment never does.
+    assert.equal(editRunText('    types:\n      - opened\n      - "edited"\n'), true);
+    assert.equal(editRunText('    types: [opened]  # not edited\n    # types: [edited]\n'), false);
+    assert.equal(editRunText("    if: github.event.action != 'edited'\n"), false);
+    assert.equal(editRunText('    types: [unedited]\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('yad-checks CI: dependency install follows package.json and Nx receives the exact PR range', () => {
@@ -1140,15 +1179,19 @@ test('gitlab migration rewrites the root .gitlab-ci.yml include to the new fragm
 // removed after a .yad-orig copy; edited → kept (`modified`) until --overwrite-local.
 const oldHubChecks = '.github/workflows/yad-hub-checks.yml';
 const newProductChecks = '.github/workflows/yad-product-checks.yml';
+// #425: pr-title and pr-template run from here on the Product (GitHub), with `--profile product`.
+const newProductPrText = '.github/workflows/yad-product-pr-text.yml';
 const shippedProductChecks = () => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-product-checks.yml'), 'utf8')
   .replace(/yad-product-checks/g, 'yad-hub-checks').replace(/--profile product/g, '--profile hub');
 const ledgerOf = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8')).files;
 // Puts the Product back to a pre-E123 install: the old workflow, recorded as written by yad, the new one gone.
 function preE123Product(T) {
   fs.rmSync(path.join(T, newProductChecks), { force: true });
+  fs.rmSync(path.join(T, newProductPrText), { force: true }); // #425: not there before 4.0 either
   fs.writeFileSync(path.join(T, oldHubChecks), shippedProductChecks());
   const rec = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8'));
   delete rec.files[newProductChecks];
+  delete rec.files[newProductPrText];
   rec.files[oldHubChecks] = contentShaOf(path.join(T, oldHubChecks));
   fs.writeFileSync(path.join(T, '.sdlc/managed.json'), JSON.stringify(rec));
 }
@@ -1298,13 +1341,14 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
     const gate = path.join(T, 'checks/pr-title.sh');
     fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
     const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
-    assert.match(out, /product\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes — every Product PR fails that check — it was edited, so it is kept/);
+    assert.match(out, /product\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml and \.github\/workflows\/yad-product-pr-text\.yml pass — every Product PR fails that check — it was edited, so it is kept/);
     const { collectDoctor } = await import('./doctor.mjs');
     const hit = collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:'));
     assert.deepEqual(hit.map((x) => [x.id, x.status]), [['profile:checks/pr-title.sh', 'warn']]);
-    assert.match(hit[0].message, /^checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml passes/);
+    assert.match(hit[0].message, /^checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-checks\.yml and \.github\/workflows\/yad-product-pr-text\.yml pass/);
     // With no workflow passing `product`, nothing breaks, and nothing is said.
     fs.rmSync(path.join(T, newProductChecks));
+    fs.rmSync(path.join(T, newProductPrText));
     assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0);
     // Every shipped gate accepts it.
     const { productProfileGap } = await import('./plan.mjs');
@@ -1319,7 +1363,7 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
     assert.equal(productProfileGap(gate), 'unmapped');
     await reconcile(T, { fix: true }); // puts the new workflow back
     const unmapped = collectDoctor(T).checks.find((x) => x.id === 'profile:checks/pr-title.sh');
-    assert.match(unmapped.message, /^checks\/pr-title\.sh accepts `--profile product` but never turns it into `hub`, which \.github\/workflows\/yad-product-checks\.yml passes — so it skips the Product's rules and passes what it should stop$/);
+    assert.match(unmapped.message, /^checks\/pr-title\.sh accepts `--profile product` but never turns it into `hub`, which \.github\/workflows\/yad-product-checks\.yml and \.github\/workflows\/yad-product-pr-text\.yml pass — so it skips the Product's rules and passes what it should stop$/);
     // Other spellings of the branch and of the mapping are read as the same thing.
     for (const [branch, mapping, gap] of [
       ['if [ $PROFILE = hub ]; then', '', 'unmapped'],
@@ -1341,7 +1385,7 @@ test('E123 review 1: an edited Product gate that rejects --profile product is na
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E123 review 2: an edited gate beside a kept old workflow that passes hub — nothing breaks, nothing is said', async () => {
+test('E123 review 2: an edited gate beside a kept old workflow that passes hub — the kept file is never named; the new PR-text file is (#425)', async () => {
   const { T } = scaffold();
   try {
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
@@ -1351,9 +1395,17 @@ test('E123 review 2: an edited gate beside a kept old workflow that passes hub �
     const gate = path.join(T, 'checks/pr-title.sh');
     fs.writeFileSync(gate, fs.readFileSync(gate, 'utf8').replace('case "$PROFILE" in code|hub|product)', 'case "$PROFILE" in code|hub)'));
     const { out } = await captureConsole(() => reconcile(T, { fix: true, scope: 'all' }));
-    assert.doesNotMatch(out, /--profile product/, 'the kept workflow passes hub, which the gate accepts');
+    // The kept workflow passes hub, which the gate accepts. But the update installs yad-product-pr-text.yml
+    // (#425), which runs pr-title with `--profile product` — so that edited gate now fails every Product PR.
+    assert.doesNotMatch(out, /which [^\n]*yad-hub-checks\.yml/, 'the kept workflow passes hub, which the gate accepts');
+    assert.match(out, /product\/checks\/pr-title\.sh does not accept `--profile product`, which \.github\/workflows\/yad-product-pr-text\.yml passes/);
     const { collectDoctor } = await import('./doctor.mjs');
-    assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0, 'doctor agrees');
+    const said = collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:'));
+    assert.deepEqual(said.map((x) => x.id), ['profile:checks/pr-title.sh'], 'doctor agrees');
+    assert.match(said[0].message, /, which \.github\/workflows\/yad-product-pr-text\.yml passes — /);
+    // Without the PR-text file nothing passes `product`, and nothing is said.
+    fs.rmSync(path.join(T, newProductPrText));
+    assert.equal(collectDoctor(T).checks.filter((x) => x.id.startsWith('profile:')).length, 0);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -27376,7 +27428,7 @@ test('E114 doctor: a gate file is read one bash command at a time (review 2)', a
   assert.equal(blind('x="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "o/m...HEAD" > "$x"\n'), false);
   assert.equal(blind('  # we used to run git diff --name-only here\n'), false);
   for (const rel of ['skills/yad-checks/templates/checks/contract-check.sh', 'skills/yad-backfill/templates/checks/backfill-check.sh',
-    'skills/yad-checks/templates/github/yad-product-checks.yml', 'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml']) {
+    'skills/yad-checks/templates/github/yad-product-pr-text.yml', 'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml']) {
     assert.equal(blind(fs.readFileSync(path.join(ROOT, rel), 'utf8')), false, `${rel} as shipped is not blind`);
   }
 });
@@ -27387,22 +27439,22 @@ test('E47 doctor: new owner-exempting checks beside a Product workflow that list
     const { collectDoctor } = await import('./doctor.mjs');
     const blind = () => collectDoctor(T).checks.filter((x) => x.id === 'owners:rename-blind');
     const shipped = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    w('.github/workflows/yad-product-checks.yml', shipped('skills/yad-checks/templates/github/yad-product-checks.yml').replace(/ --no-renames/g, '').replace(/-c core\.quotePath=false /g, ''));
+    w('.github/workflows/yad-product-pr-text.yml', shipped('skills/yad-checks/templates/github/yad-product-pr-text.yml').replace(/ --no-renames/g, '').replace(/-c core\.quotePath=false /g, ''));
     assert.deepEqual(blind(), [], 'old checks: the exemption is not there, so nothing is open');
     w('checks/pr-title.sh', shipped('skills/yad-pr-template/templates/checks/pr-title.sh'));
     const hit = blind();
     assert.equal(hit.length, 1);
-    assert.match(hit[0].message, /\.github\/workflows\/yad-product-checks\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
-    w('.github/workflows/yad-product-checks.yml', shipped('skills/yad-checks/templates/github/yad-product-checks.yml'));
+    assert.match(hit[0].message, /\.github\/workflows\/yad-product-pr-text\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
+    w('.github/workflows/yad-product-pr-text.yml', shipped('skills/yad-checks/templates/github/yad-product-pr-text.yml'));
     assert.deepEqual(blind(), [], 'the shipped workflow is fine');
     // One line fixed and its twin not: still blind (a job the team does not require would let it through).
-    const lines = shipped('skills/yad-checks/templates/github/yad-product-checks.yml').split('\n');
+    const lines = shipped('skills/yad-checks/templates/github/yad-product-pr-text.yml').split('\n');
     const first = lines.findIndex((l) => l.includes('--no-renames'));
     lines[first] = lines[first].replace(' --no-renames', '');
-    w('.github/workflows/yad-product-checks.yml', lines.join('\n'));
+    w('.github/workflows/yad-product-pr-text.yml', lines.join('\n'));
     assert.equal(blind().length, 1);
     // A comment is neither a blind line nor a fix.
-    w('.github/workflows/yad-product-checks.yml', `# we used to run git diff --name-only here\n${shipped('skills/yad-checks/templates/github/yad-product-checks.yml')}`);
+    w('.github/workflows/yad-product-pr-text.yml', `# we used to run git diff --name-only here\n${shipped('skills/yad-checks/templates/github/yad-product-pr-text.yml')}`);
     assert.deepEqual(blind(), []);
     w('.gitlab/ci/yad-product-checks.yml', 'x: git diff --name-only "origin/main...HEAD"\n');
     assert.match(blind()[0].message, /^\.gitlab\/ci\/yad-product-checks\.yml/);

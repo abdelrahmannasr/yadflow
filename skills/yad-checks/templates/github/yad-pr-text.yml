@@ -1,0 +1,38 @@
+# yad-managed: yad-checks
+# SDLC pattern gates on the PR text (profile: code): the PR title and the PR body follow the convention.
+# Its own workflow (#425) so that an edit of the title or body re-runs these two checks and nothing else.
+# A gate job skipped by `if:` counts as passed, so a run of yad-checks started by an edit would turn a
+# failed gate green. This file is OWNED by yad-checks (the marker on line 1 identifies it).
+name: yad-pr-text
+on:
+  pull_request:
+    # `edited` (beyond the opened/synchronize/reopened defaults) so a PR title/body correction
+    # re-runs these checks without a close/reopen — e.g. fixing a body the pr-template gate held.
+    types: [opened, synchronize, reopened, edited]
+    branches: ["**"]
+
+# Read-only: no check here writes to the repo.
+permissions:
+  contents: read
+
+jobs:
+  # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
+  pr-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: bash checks/pr-title.sh --profile code "$PR_TITLE"
+
+  pr-template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: |
+          body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
+          bash checks/pr-template.sh --profile code "$body"

@@ -177,7 +177,7 @@ export const CHECK_GATES: CheckGate[] = [
     queue: 'pattern-gate',
     timing: 'once the PR exists',
     description: 'The PR/MR title follows the commit-subject style. Profile-aware code | product; on the Product it splits by head branch (review/EP-* → artifact-review shape, any other branch → code shape).',
-    triggeredBy: 'PR/MR opened',
+    triggeredBy: 'PR/MR opened, pushed or its text edited (GitHub: yad-pr-text.yml)',
     visibleTo: ALL,
   },
   {
@@ -185,7 +185,7 @@ export const CHECK_GATES: CheckGate[] = [
     queue: 'pattern-gate',
     timing: 'once the PR exists',
     description: 'The PR/MR body uses the committed template (Impact & Risk block). On the Product it rejects a non-review branch that changes a Shape artifact (epics/**).',
-    triggeredBy: 'PR/MR opened',
+    triggeredBy: 'PR/MR opened, pushed or its text edited (GitHub: yad-pr-text.yml)',
     visibleTo: ALL,
   },
   {

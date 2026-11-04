@@ -672,6 +672,17 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       check(checks, 'checks:product-record-blind', 'project', 'warn', said.join('; '),
         'run `yad check --fix` (it refreshes wired files nobody changed by hand); otherwise copy the shipped gate or workflow over it from skills/yad-checks/templates/');
     }
+    // #425. A gate workflow that still starts on `edited`: its gate jobs skip that run, a skipped job counts as
+    // passed, and the newer run turns a failed gate green. The shipped copies no longer start on it; one the
+    // team changed by hand is kept by `yad update`, so name it.
+    const editRun = gateRoots.flatMap((x) => EDIT_RUN_WORKFLOWS.map((rel) => ({ ...x, rel })))
+      .filter((x) => editRunWorkflow(path.join(x.root, x.rel)))
+      .map((x) => `${x.rel} in ${x.where}`);
+    if (editRun.length) {
+      check(checks, 'checks:edit-run', 'project', 'warn',
+        `${editRun.join(', ')} ${editRun.length > 1 ? 'start' : 'starts'} on an edit of the PR text (\`edited\`) — the gate jobs skip that run, GitHub counts a skipped job as passed, so editing the title or description can turn a failed gate green`,
+        'run `yad update --overwrite-local` — it replaces every hand-edited managed file, keeping a `.yad-orig` copy of each; the PR-text checks now run from yad-pr-text.yml / yad-product-pr-text.yml. Or, by hand, remove `edited` from that file\'s `types:` and delete its `pr-title` and `pr-template` jobs: the PR-text file runs them now, and two runs under one check name let either decide');
+    }
     // E120. A wired code repo (not the Product's own git repo) whose record is not COMMITTED: its gates
     // fall back to link.md, and CI has nothing to check the Product out from. Committed, not on disk
     // (review 1): the gates read it from the default branch, and one that setup wrote and nobody
@@ -2100,6 +2111,16 @@ export function productRecordBlindGate(file) {
   let src;
   try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
   return productRecordBlindText(src);
+}
+// #425. The GitHub gate workflows that must never start on `edited` (the Product's under the old name too).
+export const EDIT_RUN_WORKFLOWS = Object.freeze(['.github/workflows/yad-checks.yml', '.github/workflows/yad-product-checks.yml', '.github/workflows/yad-hub-checks.yml']);
+// `edited` in a `types:` list, inline or as a block item; a `#` comment is prose, not a trigger.
+export const editRunText = (src) => src.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).some((l) =>
+  /^\s*types:.*(?:^|[\s[,'"])edited(?:$|[\s\],'"])/.test(l) || /^\s*-\s*(['"]?)edited\1\s*$/.test(l));
+export function editRunWorkflow(file) {
+  let src;
+  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  return editRunText(src);
 }
 // The checks workflows a connected repo may carry (one per platform).
 export const CHECK_WORKFLOWS = ['.github/workflows/yad-checks.yml', '.gitlab/ci/yad-checks.yml'];

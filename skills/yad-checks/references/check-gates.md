@@ -659,10 +659,11 @@ The gates run identically under either CI; the config just invokes the scripts w
 - **GitHub Actions** — `templates/github/yad-checks.yml` → `.github/workflows/yad-checks.yml`. The
   jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/${{ github.base_ref }}` as base
   (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup). The trigger sets
-  `types: [opened, synchronize, reopened, edited]` — the extra `edited` so a title/body correction
-  re-runs the pattern gates without a close/reopen (a plain re-run replays the frozen original payload).
-  The commit-range jobs carry `if: github.event.action != 'edited'` so a bare body/title edit only
-  re-runs `pr-title`/`pr-template`, not the whole suite. The pattern jobs
+  `types: [opened, synchronize, reopened]` — never `edited` (#425): a job skipped by `if:` counts as
+  passed, so a run started by an edit of the PR text would turn a failed gate green. The two jobs that read
+  the PR text, `pr-title` and `pr-template`, live in `templates/github/yad-pr-text.yml` →
+  `.github/workflows/yad-pr-text.yml`, which adds `edited`, so a title/body correction re-runs them
+  without a close/reopen (a plain re-run replays the frozen original payload). The pattern jobs
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
   The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) and the advisory `risk-map`
@@ -789,7 +790,9 @@ The Product is itself a repo on a platform (recorded in `.sdlc/product.json` by
 `yad-connect-repos action: detect-product`). `wire repo: product` targets `{project-root}` and uses the same
 merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "thinking" repo (it has no
 `specs/` or `package.json` build). **What yadflow wires today** (`PRODUCT_WIRING`): `commit-message`,
-`pr-title`, `pr-template` and `ledger-guard` in `yad-product-checks`, `verified-commits` in its own workflow,
+`ledger-guard` and `member-check` in `yad-product-checks`, `pr-title` and `pr-template` in
+`yad-product-pr-text` on GitHub (the only Product file that re-runs on an edit of the PR text, #425; on GitLab they
+are jobs in `yad-product-checks`), `verified-commits` in its own workflow,
 and the `yad-update-guard`. On GitHub the `ledger-guard` job is given **no** `GH_TOKEN` on purpose: its
 bot exemption checks the author text and the Verified badge, and the badge proves only that the
 *committer* signed, so any contributor who signs could claim the bot's name. Without a token the badge
@@ -830,7 +833,9 @@ title + the code task template), so a PR that changes the Product's own workflow
 `yad check --fix` installs the same `checks/*.sh` scripts plus a standalone Product workflow
 (`templates/github/yad-product-checks.yml` → `.github/workflows/yad-product-checks.yml`, or the GitLab fragment
 `templates/gitlab/yad-product-checks.gitlab-ci.yml` → `.gitlab/ci/yad-product-checks.yml` + its one include
-line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
+line), and on GitHub `templates/github/yad-product-pr-text.yml` → `.github/workflows/yad-product-pr-text.yml`
+for `pr-title` and `pr-template`. Code repos run the same three with `--profile code`: `commit-message` in
+the main `yad-checks` workflow, the other two in `yad-pr-text` (GitHub) or `yad-checks` (GitLab).
 
 ## The agent guardrail (`templates/hooks/ledger-guard.mjs` + `yad hook ledger-guard`)
 

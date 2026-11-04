@@ -1,0 +1,53 @@
+# yad-managed: yad-checks
+# Pattern gates on the PRODUCT's PR text, with `--profile product`, split by head branch:
+#   review/EP-* PRs are Shape artifact-review vehicles — a `review: <artifact> (EP-<slug>)` title
+#     and the Product artifact-review template body.
+#   every other PR is a tooling/code change to the Product itself — a Conventional-Commits title and the
+#     code task template body (same convention the code repos use).
+# Its own workflow (#425) so that an edit of the title or body re-runs these two checks and nothing else.
+# A gate job skipped by `if:` counts as passed, so a run of yad-product-checks started by an edit would
+# turn a failed gate green.
+name: yad-product-pr-text
+on:
+  pull_request:
+    # `edited` (beyond the opened/synchronize/reopened defaults) so a PR title/body correction
+    # re-runs these checks without a close/reopen — e.g. fixing a body the pr-template gate held.
+    types: [opened, synchronize, reopened, edited]
+    branches: ["**"]
+
+# Read-only: no check here writes to the repo.
+permissions:
+  contents: read
+
+jobs:
+  # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
+  # fetch-depth: 0 + the base ref give us the PR's changed paths, so the gate can reject an artifact
+  # change (epics/**) riding a non-review head past the Shape review with a plain code title.
+  pr-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_HEAD: ${{ github.event.pull_request.head.ref }}
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+      - run: |
+          changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
+          bash checks/pr-title.sh --profile product --head "$PR_HEAD" --changed "$changed" "$PR_TITLE"
+
+  pr-template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+      PR_HEAD: ${{ github.event.pull_request.head.ref }}
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+      - run: |
+          changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
+          body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
+          bash checks/pr-template.sh --profile product --head "$PR_HEAD" --changed "$changed" "$body"
