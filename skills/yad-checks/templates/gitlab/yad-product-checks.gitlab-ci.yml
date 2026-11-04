@@ -16,7 +16,40 @@
 # the Product's own jobs, and if the root already sets a top-level `image:`, GitLab rejects the whole
 # config ("image is defined in top-level and 'default:' entry"). The anchor scopes them to these jobs.
 
+#
+# Gate scripts (#426): every job runs the BASE branch's copy of checks/, never the PR's own, so a PR that
+# changes a gate script is still judged by the script already merged. A script the base does not have yet
+# (the PR that first installs the gates, or a `yad update` that adds one) runs from the PR, with a note.
+# The base's script runs with THIS file's call: keep every call one the previous release's script accepts.
+# This file itself still comes from the PR: protect checks/ and the yad CI files with a CODEOWNERS rule and
+# a required Code Owner review (docs/branch-protection.md, "Who may change the gates").
 .yad_product_mr_only:
+  before_script:
+    # #426: the base branch's copy of checks/ runs, never the MR's own (see the header).
+    - |
+      YAD_BASE="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"; YAD_CHECKS="$(mktemp -d)/checks"; export YAD_CHECKS
+      (
+        set -euo pipefail
+        b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+        rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+        git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+        t="$(git ls-tree "$b" checks)"
+        case "$t" in "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;; *) on_base=0 ;; esac
+        git ls-tree -z HEAD checks/ > "$d/.pr"
+        n=0
+        while IFS= read -r -d '' e; do
+          m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"
+          if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+          case "$m" in
+            100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+            *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$p"; continue ;;
+          esac
+          n=$((n + 1))
+          if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$p" "$YAD_BASE"; fi
+        done < "$d/.pr"
+        rm -f "$d/.pr"
+        if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s files (#426)\n' "$YAD_BASE" "$n"; fi
+      )
   image: node:${YAD_NODE_VERSION}
   variables:
     # A project/group CI/CD variable overrides this YAML value, so the Node line can be changed in project
@@ -39,7 +72,7 @@ yad-product-commit-message:
   extends: .yad_product_mr_only
   needs: []
   script:
-    - bash checks/commit-message.sh --profile product "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/commit-message.sh" --profile product "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 # GIT_DEPTH: 0 (above) gives the changed paths, so the gate can reject an artifact change (epics/**)
 # riding a non-review source branch past the Shape review with a plain code title/template.
@@ -48,7 +81,7 @@ yad-product-pr-title:
   needs: []
   script:
     - changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
-    - bash checks/pr-title.sh --profile product --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$CI_MERGE_REQUEST_TITLE"
+    - bash "$YAD_CHECKS/pr-title.sh" --profile product --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$CI_MERGE_REQUEST_TITLE"
 
 yad-product-pr-template:
   extends: .yad_product_mr_only
@@ -56,7 +89,7 @@ yad-product-pr-template:
   script:
     - changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
     - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
-    - bash checks/pr-template.sh --profile product --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$body"
+    - bash "$YAD_CHECKS/pr-template.sh" --profile product --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$body"
 
 # The gate ledger is CI-owned: reject non-bot commits to .sdlc/{state,approvals,comments,product-prs,hub-prs}.json
 # or reviews/*.md (.sdlc/contract-lock.json is artifact-side and allowed). The one other exception is a
@@ -65,7 +98,7 @@ yad-product-ledger-guard:
   extends: .yad_product_mr_only
   needs: []
   script:
-    - bash checks/ledger-guard.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/ledger-guard.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 # E131: a member file (.sdlc/members/) is changed only by the MR's own author. GitLab's predefined
 # variables do not name the MR author, so the check reads it from the API with GITLAB_TOKEN or SDLC_API_TOKEN
@@ -74,4 +107,4 @@ yad-product-member-check:
   extends: .yad_product_mr_only
   needs: []
   script:
-    - node checks/member-check.mjs "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - node "$YAD_CHECKS/member-check.mjs" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

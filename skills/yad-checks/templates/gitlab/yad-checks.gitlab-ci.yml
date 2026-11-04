@@ -19,7 +19,40 @@
 # generic name like NX_BASE can collide with one the host already computes for its own Nx jobs.
 # Only `GIT_DEPTH` stays global — the gates need the full history and a host that sets its own wins.
 
+#
+# Gate scripts (#426): every job runs the BASE branch's copy of checks/, never the PR's own, so a PR that
+# changes a gate script is still judged by the script already merged. A script the base does not have yet
+# (the PR that first installs the gates, or a `yad update` that adds one) runs from the PR, with a note.
+# The base's script runs with THIS file's call: keep every call one the previous release's script accepts.
+# This file itself still comes from the PR: protect checks/ and the yad CI files with a CODEOWNERS rule and
+# a required Code Owner review (docs/branch-protection.md, "Who may change the gates").
 .sdlc_mr_only:
+  before_script:
+    # #426: the base branch's copy of checks/ runs, never the MR's own (see the header).
+    - |
+      YAD_BASE="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"; YAD_CHECKS="$(mktemp -d)/checks"; export YAD_CHECKS
+      (
+        set -euo pipefail
+        b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+        rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+        git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+        t="$(git ls-tree "$b" checks)"
+        case "$t" in "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;; *) on_base=0 ;; esac
+        git ls-tree -z HEAD checks/ > "$d/.pr"
+        n=0
+        while IFS= read -r -d '' e; do
+          m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"
+          if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+          case "$m" in
+            100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+            *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$p"; continue ;;
+          esac
+          n=$((n + 1))
+          if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$p" "$YAD_BASE"; fi
+        done < "$d/.pr"
+        rm -f "$d/.pr"
+        if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s files (#426)\n' "$YAD_BASE" "$n"; fi
+      )
   image: node:${YAD_NODE_VERSION}
   variables:
     # A project/group CI/CD variable overrides a YAML value, so YAD_NODE_VERSION can be changed in
@@ -47,7 +80,7 @@ yad-spec-link:
   extends: .sdlc_mr_only
   needs: []
   script:
-    - bash checks/spec-link.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/spec-link.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 yad-contract-check:
   extends: .sdlc_mr_only
@@ -55,8 +88,8 @@ yad-contract-check:
   script:
     # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
     # variable is set (masked); without it the gate defers, with a WARNING unless the MR comes from a fork (#345).
-    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - bash checks/contract-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/product-checkout.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/contract-check.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 # E65/E66 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings, and the
 # approver count read from the base branch's map. It never fails the pipeline (the count is reported,
@@ -65,7 +98,7 @@ yad-risk-map:
   extends: .sdlc_mr_only
   needs: []
   script:
-    - bash checks/risk-map-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/risk-map-check.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 yad-build-test-lint:
   extends: .sdlc_mr_only
@@ -74,8 +107,8 @@ yad-build-test-lint:
   variables:
     YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
   script:
-    - bash checks/install-deps.sh
-    - bash checks/build-test-lint.sh
+    - bash "$YAD_CHECKS/install-deps.sh"
+    - bash "$YAD_CHECKS/build-test-lint.sh"
 
 # Phase 6 — feature-thread gates (lineage / seal / hotfix-debt). Build on spec-link's story->epic
 # resolution; degrade to a note when the product repo is not reachable from CI.
@@ -85,8 +118,8 @@ yad-lineage-check:
   script:
     # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
     # variable is set (masked); without it the gate defers, with a WARNING unless the MR comes from a fork (#345).
-    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - bash checks/lineage-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/product-checkout.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/lineage-check.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 yad-epic-open:
   extends: .sdlc_mr_only
@@ -94,8 +127,8 @@ yad-epic-open:
   script:
     # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
     # variable is set (masked); without it the gate defers, with a WARNING unless the MR comes from a fork (#345).
-    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - bash checks/epic-open.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/product-checkout.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/epic-open.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 yad-reconcile-debt:
   extends: .sdlc_mr_only
@@ -103,28 +136,28 @@ yad-reconcile-debt:
   script:
     # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN CI/CD
     # variable is set (masked); without it the gate defers, with a WARNING unless the MR comes from a fork (#345).
-    - bash checks/product-checkout.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - bash checks/reconcile-debt-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/product-checkout.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/reconcile-debt-check.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 # Pattern gates: commit subject + MR title + MR body all follow the convention (profile: code).
 yad-commit-message:
   extends: .sdlc_mr_only
   needs: []
   script:
-    - bash checks/commit-message.sh --profile code "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/commit-message.sh" --profile code "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 yad-pr-title:
   extends: .sdlc_mr_only
   needs: []
   script:
-    - bash checks/pr-title.sh --profile code "$CI_MERGE_REQUEST_TITLE"
+    - bash "$YAD_CHECKS/pr-title.sh" --profile code "$CI_MERGE_REQUEST_TITLE"
 
 yad-pr-template:
   extends: .sdlc_mr_only
   needs: []
   script:
     - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
-    - bash checks/pr-template.sh --profile code "$body"
+    - bash "$YAD_CHECKS/pr-template.sh" --profile code "$body"
 
 # No unverified commits: a platform-Verified signature on every commit (write access decides who authors).
 # Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot
@@ -133,4 +166,4 @@ yad-verified-commits:
   extends: .sdlc_mr_only
   needs: []
   script:
-    - bash checks/verified-commits.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash "$YAD_CHECKS/verified-commits.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

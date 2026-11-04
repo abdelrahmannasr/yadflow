@@ -678,3 +678,174 @@ test('#424: every job in every CI file yad installs has a time limit', async () 
   }
   assert.ok(seen >= 40, `read only ${seen} jobs — the reader missed some`);
 });
+
+// #426 — a gate job runs the BASE branch's copy of checks/, never the PR's own: a PR that changes a gate script
+// must not be judged by its own copy, nor read a token the job holds. The files that run gates on PR code:
+const GATE_TEMPLATES = [
+  ...['yad-checks.yml', 'yad-pr-text.yml', 'yad-product-checks.yml', 'yad-product-pr-text.yml', 'yad-verified-commits.yml']
+    .map((f) => ({ name: `skills/yad-checks/templates/github/${f}`, gitlab: false })),
+  { name: '.github/workflows/yad-verified-commits.yml', gitlab: false },
+  ...['yad-checks.gitlab-ci.yml', 'yad-product-checks.gitlab-ci.yml', 'yad-verified-commits.gitlab-ci.yml', '.gitlab-ci.yml']
+    .map((f) => ({ name: `skills/yad-checks/templates/gitlab/${f}`, gitlab: true })),
+].map((f) => ({ ...f, text: fs.readFileSync(path.join(ROOT, f.name), 'utf8') }));
+const noComments = (t) => t.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+// A YAML block scalar (`key: |` or `- |`) at `at`, as the runner hands it to the shell.
+function blockAt(lines, at) {
+  const indent = lines[at + 1].match(/^ */)[0].length;
+  const out = [];
+  for (let i = at + 1; i < lines.length && (!lines[i].trim() || lines[i].startsWith(' '.repeat(indent))); i++) out.push(lines[i].slice(indent));
+  while (out.length && !out[out.length - 1].trim()) out.pop();
+  return `${out.join('\n')}\n`;
+}
+const BASE_STEP = '- name: Gate scripts from the base branch (#426)';
+function githubStep(text) {
+  const lines = text.split('\n');
+  const at = lines.findIndex((l) => l.trim() === BASE_STEP);
+  assert.ok(at >= 0, 'no base-copy step');
+  const run = lines.findIndex((l, i) => i > at && /^\s+run: \|$/.test(l));
+  return blockAt(lines, run);
+}
+function gitlabStep(text) {
+  const lines = text.split('\n');
+  const at = lines.findIndex((l) => /^\s+before_script:$/.test(l));
+  const dash = lines.findIndex((l, i) => i > at && /^\s+- \|$/.test(l));
+  return blockAt(lines, dash);
+}
+// The `( … )` the two platforms share, word for word.
+const coreOf = (script) => script.slice(script.indexOf('(\n'), script.lastIndexOf('\n)\n') + 3);
+
+test('#426: every gate call runs "$YAD_CHECKS/…", the base branch\'s copy, set up by one shared step; no checkout keeps credentials', () => {
+  const cores = new Set();
+  for (const { name, text, gitlab } of GATE_TEMPLATES) {
+    const code = noComments(text);
+    assert.doesNotMatch(code, /\b(?:bash|node|sh)\s+\.?\/?checks\//, `${name}: a gate call reads checks/ from the PR's tree`);
+    assert.match(code, /(?:bash|node) "\$YAD_CHECKS\/[\w.-]+"/, `${name}: no gate call`);
+    if (gitlab) {
+      // Once, on the template every job extends (or the one job), so no job runs a gate without it.
+      assert.equal((code.match(/^\s+before_script:$/gm) || []).length, 1, name);
+      const s = gitlabStep(text);
+      assert.match(s, /^YAD_BASE="\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"; YAD_CHECKS="\$\(mktemp -d\)\/checks"; export YAD_CHECKS\n/, name);
+      cores.add(coreOf(s));
+      continue;
+    }
+    // Every job: checkout without credentials, then the step, then the gate.
+    const body = text.slice(text.search(/^jobs:$/m));
+    const jobs = body.split(/^(?= {2}[\w-]+:\s*$)/m).slice(1);
+    assert.ok(jobs.length, name);
+    for (const j of jobs) {
+      const job = `${name} ${j.split(':')[0].trim()}`;
+      const co = j.indexOf('actions/checkout@');
+      const step = j.indexOf(BASE_STEP);
+      const gate = j.indexOf('"$YAD_CHECKS/');
+      assert.ok(co >= 0 && co < step && step < gate, `${job}: checkout, then the base-copy step, then the gate`);
+      assert.match(j.slice(co, step), /persist-credentials: false/, `${job}: the checkout keeps no credentials`);
+      assert.match(j.slice(co, step), /fetch-depth: 0/, `${job}: the base branch must be in the checkout`);
+      assert.equal(j.split(BASE_STEP).length, 2, `${job}: one base-copy step`);
+      const s = githubStep(j);
+      assert.match(s, /^YAD_CHECKS="\$RUNNER_TEMP\/yad-base-checks\/checks"\n/, job);
+      assert.match(s, /\necho "YAD_CHECKS=\$YAD_CHECKS" >> "\$GITHUB_ENV"\n$/, job);
+      assert.match(j, /env: \{ YAD_BASE: "\$\{\{ github\.base_ref \}\}" \}/, job);
+      cores.add(coreOf(s));
+    }
+    assert.doesNotMatch(code, /filter:\s*blob:none/, `${name}: a partial clone leaves out the base's changed checks/`);
+  }
+  assert.equal(cores.size, 1, 'the base-copy step is word for word the same everywhere');
+});
+
+// The upgrade PR: the base's (older) script runs with the new workflow's call. So a call may only use what the
+// previous release's script already accepts. A change to this list needs that check, by hand, first.
+test('#426: the gate calls are the ones the previous release\'s scripts accept', () => {
+  const calls = new Set();
+  for (const { text } of GATE_TEMPLATES) {
+    for (const m of noComments(text).matchAll(/(bash|node) "\$YAD_CHECKS\/([\w.-]+)"([^\n]*)/g)) {
+      calls.add(`${m[2]} ${[...m[3].matchAll(/(?:^|\s)(--[\w-]+)/g)].map((f) => f[1]).join(' ')}`.trim());
+    }
+  }
+  assert.deepEqual([...calls].sort(), [
+    'build-test-lint.sh', 'commit-message.sh --profile', 'contract-check.sh', 'epic-open.sh', 'install-deps.sh',
+    'ledger-guard.sh', 'lineage-check.sh', 'member-check.mjs', 'pr-template.sh --profile',
+    'pr-template.sh --profile --head --changed', 'pr-title.sh --profile', 'pr-title.sh --profile --head --changed',
+    'product-checkout.sh', 'reconcile-debt-check.sh', 'risk-map-check.sh', 'spec-link.sh', 'verified-commits.sh',
+  ], 'a new script or flag in a gate call: the base branch\'s copy from the previous release runs it on the upgrade PR — make sure that copy accepts it');
+});
+
+// The step itself, run as the runner runs it, in a scratch repo: base `main` and a PR branch.
+function stepRepo({ baseChecks = true } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-426-'));
+  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+  const O = path.join(T, 'origin');
+  fs.mkdirSync(O);
+  git(O, 'init', '-q', '-b', 'main');
+  if (baseChecks) {
+    fs.mkdirSync(path.join(O, 'checks'));
+    fs.writeFileSync(path.join(O, 'checks/a.sh'), 'echo base-a\n');
+  } else fs.writeFileSync(path.join(O, 'README'), 'x\n');
+  git(O, 'add', '-A'); git(O, 'commit', '-qm', 'base');
+  const P = path.join(T, 'pr');
+  git(T, 'clone', '-q', O, P);
+  git(P, 'switch', '-qc', 'feat');
+  fs.mkdirSync(path.join(P, 'checks'), { recursive: true });
+  fs.writeFileSync(path.join(P, 'checks/a.sh'), 'echo pr-a\n');
+  fs.writeFileSync(path.join(P, 'checks/b c.sh'), 'echo pr-b\n');
+  fs.writeFileSync(path.join(P, 'checks/x.sh'), 'echo pr-x\n', { mode: 0o755 });
+  fs.symlinkSync(path.join(T, 'secret'), path.join(P, 'checks/link.sh'));
+  fs.writeFileSync(path.join(T, 'secret'), 'echo leaked\n');
+  git(P, 'add', '-A'); git(P, 'commit', '-qm', 'pr');
+  return { T, P, done: () => fs.rmSync(T, { recursive: true, force: true }) };
+}
+const env = (extra) => ({ ...process.env, GIT_CONFIG_NOSYSTEM: '1', ...extra });
+function runGithubStep(P, T, base = 'main') {
+  const step = githubStep(fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8'));
+  const ghenv = path.join(T, 'ghenv');
+  const r = spawnSync('bash', ['-e', '-c', step], { cwd: P, encoding: 'utf8', env: env({ RUNNER_TEMP: path.join(T, 'rt'), GITHUB_ENV: ghenv, YAD_BASE: base }) });
+  const dir = r.status === 0 ? fs.readFileSync(ghenv, 'utf8').match(/^YAD_CHECKS=(.*)$/m)[1] : null;
+  return { ...r, dir };
+}
+const runIn = (dir, f) => execFileSync('bash', [path.join(dir, f)], { encoding: 'utf8' }).trim();
+
+test('#426 step (GitHub): the base copy runs; a script the base lacks runs from the PR with a note; a link is never followed', () => {
+  const { T, P, done } = stepRepo();
+  try {
+    const r = runGithubStep(P, T);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(runIn(r.dir, 'a.sh'), 'base-a', 'the PR changed a.sh — the base copy still runs');
+    assert.equal(runIn(r.dir, 'b c.sh'), 'pr-b');
+    assert.match(r.stdout, /note: checks\/b c\.sh is not on main yet, so the copy from this PR runs \(#426\)/);
+    assert.ok(fs.statSync(path.join(r.dir, 'x.sh')).mode & 0o100, 'the execute bit is kept');
+    assert.ok(!fs.existsSync(path.join(r.dir, 'link.sh')) && !fs.lstatSync(r.dir).isSymbolicLink(), 'the link is not copied');
+    assert.match(r.stdout, /note: checks\/link\.sh in this PR is not a plain file, so it is not run \(#426\)/);
+    assert.doesNotMatch(r.stdout, /a\.sh is not on/);
+    assert.ok(!r.dir.startsWith(P), 'the copy is outside the work tree');
+  } finally { done(); }
+});
+
+test('#426 step: a base with no checks/ runs the PR\'s copies with one note; an unknown base fails, never falls back', () => {
+  const a = stepRepo({ baseChecks: false });
+  try {
+    const r = runGithubStep(a.P, a.T);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(runIn(r.dir, 'a.sh'), 'pr-a');
+    assert.match(r.stdout, /^note: main has no checks\/ folder yet, so the gate scripts from this PR run: 3 files \(#426\)$/m);
+    assert.doesNotMatch(r.stdout, /is not on main yet/, 'one note, not one per file');
+    const bad = runGithubStep(a.P, a.T, 'nope');
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stderr, /FAIL \[base-checks\]: origin\/nope is not in this checkout/);
+    assert.ok(!fs.existsSync(path.join(a.T, 'ghenv')) || !/nope/.test(fs.readFileSync(path.join(a.T, 'ghenv'), 'utf8')));
+  } finally { a.done(); }
+});
+
+test('#426 step (GitLab): the before_script exports YAD_CHECKS to the job\'s script, with the same rules', () => {
+  const { T, P, done } = stepRepo();
+  try {
+    for (const f of ['yad-checks.gitlab-ci.yml', 'yad-product-checks.gitlab-ci.yml', 'yad-verified-commits.gitlab-ci.yml', '.gitlab-ci.yml']) {
+      const step = gitlabStep(fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab', f), 'utf8'));
+      // GitLab runs before_script and script in one shell, with errexit on.
+      const r = spawnSync('bash', ['-c', `set -eo pipefail\n${step}\nbash "$YAD_CHECKS/a.sh"; bash "$YAD_CHECKS/b c.sh"`], { cwd: P, encoding: 'utf8', env: env({ CI_MERGE_REQUEST_TARGET_BRANCH_NAME: 'main', TMPDIR: T }) });
+      assert.equal(r.status, 0, `${f}: ${r.stderr}`);
+      assert.match(r.stdout, /^note: checks\/b c\.sh is not on main yet, so the copy from this PR runs \(#426\)\nnote: checks\/link\.sh in this PR is not a plain file, so it is not run \(#426\)\nnote: checks\/x\.sh is not on main yet, so the copy from this PR runs \(#426\)\nbase-a\npr-b\n$/, f);
+      const bad = spawnSync('bash', ['-c', `set -eo pipefail\n${step}\necho ran`], { cwd: P, encoding: 'utf8', env: env({ CI_MERGE_REQUEST_TARGET_BRANCH_NAME: 'nope', TMPDIR: T }) });
+      assert.notEqual(bad.status, 0, f);
+      assert.doesNotMatch(bad.stdout, /ran/, `${f}: the job stops`);
+    }
+  } finally { done(); }
+});

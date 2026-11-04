@@ -661,13 +661,15 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
   const gitlabStandalone = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/.gitlab-ci.yml'), 'utf8');
-  assert.match(github, /filter:\s*blob:none/, 'GitHub checkout avoids materializing unrelated history blobs');
+  // #426: no partial clone — the base-copy step reads the base's checks/, which a blob-less clone leaves out
+  // when the PR changed them, and no credentials are kept to fetch them later.
+  assert.doesNotMatch(github.replace(/^\s*#.*$/gm, ''), /filter:\s*blob:none/, 'no partial clone of the PR');
   assert.match(github, /NX_BASE:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(github, /NX_HEAD:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(github, /YAD_NODE_VERSION:\s*\$\{\{ vars\.YAD_NODE_VERSION \|\| '22' \}\}/);
   assert.match(github, /node-version:\s*\$\{\{ env\.YAD_NODE_VERSION \}\}/);
   assert.doesNotMatch(github, /node-version:\s*["']?20/, 'GitHub build-test-lint must not hard-pin Node 20');
-  assert.match(github, /bash checks\/install-deps\.sh/);
+  assert.match(github, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(github, /run:\s*npm ci/, 'GitHub must not override the consumer package manager');
   // Dependency caching survived the move off setup-node's npm-only `cache:` and now covers pnpm too.
   const cacheStep = github.match(/uses: actions\/cache@[0-9a-f]{40} # v4\.3\.0\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
@@ -676,20 +678,20 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.match(cacheStep, /\$\{\{ env\.COREPACK_HOME \}\}/, 'corepack home cached too');
   assert.match(github, /COREPACK_HOME:\s*\$\{\{ github\.workspace \}\}\/\.corepack-cache/, 'corepack home pinned to a cacheable path');
   assert.match(cacheStep, /hashFiles\('package-lock\.json', 'npm-shrinkwrap\.json', 'pnpm-lock\.yaml', 'package\.json'\)/, 'keyed on the lockfiles and package.json');
-  assert.ok(github.indexOf('actions/cache@') < github.indexOf('bash checks/install-deps.sh'), 'cache restored before install');
+  assert.ok(github.indexOf('actions/cache@') < github.indexOf('bash "$YAD_CHECKS/install-deps.sh"'), 'cache restored before install');
   assert.match(gitlab, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
   assert.match(gitlab, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
   assert.match(gitlab, /YAD_NODE_VERSION:\s*["']22["']/);
   assert.match(gitlab, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
   assert.doesNotMatch(gitlab, /image:\s*node:20/, 'GitLab build-test-lint must not hard-pin Node 20');
-  assert.match(gitlab, /bash checks\/install-deps\.sh/);
+  assert.match(gitlab, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(gitlab, /^\s*- npm ci/m, 'GitLab must use the same package-manager-aware installer');
   assert.match(gitlabStandalone, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
   assert.match(gitlabStandalone, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
   assert.match(gitlabStandalone, /YAD_NODE_VERSION:\s*["']22["']/);
   assert.match(gitlabStandalone, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
   assert.doesNotMatch(gitlabStandalone, /image:\s*node:20/, 'standalone GitLab must not hard-pin Node 20');
-  assert.match(gitlabStandalone, /bash checks\/install-deps\.sh/);
+  assert.match(gitlabStandalone, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(gitlabStandalone, /^\s*- npm ci/m, 'standalone GitLab must use the package-manager-aware installer');
   assert.match(gitlabStandalone, /YAD_TEST_MAX_WORKERS:\s*["']2["']/);
 

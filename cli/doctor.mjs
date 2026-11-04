@@ -656,12 +656,13 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     const blindGates = gateRoots.flatMap((x) => PRODUCT_PATH_GATES.map((rel) => ({ ...x, rel })))
       .filter((x) => productRecordBlindGate(path.join(x.root, x.rel)))
       .map((x) => `${x.rel} in ${x.where}`);
-    // A `#` line naming the script is prose, not a step that runs it (review 1).
+    // A `#` line naming the script is prose, not a step that runs it (review 1). Since #426 the shipped
+    // workflow runs the base branch's copy, `"$YAD_CHECKS/product-checkout.sh"`; an older one, `checks/…`.
     const blindFlows = gateRoots.filter((x) => x.where !== 'the Product').flatMap((x) => CHECK_WORKFLOWS.map((rel) => ({ ...x, rel })))
       .filter((x) => {
         let src;
         try { src = fs.readFileSync(path.join(x.root, x.rel), 'utf8'); } catch { return false; }
-        return !src.split('\n').some((l) => !/^\s*#/.test(l) && /checks\/product-checkout\.sh/.test(l));
+        return !src.split('\n').some((l) => !/^\s*#/.test(l) && /(?:\bchecks|\$\{?YAD_CHECKS\}?)\/product-checkout\.sh/.test(l));
       })
       .map((x) => `${x.rel} in ${x.where}`);
     const said = [

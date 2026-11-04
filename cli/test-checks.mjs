@@ -2741,8 +2741,8 @@ test('the shipped workflows run product-checkout before each Product-reading gat
   const gh = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gl = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
   for (const gate of ['contract-check', 'lineage-check', 'epic-open', 'reconcile-debt-check']) {
-    assert.match(gh, new RegExp(`- run: bash checks/product-checkout\\.sh "origin/\\$\\{\\{ github\\.base_ref \\}\\}"\\n {8}env: \\{ YAD_PRODUCT_TOKEN: "\\$\\{\\{ secrets\\.YAD_PRODUCT_TOKEN \\}\\}", YAD_PR_FORK: "\\$\\{\\{ github\\.event\\.pull_request\\.head\\.repo\\.full_name != github\\.repository \\}\\}" \\}\\n {6}- run: bash checks/${gate}\\.sh`), gate);
-    assert.match(gl, new RegExp(`- bash checks/product-checkout\\.sh "origin/\\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"\\n {4}- bash checks/${gate}\\.sh`), gate);
+    assert.match(gh, new RegExp(`- run: bash "\\$YAD_CHECKS/product-checkout\\.sh" "origin/\\$\\{\\{ github\\.base_ref \\}\\}"\\n {8}env: \\{ YAD_PRODUCT_TOKEN: "\\$\\{\\{ secrets\\.YAD_PRODUCT_TOKEN \\}\\}", YAD_PR_FORK: "\\$\\{\\{ github\\.event\\.pull_request\\.head\\.repo\\.full_name != github\\.repository \\}\\}" \\}\\n {6}- run: bash "\\$YAD_CHECKS/${gate}\\.sh"`), gate);
+    assert.match(gl, new RegExp(`- bash "\\$YAD_CHECKS/product-checkout\\.sh" "origin/\\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"\\n {4}- bash "\\$YAD_CHECKS/${gate}\\.sh"`), gate);
   }
 });
 
