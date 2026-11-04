@@ -681,7 +681,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     if (editRun.length) {
       check(checks, 'checks:edit-run', 'project', 'warn',
         `${editRun.join(', ')} ${editRun.length > 1 ? 'start' : 'starts'} on an edit of the PR text (\`edited\`) — the gate jobs skip that run, GitHub counts a skipped job as passed, so editing the title or description can turn a failed gate green`,
-        'run `yad update --overwrite-local` (it replaces a hand-edited managed file, keeping a `.yad-orig` copy; the PR text checks now run from yad-pr-text.yml / yad-product-pr-text.yml) — or remove `edited` from that file\'s `types:` by hand');
+        'run `yad update --overwrite-local` — it replaces every hand-edited managed file, keeping a `.yad-orig` copy of each; the PR-text checks now run from yad-pr-text.yml / yad-product-pr-text.yml. Or, by hand, remove `edited` from that file\'s `types:` and delete its `pr-title` and `pr-template` jobs: the PR-text file runs them now, and two runs under one check name let either decide');
     }
     // E120. A wired code repo (not the Product's own git repo) whose record is not COMMITTED: its gates
     // fall back to link.md, and CI has nothing to check the Product out from. Committed, not on disk

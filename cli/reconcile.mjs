@@ -218,7 +218,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // `product` is on disk or this run installs one — the same test `yad doctor` makes (review 2).
   const productRel = (p) => path.relative(root, p).split(path.sep).join('/');
   const installsProduct = actions.filter((a) => a.managed && a.managed.root === root
-    && /(^|\/)yad-product-checks\.yml$/.test(productRel(a.managed.dest))
+    && /(^|\/)yad-product-(checks|pr-text)\.yml$/.test(productRel(a.managed.dest))
     && a.status !== 'ok' && a.status !== 'modified' && (scope === 'all' || a.status !== 'missing'))
     .map((a) => productRel(a.managed.dest));
   const passing = [...new Set([...workflowsPassingProduct(root), ...installsProduct])];

@@ -412,7 +412,7 @@ export async function runChecks(dir, opts = {}) {
   const results = [];
   let record = null;
   try {
-    // The changed paths, for the Product's pr-title/pr-template split, built as yad-product-checks.yml does.
+    // The changed paths, for the Product's pr-title/pr-template split, built as yad-product-pr-text.yml does.
     const changedFile = path.join(scratch, 'changed');
     if (isProduct) {
       const d = git(repoRoot, ['-c', 'core.quotePath=false', 'diff', '--no-renames', '--name-only', `${base}...HEAD`]);
