@@ -762,6 +762,8 @@ export const PRODUCT_PROFILE_FIX = 'add `product` to its `case "$PROFILE" in` li
 // The Product's checks workflows, under the new name and the old (E123): an edited old one is kept, and runs.
 export const PRODUCT_CHECK_WORKFLOWS = Object.freeze([
   '.github/workflows/yad-product-checks.yml', '.gitlab/ci/yad-product-checks.yml',
+  // pr-title + pr-template moved here on GitHub (#425), with their `--no-renames` diff lines.
+  '.github/workflows/yad-product-pr-text.yml',
   '.github/workflows/yad-hub-checks.yml', '.gitlab/ci/yad-hub-checks.yml',
 ]);
 // Those of them on disk that pass `--profile product` to the gates.

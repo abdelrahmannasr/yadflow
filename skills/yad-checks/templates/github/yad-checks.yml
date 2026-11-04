@@ -6,10 +6,11 @@
 name: yad-checks
 on:
   pull_request:
-    # `edited` (beyond the opened/synchronize/reopened defaults) so a PR title/body correction
-    # re-runs the pattern gates without a close/reopen — e.g. fixing a body the pr-template gate held.
-    # The commit-range jobs below skip a bare `edited` (only pr-title/pr-template need to re-check).
-    types: [opened, synchronize, reopened, edited]
+    # Never `edited` (#425). A job skipped by `if:` counts as passed, so a run started by an edit of the PR
+    # text would show every gate here as passed on the same commit — a failed gate could turn green. The two
+    # checks that read the PR text, pr-title and pr-template, run from yad-pr-text.yml, which does start on
+    # an edit.
+    types: [opened, synchronize, reopened]
     branches: ["**"]
 
 # Read-only by default: no gate here writes to the repo. A job that needs more asks for it itself.
@@ -20,7 +21,6 @@ jobs:
   spec-link:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -29,7 +29,6 @@ jobs:
   contract-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -45,7 +44,6 @@ jobs:
   risk-map:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -54,7 +52,6 @@ jobs:
   build-test-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.event.action != 'edited'
     env:
       YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
       YAD_NODE_VERSION: ${{ vars.YAD_NODE_VERSION || '22' }} # repo variable; a current 22 or 24 line (Node 25+ has no Corepack; 18 and 20 are end of life)
@@ -93,7 +90,6 @@ jobs:
   lineage-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -106,7 +102,6 @@ jobs:
   epic-open:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -119,7 +114,6 @@ jobs:
   reconcile-debt:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -129,44 +123,20 @@ jobs:
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
       - run: bash checks/reconcile-debt-check.sh "origin/${{ github.base_ref }}"
 
-  # Pattern gates: commit subject + PR title + PR body all follow the convention (profile: code).
-  # commit-message reads the commit range, not the title/body — skip it on a bare `edited` event.
+  # Pattern gate: every commit subject follows the convention (profile: code). The PR title and body are
+  # checked by yad-pr-text.yml.
   commit-message:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
       - run: bash checks/commit-message.sh --profile code "origin/${{ github.base_ref }}"
 
-  # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
-  pr-title:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      PR_TITLE: ${{ github.event.pull_request.title }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: bash checks/pr-title.sh --profile code "$PR_TITLE"
-
-  pr-template:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      PR_BODY: ${{ github.event.pull_request.body }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: |
-          body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
-          bash checks/pr-template.sh --profile code "$body"
-
   # No unverified commits: a platform-Verified signature on every commit (write access decides who authors).
-  # Reads the commit range, not the title/body — skip it on a bare `edited` event.
   verified-commits:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.action != 'edited'
     permissions:
       contents: read
     env:

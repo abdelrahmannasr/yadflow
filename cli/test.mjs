@@ -594,28 +594,67 @@ test('issue #134: a malformed top-level version stamp gets an accurate read-only
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// #125 — a PR body/title fix must re-run the pattern gates without a close/reopen. The code-repo
-// checks workflow needs the `edited` pull_request type; the commit-range jobs skip a bare edit.
-test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs skip it, pattern gates do not', () => {
-  const yml = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
-  assert.match(yml, /types:\s*\[opened,\s*synchronize,\s*reopened,\s*edited\]/, 'trigger carries the edited type');
-  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
-  // Extract a single job's YAML block: from its `  <name>:` header up to the next top-level job key.
-  const jobBlock = (name) => {
-    const start = yml.indexOf(`\n  ${name}:\n`);
-    const rest = yml.slice(start + 1);
-    const end = rest.search(/\n {2}\w[\w-]*:\n/);
-    return end >= 0 ? rest.slice(0, end) : rest;
-  };
-  const SKIP_GUARD = /if:\s*github\.event\.action != 'edited'/;
-  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
-  for (const gate of ['pr-title', 'pr-template']) {
-    assert.doesNotMatch(jobBlock(gate), SKIP_GUARD, `${gate} must re-run on an edit (no skip guard)`);
+// #125 — a PR body/title fix must re-run the pattern gates without a close/reopen, so pr-title and
+// pr-template start on `edited`. #425 — but no gate job may: a job skipped by `if:` counts as passed, so a
+// run started by an edit would turn a failed gate green. So the two PR-text checks have their own workflow.
+test('#425: only the PR-text workflows start on `edited`; they hold pr-title and pr-template, and nothing skips on an edit', async () => {
+  const { wiringFor, PRODUCT_WIRING } = await import('./manifest.mjs');
+  const DIR = path.join(ROOT, 'skills/yad-checks/templates/github');
+  const TEXT = { 'yad-pr-text.yml': 'code', 'yad-product-pr-text.yml': 'product' };
+  const files = [...fs.readdirSync(DIR).map((f) => path.join(DIR, f)), path.join(ROOT, 'skills/yad-product-bridge/templates/github/yad-gate-sync.yml')];
+  let seen = 0;
+  for (const file of files) {
+    const yml = fs.readFileSync(file, 'utf8');
+    const name = path.basename(file);
+    const trigger = yml.match(/^ {4}types:\s*\[([^\]]*)\]/m)?.[1].split(',').map((t) => t.trim());
+    assert.doesNotMatch(yml, /github\.event\.action/, `${name}: no job decides on the event action`);
+    if (TEXT[name]) {
+      seen++;
+      assert.deepEqual(trigger, ['opened', 'synchronize', 'reopened', 'edited'], `${name}: re-runs on an edit`);
+      assert.deepEqual([...yml.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]), ['pr-title', 'pr-template'], `${name}: the PR-text checks, and only those`);
+      assert.match(yml, new RegExp(`--profile ${TEXT[name]} `), `${name}: its profile`);
+      assert.match(yml, /^# yad-managed: yad-checks$/m, `${name}: owned by yad-checks`);
+    } else {
+      assert.ok(!trigger?.includes('edited'), `${name}: never starts on an edit`);
+      assert.doesNotMatch(yml, /^ {2}pr-(title|template):$/m, `${name}: the PR-text checks moved out`);
+    }
   }
-  // commit-range jobs must skip a bare edit
-  for (const job of ['spec-link', 'contract-check', 'build-test-lint', 'commit-message', 'verified-commits']) {
-    assert.match(jobBlock(job), SKIP_GUARD, `${job} must skip a bare edited event`);
-  }
+  assert.equal(seen, 2);
+  // Both are installed: one on code repos, one on the Product.
+  assert.ok(wiringFor('github').some((w) => w.dest === '.github/workflows/yad-pr-text.yml'));
+  assert.ok(PRODUCT_WIRING.github.some((w) => w.dest === '.github/workflows/yad-product-pr-text.yml'));
+});
+
+test('#425 doctor: a gate workflow that still starts on `edited` is checks:edit-run', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, editRunText } = await import('./doctor.mjs');
+    const hits = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:edit-run');
+    const shipped = (rel) => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github', rel), 'utf8');
+    const put = (dir, rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+    assert.deepEqual(hits(), [], 'no copies, nothing to say');
+    put(backend, '.github/workflows/yad-checks.yml', shipped('yad-checks.yml'));
+    put(backend, '.github/workflows/yad-pr-text.yml', shipped('yad-pr-text.yml'));
+    put(T, '.github/workflows/yad-product-checks.yml', shipped('yad-product-checks.yml'));
+    put(T, '.github/workflows/yad-product-pr-text.yml', shipped('yad-product-pr-text.yml'));
+    assert.deepEqual(hits(), [], 'the shipped workflows are fine — the PR-text ones are meant to start on an edit');
+    // A copy the team kept from before #425 (yad update leaves a hand-edited file alone).
+    const old = (rel) => shipped(rel).replace('types: [opened, synchronize, reopened]', 'types: [opened, synchronize, reopened, edited]');
+    put(backend, '.github/workflows/yad-checks.yml', old('yad-checks.yml'));
+    let hit = hits();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^\.github\/workflows\/yad-checks\.yml in backend starts on an edit of the PR text \(`edited`\) — /);
+    assert.match(hit[0].hint, /yad update --overwrite-local/);
+    put(T, '.github/workflows/yad-hub-checks.yml', old('yad-product-checks.yml'));
+    hit = hits();
+    assert.match(hit[0].message, /^\.github\/workflows\/yad-hub-checks\.yml in the Product, \.github\/workflows\/yad-checks\.yml in backend start on /);
+    // What counts as the trigger: a `types:` list, inline or as a block; a comment never does.
+    assert.equal(editRunText('    types:\n      - opened\n      - "edited"\n'), true);
+    assert.equal(editRunText('    types: [opened]  # not edited\n    # types: [edited]\n'), false);
+    assert.equal(editRunText("    if: github.event.action != 'edited'\n"), false);
+    assert.equal(editRunText('    types: [unedited]\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('yad-checks CI: dependency install follows package.json and Nx receives the exact PR range', () => {

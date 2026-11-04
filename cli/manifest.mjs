@@ -492,6 +492,8 @@ export const REPO_WIRING = {
   ],
   github: [
     { src: 'skills/yad-checks/templates/github/yad-checks.yml', dest: '.github/workflows/yad-checks.yml' },
+    // pr-title + pr-template, the only checks an edit of the PR text re-runs (#425).
+    { src: 'skills/yad-checks/templates/github/yad-pr-text.yml', dest: '.github/workflows/yad-pr-text.yml' },
     // Integrity gate for direct-to-default pushes (`yad update --push`): verified-commits + commit-message.
     { src: 'skills/yad-checks/templates/github/yad-update-guard.yml', dest: '.github/workflows/yad-update-guard.yml' },
     { src: 'skills/yad-pr-template/templates/github/pull_request_template.md', dest: '.github/pull_request_template.md' },
@@ -549,6 +551,7 @@ export const PRODUCT_WIRING = {
     { src: 'skills/yad-product-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/github/yad-verified-commits.yml', dest: '.github/workflows/yad-verified-commits.yml' },
     { src: 'skills/yad-checks/templates/github/yad-product-checks.yml', dest: '.github/workflows/yad-product-checks.yml' },
+    { src: 'skills/yad-checks/templates/github/yad-product-pr-text.yml', dest: '.github/workflows/yad-product-pr-text.yml' },
     // Integrity gate for the Product's own direct-to-default pushes (`yad update --push`; the machine-
     // state `yad checkpoint`/`gate ci` commits carry [skip ci] and are intentionally not re-checked).
     { src: 'skills/yad-checks/templates/github/yad-update-guard.yml', dest: '.github/workflows/yad-update-guard.yml' },
@@ -574,8 +577,9 @@ export const PROTECTION_GUIDE_URL = 'https://github.com/abdelrahmannasr/yadflow/
 // check is named after its job (the jobs set no `name:`), on GitLab a job is the job's key. `yad ci check`
 // reads the GitHub list against the branch's required checks; on GitLab "Pipelines must succeed" covers
 // every job, so the list there is for the docs only. `productVerified` is the Product's verified-commits
-// workflow, required when that file is there. Tests hold this equal to the templates' jobs and to the table
-// in docs/branch-protection.md.
+// workflow, required when that file is there. On GitHub, pr-title and pr-template run from their own file
+// (yad-pr-text.yml / yad-product-pr-text.yml, #425). Tests hold each list equal to the jobs of its templates
+// and to the table in docs/branch-protection.md.
 export const REQUIRED_CHECKS = Object.freeze({
   github: Object.freeze({
     product: Object.freeze(['commit-message', 'pr-title', 'pr-template', 'ledger-guard', 'member-check']),

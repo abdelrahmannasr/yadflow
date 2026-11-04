@@ -129,8 +129,10 @@ two gates over the pushed commits: [verified-commits](#verified-commits) and
 [commit-message](#commit-message). This covers `yad update --push`, which pushes without a pull request.
 
 **When the PR text is edited** (title or description only), GitHub runs only `pr-title` and
-`pr-template` again. Every other job skips that run, because no commit changed. On GitLab, editing a
-merge request's text does not start a pipeline.
+`pr-template` again. They have their own workflow file for this: `yad-pr-text.yml` on a code repo,
+`yad-product-pr-text.yml` on the Product. The gate workflows do not start on an edit at all (#425). If
+they did, every gate job would skip that run, and GitHub counts a skipped job as passed, so a failed
+gate could turn green. On GitLab, editing a merge request's text does not start a pipeline.
 
 ## Run the gates on your machine
 

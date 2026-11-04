@@ -67,15 +67,19 @@ them from the list it offers.
 
 | Repo | Workflow file | Checks |
 |---|---|---|
-| Product | `.github/workflows/yad-product-checks.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard`, `member-check` |
+| Product | `.github/workflows/yad-product-checks.yml` and `.github/workflows/yad-product-pr-text.yml` | `commit-message`, `pr-title`, `pr-template`, `ledger-guard`, `member-check` |
 | Product, when the file is there | `.github/workflows/yad-verified-commits.yml` | `verified-commits` |
-| Each code repo | `.github/workflows/yad-checks.yml` | `spec-link`, `contract-check`, `risk-map`, `build-test-lint`, `lineage-check`, `epic-open`, `reconcile-debt`, `commit-message`, `pr-title`, `pr-template`, `verified-commits` |
+| Each code repo | `.github/workflows/yad-checks.yml` and `.github/workflows/yad-pr-text.yml` | `spec-link`, `contract-check`, `risk-map`, `build-test-lint`, `lineage-check`, `epic-open`, `reconcile-debt`, `commit-message`, `pr-title`, `pr-template`, `verified-commits` |
 
 `member-check` (E131) must be required too: the active-people count trusts a member file only because
 this check judged it, and a check that is not required lets a refused file merge with a red cross.
 
-Some of these jobs skip themselves on a bare title or description edit. GitHub counts a skipped job as
-passed, so requiring them does not block that edit.
+`pr-title` and `pr-template` run from their own file (`yad-pr-text.yml`, or `yad-product-pr-text.yml` on
+the Product), the only one that starts again when someone edits the PR title or description. The gate
+files never start on an edit (#425). Older copies did, and every gate job skipped that run. GitHub
+counts a skipped job as passed, so an edit could turn a failed gate green. A gate file you changed by
+hand is kept by `yad update` and may still start on an edit: `yad doctor` warns about it
+(`checks:edit-run`).
 
 Before 4.0 the Product's workflow file was `.github/workflows/yad-hub-checks.yml`, with `name:
 yad-hub-checks`; `yad update` renames it `yad-product-checks`. The job names above did not change, so
