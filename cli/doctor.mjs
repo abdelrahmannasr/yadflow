@@ -19,7 +19,7 @@ import { judgeRepo, runnable, shown as forTerminal } from './workspace.mjs';
 import { cliFor, hostFromGitUrl, ambiguousLegacyNames, plainHost, detectPlatform } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
-import { checkCodeowners, codeownersFindings } from './codeowners-command.mjs';
+import { checkCodeowners, codeownersFindings, unguardedHint, unguardedWords } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, shown } from './protection.mjs';
 import { readTokenPlacement, tokenLine, readExpiringProductTokens, TOKEN_NAME } from './product-token.mjs';
@@ -2599,6 +2599,8 @@ export function riskMapChecks(checks, root) {
 // a guess, and it prints only in `yad codeowners check`, never here. Advisory — a warning, never a
 // failure: CODEOWNERS is a hint (Part 3). No file at all is a note; a repo with no review rules at all is
 // E70's to warn about. A repo not on disk, or not a git repo, is the repos check's to report.
+// #426: gate files (checks/, yad's CI files) that no line gives an owner are a warning too, with or without a
+// CODEOWNERS file — on each code repo and on the Product, which runs its own gates. The hint gives the lines.
 export function codeownersChecks(checks, root) {
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const repos = Array.isArray(registry?.repos) ? registry.repos : [];
@@ -2612,7 +2614,11 @@ export function codeownersChecks(checks, root) {
     const nm = forTerminal(repo.name);   // printed as in riskMapChecks (E81 review 11)
     const more = `\`yad codeowners check ${asArg(repo.name)}\``;
     if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS could not be checked — ${forTerminal(r.unknown)}`, more); continue; }
-    if (r.none) { check(checks, id, 'codeowners', 'ok', `${nm}: no CODEOWNERS — nothing to check`); continue; }
+    if (r.none && !r.unguarded) { check(checks, id, 'codeowners', 'ok', `${nm}: no CODEOWNERS — nothing to check`); continue; }
+    if (r.none) {
+      check(checks, id, 'codeowners', 'warn', `${nm}: no CODEOWNERS, so ${unguardedWords(r.unguarded)} have no code owner`, unguardedHint(r.platform), { findings: codeownersFindings(r) });
+      continue;
+    }
     const findings = codeownersFindings(r);
     if (!findings.length) { check(checks, id, 'codeowners', 'ok', `${nm}: every ${r.path} line yad can read matches a file`); continue; }
     const lines = (code) => findings.filter((f) => f.code === code).map((f) => f.line);
@@ -2624,10 +2630,27 @@ export function codeownersChecks(checks, root) {
     if (dead.length) said.push(`in ${r.path}, ${dead.length === 1 ? '1 line matches' : `${dead.length} lines match`} no file (line${dead.length === 1 ? '' : 's'} ${listed(dead)})`);
     const unread = lines('not-read');
     if (unread.length) said.push(`in ${r.path}, ${unread.length === 1 ? '1 line' : `${unread.length} lines`} yad could not read (line${unread.length === 1 ? '' : 's'} ${listed(unread)})`);
-    check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS may be out of date — ${said.join('; ')}`,
-      `${more} lists each one; fix it in ${nm} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`,
+    const stale = said.length ? [`${nm}: CODEOWNERS may be out of date — ${said.join('; ')}`] : [];
+    const gates = r.unguarded ? [`${stale.length ? '' : `${nm}: `}no line in ${r.path} gives ${unguardedWords(r.unguarded)} an owner`] : [];
+    check(checks, id, 'codeowners', 'warn', [...stale, ...gates].join('; '),
+      [...(stale.length ? [`${more} lists each one; fix it in ${nm} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`] : []),
+        ...(r.unguarded ? [unguardedHint(r.platform)] : [])].join('; '),
       { findings });
   }
+  // The Product's own gates (#426). Only the gate-file finding: the stale-line facts above are for code repos.
+  const productConfig = readJSON(productConfigPath(root), null);
+  if (!isPlainObject(productConfig) || !gitHead(root)) return;
+  const platform = ['github', 'gitlab'].includes(productConfig.platform) ? productConfig.platform : null;
+  const p = checkCodeowners(root, { platform });
+  if (!p.git || p.unknown || p.tooBig || !p.platform) return;
+  if (!p.unguarded) {
+    // No CODEOWNERS and nothing unguarded means no gate files at all: nothing to say.
+    if (!p.none && fs.existsSync(path.join(root, 'checks'))) check(checks, 'codeowners:(the Product)', 'codeowners', 'ok', `the Product: checks/ and yad's CI files have a code owner in ${p.path}`);
+    return;
+  }
+  check(checks, 'codeowners:(the Product)', 'codeowners', 'warn',
+    `the Product: ${p.none ? 'no CODEOWNERS, so ' : `no line in ${p.path} gives `}${unguardedWords(p.unguarded)}${p.none ? ' have no code owner' : ' an owner'}`,
+    unguardedHint(p.platform), { findings: codeownersFindings(p).filter((f) => f.code === 'unguarded') });
 }
 
 // E70 — what the platform holds on the Product's branch and on each connected repo's: branch

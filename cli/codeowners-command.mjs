@@ -8,6 +8,9 @@
 // Two kinds of answer, kept apart:
 //   FACTS — a line that matches no file, a GitHub file of 3 MB or more, a second file the platform never
 //     reads, a line this reader cannot read. `yad doctor` prints these too.
+//     And (#426) the gate files no line gives an owner: checks/ and yad's CI files. A PR can change what a
+//     gate does through them, so the advice is a CODEOWNERS rule plus a required Code Owner review. yad still
+//     never writes that rule: it prints the lines to add (`unguardedHint`).
 //   A HINT — the @logins with no commit in the last 90 days that carries their noreply address. Only a
 //     hint: a person may commit under a work address. Printed by this command only, never by the doctor,
 //     and only where a noreply address is evidence (a github.com or gitlab.com remote).
@@ -15,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
 import { c, fail, hand, info, log, ok, run, warn, emitJSON } from './lib.mjs';
-import { deadLines, diskCodeowners, parseCodeowners } from './codeowners.mjs';
+import { deadLines, diskCodeowners, ownersFor, parseCodeowners } from './codeowners.mjs';
 import { OWNER_WINDOW, recentLoginsFor, repoFiles, targets } from './riskmap-command.mjs';
 import { PUBLIC_HOST, remoteHost } from './openpr.mjs';
 import { detectPlatform } from './platform.mjs';
@@ -30,6 +33,37 @@ function submodulesOf(repoRoot) {
   const r = spawnSync('git', ['ls-files', '-z', '--stage'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
   if (r.status !== 0) return [];
   return r.stdout.split('\0').filter((l) => l.startsWith('160000 ')).map((l) => l.slice(l.indexOf('\t') + 1));
+}
+
+// #426 — the files that decide what a gate does on a PR: every gate script under checks/, and yad's CI files
+// for this platform. Tracked files only, as the platform sees them; null when git cannot list them.
+export const GATE_CI_PATTERN = { github: '/.github/workflows/yad-*', gitlab: '/.gitlab/ci/yad-*' };
+function gateFiles(repoRoot, platform) {
+  const ciDir = platform === 'gitlab' ? '.gitlab/ci' : '.github/workflows';
+  const r = spawnSync('git', ['ls-files', '-z', '--', 'checks', ciDir], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  if (r.status !== 0) return null;
+  const all = r.stdout.split('\0').filter(Boolean);
+  const ci = platform === 'gitlab' ? /^\.gitlab\/ci\/yad-[^/]*\.ya?ml$/ : /^\.github\/workflows\/yad-[^/]*\.ya?ml$/;
+  return { checks: all.filter((f) => f.startsWith('checks/')), ci: all.filter((f) => ci.test(f)) };
+}
+// The gate files with no owner whose review the platform can require: no line matches, the last match lists
+// no owner, or (GitLab) only an `^[optional]` section names one. With no CODEOWNERS (`parsed` null), all.
+function unguardedOf(g, parsed) {
+  const owned = (f) => !!parsed && ownersFor(parsed, [f]).owners.some((o) => !o.optional);
+  const checks = g.checks.filter((f) => !owned(f));
+  const ci = g.ci.filter((f) => !owned(f));
+  return checks.length || ci.length ? { checks, ci } : null;
+}
+// `checks/ (3 files) and 2 yad CI files`.
+export function unguardedWords(u) {
+  return [...(u.checks.length ? [`checks/ (${plural(u.checks.length, 'file')})`] : []), ...(u.ci.length ? [plural(u.ci.length, 'yad CI file')] : [])].join(' and ');
+}
+// What to do, for the person: the lines to add and the setting that makes them count. Printed, never written.
+export function unguardedHint(platform) {
+  const setting = platform === 'gitlab'
+    ? 'turn on "Code owner approval" for the protected default branch (GitLab Premium)'
+    : 'turn on "Require review from Code Owners" for the default branch';
+  return `add \`/checks/ @<owner>\` and \`${GATE_CI_PATTERN[platform === 'gitlab' ? 'gitlab' : 'github']} @<owner>\` to CODEOWNERS through a PR, and ${setting} — see "Who may change the gates" in docs/branch-protection.md (yad never writes CODEOWNERS)`;
 }
 
 // A pattern is printed as written unless it holds an `@`: E67's rule that no e-mail address is ever printed.
@@ -53,7 +87,11 @@ export function checkCodeowners(repoRoot, { platform = null, remote, hint = fals
   if (!plat) return { ...base, unknown: 'yad cannot tell whether this repo is on GitHub or GitLab (no `platform` in repos.json, and the origin remote names neither) — pass --platform' };
   const co = diskCodeowners(repoRoot, plat);
   if (co.unknown) return { ...base, unknown: co.unknown };
-  if (co.none) return { ...base, none: co.none };
+  if (co.none) {
+    const g = gateFiles(repoRoot, plat);
+    const unguarded = g && unguardedOf(g, null);
+    return { ...base, none: co.none, ...(unguarded ? { unguarded } : {}) };
+  }
   const out = { ...base, path: co.path, ignored: co.ignored };
   if (co.tooBig) return { ...out, tooBig: true };
   // Only now the file list: it is slow on a large repo, and a repo with no CODEOWNERS never needs it.
@@ -62,6 +100,9 @@ export function checkCodeowners(repoRoot, { platform = null, remote, hint = fals
   const parsed = parseCodeowners(co.text, plat);
   out.notRead = parsed.skipped;
   out.dead = deadLines(parsed, files, { submodules: submodulesOf(repoRoot) });
+  const g = gateFiles(repoRoot, plat);
+  const unguarded = g && unguardedOf(g, parsed);
+  if (unguarded) out.unguarded = unguarded;
   if (hint) out.inactive = inactiveOwners(repoRoot, parsed, plat, url);
   return out;
 }
@@ -104,6 +145,12 @@ export function codeownersFindings(r) {
   for (const d of r.dead) {
     out.push({ code: 'matches-nothing', line: d.line, message: `line ${d.line}${shownPattern(d)} ${d.negate ? 'excludes' : 'matches'} no file in this repo` });
   }
+  if (r.unguarded) {
+    const words = unguardedWords(r.unguarded);
+    out.push({ code: 'unguarded', checks: r.unguarded.checks.length, ci: r.unguarded.ci.length,
+      message: r.none ? `no CODEOWNERS, so ${words} have no code owner — a pull request can change what the gates do with no code owner's review`
+        : `no line in ${r.path} that yad can read gives ${words} an owner whose review ${name} can require — a pull request can change what the gates do with no code owner's review` });
+  }
   return out;
 }
 
@@ -113,8 +160,13 @@ function printRepo(name, r) {
   log(c.bold(`\ncodeowners — ${name}`));
   if (!r.git) { warn('no files on disk to check (not a git repo, or a bare one) — skipped'); return; }
   if (r.unknown) { warn(`CODEOWNERS: not known — ${r.unknown}`); return; }
-  if (r.none) { info(`none — ${r.none}; nothing to check`); return; }
+  if (r.none && !r.unguarded) { info(`none — ${r.none}; nothing to check`); return; }
   const findings = codeownersFindings(r);
+  if (r.none) {
+    for (const f of findings) warn(f.message);
+    hand(unguardedHint(r.platform));
+    return;
+  }
   for (const f of findings) warn(f.message);
   if (!findings.length) ok(`${r.path}: every line yad can read matches a file`);
   const i = r.inactive;
@@ -131,7 +183,8 @@ function printRepo(name, r) {
     const nc = Object.entries(i.notChecked).map(([k, n]) => plural(n, ...(KIND_WORD[k] || [k])));
     if (nc.length) info(`not checked for recent commits: ${nc.join(', ')} — the hint reads only @logins`);
   }
-  if (findings.length) hand(`fix ${r.path} in ${name} through a PR — the warnings are advisory: CODEOWNERS is a hint, and yad never enforces it`);
+  if (findings.some((f) => f.code !== 'unguarded')) hand(`fix ${r.path} in ${name} through a PR — the warnings are advisory: CODEOWNERS is a hint, and yad never enforces it`);
+  if (r.unguarded) hand(unguardedHint(r.platform));
 }
 
 export async function runCodeowners(root, { action = 'check', name, json = false, platform = null, write = false } = {}) {
@@ -160,7 +213,7 @@ export async function runCodeowners(root, { action = 'check', name, json = false
     emitJSON({ ok: true, repos: repos.map((r) => ({
       name: r.name, git: r.git, platform: r.platform ?? null, path: r.path ?? null,
       ...(r.none ? { none: r.none } : {}), ...(r.unknown ? { unknown: r.unknown } : {}),
-      findings: r.git && !r.unknown && !r.none ? codeownersFindings(r) : [],
+      findings: r.git && !r.unknown ? codeownersFindings(r) : [],
       ...(r.inactive ? { inactive: r.inactive } : {}),
     })) });
     return { ok: true, repos };
