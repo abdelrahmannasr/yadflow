@@ -101,6 +101,19 @@ Two more scripts run as steps inside the jobs above:
   reconcile-debt. It checks the Product out so those gates can read it.
 - [install-deps](#install-deps) (`install-deps.sh`) runs first in build/test/lint. It installs the repo's packages.
 
+**Time limits.** Every job yad installs stops after a set time, so a stuck job does not keep a runner
+busy (GitHub's own limit is 6 hours; GitLab's is the project's, 1 hour by default):
+
+| Job | Limit |
+|---|---|
+| build/test/lint | 30 minutes (it runs the repo's own build and tests) |
+| gate-sync (Product) and the docs site | 15 minutes |
+| every other gate | 10 minutes |
+
+A job that hits its limit fails, like any other failure: push again, or run it again from the
+platform. If your build and tests really need longer, raise the limit by editing the managed file and
+keep the change in mind on `yad update`, which writes the file back from its template.
+
 A gate holds a merge only when the platform requires its job. `yad ci check` reads whether it does, for
 each repo, and names the settings page when it does not ([branch-protection.md](branch-protection.md)).
 

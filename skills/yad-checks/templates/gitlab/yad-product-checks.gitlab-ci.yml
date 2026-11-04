@@ -28,6 +28,7 @@
   # Variables, so it survives every `yad` sync. When unset, current GitLab (>=15) runs the jobs untagged;
   # older versions may strand them — set a real tag if so. Single value only: `tags: [$VAR]` is one tag.
   tags: [$YAD_RUNNER_TAGS]
+  timeout: 10 minutes # a stuck job stops here, not at the project default (#424)
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 

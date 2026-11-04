@@ -65,6 +65,7 @@ yad-gate-sync:
   # project Settings → CI/CD → Variables, so it survives every `yad` sync. When unset, current
   # GitLab (>=15) runs the job untagged; older versions may strand it — set a real tag if so.
   tags: [$YAD_RUNNER_TAGS]
+  timeout: 15 minutes # a stuck job stops here, not at the project default (#424)
   image: node:${YAD_NODE_VERSION}
   variables:
     # A project/group CI/CD variable overrides this YAML value, so the Node line can be changed in project
