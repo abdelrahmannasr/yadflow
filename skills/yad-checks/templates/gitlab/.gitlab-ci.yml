@@ -8,6 +8,7 @@ default:
   # Runner selection on tag-locked instances (run_untagged: false): set the YAD_RUNNER_TAGS CI/CD variable.
   # When unset, current GitLab (>=15) runs the jobs untagged.
   tags: [$YAD_RUNNER_TAGS]
+  timeout: 10 minutes # a stuck job stops here (#424); build-test-lint sets its own
 
 .mr_only:
   rules:
@@ -34,6 +35,7 @@ contract-check:
 build-test-lint:
   stage: build-test-lint
   extends: .mr_only
+  timeout: 30 minutes
   variables:
     YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
   script:

@@ -13,6 +13,7 @@ jobs:
   test:
     name: test (${{ matrix.os }}, node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [ubuntu-latest]
@@ -70,6 +71,7 @@ jobs:
   windows:
     name: windows (hooks + CLI, node ${{ matrix.node-version }})
     runs-on: windows-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         # 18 is the oldest Node yadflow 4 still runs on (end of life: test-only); 24 is current.
@@ -91,6 +93,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -117,6 +120,7 @@ jobs:
   docs-sites:
     name: docs sites (build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -136,6 +140,7 @@ jobs:
   audit:
     name: audit (dependencies)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

@@ -101,6 +101,25 @@ Two more scripts run as steps inside the jobs above:
   reconcile-debt. It checks the Product out so those gates can read it.
 - [install-deps](#install-deps) (`install-deps.sh`) runs first in build/test/lint. It installs the repo's packages.
 
+**Time limits.** Every job yad installs stops after a set time, so a stuck job does not keep a runner
+busy (GitHub's own limit is 6 hours; GitLab's is the project's, 1 hour by default):
+
+| Job | Limit |
+|---|---|
+| build/test/lint | 30 minutes (it runs the repo's own build and tests) |
+| gate-sync (Product) and the docs site | 15 minutes |
+| every other gate | 10 minutes |
+
+A job that hits its limit fails, like any other failure: push again, or run it again from the
+platform. If a code repo's build and tests really need longer, raise the limit of the `build-test-lint`
+job in `.github/workflows/yad-checks.yml` (GitHub) or of `yad-build-test-lint` in
+`.gitlab/ci/yad-checks.yml` (GitLab). `yad update` then reports that file as `modified` and leaves it
+alone, so it stops getting template fixes until you run `yad update --overwrite-local`, which saves your
+copy as `<file>.yad-orig` and writes the template back. `yad ci check` also reports the file as a
+`files` gap for as long as you keep the edit — that is expected.
+Do not edit the Product's `yad-product-checks` file: member-check trusts member files only while that
+file matches the shipped copy exactly.
+
 A gate holds a merge only when the platform requires its job. `yad ci check` reads whether it does, for
 each repo, and names the settings page when it does not ([branch-protection.md](branch-protection.md)).
 

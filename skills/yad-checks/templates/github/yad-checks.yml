@@ -19,6 +19,7 @@ permissions:
 jobs:
   spec-link:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -27,6 +28,7 @@ jobs:
 
   contract-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -42,6 +44,7 @@ jobs:
   # not enforced, and a stale map never blocks a merge.
   risk-map:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -50,6 +53,7 @@ jobs:
 
   build-test-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event.action != 'edited'
     env:
       YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
@@ -88,6 +92,7 @@ jobs:
   # story->epic resolution and degrade to a note when the product repo is not reachable from CI.
   lineage-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -100,6 +105,7 @@ jobs:
 
   epic-open:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -112,6 +118,7 @@ jobs:
 
   reconcile-debt:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -126,6 +133,7 @@ jobs:
   # commit-message reads the commit range, not the title/body — skip it on a bare `edited` event.
   commit-message:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -135,6 +143,7 @@ jobs:
   # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
   pr-title:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PR_TITLE: ${{ github.event.pull_request.title }}
     steps:
@@ -143,6 +152,7 @@ jobs:
 
   pr-template:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
@@ -155,6 +165,7 @@ jobs:
   # Reads the commit range, not the title/body — skip it on a bare `edited` event.
   verified-commits:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     permissions:
       contents: read

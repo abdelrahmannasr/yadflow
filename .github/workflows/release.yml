@@ -29,6 +29,7 @@ jobs:
   check:
     name: release check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Read-only, and deliberately WITHOUT `id-token: write`. npm Trusted Publishing binds to the repo
     # and the workflow FILENAME, not the job, so any job holding that permission can mint a token and
     # publish. This job runs `npm ci` (dependency install scripts), the whole test suite, and a
@@ -68,6 +69,7 @@ jobs:
     name: release
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # The only job that can publish, and it cannot start until the check above passes.
     permissions:
       contents: write        # the chore(release) commit + the git tag

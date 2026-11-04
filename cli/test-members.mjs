@@ -190,7 +190,8 @@ test('E131 gateMemberMap: no pairing unless the member-check gate is live (revie
     memberC(T, 'github-alice.json', alice({ names: ['Alice Smith'] }));
     assert.equal(M.gateMemberMap(T).size, 1, 'a new judged change: trusted');
     const wf = fs.readFileSync(path.join(T, '.github/workflows/yad-product-checks.yml'), 'utf8');
-    edit('.github/workflows/yad-product-checks.yml', wf.replace('  member-check:\n    runs-on: ubuntu-latest\n    if: github.event.action != \'edited\'', '  member-check:\n    runs-on: ubuntu-latest\n    if: false'));
+    edit('.github/workflows/yad-product-checks.yml', wf.replace(/( {2}member-check:\n(?: {4}.*\n)*? {4})if: github\.event\.action != 'edited'/, '$1if: false'));
+    assert.notEqual(fs.readFileSync(path.join(T, '.github/workflows/yad-product-checks.yml'), 'utf8'), wf, 'the job really was switched off');
     assert.equal(M.gateMemberMap(T).size, 0, 'an `if: false` job is not live');
     edit('.github/workflows/yad-product-checks.yml', wf);
     assert.equal(M.gateMemberMap(T).size, 0, 'restored: trust starts again from here');

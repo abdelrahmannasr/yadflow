@@ -135,7 +135,7 @@ signature_verified() {
     gitlab)
       # In CI use the documented API directly; locally fall back to the user's own glab.
       if [ -n "${CI_API_V4_URL:-}" ] && [ -n "${CI_PROJECT_ID:-}" ]; then
-        body="$(curl -fsS --header "PRIVATE-TOKEN: ${GITLAB_TOKEN:-${SDLC_API_TOKEN:-}}" \
+        body="$(curl -fsS --max-time 15 --header "PRIVATE-TOKEN: ${GITLAB_TOKEN:-${SDLC_API_TOKEN:-}}" \
           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/commits/${sha}/signature" 2>/dev/null || true)"
       else
         body="$(glab api "projects/:id/repository/commits/${sha}/signature" 2>/dev/null || true)"

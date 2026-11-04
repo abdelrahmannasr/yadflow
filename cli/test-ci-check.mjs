@@ -614,3 +614,64 @@ test('E160b round 11: a list item whose dash stands alone is read from its next 
     assert.equal(byId(check(w, [...gl('p'), ...gl('app')]).r, 'app').files.status, 'ok');
   } finally { done(w); }
 });
+
+// #424: with no limit, GitHub stops a stuck job after 6 hours and GitLab at the project's default (1 hour
+// unless changed) — a team pays for that runner time. Every job in every CI file yad installs, and in the
+// docs workflow it generates, sets its own limit.
+test('#424: every job in every CI file yad installs has a time limit', async () => {
+  const { pagesWorkflow } = await import('../cli/docs.mjs');
+  const files = [];
+  for (const dir of ['skills/yad-checks/templates/github', 'skills/yad-product-bridge/templates/github',
+    'skills/yad-checks/templates/gitlab', 'skills/yad-product-bridge/templates/gitlab']) {
+    for (const f of fs.readdirSync(path.join(ROOT, dir))) {
+      if (!/\.ya?ml$/.test(f) || f.startsWith('gitlab-ci.include-root')) continue;
+      files.push({ name: `${dir}/${f}`, text: fs.readFileSync(path.join(ROOT, dir, f), 'utf8'), gitlab: dir.endsWith('gitlab') });
+    }
+  }
+  // This repo's own workflows too (yad-gate-sync.yml is a stale 3.x copy, removed by #430).
+  for (const f of fs.readdirSync(path.join(ROOT, '.github/workflows'))) {
+    if (!/\.ya?ml$/.test(f) || f === 'yad-gate-sync.yml') continue;
+    files.push({ name: `.github/workflows/${f}`, text: fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8'), gitlab: false });
+  }
+  files.push({ name: 'yad docs (GitHub)', text: pagesWorkflow('github'), gitlab: false });
+  files.push({ name: 'yad docs (GitLab)', text: pagesWorkflow('gitlab'), gitlab: true });
+  let seen = 0;
+  for (const { name, text, gitlab } of files) {
+    if (!gitlab) {
+      const body = text.slice(text.search(/^jobs:$/m));
+      const blocks = body.split(/^(?= {2}['"]?[^\s#'"][^:]*['"]?:\s*(?:#.*)?$)/m).slice(1);
+      assert.ok(blocks.length, `${name}: no jobs read`);
+      for (const b of blocks) {
+        seen++;
+        assert.match(b, /^ {4}timeout-minutes: \d+$/m, `${name}: job ${b.split(':')[0].trim()} has no timeout-minutes`);
+      }
+      continue;
+    }
+    // GitLab: a job is a top-level key that is not a keyword and does not start with a dot; it has a limit when
+    // `default:`, its own block, a template it `extends`, or an anchor it merges (`<<: *x`) sets `timeout:`.
+    const blocks = new Map();
+    const anchors = new Map();
+    for (const b of text.split(/^(?=['"]?[^\s#'"-][^:]*['"]?:)/m)) {
+      const m = b.match(/^['"]?([^\s#'"-][^:'"]*)['"]?:(?:\s*&([A-Za-z0-9_-]+))?/);
+      if (!m) continue;
+      blocks.set(m[1], b);
+      if (m[2]) anchors.set(m[2], m[1]);
+    }
+    const all = /^ {2}timeout: \d+ (minutes|hours?)\b/m.test(blocks.get('default') || ''); // `default:` covers every job
+    const limited = (key, depth = 0) => {
+      if (all) return true;
+      const b = blocks.get(key);
+      if (!b || depth > 5) return false;
+      if (/^ {2}timeout: \d+ (minutes|hours?)\b/m.test(b)) return true;
+      const ext = b.match(/^ {2}extends: (\S+)$/m);
+      const merge = b.match(/^ {2}<<: \*(\S+)$/m);
+      return (ext && limited(ext[1], depth + 1)) || (merge && limited(anchors.get(merge[1]), depth + 1)) || false;
+    };
+    for (const key of blocks.keys()) {
+      if (key.startsWith('.') || ['variables', 'include', 'stages', 'default', 'workflow'].includes(key)) continue;
+      seen++;
+      assert.ok(limited(key), `${name}: job ${key} has no timeout`);
+    }
+  }
+  assert.ok(seen >= 40, `read only ${seen} jobs — the reader missed some`);
+});

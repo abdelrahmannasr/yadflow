@@ -17,6 +17,7 @@ yad-product-verified-commits:
   # project Settings → CI/CD → Variables, so it survives every `yad` sync. When unset, current
   # GitLab (>=15) runs the job untagged; older versions may strand it — set a real tag if so.
   tags: [$YAD_RUNNER_TAGS]
+  timeout: 10 minutes # a stuck job stops here, not at the project default (#424)
   image: node:${YAD_NODE_VERSION}
   variables:
     GIT_DEPTH: "0" # full history so the gate can diff against the target branch

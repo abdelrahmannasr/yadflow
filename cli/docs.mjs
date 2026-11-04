@@ -176,6 +176,7 @@ pages:
   # Set the YAD_RUNNER_TAGS / YAD_NODE_VERSION CI/CD variables to route this job to a tag-locked runner or
   # change its Node line; a shell-executor runner ignores \`image:\` and needs Node on its host.
   tags: [$YAD_RUNNER_TAGS]
+  timeout: 15 minutes
   image: node:\${YAD_NODE_VERSION}
   variables:
     YAD_NODE_VERSION: "22"
@@ -202,6 +203,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pages: write # publish the site

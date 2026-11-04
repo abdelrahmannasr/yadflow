@@ -23,6 +23,7 @@ jobs:
   # `edited` event (only pr-title/pr-template need to re-check a title/body fix).
   commit-message:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -34,6 +35,7 @@ jobs:
   # change (epics/**) riding a non-review head past the Shape review with a plain code title.
   pr-title:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_HEAD: ${{ github.event.pull_request.head.ref }}
@@ -47,6 +49,7 @@ jobs:
 
   pr-template:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PR_BODY: ${{ github.event.pull_request.body }}
       PR_HEAD: ${{ github.event.pull_request.head.ref }}
@@ -64,6 +67,7 @@ jobs:
   # brand-new epic's seed, which no CI path can write, so it rides this first review PR (#162).
   ledger-guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -75,6 +79,7 @@ jobs:
   # GitHub who a commit belongs to; the PR author comes from the event, never from the PR's own files.
   member-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.action != 'edited'
     env:
       PR_AUTHOR: ${{ github.event.pull_request.user.login }}

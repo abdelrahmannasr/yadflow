@@ -19,6 +19,7 @@
 
 .yad_update_guard_base: &yad_update_guard_base
   tags: [$YAD_RUNNER_TAGS]
+  timeout: 10 minutes # a stuck job stops here, not at the project default (#424)
   image: node:${YAD_NODE_VERSION}
   variables:
     GIT_DEPTH: "0" # full history so the gates can diff the pushed range

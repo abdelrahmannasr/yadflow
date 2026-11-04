@@ -35,6 +35,8 @@
   # instead strand it `pending` — if so, set the variable to a real tag. Single value only:
   # `tags: [$VAR]` is one tag equal to the whole variable, not a comma-split.
   tags: [$YAD_RUNNER_TAGS]
+  # A stuck job stops here, not at the 1-hour project default (#424). build-test-lint sets its own.
+  timeout: 10 minutes
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
@@ -67,6 +69,7 @@ yad-risk-map:
 
 yad-build-test-lint:
   extends: .sdlc_mr_only
+  timeout: 30 minutes # it runs the team's own build and tests
   needs: []
   variables:
     YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
