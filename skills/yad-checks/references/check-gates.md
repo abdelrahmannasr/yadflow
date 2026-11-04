@@ -643,9 +643,9 @@ someone who has worked in any of them meets the ask, and the output never says w
 `FILES`, `LEVEL`, `DIR <dir> <level> <state>`, `WHO <login|-> <name>`, `HISTNONE` — the history was read
 and held nobody — and `HISTUNKNOWN <why>`) for `checks/risk-route.sh`, which joins it with the PR
 body. One awk program serves both the warnings and the count. Its twin is `changeLevel` in
-`cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** like every check here, the
-script runs from the PR's own checkout, so a PR can edit the script itself; that is harmless only because nothing
-blocks on the count — the Build count stays reported, and branch protection holds the merge (E72). And, as for the warnings, a path holding a newline is
+`cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** CI runs the base branch's copy of the
+script (#426), but the workflow that calls it comes from the PR, so the count is only as safe as the code owner
+review of the gate files; that is enough only because nothing blocks on the count — the Build count stays reported, and branch protection holds the merge (E72). And, as for the warnings, a path holding a newline is
 split in two here but kept whole by `changeLevel`, so the bash count can read its second half as a file
 at the root; the error can only raise the count, never lower it. (The E67 history is free of that class:
 it reads no file names at all.) If git itself fails, each step of the
@@ -655,6 +655,23 @@ count says "not counted"; the E65 warnings half is not guarded the same way, so 
 ## CI wiring (both platforms)
 
 The gates run identically under either CI; the config just invokes the scripts with the PR/MR base.
+
+- **The base branch's scripts (#426).** CI never runs the PR's own `checks/`. Each gate job first copies
+  `checks/` from `origin/<base>` into a temp folder outside the work tree (`git archive`), and every call
+  is `bash "$YAD_CHECKS/<gate>.sh"` (`node "$YAD_CHECKS/member-check.mjs"`) with the PR's tree as the
+  working folder — so a PR that edits a gate script is still judged by the merged one. A script the base
+  does not have yet runs from the PR, with a `note:` line: one per file, or one line when the base has no
+  `checks/` at all (the PR that installs the gates). A link in the PR's `checks/` is never followed. An
+  `origin/<base>` that is not in the checkout FAILs the job (`FAIL [base-checks]`) — it never falls back
+  to the PR's copies. GitHub runs this as a step named "Gate scripts from the base branch (#426)" in each
+  job, exporting `YAD_CHECKS` through `$GITHUB_ENV`; GitLab as the `before_script` of the template every
+  job extends. The step's text is the same everywhere, and a test holds it. The base's script runs with
+  the new file's call, so a call may only use what the previous release's script accepts (a test holds
+  that list too). The CI file itself still comes from the PR: the CODEOWNERS lines in
+  `docs/branch-protection.md` ("Who may change the gates") cover it.
+- **No token left in the checkout (#426).** Every `actions/checkout` sets `persist-credentials: false`, so
+  code a job runs (the team's tests) finds no `GITHUB_TOKEN` in `.git/config`. No gate needs one there:
+  `product-checkout.sh` clones with its own token, and the base was fetched by `fetch-depth: 0`.
 
 - **GitHub Actions** — `templates/github/yad-checks.yml` → `.github/workflows/yad-checks.yml`. The
   jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/${{ github.base_ref }}` as base
@@ -667,8 +684,9 @@ The gates run identically under either CI; the config just invokes the scripts w
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
   The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) and the advisory `risk-map`
-  check run as their own jobs with `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base. The build/test/lint checkout also
-  uses `filter: blob:none`; its installer follows `package.json#packageManager`, and `NX_BASE` /
+  check run as their own jobs with `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base. The build/test/lint checkout takes the
+  full history with no `filter: blob:none` (#426): a blob-less clone leaves out the base's `checks/`
+  when the PR changed them, and with no token kept the base-copy step could not fetch them. Its installer follows `package.json#packageManager`, and `NX_BASE` /
   `NX_HEAD` carry the exact base/head SHAs so Nx affected commands evaluate the PR rather than a
   stale default. `YAD_NODE_VERSION` is read from GitHub repository variables with `22` as the default.
   Dependencies are cached with `actions/cache` (npm's `~/.npm`, pnpm's store, and the Corepack home
@@ -718,9 +736,11 @@ itself, then confirms by reading (`yad doctor`) once they say it is done (E158).
 3. Add it to the **code repo** as the `YAD_PRODUCT_TOKEN` secret (GitHub: Settings → Secrets and
    variables → Actions; GitLab: Settings → CI/CD → Variables, **masked**).
 
-**Who can read the token.** The workflow runs on the PR's own copy of `checks/product-checkout.sh`, so
-anyone who can push a branch to the code repo can read `YAD_PRODUCT_TOKEN` — edit the script, open a
-PR. (A PR from a fork gets no secret, and defers.) So give it **read** access to the Product repository
+**Who can read the token.** The workflow runs the base branch's copy of `checks/product-checkout.sh`
+(#426), so editing the script in a PR does not reach it. But the workflow file itself comes from the PR:
+anyone who can push a branch could change the workflow to print `YAD_PRODUCT_TOKEN`, unless a code
+owner must review `.github/workflows/yad-*` / `.gitlab/ci/yad-*` (`docs/branch-protection.md`, "Who may
+change the gates"). (A PR from a fork gets no secret, and defers.) So give it **read** access to the Product repository
 and nothing else. On GitLab, a variable marked **protected** is not handed to pipelines of unprotected
 branches, so merge requests from feature branches would defer: leave it unprotected, masked, and
 read-only.

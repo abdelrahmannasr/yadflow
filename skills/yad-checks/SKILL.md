@@ -139,9 +139,12 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     → the standalone Product-side verified-commits CI (installed by `yad check --fix` with the Product wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);
     its quality job uses `install-deps.sh`, reads the optional `YAD_NODE_VERSION` repository variable,
-    exports the PR's exact `NX_BASE`/`NX_HEAD`, and filters unrelated history blobs while preserving
-    the full commit graph. It never starts on `edited` (#425): a gate job skipped on an edit counts as
-    passed, so an edit of the PR text could turn a failed gate green.
+    exports the PR's exact `NX_BASE`/`NX_HEAD`, and checks out the full history. It never starts on
+    `edited` (#425): a gate job skipped on an edit counts as passed, so an edit of the PR text could turn
+    a failed gate green. Every gate job (both platforms, every gate file) runs the base branch's copy of
+    `checks/` through `"$YAD_CHECKS/…"`, never the PR's own, and keeps no token in the checkout (#426);
+    advise the CODEOWNERS lines in `docs/branch-protection.md` ("Who may change the gates") — never
+    write CODEOWNERS.
   - `templates/github/yad-pr-text.yml` → `.github/workflows/yad-pr-text.yml`: `pr-title` + `pr-template`,
     the only checks that re-run on an edit of the PR title or body. The Product gets
     `templates/github/yad-product-pr-text.yml` (`--profile product`) beside `yad-product-checks.yml`.

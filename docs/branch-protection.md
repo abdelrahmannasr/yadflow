@@ -58,7 +58,7 @@ to many repos from an organization. Set these on the default branch:
 | Block force pushes | on | A force-push can rewrite the ledger's history |
 | Restrict deletions | on | |
 | Require signed commits | **off** on the Product; your choice on a code repo | On the Product, yad's CI writes the ledger in unsigned commits, so this rule would refuse them (#432) |
-| Require review from Code Owners | your choice | yad treats CODEOWNERS as a hint, never as the rule ([E69](roadmap-idea-1.md)) |
+| Require review from Code Owners | **on**, with the gate-file lines in [Who may change the gates](#who-may-change-the-gates-426) | Without it a pull request can change the gates and pass them. For the rest of your code, CODEOWNERS stays your choice: yad reads it as a hint and never writes it ([E69](roadmap-idea-1.md)) |
 
 ### The status checks to require
 
@@ -131,6 +131,7 @@ retries every 15 minutes and fails the same way until the token is there.
 | Reject unsigned commits (Settings → Repository → Push rules) | **off** on the Product; your choice on a code repo | As on GitHub (#432). Push rules are GitLab Premium |
 | Merge request approval rules (Settings → Merge requests) | 1 or more approvals for a team, 0 in solo mode | **Premium and Ultimate only.** On GitLab Free an approval never blocks a merge |
 | Remove all approvals when commits are added to the source branch | on | Safe with yad, for the same reason as on GitHub |
+| Code owner approval (Settings → Repository → Protected branches) | **on**, with the gate-file lines in [Who may change the gates](#who-may-change-the-gates-426) | As on GitHub. **Premium and Ultimate only** |
 
 The checks run as jobs in the merge request pipeline: on the Product `yad-product-commit-message`,
 `yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard`, `yad-product-member-check` and, when that file is there,
@@ -146,6 +147,43 @@ change — but a job of your own that names an old one (`needs:`, `dependencies:
 branch with the project access token stored as the masked CI/CD variable `SDLC_GATE_TOKEN`
 (`read_api` + `write_repository`). The token's role must be in "Allowed to push and merge" on the
 protected branch, or the push is refused and the ledger never advances.
+
+## Who may change the gates (#426)
+
+A gate is two files: a script in `checks/` and a CI file that runs it. Both are in the repo, so a pull
+request can change them. Two things stop a pull request from changing the gate that judges it.
+
+**1. The gate runs the base branch's script.** Every gate job copies `checks/` from the branch the pull
+request merges into, and runs that copy. A pull request that edits `checks/spec-link.sh` to pass is
+still judged by the `spec-link.sh` already merged. The pull request's own copy runs only for a script
+the base does not have yet: the pull request that first installs the gates, or a `yad update` that adds
+a new one. The job log says so in a `note:` line. GitHub's checkout also keeps no token in the repo
+(`persist-credentials: false`), so the team's own tests in `build-test-lint` cannot read one there.
+
+**2. A code owner reviews any change to the gate files.** This covers what step 1 cannot: the CI file
+itself always comes from the pull request, so a pull request could change the workflow to run its own
+scripts again. Add these lines to `CODEOWNERS` through a pull request, with a real person or team for
+`@<owner>`:
+
+| Platform | Lines | Setting to turn on |
+|---|---|---|
+| GitHub | `/checks/ @<owner>`<br>`/.github/workflows/yad-* @<owner>` | "Require review from Code Owners" on the default branch's rule |
+| GitLab | `/checks/ @<owner>`<br>`/.gitlab/ci/yad-* @<owner>` | "Code owner approval" on the protected default branch (Premium and Ultimate only) |
+
+On GitLab the root `.gitlab-ci.yml` decides whether the yad fragments are included at all, so think
+about an owner for it too.
+
+yad never writes `CODEOWNERS` ([E69](roadmap-idea-1.md)): a name it wrote would become an owner the
+platform enforces. `yad codeowners check` and `yad doctor` warn when `checks/` or yad's CI files have no
+owner whose review can be required, and print the lines above.
+
+**What is still open.**
+
+| Case | Why |
+|---|---|
+| GitLab hands every job `CI_JOB_TOKEN` | There is no switch like `persist-credentials`. Code the pull request runs (its tests) can read it while the job runs |
+| A pull request that changes a script's call and the script together | The base's older script runs with the new call. yad keeps every call one the previous release's script accepts, and a test holds that list |
+| No code owner review | Step 2 is advice. Without it, step 1 still stops the simple case: an edited script |
 
 ## Which merges the code-repo gates model
 
