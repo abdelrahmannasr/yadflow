@@ -5964,6 +5964,72 @@ test('#327 gate-sync on GitLab: fetches a pinned git-lfs before checkout, only f
   assert.deepEqual(runLfsBlock({ hook: true, filter: true, hasLfs: true }), none, 'an image that has git-lfs downloads nothing');
 });
 
+// #431 — glab and jq are checked against a pinned SHA-256 before they are installed, like git-lfs (#327).
+// The job holds SDLC_GATE_TOKEN, so a swapped download would run beside a token that can push the default branch.
+const toolBlock = (first) => {
+  const lines = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8').split('\n');
+  const at = lines.findIndex((l) => new RegExp(`^\\s+${first}=`).test(l));
+  assert.ok(at > 0 && /^\s+- \|$/.test(lines[at - 1]), `the ${first} step is its own \`- |\` block`);
+  const indent = lines[at].match(/^ */)[0];
+  const body = [];
+  for (let i = at; i < lines.length && (lines[i].startsWith(indent) || !lines[i].trim()); i++) body.push(lines[i].slice(indent.length));
+  return body.join('\n');
+};
+const runToolBlock = (first, { badSum } = {}) => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-431-'));
+  try {
+    const bin = path.join(T, 'bin');
+    const mark = path.join(T, 'mark');
+    fs.mkdirSync(bin);
+    const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    stub('curl', `echo "curl $*" >> "${mark}"`);
+    stub('sha256sum', `IFS= read -r line; echo "sha256sum $* $line" >> "${mark}"${badSum ? '; exit 1' : ''}`);
+    for (const t of ['dpkg', 'install']) stub(t, `echo "${t} $*" >> "${mark}"`);
+    // `set -e`, as GitLab runs every script: a failed checksum must stop the job.
+    const r = spawnSync('/bin/sh', ['-c', `set -e\n${toolBlock(first)}`], { cwd: T, env: { PATH: bin }, stdio: 'pipe' });
+    return { status: r.status, did: fs.existsSync(mark) ? fs.readFileSync(mark, 'utf8') : '' };
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+};
+
+test('#431 gate-sync on GitLab: glab and jq are checked against a pinned SHA-256 before they are installed', () => {
+  const text = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8');
+  const tools = [
+    { tool: 'GLAB', file: '/tmp/glab.deb', url: (v) => `https://gitlab.com/gitlab-org/cli/-/releases/v${v}/downloads/glab_${v}_linux_amd64.deb`, last: 'dpkg -i /tmp/glab.deb' },
+    { tool: 'JQ', file: '/tmp/jq', url: (v) => `https://github.com/jqlang/jq/releases/download/jq-${v}/jq-linux-amd64`, last: 'install -m 0755 /tmp/jq /usr/local/bin/jq' },
+  ];
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  for (const { tool, file, url, last } of tools) {
+    const version = text.match(new RegExp(`^\\s+${tool}_VERSION=(\\d+\\.\\d+\\.\\d+)$`, 'm'));
+    assert.ok(version, `${tool} is pinned to an exact release`);
+    const sum = text.match(new RegExp(`^\\s+${tool}_SHA256=([0-9a-f]{64})$`, 'm'));
+    assert.ok(sum, `${tool}: the download is checked against a pinned SHA-256`);
+    const { status, did } = runToolBlock(`${tool}_VERSION`);
+    assert.equal(status, 0, tool);
+    const steps = did.trim().split('\n');
+    assert.deepEqual(steps.map((l) => l.split(' ')[0]), ['curl', 'sha256sum', last.split(' ')[0]], `${tool}: checked before it is installed`);
+    assert.equal(steps[0], `curl -fsSL ${url(version[1])} -o ${file}`, tool);
+    assert.equal(steps[1], `sha256sum -c - ${sum[1]}  ${file}`, tool);
+    assert.equal(steps[2], last, tool);
+    const bad = runToolBlock(`${tool}_VERSION`, { badSum: true });
+    assert.notEqual(bad.status, 0, `${tool}: a checksum that does not match fails the job`);
+    assert.match(bad.did, /^sha256sum /m, `${tool}: and it is the checksum that failed it`);
+    assert.doesNotMatch(bad.did, new RegExp(`^${esc(last.split(' ')[0])} `, 'm'), `${tool}: and nothing is installed`);
+  }
+  // Every download in the file — a future one too — is checked before anything else touches it.
+  const code = text.split('\n').filter((l) => !/^\s*#/.test(l));
+  // Any curl or wget not written as `curl … -o <file>` is refused here, so a download piped to a shell or
+  // saved another way cannot slip past the check below.
+  for (const l of code.filter((x) => /\b(curl|wget)\b/.test(x))) {
+    assert.match(l, /\bcurl -fsSL "[^"]+" -o \/tmp\/\S+$/, `a download is saved to /tmp with -o, then checked: ${l.trim()}`);
+  }
+  const downloads = code.map((l, i) => [l.match(/\bcurl\b.*\s-o\s+(\S+)/), i]).filter(([m]) => m);
+  assert.equal(downloads.length, 3, 'glab, jq and git-lfs');
+  for (const [[, out], i] of downloads) {
+    const next = code.slice(i + 1).find((l) => l.includes(out));
+    assert.match(next || '', new RegExp(`\\| sha256sum -c -$`), `${out}: the next line that uses it is its checksum check`);
+  }
+});
+
 // The major a fragment ships with: the one `YAD_MAJOR=<n>` literal in its pin block. Read from the
 // block, never written into these tests, so they hold at every major rather than being edited at each.
 const pinMajor = (block) => {
