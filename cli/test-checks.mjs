@@ -4921,6 +4921,33 @@ test('pr-title gate: a Product review title passes; a code title fails under pro
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('#451 pr-title gate: on GitLab the draft marker is not part of the title; on GitHub it still is', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
+  try {
+    const gl = { GITLAB_CI: 'true' };
+    for (const title of ['Draft: feat: add x', '[Draft] feat: add x', '(draft) fix: y', 'DRAFT:feat: z', 'Draft: [Draft] feat: z']) {
+      const r = runGate(PR_TITLE, T, ['--profile', 'code', title], gl);
+      assert.equal(r.code, 0, `${title}: ${r.out}`);
+      assert.match(r.out, /note \[pr-title\]: the GitLab draft marker '.+' is not part of the title that is checked/);
+      assert.match(r.out, /PASS \[pr-title\]: '(feat: add x|fix: y|feat: z)' \(profile: code, tooling\/code, GitLab draft marker ignored\)/);
+    }
+    const review = runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'review/EP-x/epic', 'Draft: review: epic (EP-x)'], gl);
+    assert.equal(review.code, 0, review.out);
+    assert.match(review.out, /artifact-review, GitLab draft marker ignored/);
+    // The rest of the title is judged as always.
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'Draft: add x'], gl).code, 1);
+    const only = runGate(PR_TITLE, T, ['--profile', 'code', 'Draft:'], gl);
+    assert.equal(only.code, 1);
+    assert.match(only.out, /the title is only the GitLab draft marker 'Draft:' — write the title after it/);
+    // Only GitLab's exact forms are a draft marker.
+    for (const title of ['Drafts: feat: x', 'Draft feat: x', 'feat: Draft: x.']) assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', title], gl).code, 1, title);
+    // Outside GitLab CI a draft title is a title: on GitHub it would be the squash subject.
+    const gh = runGate(PR_TITLE, T, ['--profile', 'code', 'Draft: feat: add x'], { GITLAB_CI: '' });
+    assert.equal(gh.code, 1);
+    assert.doesNotMatch(gh.out, /draft marker/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('pr-title gate: product splits by --head — review/EP-* wants the review shape, any other branch wants a code subject', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
   // review/EP-* head => artifact-review title required

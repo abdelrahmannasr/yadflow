@@ -69,6 +69,36 @@ if [ -z "$TITLE" ]; then
   exit 1
 fi
 
+# A GitLab draft MR carries its draft mark IN the title: `Draft:`, `[Draft]` or `(Draft)`, any case, possibly
+# repeated (#451). GitLab removes it when the MR is marked ready, so it is never the merged subject: it is
+# stripped before the title is judged. Only in GitLab CI (GITLAB_CI=true on every job) — a GitHub draft is a
+# flag, so there a `Draft:` title would be the squash subject and still fails. An environment variable, not a
+# flag: the gate runs the base branch's copy of this script with the PR's call (#426), and an older copy
+# would read an unknown flag as the title.
+DRAFT=""
+if [ "${GITLAB_CI:-}" = true ]; then
+  while :; do
+    lower="$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+      '[draft]'* | '(draft)'*) n=7 ;;
+      'draft:'*) n=6 ;;
+      *) break ;;
+    esac
+    DRAFT="${DRAFT}${TITLE:0:n}"
+    TITLE="${TITLE:n}"
+    TITLE="${TITLE#"${TITLE%%[![:space:]]*}"}"
+  done
+fi
+DRAFT_NOTE=""
+if [ -n "$DRAFT" ]; then
+  if [ -z "$TITLE" ]; then
+    echo "FAIL [pr-title]: the title is only the GitLab draft marker '${DRAFT}' — write the title after it."
+    exit 1
+  fi
+  echo "note [pr-title]: the GitLab draft marker '${DRAFT}' is not part of the title that is checked"
+  DRAFT_NOTE=", GitLab draft marker ignored"
+fi
+
 TYPES='feat|fix|docs|refactor|test|perf|build|ci|chore|revert'
 
 # Conventional-Commits subject (optional scope + breaking `!`), no trailing period. Used by the code
@@ -82,7 +112,7 @@ check_code_title() {
     echo "FAIL [pr-title]: '${TITLE}' must not end with a period."
     exit 1
   fi
-  echo "PASS [pr-title]: '${TITLE}' (profile: ${PROFILE}, tooling/code)"
+  echo "PASS [pr-title]: '${TITLE}' (profile: ${PROFILE}, tooling/code${DRAFT_NOTE})"
   exit 0
 }
 
@@ -91,7 +121,7 @@ if [ "$PROFILE" = product ]; then
   case "$HEADREF" in
     review/EP-*|"")
       if printf '%s' "$TITLE" | grep -qE '^review: .+ \(EP-[a-z0-9-]+\)$'; then
-        echo "PASS [pr-title]: '${TITLE}' (profile: product, artifact-review)"
+        echo "PASS [pr-title]: '${TITLE}' (profile: product, artifact-review${DRAFT_NOTE})"
         exit 0
       fi
       echo "FAIL [pr-title]: '${TITLE}' is not a Product review title 'review: <artifact> (EP-<slug>)'."
