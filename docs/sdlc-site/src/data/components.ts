@@ -103,7 +103,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#ca6f1e",
     position: { x: 68, y: 14 },
     description:
-      "The connected design tool (Figma / Pencil), reached via its MCP; degrades to markdown-only when absent.",
+      "The connected design tool (Figma / Pencil / OpenPencil), reached via its MCP; degrades to markdown-only when absent.",
   },
   {
     id: "testing-tool",
