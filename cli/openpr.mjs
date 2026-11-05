@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
-  detectPlatform, createPr, platformLogin, resolveBaseBranch, prNumberFromUrl, editPrBody, forkBranch, forkBranchWords,
+  detectPlatform, createPr, platformLogin, resolveBaseBranch, prNumberFromUrl, editPrBody, forkBranch, forkBranchWords, branchTaskId,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase, gateCapFor, capLimit, peopleWord, gateRuleSum, gateRuleEnforced, legacyLogins } from './epic-state.mjs';
@@ -398,7 +398,7 @@ export async function runOpenPr(root, opts = {}) {
     info(`opened on the standing approval: the checks of ${ids.join(', ')} passed, and the open-pr dial is auto`);
   } else if (commitIds && commitIds.length > 1) {
     // The branch's own task first, so the body's Spec path is its story, not the newest commit's (#450).
-    const own = (taskFromBranch(branch) || '').toLowerCase();
+    const own = (branchTaskId(branch) || '').toLowerCase();
     const at = commitIds.findIndex((t) => t.toLowerCase() === own);
     groupIds = at > 0 ? [commitIds[at], ...commitIds.filter((_t, i) => i !== at)] : commitIds;
   }

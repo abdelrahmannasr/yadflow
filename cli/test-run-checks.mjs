@@ -611,10 +611,10 @@ test('#450 yad run checks: a branch cut from another branch, with a base nobody 
     git(backend, 'checkout', '-q', '-b', 'feature-2');
     commitAll(backend, 'feat: two\n\nTask: EP-demo-S01-T02', { 'src/two.js': 't\n' });
     const r = yad(backend, ['run', 'checks', '--no-build']);
-    const hits = r.out.match(/this branch was cut from origin\/develop, not from origin\/main: 1 commit on it is from origin\/develop, not this task's — pass --base origin\/develop, or --base origin\/main to check against main anyway/g) || [];
+    const hits = r.out.match(/this branch holds 1 commit of other tasks from origin\/develop that origin\/main does not have, so it was likely cut from origin\/develop — pass --base origin\/develop, or --base origin\/main to check against main anyway/g) || [];
     assert.equal(hits.length, 1, r.out);
     assert.match(r.out, /PASS \[spec-link\]: \w+ EP-demo-S01-T02/, 'the gates still run');
     // A base someone chose is trusted: no warning.
-    assert.doesNotMatch(yad(backend, ['run', 'checks', '--no-build', '--base', 'origin/main']).out, /was cut from/);
+    assert.doesNotMatch(yad(backend, ['run', 'checks', '--no-build', '--base', 'origin/main']).out, /likely cut from/);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });

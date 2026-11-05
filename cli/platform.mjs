@@ -474,48 +474,58 @@ export function resolveBaseBranch(platform, {
 
 // The branch a task branch was really cut from, when it is not the base (#450). A branch cut from an
 // integration branch (`develop`) and opened with no --base gets the platform default (`main`), and then
-// `origin/main..HEAD` holds every commit `develop` has that `main` lacks: other tasks' commits, read as this
-// PR's tasks, its Spec path, its size. So: of the remote branches, the one whose fork point with HEAD is
-// newer than the base's is where those commits came from. Returns { branch, foreign } (foreign = the
-// commits between the two fork points), { skipped: n } when there are too many remote branches to ask,
-// or null — no such branch, or git could not tell (never a guess: the answer only stops with advice).
-// Left out: origin/HEAD, the base, the task branch's own pushed copy, and task-shaped branches (a branch
-// cut FROM this one holds its commits too, and is no integration branch); and any branch that already
-// holds HEAD itself, for the same reason.
+// `origin/main..HEAD` holds commits `develop` has that `main` lacks: other tasks' commits, read as this PR's
+// tasks, its Spec path, its size. So, for each remote branch: the commits of `origin/<base>..<fork point>`
+// (the fork point = merge-base of that branch and HEAD) are in the PR's range and came from that branch; the
+// ones whose `Task:` line names ANOTHER task are the ones that matter. Only those count: a teammate's branch
+// cut from this one's middle holds this task's own commits, and is never named. A commit with no `Task:`
+// line is not counted either (a missed stop opens as before; a wrong stop would send the PR to a wrong base).
+// Of the branches with any, the newest fork point wins (fewest commits from it to HEAD), ties by name.
+// Returns { branch, foreign }, { skipped: n } past FORK_REF_CAP remote branches, or null — none, or git
+// could not tell (never a guess). Left out up front: origin/HEAD, the base, the task branch's own pushed
+// copy, task-shaped names (a branch cut FROM this one), and every branch that already holds HEAD.
 export const FORK_REF_CAP = 200;
 const TASK_SHAPED = /-S\d+-T\d+(?:-|$)/i;
+const TASK_ID = /^EP-[a-z0-9-]+-S\d+-T\d+$/i;
+// The task a branch carries, wherever its id sits in the name (`feat/team/EP-x-S01-T02-word`).
+export function branchTaskId(branch = '') {
+  const m = String(branch).match(/(?:^|[/_])(EP-[a-z0-9-]+?-S\d+-T\d+)(?=-|$)/i);
+  return m ? m[1] : null;
+}
 export function forkBranch(cwd, { base, head, runner = run } = {}) {
   const g = (args) => runner('git', args, { cwd });
   const baseRef = `origin/${base}`;
-  const mb0 = g(['merge-base', baseRef, 'HEAD']);
-  if (!mb0.ok || !mb0.stdout) return null;
-  const tip = g(['rev-parse', 'HEAD']);
-  const refs = g(['for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin/']);
-  if (!tip.ok || !refs.ok) return null;
-  const skip = new Set(['origin', 'origin/HEAD', baseRef, `origin/${head}`]);
-  const cands = refs.stdout.split('\n').filter((r) => r.startsWith('origin/') && !skip.has(r) && !TASK_SHAPED.test(r)).sort();
+  if (!g(['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`]).ok) return null;
+  // The full name, never `refname:short`: a short name can come out as `remotes/origin/x` when ambiguous.
+  const refs = g(['for-each-ref', '--format=%(refname)', '--no-contains', 'HEAD', 'refs/remotes/origin/']);
+  if (!refs.ok) return null;
+  const skip = new Set(['origin/HEAD', baseRef, `origin/${head}`]);
+  const cands = refs.stdout.split('\n').map((r) => r.replace(/^refs\/remotes\//, ''))
+    .filter((r) => r.startsWith('origin/') && !skip.has(r) && !TASK_SHAPED.test(r)).sort();
   if (cands.length > FORK_REF_CAP) return { skipped: cands.length };
+  const own = (branchTaskId(head) || '').toLowerCase();
   let best = null;
   for (const cand of cands) {
     const mb = g(['merge-base', cand, 'HEAD']);
-    if (!mb.ok || !mb.stdout || mb.stdout === mb0.stdout || mb.stdout === tip.stdout) continue;
-    if (!g(['merge-base', '--is-ancestor', mb0.stdout, mb.stdout]).ok) continue;
+    if (!mb.ok || !mb.stdout) continue;
+    const log = g(['log', '--no-merges', '--format=%(trailers:key=Task,valueonly,separator=%x1e)%x00', `${baseRef}..${mb.stdout}`]);
+    if (!log.ok) return null;
+    const foreign = log.stdout.split('\0').map((x) => x.split('\x1e')[0].trim())
+      .filter((t) => TASK_ID.test(t) && t.toLowerCase() !== own).length;
+    if (!foreign) continue;
     const toHead = g(['rev-list', '--count', `${mb.stdout}..HEAD`]);
     if (!toHead.ok) return null;
     const n = Number(toHead.stdout);
-    if (!best || n < best.n) best = { branch: cand.slice('origin/'.length), fork: mb.stdout, n };
+    if (!best || n < best.n) best = { branch: cand.slice('origin/'.length), foreign, n };
   }
-  if (!best) return null;
-  const foreign = g(['rev-list', '--count', '--no-merges', `${mb0.stdout}..${best.fork}`]);
-  if (!foreign.ok || !(Number(foreign.stdout) > 0)) return null;
-  return { branch: best.branch, foreign: Number(foreign.stdout) };
+  return best ? { branch: best.branch, foreign: best.foreign } : null;
 }
 
 // The words both commands print for a forkBranch answer (#450): one sentence, and the two ways out.
 // `yad open-pr --base` takes a branch name; `yad run checks --base` takes a ref, so it asks for origin/<name>.
 export function forkBranchWords(fork, base, { ref = '', verb = 'open the PR/MR against' } = {}) {
   const n = fork.foreign === 1 ? '1 commit' : `${fork.foreign} commits`;
-  return `this branch was cut from origin/${fork.branch}, not from origin/${base}: ${n} on it ${fork.foreign === 1 ? 'is' : 'are'} from origin/${fork.branch}, not this task's — pass --base ${ref}${fork.branch}, or --base ${ref}${base} to ${verb} ${base} anyway`;
+  return `this branch holds ${n} of other tasks from origin/${fork.branch} that origin/${base} does not have, so it was likely cut from origin/${fork.branch} — pass --base ${ref}${fork.branch}, or --base ${ref}${base} to ${verb} ${base} anyway`;
 }
 
 // ---- create a PR/MR -----------------------------------------------------------------------------

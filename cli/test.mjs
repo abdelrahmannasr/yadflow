@@ -2466,7 +2466,7 @@ test('#450 open-pr: a branch cut from another branch, with no --base, stops befo
   const r = forkedTaskRepo();
   try {
     const { out, seen, code } = await openWith(r.T, {});
-    assert.match(out, /this branch was cut from origin\/develop, not from origin\/main: 2 commits on it are from origin\/develop, not this task's — pass --base develop, or --base main to open the PR\/MR against main anyway/);
+    assert.match(out, /this branch holds 2 commits of other tasks from origin\/develop that origin\/main does not have, so it was likely cut from origin\/develop — pass --base develop, or --base main to open the PR\/MR against main anyway/);
     assert.equal(seen, null, 'no PR/MR is created');
     assert.equal(code, 1);
     assert.equal(git(r.bare, 'branch', '--list', 'feat/*').toString().trim(), '', 'and nothing was pushed');
@@ -2479,7 +2479,7 @@ test('#450 open-pr: --base, or a default_branch someone set, is trusted; and the
   try {
     const { out, seen, code } = await openWith(r.T, { base: 'main' });
     assert.equal(seen.base, 'main', '--base main opens against main: the person chose it');
-    assert.doesNotMatch(out, /was cut from/);
+    assert.doesNotMatch(out, /likely cut from/);
     assert.ok(!code);
   } finally { r.done(); }
   r = forkedTaskRepo();
@@ -2490,7 +2490,7 @@ test('#450 open-pr: --base, or a default_branch someone set, is trusted; and the
     fs.writeFileSync(path.join(H, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: r.T, platform: 'github', default_branch: 'develop' }] }));
     const { out, seen } = await openWith(H, { repo: 'backend' });
     assert.equal(seen.base, 'develop');
-    assert.doesNotMatch(out, /was cut from|a grouped PR/);
+    assert.doesNotMatch(out, /likely cut from|a grouped PR/);
     assert.match(seen.body, /EP-demo-S01-T01/);
     assert.doesNotMatch(seen.body, /EP-demo-S02/, 'only the branch\'s own commits are read');
   } finally { r.done(); fs.rmSync(H, { recursive: true, force: true }); }
@@ -2505,30 +2505,44 @@ test('#450 open-pr: no false stop — a branch cut from the base, its own pushed
     git(r.T, 'push', '-q', 'origin', 'feat/EP-demo-S01-T02-y');
     git(r.T, 'checkout', '-q', 'feat/EP-demo-S01-T01-x');
     const { out, seen, code } = await openWith(r.T, {});
-    assert.doesNotMatch(out, /was cut from/);
+    assert.doesNotMatch(out, /likely cut from/);
     assert.equal(seen.base, 'main');
     assert.ok(!code);
   } finally { r.done(); }
 });
 
-test('#450 open-pr --via auto: the same stop is a YAD-STATE-009 error', async () => {
-  const { forkBranch, forkBranchWords } = await import('./platform.mjs');
-  const r = forkedTaskRepo();
+test('#450 forkBranch: only other tasks\' commits count; newest fork wins; main merged in; git that cannot tell', async () => {
+  const { forkBranch, forkBranchWords, branchTaskId } = await import('./platform.mjs');
+  const head = 'feat/EP-demo-S01-T01-x';
+  let r = forkedTaskRepo();
   try {
-    // The auto path needs a Product lane; the refusal itself is the same words, so check those and the helper.
-    const fork = forkBranch(r.T, { base: 'main', head: 'feat/EP-demo-S01-T01-x' });
-    assert.deepEqual(fork, { branch: 'develop', foreign: 2 });
-    assert.match(forkBranchWords({ branch: 'develop', foreign: 1 }, 'main'), /1 commit on it is from origin\/develop/);
-    assert.match(forkBranchWords(fork, 'main', { ref: 'origin/', verb: 'check against' }), /pass --base origin\/develop, or --base origin\/main to check against main anyway$/);
-    // The newest fork wins: a second branch cut from develop's first commit is an older fork.
+    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2 });
+    assert.match(forkBranchWords({ branch: 'develop', foreign: 1 }, 'main'), /holds 1 commit of other tasks from origin\/develop/);
+    assert.match(forkBranchWords({ branch: 'develop', foreign: 2 }, 'main', { ref: 'origin/', verb: 'check against' }), /pass --base origin\/develop, or --base origin\/main to check against main anyway$/);
+    // A branch cut from develop's first commit is an older fork: develop, the newest, wins.
     git(r.T, 'push', '-q', 'origin', 'develop~1:refs/heads/staging');
-    assert.equal(forkBranch(r.T, { base: 'main', head: 'feat/EP-demo-S01-T01-x' }).branch, 'develop');
+    assert.equal(forkBranch(r.T, { base: 'main', head }).branch, 'develop');
+    // main merged INTO the task branch: develop's commits are still in origin/main..HEAD, still found (review 1).
+    git(r.T, 'checkout', '-q', 'main');
+    fs.writeFileSync(path.join(r.T, 'm.txt'), 'm'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: main moves');
+    git(r.T, 'push', '-q', 'origin', 'main');
+    git(r.T, 'checkout', '-q', head); git(r.T, 'merge', '-q', '--no-edit', 'origin/main');
+    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2 });
     // Git that cannot tell is no answer, never a guess.
-    assert.equal(forkBranch(r.T, { base: 'no-such-branch', head: 'x' }), null);
-    assert.equal(forkBranch(r.T, { base: 'main', head: 'x', runner: () => ({ ok: false, stdout: '' }) }), null);
+    assert.equal(forkBranch(r.T, { base: 'no-such-branch', head }), null);
+    assert.equal(forkBranch(r.T, { base: 'main', head, runner: () => ({ ok: false, stdout: '' }) }), null);
   } finally { r.done(); }
-  const src = fs.readFileSync(path.join(ROOT, 'cli/openpr.mjs'), 'utf8');
-  assert.match(src, /if \(auto\) throw err\('YAD-STATE-009', why,/, 'under --via auto the stop is an error, before the push');
+  // A teammate's branch with no task in its name, pushed from this branch's middle: it holds only this
+  // task's own commits, so it is never named — the PR is not sent to a teammate's branch (review 1).
+  r = forkedTaskRepo({ from: 'main' });
+  try {
+    git(r.T, 'push', '-q', 'origin', 'HEAD:refs/heads/alice-wip');
+    fs.writeFileSync(path.join(r.T, 'u.txt'), 'u'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: more\n\nTask: EP-demo-S01-T01');
+    assert.equal(forkBranch(r.T, { base: 'main', head }), null);
+  } finally { r.done(); }
+  assert.equal(branchTaskId('feat/team/EP-demo-S01-T02-word'), 'EP-demo-S01-T02');
+  assert.equal(branchTaskId('EP-demo-S01-T02'), 'EP-demo-S01-T02');
+  assert.equal(branchTaskId('develop'), null);
 });
 
 test('#450 open-pr: a grouped PR\'s Spec path is the branch\'s own story, not the newest commit\'s', async () => {
