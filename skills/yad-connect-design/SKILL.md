@@ -29,6 +29,8 @@ Tell the person which tools you used and which fallbacks, and why.
   - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
 - **Pencil (pen.dev)** (`pencil`, a connector). This skill connects it, by writing `.sdlc/design.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
   - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
+- **OpenPencil** (`openpencil`, a connector). This skill connects it, by writing `.sdlc/design.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
+  - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
 
 <!-- end: When a tool is missing -->
 
@@ -37,7 +39,9 @@ Tell the person which tools you used and which fallbacks, and why.
 - `{project-root}` resolves from the project working directory (the **Product**).
 - The integration is **Figma-first but pluggable** (`config.yaml` `design.tools`): a design-tool
   *adapter*, like the GitHub/GitLab platform adapter. Figma is the primary provider; `pencil`
-  (the `.pen` web/mobile editor) is a second, write-capable provider; `none` → markdown-only.
+  (the `.pen` web/mobile editor) is a second, write-capable provider; `openpencil` (OpenPencil, an
+  open-source editor that works on a design file in the repo, with no account and no app open, E164) is a
+  third; `none` → markdown-only.
 - **The design tool is reached through its MCP** (a harness MCP server), NOT a subprocess CLI — the same
   shape as Impeccable's slash-commands, not Repomix's `npx`. The skill detects the MCP and degrades when
   it is absent; it never installs an MCP server.
@@ -50,7 +54,7 @@ Tell the person which tools you used and which fallbacks, and why.
 ## Inputs
 
 - `action` — `connect` (default) | `refresh` | `list` | `disconnect`.
-- `tool` — `figma` | `pencil` | another adapter id (`config.yaml` `design.tools`). `none` records a
+- `tool` — `figma` | `pencil` | `openpencil` | another adapter id (`config.yaml` `design.tools`). `none` records a
   deliberate markdown-only project.
 - `project_url` — the design tool's team/project/file reference (e.g. a Figma project or file URL).
   Optional — a connection with no file yet is valid; `yad-ui` can create one on first generate.
@@ -65,12 +69,16 @@ Determine which tool is being connected from `tool` (default `figma`); reject a 
 
 - **figma** → a Figma MCP server (Dev Mode MCP for read/link; html.to.design for HTML→Figma *generate*).
 - **pencil** → the `pencil` MCP (`batch_design` writes `.pen` web/mobile screens — generate-capable).
+- **openpencil** → the `open-pencil` MCP (`openpencil-mcp`): it creates pages and frames in a design file
+  on disk and saves it — generate-capable. It reads only files inside `OPENPENCIL_MCP_ROOT` (the folder the
+  server starts in, by default), so the file goes in the repo, and `files` holds its repo path (for
+  example `design/app.fig`), never a URL. No account: `auth` stays `"user"` and there is nothing to sign in to.
 - another adapter → its named MCP.
 
 Record `provider` (the concrete MCP) and whether it is available. For Figma, say which server it is,
 because a UI task checks it before it starts (#358): `figma-desktop` (the Dev Mode MCP server inside the
 running desktop app — the app must be open), `figma` (Figma's hosted server — a sign-in, no app), or
-`html-to-design` (writes screens only, cannot read a frame). For Pencil, `pencil-mcp`. The older value
+`html-to-design` (writes screens only, cannot read a frame). For Pencil, `pencil-mcp`. For OpenPencil, `openpencil-mcp`. The older value
 `figma-mcp` does not say which Figma server it is: on a refresh, record the exact one. **Auth is the local user's own** — the user's authenticated MCP session. The skill
 **stores no tokens**; `project_url`/`files` are plain references, never credentials.
 

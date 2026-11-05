@@ -15,11 +15,12 @@ Detection is best-effort against the user's own authenticated MCP session:
 | `figma` | a Figma Dev Mode MCP | **read/link** — reference a file, read frames back into `ui-design.md` |
 | `figma` | html.to.design MCP (`import-html`) | **generate** — render HTML/CSS screens into a Figma file |
 | `pencil` | the `pencil` MCP (`batch_design`) | **generate** — author `.pen` web/mobile screens directly |
+| `openpencil` | the `open-pencil` MCP (`openpencil-mcp`) | **generate** — create pages and frames in a design file in the repo, then save it |
 | other | the adapter's named MCP | per that adapter |
 
 **Honest capability note:** not every design-tool MCP can *write*. A read-only Figma Dev Mode MCP
 supports **link + read-back** only; *generate* needs a write-capable provider (html.to.design for Figma,
-or `pencil`). `yad-ui` picks the direction the connected provider actually supports and records which one
+`pencil` or `openpencil`). `yad-ui` picks the direction the connected provider actually supports and records which one
 it used (`direction: generated | linked`). It never claims to have generated screens a read-only MCP
 cannot produce.
 
@@ -32,6 +33,10 @@ tool, covering the screens/states `ui-design.md` enumerates and the user flows t
   then imports it into the Figma file via the MCP's `import-html`, one frame per screen.
 - **pencil** — the lens calls `batch_design` to author the screens as `.pen` frames directly (mobile
   and/or web per the epic).
+- **openpencil** — the lens opens the design file named in `design.json` `files` (or creates it in the
+  repo), adds one frame per screen through the `open-pencil` MCP's tools, and saves the file. The file must
+  sit inside `OPENPENCIL_MCP_ROOT` (the folder the server starts in, by default). Commit the file with the
+  epic's other artifacts: it is the design.
 
 Reuse what already exists: load the connected code repos' code-maps (`yad-ui` Step 2b) and any
 Impeccable `DESIGN.md` tokens so generated screens match built components, not invented ones.
@@ -71,6 +76,7 @@ how to check and what to tell the person; the text for each tool is the toolbox 
 | `figma`, provider `figma` (hosted) | `get_metadata` on one recorded frame | sign in to Figma in your agent; no app is needed |
 | `figma`, provider `figma-mcp` (older value), any other name, or none | `get_metadata` on one recorded frame | either of the two above — yad cannot tell which server it is |
 | `figma`, provider `html-to-design` | nothing: it writes screens and cannot read a frame | not checked; build from the frame links |
+| `openpencil` | not checked yet: yad has no reach rule for it (E164 adds one) | build from the frame links |
 
 Also not checked (build from the frame links): no `design.json`, tool `none`, source `unavailable`; no
 `design-links.json`, one that cannot be read, or one recorded for another tool (re-run the UI step); and a

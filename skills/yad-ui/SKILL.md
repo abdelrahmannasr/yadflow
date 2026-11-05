@@ -50,6 +50,8 @@ Tell the person which tools you used and which fallbacks, and why.
   - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
 - **Pencil (pen.dev)** (`pencil`, a connector). Used when `.sdlc/design.json` connects it. yad-connect-design writes that file; follow it, not yad's toolbox answer.
   - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
+- **OpenPencil** (`openpencil`, a connector). Used when `.sdlc/design.json` connects it. yad-connect-design writes that file; follow it, not yad's toolbox answer.
+  - Fallback — markdown-only: yad-ui writes ui-design.md and DESIGN.md only.
 
 <!-- end: When a tool is missing -->
 
@@ -147,7 +149,9 @@ Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decid
   author the Markdown artifacts only and record `design: none` in the frontmatter with a one-line note
   (mirrors the `impeccable: not-installed` degrade). Skip to Step 4.
 - **A tool is connected and its MCP is available:** adopt the `ux-designer` lens and, using the provider
-  recorded in `design.json` (Figma via a Figma/html.to.design MCP, `pencil` via its MCP, etc.):
+  recorded in `design.json` (Figma via a Figma/html.to.design MCP, `pencil` via its MCP, `openpencil` via the `open-pencil` MCP —
+  it writes the frames into the design file in the repo and saves it, and that file is committed with the
+  epic — etc.):
   - **Generate** — when the provider is write-capable, produce one frame per screen the design covers,
     for the platforms in `epic.repos` (mobile and/or web), reusing the code-maps (Step 2b) and
     `DESIGN.md` tokens so screens match built components rather than inventing parallel ones.
@@ -171,7 +175,7 @@ owner: <inherit from epic.md owner>   # the epic owner carries through; not rety
 repos: [<inherit from epic>]
 impeccable: <used | not-installed>
 code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # code-maps that informed component reuse (Step 2b)
-design: <none | { tool: <figma|pencil|…>, direction: <generated|linked>, file: <url>, screens: <N> }>   # the connected design tool (Step 3b)
+design: <none | { tool: <figma|pencil|openpencil|…>, direction: <generated|linked>, file: <url or repo path>, screens: <N> }>   # the connected design tool (Step 3b)
 ---
 
 ## Screens & states
