@@ -229,10 +229,12 @@ ${c.bold('Where am I / what next')}
                                        --role "<text>" --fallback "<text>" --detect <kind>:<name>[,…]
                                        [--install "<type>: <command>"] [--source <https URL>]
   yad toolbox remove <id>              Stop using a tool in this Product, or drop one of your own
-  yad toolbox connect <id> [--verify]  What putting a tool on this machine takes (E165): the steps the
+  yad toolbox connect <id> [--verify [--replace]]
+                                       What putting a tool on this machine takes (E165): the steps the
                                        agent may run after your yes (pinned installs), the ones that
                                        are yours, and the question to ask. Runs nothing. --verify
-                                       checks it is found here, then records it as the team's choice
+                                       checks it is found here, then records it as the team's choice;
+                                       --replace when that replaces the team's current tool
   yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
@@ -562,6 +564,7 @@ function parseArgs(argv) {
     else if (a === '--preview') o.apply = false;
     else if (a === '--custom') o.custom = true;
     else if (a === '--verify') o.verify = true;
+    else if (a === '--replace') o.replace = true;
     else if (a === '--json') o.json = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else if (a === '-v' || a === '--version') o.version = true;
@@ -938,7 +941,7 @@ async function main() {
       const drift = commands.productDriftError(productRoot);
       if (drift) throw drift;
       result = action === 'connect'
-        ? commands.runToolboxConnect(commands.toolsFolder(found, o.dir || process.cwd()), productRoot, { id, verify: true, json: o.json })
+        ? commands.runToolboxConnect(commands.toolsFolder(found, o.dir || process.cwd()), productRoot, { id, verify: true, replace: o.replace, json: o.json })
         : action === 'add'
         ? commands.runToolboxAdd(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json })
         : commands.runToolboxRemove(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json });

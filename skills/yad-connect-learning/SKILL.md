@@ -73,7 +73,7 @@ the user's LLM provider keys. The skill **stores no tokens**; `kb`/`kb_sources` 
 
 **Offer to connect it first (E165):** when DeepTutor is not found, run `yad toolbox connect deeptutor --json`
 and follow the connect-tool rule: show its `ask` word for word, ask once, hand over its `person` steps (its
-install and `deeptutor init` are the person's), then run `yad toolbox connect deeptutor --verify --json`.
+install and `deeptutor init` are the person's), then run the `verify` command it gives (`yad toolbox connect deeptutor --verify --json`).
 On a no, or when a step fails, degrade:
 
 **Graceful degradation:** if the `deeptutor` binary is not on PATH, record `source: "harness-native"`

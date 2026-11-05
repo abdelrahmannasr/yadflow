@@ -4,8 +4,9 @@
 // E85 made the toolbox print-only, and the install lines (`install` in cli/toolbox.mjs) stay text for people:
 // some start an interactive installer, some are slash commands only a person types, one runs a remote
 // script. So each tool also has a RECIPE here: the exact steps, each marked for the agent or the person.
-// The agent runs only package-manager installs pinned to the vetted version (E88); everything else — a
-// remote script, an interactive installer, a slash command, an app, a sign-in — is the person's, with why.
+// The agent runs only package-manager and plugin installs, pinned to the vetted version (E88) wherever one is
+// vetted; everything else — a remote script, an interactive installer, a slash command, an app, a sign-in —
+// is the person's, with why.
 // The user's decisions (2026-11-05): one yes per tool covers installing it here AND recording the team's
 // choice; nothing here ever installs on its own.
 //
@@ -22,7 +23,9 @@ import {
 import { registerDesign, registerLearning, registerTesting } from './setup.mjs';
 
 // Each shipped tool's recipe. `null`: nothing to install here (the person's app, account or service — the
-// tool's `manual` says how). Every agent step is pinned to the vetted version; `recipeProblems` checks it.
+// tool's `manual` says how). An agent step is a package-manager or plugin install, pinned to the vetted version
+// wherever one is vetted; `recipeProblems` checks it. The `claude` steps are Claude Code's: with another agent,
+// the connect-tool rule hands every step to the person.
 const A = (run) => ({ who: 'agent', run, scope: 'user' });
 const P = (run, why) => ({ who: 'person', run, why });
 // A person step that is a thing to do, not a command to type.
@@ -38,7 +41,7 @@ export const RECIPES = Object.freeze({
   impeccable: [P('npx impeccable install', INTERACTIVE)],
   'bmad-method': [P('npx bmad-method install', INTERACTIVE)],
   ecc: [P('npx ecc-universal install --guided', INTERACTIVE)],
-  'mattpocock-skills': [A('claude plugins install mattpocock-skills')],
+  'mattpocock-skills': [P('claude plugin install mattpocock-skills', 'it comes from its own plugin marketplace, which you add in your agent first')],
   'docker-mcp': [PT('set up the MCP Toolkit in Docker Desktop: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', 'it is a feature of the Docker Desktop app')],
   figma: [
     A('claude plugin install figma@claude-plugins-official'),
@@ -49,12 +52,12 @@ export const RECIPES = Object.freeze({
     A('npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0'),
     A('claude mcp add --scope user open-pencil -- openpencil-mcp'),
   ],
-  playwright: [A('claude mcp add playwright -- npx @playwright/mcp@0.0.83')],
+  playwright: [A('claude mcp add --scope user playwright -- npx @playwright/mcp@0.0.83')],
   cypress: [PT('connect the Cypress Cloud MCP: https://docs.cypress.io/cloud/integrations/cloud-mcp', 'it reads your Cypress Cloud account')],
   pytest: [PT('connect a pytest MCP server you trust, under the name pytest: https://docs.pytest.org/', 'pytest has no official MCP server, and the community ones are not vetted, so the choice is yours')],
   maestro: [
     P('curl -fsSL "https://get.maestro.mobile.dev" | bash', SCRIPT),
-    A('claude mcp add maestro -- maestro mcp'),
+    A('claude mcp add --scope user maestro -- maestro mcp'),
   ],
   deeptutor: [
     P('pip install deeptutor==1.6.12', 'where Python packages go (pip, pipx or a virtual environment) is your choice'),
@@ -97,32 +100,53 @@ export function recipeProblems(tool, steps = Object.hasOwn(RECIPES, tool.id) ? R
 const tools = () => TOOLBOX;
 const byId = (id) => tools().find((t) => t.id === id) ?? null;
 
-// The files `--verify` writes for a tool: the team's choice, and a connector's own file.
-function recordFiles(tool) {
-  const file = tool.tier === 'connector' ? connectorFile(tool) : null;
-  return [PROJECT_FILES.toolboxConfig, ...(file ? [file] : [])];
-}
+// The file `--verify` records the team's choice in: a connector's own file (it is what makes a connector used),
+// else the tool's line in the toolbox file.
+const recordFile = (tool) => (tool.tier === 'connector' ? connectorFile(tool) : null) ?? PROJECT_FILES.toolboxConfig;
 
-// The question the agent asks, word for word: every step it will run, where it installs, what it records.
-function askText(tool, steps, record, found) {
-  const files = record.join(' and ');
-  if (!steps.length && found) return `${tool.name} is already on this machine. Record it as this team's choice in ${files}?`;
-  if (!steps.length) return `${tool.name} has nothing yad can install: set it up as ${tool.manual ?? tool.source} says, then I will check that it is found and record it as this team's choice in ${files}.`;
+// What the connector's file names today, read strictly: `{ tool }` (null when there is no file or it names
+// none), or `{ error }` when it does not parse — such a file is never written over.
+function currentConnection(productRoot, tool) {
+  const file = tool.tier === 'connector' ? connectorFile(tool) : null;
+  if (!file || !productRoot) return { tool: null };
+  const abs = path.join(productRoot, file);
+  if (!fs.existsSync(abs)) return { tool: null };
+  try {
+    const doc = readJSONStrict(abs);
+    const t = doc && typeof doc.tool === 'string' && doc.tool !== 'none' ? doc.tool : null;
+    return { tool: t };
+  } catch (e) { return { error: `${file} does not parse (${e.message})` }; }
+}
+const nameOf = (id) => byId(id)?.name ?? id;
+
+// On native Windows, a local MCP server started through npx or an npm program (a .cmd shim) needs `cmd /c`
+// (Claude Code's own setup note): the same step, in the form that starts there.
+const forPlatform = (run, platform) => (platform === 'win32' && /^claude mcp add .* -- (?!cmd \/c )/.test(run) ? run.replace(' -- ', ' -- cmd /c ') : run);
+
+// The question the agent asks, word for word: every step in order (each of the person's with its reason), where
+// it installs, and what it records — naming the tool it replaces as the team's choice, if any.
+function askText(tool, steps, { found, file, replaces, productRoot }) {
+  const recordPart = !productRoot ? 'There is no Product here, so nothing will be recorded.'
+    : replaces ? `record it as this team's choice in ${file}, in place of ${nameOf(replaces)} (what that file holds for ${nameOf(replaces)} is dropped)`
+      : `record it as this team's choice in ${file}`;
+  if (!steps.length && found) return productRoot ? `${tool.name} is already on this machine. ${recordPart[0].toUpperCase()}${recordPart.slice(1)}?` : `${tool.name} is already on this machine. ${recordPart}`;
+  const tail = productRoot ? `then I will check that it is found and ${recordPart}.` : `then I will check that it is found. ${recordPart}`;
+  if (!steps.length) return `${tool.name} has nothing yad can install: set it up as ${tool.manual ?? tool.source} says; ${tail}`;
   // In the recipe's order: a step of the person's that comes first (Maestro's installer) is said first.
   const parts = [];
   for (const s of steps) {
     const last = parts[parts.length - 1];
-    if (last && last.who === s.who) last.runs.push(s.who === 'agent' ? s.run : s);
-    else parts.push({ who: s.who, runs: [s.who === 'agent' ? s.run : s] });
+    if (last && last.who === s.who) last.runs.push(s);
+    else parts.push({ who: s.who, runs: [s] });
   }
   const said = parts.map((p, i) => {
     const lead = i === 0 ? (p.who === 'person' ? 'first, ' : '') : 'then ';
-    if (p.who === 'agent') return `${lead}I will run ${p.runs.map((r) => `\`${r}\``).join(', then ')} (for your user account on this machine)`;
-    return `${lead}you ${p.runs.map((r) => (r.text ? r.run : `run \`${r.run}\``)).join(', then ')} (see why below)`;
+    if (p.who === 'agent') return `${lead}I will run ${p.runs.map((r) => `\`${r.run}\``).join(', then ')} (for your user account on this machine)`;
+    return `${lead}you ${p.runs.map((r) => `${r.text ? r.run : `run \`${r.run}\``} (${r.why})`).join(', then ')}`;
   });
-  if (said[0]) said[0] = said[0][0].toUpperCase() + said[0].slice(1);
+  said[0] = said[0][0].toUpperCase() + said[0].slice(1);
   const anyAgent = steps.some((s) => s.who === 'agent');
-  return `${anyAgent ? `Connect ${tool.name}? ` : `${tool.name} needs steps only you can do. `}${said.join('; ')}; then I will check that it is found and record it as this team's choice in ${files}.`;
+  return `${anyAgent ? `Connect ${tool.name}? ` : `${tool.name} needs steps only you can do. `}${said.join('; ')}; ${tail}`;
 }
 
 const personBlock = (tool, steps) => (steps.length ? {
@@ -134,31 +158,34 @@ const personBlock = (tool, steps) => (steps.length ? {
 } : null);
 
 // The read: what connecting `id` takes here. Runs nothing, writes nothing.
-export function connectPlan(id, { items = null, has = onPath, detectRoot = process.cwd() } = {}) {
+export function connectPlan(id, { items = null, has = onPath, detectRoot = process.cwd(), productRoot = null, platform = process.platform } = {}) {
   const tool = byId(id);
   if (!tool) return { error: `${id} is not in the toolbox`, ids: tools().map((t) => t.id) };
   const found = items ?? detectInstalled(detectRoot).items;
   const status = toolStatus(tool, found, { has });
-  const recipe = RECIPES[tool.id] ?? [];
+  const recipe = (RECIPES[tool.id] ?? []).map((s) => (s.who === 'agent' ? { ...s, run: forPlatform(s.run, platform) } : s));
   // Already here: nothing to install, only the record.
   const here = status.state === 'installed' || status.state === 'available';
   const steps = here ? [] : recipe;
-  const personSteps = steps.filter((s) => s.who === 'person');
-  const record = recordFiles(tool);
+  const file = recordFile(tool);
+  const now = currentConnection(productRoot, tool);
+  const replaces = now.tool && now.tool !== tool.id ? now.tool : null;
   return {
     tool: tool.id, name: tool.name, state: status.state, found: status.found,
     steps: steps.map((s) => ({ who: s.who, run: s.run, ...(s.scope ? { scope: s.scope } : {}), ...(s.why ? { why: s.why } : {}), ...(s.text ? { text: true } : {}) })),
-    ask: askText(tool, steps, record, here),
-    record,
-    person: personBlock(tool, personSteps),
+    ask: askText(tool, steps, { found: here, file, replaces, productRoot }),
+    record: productRoot ? [file] : [],
+    replaces,
+    ...(now.error ? { recordProblem: now.error } : {}),
+    person: personBlock(tool, steps.filter((s) => s.who === 'person')),
     manual: tool.manual,
-    verify: `yad toolbox connect ${tool.id} --verify --json`,
+    verify: `yad toolbox connect ${tool.id} --verify${replaces ? ' --replace' : ''} --json`,
   };
 }
 
-export function runToolboxConnect(detectRoot, productRoot, { id, verify = false, json = false, items = null, has = onPath, today = new Date().toISOString().slice(0, 10) } = {}) {
+export function runToolboxConnect(detectRoot, productRoot, { id, verify = false, replace = false, json = false, items = null, has = onPath, platform = process.platform, today = new Date().toISOString().slice(0, 10) } = {}) {
   if (!id) return refuse('yad toolbox connect needs a tool id', 'usage: yad toolbox connect <id> [--verify] [--json]', { json });
-  const plan = connectPlan(id, { items, has, detectRoot });
+  const plan = connectPlan(id, { items, has, detectRoot, productRoot, platform });
   if (plan.error) return refuse(plan.error, `the tools: ${plan.ids.join(', ')}`, { json });
   if (!verify) {
     if (json) return emitJSON({ ok: true, ...plan });
@@ -168,43 +195,41 @@ export function runToolboxConnect(detectRoot, productRoot, { id, verify = false,
     hand(`then: ${plan.verify}`);
     return plan;
   }
-  return verifyAndRecord(productRoot, plan, { json, today });
+  return verifyAndRecord(productRoot, plan, { json, today, replace });
 }
 
-// `--verify`: found here → record the choice; not found → say what is left, and record nothing.
-function verifyAndRecord(productRoot, plan, { json, today }) {
+// `--verify`: found here → record the choice; not found → say what is left, and record nothing. Every check runs
+// before the first write, so a refusal leaves every file as it was.
+function verifyAndRecord(productRoot, plan, { json, today, replace }) {
   const found = plan.state === 'installed' || plan.state === 'available';
   if (!found) {
     const left = plan.steps.length ? plan.steps.map((s) => s.run) : [plan.manual].filter(Boolean);
     return refuse(`${plan.name} is not found here yet, so nothing was recorded`,
       left.length ? `still to do: ${left.join('; then ')}` : 'install it, then run this again',
-      { json, person: plan.person ?? { act: 'install', why: 'the tool is not found on this machine', steps: left, commands: left, verify: plan.verify } });
+      { json, person: plan.person ?? { act: 'install', why: 'it is not found on this machine yet', steps: left, commands: [], verify: plan.verify } });
   }
   if (!productRoot) return refuse(`${plan.name} is found here, but there is no Product to record it in`, 'run it from the Product, or a repo it registers', { json });
-  const tool = byId(plan.tool);
-  const written = [];
-  // A connector's own file first: it is what makes a connector used (`connectedTools`). Read strictly — a file
-  // that does not parse is never written over, and the same tool already recorded is left as it is.
-  const file = tool.tier === 'connector' ? connectorFile(tool) : null;
-  if (file) {
-    const abs = path.join(productRoot, file);
-    let prev = null;
-    if (fs.existsSync(abs)) {
-      try { prev = readJSONStrict(abs); } catch (e) { return refuse(`${file} does not parse (${e.message})`, 'fix it or restore it from git first: writing over it would lose what it holds', { json }); }
-    }
-    if (!prev || prev.tool !== tool.id) {
-      const write = { [PROJECT_FILES.designConfig]: registerDesign, [PROJECT_FILES.testingConfig]: registerTesting, [PROJECT_FILES.learningConfig]: registerLearning }[file];
-      write(productRoot, { tool: tool.id, today });
-      written.push(file);
-    }
-  }
+  if (plan.recordProblem) return refuse(plan.recordProblem, 'fix it or restore it from git first: writing over it would lose what it holds', { json });
   const { error } = readToolboxFile(productRoot);
   if (error) return refuse(`${PROJECT_FILES.toolboxConfig} ${error}`, 'fix it (or restore it from git) first — writing over it would delete every choice it holds', { json });
+  // Replacing the team's tool is said in the question; only with that yes (--replace) is the file changed.
+  if (plan.replaces && !replace) {
+    return refuse(`${plan.name} would replace ${nameOf(plan.replaces)} as this team's choice in ${plan.record[0]}, so nothing was recorded`,
+      `ask the person first (the \`ask\` of \`yad toolbox connect ${plan.tool} --json\` says it), then run \`yad toolbox connect ${plan.tool} --verify --replace --json\``, { json });
+  }
+  const tool = byId(plan.tool);
+  const written = [];
+  const file = tool.tier === 'connector' ? connectorFile(tool) : null;
+  if (file && (plan.replaces || !currentConnection(productRoot, tool).tool)) {
+    const write = { [PROJECT_FILES.designConfig]: registerDesign, [PROJECT_FILES.testingConfig]: registerTesting, [PROJECT_FILES.learningConfig]: registerLearning }[file];
+    write(productRoot, { tool: tool.id, today });
+    written.push(file);
+  }
   if (recordToolUse(productRoot, tool)) written.push(PROJECT_FILES.toolboxConfig);
   const used = toolUse(tool, loadChoices(productRoot)).used;
-  const out = { ok: true, tool: tool.id, found: plan.found, used, written };
+  const out = { ok: true, tool: tool.id, found: plan.found, used, written, ...(plan.replaces ? { replaced: plan.replaces } : {}) };
   if (json) return emitJSON(out);
-  ok(`${plan.name} is found here${used ? ' and used by this team' : ''}`);
+  ok(`${plan.name} is found here${used ? ' and used by this team' : ''}${plan.replaces ? `, in place of ${nameOf(plan.replaces)}` : ''}`);
   if (written.length) hand(`recorded in ${written.join(' and ')} — commit ${written.length > 1 ? 'them' : 'it'} with your next change, so the team shares the choice`);
   else info('already recorded — nothing to change');
   if (!used) warn(`${plan.name} is still not used here — a line in ${PROJECT_FILES.toolboxConfig} turns it off`);

@@ -1899,6 +1899,8 @@ test('E165: every shipped tool has a recipe; agent steps are pinned installs, th
   const deep = TOOLBOX.find((t) => t.id === 'deeptutor');
   assert.match(recipeProblems(deep, [A('pip install deeptutor==1.0.0')]).join('\n'), /not at the vetted deeptutor==1\.6\.12/);
   // The agent never runs a remote script or an interactive installer: those stay the person's.
+  // An MCP server is added for the user account, so it works in the Product and every code repo.
+  for (const t of TOOLBOX) for (const st of RECIPES[t.id] ?? []) if (st.who === 'agent' && /^claude mcp add /.test(st.run)) assert.match(st.run, /^claude mcp add --scope user /, st.run);
   for (const id of ['maestro', 'ecc', 'bmad-method', 'impeccable']) {
     assert.ok(!RECIPES[id].some((s) => s.who === 'agent' && /curl|install --guided|bmad-method install|impeccable install/.test(s.run)), id);
   }
@@ -1916,20 +1918,34 @@ test('E165: `yad toolbox connect <tool> --json` reads only — the steps, the qu
       ['agent', 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0'],
       ['agent', 'claude mcp add --scope user open-pencil -- openpencil-mcp'],
     ]);
-    assert.equal(j.ask, 'Connect OpenPencil? I will run `npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0`, then `claude mcp add --scope user open-pencil -- openpencil-mcp` (for your user account on this machine); then I will check that it is found and record it as this team\'s choice in .sdlc/toolbox.json and .sdlc/design.json.');
-    assert.deepEqual([j.record, j.person, j.verify], [['.sdlc/toolbox.json', '.sdlc/design.json'], null, 'yad toolbox connect openpencil --verify --json']);
+    assert.equal(j.ask, 'Connect OpenPencil? I will run `npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0`, then `claude mcp add --scope user open-pencil -- openpencil-mcp` (for your user account on this machine); then I will check that it is found and record it as this team\'s choice in .sdlc/design.json.');
+    assert.deepEqual([j.record, j.replaces, j.person, j.verify], [['.sdlc/design.json'], null, null, 'yad toolbox connect openpencil --verify --json']);
     // A person step first is said first, with why, and its command is in the person block.
     j = JSON.parse(yadPath(['toolbox', 'connect', 'maestro', '--json'], { cwd: p, home }).stdout);
-    assert.match(j.ask, /^Connect Maestro\? First, you run `curl -fsSL "https:\/\/get\.maestro\.mobile\.dev" \| bash` \(see why below\); then I will run `claude mcp add maestro -- maestro mcp`/);
+    assert.match(j.ask, /^Connect Maestro\? First, you run `curl -fsSL "https:\/\/get\.maestro\.mobile\.dev" \| bash` \(a remote install script: [^)]+\); then I will run `claude mcp add --scope user maestro -- maestro mcp`/);
     assert.deepEqual(j.person.commands, ['curl -fsSL "https://get.maestro.mobile.dev" | bash']);
     assert.match(j.person.why, /remote install script/);
     // Found here: nothing to install, only the record.
     put(path.join(p, '.mcp.json'), JSON.stringify({ mcpServers: { 'open-pencil': { command: 'openpencil-mcp' } } }));
     j = JSON.parse(yadPath(['toolbox', 'connect', 'openpencil', '--json'], { cwd: p, home }).stdout);
     assert.deepEqual([j.state, j.steps], ['installed', []]);
-    assert.match(j.ask, /^OpenPencil is already on this machine\. Record it as this team's choice/);
+    assert.equal(j.ask, 'OpenPencil is already on this machine. Record it as this team\'s choice in .sdlc/design.json?');
+    // The team's design tool is another one: the question says so, and so does the verify command.
+    put(path.join(p, '.sdlc/design.json'), JSON.stringify({ tool: 'figma', project_url: 'https://figma.example/f' }));
+    j = JSON.parse(yadPath(['toolbox', 'connect', 'openpencil', '--json'], { cwd: p, home }).stdout);
+    assert.equal(j.replaces, 'figma');
+    assert.match(j.ask, /[Rr]ecord it as this team's choice in \.sdlc\/design\.json, in place of Figma \(what that file holds for Figma is dropped\)\?$/);
+    assert.equal(j.verify, 'yad toolbox connect openpencil --verify --replace --json');
+    fs.rmSync(path.join(p, '.sdlc/design.json'));
     fs.rmSync(path.join(p, '.mcp.json'));
     assert.deepEqual(fs.readdirSync(path.join(p, '.sdlc')).sort(), before, 'nothing written');
+    // No Product: the question says nothing will be recorded.
+    const away = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e165-away-'));
+    try {
+      j = JSON.parse(yadPath(['toolbox', 'connect', 'repomix', '--json'], { cwd: away, home }).stdout);
+      assert.deepEqual(j.record, []);
+      assert.match(j.ask, /There is no Product here, so nothing will be recorded\.$/);
+    } finally { fs.rmSync(away, { recursive: true, force: true }); }
     r = yadPath(['toolbox', 'connect', 'sketch', '--json'], { cwd: p, home });
     assert.equal(r.status, 1);
     assert.match(JSON.parse(r.stdout).error, /sketch is not in the toolbox/);
@@ -1964,6 +1980,22 @@ test('E165: `--verify` records only a tool it finds — the connector\'s file, o
     assert.equal(r.status, 1);
     assert.match(JSON.parse(r.stdout).error, /\.sdlc\/design\.json does not parse/);
     assert.equal(fs.readFileSync(design, 'utf8'), '{broken');
+    // Replacing the team's tool needs --replace (the yes to a question that said so); without it nothing changes.
+    fs.writeFileSync(design, JSON.stringify({ tool: 'figma', project_url: 'https://figma.example/f' }));
+    r = yadPath(['toolbox', 'connect', 'openpencil', '--verify', '--json'], { cwd: p, home, bins: ['openpencil'] });
+    assert.equal(r.status, 1);
+    assert.match(JSON.parse(r.stdout).error, /OpenPencil would replace Figma as this team's choice in \.sdlc\/design\.json, so nothing was recorded/);
+    assert.equal(JSON.parse(fs.readFileSync(design, 'utf8')).tool, 'figma');
+    j = JSON.parse(yadPath(['toolbox', 'connect', 'openpencil', '--verify', '--replace', '--json'], { cwd: p, home, bins: ['openpencil'] }).stdout);
+    assert.deepEqual([j.written, j.replaced], [['.sdlc/design.json'], 'figma']);
+    assert.equal(JSON.parse(fs.readFileSync(design, 'utf8')).tool, 'openpencil');
+    // A broken toolbox file refuses before ANY write: the connector's file stays as it was.
+    fs.writeFileSync(design, JSON.stringify({ tool: 'figma' }));
+    fs.writeFileSync(path.join(p, '.sdlc/toolbox.json'), '{broken');
+    r = yadPath(['toolbox', 'connect', 'openpencil', '--verify', '--replace', '--json'], { cwd: p, home, bins: ['openpencil'] });
+    assert.equal(r.status, 1);
+    assert.equal(JSON.parse(fs.readFileSync(design, 'utf8')).tool, 'figma');
+    fs.rmSync(path.join(p, '.sdlc/toolbox.json'));
     // A tool that is not a connector: its use goes in the team's toolbox file.
     put(path.join(p, '.mcp.json'), JSON.stringify({ mcpServers: { MCP_DOCKER: { command: 'docker' } } }));
     j = JSON.parse(yadPath(['toolbox', 'connect', 'docker-mcp', '--verify', '--json'], { cwd: p, home }).stdout);
@@ -1980,4 +2012,13 @@ test('E165: the connect skills offer `yad toolbox connect` under the connect-too
     assert.match(text, /connect-tool rule/, `${skill} names the rule`);
     assert.doesNotMatch(text, /Do \*\*not\*\* install/, `${skill} no longer forbids the connect step`);
   }
+});
+
+test('E165: on Windows an MCP server started through npx or an npm program gets `cmd /c`, as Claude Code needs there', async () => {
+  const { connectPlan } = await import('./toolbox-connect.mjs');
+  const none = { items: [], has: () => false };
+  assert.equal(connectPlan('playwright', { ...none, platform: 'win32' }).steps[0].run, 'claude mcp add --scope user playwright -- cmd /c npx @playwright/mcp@0.0.83');
+  assert.equal(connectPlan('openpencil', { ...none, platform: 'win32' }).steps[1].run, 'claude mcp add --scope user open-pencil -- cmd /c openpencil-mcp');
+  assert.equal(connectPlan('openpencil', { ...none, platform: 'win32' }).steps[0].run, 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0', 'a package install is the same everywhere');
+  assert.equal(connectPlan('playwright', { ...none, platform: 'darwin' }).steps[0].run, 'claude mcp add --scope user playwright -- npx @playwright/mcp@0.0.83');
 });

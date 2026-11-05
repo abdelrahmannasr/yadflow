@@ -84,7 +84,8 @@ it is available. **Auth is the local user's own** — the user's authenticated M
 
 **Offer to connect it first (E165):** when the tool is not found, run `yad toolbox connect <tool> --json`
 and follow the connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent`
-steps, hand over its `person` steps, then run `yad toolbox connect <tool> --verify --json`. Never install
+steps, hand over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
+with `--replace` only when its question said which tool it replaces). Never install
 it any other way. On a no, or when a step fails, degrade:
 
 **Graceful degradation:** if no testing-tool MCP is available, record `source: "unavailable"` and report
