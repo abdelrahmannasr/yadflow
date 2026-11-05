@@ -631,9 +631,9 @@ test('#424: every job in every CI file yad installs has a time limit', async () 
       files.push({ name: `${dir}/${f}`, text: fs.readFileSync(path.join(ROOT, dir, f), 'utf8'), gitlab: dir.endsWith('gitlab') });
     }
   }
-  // This repo's own workflows too (yad-gate-sync.yml is a stale 3.x copy, removed by #430).
+  // This repo's own workflows too.
   for (const f of fs.readdirSync(path.join(ROOT, '.github/workflows'))) {
-    if (!/\.ya?ml$/.test(f) || f === 'yad-gate-sync.yml') continue;
+    if (!/\.ya?ml$/.test(f)) continue;
     files.push({ name: `.github/workflows/${f}`, text: fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8'), gitlab: false });
   }
   files.push({ name: 'yad docs (GitHub)', text: pagesWorkflow('github'), gitlab: false });
