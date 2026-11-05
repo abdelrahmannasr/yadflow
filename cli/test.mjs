@@ -21568,39 +21568,46 @@ function gateRepo(files, remote = 'https://github.com/acme/x.git') {
   return { T, put, done: () => fs.rmSync(T, { recursive: true, force: true }) };
 }
 
-test('#426 codeowners: checks/ and yad CI files with no owner whose review can be required are a finding, with or without a file', async () => {
+test('#426 codeowners: checks/ and the CI files with no owner whose review can be required are a finding, with or without a file', async () => {
   const { checkCodeowners, codeownersFindings, unguardedHint } = await import('./codeowners-command.mjs');
-  const r = gateRepo({ 'src/a.js': '1', 'checks/a.sh': 'x', 'checks/b.sh': 'x', '.github/workflows/yad-checks.yml': 'x', '.github/workflows/team.yml': 'x', '.gitlab/ci/yad-checks.yml': 'x' });
+  const r = gateRepo({ 'src/a.js': '1', 'checks/a.sh': 'x', 'checks/b.sh': 'x', '.github/workflows/yad-checks.yml': 'x', '.github/workflows/team.yml': 'x', '.gitlab/ci/yad-checks.yml': 'x', '.gitlab-ci.yml': 'x' });
   try {
     let got = checkCodeowners(r.T, { platform: 'github' });
     assert.ok(got.none);
-    assert.deepEqual(got.unguarded, { checks: ['checks/a.sh', 'checks/b.sh'], ci: ['.github/workflows/yad-checks.yml'] }, 'the team\'s own workflow and the other platform\'s file are not gate files');
-    assert.deepEqual(codeownersFindings(got).map((f) => [f.code, f.checks, f.ci, f.message]), [['unguarded', 2, 1,
-      'no CODEOWNERS, so checks/ (2 files) and 1 yad CI file have no code owner — a pull request can change what the gates do with no code owner\'s review']]);
+    // Every workflow counts: a required check is matched by job name, so the team's own file could pass one.
+    assert.deepEqual(got.unguarded, { checks: ['checks/a.sh', 'checks/b.sh'], ci: ['.github/workflows/team.yml', '.github/workflows/yad-checks.yml'] }, 'the other platform\'s files are not gate files');
+    assert.deepEqual(codeownersFindings(got).map((f) => [f.code, f.checks, f.ci, f.message]), [['unguarded', 2, 2,
+      'no CODEOWNERS, so checks/ (2 files) and 2 CI files have no code owner — a pull request can change what the gates do with no code owner\'s review']]);
     r.put({ 'CODEOWNERS': 'src/ @a\n' });
     got = checkCodeowners(r.T, { platform: 'github' });
-    assert.deepEqual(got.unguarded, { checks: ['checks/a.sh', 'checks/b.sh'], ci: ['.github/workflows/yad-checks.yml'] });
-    assert.match(codeownersFindings(got).at(-1).message, /^no line in CODEOWNERS that yad can read gives checks\/ \(2 files\) and 1 yad CI file an owner whose review GitHub can require/);
+    assert.deepEqual(got.unguarded, { checks: ['checks/a.sh', 'checks/b.sh'], ci: ['.github/workflows/team.yml', '.github/workflows/yad-checks.yml'] });
+    assert.match(codeownersFindings(got).at(-1).message, /^no line in CODEOWNERS that yad can read gives checks\/ \(2 files\) and 2 CI files an owner whose review GitHub can require/);
     r.put({ 'CODEOWNERS': 'src/ @a\n/checks/ @a\n/.github/workflows/yad-* @a\n' });
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'github' }).unguarded, { checks: [], ci: ['.github/workflows/team.yml'] }, 'yad-* alone leaves the team\'s workflow open');
+    r.put({ 'CODEOWNERS': 'src/ @a\n/checks/ @a\n/.github/workflows/ @a\n' });
     got = checkCodeowners(r.T, { platform: 'github' });
     assert.equal(got.unguarded, undefined, 'the lines yad advises cover them');
     assert.deepEqual(codeownersFindings(got), []);
-    r.put({ 'CODEOWNERS': 'src/ @a\n/checks/ @a\n/.github/workflows/yad-* @a\n/checks/b.sh\n' });
+    r.put({ 'CODEOWNERS': 'src/ @a\n/checks/ @a\n/.github/workflows/ @a\n/checks/b.sh\n' });
     assert.deepEqual(checkCodeowners(r.T, { platform: 'github' }).unguarded, { checks: ['checks/b.sh'], ci: [] }, 'a later line with no owner takes one file back');
     // GitLab: its own CI folder, and an owner only in an optional section cannot be required.
-    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n^[Later]\n/.gitlab/ci/yad-* @a\n' });
+    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n/.gitlab-ci.yml @a\n^[Later]\n/.gitlab/ci/ @a\n' });
     assert.deepEqual(checkCodeowners(r.T, { platform: 'gitlab' }).unguarded, { checks: [], ci: ['.gitlab/ci/yad-checks.yml'] });
-    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n/.gitlab/ci/yad-* @a\n' });
+    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n/.gitlab/ci/ @a\n' });
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'gitlab' }).unguarded, { checks: [], ci: ['.gitlab-ci.yml'] }, 'the root file decides what is included');
+    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n/.gitlab-ci.yml @a\n/.gitlab/ci/ @a\n' });
     assert.equal(checkCodeowners(r.T, { platform: 'gitlab' }).unguarded, undefined);
     // The hint: the exact lines and the setting, per platform; never an address.
-    assert.match(unguardedHint('github'), /`\/checks\/ @<owner>` and `\/\.github\/workflows\/yad-\* @<owner>`.*"Require review from Code Owners".*yad never writes CODEOWNERS/);
-    assert.match(unguardedHint('gitlab'), /`\/checks\/ @<owner>` and `\/\.gitlab\/ci\/yad-\* @<owner>`.*"Code owner approval".*GitLab Premium/);
+    assert.match(unguardedHint('github'), /^add `\/checks\/ @<owner>` and `\/\.github\/workflows\/ @<owner>` to CODEOWNERS.*"Require review from Code Owners".*yad never writes CODEOWNERS/);
+    assert.match(unguardedHint('gitlab'), /^add `\/checks\/ @<owner>`, `\/\.gitlab-ci\.yml @<owner>` and `\/\.gitlab\/ci\/ @<owner>` to CODEOWNERS.*"Code owner approval".*GitLab Premium/);
   } finally { r.done(); }
   const plain = gateRepo({ 'src/a.js': '1' });
   try {
     const got = checkCodeowners(plain.T, { platform: 'github' });
     assert.ok(got.none);
     assert.equal(got.unguarded, undefined, 'no gate files: nothing to guard');
+    fs.writeFileSync(path.join(plain.T, '.git/index'), 'broken');
+    assert.match(checkCodeowners(plain.T, { platform: 'github' }).unknown || '', /git could not list the files/, 'a git failure is not known, never "none"');
   } finally { plain.done(); }
 });
 
@@ -21620,17 +21627,23 @@ test('#426 doctor + yad codeowners check: the gate-file warning on a code repo a
     assert.deepEqual(Object.keys(by), ['codeowners:code', 'codeowners:(the Product)']);
     assert.deepEqual([by['codeowners:code'].status, by['codeowners:code'].message], ['warn', 'code: no CODEOWNERS, so checks/ (1 file) have no code owner']);
     assert.match(by['codeowners:code'].hint, /`\/checks\/ @<owner>`.*"Require review from Code Owners"/);
-    assert.deepEqual([by['codeowners:(the Product)'].status, by['codeowners:(the Product)'].message], ['warn', 'the Product: no CODEOWNERS, so checks/ (1 file) and 1 yad CI file have no code owner']);
+    assert.deepEqual([by['codeowners:(the Product)'].status, by['codeowners:(the Product)'].message], ['warn', 'the Product: no CODEOWNERS, so checks/ (1 file) and 1 CI file have no code owner']);
     // A file with other stale lines: one row says both, and its hint both fixes.
-    P.put({ 'CODEOWNERS': '/checks/ @a\n/.github/workflows/yad-* @a\n' });
+    P.put({ 'CODEOWNERS': '/checks/ @a\n/.github/workflows/ @a\n' });
     fs.writeFileSync(path.join(code, 'CODEOWNERS'), 'gone/ @a\n');
     git(code, 'add', '-A'); git(code, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'y');
     checks = [];
     codeownersChecks(checks, P.T);
     by = Object.fromEntries(checks.map((x) => [x.id, x]));
-    assert.equal(by['codeowners:code'].message, 'code: CODEOWNERS may be out of date — in CODEOWNERS, 1 line matches no file (line 1); no line in CODEOWNERS gives checks/ (1 file) an owner');
+    assert.equal(by['codeowners:code'].message, 'code: CODEOWNERS may be out of date — in CODEOWNERS, 1 line matches no file (line 1); no line in CODEOWNERS that yad can read gives checks/ (1 file) an owner whose review GitHub can require');
     assert.match(by['codeowners:code'].hint, /^`yad codeowners check code` lists each one; .*; add `\/checks\/ @<owner>`/);
-    assert.deepEqual([by['codeowners:(the Product)'].status, by['codeowners:(the Product)'].message], ['ok', 'the Product: checks/ and yad\'s CI files have a code owner in CODEOWNERS']);
+    assert.deepEqual([by['codeowners:(the Product)'].status, by['codeowners:(the Product)'].message], ['ok', 'the Product: checks/ and the CI files have a code owner in CODEOWNERS']);
+    // A Product registered as one of its own repos is said once.
+    fs.writeFileSync(path.join(P.T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'code', path: 'code' }, { name: 'self', path: '.' }] }));
+    checks = [];
+    codeownersChecks(checks, P.T);
+    assert.deepEqual(checks.map((x) => x.id), ['codeowners:code', 'codeowners:self']);
+    fs.writeFileSync(path.join(P.T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'code', path: 'code' }] }));
     // The command: --json carries the finding (a file-less repo too); nothing is written.
     const before = fs.readFileSync(path.join(code, 'CODEOWNERS'), 'utf8');
     fs.rmSync(path.join(code, 'CODEOWNERS')); git(code, 'add', '-A'); git(code, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'z');

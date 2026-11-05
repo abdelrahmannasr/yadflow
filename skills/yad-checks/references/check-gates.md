@@ -664,8 +664,9 @@ The gates run identically under either CI; the config just invokes the scripts w
   `checks/` at all (the PR that installs the gates). A link in the PR's `checks/` is never followed. An
   `origin/<base>` that is not in the checkout FAILs the job (`FAIL [base-checks]`) — it never falls back
   to the PR's copies. GitHub runs this as a step named "Gate scripts from the base branch (#426)" in each
-  job, exporting `YAD_CHECKS` through `$GITHUB_ENV`; GitLab as the `before_script` of the template every
-  job extends. The step's text is the same everywhere, and a test holds it. The base's script runs with
+  job, exporting `YAD_CHECKS` through `$GITHUB_ENV`; GitLab as the first line of every gate job's `script:`
+  (`!reference [.yad_base_checks, script]`) — not a `before_script`, which would replace the host
+  pipeline's `default: before_script` for these jobs (registry auth, proxies). The step's text is the same everywhere, and a test holds it. The base's script runs with
   the new file's call, so a call may only use what the previous release's script accepts (a test holds
   that list too). The CI file itself still comes from the PR: the CODEOWNERS lines in
   `docs/branch-protection.md` ("Who may change the gates") cover it.
@@ -737,9 +738,9 @@ itself, then confirms by reading (`yad doctor`) once they say it is done (E158).
    variables → Actions; GitLab: Settings → CI/CD → Variables, **masked**).
 
 **Who can read the token.** The workflow runs the base branch's copy of `checks/product-checkout.sh`
-(#426), so editing the script in a PR does not reach it. But the workflow file itself comes from the PR:
-anyone who can push a branch could change the workflow to print `YAD_PRODUCT_TOKEN`, unless a code
-owner must review `.github/workflows/yad-*` / `.gitlab/ci/yad-*` (`docs/branch-protection.md`, "Who may
+(#426), so editing the script in a PR does not reach it. But a PR's workflow runs before any review:
+anyone who can push a branch can add or change a workflow that prints `YAD_PRODUCT_TOKEN`, whatever
+CODEOWNERS says — a code owner guards the merge, not the run (`docs/branch-protection.md`, "Who may
 change the gates"). (A PR from a fork gets no secret, and defers.) So give it **read** access to the Product repository
 and nothing else. On GitLab, a variable marked **protected** is not handed to pipelines of unprotected
 branches, so merge requests from feature branches would defer: leave it unprotected, masked, and

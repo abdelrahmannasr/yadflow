@@ -707,7 +707,7 @@ function githubStep(text) {
 }
 function gitlabStep(text) {
   const lines = text.split('\n');
-  const at = lines.findIndex((l) => /^\s+before_script:$/.test(l));
+  const at = lines.findIndex((l) => l === '.yad_base_checks:');
   const dash = lines.findIndex((l, i) => i > at && /^\s+- \|$/.test(l));
   return blockAt(lines, dash);
 }
@@ -721,8 +721,13 @@ test('#426: every gate call runs "$YAD_CHECKS/…", the base branch\'s copy, set
     assert.doesNotMatch(code, /\b(?:bash|node|sh)\s+\.?\/?checks\//, `${name}: a gate call reads checks/ from the PR's tree`);
     assert.match(code, /(?:bash|node) "\$YAD_CHECKS\/[\w.-]+"/, `${name}: no gate call`);
     if (gitlab) {
-      // Once, on the template every job extends (or the one job), so no job runs a gate without it.
-      assert.equal((code.match(/^\s+before_script:$/gm) || []).length, 1, name);
+      // Defined once, and the FIRST line of the script of every job that runs a gate — not a before_script,
+      // which would replace the host pipeline's `default: before_script` for these jobs.
+      assert.equal((code.match(/^\.yad_base_checks:$/gm) || []).length, 1, name);
+      assert.doesNotMatch(code, /^\s*before_script:/m, `${name}: no before_script`);
+      const jobs = code.split(/^(?=[\w.-]+:)/m).filter((b) => /"\$YAD_CHECKS\//.test(b) && !b.startsWith('.yad_base_checks:'));
+      assert.ok(jobs.length, name);
+      for (const j of jobs) assert.match(j, /\n {2}script:\n {4}- !reference \[\.yad_base_checks, script\]\n/, `${name} ${j.split(':')[0]}: the base copy is the script's first line`);
       const s = gitlabStep(text);
       assert.match(s, /^YAD_BASE="\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"; YAD_CHECKS="\$\(mktemp -d\)\/checks"; export YAD_CHECKS\n/, name);
       cores.add(coreOf(s));
@@ -834,12 +839,12 @@ test('#426 step: a base with no checks/ runs the PR\'s copies with one note; an 
   } finally { a.done(); }
 });
 
-test('#426 step (GitLab): the before_script exports YAD_CHECKS to the job\'s script, with the same rules', () => {
+test('#426 step (GitLab): the script\'s first line exports YAD_CHECKS to the rest of it, with the same rules', () => {
   const { T, P, done } = stepRepo();
   try {
     for (const f of ['yad-checks.gitlab-ci.yml', 'yad-product-checks.gitlab-ci.yml', 'yad-verified-commits.gitlab-ci.yml', '.gitlab-ci.yml']) {
       const step = gitlabStep(fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab', f), 'utf8'));
-      // GitLab runs before_script and script in one shell, with errexit on.
+      // GitLab runs a job's script lines in one shell, with errexit on.
       const r = spawnSync('bash', ['-c', `set -eo pipefail\n${step}\nbash "$YAD_CHECKS/a.sh"; bash "$YAD_CHECKS/b c.sh"`], { cwd: P, encoding: 'utf8', env: env({ CI_MERGE_REQUEST_TARGET_BRANCH_NAME: 'main', TMPDIR: T }) });
       assert.equal(r.status, 0, `${f}: ${r.stderr}`);
       assert.match(r.stdout, /^note: checks\/b c\.sh is not on main yet, so the copy from this PR runs \(#426\)\nnote: checks\/link\.sh in this PR is not a plain file, so it is not run \(#426\)\nnote: checks\/x\.sh is not on main yet, so the copy from this PR runs \(#426\)\nbase-a\npr-b\n$/, f);
@@ -848,4 +853,55 @@ test('#426 step (GitLab): the before_script exports YAD_CHECKS to the job\'s scr
       assert.doesNotMatch(bad.stdout, /ran/, `${f}: the job stops`);
     }
   } finally { done(); }
+});
+
+test('#426 step: a base symlink stays a link, a submodule or a control character in the PR is said safely, a base checks that is not a folder fails', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-426b-'));
+  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+  try {
+    const O = path.join(T, 'origin');
+    fs.mkdirSync(path.join(O, 'checks'), { recursive: true });
+    git(O, 'init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(O, 'checks/a.sh'), 'echo base-a\n');
+    fs.symlinkSync('a.sh', path.join(O, 'checks/l.sh'));
+    git(O, 'add', '-A'); git(O, 'commit', '-qm', 'base');
+    const P = path.join(T, 'pr');
+    git(T, 'clone', '-q', O, P);
+    git(P, 'switch', '-qc', 'feat');
+    fs.rmSync(path.join(P, 'checks/l.sh'));
+    fs.writeFileSync(path.join(P, 'checks/l.sh'), 'echo pr-l\n');               // the PR turns the link into a file
+    fs.writeFileSync(path.join(P, 'checks/n\nl.sh'), 'echo nl\n');
+    git(P, 'add', '-A');
+    git(P, 'update-index', '--add', '--cacheinfo', `160000,${git(P, 'rev-parse', 'HEAD').trim()},checks/sub`);
+    git(P, 'commit', '-qm', 'pr');
+    const r = runGithubStep(P, T);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(fs.lstatSync(path.join(r.dir, 'l.sh')).isSymbolicLink(), 'the base\'s link is kept; the PR\'s file does not replace it');
+    assert.equal(runIn(r.dir, 'l.sh'), 'base-a');
+    assert.match(r.stdout, /^note: checks\/n\?l\.sh is not on main yet, so the copy from this PR runs \(#426\)$/m, 'a control character is printed as ?');
+    assert.match(r.stdout, /^note: checks\/sub in this PR is not a plain file, so it is not run \(#426\)$/m);
+    assert.ok(!fs.existsSync(path.join(r.dir, 'sub')));
+    // A base whose checks is a file, not a folder: FAIL, never "no checks/ on the base".
+    fs.rmSync(path.join(O, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(O, 'checks'), 'x\n');
+    git(O, 'add', '-A'); git(O, 'commit', '-qm', 'file');
+    git(P, 'fetch', '-q', 'origin');
+    const bad = runGithubStep(P, T);
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stderr, /FAIL \[base-checks\]: checks on origin\/main is not a folder/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#426 step: one file from a base with no checks/ is "1 file"', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-426c-'));
+  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+  try {
+    const O = path.join(T, 'origin'); fs.mkdirSync(O);
+    git(O, 'init', '-q', '-b', 'main'); fs.writeFileSync(path.join(O, 'R'), 'x'); git(O, 'add', '-A'); git(O, 'commit', '-qm', 'b');
+    const P = path.join(T, 'pr'); git(T, 'clone', '-q', O, P);
+    fs.mkdirSync(path.join(P, 'checks')); fs.writeFileSync(path.join(P, 'checks/a.sh'), 'echo a\n'); git(P, 'add', '-A'); git(P, 'commit', '-qm', 'c');
+    const r = runGithubStep(P, T);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /run: 1 file \(#426\)$/m);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

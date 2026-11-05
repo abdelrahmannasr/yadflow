@@ -6630,7 +6630,7 @@ test('risk-map check is wired on both platforms, and the map it reads never is',
   const all = Object.values(REPO_WIRING).flat();
   assert.ok(!all.some((w) => /risk-map$/.test(w.dest)), 'the map is the team\'s file — `yad update` must never own it');
   for (const f of ['skills/yad-checks/templates/github/yad-checks.yml', 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml']) {
-    assert.match(fs.readFileSync(path.join(ROOT, f), 'utf8'), /bash checks\/risk-map-check\.sh "origin\//, f);
+    assert.match(fs.readFileSync(path.join(ROOT, f), 'utf8'), /bash "\$YAD_CHECKS\/risk-map-check\.sh" "origin\//, f);
   }
 });
 
@@ -7416,7 +7416,7 @@ test('docs/GATES.md names every gate script a CI template runs (#351)', () => {
   for (const dir of dirs) {
     for (const f of fs.readdirSync(path.join(ROOT, dir))) {
       if (!/\.ya?ml$/.test(f)) continue;
-      for (const m of fs.readFileSync(path.join(ROOT, dir, f), 'utf8').matchAll(/checks\/([a-z-]+\.(?:sh|mjs))/g)) wired.add(m[1]);
+      for (const m of fs.readFileSync(path.join(ROOT, dir, f), 'utf8').matchAll(/(?:checks|\$YAD_CHECKS)\/([a-z-]+\.(?:sh|mjs))/g)) wired.add(m[1]);
     }
   }
   assert.ok(wired.size >= 15, `found only ${[...wired]}`);

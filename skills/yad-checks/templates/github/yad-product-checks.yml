@@ -7,7 +7,7 @@
 # changes a gate script is still judged by the script already merged. A script the base does not have yet
 # (the PR that first installs the gates, or a `yad update` that adds one) runs from the PR, with a note.
 # The base's script runs with THIS file's call: keep every call one the previous release's script accepts.
-# This file itself still comes from the PR: protect checks/ and the yad CI files with a CODEOWNERS rule and
+# This file itself still comes from the PR: protect checks/ and the CI files with a CODEOWNERS rule and
 # a required Code Owner review (docs/branch-protection.md, "Who may change the gates").
 name: yad-product-checks
 on:
@@ -41,21 +41,26 @@ jobs:
             rm -rf "$d"; mkdir -p "$YAD_CHECKS"
             git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
             t="$(git ls-tree "$b" checks)"
-            case "$t" in "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;; *) on_base=0 ;; esac
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
             git ls-tree -z HEAD checks/ > "$d/.pr"
             n=0
             while IFS= read -r -d '' e; do
-              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[$'\001'-$'\037']/?}"
               if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
               case "$m" in
                 100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
-                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$p"; continue ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
               esac
               n=$((n + 1))
-              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$p" "$YAD_BASE"; fi
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
             done < "$d/.pr"
             rm -f "$d/.pr"
-            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s files (#426)\n' "$YAD_BASE" "$n"; fi
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - run: bash "$YAD_CHECKS/commit-message.sh" --profile product "origin/${{ github.base_ref }}"
@@ -79,21 +84,26 @@ jobs:
             rm -rf "$d"; mkdir -p "$YAD_CHECKS"
             git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
             t="$(git ls-tree "$b" checks)"
-            case "$t" in "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;; *) on_base=0 ;; esac
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
             git ls-tree -z HEAD checks/ > "$d/.pr"
             n=0
             while IFS= read -r -d '' e; do
-              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[$'\001'-$'\037']/?}"
               if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
               case "$m" in
                 100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
-                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$p"; continue ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
               esac
               n=$((n + 1))
-              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$p" "$YAD_BASE"; fi
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
             done < "$d/.pr"
             rm -f "$d/.pr"
-            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s files (#426)\n' "$YAD_BASE" "$n"; fi
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - run: bash "$YAD_CHECKS/ledger-guard.sh" "origin/${{ github.base_ref }}"
@@ -121,21 +131,26 @@ jobs:
             rm -rf "$d"; mkdir -p "$YAD_CHECKS"
             git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
             t="$(git ls-tree "$b" checks)"
-            case "$t" in "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;; *) on_base=0 ;; esac
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
             git ls-tree -z HEAD checks/ > "$d/.pr"
             n=0
             while IFS= read -r -d '' e; do
-              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[$'\001'-$'\037']/?}"
               if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
               case "$m" in
                 100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
-                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$p"; continue ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
               esac
               n=$((n + 1))
-              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$p" "$YAD_BASE"; fi
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
             done < "$d/.pr"
             rm -f "$d/.pr"
-            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s files (#426)\n' "$YAD_BASE" "$n"; fi
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - run: node "$YAD_CHECKS/member-check.mjs" "origin/${{ github.base_ref }}"

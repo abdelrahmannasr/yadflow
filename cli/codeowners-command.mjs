@@ -8,7 +8,7 @@
 // Two kinds of answer, kept apart:
 //   FACTS — a line that matches no file, a GitHub file of 3 MB or more, a second file the platform never
 //     reads, a line this reader cannot read. `yad doctor` prints these too.
-//     And (#426) the gate files no line gives an owner: checks/ and yad's CI files. A PR can change what a
+//     And (#426) the gate files no line gives an owner: checks/ and every CI file. A PR can change what a
 //     gate does through them, so the advice is a CODEOWNERS rule plus a required Code Owner review. yad still
 //     never writes that rule: it prints the lines to add (`unguardedHint`).
 //   A HINT — the @logins with no commit in the last 90 days that carries their noreply address. Only a
@@ -19,7 +19,7 @@ import fs from 'node:fs';
 
 import { c, fail, hand, info, log, ok, run, warn, emitJSON } from './lib.mjs';
 import { deadLines, diskCodeowners, ownersFor, parseCodeowners } from './codeowners.mjs';
-import { OWNER_WINDOW, recentLoginsFor, repoFiles, targets } from './riskmap-command.mjs';
+import { OWNER_WINDOW, gitEnv, recentLoginsFor, repoFiles, targets } from './riskmap-command.mjs';
 import { PUBLIC_HOST, remoteHost } from './openpr.mjs';
 import { detectPlatform } from './platform.mjs';
 
@@ -35,16 +35,17 @@ function submodulesOf(repoRoot) {
   return r.stdout.split('\0').filter((l) => l.startsWith('160000 ')).map((l) => l.slice(l.indexOf('\t') + 1));
 }
 
-// #426 — the files that decide what a gate does on a PR: every gate script under checks/, and yad's CI files
-// for this platform. Tracked files only, as the platform sees them; null when git cannot list them.
-export const GATE_CI_PATTERN = { github: '/.github/workflows/yad-*', gitlab: '/.gitlab/ci/yad-*' };
+// #426 — the files that decide what a gate does on a PR: every gate script under checks/, and EVERY CI file
+// for this platform — not only yad's. A required check is matched by job name, so a PR could add its own
+// workflow with a job named `spec-link` that passes; on GitLab the root .gitlab-ci.yml decides what is
+// included at all. Tracked files only, as the platform sees them; null when git cannot list them.
+export const GATE_CI_LINES = { github: ['/.github/workflows/'], gitlab: ['/.gitlab-ci.yml', '/.gitlab/ci/'] };
 function gateFiles(repoRoot, platform) {
-  const ciDir = platform === 'gitlab' ? '.gitlab/ci' : '.github/workflows';
-  const r = spawnSync('git', ['ls-files', '-z', '--', 'checks', ciDir], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  const paths = platform === 'gitlab' ? ['checks', '.gitlab-ci.yml', '.gitlab/ci'] : ['checks', '.github/workflows'];
+  const r = spawnSync('git', ['ls-files', '-z', '--', ...paths], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30, env: gitEnv() });
   if (r.status !== 0) return null;
   const all = r.stdout.split('\0').filter(Boolean);
-  const ci = platform === 'gitlab' ? /^\.gitlab\/ci\/yad-[^/]*\.ya?ml$/ : /^\.github\/workflows\/yad-[^/]*\.ya?ml$/;
-  return { checks: all.filter((f) => f.startsWith('checks/')), ci: all.filter((f) => ci.test(f)) };
+  return { checks: all.filter((f) => f.startsWith('checks/')), ci: all.filter((f) => !f.startsWith('checks/')) };
 }
 // The gate files with no owner whose review the platform can require: no line matches, the last match lists
 // no owner, or (GitLab) only an `^[optional]` section names one. With no CODEOWNERS (`parsed` null), all.
@@ -54,16 +55,17 @@ function unguardedOf(g, parsed) {
   const ci = g.ci.filter((f) => !owned(f));
   return checks.length || ci.length ? { checks, ci } : null;
 }
-// `checks/ (3 files) and 2 yad CI files`.
+// `checks/ (3 files) and 2 CI files`.
 export function unguardedWords(u) {
-  return [...(u.checks.length ? [`checks/ (${plural(u.checks.length, 'file')})`] : []), ...(u.ci.length ? [plural(u.ci.length, 'yad CI file')] : [])].join(' and ');
+  return [...(u.checks.length ? [`checks/ (${plural(u.checks.length, 'file')})`] : []), ...(u.ci.length ? [plural(u.ci.length, 'CI file')] : [])].join(' and ');
 }
 // What to do, for the person: the lines to add and the setting that makes them count. Printed, never written.
 export function unguardedHint(platform) {
   const setting = platform === 'gitlab'
     ? 'turn on "Code owner approval" for the protected default branch (GitLab Premium)'
     : 'turn on "Require review from Code Owners" for the default branch';
-  return `add \`/checks/ @<owner>\` and \`${GATE_CI_PATTERN[platform === 'gitlab' ? 'gitlab' : 'github']} @<owner>\` to CODEOWNERS through a PR, and ${setting} — see "Who may change the gates" in docs/branch-protection.md (yad never writes CODEOWNERS)`;
+  const lines = ['/checks/', ...GATE_CI_LINES[platform === 'gitlab' ? 'gitlab' : 'github']].map((l) => `\`${l} @<owner>\``);
+  return `add ${lines.slice(0, -1).join(', ')} and ${lines.at(-1)} to CODEOWNERS through a PR, and ${setting} — see "Who may change the gates" in docs/branch-protection.md (yad never writes CODEOWNERS)`;
 }
 
 // A pattern is printed as written unless it holds an `@`: E67's rule that no e-mail address is ever printed.
@@ -89,7 +91,8 @@ export function checkCodeowners(repoRoot, { platform = null, remote, hint = fals
   if (co.unknown) return { ...base, unknown: co.unknown };
   if (co.none) {
     const g = gateFiles(repoRoot, plat);
-    const unguarded = g && unguardedOf(g, null);
+    if (!g) return { ...base, unknown: 'git could not list the files in this repo' };
+    const unguarded = unguardedOf(g, null);
     return { ...base, none: co.none, ...(unguarded ? { unguarded } : {}) };
   }
   const out = { ...base, path: co.path, ignored: co.ignored };
@@ -101,7 +104,8 @@ export function checkCodeowners(repoRoot, { platform = null, remote, hint = fals
   out.notRead = parsed.skipped;
   out.dead = deadLines(parsed, files, { submodules: submodulesOf(repoRoot) });
   const g = gateFiles(repoRoot, plat);
-  const unguarded = g && unguardedOf(g, parsed);
+  if (!g) return { ...base, unknown: 'git could not list the files in this repo' };
+  const unguarded = unguardedOf(g, parsed);
   if (unguarded) out.unguarded = unguarded;
   if (hint) out.inactive = inactiveOwners(repoRoot, parsed, plat, url);
   return out;

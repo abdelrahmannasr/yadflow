@@ -141,8 +141,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     its quality job uses `install-deps.sh`, reads the optional `YAD_NODE_VERSION` repository variable,
     exports the PR's exact `NX_BASE`/`NX_HEAD`, and checks out the full history. It never starts on
     `edited` (#425): a gate job skipped on an edit counts as passed, so an edit of the PR text could turn
-    a failed gate green. Every gate job (both platforms, every gate file) runs the base branch's copy of
-    `checks/` through `"$YAD_CHECKS/…"`, never the PR's own, and keeps no token in the checkout (#426);
+    a failed gate green. Every PR gate job (both platforms) runs the base branch's copy of `checks/`
+    through `"$YAD_CHECKS/…"`, never the PR's own, and keeps no token in the checkout (#426) — except
+    `yad-update-guard`, which runs on a direct push to the default branch;
     advise the CODEOWNERS lines in `docs/branch-protection.md` ("Who may change the gates") — never
     write CODEOWNERS.
   - `templates/github/yad-pr-text.yml` → `.github/workflows/yad-pr-text.yml`: `pr-title` + `pr-template`,

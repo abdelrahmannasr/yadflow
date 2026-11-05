@@ -160,28 +160,38 @@ the base does not have yet: the pull request that first installs the gates, or a
 a new one. The job log says so in a `note:` line. GitHub's checkout also keeps no token in the repo
 (`persist-credentials: false`), so the team's own tests in `build-test-lint` cannot read one there.
 
-**2. A code owner reviews any change to the gate files.** This covers what step 1 cannot: the CI file
-itself always comes from the pull request, so a pull request could change the workflow to run its own
-scripts again. Add these lines to `CODEOWNERS` through a pull request, with a real person or team for
-`@<owner>`:
+**2. A code owner reviews any change to the gate files.** This covers what step 1 cannot: the CI files
+always come from the pull request, so a pull request could change a workflow to run its own scripts
+again. It could also add a workflow of its own: GitHub matches a required check by its job name, so a
+new file with a job named `spec-link` that always passes would count. So the rule covers **every** CI
+file, not only yad's. Add these lines to `CODEOWNERS` through a pull request, with a real person or team
+for `@<owner>`:
 
 | Platform | Lines | Setting to turn on |
 |---|---|---|
-| GitHub | `/checks/ @<owner>`<br>`/.github/workflows/yad-* @<owner>` | "Require review from Code Owners" on the default branch's rule |
-| GitLab | `/checks/ @<owner>`<br>`/.gitlab/ci/yad-* @<owner>` | "Code owner approval" on the protected default branch (Premium and Ultimate only) |
+| GitHub | `/checks/ @<owner>`<br>`/.github/workflows/ @<owner>` | "Require review from Code Owners" on the default branch's rule |
+| GitLab | `/checks/ @<owner>`<br>`/.gitlab-ci.yml @<owner>`<br>`/.gitlab/ci/ @<owner>` | "Code owner approval" on the protected default branch (Premium and Ultimate only) |
 
-On GitLab the root `.gitlab-ci.yml` decides whether the yad fragments are included at all, so think
-about an owner for it too.
+On GitLab the root `.gitlab-ci.yml` decides whether the yad fragments are included at all, which is why
+it is on the list.
 
 yad never writes `CODEOWNERS` ([E69](roadmap-idea-1.md)): a name it wrote would become an owner the
-platform enforces. `yad codeowners check` and `yad doctor` warn when `checks/` or yad's CI files have no
-owner whose review can be required, and print the lines above.
+platform enforces. `yad codeowners check` and `yad doctor` warn when `checks/` or a CI file has no owner
+whose review can be required, and print the lines above.
+
+**A code owner guards the merge, not the run.** A pull request's workflow runs before anyone reviews
+it. Anyone who can push a branch can add a workflow that prints a secret, such as `YAD_PRODUCT_TOKEN`,
+and read it from the job log without ever merging. CODEOWNERS cannot stop that. So give every secret the
+least access that works: `YAD_PRODUCT_TOKEN` gets read access to the Product repository and nothing
+else. (A pull request from a fork gets no secrets.)
 
 **What is still open.**
 
 | Case | Why |
 |---|---|
+| Anyone who can push a branch can read the CI secrets | A pull request's workflow runs before review, so it can print a secret. Keep each secret read-only and as narrow as it can be |
 | GitLab hands every job `CI_JOB_TOKEN` | There is no switch like `persist-credentials`. Code the pull request runs (its tests) can read it while the job runs |
+| `yad-update-guard` runs `checks/` from the pushed commit | It runs on a direct push to the default branch, not on a pull request, so only people allowed to push there reach it |
 | A pull request that changes a script's call and the script together | The base's older script runs with the new call. yad keeps every call one the previous release's script accepts, and a test holds that list |
 | No code owner review | Step 2 is advice. Without it, step 1 still stops the simple case: an edited script |
 
