@@ -42,9 +42,10 @@ Tell the person which tools you used and which fallbacks, and why.
   (the `.pen` web/mobile editor) is a second, write-capable provider; `openpencil` (OpenPencil, an
   open-source editor whose CLI writes a design file in the repo with no account and no app open, E164)
   is a third; `none` → markdown-only.
-- **The design tool is reached through its MCP** (a harness MCP server), NOT a subprocess CLI — the same
-  shape as Impeccable's slash-commands, not Repomix's `npx`. The skill detects the MCP and degrades when
-  it is absent; it never installs an MCP server.
+- **The design tool is reached through its MCP** (a harness MCP server) — the same shape as Impeccable's
+  slash-commands, not Repomix's `npx`. **One exception: OpenPencil** is reached through its CLI
+  (`openpencil` on PATH) first, and its MCP only while its desktop app is open. The skill detects the MCP
+  (or, for OpenPencil, the CLI) and degrades when it is absent; it never installs an MCP server.
 - Registry: `{project-root}/.sdlc/design.json` (project-wide, shared across all epics — NOT per-epic),
   the sibling of `.sdlc/repos.json` and `.sdlc/product.json`.
 - Per-epic screen→frame links are written later by `yad-ui` (`epics/EP-<slug>/.sdlc/design-links.json`),
@@ -86,7 +87,8 @@ running desktop app — the app must be open), `figma` (Figma's hosted server �
 `figma-mcp` does not say which Figma server it is: on a refresh, record the exact one. **Auth is the local user's own** — the user's authenticated MCP session. The skill
 **stores no tokens**; `project_url`/`files` are plain references, never credentials.
 
-**Graceful degradation:** if no design-tool MCP is available, record `source: "unavailable"` and report
+**Graceful degradation:** if no design-tool MCP is available (for OpenPencil: neither its CLI on PATH nor
+its MCP), record `source: "unavailable"` and report
 that `yad-ui` will run **markdown-only** until an MCP is connected (no error — the design tool is purely
 additive, exactly like Impeccable being absent). Do **not** install an MCP server as part of this step.
 
@@ -118,7 +120,7 @@ Nothing auto-advances; this is setup.
 
 ## Other actions
 
-- **`refresh`** — re-detect the MCP and update `lastSyncedAt` (after the user authenticates a session or
+- **`refresh`** — re-detect the MCP (for OpenPencil, the CLI first) and update `lastSyncedAt` (after the user authenticates a session or
   changes tools). Same machinery as `connect`. Re-detection may flip `source` between an MCP id and
   `unavailable` — report the change.
 - **`list`** — print the current connection: `tool`, `provider`, `project_url`, the file mapping, and a

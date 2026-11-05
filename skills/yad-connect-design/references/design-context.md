@@ -8,7 +8,8 @@ analogue of `yad-connect-repos`'s code-context.
 ## Provider detection
 
 `connect`/`refresh` records `provider` (the concrete MCP) and `source` (the MCP id, or `unavailable`).
-Detection is best-effort against the user's own authenticated MCP session:
+Detection is best-effort against the user's own authenticated MCP session (for OpenPencil, its CLI on
+PATH first):
 
 | `tool` | MCP / provider | Capability |
 |--------|----------------|------------|
@@ -33,8 +34,10 @@ tool, covering the screens/states `ui-design.md` enumerates and the user flows t
   then imports it into the Figma file via the MCP's `import-html`, one frame per screen.
 - **pencil** — the lens calls `batch_design` to author the screens as `.pen` frames directly (mobile
   and/or web per the epic).
-- **openpencil** — the lens writes the screens into the epic's design file, `epics/EP-<slug>/design/<name>.fig`
-  (created on first generate), one frame per screen, with `openpencil eval <file> --stdin --write` (Figma
+- **openpencil** — the lens writes the screens into the epic's design file, `epics/EP-<slug>/design/<name>.fig`,
+  one frame per screen. `eval` cannot create a file: the first time, make it with
+  `openpencil import <seed.html> -o epics/EP-<slug>/design/<name>.fig` (a small HTML page, such as the first
+  screen), then add each frame with `openpencil eval <file> --stdin --write` (Figma
   Plugin API code, run on the file with no app open). With the desktop app open on the file, the
   `open-pencil` MCP may be used instead. Until E164's second PR, `yad fold` does not take the `design/` folder: commit it on the review
   branch with `git`, as `yad-ui` says.

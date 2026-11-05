@@ -148,10 +148,11 @@ Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decid
 - **No tool / `tool: "none"` / `source: "unavailable"`** (or the file is absent): **degrade** —
   author the Markdown artifacts only and record `design: none` in the frontmatter with a one-line note
   (mirrors the `impeccable: not-installed` degrade). Skip to Step 4.
-- **A tool is connected and its MCP is available:** adopt the `ux-designer` lens and, using the provider
+- **A tool is connected and its provider is available** (`source` is not `unavailable`): adopt the `ux-designer` lens and, using the provider
   recorded in `design.json` (Figma via a Figma/html.to.design MCP, `pencil` via its MCP, `openpencil` through its CLI —
   `openpencil eval <file> --stdin --write` on the epic's design file, `epics/EP-<slug>/design/<name>.fig`,
-  with no app open (or its MCP while the desktop app is open on the file) — etc.):
+  with no app open (the first time, create the file with `openpencil import <seed.html> -o <file>`:
+  `eval` cannot create one) (or its MCP while the desktop app is open on the file) — etc.):
   - **Generate** — when the provider is write-capable, produce one frame per screen the design covers,
     for the platforms in `epic.repos` (mobile and/or web), reusing the code-maps (Step 2b) and
     `DESIGN.md` tokens so screens match built components rather than inventing parallel ones.
@@ -243,7 +244,9 @@ design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) �
 which takes exactly these and leaves the ledger to CI. An OpenPencil design file in `epics/EP-<slug>/design/`
 is not taken by `yad fold` yet, and the review's fingerprint does not cover it yet (both come in E164's
 second PR): commit that folder on the same review branch with `git add epics/EP-<slug>/design && git
-commit`, and tell the reviewers it is part of the review — then hand off to
+commit -m "docs(ep-<slug>): add the ui-design design file"` (the scope is the epic ID in lowercase, as the
+commit-message gate wants), and tell the reviewers it is part of the review. `yad fold` will say the folder
+is "changed but not ui-design's, left on disk" — that is expected — then hand off to
 `yad-review-gate`.
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
