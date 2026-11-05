@@ -22,8 +22,9 @@
 //      case or Unicode twin of `.sdlc/members/` — a macOS or Windows checkout would read either as a member
 //      file this gate never judged (E131 review 1–2; the E115 and E121 lessons).
 //
-// LIMIT: like every Product gate, this file and the workflow that runs it come from the PR's own checkout,
-// so a PR can change the gate it is judged by; branch protection on the default branch is the backstop.
+// LIMIT: CI runs the base branch's copy of this file (#426), but the workflow that runs it comes from the
+// PR, so a PR that changes the workflow can change the gate it is judged by; a required code owner review
+// of the gate files (docs/branch-protection.md, "Who may change the gates") is the backstop.
 //
 // A Node script, not bash: it reads JSON and hashes, and both CI images already have Node (E113's hooks are
 // Node for the same reason). Usage: node checks/member-check.mjs <base-ref>

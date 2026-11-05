@@ -661,13 +661,15 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
   const gitlabStandalone = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/.gitlab-ci.yml'), 'utf8');
-  assert.match(github, /filter:\s*blob:none/, 'GitHub checkout avoids materializing unrelated history blobs');
+  // #426: no partial clone — the base-copy step reads the base's checks/, which a blob-less clone leaves out
+  // when the PR changed them, and no credentials are kept to fetch them later.
+  assert.doesNotMatch(github.replace(/^\s*#.*$/gm, ''), /filter:\s*blob:none/, 'no partial clone of the PR');
   assert.match(github, /NX_BASE:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(github, /NX_HEAD:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(github, /YAD_NODE_VERSION:\s*\$\{\{ vars\.YAD_NODE_VERSION \|\| '22' \}\}/);
   assert.match(github, /node-version:\s*\$\{\{ env\.YAD_NODE_VERSION \}\}/);
   assert.doesNotMatch(github, /node-version:\s*["']?20/, 'GitHub build-test-lint must not hard-pin Node 20');
-  assert.match(github, /bash checks\/install-deps\.sh/);
+  assert.match(github, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(github, /run:\s*npm ci/, 'GitHub must not override the consumer package manager');
   // Dependency caching survived the move off setup-node's npm-only `cache:` and now covers pnpm too.
   const cacheStep = github.match(/uses: actions\/cache@[0-9a-f]{40} # v4\.3\.0\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
@@ -676,20 +678,20 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.match(cacheStep, /\$\{\{ env\.COREPACK_HOME \}\}/, 'corepack home cached too');
   assert.match(github, /COREPACK_HOME:\s*\$\{\{ github\.workspace \}\}\/\.corepack-cache/, 'corepack home pinned to a cacheable path');
   assert.match(cacheStep, /hashFiles\('package-lock\.json', 'npm-shrinkwrap\.json', 'pnpm-lock\.yaml', 'package\.json'\)/, 'keyed on the lockfiles and package.json');
-  assert.ok(github.indexOf('actions/cache@') < github.indexOf('bash checks/install-deps.sh'), 'cache restored before install');
+  assert.ok(github.indexOf('actions/cache@') < github.indexOf('bash "$YAD_CHECKS/install-deps.sh"'), 'cache restored before install');
   assert.match(gitlab, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
   assert.match(gitlab, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
   assert.match(gitlab, /YAD_NODE_VERSION:\s*["']22["']/);
   assert.match(gitlab, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
   assert.doesNotMatch(gitlab, /image:\s*node:20/, 'GitLab build-test-lint must not hard-pin Node 20');
-  assert.match(gitlab, /bash checks\/install-deps\.sh/);
+  assert.match(gitlab, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(gitlab, /^\s*- npm ci/m, 'GitLab must use the same package-manager-aware installer');
   assert.match(gitlabStandalone, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
   assert.match(gitlabStandalone, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
   assert.match(gitlabStandalone, /YAD_NODE_VERSION:\s*["']22["']/);
   assert.match(gitlabStandalone, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
   assert.doesNotMatch(gitlabStandalone, /image:\s*node:20/, 'standalone GitLab must not hard-pin Node 20');
-  assert.match(gitlabStandalone, /bash checks\/install-deps\.sh/);
+  assert.match(gitlabStandalone, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(gitlabStandalone, /^\s*- npm ci/m, 'standalone GitLab must use the package-manager-aware installer');
   assert.match(gitlabStandalone, /YAD_TEST_MAX_WORKERS:\s*["']2["']/);
 
@@ -21545,6 +21547,123 @@ test('yad doctor: the codeowners section — facts warn, no file is a note, the 
       ['warn', 'broken: CODEOWNERS could not be checked — git could not list the files in this repo'],
     ]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #426 — the gate files (checks/, yad's CI files) need a code owner whose review the platform can require: a PR
+// that changes them changes what the gates do. yad only says so, with the lines to add; it never writes them.
+function gateRepo(files, remote = 'https://github.com/acme/x.git') {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-426-co-'));
+  const put = (fl) => {
+    for (const [rel, text] of Object.entries(fl)) {
+      if (text === null) { fs.rmSync(path.join(T, rel), { force: true }); continue; }
+      fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+      fs.writeFileSync(path.join(T, rel), text);
+    }
+    git(T, 'add', '-A');
+    git(T, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x');
+  };
+  git(T, 'init', '-q');
+  if (remote) git(T, 'remote', 'add', 'origin', remote);
+  put(files);
+  return { T, put, done: () => fs.rmSync(T, { recursive: true, force: true }) };
+}
+
+test('#426 codeowners: checks/ and the CI files with no owner whose review can be required are a finding, with or without a file', async () => {
+  const { checkCodeowners, codeownersFindings, unguardedHint } = await import('./codeowners-command.mjs');
+  const r = gateRepo({ 'src/a.js': '1', 'checks/a.sh': 'x', 'checks/b.sh': 'x', '.github/workflows/yad-checks.yml': 'x', '.github/workflows/team.yml': 'x', '.gitlab/ci/yad-checks.yml': 'x', '.gitlab-ci.yml': 'x' });
+  try {
+    let got = checkCodeowners(r.T, { platform: 'github' });
+    assert.ok(got.none);
+    // Every workflow counts: a required check is matched by job name, so the team's own file could pass one.
+    assert.deepEqual(got.unguarded, { checks: ['checks/a.sh', 'checks/b.sh'], ci: ['.github/workflows/team.yml', '.github/workflows/yad-checks.yml'] }, 'the other platform\'s files are not gate files');
+    assert.deepEqual(codeownersFindings(got).map((f) => [f.code, f.checks, f.ci, f.message]), [['unguarded', 2, 2,
+      'no CODEOWNERS, so checks/ (2 files) and 2 CI files have no code owner — a pull request can change what the gates do with no code owner\'s review']]);
+    r.put({ 'CODEOWNERS': 'src/ @a\n' });
+    got = checkCodeowners(r.T, { platform: 'github' });
+    assert.deepEqual(got.unguarded, { checks: ['checks/a.sh', 'checks/b.sh'], ci: ['.github/workflows/team.yml', '.github/workflows/yad-checks.yml'] });
+    assert.match(codeownersFindings(got).at(-1).message, /^no line in CODEOWNERS that yad can read gives checks\/ \(2 files\) and 2 CI files an owner whose review GitHub can require/);
+    r.put({ 'CODEOWNERS': 'src/ @a\n/checks/ @a\n/.github/workflows/yad-* @a\n' });
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'github' }).unguarded, { checks: [], ci: ['.github/workflows/team.yml'] }, 'yad-* alone leaves the team\'s workflow open');
+    r.put({ 'CODEOWNERS': 'src/ @a\n/checks/ @a\n/.github/workflows/ @a\n' });
+    got = checkCodeowners(r.T, { platform: 'github' });
+    assert.equal(got.unguarded, undefined, 'the lines yad advises cover them');
+    assert.deepEqual(codeownersFindings(got), []);
+    r.put({ 'CODEOWNERS': 'src/ @a\n/checks/ @a\n/.github/workflows/ @a\n/checks/b.sh\n' });
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'github' }).unguarded, { checks: ['checks/b.sh'], ci: [] }, 'a later line with no owner takes one file back');
+    // GitLab: its own CI folder, and an owner only in an optional section cannot be required.
+    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n/.gitlab-ci.yml @a\n^[Later]\n/.gitlab/ci/ @a\n' });
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'gitlab' }).unguarded, { checks: [], ci: ['.gitlab/ci/yad-checks.yml'] });
+    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n/.gitlab/ci/ @a\n' });
+    assert.deepEqual(checkCodeowners(r.T, { platform: 'gitlab' }).unguarded, { checks: [], ci: ['.gitlab-ci.yml'] }, 'the root file decides what is included');
+    r.put({ 'CODEOWNERS': '[Gates]\n/checks/ @a\n/.gitlab-ci.yml @a\n/.gitlab/ci/ @a\n' });
+    assert.equal(checkCodeowners(r.T, { platform: 'gitlab' }).unguarded, undefined);
+    // The hint: the exact lines and the setting, per platform; never an address.
+    assert.match(unguardedHint('github'), /^add `\/checks\/ @<owner>` and `\/\.github\/workflows\/ @<owner>` to CODEOWNERS.*"Require review from Code Owners".*yad never writes CODEOWNERS/);
+    assert.match(unguardedHint('gitlab'), /^add `\/checks\/ @<owner>`, `\/\.gitlab-ci\.yml @<owner>` and `\/\.gitlab\/ci\/ @<owner>` to CODEOWNERS.*"Code owner approval".*GitLab Premium/);
+  } finally { r.done(); }
+  // A repo with workflows of its own but no yad gates (connected for code context): nothing to guard.
+  const plain = gateRepo({ 'src/a.js': '1', '.github/workflows/ci.yml': 'x' });
+  try {
+    const got = checkCodeowners(plain.T, { platform: 'github' });
+    assert.ok(got.none);
+    assert.equal(got.unguarded, undefined, 'no yad gates: nothing to guard');
+    // A yad CI file and no checks/: the hint does not name /checks/, which would match no file.
+    plain.put({ '.github/workflows/yad-verified-commits.yml': 'x' });
+    const v = checkCodeowners(plain.T, { platform: 'github' });
+    assert.deepEqual(v.unguarded, { checks: [], ci: ['.github/workflows/ci.yml', '.github/workflows/yad-verified-commits.yml'] });
+    assert.match(unguardedHint('github', v.unguarded), /^add `\/\.github\/workflows\/ @<owner>` to CODEOWNERS/);
+    fs.writeFileSync(path.join(plain.T, '.git/index'), 'broken');
+    assert.match(checkCodeowners(plain.T, { platform: 'github' }).unknown || '', /git could not list the files/, 'a git failure is not known, never "none"');
+  } finally { plain.done(); }
+});
+
+test('#426 doctor + yad codeowners check: the gate-file warning on a code repo and on the Product; --json carries it; nothing is written', async () => {
+  const { codeownersChecks } = await import('./doctor.mjs');
+  const P = gateRepo({ '.sdlc/product.json': JSON.stringify({ platform: 'github', default_branch: 'main' }), 'checks/ledger-guard.sh': 'x', '.github/workflows/yad-product-checks.yml': 'x' });
+  const code = path.join(P.T, 'code');
+  try {
+    fs.mkdirSync(code);
+    git(code, 'init', '-q'); git(code, 'remote', 'add', 'origin', 'https://github.com/acme/code.git');
+    fs.mkdirSync(path.join(code, 'checks')); fs.writeFileSync(path.join(code, 'checks/spec-link.sh'), 'x');
+    git(code, 'add', '-A'); git(code, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x');
+    P.put({ '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'code', path: 'code' }] }), '.gitignore': 'code/\n' });
+    let checks = [];
+    codeownersChecks(checks, P.T);
+    let by = Object.fromEntries(checks.map((x) => [x.id, x]));
+    assert.deepEqual(Object.keys(by), ['codeowners:code', 'codeowners:(the Product)']);
+    assert.deepEqual([by['codeowners:code'].status, by['codeowners:code'].message], ['warn', 'code: no CODEOWNERS, so checks/ (1 file) have no code owner']);
+    assert.match(by['codeowners:code'].hint, /`\/checks\/ @<owner>`.*"Require review from Code Owners"/);
+    assert.deepEqual([by['codeowners:(the Product)'].status, by['codeowners:(the Product)'].message], ['warn', 'the Product: no CODEOWNERS, so checks/ (1 file) and 1 CI file have no code owner']);
+    // A file with other stale lines: one row says both, and its hint both fixes.
+    P.put({ 'CODEOWNERS': '/checks/ @a\n/.github/workflows/ @a\n' });
+    fs.writeFileSync(path.join(code, 'CODEOWNERS'), 'gone/ @a\n');
+    git(code, 'add', '-A'); git(code, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'y');
+    checks = [];
+    codeownersChecks(checks, P.T);
+    by = Object.fromEntries(checks.map((x) => [x.id, x]));
+    assert.equal(by['codeowners:code'].message, 'code: CODEOWNERS may be out of date — in CODEOWNERS, 1 line matches no file (line 1); no line in CODEOWNERS that yad can read gives checks/ (1 file) an owner whose review GitHub can require');
+    assert.match(by['codeowners:code'].hint, /^`yad codeowners check code` lists each one; .*; add `\/checks\/ @<owner>`/);
+    assert.deepEqual([by['codeowners:(the Product)'].status, by['codeowners:(the Product)'].message], ['ok', 'the Product: checks/ and the CI files have a code owner in CODEOWNERS']);
+    // A Product registered as one of its own repos is said once.
+    fs.writeFileSync(path.join(P.T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'code', path: 'code' }, { name: 'self', path: '.' }] }));
+    checks = [];
+    codeownersChecks(checks, P.T);
+    assert.deepEqual(checks.map((x) => x.id), ['codeowners:code', 'codeowners:self']);
+    fs.writeFileSync(path.join(P.T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'code', path: 'code' }] }));
+    // The command: --json carries the finding (a file-less repo too); nothing is written.
+    const before = fs.readFileSync(path.join(code, 'CODEOWNERS'), 'utf8');
+    fs.rmSync(path.join(code, 'CODEOWNERS')); git(code, 'add', '-A'); git(code, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'z');
+    const j = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'codeowners', 'check', '--json'], { cwd: P.T, encoding: 'utf8', env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+    const out = JSON.parse(j.stdout);
+    assert.deepEqual(out.repos[0].findings.map((f) => [f.code, f.checks, f.ci]), [['unguarded', 1, 0]]);
+    assert.ok(out.repos[0].none);
+    assert.equal(fs.existsSync(path.join(code, 'CODEOWNERS')), false, 'yad never writes CODEOWNERS');
+    assert.notEqual(before, '');
+    const t = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'codeowners', 'check'], { cwd: P.T, encoding: 'utf8', env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' } });
+    assert.equal(t.status, 0, 'advisory: never a failing exit code');
+    assert.match(t.stdout + t.stderr, /no CODEOWNERS, so checks\/ \(1 file\) have no code owner/);
+    assert.match(t.stdout + t.stderr, /`\/checks\/ @<owner>`/);
+  } finally { P.done(); }
 });
 
 // ---- E70: warn loudly when a repo has no approval rules ------------------------------------------

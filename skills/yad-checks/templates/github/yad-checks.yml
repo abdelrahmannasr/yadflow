@@ -3,6 +3,13 @@
 # merge. They are CI-agnostic bash in checks/ — this workflow just invokes them with the PR base.
 # This workflow file is OWNED by yad-checks (the marker on line 1 identifies it). It runs
 # independently of any other workflow in .github/workflows/, so wiring never edits a foreign workflow.
+#
+# Gate scripts (#426): every job runs the BASE branch's copy of checks/, never the PR's own, so a PR that
+# changes a gate script is still judged by the script already merged. A script the base does not have yet
+# (the PR that first installs the gates, or a `yad update` that adds one) runs from the PR, with a note.
+# The base's script runs with THIS file's call: keep every call one the previous release's script accepts.
+# This file itself still comes from the PR: protect checks/ and the CI files with a CODEOWNERS rule and
+# a required Code Owner review (docs/branch-protection.md, "Who may change the gates").
 name: yad-checks
 on:
   pull_request:
@@ -23,20 +30,84 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
-      - run: bash checks/spec-link.sh "origin/${{ github.base_ref }}"
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
+      - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"
 
   contract-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash checks/contract-check.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/contract-check.sh" "origin/${{ github.base_ref }}"
 
   # E65/E66 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings, and the
   # approver count read from the base branch's map. The script always exits 0: the count is reported,
@@ -46,8 +117,40 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
-      - run: bash checks/risk-map-check.sh "origin/${{ github.base_ref }}"
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
+      - run: bash "$YAD_CHECKS/risk-map-check.sh" "origin/${{ github.base_ref }}"
 
   build-test-lint:
     runs-on: ubuntu-latest
@@ -62,7 +165,42 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-          filter: blob:none
+          # No `filter: blob:none` (#426): the next step reads the base's checks/, which a
+          # partial clone leaves out when the PR changed them, and with no credentials kept it
+          # could not fetch them.
+          persist-credentials: false
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.YAD_NODE_VERSION }}
@@ -80,8 +218,8 @@ jobs:
             ${{ env.COREPACK_HOME }}
           key: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'package.json') }}
           restore-keys: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-
-      - run: bash checks/install-deps.sh
-      - run: bash checks/build-test-lint.sh
+      - run: bash "$YAD_CHECKS/install-deps.sh"
+      - run: bash "$YAD_CHECKS/build-test-lint.sh"
 
   # Phase 6 — feature-thread gates. lineage-check: the change links a real threaded epic. epic-open:
   # a sealed epic (all stories shipped) refuses new behaviour, forcing a change-epic. reconcile-debt:
@@ -92,36 +230,132 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash checks/lineage-check.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/lineage-check.sh" "origin/${{ github.base_ref }}"
 
   epic-open:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash checks/epic-open.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/epic-open.sh" "origin/${{ github.base_ref }}"
 
   reconcile-debt:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash checks/product-checkout.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash checks/reconcile-debt-check.sh "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/reconcile-debt-check.sh" "origin/${{ github.base_ref }}"
 
   # Pattern gate: every commit subject follows the convention (profile: code). The PR title and body are
   # checked by yad-pr-text.yml.
@@ -130,8 +364,40 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
-      - run: bash checks/commit-message.sh --profile code "origin/${{ github.base_ref }}"
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
+      - run: bash "$YAD_CHECKS/commit-message.sh" --profile code "origin/${{ github.base_ref }}"
 
   # No unverified commits: a platform-Verified signature on every commit (write access decides who authors).
   verified-commits:
@@ -143,5 +409,37 @@ jobs:
       GH_TOKEN: ${{ github.token }} # read-only: gh api commits/<sha> for the Verified badge
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
-      - run: bash checks/verified-commits.sh "origin/${{ github.base_ref }}"
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
+      - run: bash "$YAD_CHECKS/verified-commits.sh" "origin/${{ github.base_ref }}"

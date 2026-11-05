@@ -268,7 +268,10 @@ epic-open and reconcile-debt pass it:
   request can change that config where its own pipeline runs (GitHub `pull_request` workflows, for
   example). That does not let it waive its own commits: the variable can only name a file on the base,
   and every entry there must be a full SHA. A pull request that edits the pipeline could remove the
-  gates altogether, so required checks and branch protection are what guard the pipeline itself.
+  gates altogether. CI runs the base branch's gate scripts, never the pull request's own (#426), but the
+  pipeline file itself comes from the pull request: a required code owner review of `checks/` and every
+  CI file is what guards the merge. (It cannot guard the run: a pull request's pipeline runs before
+  review, so keep CI secrets read-only.) See "Who may change the gates" in `docs/branch-protection.md`.
 - A listed commit skips **every** check of all four gates, not only the trailer check. In epic-open
   and reconcile-debt that includes the sealed-epic, orphan-thread and frozen-thread checks, which a
   `chore:` subject can never skip. Read the commit before you list it.

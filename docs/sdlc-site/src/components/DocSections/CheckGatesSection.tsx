@@ -44,6 +44,7 @@ const GATE_GROUPS = [
       { control: 'On GitHub, pr-title and pr-template run from their own file (yad-pr-text.yml, or yad-product-pr-text.yml on the Product): the only checks an edit of the PR title or description re-runs, so an edit never turns a failed gate green' },
       { control: 'verified-commits runs on every code repo (a job in yad-checks.yml) and on the Product (its own yad-verified-commits.yml)' },
       { control: 'They fail closed on a bad base ref — never silently pass' },
+      { control: 'Each gate runs the base branch\'s copy of checks/, never the PR\'s own, and the checkout keeps no token — so a PR that edits a gate script is still judged by the merged one. A code owner rule over checks/ and every CI file (docs/branch-protection.md) guards the merge of a changed workflow; yad codeowners check and yad doctor warn when it is missing' },
     ],
   },
 ];

@@ -10,6 +10,48 @@
 # read the commit-signature API. The Product's SDLC_GATE_TOKEN (from the gate-sync wiring) also works:
 # set GITLAB_TOKEN: $SDLC_GATE_TOKEN in the job if you prefer one token.
 # Job name is yad-product-prefixed so it can coexist with the code-repo fragment in one pipeline.
+#
+# Gate scripts (#426): every job runs the BASE branch's copy of checks/, never the PR's own, so a PR that
+# changes a gate script is still judged by the script already merged. A script the base does not have yet
+# (the PR that first installs the gates, or a `yad update` that adds one) runs from the PR, with a note.
+# The base's script runs with THIS file's call: keep every call one the previous release's script accepts.
+# This file itself still comes from the PR: protect checks/ and the CI files with a CODEOWNERS rule and
+# a required Code Owner review (docs/branch-protection.md, "Who may change the gates").
+# The step the header names: the first line of every gate job's script (`!reference`, GitLab 13.9+), not a
+# before_script, so a `default: before_script` of the host pipeline still runs. Every yad fragment defines
+# this same key and the file included last wins, so keep every fragment on the same yadflow release.
+.yad_base_checks:
+  script:
+    - |
+      YAD_BASE="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"; YAD_CHECKS="$(mktemp -d)/checks"; export YAD_CHECKS
+      (
+        set -euo pipefail
+        b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+        rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+        git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+        t="$(git ls-tree "$b" checks)"
+        case "$t" in
+          "") on_base=0 ;;
+          "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+          *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+        esac
+        git ls-tree -z HEAD checks/ > "$d/.pr"
+        n=0
+        while IFS= read -r -d '' e; do
+          m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+          if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+          case "$m" in
+            100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+            *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+          esac
+          n=$((n + 1))
+          if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+        done < "$d/.pr"
+        rm -f "$d/.pr"
+        if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+        if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+      )
+
 yad-product-verified-commits:
   needs: []
   # Runner selection: set the YAD_RUNNER_TAGS CI/CD variable (e.g. `dind_runner`) to route this
@@ -28,4 +70,5 @@ yad-product-verified-commits:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
-    - bash checks/verified-commits.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - !reference [.yad_base_checks, script]
+    - bash "$YAD_CHECKS/verified-commits.sh" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

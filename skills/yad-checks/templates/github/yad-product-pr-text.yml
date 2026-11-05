@@ -7,6 +7,13 @@
 # Its own workflow (#425) so that an edit of the title or body re-runs these two checks and nothing else.
 # A gate job skipped by `if:` counts as passed, so a run of yad-product-checks started by an edit would
 # turn a failed gate green.
+#
+# Gate scripts (#426): every job runs the BASE branch's copy of checks/, never the PR's own, so a PR that
+# changes a gate script is still judged by the script already merged. A script the base does not have yet
+# (the PR that first installs the gates, or a `yad update` that adds one) runs from the PR, with a note.
+# The base's script runs with THIS file's call: keep every call one the previous release's script accepts.
+# This file itself still comes from the PR: protect checks/ and the CI files with a CODEOWNERS rule and
+# a required Code Owner review (docs/branch-protection.md, "Who may change the gates").
 name: yad-product-pr-text
 on:
   pull_request:
@@ -32,10 +39,42 @@ jobs:
       BASE_REF: ${{ github.base_ref }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - run: |
           changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
-          bash checks/pr-title.sh --profile product --head "$PR_HEAD" --changed "$changed" "$PR_TITLE"
+          bash "$YAD_CHECKS/pr-title.sh" --profile product --head "$PR_HEAD" --changed "$changed" "$PR_TITLE"
 
   pr-template:
     runs-on: ubuntu-latest
@@ -46,8 +85,40 @@ jobs:
       BASE_REF: ${{ github.base_ref }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Gate scripts from the base branch (#426)
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+        run: |
+          YAD_CHECKS="$RUNNER_TEMP/yad-base-checks/checks"
+          (
+            set -euo pipefail
+            b="origin/${YAD_BASE}"; d="${YAD_CHECKS%/checks}"
+            rm -rf "$d"; mkdir -p "$YAD_CHECKS"
+            git rev-parse --verify --quiet "${b}^{commit}" > /dev/null || { echo "FAIL [base-checks]: ${b} is not in this checkout, so the gate scripts cannot be read from the base branch. Check the code out with its full history." >&2; exit 1; }
+            t="$(git ls-tree "$b" checks)"
+            case "$t" in
+              "") on_base=0 ;;
+              "040000 tree "*) git archive "$b" checks | tar -x -C "$d"; on_base=1 ;;
+              *) echo "FAIL [base-checks]: checks on ${b} is not a folder, so the gate scripts cannot be read from it. Make checks/ a plain folder on the base branch." >&2; exit 1 ;;
+            esac
+            git ls-tree -z HEAD checks/ > "$d/.pr"
+            n=0
+            while IFS= read -r -d '' e; do
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
+              if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
+              case "$m" in
+                100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
+                *) printf 'note: %s in this PR is not a plain file, so it is not run (#426)\n' "$s"; continue ;;
+              esac
+              n=$((n + 1))
+              if [ "$on_base" = 1 ]; then printf 'note: %s is not on %s yet, so the copy from this PR runs (#426)\n' "$s" "$YAD_BASE"; fi
+            done < "$d/.pr"
+            rm -f "$d/.pr"
+            if [ "$n" = 1 ]; then w="1 file"; else w="$n files"; fi
+            if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
+          )
+          echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - run: |
           changed="$(mktemp)"; git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$changed"
           body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
-          bash checks/pr-template.sh --profile product --head "$PR_HEAD" --changed "$changed" "$body"
+          bash "$YAD_CHECKS/pr-template.sh" --profile product --head "$PR_HEAD" --changed "$changed" "$body"
