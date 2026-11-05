@@ -2063,7 +2063,9 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
   // Review 3: the connect skills themselves never write `unavailable` right after a connect.
   // Review 4: the restart branch writes nothing — it skips the degrade and Step 2.
   for (const skill of ['yad-connect-design', 'yad-connect-testing']) {
-    assert.match(read(skill), /When `--verify` passes, detect again[\s\S]*\*\*not\*\* write the file: skip the degrade below and Step 2[\s\S]*restart the\s+agent and run this skill again with `action: refresh`/, skill);
+    assert.match(read(skill), /When `--verify` passes, detect again[\s\S]*\*\*If you can\*\*, go on to Step 2 and record what you found\. \*\*If you cannot\*\*[\s\S]*do \*\*not\*\* write the file:\s+skip the degrade below and Step 2[\s\S]*restart the agent and run this skill\s+again with `action: refresh`/, skill);
+    // Review 5: the report says only what is true before the restart.
+    assert.match(read(skill), /### Step 3[\s\S]*\*\*Right after a `--verify` that passed but could not reach the\s+tool yet:\*\* report only/, skill);
     assert.match(read(skill), /\*\*Graceful degradation\*\* \(never right after a `--verify` that passed — see above\)/, skill);
   }
   assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\nfile is open, \*\*STOP\*\*/, 'implement says what a no means');

@@ -97,9 +97,10 @@ and follow the connect-tool rule: show its `ask` word for word, ask once, and on
 steps, hand over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
 with `--replace` only when its question said which tool it replaces). Never install
 it any other way. When `--verify` passes, detect again — you can reach the tool when you find
-its MCP server in your session (in Claude Code, `/mcp`), or for OpenPencil its CLI on PATH. A new MCP server is loaded when the agent starts, so it may not be there yet. Then do
-**not** write the file: skip the degrade below and Step 2, and in Step 3 tell the person to restart the
-agent and run this skill again with `action: refresh`. On a no, or when a step fails, degrade:
+its MCP server in your session (in Claude Code, `/mcp`), or for OpenPencil its CLI on PATH. **If you can**, go on to Step 2 and record what you found. **If you cannot**, the server is
+most likely just added: a new MCP server is loaded when the agent starts. Then do **not** write the file:
+skip the degrade below and Step 2, and in Step 3 tell the person to restart the agent and run this skill
+again with `action: refresh`. On a no, or when a step fails, degrade:
 
 **Graceful degradation** (never right after a `--verify` that passed — see above)**:** if no design-tool MCP is available (for OpenPencil: neither its CLI on PATH nor
 its MCP), record `source: "unavailable"` and report
@@ -130,7 +131,10 @@ Upsert into `{project-root}/.sdlc/design.json` (create the file + parent `.sdlc/
 ### Step 3 — Report (never auto-advance)
 Report the connected `tool`, its `provider`, whether the MCP is available (or that `yad-ui` will degrade
 to markdown-only), the `project_url`, and that **`yad-ui` will now generate/link the design here**.
-Nothing auto-advances; this is setup.
+Nothing auto-advances; this is setup. **Right after a `--verify` that passed but could not reach the
+tool yet:** report only that it is installed and recorded as the team's tool, that its server loads when the
+agent starts, and that the person restarts the agent and runs this skill again with `action: refresh` —
+not what `yad-ui` will do, which that refresh decides.
 
 ## Other actions
 
