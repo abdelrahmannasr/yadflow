@@ -532,9 +532,10 @@ export function forkBranchWords(fork, base, { ref = '', verb = 'open the PR/MR a
   if (!others.length) {
     return `this branch holds ${n} of other tasks from origin/${fork.branch} that origin/${base} does not have, so it was likely cut from origin/${fork.branch} — pass --base ${ref}${fork.branch}, or --base ${ref}${base} to ${verb} ${base} anyway`;
   }
-  const all = [fork.branch, ...others].slice(0, 5).map((b) => `origin/${b}`);
-  const more = others.length + 1 > 5 ? ` and ${others.length + 1 - 5} more` : '';
-  return `this branch holds commits of other tasks that origin/${base} does not have (${n} from origin/${fork.branch}); it was cut from one of ${all.join(', ')}${more} — pass --base ${ref}<the branch it was cut from>, or --base ${ref}${base} to ${verb} ${base} anyway`;
+  // Each name in the form this command's --base takes, so one can be copied as it is (review 4).
+  const all = [fork.branch, ...others].slice(0, 5).map((b) => `${ref}${b}`);
+  const more = others.length + 1 > 5 ? ` (and ${others.length + 1 - 5} more)` : '';
+  return `this branch holds commits of other tasks that origin/${base} does not have (${n} from origin/${fork.branch}), so it was cut from another branch — pass the one it was cut from as --base: ${all.join(', ')}${more}; or --base ${ref}${base} to ${verb} ${base} anyway`;
 }
 
 // ---- create a PR/MR -----------------------------------------------------------------------------

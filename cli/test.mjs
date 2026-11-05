@@ -2549,7 +2549,9 @@ test('#450 forkBranch: only other tasks\' commits count; newest fork wins; main 
     fs.writeFileSync(path.join(r.T, 'u.txt'), 'u'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: more\n\nTask: EP-demo-S01-T01');
     const fork = forkBranch(r.T, { base: 'main', head });
     assert.deepEqual(fork, { branch: 'alice-wip', foreign: 2, others: ['develop'] });
-    assert.match(forkBranchWords(fork, 'main'), /\(2 commits from origin\/alice-wip\); it was cut from one of origin\/alice-wip, origin\/develop — pass --base <the branch it was cut from>, or --base main to open the PR\/MR against main anyway$/);
+    assert.match(forkBranchWords(fork, 'main'), /\(2 commits from origin\/alice-wip\), so it was cut from another branch — pass the one it was cut from as --base: alice-wip, develop; or --base main to open the PR\/MR against main anyway$/);
+    assert.match(forkBranchWords(fork, 'main', { ref: 'origin/', verb: 'check against' }), /as --base: origin\/alice-wip, origin\/develop; or --base origin\/main to check against main anyway$/);
+    assert.match(forkBranchWords({ branch: 'a', foreign: 1, others: ['b', 'c', 'd', 'e', 'f', 'g'] }, 'main'), /--base: a, b, c, d, e \(and 2 more\);/);
   } finally { r.done(); }
   // A follow-up (#350): the task's earlier commit is already merged into develop, and a release branch was cut
   // from develop before that merge. develop must be among the names (review 3).
