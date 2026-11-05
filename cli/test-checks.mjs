@@ -4928,7 +4928,7 @@ test('#451 pr-title gate: on GitLab the draft marker is not part of the title; o
     for (const title of ['Draft: feat: add x', '[Draft] feat: add x', '(draft) fix: y', 'DRAFT:feat: z', 'Draft: [Draft] feat: z']) {
       const r = runGate(PR_TITLE, T, ['--profile', 'code', title], gl);
       assert.equal(r.code, 0, `${title}: ${r.out}`);
-      assert.match(r.out, /note \[pr-title\]: the GitLab draft marker '.+' is not part of the title that is checked/);
+      assert.match(r.out, /note \[pr-title\]: the GitLab draft marker '.+' is not part of the title that is checked\./);
       assert.match(r.out, /PASS \[pr-title\]: '(feat: add x|fix: y|feat: z)' \(profile: code, tooling\/code, GitLab draft marker ignored\)/);
     }
     const review = runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'review/EP-x/epic', 'Draft: review: epic (EP-x)'], gl);
@@ -4945,6 +4945,11 @@ test('#451 pr-title gate: on GitLab the draft marker is not part of the title; o
     const gh = runGate(PR_TITLE, T, ['--profile', 'code', 'Draft: feat: add x'], { GITLAB_CI: '' });
     assert.equal(gh.code, 1);
     assert.doesNotMatch(gh.out, /draft marker/);
+    // Only GitLab's own value counts.
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'Draft: feat: add x'], { GITLAB_CI: '1' }).code, 1);
+    // A byte that is not valid UTF-8 after the mark never stops the script without a verdict.
+    const odd = spawnSync('bash', ['-c', `bash "$0" --profile code "$(printf 'Draft: feat: add \\377')"`, PR_TITLE], { cwd: T, env: { ...GIT_ENV, ...gl, LC_ALL: 'en_US.UTF-8' }, encoding: 'latin1' });
+    assert.match(odd.stdout, /^PASS \[pr-title\]/m, odd.stdout + odd.stderr);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

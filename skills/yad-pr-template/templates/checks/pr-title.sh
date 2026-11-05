@@ -69,19 +69,21 @@ if [ -z "$TITLE" ]; then
   exit 1
 fi
 
-# A GitLab draft MR carries its draft mark IN the title: `Draft:`, `[Draft]` or `(Draft)`, any case, possibly
-# repeated (#451). GitLab removes it when the MR is marked ready, so it is never the merged subject: it is
-# stripped before the title is judged. Only in GitLab CI (GITLAB_CI=true on every job) — a GitHub draft is a
+# A GitLab draft MR carries its draft mark IN the title: `Draft:`, `[Draft]` or `(Draft)`, any case (GitLab
+# 14 and later; the older `WIP:` is not one) (#451). Marking the MR ready removes it but starts no pipeline,
+# so the draft-time result is the one that stands at merge: the mark is stripped before the title is judged.
+# A repeat is stripped too — a title that still starts with a mark is still a draft, and cannot merge. Only in GitLab CI (GITLAB_CI=true on every job) — a GitHub draft is a
 # flag, so there a `Draft:` title would be the squash subject and still fails. An environment variable, not a
 # flag: the gate runs the base branch's copy of this script with the PR's call (#426), and an older copy
 # would read an unknown flag as the title.
 DRAFT=""
 if [ "${GITLAB_CI:-}" = true ]; then
   while :; do
-    lower="$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]')"
-    case "$lower" in
-      '[draft]'* | '(draft)'*) n=7 ;;
-      'draft:'*) n=6 ;;
+    # Matched by pattern, not lower-cased with `tr`: no process, and no locale (BSD tr stops on a byte that
+    # is not valid UTF-8, which under `set -e` would end the job with no FAIL line).
+    case "$TITLE" in
+      '['[Dd][Rr][Aa][Ff][Tt]']'* | '('[Dd][Rr][Aa][Ff][Tt]')'*) n=7 ;;
+      [Dd][Rr][Aa][Ff][Tt]':'*) n=6 ;;
       *) break ;;
     esac
     DRAFT="${DRAFT}${TITLE:0:n}"
@@ -95,7 +97,7 @@ if [ -n "$DRAFT" ]; then
     echo "FAIL [pr-title]: the title is only the GitLab draft marker '${DRAFT}' — write the title after it."
     exit 1
   fi
-  echo "note [pr-title]: the GitLab draft marker '${DRAFT}' is not part of the title that is checked"
+  echo "note [pr-title]: the GitLab draft marker '${DRAFT}' is not part of the title that is checked."
   DRAFT_NOTE=", GitLab draft marker ignored"
 fi
 
