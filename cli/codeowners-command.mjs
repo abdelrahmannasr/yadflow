@@ -38,14 +38,19 @@ function submodulesOf(repoRoot) {
 // #426 — the files that decide what a gate does on a PR: every gate script under checks/, and EVERY CI file
 // for this platform — not only yad's. A required check is matched by job name, so a PR could add its own
 // workflow with a job named `spec-link` that passes; on GitLab the root .gitlab-ci.yml decides what is
-// included at all. Tracked files only, as the platform sees them; null when git cannot list them.
+// included at all. Only in a repo where yad's gates are installed (a file in checks/, or a yad-* CI file): a
+// repo connected for code context alone has no gate to guard. Tracked files only, as the platform sees them;
+// null when git cannot list them.
 export const GATE_CI_LINES = { github: ['/.github/workflows/'], gitlab: ['/.gitlab-ci.yml', '/.gitlab/ci/'] };
 function gateFiles(repoRoot, platform) {
   const paths = platform === 'gitlab' ? ['checks', '.gitlab-ci.yml', '.gitlab/ci'] : ['checks', '.github/workflows'];
   const r = spawnSync('git', ['ls-files', '-z', '--', ...paths], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30, env: gitEnv() });
   if (r.status !== 0) return null;
   const all = r.stdout.split('\0').filter(Boolean);
-  return { checks: all.filter((f) => f.startsWith('checks/')), ci: all.filter((f) => !f.startsWith('checks/')) };
+  const checks = all.filter((f) => f.startsWith('checks/'));
+  const ci = all.filter((f) => !f.startsWith('checks/'));
+  if (!checks.length && !ci.some((f) => /(^|\/)yad-[^/]*\.ya?ml$/.test(f))) return { checks: [], ci: [] };
+  return { checks, ci };
 }
 // The gate files with no owner whose review the platform can require: no line matches, the last match lists
 // no owner, or (GitLab) only an `^[optional]` section names one. With no CODEOWNERS (`parsed` null), all.
@@ -60,12 +65,16 @@ export function unguardedWords(u) {
   return [...(u.checks.length ? [`checks/ (${plural(u.checks.length, 'file')})`] : []), ...(u.ci.length ? [plural(u.ci.length, 'CI file')] : [])].join(' and ');
 }
 // What to do, for the person: the lines to add and the setting that makes them count. Printed, never written.
-export function unguardedHint(platform) {
+// `/checks/` only when gate scripts are unguarded: in a repo with no checks/ that line would match no file,
+// itself a finding; and where every script already has an owner it is not needed.
+export function unguardedHint(platform, u = { checks: [1] }) {
+  const hasChecks = u.checks.length > 0;
   const setting = platform === 'gitlab'
     ? 'turn on "Code owner approval" for the protected default branch (GitLab Premium)'
     : 'turn on "Require review from Code Owners" for the default branch';
-  const lines = ['/checks/', ...GATE_CI_LINES[platform === 'gitlab' ? 'gitlab' : 'github']].map((l) => `\`${l} @<owner>\``);
-  return `add ${lines.slice(0, -1).join(', ')} and ${lines.at(-1)} to CODEOWNERS through a PR, and ${setting} — see "Who may change the gates" in docs/branch-protection.md (yad never writes CODEOWNERS)`;
+  const lines = [...(hasChecks ? ['/checks/'] : []), ...GATE_CI_LINES[platform === 'gitlab' ? 'gitlab' : 'github']].map((l) => `\`${l} @<owner>\``);
+  const listed = lines.length > 1 ? `${lines.slice(0, -1).join(', ')} and ${lines.at(-1)}` : lines[0];
+  return `add ${listed} to CODEOWNERS through a PR, and ${setting} — see "Who may change the gates" in docs/branch-protection.md (yad never writes CODEOWNERS)`;
 }
 
 // A pattern is printed as written unless it holds an `@`: E67's rule that no e-mail address is ever printed.
@@ -168,7 +177,7 @@ function printRepo(name, r) {
   const findings = codeownersFindings(r);
   if (r.none) {
     for (const f of findings) warn(f.message);
-    hand(unguardedHint(r.platform));
+    hand(unguardedHint(r.platform, r.unguarded));
     return;
   }
   for (const f of findings) warn(f.message);
@@ -188,7 +197,7 @@ function printRepo(name, r) {
     if (nc.length) info(`not checked for recent commits: ${nc.join(', ')} — the hint reads only @logins`);
   }
   if (findings.some((f) => f.code !== 'unguarded')) hand(`fix ${r.path} in ${name} through a PR — the warnings are advisory: CODEOWNERS is a hint, and yad never enforces it`);
-  if (r.unguarded) hand(unguardedHint(r.platform));
+  if (r.unguarded) hand(unguardedHint(r.platform, r.unguarded));
 }
 
 export async function runCodeowners(root, { action = 'check', name, json = false, platform = null, write = false } = {}) {

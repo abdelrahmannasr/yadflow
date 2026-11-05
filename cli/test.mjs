@@ -21601,11 +21601,17 @@ test('#426 codeowners: checks/ and the CI files with no owner whose review can b
     assert.match(unguardedHint('github'), /^add `\/checks\/ @<owner>` and `\/\.github\/workflows\/ @<owner>` to CODEOWNERS.*"Require review from Code Owners".*yad never writes CODEOWNERS/);
     assert.match(unguardedHint('gitlab'), /^add `\/checks\/ @<owner>`, `\/\.gitlab-ci\.yml @<owner>` and `\/\.gitlab\/ci\/ @<owner>` to CODEOWNERS.*"Code owner approval".*GitLab Premium/);
   } finally { r.done(); }
-  const plain = gateRepo({ 'src/a.js': '1' });
+  // A repo with workflows of its own but no yad gates (connected for code context): nothing to guard.
+  const plain = gateRepo({ 'src/a.js': '1', '.github/workflows/ci.yml': 'x' });
   try {
     const got = checkCodeowners(plain.T, { platform: 'github' });
     assert.ok(got.none);
-    assert.equal(got.unguarded, undefined, 'no gate files: nothing to guard');
+    assert.equal(got.unguarded, undefined, 'no yad gates: nothing to guard');
+    // A yad CI file and no checks/: the hint does not name /checks/, which would match no file.
+    plain.put({ '.github/workflows/yad-verified-commits.yml': 'x' });
+    const v = checkCodeowners(plain.T, { platform: 'github' });
+    assert.deepEqual(v.unguarded, { checks: [], ci: ['.github/workflows/ci.yml', '.github/workflows/yad-verified-commits.yml'] });
+    assert.match(unguardedHint('github', v.unguarded), /^add `\/\.github\/workflows\/ @<owner>` to CODEOWNERS/);
     fs.writeFileSync(path.join(plain.T, '.git/index'), 'broken');
     assert.match(checkCodeowners(plain.T, { platform: 'github' }).unknown || '', /git could not list the files/, 'a git failure is not known, never "none"');
   } finally { plain.done(); }

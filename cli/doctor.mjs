@@ -2621,7 +2621,7 @@ export function codeownersChecks(checks, root) {
     if (r.unknown) { check(checks, id, 'codeowners', 'warn', `${nm}: CODEOWNERS could not be checked — ${forTerminal(r.unknown)}`, more); continue; }
     if (r.none && !r.unguarded) { check(checks, id, 'codeowners', 'ok', `${nm}: no CODEOWNERS — nothing to check`); continue; }
     if (r.none) {
-      check(checks, id, 'codeowners', 'warn', `${nm}: no CODEOWNERS, so ${unguardedWords(r.unguarded)} have no code owner`, unguardedHint(r.platform), { findings: codeownersFindings(r) });
+      check(checks, id, 'codeowners', 'warn', `${nm}: no CODEOWNERS, so ${unguardedWords(r.unguarded)} have no code owner`, unguardedHint(r.platform, r.unguarded), { findings: codeownersFindings(r) });
       continue;
     }
     const findings = codeownersFindings(r);
@@ -2636,10 +2636,10 @@ export function codeownersChecks(checks, root) {
     const unread = lines('not-read');
     if (unread.length) said.push(`in ${r.path}, ${unread.length === 1 ? '1 line' : `${unread.length} lines`} yad could not read (line${unread.length === 1 ? '' : 's'} ${listed(unread)})`);
     const stale = said.length ? [`${nm}: CODEOWNERS may be out of date — ${said.join('; ')}`] : [];
-    const gates = r.unguarded ? [`${stale.length ? '' : `${nm}: `}no line in ${r.path} that yad can read gives ${unguardedWords(r.unguarded)} an owner whose review ${can[r.platform]} can require`] : [];
+    const gates = r.unguarded ? [`${stale.length ? '' : `${nm}: `}no line in ${r.path} that yad can read gives ${unguardedWords(r.unguarded)} an owner whose review ${can[r.platform] || 'the platform'} can require`] : [];
     check(checks, id, 'codeowners', 'warn', [...stale, ...gates].join('; '),
       [...(stale.length ? [`${more} lists each one; fix it in ${nm} through a PR (advisory — CODEOWNERS is a hint, and yad never enforces it)`] : []),
-        ...(r.unguarded ? [unguardedHint(r.platform)] : [])].join('; '),
+        ...(r.unguarded ? [unguardedHint(r.platform, r.unguarded)] : [])].join('; '),
       { findings });
   }
   // The Product's own gates (#426). Only the gate-file finding: the stale-line facts above are for code repos.
@@ -2654,8 +2654,8 @@ export function codeownersChecks(checks, root) {
     return;
   }
   check(checks, 'codeowners:(the Product)', 'codeowners', 'warn',
-    `the Product: ${p.none ? 'no CODEOWNERS, so ' : `no line in ${p.path} that yad can read gives `}${unguardedWords(p.unguarded)}${p.none ? ' have no code owner' : ` an owner whose review ${can[p.platform]} can require`}`,
-    unguardedHint(p.platform), { findings: codeownersFindings(p).filter((f) => f.code === 'unguarded') });
+    `the Product: ${p.none ? 'no CODEOWNERS, so ' : `no line in ${p.path} that yad can read gives `}${unguardedWords(p.unguarded)}${p.none ? ' have no code owner' : ` an owner whose review ${can[p.platform] || 'the platform'} can require`}`,
+    unguardedHint(p.platform, p.unguarded), { findings: codeownersFindings(p).filter((f) => f.code === 'unguarded') });
 }
 
 // E70 — what the platform holds on the Product's branch and on each connected repo's: branch

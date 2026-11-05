@@ -173,11 +173,13 @@ for `@<owner>`:
 | GitLab | `/checks/ @<owner>`<br>`/.gitlab-ci.yml @<owner>`<br>`/.gitlab/ci/ @<owner>` | "Code owner approval" on the protected default branch (Premium and Ultimate only) |
 
 On GitLab the root `.gitlab-ci.yml` decides whether the yad fragments are included at all, which is why
-it is on the list.
+it is on the list. A CI file kept outside `.gitlab/ci/` (for example `ci/*.yml`) needs its own line; yad
+reads only these paths.
 
 yad never writes `CODEOWNERS` ([E69](roadmap-idea-1.md)): a name it wrote would become an owner the
-platform enforces. `yad codeowners check` and `yad doctor` warn when `checks/` or a CI file has no owner
-whose review can be required, and print the lines above.
+platform enforces. In a repo where yad's gates are installed, `yad codeowners check` and `yad doctor` warn
+when `checks/` or a CI file has no owner whose review can be required, and print the lines above. A repo
+connected for code context only, with no gates, gets no such warning.
 
 **A code owner guards the merge, not the run.** A pull request's workflow runs before anyone reviews
 it. Anyone who can push a branch can add a workflow that prints a secret, such as `YAD_PRODUCT_TOKEN`,

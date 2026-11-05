@@ -716,6 +716,7 @@ const coreOf = (script) => script.slice(script.indexOf('(\n'), script.lastIndexO
 
 test('#426: every gate call runs "$YAD_CHECKS/…", the base branch\'s copy, set up by one shared step; no checkout keeps credentials', () => {
   const cores = new Set();
+  const glBlocks = new Set();
   for (const { name, text, gitlab } of GATE_TEMPLATES) {
     const code = noComments(text);
     assert.doesNotMatch(code, /\b(?:bash|node|sh)\s+\.?\/?checks\//, `${name}: a gate call reads checks/ from the PR's tree`);
@@ -729,6 +730,7 @@ test('#426: every gate call runs "$YAD_CHECKS/…", the base branch\'s copy, set
       assert.ok(jobs.length, name);
       for (const j of jobs) assert.match(j, /\n {2}script:\n {4}- !reference \[\.yad_base_checks, script\]\n/, `${name} ${j.split(':')[0]}: the base copy is the script's first line`);
       const s = gitlabStep(text);
+      glBlocks.add(s);
       assert.match(s, /^YAD_BASE="\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"; YAD_CHECKS="\$\(mktemp -d\)\/checks"; export YAD_CHECKS\n/, name);
       cores.add(coreOf(s));
       continue;
@@ -755,6 +757,8 @@ test('#426: every gate call runs "$YAD_CHECKS/…", the base branch\'s copy, set
     assert.doesNotMatch(code, /filter:\s*blob:none/, `${name}: a partial clone leaves out the base's changed checks/`);
   }
   assert.equal(cores.size, 1, 'the base-copy step is word for word the same everywhere');
+  // Every GitLab fragment defines the same .yad_base_checks key and the file included last wins: one text.
+  assert.equal(glBlocks.size, 1, 'the .yad_base_checks block is the same in every GitLab file');
 });
 
 // The upgrade PR: the base's (older) script runs with the new workflow's call. So a call may only use what the

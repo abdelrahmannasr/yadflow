@@ -665,7 +665,7 @@ The gates run identically under either CI; the config just invokes the scripts w
   `origin/<base>` that is not in the checkout FAILs the job (`FAIL [base-checks]`) — it never falls back
   to the PR's copies. GitHub runs this as a step named "Gate scripts from the base branch (#426)" in each
   job, exporting `YAD_CHECKS` through `$GITHUB_ENV`; GitLab as the first line of every gate job's `script:`
-  (`!reference [.yad_base_checks, script]`) — not a `before_script`, which would replace the host
+  (`!reference [.yad_base_checks, script]`, GitLab 13.9 or later) — not a `before_script`, which would replace the host
   pipeline's `default: before_script` for these jobs (registry auth, proxies). The step's text is the same everywhere, and a test holds it. The base's script runs with
   the new file's call, so a call may only use what the previous release's script accepts (a test holds
   that list too). The CI file itself still comes from the PR: the CODEOWNERS lines in

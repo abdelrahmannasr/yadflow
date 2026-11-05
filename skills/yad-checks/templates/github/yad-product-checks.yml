@@ -49,7 +49,7 @@ jobs:
             git ls-tree -z HEAD checks/ > "$d/.pr"
             n=0
             while IFS= read -r -d '' e; do
-              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[$'\001'-$'\037']/?}"
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
               if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
               case "$m" in
                 100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
@@ -92,7 +92,7 @@ jobs:
             git ls-tree -z HEAD checks/ > "$d/.pr"
             n=0
             while IFS= read -r -d '' e; do
-              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[$'\001'-$'\037']/?}"
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
               if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
               case "$m" in
                 100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
@@ -139,7 +139,7 @@ jobs:
             git ls-tree -z HEAD checks/ > "$d/.pr"
             n=0
             while IFS= read -r -d '' e; do
-              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[$'\001'-$'\037']/?}"
+              m="${e%% *}"; p="${e#*$'\t'}"; o="${e#* * }"; o="${o%%$'\t'*}"; s="${p//[[:cntrl:]]/?}"
               if [ -e "$d/$p" ] || [ -L "$d/$p" ]; then continue; fi
               case "$m" in
                 100644 | 100755) git cat-file blob "$o" > "$d/$p"; if [ "$m" = 100755 ]; then chmod +x "$d/$p"; fi ;;
