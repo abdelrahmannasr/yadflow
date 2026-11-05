@@ -650,7 +650,10 @@ The other way round, a second person who has neither committed nor approved insi
 gate files by hand. On such a Product, `yad check --fix` installs `.github/workflows/yad-gate-sync.yml`
 (or, on GitLab, the `.gitlab/ci/yad-gate-sync.yml` fragment plus a pipeline schedule you create once;
 on a Product that uses Git LFS, the GitLab job downloads a pinned `git-lfs` before it checks out, because
-the runner's LFS hooks fail without it — #327).
+the runner's LFS hooks fail without it — #327). The GitLab job also downloads pinned `glab` and `jq`.
+Every download is checked against a SHA-256 hash (a fingerprint of the file's exact bytes) written in
+the fragment, and copied from the release's own checksum file. A file that does not match stops the job
+before it is installed, because the job holds `SDLC_GATE_TOKEN`, which can push the default branch (#431).
 It runs `yad gate ci --merged` in the Product's own CI at **two moments only**:
 
 | When | What runs |

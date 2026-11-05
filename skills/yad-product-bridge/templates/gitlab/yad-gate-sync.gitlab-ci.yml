@@ -79,23 +79,36 @@ yad-gate-sync:
     # Scheduled sweep: the only path that picks up bare approvals (advances merged reviews it finds).
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"
   script:
-    # Pinned glab binary (the node image has no glab). Alternative: image registry.gitlab.com/gitlab-org/cli.
-    - GLAB_VERSION=1.55.0
-    - curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.deb" -o /tmp/glab.deb && dpkg -i /tmp/glab.deb
-    # Pinned jq binary (the node image has none, and `glab api` has NO built-in --jq like `gh api` does —
+    # Every tool this job downloads is checked against a pinned SHA-256 before it is installed (#431):
+    # the job holds SDLC_GATE_TOKEN, which can push the default branch, and each tool runs beside it.
+    # Each hash is copied from the release's own published checksum file (glab: checksums.txt,
+    # jq: sha256sum.txt, git-lfs: sha256sums.asc) — a version bump must change its hash in the same edit.
+    # One command per line, not an `&&` chain — `set -e` does not stop on a failure inside a chain,
+    # so a bad checksum would fall through to the install.
+    # Pinned glab (the node image has no glab). The official glab image was not used: this job needs Node.
+    - |
+      GLAB_VERSION=1.55.0
+      GLAB_SHA256=ae3feac2aa1034a585e4a24787970dacd30f07906cdc75af8911c32d158b44e8
+      curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.deb" -o /tmp/glab.deb
+      echo "${GLAB_SHA256}  /tmp/glab.deb" | sha256sum -c -
+      dpkg -i /tmp/glab.deb
+    # Pinned jq (the node image has none, and `glab api` has NO built-in --jq like `gh api` does —
     # it errors "unknown flag: --jq"). We fetch raw JSON from glab and filter it through real jq;
-    # jq streams glab's concatenated per-page --paginate arrays natively.
-    - JQ_VERSION=1.7.1
-    - curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64" -o /usr/local/bin/jq && chmod +x /usr/local/bin/jq
+    # jq streams glab's concatenated per-page --paginate arrays natively. It is downloaded to /tmp and
+    # installed only after the check, so a file that fails it never lands on the PATH.
+    - |
+      JQ_VERSION=1.7.1
+      JQ_SHA256=5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5
+      curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64" -o /tmp/jq
+      echo "${JQ_SHA256}  /tmp/jq" | sha256sum -c -
+      install -m 0755 /tmp/jq /usr/local/bin/jq
     # Pinned git-lfs, ONLY for a Product that uses Git LFS (issue #327). The runner clones an LFS repo
     # with its own git-lfs and installs LFS git hooks (post-checkout, pre-push, …) that exit with an
     # error when git-lfs is missing — and the node image has none. So the `git checkout` below failed, and so
     # would the push of the advance. A Product without LFS skips the download. Only the clone's own
     # signs count (its hooks, its .git/config, its .gitattributes) — never a global git setting.
-    # The download is checked against the release's published SHA-256 (sha256sums.asc) before it is
-    # unpacked: this job holds a token that can push the default branch, and git-lfs then runs on every
-    # checkout and push. One command per line, not an `&&` chain — `set -e` does not stop on a failure
-    # inside a chain, so a bad checksum would fall through to the checkout.
+    # The download is checked against its pinned SHA-256 before it is unpacked, as glab and jq are above:
+    # git-lfs then runs on every checkout and push.
     - |
       GIT_LFS_VERSION=3.8.0
       GIT_LFS_SHA256=e455e00f15d9b95661b8d53498ffb0c3367962cf1ec73c31ab7369516cd6ab8d
