@@ -367,6 +367,10 @@ from the event payload):
 - `--profile code` (default) → a Conventional-Commits subject `<type>: <description>`, no trailing
   period (`config.yaml build.pr_title_style: same_as_commit_subject` — one task = one PR, the title is
   the squash-merge subject).
+- **A GitLab draft** (#451): in GitLab CI (`GITLAB_CI=true`) a leading `Draft:`, `[Draft]` or
+  `(Draft)` (any case, repeats too) is stripped before the title is judged, with a `note`. GitLab removes
+  it when the MR is marked ready, which starts no pipeline, so the draft-time result is the one that
+  stands. Outside GitLab CI (GitHub, `yad run checks`) the title is judged as written.
 - `--profile product` (old name `hub`, still accepted) → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
   - `review/EP-*` head (or no `--head` — stays strict) → a Shape artifact-review title
     `review: <artifact> (EP-<slug>)`, the shape `yad gate open` creates.

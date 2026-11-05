@@ -54,7 +54,8 @@ routing helper.
   description, no trailing period>`, proper nouns/acronyms keep their case (`config.yaml`
   `build.pr_title_style`; see `CONTRIBUTING.md`). Because PRs are squash-merged, the title becomes the
   merge commit subject — so it must be the clean, lowercase-after-the-type form, not `Fix: ...` or a
-  trailing period.
+  trailing period. On GitLab, a draft MR's `Draft:` / `[Draft]` / `(Draft)` prefix is ignored by the
+  gate (GitLab removes it when the MR is marked ready, #451).
 
 ## Inputs
 
