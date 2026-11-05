@@ -149,12 +149,12 @@ function askText(tool, steps, { found, file, replaces, productRoot }) {
   return `${anyAgent ? `Connect ${tool.name}? ` : `${tool.name} needs steps only you can do. `}${said.join('; ')}; ${tail}`;
 }
 
-const personBlock = (tool, steps) => (steps.length ? {
+const personBlock = (steps, verify) => (steps.length ? {
   act: 'install',
   why: steps.map((s) => s.why).filter((w, i, all) => all.indexOf(w) === i).join('; '),
   steps: steps.map((s) => s.run),
   commands: steps.filter((s) => !s.text).map((s) => s.run),
-  verify: `yad toolbox connect ${tool.id} --verify --json`,
+  verify,
 } : null);
 
 // The read: what connecting `id` takes here. Runs nothing, writes nothing.
@@ -169,7 +169,9 @@ export function connectPlan(id, { items = null, has = onPath, detectRoot = proce
   const steps = here ? [] : recipe;
   const file = recordFile(tool);
   const now = currentConnection(productRoot, tool);
-  const replaces = now.tool && now.tool !== tool.id ? now.tool : null;
+  // Compared without case: a hand-written `Figma` is still Figma.
+  const replaces = now.tool && now.tool.toLowerCase() !== tool.id ? now.tool : null;
+  const verify = `yad toolbox connect ${tool.id} --verify${replaces ? ' --replace' : ''} --json`;
   return {
     tool: tool.id, name: tool.name, state: status.state, found: status.found,
     steps: steps.map((s) => ({ who: s.who, run: s.run, ...(s.scope ? { scope: s.scope } : {}), ...(s.why ? { why: s.why } : {}), ...(s.text ? { text: true } : {}) })),
@@ -177,9 +179,9 @@ export function connectPlan(id, { items = null, has = onPath, detectRoot = proce
     record: productRoot ? [file] : [],
     replaces,
     ...(now.error ? { recordProblem: now.error } : {}),
-    person: personBlock(tool, steps.filter((s) => s.who === 'person')),
+    person: personBlock(steps.filter((s) => s.who === 'person'), verify),
     manual: tool.manual,
-    verify: `yad toolbox connect ${tool.id} --verify${replaces ? ' --replace' : ''} --json`,
+    verify,
   };
 }
 
@@ -220,7 +222,8 @@ function verifyAndRecord(productRoot, plan, { json, today, replace }) {
   const tool = byId(plan.tool);
   const written = [];
   const file = tool.tier === 'connector' ? connectorFile(tool) : null;
-  if (file && (plan.replaces || !currentConnection(productRoot, tool).tool)) {
+  const recorded = currentConnection(productRoot, tool).tool;
+  if (file && (plan.replaces || !recorded)) {
     const write = { [PROJECT_FILES.designConfig]: registerDesign, [PROJECT_FILES.testingConfig]: registerTesting, [PROJECT_FILES.learningConfig]: registerLearning }[file];
     write(productRoot, { tool: tool.id, today });
     written.push(file);

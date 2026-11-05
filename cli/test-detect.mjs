@@ -1936,6 +1936,12 @@ test('E165: `yad toolbox connect <tool> --json` reads only — the steps, the qu
     assert.equal(j.replaces, 'figma');
     assert.match(j.ask, /[Rr]ecord it as this team's choice in \.sdlc\/design\.json, in place of Figma \(what that file holds for Figma is dropped\)\?$/);
     assert.equal(j.verify, 'yad toolbox connect openpencil --verify --replace --json');
+    // A person step's block names the same command, --replace included.
+    put(path.join(p, '.sdlc/design.json'), JSON.stringify({ tool: 'Figma' }));
+    j = JSON.parse(yadPath(['toolbox', 'connect', 'pencil', '--json'], { cwd: p, home }).stdout);
+    assert.deepEqual([j.replaces, j.person.verify], ['Figma', 'yad toolbox connect pencil --verify --replace --json']);
+    put(path.join(p, '.sdlc/design.json'), JSON.stringify({ tool: 'OpenPencil' }));
+    assert.equal(JSON.parse(yadPath(['toolbox', 'connect', 'openpencil', '--json'], { cwd: p, home }).stdout).replaces, null, 'the same tool in other letters is not a replacement');
     fs.rmSync(path.join(p, '.sdlc/design.json'));
     fs.rmSync(path.join(p, '.mcp.json'));
     assert.deepEqual(fs.readdirSync(path.join(p, '.sdlc')).sort(), before, 'nothing written');
