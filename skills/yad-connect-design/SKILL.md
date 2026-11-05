@@ -45,7 +45,8 @@ Tell the person which tools you used and which fallbacks, and why.
 - **The design tool is reached through its MCP** (a harness MCP server) — the same shape as Impeccable's
   slash-commands, not Repomix's `npx`. **One exception: OpenPencil** is reached through its CLI
   (`openpencil` on PATH) first, and its MCP only while its desktop app is open. The skill detects the MCP
-  (or, for OpenPencil, the CLI) and degrades when it is absent; it never installs an MCP server.
+  (or, for OpenPencil, the CLI) and, when it is absent, offers to connect it with `yad toolbox connect`
+  (E165) before it degrades; it never installs anything another way.
 - Registry: `{project-root}/.sdlc/design.json` (project-wide, shared across all epics — NOT per-epic),
   the sibling of `.sdlc/repos.json` and `.sdlc/product.json`.
 - Per-epic screen→frame links are written later by `yad-ui` (`epics/EP-<slug>/.sdlc/design-links.json`),
@@ -87,10 +88,15 @@ running desktop app — the app must be open), `figma` (Figma's hosted server �
 `figma-mcp` does not say which Figma server it is: on a refresh, record the exact one. **Auth is the local user's own** — the user's authenticated MCP session. The skill
 **stores no tokens**; `project_url`/`files` are plain references, never credentials.
 
+**Offer to connect it first (E165):** when the tool is not found, run `yad toolbox connect <tool> --json`
+and follow the connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent`
+steps, hand over its `person` steps, then run `yad toolbox connect <tool> --verify --json`. Never install
+it any other way. On a no, or when a step fails, degrade:
+
 **Graceful degradation:** if no design-tool MCP is available (for OpenPencil: neither its CLI on PATH nor
 its MCP), record `source: "unavailable"` and report
 that `yad-ui` will run **markdown-only** until an MCP is connected (no error — the design tool is purely
-additive, exactly like Impeccable being absent). Do **not** install an MCP server as part of this step.
+additive, exactly like Impeccable being absent).
 
 ### Step 2 — Record the connection in the registry
 Upsert into `{project-root}/.sdlc/design.json` (create the file + parent `.sdlc/` if absent):

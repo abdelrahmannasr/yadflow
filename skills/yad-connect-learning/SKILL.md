@@ -39,7 +39,8 @@ Tell the person which tools you used and which fallbacks, and why.
   harness model).
 - **DeepTutor is reached as a CLI SUBPROCESS** (`deeptutor …`), the same shape as Repomix's `npx` — NOT
   an MCP like the design/testing tools (DeepTutor ships no MCP server). The skill detects the **binary on
-  PATH** and degrades when it is absent; it never installs DeepTutor.
+  PATH** and, when it is absent, offers to connect it with `yad toolbox connect deeptutor` (E165) before it
+  degrades; it never installs DeepTutor another way.
 - Registry: `{project-root}/.sdlc/learning.json` (project-wide, shared across all epics — NOT per-epic),
   the sibling of `.sdlc/repos.json`, `.sdlc/product.json`, `.sdlc/design.json`, and `.sdlc/testing.json`.
 - Per-epic, per-member learning records + rendered tutorials are written later by `yad-learn`
@@ -70,10 +71,15 @@ way `registerRepo`/`registerDesign` fall back). Then **detect the tool's CLI on 
 **Auth is the local user's own** — DeepTutor's own config (`deeptutor init`, `data/user/settings/`) and
 the user's LLM provider keys. The skill **stores no tokens**; `kb`/`kb_sources` are plain references.
 
+**Offer to connect it first (E165):** when DeepTutor is not found, run `yad toolbox connect deeptutor --json`
+and follow the connect-tool rule: show its `ask` word for word, ask once, hand over its `person` steps (its
+install and `deeptutor init` are the person's), then run `yad toolbox connect deeptutor --verify --json`.
+On a no, or when a step fails, degrade:
+
 **Graceful degradation:** if the `deeptutor` binary is not on PATH, record `source: "harness-native"`
 and report that `yad-learn` will still tutor **using the harness model reading the project artifacts**
 (no error — the learning layer is additive and always works; DeepTutor only adds knowledge-base
-grounding, quizzes, and deep research). Do **not** install DeepTutor as part of this step.
+grounding, quizzes, and deep research).
 
 ### Step 2 — Ground it in the project (optional, when DeepTutor is available)
 When `ground: true` and DeepTutor is available, build or refresh a project **knowledge base** so tutoring

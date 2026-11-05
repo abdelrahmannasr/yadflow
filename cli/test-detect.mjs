@@ -1971,3 +1971,13 @@ test('E165: `--verify` records only a tool it finds — the connector\'s file, o
     assert.deepEqual(toolboxJSON(p).shipped, { 'docker-mcp': 'use' });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E165: the connect skills offer `yad toolbox connect` under the connect-tool rule, and no longer say never install', () => {
+  for (const [skill, tool] of [['yad-connect-design', '<tool>'], ['yad-connect-testing', '<tool>'], ['yad-connect-learning', 'deeptutor']]) {
+    const text = fs.readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
+    assert.ok(text.includes(`yad toolbox connect ${tool} --json`), `${skill} asks the command first`);
+    assert.match(text, /--verify --json/, `${skill} verifies after`);
+    assert.match(text, /connect-tool rule/, `${skill} names the rule`);
+    assert.doesNotMatch(text, /Do \*\*not\*\* install/, `${skill} no longer forbids the connect step`);
+  }
+});
