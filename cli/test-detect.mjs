@@ -1415,6 +1415,12 @@ test('E86: `yad toolbox check` names what the project uses and is not here — a
     ];
     const res = toolboxCheck(p, null, { tools, items, has: () => false });
     assert.deepEqual(res.findings.map((x) => [x.id, x.problem]), [['impeccable', 'out-of-range'], ['repomix', 'disabled']]);
+    // E165 PR 2: the agent's command — for a shipped tool missing or out of range; not for a plugin turned
+    // off (the person turns it on), nor a team's own tool (yad has no recipe for it).
+    assert.deepEqual(res.findings.map((x) => [x.id, x.connect]), [['impeccable', 'yad toolbox connect impeccable --json'], ['repomix', null]]);
+    assert.equal(f.figma.connect, 'yad toolbox connect figma --json');
+    assert.equal(f['bmad-method'].connect, 'yad toolbox connect bmad-method --json', 'a recipe of person steps is still offered: the command hands them over');
+    assert.equal(f.doclint.connect, null, 'a custom tool has no recipe');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -1736,7 +1742,10 @@ test('E85: `yad setup` offers the tools in use after the tools step — a connec
 
     const human = run(['setup', '--solo', '--greenfield', '--monorepo', '--ide-targets', '.claude']);
     assert.equal(human.status, 0, human.stdout + human.stderr);
-    assert.match(human.stdout, /\[9\/10\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed for you[\s\S]*\[10\/10\] Done/);
+    assert.match(human.stdout, /\[9\/10\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed without asking[\s\S]*`yad toolbox connect <id>` \(it asks you once first\)[\s\S]*\[10\/10\] Done/);
+    // E165 PR 2: the agent is offered each tool to connect, in the AI-only steps, and reads `connect` in the JSON.
+    assert.match(human.stdout, /AI-only steps[\s\S]*offer to connect Playwright MCP: `yad toolbox connect playwright --json` \(the connect-tool rule/);
+    assert.equal(out.toolbox.findings.find((f) => f.id === 'playwright').connect, 'yad toolbox connect playwright --json');
 
     // `yad check` and `yad update` end with the same section, exit 0 with tools missing, and write no choice.
     for (const verb of ['check', 'update']) {
@@ -1744,8 +1753,9 @@ test('E85: `yad setup` offers the tools in use after the tools step — a connec
       assert.equal(j.status, 0, verb + j.stdout + j.stderr);
       const a = JSON.parse(j.stdout);
       assert.ok(a.toolbox.used.includes('playwright') && a.toolbox.findings.length > 0, verb);
+      assert.equal(a.toolbox.findings.find((f) => f.id === 'playwright')?.connect, 'yad toolbox connect playwright --json', verb);
       const h = run([verb]);
-      assert.match(h.stdout, /\nToolbox\n[\s\S]*– Playwright MCP: not found/, verb);
+      assert.match(h.stdout, /\nToolbox\n[\s\S]*– Playwright MCP: not found[\s\S]*`yad toolbox connect <id>`/, verb);
     }
     assert.ok(!fs.existsSync(path.join(p, '.sdlc/toolbox.json')));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1780,7 +1790,7 @@ test('E85 review 1: join\'s offer does not advise removing a tool the team chose
       offerToolbox(p, p, { canRemove: false, items: [], has: () => false });
       offerToolbox(p, p, { items: [], has: () => false });
     } finally { console.log = orig; }
-    const hints = lines.filter((l) => l.includes('nothing is installed for you'));
+    const hints = lines.filter((l) => l.includes('nothing is installed without asking'));
     assert.equal(hints.length, 2);
     assert.ok(!hints[0].includes('yad toolbox remove'), 'join: no remove advice');
     assert.match(hints[1], /for the whole team/);
@@ -2029,4 +2039,16 @@ test('E165: on Windows an MCP server started through npx or an npm program gets 
   assert.equal(connectPlan('openpencil', { ...none, platform: 'win32' }).steps[1].run, 'claude mcp add --scope user open-pencil -- cmd /c openpencil-mcp');
   assert.equal(connectPlan('openpencil', { ...none, platform: 'win32' }).steps[0].run, 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0', 'a package install is the same everywhere');
   assert.equal(connectPlan('playwright', { ...none, platform: 'darwin' }).steps[0].run, 'claude mcp add --scope user playwright -- npx @playwright/mcp@0.0.83');
+});
+
+test('E165 PR 2: a tool found outside its known-good versions is offered its pinned install; inside the range, only the record', async () => {
+  const { connectPlan } = await import('./toolbox-connect.mjs');
+  const list = [{ ...TOOLBOX.find((t) => t.id === 'repomix'), versions: '>=2.0.0' }];
+  const items = (version) => [{ kind: 'mcp', name: 'repomix', where: 'x', agents: ['Claude Code'], version, plugin: null }];
+  const out = connectPlan('repomix', { list, items: items('1.0.0'), has: () => false, platform: 'linux' });
+  assert.deepEqual([out.state, out.inRange], ['installed', false]);
+  assert.deepEqual(out.steps.map((s) => [s.who, s.run]), [['agent', 'npm install -g repomix@1.18.1']]);
+  assert.match(out.ask, /^Connect Repomix\? I will run `npm install -g repomix@1\.18\.1`/);
+  const ok = connectPlan('repomix', { list, items: items('2.1.0'), has: () => false, platform: 'linux' });
+  assert.deepEqual([ok.inRange, ok.steps], [true, []]);
 });
