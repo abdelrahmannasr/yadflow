@@ -645,7 +645,7 @@ export async function runSetup(root, opts = {}) {
   const learningPath = path.join(root, PROJECT_FILES.learningConfig);
   if (configureTools) {
     // Connect a design tool (Figma-first, pluggable; the UI step materializes the design here)
-    S('Connect a design tool (Figma / pencil / none)');
+    S('Connect a design tool (Figma / pencil / openpencil / none)');
     guide([
       'Where yad-ui materializes real screens. figma (confirm the MCP later) or none for markdown-only.',
       'Skipping is safe — the UI step degrades to ui-design.md.',

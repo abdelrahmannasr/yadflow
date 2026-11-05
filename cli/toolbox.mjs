@@ -291,6 +291,35 @@ export const TOOLBOX = Object.freeze([
     },
     usedBy: ['yad-connect-design', 'yad-ui'],
   },
+  // E164: an open-source design editor that works on a file on disk — no account, no paid plan, no app open,
+  // and the design file can live in the repo. Beside Figma and Pencil, never in place of them: it reads local
+  // `.fig` copies only (never Figma's cloud), and opens `.pen` files only partly. Both packages are pinned to
+  // an exact version while it is before 1.0, and each bump is vetted again. No `reach` block yet: the design
+  // preflight (#358) answers `not-checkable` for it until E164's second PR adds the rule.
+  {
+    id: 'openpencil', name: 'OpenPencil', tier: 'connector', role: 'design tool: yad-ui writes screens into a design file in the repo, with no account and no app open',
+    licence: 'MIT', source: 'https://github.com/open-pencil/open-pencil', checked: '2026-11-05',
+    vetted: {
+      on: '2026-11-05', licenceFrom: 'https://github.com/open-pencil/open-pencil/blob/master/LICENSE',
+      source: 'https://github.com/open-pencil/open-pencil', release: 'v0.16.0',
+      packages: [
+        { registry: 'npm', name: '@open-pencil/mcp', version: '0.16.0' },
+        { registry: 'npm', name: '@open-pencil/cli', version: '0.16.0' },
+      ],
+      note: 'Before 1.0, and its own README says "active development … some rough edges": vet each version bump again.',
+    },
+    install: [
+      { type: 'npm', command: 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0' },
+      { type: 'npm', command: 'claude mcp add --scope user open-pencil -- openpencil-mcp' },
+    ],
+    manual: 'https://github.com/open-pencil/open-pencil#readme',
+    detect: { mcp: ['open-pencil'], bins: ['openpencil', 'openpencil-mcp'] },
+    versions: null,
+    fallback: 'markdown-only: yad-ui writes ui-design.md and DESIGN.md only',
+    records: null,
+    note: 'The MCP server reads and writes only files inside OPENPENCIL_MCP_ROOT (the folder it starts in, by default). It opens local .fig copies, never Figma\'s cloud, and a round trip may lose detail; .pen support is partial.',
+    usedBy: ['yad-connect-design', 'yad-ui'],
+  },
   {
     id: 'playwright', name: 'Playwright MCP', tier: 'connector', role: 'testing tool: generates and runs browser and API tests',
     licence: 'Apache-2.0', source: 'https://github.com/microsoft/playwright-mcp', checked: CHECKED,

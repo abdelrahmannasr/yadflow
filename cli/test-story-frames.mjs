@@ -277,6 +277,9 @@ test('#358: designPreflight — nothing to probe is not-checkable, and no frame 
     assert.equal(designPreflight(design, links, frames).reachable, 'not-checkable', JSON.stringify(design));
   }
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, []), null);
+  // E164: OpenPencil has no reach rule until its second PR — not checkable, said plainly.
+  assert.deepEqual(designPreflight({ state: 'ok', data: { tool: 'openpencil', provider: 'openpencil-mcp' } }, links, frames),
+    { tool: 'openpencil', reachable: 'not-checkable', why: 'yad has no reachability check for openpencil' });
   const writer = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'html-to-design' } }, links, frames);
   assert.deepEqual([writer.reachable, /cannot read a frame/.test(writer.why)], ['not-checkable', true]);
   const gone = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'missing' }, [{ id: '9:9', found: false }]);

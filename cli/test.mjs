@@ -6149,6 +6149,16 @@ test('registerDesign: an unknown tool falls back to the primary; `none` is markd
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('E164: registerDesign records openpencil, a repo path as its file; doctor accepts it', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-design-op-'));
+  try {
+    const d = registerDesign(T, { tool: 'openpencil', project_url: 'design/app.fig', today: '2026-11-05' });
+    assert.deepEqual([d.tool, d.project_url, d.auth, d.source], ['openpencil', 'design/app.fig', 'user', null]);
+    const { DESIGN_TOOLS } = await import('./manifest.mjs');
+    assert.deepEqual(DESIGN_TOOLS, ['figma', 'pencil', 'openpencil'], 'today\'s order, OpenPencil last');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerTesting: record the testing-tool connection (deterministic half)
 // ---------------------------------------------------------------------------------------------
@@ -12667,6 +12677,10 @@ test('doctor: design.json with a known tool + confirmed MCP is ok; unknown tool 
   fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'figma', source: 'figma-mcp' }));
   let r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'ok' && /figma/.test(x.message)));
+  // E164: OpenPencil is a known tool
+  fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'openpencil', source: 'openpencil-mcp' }));
+  r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'ok' && /openpencil/.test(x.message)), JSON.stringify(r.checks.filter((x) => x.id === 'design')));
   // none => markdown-only, still ok
   fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'none', source: 'unavailable' }));
   r = await doctorOn(T);
