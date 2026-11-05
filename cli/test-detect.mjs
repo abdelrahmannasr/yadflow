@@ -2074,7 +2074,7 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
     assert.match(read(skill), /### Step 3[\s\S]*\*\*Right after a `--verify` that passed but could not reach the\s+tool yet:\*\* report only/, skill);
     assert.match(read(skill), /\*\*Graceful degradation\*\* \(never right after a `--verify` that passed — see above\)/, skill);
   }
-  assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\nfile is open, \*\*STOP\*\*/, 'implement says what a no means');
+  assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\s+file is open, \*\*STOP\*\*/, 'implement says what a no means');
   for (const skill of ['yad-spec', 'yad-implement']) {
     const text = read(skill);
     assert.match(text, /not on this machine at all[\s\S]*not a\s+closed app[\s\S]*the answer has `preflight\.connect`[\s\S]*connect-tool rule/, `${skill} offers only when the tool is absent, never for a closed app`);
