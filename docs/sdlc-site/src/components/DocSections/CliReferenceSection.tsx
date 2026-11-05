@@ -76,7 +76,7 @@ const GROUPS = [
     items: [
       'yad commit --type <t> -m <subject> — Conventional subject + trailers + atomic guard',
       'yad commit … --manual --reason <why> — commit past the Product\'s ledger hook; the reason is recorded, CI still judges it',
-      'yad open-pr [--repo <name>] [--base <branch>] — open a task PR/MR from the repo template, based on the repo\'s resolved default branch (warns on a non-default base: no AI first pass); prints a reviewer suggestion from recent history and CODEOWNERS — a hint, never a request (E68)',
+      'yad open-pr [--repo <name>] [--base <branch>] — open a task PR/MR from the repo template, based on the repo\'s resolved default branch (warns on a non-default base: no AI first pass; stops when the branch was cut from another branch and no base was chosen, #450); prints a reviewer suggestion from recent history and CODEOWNERS — a hint, never a request (E68)',
       'yad ship --type <t> -m <subject> — commit AND open the PR/MR in one step',
       'yad build start|step|trust|ship|done <story> … — the Build records on the Product, one command each (#346): a story\'s lane, a step\'s move, a run\'s trust verdict, a ship from the merged PR, and the story shipped once every task is',
       'yad story frames <story> [--json] — the design frames (Pencil, Figma) a story builds: the IDs in its design-frames: field, with each frame\'s name, platform and link from the epic\'s design-links.json. The spec and implement steps run it (#354). Read only; an ID it cannot find is a warning, never a failure. --json preflight (#358): how the agent checks the design app is open with the file loaded before UI work, and the message to stop with',

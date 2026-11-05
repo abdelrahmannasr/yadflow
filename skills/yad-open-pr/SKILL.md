@@ -50,6 +50,11 @@ the Product.
   auto-review eligibility from the base at PR-**open** time, and retargeting afterwards does not undo
   the skip. Hardcoding `main` here is the same bug the check gates already refuse to make (see
   `../yad-checks/references/check-gates.md`).
+  **A branch cut from another branch stops it (#450).** When nobody chose the base (it came from the
+  platform, `origin/HEAD` or `main`) and the branch was cut from another remote branch such as
+  `develop`, the CLI stops before pushing and names the branch. Ask the person which base they mean,
+  then re-run with `--base develop` (or `--base main` to open against `main` anyway). If tasks in that
+  repo always go to `develop`, suggest setting its `default_branch` in `.sdlc/repos.json`.
 - **Assignee** — the person opening it: `@me` on GitHub (`gh` resolves it on the repo's own host), and
   on GitLab the login `glab` reports (no assignee is passed when that lookup fails). **No reviewers are
   requested** (E62): yadflow keeps no list of people. The CLI prints `no
