@@ -119,7 +119,8 @@ find is an open question for the batch below, not a guess.
 `preflight.reachable` is `check`, make the MCP call `preflight.probe` describes. If it fails because the
 tool is not on this machine at all (no such MCP server in your session — not a closed app, the wrong file
 or a sign-in) and the answer has `preflight.connect`, offer it first, under the connect-tool rule, and probe again once it is
-found. On a no, when a step fails, if it still fails, or if another
+found (a new MCP server is loaded when the agent starts: if your session does not see it yet, check
+`/mcp`, and tell the person to restart the agent and run this step again). On a no, when a step fails, if it still fails, or if another
 file is open, **STOP**: print `preflight.stop` word for word and wait. Go on without the design tool, from
 the frame links only, only when the person says so, and record that in the commit's `Decisions:`
 paragraph (Step 6) as `design tool not reachable: continued from the frame links, on <person>'s word`.

@@ -318,6 +318,12 @@ test('#358: readDesignConfig, the reach data, and preflight through the command'
     assert.deepEqual([j.preflight.reachable, j.preflight.tool, j.preflight.appBound], ['check', 'pencil', true]);
     assert.match(yad(T, 'story', 'frames', 'EP-shop-S01').stdout, /before UI work: .* if that fails, stop: Open the Pencil desktop app[\s\S]*if pencil is not on this machine at all, your agent can offer to connect it first: `yad toolbox connect pencil --json`/);
     assert.equal(j.preflight.connect, 'yad toolbox connect pencil --json');
+    // Review 2: no `connect`, no offer line — Figma's desktop server is opened, never connected.
+    put(path.join(T, '.sdlc', 'design.json'), { tool: 'figma', provider: 'figma-desktop', source: 'figma-desktop', auth: 'user' });
+    put(path.join(T, 'epics', 'EP-shop', '.sdlc', 'design-links.json'), { ...LINKS, tool: 'figma', source: 'figma' });
+    const desk = yad(T, 'story', 'frames', 'EP-shop-S01');
+    assert.match(desk.stdout, /before UI work: .* if that fails, stop: .*Figma desktop app/);
+    assert.doesNotMatch(desk.stdout, /offer to connect/);
     assert.equal(JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S02', '--json').stdout).preflight, null, 'no screens, no probe');
   } finally { done(T); }
 });

@@ -2052,6 +2052,9 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
     assert.match(text, /When `--verify` passes, run `yad-connect-(design|testing)` with `action: refresh`/, `${skill} refreshes the connection before it goes on`);
   }
   assert.match(read('yad-ui'), /out of scope for Shape, except the one connect offer/, 'the Shape rule does not forbid the offer');
+  // Review 2: a server just added is loaded only when the agent starts — restart, never "unavailable".
+  for (const skill of ['yad-ui', 'yad-test-cases', 'yad-spec', 'yad-implement']) assert.match(read(skill), /restart the agent and run this step again/, `${skill} says a new server needs a restart`);
+  assert.match(read('yad-ui'), /then do not refresh — it would record the\n {2}tool as unavailable/);
   assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\nfile is open, \*\*STOP\*\*/, 'implement says what a no means');
   for (const skill of ['yad-spec', 'yad-implement']) {
     const text = read(skill);

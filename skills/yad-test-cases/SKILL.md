@@ -126,7 +126,10 @@ Read `{project-root}/.sdlc/testing.json` (`config.yaml` `testing.registry`). Dec
   over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
   with `--replace` only when its question said which tool it replaces). Never install it any other way.
   When `--verify` passes, run `yad-connect-testing` with `action: refresh`, so `testing.json` records the server it
-  now finds (its `source`), then go on with the next bullet. On a no, or when a step fails, degrade as
+  now finds (its `source`), then go on with the next bullet. A new MCP server is loaded when the agent
+  starts, so your session may not see it yet (check `/mcp`): then do not refresh — it would record the
+  tool as unavailable. Tell the person to restart the agent and run this step again, and degrade for
+  this run with that note. On a no, or when a step fails, degrade as
   in the bullet above.
 - **A tool is connected and its MCP is available:** adopt the `test architect` lens and, using the
   provider recorded in `testing.json` (Playwright via a Playwright MCP, Cypress/pytest/Maestro via

@@ -137,7 +137,8 @@ through the running app, so a closed app or the wrong file open is found here an
 - **It fails because the tool is not on this machine at all** (no such MCP server in your session — not a
   closed app, the wrong file or a sign-in), and the answer has `preflight.connect`: offer it first, under the connect-tool rule
   (show its `ask`, ask once, run only its `agent` steps, hand over the rest, verify). Once it is found,
-  probe again. On a no, or when a step fails, treat it as the next bullet.
+  probe again. A new MCP server is loaded when the agent starts: if your session does not see it yet
+  (check `/mcp`), tell the person to restart the agent and run this step again, and STOP. On a no, or when a step fails, treat it as the next bullet.
 - **It fails, or another file is open: STOP.** Print `preflight.stop` word for word and wait. Go on
   without the design tool only when the person says so, and record that in `spec.md`'s
   `## Clarifications` as `- Q: design tool not reachable → A: continue without it, from the frame links`
