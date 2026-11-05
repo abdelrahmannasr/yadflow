@@ -33,7 +33,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout, clearTimeout, setImmediate } from 'node:timers';
 import { c, log, info, warn, fail, hand, ok, run, exists, readJSON, refuse, inJSON, asset, contentSha } from './lib.mjs';
-import { detectPlatform, resolveBaseBranch } from './platform.mjs';
+import { detectPlatform, forkBranch, forkBranchWords, resolveBaseBranch } from './platform.mjs';
 import { registryEntryFor } from './find-product.mjs';
 import { repoPathFromGitUrl } from './protection.mjs';
 import { rangeTasks, groupWarnings } from './build.mjs';
@@ -314,6 +314,7 @@ export async function runChecks(dir, opts = {}) {
 
   // The base: as given, else the branch `yad open-pr` would open the PR against, fetched first.
   let base = opts.base;
+  let chosenBase = null;
   if (!base) {
     // The Product's own default_branch counts only for the Product itself: a code repo's trunk is its own.
     const chosen = resolveBaseBranch(platform, { cwd: repoRoot, meta, productConfig: isProduct ? settings : null, probe: false });
@@ -321,6 +322,9 @@ export async function runChecks(dir, opts = {}) {
     if (!b) return refuse(`the base branch '${chosen.base}' (from ${chosen.source}) is not a branch name git accepts`, 'pass --base <ref>');
     if (opts.fetch !== false && !fetchBranch(repoRoot, b).ok) warn(`could not fetch ${b} from origin — the last fetched origin/${b} is the base`);
     base = `origin/${b}`;
+    // A base nobody chose may not be where this branch was cut from (#450) — `yad open-pr` stops there;
+    // this run only warns, as it opens nothing.
+    if (!['registry', 'product'].includes(chosen.source)) chosenBase = b;
   } else if (base.startsWith('-')) {
     return refuse(`--base '${base}' is not a ref`, 'pass a branch or commit, such as origin/main');
   }
@@ -328,6 +332,10 @@ export async function runChecks(dir, opts = {}) {
     return refuse(`base '${base}' is not a commit here`, 'fetch it (git fetch origin), or pass --base <ref>');
   }
   info(`${isProduct ? 'Product' : 'code repo'} ${path.basename(repoRoot)} · branch ${branchName} · base ${base}`);
+  if (chosenBase) {
+    const fork = forkBranch(repoRoot, { base: chosenBase, head: branchName });
+    if (fork && !fork.skipped) warn(forkBranchWords(fork, chosenBase, { ref: 'origin/', verb: 'check against' }));
+  }
   // A grouped PR (#350) — commits carrying several tasks — is warned about over its size limit, as
   // `yad open-pr` warns. Never a failed gate.
   if (!isProduct) {

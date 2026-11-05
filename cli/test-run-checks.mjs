@@ -601,3 +601,20 @@ test('yad run checks: a folder read as it was, removed while the Product gates r
     assert.equal(JSON.parse(r.stdout).product.vanished, true);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+test('#450 yad run checks: a branch cut from another branch, with a base nobody chose, is warned about once — and the run goes on', () => {
+  const { W, backend } = workspace();
+  try {
+    git(backend, 'checkout', '-q', '-b', 'develop', 'main');
+    commitAll(backend, 'feat: other\n\nTask: EP-demo-S01-T09', { 'src/other.js': 'o\n' });
+    git(backend, 'push', '-q', 'origin', 'develop');
+    git(backend, 'checkout', '-q', '-b', 'feature-2');
+    commitAll(backend, 'feat: two\n\nTask: EP-demo-S01-T02', { 'src/two.js': 't\n' });
+    const r = yad(backend, ['run', 'checks', '--no-build']);
+    const hits = r.out.match(/this branch was cut from origin\/develop, not from origin\/main: 1 commit on it is from origin\/develop, not this task's — pass --base origin\/develop, or --base origin\/main to check against main anyway/g) || [];
+    assert.equal(hits.length, 1, r.out);
+    assert.match(r.out, /PASS \[spec-link\]: \w+ EP-demo-S01-T02/, 'the gates still run');
+    // A base someone chose is trusted: no warning.
+    assert.doesNotMatch(yad(backend, ['run', 'checks', '--no-build', '--base', 'origin/main']).out, /was cut from/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
