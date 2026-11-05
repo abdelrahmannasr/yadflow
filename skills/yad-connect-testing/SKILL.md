@@ -44,7 +44,8 @@ Tell the person which tools you used and which fallbacks, and why.
   primary provider; `cypress`, `pytest` and `maestro` are second providers; `none` → artifacts-only.
 - **The testing tool is reached through its MCP** (a harness MCP server), NOT a subprocess CLI — the
   same shape as the design tool's MCP, not Repomix's `npx`. The skill detects the MCP and degrades when
-  it is absent; it never installs an MCP server.
+  it is absent, offering first to connect it with `yad toolbox connect` (E165); it never installs anything
+  another way.
 - Registry: `{project-root}/.sdlc/testing.json` (project-wide, shared across all epics — NOT per-epic),
   the sibling of `.sdlc/repos.json`, `.sdlc/product.json`, and `.sdlc/design.json`.
 - Per-epic test→suite links are written later by `yad-test-cases`
@@ -81,10 +82,15 @@ Record `provider` (the concrete MCP, e.g. `playwright-mcp` | `cypress-mcp` | `py
 it is available. **Auth is the local user's own** — the user's authenticated MCP session. The skill
 **stores no tokens**; `project_url`/`suites` are plain references, never credentials.
 
+**Offer to connect it first (E165):** when the tool is not found, run `yad toolbox connect <tool> --json`
+and follow the connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent`
+steps, hand over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
+with `--replace` only when its question said which tool it replaces). Never install
+it any other way. On a no, or when a step fails, degrade:
+
 **Graceful degradation:** if no testing-tool MCP is available, record `source: "unavailable"` and report
 that `yad-test-cases` will run **artifacts-only** until an MCP is connected (no error — the testing tool
-is purely additive, exactly like the design tool being absent). Do **not** install an MCP server as part
-of this step.
+is purely additive, exactly like the design tool being absent).
 
 ### Step 2 — Record the connection in the registry
 Upsert into `{project-root}/.sdlc/testing.json` (create the file + parent `.sdlc/` if absent):

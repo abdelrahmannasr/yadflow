@@ -229,6 +229,12 @@ ${c.bold('Where am I / what next')}
                                        --role "<text>" --fallback "<text>" --detect <kind>:<name>[,…]
                                        [--install "<type>: <command>"] [--source <https URL>]
   yad toolbox remove <id>              Stop using a tool in this Product, or drop one of your own
+  yad toolbox connect <id> [--verify [--replace]]
+                                       What putting a tool on this machine takes (E165): the steps the
+                                       agent may run after your yes (pinned installs), the ones that
+                                       are yours, and the question to ask. Runs nothing. --verify
+                                       checks it is found here, then records it as the team's choice;
+                                       --replace when that replaces the team's current tool
   yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
@@ -557,6 +563,8 @@ function parseArgs(argv) {
     // say what it means rather than relying on the absence of a flag.
     else if (a === '--preview') o.apply = false;
     else if (a === '--custom') o.custom = true;
+    else if (a === '--verify') o.verify = true;
+    else if (a === '--replace') o.replace = true;
     else if (a === '--json') o.json = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else if (a === '-v' || a === '--version') o.version = true;
@@ -624,7 +632,7 @@ const ACTIONS = {
   docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
-  toolbox: { known: ['list', 'check', 'add', 'remove'], default: 'list' },
+  toolbox: { known: ['list', 'check', 'add', 'remove', 'connect'], default: 'list' },
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
@@ -893,8 +901,8 @@ async function main() {
       // team's choices are the Product's `.sdlc/toolbox.json`, found the way every Product command finds
       // it. So `toolbox` is not in PRODUCT_CMDS: that would move the finding to the Product's folder.
       const [, action = 'list', id, extra] = o._;
-      const usage = 'usage: yad toolbox list | check | add <id> [--custom …] | remove <id>   [--json] [--dir <folder>]';
-      if (!['list', 'check', 'add', 'remove'].includes(action)) { refuse(`unknown toolbox action: ${action} (list, check, add, remove)`, usage); break; }
+      const usage = 'usage: yad toolbox list | check | add <id> [--custom …] | remove <id> | connect <id> [--verify]   [--json] [--dir <folder>]';
+      if (!['list', 'check', 'add', 'remove', 'connect'].includes(action)) { refuse(`unknown toolbox action: ${action} (list, check, add, remove, connect)`, usage); break; }
       const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
       const rel = (p) => path.relative(process.cwd(), p) || '.';
       if (action === 'list' || action === 'check') {
@@ -910,6 +918,12 @@ async function main() {
         break;
       }
       if (extra) { refuse(`yad toolbox ${action} takes one tool id (got also: ${extra})`, usage); break; }
+      // E165. Without --verify it only reads (the steps, the question, what will be recorded), so it needs no
+      // Product; --verify records the team's choice, so it is a writer like add.
+      if (action === 'connect' && !o.verify) {
+        result = commands.runToolboxConnect(commands.toolsFolder(found, o.dir || process.cwd()), found?.root ?? null, { id, json: o.json });
+        break;
+      }
       // A writer: the Product's file, never a code repo's, and the same refusals every writer has. With
       // --dir it is the Product itself, as for every other Product command (`yad skill bind --dir`) —
       // never a folder a walk up from it happens to reach.
@@ -926,7 +940,9 @@ async function main() {
       commands.warnIfProjectAhead(productRoot);
       const drift = commands.productDriftError(productRoot);
       if (drift) throw drift;
-      result = action === 'add'
+      result = action === 'connect'
+        ? commands.runToolboxConnect(commands.toolsFolder(found, o.dir || process.cwd()), productRoot, { id, verify: true, replace: o.replace, json: o.json })
+        : action === 'add'
         ? commands.runToolboxAdd(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json })
         : commands.runToolboxRemove(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json });
       break;

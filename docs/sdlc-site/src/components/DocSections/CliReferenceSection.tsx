@@ -22,6 +22,7 @@ const GROUPS = [
       'yad toolbox list [--json] — the external tools yadflow can use (core, recommended, connectors, your own), whether each is found here, whether this Product uses it, and the fallback when it is not; installs nothing',
       'yad toolbox check [--json] — the tools this Product uses that are not ready here, each with its install command and fallback; never fails',
       'yad toolbox add <id> | remove <id> — record which tools this Product uses in .sdlc/toolbox.json (add <id> --custom --role … --fallback … --detect … adds your own); installs nothing',
+      'yad toolbox connect <id> [--verify] — what connecting a tool on this machine takes: the pinned steps the agent may run after your one yes, the steps that are yours, and the question to ask; --verify checks it is found, then records it as the team\'s choice (E165)',
       'yad repo clone [name] — clone every registered repo missing on this machine, at its recorded path (the clone step of yad join); never touches a repo already there',
       'yad report [-m <text>] — file a bug in the yadflow repo with scrubbed diagnostics (no paths, hosts, repo names, logins or flag values); YAD_NO_REPORT=1 turns the offer off',
       'yad usage [--out <path>] [--since/--until <YYYY-MM-DD> | --all] [--member <name>] [--format html|json|md] [--repos] — per-member adoption report from git + the ledgers; read-only',

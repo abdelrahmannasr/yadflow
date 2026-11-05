@@ -1218,6 +1218,18 @@ function setShipped(doc, tool, want, connected) {
 }
 const sameJSON = (a, b) => JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
 
+// E165: mark a shipped tool as used, quietly, for `yad toolbox connect --verify` (the person's one yes already
+// covered it). The same write `yad toolbox add <id>` makes for a shipped tool; true when the file changed. The
+// caller has checked that the file reads. Custom entries are left alone.
+export function recordToolUse(productRoot, tool) {
+  const { doc, error } = readToolboxFile(productRoot);
+  if (error) return false;
+  const shipped = setShipped(doc, tool, 'use', connectedTools(productRoot));
+  if (sameJSON(shipped, doc.shipped)) return false;
+  save(productRoot, doc, shipped, Array.isArray(doc.custom) ? doc.custom : []);
+  return true;
+}
+
 // Where the file is, for an answer: the Product as a path from here, since run from a code repo nothing
 // else on stdout names it. Both sides as the disk has them: `process.cwd()` is already resolved, and a
 // Product reached through a link (macOS's /var is /private/var) would otherwise climb to the top and back.
