@@ -1557,3 +1557,28 @@ test('yad build done: a tasks.md that exists wins over a light spec\'s tasks blo
     assert.equal(status(dir), 'shipped');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+test('#450 yad open-pr --via auto: a branch cut from another branch, with no base chosen, is a YAD-STATE-009 error and nothing is pushed', async () => {
+  const { runOpenPr } = await import('./openpr.mjs');
+  const { W, P, api } = workspace();
+  try {
+    // The registry names no default_branch for api, so the base is origin/HEAD (main): nobody chose it.
+    git(api, 'checkout', '-q', '-b', 'develop');
+    write(api, { 'src/other.js': 'o\n' });
+    git(api, 'add', '-A');
+    git(api, 'commit', '-q', '-m', 'feat: other\n\nTask: EP-l-S01-T09');
+    git(api, 'push', '-q', 'origin', 'develop');
+    const branch = 'feat/EP-l-S01-T01-orders';
+    git(api, 'checkout', '-q', '-b', branch);
+    write(api, { 'src/orders.js': 'x\n' });
+    git(api, 'add', '-A');
+    git(api, 'commit', '-q', '-m', 'feat: orders\n\nTask: EP-l-S01-T01');
+    let created = 0;
+    const creator = () => { created += 1; return { ok: true, url: 'https://github.com/o/api/pull/12' }; };
+    const runner = () => ({ ok: false, stdout: '', stderr: 'no platform here' });
+    await assert.rejects(() => runOpenPr(api, { product: P, via: 'auto', platform: 'github', creator, runner }),
+      (e) => e.code === 'YAD-STATE-009' && /holds 1 commit of other tasks from origin\/develop/.test(e.message));
+    assert.equal(git(api, 'ls-remote', '--heads', 'origin', branch), '', 'nothing was pushed');
+    assert.equal(created, 0);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
-  detectPlatform, createPr, platformLogin, resolveBaseBranch, prNumberFromUrl, editPrBody,
+  detectPlatform, createPr, platformLogin, resolveBaseBranch, prNumberFromUrl, editPrBody, forkBranch, forkBranchWords, branchTaskId,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase, gateCapFor, capLimit, peopleWord, gateRuleSum, gateRuleEnforced, legacyLogins } from './epic-state.mjs';
@@ -368,6 +368,21 @@ export async function runOpenPr(root, opts = {}) {
   if (!fetched && auto) throw err('YAD-STATE-009', `could not fetch ${baseBranch} from origin, so the tasks ${branch} carries are not known`, 'check the network and your login, then run this again');
   if (!fetched) warn(`could not fetch ${baseBranch} from origin — the tasks this PR carries are read against the last fetched ${baseRef}`);
   const haveBase = run('git', ['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`], { cwd: repoRoot }).ok;
+  // A base nobody chose (the platform's default, origin/HEAD, or 'main') may not be where this branch was
+  // cut from (#450): then the range below holds another branch's commits. Stop before anything is pushed.
+  // A --base, or a default_branch someone set in repos.json or the Product settings, is trusted as it is.
+  if (haveBase && !['flag', 'registry', 'product'].includes(baseSource)) {
+    const fork = forkBranch(repoRoot, { base: baseBranch, head: branch });
+    if (fork?.skipped) info(`origin has ${fork.skipped} branches, so yad did not check which one ${branch} was cut from — pass --base if it is not ${baseBranch}`);
+    else if (fork) {
+      const why = forkBranchWords(fork, baseBranch);
+      if (auto) throw err('YAD-STATE-009', why, 'a person picks the base and opens it with --base <branch>');
+      fail(why);
+      if (meta?.name) hand(`if tasks in ${meta.name} always go to one branch, set its default_branch in .sdlc/repos.json`);
+      process.exitCode = 1;
+      return;
+    }
+  }
   const commitIds = haveBase ? rangeTasks(repoRoot, `${baseRef}..HEAD`) : null;
   let groupIds = null;
   if (auto) {
@@ -381,7 +396,12 @@ export async function runOpenPr(root, opts = {}) {
     Object.assign(auto, { tasks, ...autoOpenCheck(auto.productRoot, { story: auto.story, tasks, repo: auto.repo }) });
     if (ids.length > 1) groupIds = ids;
     info(`opened on the standing approval: the checks of ${ids.join(', ')} passed, and the open-pr dial is auto`);
-  } else if (commitIds && commitIds.length > 1) groupIds = commitIds;
+  } else if (commitIds && commitIds.length > 1) {
+    // The branch's own task first, so the body's Spec path is its story, not the newest commit's (#450).
+    const own = (branchTaskId(branch) || '').toLowerCase();
+    const at = commitIds.findIndex((t) => t.toLowerCase() === own);
+    groupIds = at > 0 ? [commitIds[at], ...commitIds.filter((_t, i) => i !== at)] : commitIds;
+  }
   if (groupIds) {
     info(`a grouped PR/MR: ${groupIds.join(', ')}`);
     const settings = readJSON(productConfigPath(opts.product || root), {}) || {};
