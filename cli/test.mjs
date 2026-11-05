@@ -2540,7 +2540,15 @@ test('#450 forkBranch: only other tasks\' commits count; newest fork wins; main 
     fs.writeFileSync(path.join(r.T, 'u.txt'), 'u'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: more\n\nTask: EP-demo-S01-T01');
     assert.equal(forkBranch(r.T, { base: 'main', head }), null);
   } finally { r.done(); }
+  // The same teammate copy when the task branch was cut from develop: develop is named, never alice-wip (review 2).
+  r = forkedTaskRepo();
+  try {
+    git(r.T, 'push', '-q', 'origin', 'HEAD:refs/heads/alice-wip');
+    fs.writeFileSync(path.join(r.T, 'u.txt'), 'u'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: more\n\nTask: EP-demo-S01-T01');
+    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2 });
+  } finally { r.done(); }
   assert.equal(branchTaskId('feat/team/EP-demo-S01-T02-word'), 'EP-demo-S01-T02');
+  assert.equal(branchTaskId('alice-EP-demo-S01-T02'), 'EP-demo-S01-T02');
   assert.equal(branchTaskId('EP-demo-S01-T02'), 'EP-demo-S01-T02');
   assert.equal(branchTaskId('develop'), null);
 });

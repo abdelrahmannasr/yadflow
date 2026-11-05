@@ -477,8 +477,8 @@ export function resolveBaseBranch(platform, {
 // `origin/main..HEAD` holds commits `develop` has that `main` lacks: other tasks' commits, read as this PR's
 // tasks, its Spec path, its size. So, for each remote branch: the commits of `origin/<base>..<fork point>`
 // (the fork point = merge-base of that branch and HEAD) are in the PR's range and came from that branch; the
-// ones whose `Task:` line names ANOTHER task are the ones that matter. Only those count: a teammate's branch
-// cut from this one's middle holds this task's own commits, and is never named. A commit with no `Task:`
+// ones whose `Task:` line names ANOTHER task are the ones that matter. A branch whose range holds one of this
+// task's own commits was cut from this task's work (a teammate's copy), and is never named. A commit with no `Task:`
 // line is not counted either (a missed stop opens as before; a wrong stop would send the PR to a wrong base).
 // Of the branches with any, the newest fork point wins (fewest commits from it to HEAD), ties by name.
 // Returns { branch, foreign }, { skipped: n } past FORK_REF_CAP remote branches, or null — none, or git
@@ -489,7 +489,7 @@ const TASK_SHAPED = /-S\d+-T\d+(?:-|$)/i;
 const TASK_ID = /^EP-[a-z0-9-]+-S\d+-T\d+$/i;
 // The task a branch carries, wherever its id sits in the name (`feat/team/EP-x-S01-T02-word`).
 export function branchTaskId(branch = '') {
-  const m = String(branch).match(/(?:^|[/_])(EP-[a-z0-9-]+?-S\d+-T\d+)(?=-|$)/i);
+  const m = String(branch).match(/(?:^|[/_-])(EP-[a-z0-9-]+?-S\d+-T\d+)(?=-|$)/i);
   return m ? m[1] : null;
 }
 export function forkBranch(cwd, { base, head, runner = run } = {}) {
@@ -510,8 +510,11 @@ export function forkBranch(cwd, { base, head, runner = run } = {}) {
     if (!mb.ok || !mb.stdout) continue;
     const log = g(['log', '--no-merges', '--format=%(trailers:key=Task,valueonly,separator=%x1e)%x00', `${baseRef}..${mb.stdout}`]);
     if (!log.ok) return null;
-    const foreign = log.stdout.split('\0').map((x) => x.split('\x1e')[0].trim())
-      .filter((t) => TASK_ID.test(t) && t.toLowerCase() !== own).length;
+    const tasks = log.stdout.split('\0').map((x) => x.split('\x1e')[0].trim()).filter((t) => TASK_ID.test(t));
+    // A branch whose range holds this task's own commit was cut from this task's own work (a teammate's
+    // copy): never where the task branch came from, even when develop's commits sit below it (review 2).
+    if (own && tasks.some((t) => t.toLowerCase() === own)) continue;
+    const foreign = tasks.length;
     if (!foreign) continue;
     const toHead = g(['rev-list', '--count', `${mb.stdout}..HEAD`]);
     if (!toHead.ok) return null;
