@@ -248,10 +248,12 @@ test('#358: designPreflight — Pencil is read through the app; Figma only throu
   assert.deepEqual([pencil.reachable, pencil.appBound, pencil.frame, pencil.file], ['check', true, '12:34', 'design/app.pen'], 'the first frame that resolves is the one probed');
   assert.match(pencil.stop, /^Open the Pencil desktop app with `design\/app\.pen` loaded/);
   assert.match(pencil.probe, /get_app_state/);
+  // E165: the command to connect the tool, when it is not on this machine at all.
+  assert.equal(pencil.connect, 'yad toolbox connect pencil --json');
   const desk = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-desktop' } }, links, frames);
   assert.deepEqual([desk.appBound, /desktop app/.test(desk.stop)], [true, true]);
   const cloud = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma' } }, links, frames);
-  assert.deepEqual([cloud.appBound, /^Sign in to Figma/.test(cloud.stop)], [false, true]);
+  assert.deepEqual([cloud.appBound, /^Sign in to Figma/.test(cloud.stop), cloud.connect], [false, true, 'yad toolbox connect figma --json']);
   assert.match(cloud.probe, /`12:34`/);
   const old = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-mcp' } }, links, frames);
   assert.deepEqual([old.appBound, /desktop app.*or sign in/.test(old.stop)], [null, true], 'the older figma-mcp: yad cannot tell, so both');
@@ -274,7 +276,9 @@ test('#358: designPreflight — nothing to probe is not-checkable, and no frame 
   const frames = [{ id: '12:34', found: true }];
   const links = { state: 'ok', fileUrl: 'f', screens: [] };
   for (const design of [{ state: 'missing' }, { state: 'unreadable' }, { state: 'ok', data: { tool: 'none' } }, { state: 'ok', data: { tool: 'pencil', source: 'unavailable' } }, { state: 'ok', data: { tool: 'sketch' } }]) {
-    assert.equal(designPreflight(design, links, frames).reachable, 'not-checkable', JSON.stringify(design));
+    const r = designPreflight(design, links, frames);
+    assert.equal(r.reachable, 'not-checkable', JSON.stringify(design));
+    assert.equal(r.connect, undefined, 'nothing to probe, nothing to connect: connecting the team\'s tool is yad-connect-design\'s');
   }
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, []), null);
   // E164: OpenPencil has no reach rule until its second PR — not checkable, said plainly.
@@ -311,7 +315,8 @@ test('#358: readDesignConfig, the reach data, and preflight through the command'
     put(path.join(T, '.sdlc', 'design.json'), { tool: 'pencil', provider: 'pencil-mcp', source: 'pencil-mcp', auth: 'user' });
     const j = JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S01', '--json').stdout);
     assert.deepEqual([j.preflight.reachable, j.preflight.tool, j.preflight.appBound], ['check', 'pencil', true]);
-    assert.match(yad(T, 'story', 'frames', 'EP-shop-S01').stdout, /before UI work: .* if that fails, stop: Open the Pencil desktop app/);
+    assert.match(yad(T, 'story', 'frames', 'EP-shop-S01').stdout, /before UI work: .* if that fails, stop: Open the Pencil desktop app[\s\S]*if pencil is not on this machine at all, your agent can offer to connect it first: `yad toolbox connect pencil --json`/);
+    assert.equal(j.preflight.connect, 'yad toolbox connect pencil --json');
     assert.equal(JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S02', '--json').stdout).preflight, null, 'no screens, no probe');
   } finally { done(T); }
 });
