@@ -2053,11 +2053,19 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
   }
   assert.match(read('yad-ui'), /out of scope for Shape, except the one connect offer/, 'the Shape rule does not forbid the offer');
   // Review 2: a server just added is loaded only when the agent starts — restart, never "unavailable".
-  for (const skill of ['yad-ui', 'yad-test-cases', 'yad-spec', 'yad-implement']) assert.match(read(skill), /restart the agent and run\s+this step again/, `${skill} says a new server needs a restart`);
+  for (const skill of ['yad-spec', 'yad-implement']) assert.match(read(skill), /restart the agent and run\s+this step again/, `${skill} says a new server needs a restart`);
+  // Review 4: after the restart, refresh first — `--verify` records the tool, never its server.
+  for (const [skill, connect] of [['yad-ui', 'yad-connect-design'], ['yad-test-cases', 'yad-connect-testing']]) {
+    assert.match(read(skill), new RegExp(`restart the agent, run\\s+\`${connect}\` with \`action: refresh\`, and then run this step again`), skill);
+  }
   for (const skill of ['yad-ui', 'yad-test-cases']) assert.match(read(skill), /first check that you can reach the tool[\s\S]*do not\s+refresh — it would record the tool as unavailable[\s\S]*If you can, run `yad-connect-/, `${skill}: the check comes before the refresh`);
   assert.match(read('yad-ui'), /or for OpenPencil its CLI on PATH/, 'the CLI path needs no restart');
   // Review 3: the connect skills themselves never write `unavailable` right after a connect.
-  for (const skill of ['yad-connect-design', 'yad-connect-testing']) assert.match(read(skill), /When `--verify` passes, detect again[\s\S]*do \*\*not\*\* record `source: "unavailable"`[\s\S]*restart the agent and run this skill again/, skill);
+  // Review 4: the restart branch writes nothing — it skips the degrade and Step 2.
+  for (const skill of ['yad-connect-design', 'yad-connect-testing']) {
+    assert.match(read(skill), /When `--verify` passes, detect again[\s\S]*\*\*not\*\* write the file: skip the degrade below and Step 2[\s\S]*restart the\s+agent and run this skill again with `action: refresh`/, skill);
+    assert.match(read(skill), /\*\*Graceful degradation\*\* \(never right after a `--verify` that passed — see above\)/, skill);
+  }
   assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\nfile is open, \*\*STOP\*\*/, 'implement says what a no means');
   for (const skill of ['yad-spec', 'yad-implement']) {
     const text = read(skill);

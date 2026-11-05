@@ -96,12 +96,12 @@ running desktop app — the app must be open), `figma` (Figma's hosted server �
 and follow the connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent`
 steps, hand over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
 with `--replace` only when its question said which tool it replaces). Never install
-it any other way. When `--verify` passes, detect again. A new MCP server is loaded when the agent starts:
-if you still cannot reach the tool (its MCP server in your session (in Claude Code, `/mcp`), or for OpenPencil its CLI on PATH), do **not** record `source: "unavailable"` —
-leave the file as `--verify` wrote it, and tell the person to restart the agent and run this skill again
-(`action: refresh`). On a no, or when a step fails, degrade:
+it any other way. When `--verify` passes, detect again — you can reach the tool when you find
+its MCP server in your session (in Claude Code, `/mcp`), or for OpenPencil its CLI on PATH. A new MCP server is loaded when the agent starts, so it may not be there yet. Then do
+**not** write the file: skip the degrade below and Step 2, and in Step 3 tell the person to restart the
+agent and run this skill again with `action: refresh`. On a no, or when a step fails, degrade:
 
-**Graceful degradation:** if no design-tool MCP is available (for OpenPencil: neither its CLI on PATH nor
+**Graceful degradation** (never right after a `--verify` that passed — see above)**:** if no design-tool MCP is available (for OpenPencil: neither its CLI on PATH nor
 its MCP), record `source: "unavailable"` and report
 that `yad-ui` will run **markdown-only** until an MCP is connected (no error — the design tool is purely
 additive, exactly like Impeccable being absent).

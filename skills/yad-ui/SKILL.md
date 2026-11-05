@@ -161,8 +161,8 @@ Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decid
   with `--replace` only when its question said which tool it replaces). Never install it any other way.
   When `--verify` passes, first check that you can reach the tool: its MCP server in your session (in Claude Code, `/mcp`), or for OpenPencil its CLI on PATH. A new MCP
   server is loaded when the agent starts, so it may not be there yet. If you cannot reach it, do not
-  refresh — it would record the tool as unavailable: tell the person to restart the agent and run
-  this step again, and degrade for this run with that note. If you can, run `yad-connect-design` with
+  refresh — it would record the tool as unavailable: tell the person to restart the agent, run
+  `yad-connect-design` with `action: refresh`, and then run this step again; degrade for this run with that note. If you can, run `yad-connect-design` with
   `action: refresh`, so `design.json` records what it now finds (its `source`), then go on with the next bullet. On a no, or when a step fails, degrade as
   in the bullet above.
 - **A tool is connected and its provider is available** (`source` is not `unavailable`): adopt the `ux-designer` lens and, using the provider
