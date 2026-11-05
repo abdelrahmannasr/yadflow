@@ -2430,6 +2430,117 @@ test('runOpenPr warns (but still opens) when the base is not the platform defaul
   }
 });
 
+// #450 — a task branch cut from an integration branch (`develop`), opened with no --base: the platform says
+// `main`, and `origin/main..HEAD` holds develop's commits (other tasks), read as this PR's tasks and Spec path.
+// origin: main (seed) ← develop (2 commits, tasks of S02) ← the task branch (1 commit, S01-T01).
+function forkedTaskRepo({ branch = 'feat/EP-demo-S01-T01-x', from = 'develop' } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-450-'));
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-450bare-'));
+  git(bare, 'init', '-q', '--bare');
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x'); git(T, 'config', 'commit.gpgsign', 'false');
+  const commit = (file, msg) => { fs.writeFileSync(path.join(T, file), file); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', msg); };
+  commit('seed.txt', 'feat: seed');
+  git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', bare);
+  git(T, 'checkout', '-q', '-b', 'develop');
+  commit('d1.txt', 'feat: other one\n\nTask: EP-demo-S02-T01');
+  commit('d2.txt', 'feat: other two\n\nTask: EP-demo-S02-T02');
+  git(T, 'push', '-q', 'origin', 'main', 'develop');
+  git(T, 'checkout', '-q', '-b', branch, from);
+  commit('t.txt', 'feat: this task\n\nTask: EP-demo-S01-T01');
+  return { T, bare, done: () => { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); } };
+}
+const openWith = async (T, opts) => {
+  let seen = null;
+  const creator = (_p, o) => { seen = o; return { ok: true, url: 'https://x/pull/1' }; };
+  const runner = fakeRunner({ 'gh repo view': 'main' });
+  const prev = process.exitCode;
+  process.exitCode = 0;
+  try {
+    let threw = null;
+    const out = await grab(() => runOpenPr(T, { platform: 'github', creator, runner, ...opts }).catch((e) => { threw = e; }));
+    return { out, seen, threw, code: process.exitCode };
+  } finally { process.exitCode = prev; }
+};
+
+test('#450 open-pr: a branch cut from another branch, with no --base, stops before anything is pushed', async () => {
+  const r = forkedTaskRepo();
+  try {
+    const { out, seen, code } = await openWith(r.T, {});
+    assert.match(out, /this branch was cut from origin\/develop, not from origin\/main: 2 commits on it are from origin\/develop, not this task's — pass --base develop, or --base main to open the PR\/MR against main anyway/);
+    assert.equal(seen, null, 'no PR/MR is created');
+    assert.equal(code, 1);
+    assert.equal(git(r.bare, 'branch', '--list', 'feat/*').toString().trim(), '', 'and nothing was pushed');
+    assert.doesNotMatch(out, /a grouped PR/, 'the other branch\'s tasks were never read as this one\'s');
+  } finally { r.done(); }
+});
+
+test('#450 open-pr: --base, or a default_branch someone set, is trusted; and the task list is the branch\'s own', async () => {
+  let r = forkedTaskRepo();
+  try {
+    const { out, seen, code } = await openWith(r.T, { base: 'main' });
+    assert.equal(seen.base, 'main', '--base main opens against main: the person chose it');
+    assert.doesNotMatch(out, /was cut from/);
+    assert.ok(!code);
+  } finally { r.done(); }
+  r = forkedTaskRepo();
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-450product-'));
+  try {
+    fs.mkdirSync(path.join(H, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(H, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [] }));
+    fs.writeFileSync(path.join(H, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: r.T, platform: 'github', default_branch: 'develop' }] }));
+    const { out, seen } = await openWith(H, { repo: 'backend' });
+    assert.equal(seen.base, 'develop');
+    assert.doesNotMatch(out, /was cut from|a grouped PR/);
+    assert.match(seen.body, /EP-demo-S01-T01/);
+    assert.doesNotMatch(seen.body, /EP-demo-S02/, 'only the branch\'s own commits are read');
+  } finally { r.done(); fs.rmSync(H, { recursive: true, force: true }); }
+});
+
+test('#450 open-pr: no false stop — a branch cut from the base, its own pushed copy, a task branch cut from it', async () => {
+  const r = forkedTaskRepo({ from: 'main' });
+  try {
+    git(r.T, 'push', '-q', 'origin', 'feat/EP-demo-S01-T01-x');                  // its own copy on origin
+    git(r.T, 'checkout', '-q', '-b', 'feat/EP-demo-S01-T02-y');                    // a task branch cut from it
+    fs.writeFileSync(path.join(r.T, 'y.txt'), 'y'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: y\n\nTask: EP-demo-S01-T02');
+    git(r.T, 'push', '-q', 'origin', 'feat/EP-demo-S01-T02-y');
+    git(r.T, 'checkout', '-q', 'feat/EP-demo-S01-T01-x');
+    const { out, seen, code } = await openWith(r.T, {});
+    assert.doesNotMatch(out, /was cut from/);
+    assert.equal(seen.base, 'main');
+    assert.ok(!code);
+  } finally { r.done(); }
+});
+
+test('#450 open-pr --via auto: the same stop is a YAD-STATE-009 error', async () => {
+  const { forkBranch, forkBranchWords } = await import('./platform.mjs');
+  const r = forkedTaskRepo();
+  try {
+    // The auto path needs a Product lane; the refusal itself is the same words, so check those and the helper.
+    const fork = forkBranch(r.T, { base: 'main', head: 'feat/EP-demo-S01-T01-x' });
+    assert.deepEqual(fork, { branch: 'develop', foreign: 2 });
+    assert.match(forkBranchWords({ branch: 'develop', foreign: 1 }, 'main'), /1 commit on it is from origin\/develop/);
+    assert.match(forkBranchWords(fork, 'main', { ref: 'origin/', verb: 'check against' }), /pass --base origin\/develop, or --base origin\/main to check against main anyway$/);
+    // The newest fork wins: a second branch cut from develop's first commit is an older fork.
+    git(r.T, 'push', '-q', 'origin', 'develop~1:refs/heads/staging');
+    assert.equal(forkBranch(r.T, { base: 'main', head: 'feat/EP-demo-S01-T01-x' }).branch, 'develop');
+    // Git that cannot tell is no answer, never a guess.
+    assert.equal(forkBranch(r.T, { base: 'no-such-branch', head: 'x' }), null);
+    assert.equal(forkBranch(r.T, { base: 'main', head: 'x', runner: () => ({ ok: false, stdout: '' }) }), null);
+  } finally { r.done(); }
+  const src = fs.readFileSync(path.join(ROOT, 'cli/openpr.mjs'), 'utf8');
+  assert.match(src, /if \(auto\) throw err\('YAD-STATE-009', why,/, 'under --via auto the stop is an error, before the push');
+});
+
+test('#450 open-pr: a grouped PR\'s Spec path is the branch\'s own story, not the newest commit\'s', async () => {
+  const r = forkedTaskRepo({ from: 'main' });
+  try {
+    fs.writeFileSync(path.join(r.T, 'z.txt'), 'z'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: z\n\nTask: EP-demo-S03-T01');
+    const { seen } = await openWith(r.T, {});
+    assert.match(seen.body, /specs\/EP-demo-S01\//);
+    assert.doesNotMatch(seen.body, /specs\/EP-demo-S03\//);
+  } finally { r.done(); }
+});
+
 // ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------

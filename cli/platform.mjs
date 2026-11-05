@@ -472,6 +472,52 @@ export function resolveBaseBranch(platform, {
   return { base: 'main', source: 'fallback', platformDefault };
 }
 
+// The branch a task branch was really cut from, when it is not the base (#450). A branch cut from an
+// integration branch (`develop`) and opened with no --base gets the platform default (`main`), and then
+// `origin/main..HEAD` holds every commit `develop` has that `main` lacks: other tasks' commits, read as this
+// PR's tasks, its Spec path, its size. So: of the remote branches, the one whose fork point with HEAD is
+// newer than the base's is where those commits came from. Returns { branch, foreign } (foreign = the
+// commits between the two fork points), { skipped: n } when there are too many remote branches to ask,
+// or null — no such branch, or git could not tell (never a guess: the answer only stops with advice).
+// Left out: origin/HEAD, the base, the task branch's own pushed copy, and task-shaped branches (a branch
+// cut FROM this one holds its commits too, and is no integration branch); and any branch that already
+// holds HEAD itself, for the same reason.
+export const FORK_REF_CAP = 200;
+const TASK_SHAPED = /-S\d+-T\d+(?:-|$)/i;
+export function forkBranch(cwd, { base, head, runner = run } = {}) {
+  const g = (args) => runner('git', args, { cwd });
+  const baseRef = `origin/${base}`;
+  const mb0 = g(['merge-base', baseRef, 'HEAD']);
+  if (!mb0.ok || !mb0.stdout) return null;
+  const tip = g(['rev-parse', 'HEAD']);
+  const refs = g(['for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin/']);
+  if (!tip.ok || !refs.ok) return null;
+  const skip = new Set(['origin', 'origin/HEAD', baseRef, `origin/${head}`]);
+  const cands = refs.stdout.split('\n').filter((r) => r.startsWith('origin/') && !skip.has(r) && !TASK_SHAPED.test(r)).sort();
+  if (cands.length > FORK_REF_CAP) return { skipped: cands.length };
+  let best = null;
+  for (const cand of cands) {
+    const mb = g(['merge-base', cand, 'HEAD']);
+    if (!mb.ok || !mb.stdout || mb.stdout === mb0.stdout || mb.stdout === tip.stdout) continue;
+    if (!g(['merge-base', '--is-ancestor', mb0.stdout, mb.stdout]).ok) continue;
+    const toHead = g(['rev-list', '--count', `${mb.stdout}..HEAD`]);
+    if (!toHead.ok) return null;
+    const n = Number(toHead.stdout);
+    if (!best || n < best.n) best = { branch: cand.slice('origin/'.length), fork: mb.stdout, n };
+  }
+  if (!best) return null;
+  const foreign = g(['rev-list', '--count', '--no-merges', `${mb0.stdout}..${best.fork}`]);
+  if (!foreign.ok || !(Number(foreign.stdout) > 0)) return null;
+  return { branch: best.branch, foreign: Number(foreign.stdout) };
+}
+
+// The words both commands print for a forkBranch answer (#450): one sentence, and the two ways out.
+// `yad open-pr --base` takes a branch name; `yad run checks --base` takes a ref, so it asks for origin/<name>.
+export function forkBranchWords(fork, base, { ref = '', verb = 'open the PR/MR against' } = {}) {
+  const n = fork.foreign === 1 ? '1 commit' : `${fork.foreign} commits`;
+  return `this branch was cut from origin/${fork.branch}, not from origin/${base}: ${n} on it ${fork.foreign === 1 ? 'is' : 'are'} from origin/${fork.branch}, not this task's — pass --base ${ref}${fork.branch}, or --base ${ref}${base} to ${verb} ${base} anyway`;
+}
+
 // ---- create a PR/MR -----------------------------------------------------------------------------
 // `assignees` = the committer/PR-opener on GitLab (empty when `glab` cannot say who is logged in);
 // GitHub callers pass none and get `@me`, so the PR is owned by whoever pushed it;
