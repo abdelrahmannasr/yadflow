@@ -376,9 +376,9 @@ export async function runOpenPr(root, opts = {}) {
     if (fork?.skipped) info(`origin has ${fork.skipped} branches, so yad did not check which one ${branch} was cut from — pass --base if it is not ${baseBranch}`);
     else if (fork) {
       const why = forkBranchWords(fork, baseBranch);
-      if (auto) throw err('YAD-STATE-009', why, `a person opens it with --base ${fork.branch}`);
+      if (auto) throw err('YAD-STATE-009', why, 'a person picks the base and opens it with --base <branch>');
       fail(why);
-      if (meta?.name) hand(`if tasks in ${meta.name} go to ${fork.branch}, set its default_branch to ${fork.branch} in .sdlc/repos.json`);
+      if (meta?.name) hand(`if tasks in ${meta.name} always go to one branch, set its default_branch in .sdlc/repos.json`);
       process.exitCode = 1;
       return;
     }

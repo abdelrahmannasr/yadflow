@@ -52,7 +52,8 @@ the Product.
   `../yad-checks/references/check-gates.md`).
   **A branch cut from another branch stops it (#450).** When nobody chose the base (it came from the
   platform, `origin/HEAD` or `main`) and the branch was cut from another remote branch such as
-  `develop`, the CLI stops before pushing and names the branch. Ask the person which base they mean,
+  `develop`, the CLI stops before pushing and names the branch (or several, most likely first, when git
+  cannot tell which one it was). Ask the person which base they mean,
   then re-run with `--base develop` (or `--base main` to open against `main` anyway). If tasks in that
   repo always go to `develop`, suggest setting its `default_branch` in `.sdlc/repos.json`.
 - **Assignee** — the person opening it: `@me` on GitHub (`gh` resolves it on the repo's own host), and

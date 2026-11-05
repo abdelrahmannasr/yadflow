@@ -2516,18 +2516,19 @@ test('#450 forkBranch: only other tasks\' commits count; newest fork wins; main 
   const head = 'feat/EP-demo-S01-T01-x';
   let r = forkedTaskRepo();
   try {
-    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2 });
+    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2, others: [] });
     assert.match(forkBranchWords({ branch: 'develop', foreign: 1 }, 'main'), /holds 1 commit of other tasks from origin\/develop/);
     assert.match(forkBranchWords({ branch: 'develop', foreign: 2 }, 'main', { ref: 'origin/', verb: 'check against' }), /pass --base origin\/develop, or --base origin\/main to check against main anyway$/);
     // A branch cut from develop's first commit is an older fork: develop, the newest, wins.
     git(r.T, 'push', '-q', 'origin', 'develop~1:refs/heads/staging');
-    assert.equal(forkBranch(r.T, { base: 'main', head }).branch, 'develop');
+    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2, others: ['staging'] });
+    git(r.T, 'push', '-q', 'origin', '--delete', 'staging');
     // main merged INTO the task branch: develop's commits are still in origin/main..HEAD, still found (review 1).
     git(r.T, 'checkout', '-q', 'main');
     fs.writeFileSync(path.join(r.T, 'm.txt'), 'm'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: main moves');
     git(r.T, 'push', '-q', 'origin', 'main');
     git(r.T, 'checkout', '-q', head); git(r.T, 'merge', '-q', '--no-edit', 'origin/main');
-    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2 });
+    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2, others: [] });
     // Git that cannot tell is no answer, never a guess.
     assert.equal(forkBranch(r.T, { base: 'no-such-branch', head }), null);
     assert.equal(forkBranch(r.T, { base: 'main', head, runner: () => ({ ok: false, stdout: '' }) }), null);
@@ -2540,12 +2541,28 @@ test('#450 forkBranch: only other tasks\' commits count; newest fork wins; main 
     fs.writeFileSync(path.join(r.T, 'u.txt'), 'u'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: more\n\nTask: EP-demo-S01-T01');
     assert.equal(forkBranch(r.T, { base: 'main', head }), null);
   } finally { r.done(); }
-  // The same teammate copy when the task branch was cut from develop: develop is named, never alice-wip (review 2).
+  // The same teammate copy when the task branch was cut from develop: git cannot tell the two apart, so both
+  // are named and the person picks (reviews 2 and 3).
   r = forkedTaskRepo();
   try {
     git(r.T, 'push', '-q', 'origin', 'HEAD:refs/heads/alice-wip');
     fs.writeFileSync(path.join(r.T, 'u.txt'), 'u'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: more\n\nTask: EP-demo-S01-T01');
-    assert.deepEqual(forkBranch(r.T, { base: 'main', head }), { branch: 'develop', foreign: 2 });
+    const fork = forkBranch(r.T, { base: 'main', head });
+    assert.deepEqual(fork, { branch: 'alice-wip', foreign: 2, others: ['develop'] });
+    assert.match(forkBranchWords(fork, 'main'), /\(2 commits from origin\/alice-wip\); it was cut from one of origin\/alice-wip, origin\/develop — pass --base <the branch it was cut from>, or --base main to open the PR\/MR against main anyway$/);
+  } finally { r.done(); }
+  // A follow-up (#350): the task's earlier commit is already merged into develop, and a release branch was cut
+  // from develop before that merge. develop must be among the names (review 3).
+  r = forkedTaskRepo({ branch: 'fix/EP-demo-S01-T01-followup-x' });
+  try {
+    git(r.T, 'checkout', '-q', 'develop');
+    git(r.T, 'push', '-q', 'origin', 'HEAD:refs/heads/release/1');
+    fs.writeFileSync(path.join(r.T, 'p.txt'), 'p'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'feat: first cut\n\nTask: EP-demo-S01-T01');
+    git(r.T, 'push', '-q', 'origin', 'develop');
+    git(r.T, 'checkout', '-q', '-B', 'fix/EP-demo-S01-T01-followup-x', 'develop');
+    fs.writeFileSync(path.join(r.T, 'q.txt'), 'q'); git(r.T, 'add', '-A'); git(r.T, 'commit', '-q', '-m', 'fix: follow-up\n\nTask: EP-demo-S01-T01');
+    const fork = forkBranch(r.T, { base: 'main', head: 'fix/EP-demo-S01-T01-followup-x' });
+    assert.deepEqual(fork, { branch: 'develop', foreign: 2, others: ['release/1'] });
   } finally { r.done(); }
   assert.equal(branchTaskId('feat/team/EP-demo-S01-T02-word'), 'EP-demo-S01-T02');
   assert.equal(branchTaskId('alice-EP-demo-S01-T02'), 'EP-demo-S01-T02');

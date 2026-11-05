@@ -477,13 +477,15 @@ export function resolveBaseBranch(platform, {
 // `origin/main..HEAD` holds commits `develop` has that `main` lacks: other tasks' commits, read as this PR's
 // tasks, its Spec path, its size. So, for each remote branch: the commits of `origin/<base>..<fork point>`
 // (the fork point = merge-base of that branch and HEAD) are in the PR's range and came from that branch; the
-// ones whose `Task:` line names ANOTHER task are the ones that matter. A branch whose range holds one of this
-// task's own commits was cut from this task's work (a teammate's copy), and is never named. A commit with no `Task:`
-// line is not counted either (a missed stop opens as before; a wrong stop would send the PR to a wrong base).
-// Of the branches with any, the newest fork point wins (fewest commits from it to HEAD), ties by name.
-// Returns { branch, foreign }, { skipped: n } past FORK_REF_CAP remote branches, or null — none, or git
-// could not tell (never a guess). Left out up front: origin/HEAD, the base, the task branch's own pushed
-// copy, task-shaped names (a branch cut FROM this one), and every branch that already holds HEAD.
+// ones whose `Task:` line names ANOTHER task are the ones that matter. A commit with no `Task:` line, or with
+// this task's own id, is not counted (a teammate's copy cut from this branch, when it was cut from the base,
+// holds only those, and is never named).
+// Git cannot always tell the integration branch from a teammate's copy of this branch, or from a release
+// branch cut from develop earlier (reviews 2 and 3): every branch with any such commit is returned, newest
+// fork point first (fewest commits from it to HEAD), ties by name, and the person picks — never one guess.
+// Returns { branch, foreign, others }, { skipped: n } past FORK_REF_CAP remote branches, or null — none, or
+// git could not tell. Left out up front: origin/HEAD, the base, the task branch's own pushed copy,
+// task-shaped names (a branch cut FROM this one), and every branch that already holds HEAD.
 export const FORK_REF_CAP = 200;
 const TASK_SHAPED = /-S\d+-T\d+(?:-|$)/i;
 const TASK_ID = /^EP-[a-z0-9-]+-S\d+-T\d+$/i;
@@ -504,31 +506,35 @@ export function forkBranch(cwd, { base, head, runner = run } = {}) {
     .filter((r) => r.startsWith('origin/') && !skip.has(r) && !TASK_SHAPED.test(r)).sort();
   if (cands.length > FORK_REF_CAP) return { skipped: cands.length };
   const own = (branchTaskId(head) || '').toLowerCase();
-  let best = null;
+  const found = [];
   for (const cand of cands) {
     const mb = g(['merge-base', cand, 'HEAD']);
     if (!mb.ok || !mb.stdout) continue;
     const log = g(['log', '--no-merges', '--format=%(trailers:key=Task,valueonly,separator=%x1e)%x00', `${baseRef}..${mb.stdout}`]);
     if (!log.ok) return null;
-    const tasks = log.stdout.split('\0').map((x) => x.split('\x1e')[0].trim()).filter((t) => TASK_ID.test(t));
-    // A branch whose range holds this task's own commit was cut from this task's own work (a teammate's
-    // copy): never where the task branch came from, even when develop's commits sit below it (review 2).
-    if (own && tasks.some((t) => t.toLowerCase() === own)) continue;
-    const foreign = tasks.length;
+    const foreign = log.stdout.split('\0').map((x) => x.split('\x1e')[0].trim())
+      .filter((t) => TASK_ID.test(t) && t.toLowerCase() !== own).length;
     if (!foreign) continue;
     const toHead = g(['rev-list', '--count', `${mb.stdout}..HEAD`]);
     if (!toHead.ok) return null;
-    const n = Number(toHead.stdout);
-    if (!best || n < best.n) best = { branch: cand.slice('origin/'.length), foreign, n };
+    found.push({ branch: cand.slice('origin/'.length), foreign, n: Number(toHead.stdout) });
   }
-  return best ? { branch: best.branch, foreign: best.foreign } : null;
+  if (!found.length) return null;
+  found.sort((x, y) => x.n - y.n || x.branch.localeCompare(y.branch));
+  return { branch: found[0].branch, foreign: found[0].foreign, others: found.slice(1).map((f) => f.branch) };
 }
 
 // The words both commands print for a forkBranch answer (#450): one sentence, and the two ways out.
 // `yad open-pr --base` takes a branch name; `yad run checks --base` takes a ref, so it asks for origin/<name>.
 export function forkBranchWords(fork, base, { ref = '', verb = 'open the PR/MR against' } = {}) {
   const n = fork.foreign === 1 ? '1 commit' : `${fork.foreign} commits`;
-  return `this branch holds ${n} of other tasks from origin/${fork.branch} that origin/${base} does not have, so it was likely cut from origin/${fork.branch} — pass --base ${ref}${fork.branch}, or --base ${ref}${base} to ${verb} ${base} anyway`;
+  const others = fork.others || [];
+  if (!others.length) {
+    return `this branch holds ${n} of other tasks from origin/${fork.branch} that origin/${base} does not have, so it was likely cut from origin/${fork.branch} — pass --base ${ref}${fork.branch}, or --base ${ref}${base} to ${verb} ${base} anyway`;
+  }
+  const all = [fork.branch, ...others].slice(0, 5).map((b) => `origin/${b}`);
+  const more = others.length + 1 > 5 ? ` and ${others.length + 1 - 5} more` : '';
+  return `this branch holds commits of other tasks that origin/${base} does not have (${n} from origin/${fork.branch}); it was cut from one of ${all.join(', ')}${more} — pass --base ${ref}<the branch it was cut from>, or --base ${ref}${base} to ${verb} ${base} anyway`;
 }
 
 // ---- create a PR/MR -----------------------------------------------------------------------------
