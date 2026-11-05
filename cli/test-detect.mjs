@@ -2049,12 +2049,15 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
     assert.ok(text.includes('yad toolbox connect <tool> --json') && text.includes('yad toolbox connect <tool> --verify --json'), `${skill} asks, then verifies`);
     assert.match(text, /A tool is named, but it is not on this machine[\s\S]*connect-tool rule[\s\S]*On a no, or when a step fails, degrade/, `${skill} offers before it degrades`);
     // Review 1: --verify records the tool, not the server found — the connect skill's refresh writes `source`.
-    assert.match(text, /When `--verify` passes, run `yad-connect-(design|testing)` with `action: refresh`/, `${skill} refreshes the connection before it goes on`);
+    assert.match(text, /run `yad-connect-(design|testing)` with\s+`action: refresh`/, `${skill} refreshes the connection before it goes on`);
   }
   assert.match(read('yad-ui'), /out of scope for Shape, except the one connect offer/, 'the Shape rule does not forbid the offer');
   // Review 2: a server just added is loaded only when the agent starts — restart, never "unavailable".
-  for (const skill of ['yad-ui', 'yad-test-cases', 'yad-spec', 'yad-implement']) assert.match(read(skill), /restart the agent and run this step again/, `${skill} says a new server needs a restart`);
-  assert.match(read('yad-ui'), /then do not refresh — it would record the\n {2}tool as unavailable/);
+  for (const skill of ['yad-ui', 'yad-test-cases', 'yad-spec', 'yad-implement']) assert.match(read(skill), /restart the agent and run\s+this step again/, `${skill} says a new server needs a restart`);
+  for (const skill of ['yad-ui', 'yad-test-cases']) assert.match(read(skill), /first check that you can reach the tool[\s\S]*do not\s+refresh — it would record the tool as unavailable[\s\S]*If you can, run `yad-connect-/, `${skill}: the check comes before the refresh`);
+  assert.match(read('yad-ui'), /or for OpenPencil its CLI on PATH/, 'the CLI path needs no restart');
+  // Review 3: the connect skills themselves never write `unavailable` right after a connect.
+  for (const skill of ['yad-connect-design', 'yad-connect-testing']) assert.match(read(skill), /When `--verify` passes, detect again[\s\S]*do \*\*not\*\* record `source: "unavailable"`[\s\S]*restart the agent and run this skill again/, skill);
   assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\nfile is open, \*\*STOP\*\*/, 'implement says what a no means');
   for (const skill of ['yad-spec', 'yad-implement']) {
     const text = read(skill);

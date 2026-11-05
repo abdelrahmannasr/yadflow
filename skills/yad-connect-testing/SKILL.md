@@ -90,7 +90,10 @@ it is available. **Auth is the local user's own** — the user's authenticated M
 and follow the connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent`
 steps, hand over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
 with `--replace` only when its question said which tool it replaces). Never install
-it any other way. On a no, or when a step fails, degrade:
+it any other way. When `--verify` passes, detect again. A new MCP server is loaded when the agent starts:
+if you still cannot reach the tool (its MCP server in your session (in Claude Code, `/mcp`)), do **not** record `source: "unavailable"` —
+leave the file as `--verify` wrote it, and tell the person to restart the agent and run this skill again
+(`action: refresh`). On a no, or when a step fails, degrade:
 
 **Graceful degradation:** if no testing-tool MCP is available, record `source: "unavailable"` and report
 that `yad-test-cases` will run **artifacts-only** until an MCP is connected (no error — the testing tool
