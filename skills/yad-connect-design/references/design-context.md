@@ -89,7 +89,8 @@ story whose recorded frame IDs are all missing from `design-links.json` — the 
 When the check fails because the tool is not on this machine at all (no such MCP server in the agent's
 session), the skill first offers `preflight.connect` — `yad toolbox connect <tool> --json`, under the
 connect-tool rule — and checks again once it is found (E165). A closed app, the wrong file or a sign-in
-is never offered: those are the person's.
+is never offered: those are the person's. Nor is Figma's `figma-desktop` provider: it is the desktop app's
+own server, and Figma's connect step sets up the hosted one, so the person opens the app instead.
 
 A failed check stops the step. The person may choose to go on from the frame links only; that choice is
 recorded (in `spec.md`'s Clarifications, or the commit's Decisions paragraph).

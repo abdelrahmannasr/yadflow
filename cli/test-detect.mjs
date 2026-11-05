@@ -1415,9 +1415,10 @@ test('E86: `yad toolbox check` names what the project uses and is not here — a
     ];
     const res = toolboxCheck(p, null, { tools, items, has: () => false });
     assert.deepEqual(res.findings.map((x) => [x.id, x.problem]), [['impeccable', 'out-of-range'], ['repomix', 'disabled']]);
-    // E165 PR 2: the agent's command — for a shipped tool missing or out of range; not for a plugin turned
-    // off (the person turns it on), nor a team's own tool (yad has no recipe for it).
-    assert.deepEqual(res.findings.map((x) => [x.id, x.connect]), [['impeccable', 'yad toolbox connect impeccable --json'], ['repomix', null]]);
+    // E165 PR 2: the agent's command — for a shipped tool that is missing; not for one out of range (connect
+    // would find it here, and --verify reads no version), a plugin turned off (the person turns it on), nor a
+    // team's own tool (yad has no recipe for it).
+    assert.deepEqual(res.findings.map((x) => [x.id, x.connect]), [['impeccable', null], ['repomix', null]]);
     assert.equal(f.figma.connect, 'yad toolbox connect figma --json');
     assert.equal(f['bmad-method'].connect, 'yad toolbox connect bmad-method --json', 'a recipe of person steps is still offered: the command hands them over');
     assert.equal(f.doclint.connect, null, 'a custom tool has no recipe');
@@ -2041,28 +2042,20 @@ test('E165: on Windows an MCP server started through npx or an npm program gets 
   assert.equal(connectPlan('playwright', { ...none, platform: 'darwin' }).steps[0].run, 'claude mcp add --scope user playwright -- npx @playwright/mcp@0.0.83');
 });
 
-test('E165 PR 2: a tool found outside its known-good versions is offered its pinned install; inside the range, only the record', async () => {
-  const { connectPlan } = await import('./toolbox-connect.mjs');
-  const list = [{ ...TOOLBOX.find((t) => t.id === 'repomix'), versions: '>=2.0.0' }];
-  const items = (version) => [{ kind: 'mcp', name: 'repomix', where: 'x', agents: ['Claude Code'], version, plugin: null }];
-  const out = connectPlan('repomix', { list, items: items('1.0.0'), has: () => false, platform: 'linux' });
-  assert.deepEqual([out.state, out.inRange], ['installed', false]);
-  assert.deepEqual(out.steps.map((s) => [s.who, s.run]), [['agent', 'npm install -g repomix@1.18.1']]);
-  assert.match(out.ask, /^Connect Repomix\? I will run `npm install -g repomix@1\.18\.1`/);
-  const ok = connectPlan('repomix', { list, items: items('2.1.0'), has: () => false, platform: 'linux' });
-  assert.deepEqual([ok.inRange, ok.steps], [true, []]);
-});
-
 test('E165 PR 2: the flow offers the connect step — yad-ui and the test step before they degrade, spec and implement on a failed probe, every fallback section', () => {
   const read = (skill) => fs.readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
   for (const skill of ['yad-ui', 'yad-test-cases']) {
     const text = read(skill);
     assert.ok(text.includes('yad toolbox connect <tool> --json') && text.includes('yad toolbox connect <tool> --verify --json'), `${skill} asks, then verifies`);
     assert.match(text, /A tool is named, but it is not on this machine[\s\S]*connect-tool rule[\s\S]*On a no, or when a step fails, degrade/, `${skill} offers before it degrades`);
+    // Review 1: --verify records the tool, not the server found — the connect skill's refresh writes `source`.
+    assert.match(text, /When `--verify` passes, run `yad-connect-(design|testing)` with `action: refresh`/, `${skill} refreshes the connection before it goes on`);
   }
+  assert.match(read('yad-ui'), /out of scope for Shape, except the one connect offer/, 'the Shape rule does not forbid the offer');
+  assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\nfile is open, \*\*STOP\*\*/, 'implement says what a no means');
   for (const skill of ['yad-spec', 'yad-implement']) {
     const text = read(skill);
-    assert.match(text, /not on this machine at all[\s\S]*not a\s+closed app[\s\S]*`preflight\.connect`[\s\S]*connect-tool rule/, `${skill} offers only when the tool is absent, never for a closed app`);
+    assert.match(text, /not on this machine at all[\s\S]*not a\s+closed app[\s\S]*the answer has `preflight\.connect`[\s\S]*connect-tool rule/, `${skill} offers only when the tool is absent, never for a closed app`);
   }
   // The generated section says it once, in every skill that has one.
   const section = skillFallbackSection('yad-ui');

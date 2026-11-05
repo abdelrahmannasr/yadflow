@@ -135,7 +135,7 @@ describes, now, before the ceremony starts. Some design tools (Pencil, Figma's d
 through the running app, so a closed app or the wrong file open is found here and not half way through.
 - **It answers, with the right file open:** go on.
 - **It fails because the tool is not on this machine at all** (no such MCP server in your session — not a
-  closed app, the wrong file or a sign-in): offer `preflight.connect` first, under the connect-tool rule
+  closed app, the wrong file or a sign-in), and the answer has `preflight.connect`: offer it first, under the connect-tool rule
   (show its `ask`, ask once, run only its `agent` steps, hand over the rest, verify). Once it is found,
   probe again. On a no, or when a step fails, treat it as the next bullet.
 - **It fails, or another file is open: STOP.** Print `preflight.stop` word for word and wait. Go on

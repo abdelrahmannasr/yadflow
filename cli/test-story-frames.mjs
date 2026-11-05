@@ -252,6 +252,7 @@ test('#358: designPreflight — Pencil is read through the app; Figma only throu
   assert.equal(pencil.connect, 'yad toolbox connect pencil --json');
   const desk = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-desktop' } }, links, frames);
   assert.deepEqual([desk.appBound, /desktop app/.test(desk.stop)], [true, true]);
+  assert.equal(desk.connect, undefined, 'the desktop app\'s own server: open the app, never the hosted plugin\'s recipe');
   const cloud = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma' } }, links, frames);
   assert.deepEqual([cloud.appBound, /^Sign in to Figma/.test(cloud.stop), cloud.connect], [false, true, 'yad toolbox connect figma --json']);
   assert.match(cloud.probe, /`12:34`/);

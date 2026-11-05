@@ -194,7 +194,9 @@ export function designPreflight(design, links, frames) {
     stop: fill(appBound === true ? reach.open : appBound === false ? reach.signIn : reach.either),
     // E165: when the probe fails because the tool is not on this machine at all (not a closed app or a
     // sign-in), the agent offers this first, under the connect-tool rule. A tool with a reach rule is shipped.
-    connect: `yad toolbox connect ${tool} --json`,
+    // Not for a provider that is one app's own server (Figma's figma-desktop): the tool's recipe connects its
+    // other server, so the person opens the app instead, as `stop` says.
+    ...(Array.isArray(reach.appBound) && listed(reach.appBound) ? {} : { connect: `yad toolbox connect ${tool} --json` }),
   };
 }
 
@@ -295,7 +297,7 @@ export async function runStory(root, { action, story, json = false } = {}) {
   const p = r.preflight;
   if (p?.reachable === 'check') {
     hand(`before UI work: ${p.probe} — if that fails, stop: ${p.stop}`);
-    hand(`if ${forTerminal(p.tool)} is not on this machine at all, your agent can offer to connect it first: \`${p.connect}\``);
+    if (p.connect) hand(`if ${forTerminal(p.tool)} is not on this machine at all, your agent can offer to connect it first: \`${p.connect}\``);
   }
   else if (p) info(`before UI work: the design tool is not checked (${p.why}) — build from the frame links`);
   return { ok: true, ...r };

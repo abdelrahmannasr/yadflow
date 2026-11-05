@@ -144,7 +144,8 @@ components/tokens into the design system; `/impeccable craft` is shape-then-buil
 yad cannot answer, it is not used when no `/impeccable …` commands are available), the
 `ux-designer` lens authors `ui-design.md` and `DESIGN.md` directly, and you **note in `ui-design.md`
 that Impeccable was not used**. Do not run `npx impeccable skills install` as part of this step — tool
-installation is out of scope for Shape.
+installation is out of scope for Shape, except the one connect offer in **When a tool is missing**
+(E165), which hands Impeccable's interactive installer to the person.
 
 ### Step 3b — Materialize the design in the connected tool (generate or link)
 Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decide the path:
@@ -158,7 +159,9 @@ Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decid
   connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent` steps, hand
   over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
   with `--replace` only when its question said which tool it replaces). Never install it any other way.
-  When it is found, go on with the next bullet. On a no, or when a step fails, degrade as in the bullet above.
+  When `--verify` passes, run `yad-connect-design` with `action: refresh`, so `design.json` records the server it
+  now finds (its `source`), then go on with the next bullet. On a no, or when a step fails, degrade as
+  in the bullet above.
 - **A tool is connected and its provider is available** (`source` is not `unavailable`): adopt the `ux-designer` lens and, using the provider
   recorded in `design.json` (Figma via a Figma/html.to.design MCP, `pencil` via its MCP, `openpencil` through its CLI —
   `openpencil eval <file> --stdin --write` on the epic's design file, `epics/EP-<slug>/design/<name>.fig`,

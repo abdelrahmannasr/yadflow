@@ -158,16 +158,14 @@ const personBlock = (steps, verify) => (steps.length ? {
 } : null);
 
 // The read: what connecting `id` takes here. Runs nothing, writes nothing.
-// `list`: the toolbox, or a test's copy of it (a version range no shipped tool has yet).
-export function connectPlan(id, { items = null, has = onPath, detectRoot = process.cwd(), productRoot = null, platform = process.platform, list = tools() } = {}) {
-  const tool = list.find((t) => t.id === id) ?? null;
-  if (!tool) return { error: `${id} is not in the toolbox`, ids: list.map((t) => t.id) };
+export function connectPlan(id, { items = null, has = onPath, detectRoot = process.cwd(), productRoot = null, platform = process.platform } = {}) {
+  const tool = byId(id);
+  if (!tool) return { error: `${id} is not in the toolbox`, ids: tools().map((t) => t.id) };
   const found = items ?? detectInstalled(detectRoot).items;
   const status = toolStatus(tool, found, { has });
   const recipe = (RECIPES[tool.id] ?? []).map((s) => (s.who === 'agent' ? { ...s, run: forPlatform(s.run, platform) } : s));
-  // Already here, at a known-good version: nothing to install, only the record. Found outside its range: the
-  // recipe's pinned install moves it to the vetted version (E165 PR 2, the update offer).
-  const here = (status.state === 'installed' || status.state === 'available') && status.inRange !== false;
+  // Already here: nothing to install, only the record.
+  const here = status.state === 'installed' || status.state === 'available';
   const steps = here ? [] : recipe;
   const file = recordFile(tool);
   const now = currentConnection(productRoot, tool);
@@ -175,7 +173,7 @@ export function connectPlan(id, { items = null, has = onPath, detectRoot = proce
   const replaces = now.tool && now.tool.toLowerCase() !== tool.id ? now.tool : null;
   const verify = `yad toolbox connect ${tool.id} --verify${replaces ? ' --replace' : ''} --json`;
   return {
-    tool: tool.id, name: tool.name, state: status.state, found: status.found, inRange: status.inRange,
+    tool: tool.id, name: tool.name, state: status.state, found: status.found,
     steps: steps.map((s) => ({ who: s.who, run: s.run, ...(s.scope ? { scope: s.scope } : {}), ...(s.why ? { why: s.why } : {}), ...(s.text ? { text: true } : {}) })),
     ask: askText(tool, steps, { found: here, file, replaces, productRoot }),
     record: productRoot ? [file] : [],
@@ -193,8 +191,7 @@ export function runToolboxConnect(detectRoot, productRoot, { id, verify = false,
   if (plan.error) return refuse(plan.error, `the tools: ${plan.ids.join(', ')}`, { json });
   if (!verify) {
     if (json) return emitJSON({ ok: true, ...plan });
-    const here = plan.state === 'installed' || plan.state === 'available';
-    info(`${plan.name}: ${!here ? 'not found here' : plan.inRange === false ? 'found here, outside its known-good versions' : 'found here'}`);
+    info(`${plan.name}: ${plan.state === 'installed' || plan.state === 'available' ? 'found here' : 'not found here'}`);
     for (const s of plan.steps) info(`${s.who === 'agent' ? 'agent runs' : 'you run'}: ${clean(s.run)}${s.why ? ` — ${s.why}` : ''}`);
     hand(plan.ask);
     hand(`then: ${plan.verify}`);
