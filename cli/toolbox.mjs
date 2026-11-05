@@ -291,6 +291,37 @@ export const TOOLBOX = Object.freeze([
     },
     usedBy: ['yad-connect-design', 'yad-ui'],
   },
+  // E164: an open-source design editor — no account, no paid plan, and the design file lives in the repo
+  // (`epics/<epic>/design/`). Two ways in: its CLI works on the file with no app open (`openpencil eval <file>
+  // --write` runs Figma Plugin API code and saves), and yad-ui writes screens that way; its MCP server is a
+  // bridge to the running desktop app, used only when the app is open with the file. Beside Figma and Pencil,
+  // never in place of them: it reads local `.fig` copies only (never Figma's cloud), and opens `.pen` files
+  // only partly. Both packages are pinned to an exact version while it is before 1.0, and each bump is vetted
+  // again. No `reach` block yet: the design preflight (#358) answers `not-checkable` until E164's second PR.
+  {
+    id: 'openpencil', name: 'OpenPencil', tier: 'connector', role: 'design tool: yad-ui writes screens into a design file in the repo through its CLI, with no account and no app open',
+    licence: 'MIT', source: 'https://github.com/open-pencil/open-pencil', checked: '2026-11-05',
+    vetted: {
+      on: '2026-11-05', licenceFrom: 'https://github.com/open-pencil/open-pencil/blob/master/LICENSE',
+      source: 'https://github.com/open-pencil/open-pencil', release: 'v0.16.0',
+      packages: [
+        { registry: 'npm', name: '@open-pencil/mcp', version: '0.16.0' },
+        { registry: 'npm', name: '@open-pencil/cli', version: '0.16.0' },
+      ],
+      note: 'Before 1.0, and its own README says "active development … some rough edges": vet each version bump again.',
+    },
+    // One route: the MCP connection does nothing without the packages (a route is an alternative — E84).
+    install: [{ type: 'npm', command: 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0, then claude mcp add --scope user open-pencil -- openpencil-mcp' }],
+    // The desktop app is needed only for the MCP path; the CLI path needs nothing else.
+    manual: 'https://openpencil.dev',
+    // The CLI is the way yad-ui writes, so the program alone counts; the MCP server is found too.
+    detect: { bins: ['openpencil'], mcp: ['open-pencil'] },
+    versions: null,
+    fallback: 'markdown-only: yad-ui writes ui-design.md and DESIGN.md only',
+    records: null,
+    note: 'The CLI (openpencil) works on the file with no app open. The MCP server only forwards to the running desktop app, and reads and writes only files inside OPENPENCIL_MCP_ROOT (the folder it starts in by default; the home folder on Windows). It opens local .fig copies, never Figma\'s cloud, and a round trip may lose detail; .pen support is partial.',
+    usedBy: ['yad-connect-design', 'yad-ui'],
+  },
   {
     id: 'playwright', name: 'Playwright MCP', tier: 'connector', role: 'testing tool: generates and runs browser and API tests',
     licence: 'Apache-2.0', source: 'https://github.com/microsoft/playwright-mcp', checked: CHECKED,

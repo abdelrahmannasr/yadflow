@@ -724,6 +724,10 @@ chain is unchanged — this is an *output enrichment*, mirrored by the `design:`
   "source": "<mcp id>" }
 ```
 
+For a design file kept in the repo (OpenPencil, E164), `fileUrl` is its path from the Product root
+(`epics/EP-<slug>/design/<name>.fig`), each screen's `url` is `null`, and `source` is `openpencil-cli` or
+`openpencil-mcp`.
+
 **Who reads it (#354):** each story lists the `nodeId`s of the screens it builds in its own
 `design-frames: [<id>, …]` frontmatter field (written by `yad-stories`). `yad story frames <story>` looks
 each ID up here for its name, platform and link; `yad-spec` and `yad-implement` run it, and `yad doctor`

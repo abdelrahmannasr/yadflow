@@ -189,7 +189,7 @@ export const MODULE_CONFIG = '.sdlc/config.yaml';
 // the fallback `registerDesign`/setup use when an unknown tool is named, and `none` is the explicit
 // markdown-only choice. (doctor does NOT fall back — an unknown tool there is a hard YAD-CFG-002 fail,
 // mirroring how registerRepo falls back on platform while doctor fails on an unknown Product platform.)
-export const DESIGN_TOOLS = ['figma', 'pencil'];
+export const DESIGN_TOOLS = ['figma', 'pencil', 'openpencil'];
 export const DESIGN_PRIMARY = 'figma';
 
 // Supported testing-tool adapters (mirrors skills/sdlc/config.yaml `testing.tools`); `TESTING_PRIMARY`
