@@ -1871,6 +1871,8 @@ test('E164: OpenPencil is a design connector — vetted, pinned exactly, one ins
 
 // ---- E165: `yad toolbox connect` — the agent connects a tool after one yes ---------------------------
 const { RECIPES, recipeProblems } = await import('./toolbox-connect.mjs');
+// A `claude mcp add` step as this platform runs it: native Windows starts the server through `cmd /c`.
+const mcpRun = (run) => (process.platform === 'win32' ? run.replace(' -- ', ' -- cmd /c ') : run);
 // The command with a PATH of the test's own: this machine's programs must not decide what is "found".
 function yadPath(args, { cwd, home, bins = [] }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-e165-bin-'));
@@ -1916,13 +1918,13 @@ test('E165: `yad toolbox connect <tool> --json` reads only — the steps, the qu
     assert.equal(j.state, 'missing');
     assert.deepEqual(j.steps.map((s) => [s.who, s.run]), [
       ['agent', 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0'],
-      ['agent', 'claude mcp add --scope user open-pencil -- openpencil-mcp'],
+      ['agent', mcpRun('claude mcp add --scope user open-pencil -- openpencil-mcp')],
     ]);
-    assert.equal(j.ask, 'Connect OpenPencil? I will run `npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0`, then `claude mcp add --scope user open-pencil -- openpencil-mcp` (for your user account on this machine); then I will check that it is found and record it as this team\'s choice in .sdlc/design.json.');
+    assert.equal(j.ask, `Connect OpenPencil? I will run \`npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0\`, then \`${mcpRun('claude mcp add --scope user open-pencil -- openpencil-mcp')}\` (for your user account on this machine); then I will check that it is found and record it as this team's choice in .sdlc/design.json.`);
     assert.deepEqual([j.record, j.replaces, j.person, j.verify], [['.sdlc/design.json'], null, null, 'yad toolbox connect openpencil --verify --json']);
     // A person step first is said first, with why, and its command is in the person block.
     j = JSON.parse(yadPath(['toolbox', 'connect', 'maestro', '--json'], { cwd: p, home }).stdout);
-    assert.match(j.ask, /^Connect Maestro\? First, you run `curl -fsSL "https:\/\/get\.maestro\.mobile\.dev" \| bash` \(a remote install script: [^)]+\); then I will run `claude mcp add --scope user maestro -- maestro mcp`/);
+    assert.match(j.ask, /^Connect Maestro\? First, you run `curl -fsSL "https:\/\/get\.maestro\.mobile\.dev" \| bash` \(a remote install script: [^)]+\); then I will run `claude mcp add --scope user maestro -- (cmd \/c )?maestro mcp`/);
     assert.deepEqual(j.person.commands, ['curl -fsSL "https://get.maestro.mobile.dev" | bash']);
     assert.match(j.person.why, /remote install script/);
     // Found here: nothing to install, only the record.
@@ -1967,7 +1969,7 @@ test('E165: `--verify` records only a tool it finds — the connector\'s file, o
     assert.equal(r.status, 1);
     let j = JSON.parse(r.stdout);
     assert.match(j.error, /OpenPencil is not found here yet, so nothing was recorded/);
-    assert.deepEqual(j.person.steps, ['npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0', 'claude mcp add --scope user open-pencil -- openpencil-mcp']);
+    assert.deepEqual(j.person.steps, ['npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0', mcpRun('claude mcp add --scope user open-pencil -- openpencil-mcp')]);
     assert.ok(!fs.existsSync(design) && !fs.existsSync(path.join(p, '.sdlc/toolbox.json')));
     // Found (its CLI on PATH): the connector's own file is written, which makes it used.
     r = yadPath(['toolbox', 'connect', 'openpencil', '--verify', '--json'], { cwd: p, home, bins: ['openpencil'] });
