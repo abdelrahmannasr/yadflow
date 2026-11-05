@@ -128,8 +128,8 @@ Read `{project-root}/.sdlc/testing.json` (`config.yaml` `testing.registry`). Dec
   When `--verify` passes, first check that you can reach the tool: its MCP server in your session (in Claude Code, `/mcp`). A new MCP
   server is loaded when the agent starts, so it may not be there yet. If you cannot reach it, do not
   refresh — it would record the tool as unavailable: tell the person to restart the agent, run
-  `yad-connect-testing` with `action: refresh`, and then run this step again; degrade for this run with that note. If you can, run `yad-connect-testing` with
-  `action: refresh`, so `testing.json` records what it now finds (its `source`), then go on with the next bullet. On a no, or when a step fails, degrade as
+  `yad-connect-testing` with `action: refresh` and the same `tool`, and then run this step again; degrade for this run with that note. If you can, run `yad-connect-testing` with
+  `action: refresh` and the same `tool`, so `testing.json` records what it now finds (its `source`), then go on with the next bullet. On a no, or when a step fails, degrade as
   in the bullet above.
 - **A tool is connected and its MCP is available:** adopt the `test architect` lens and, using the
   provider recorded in `testing.json` (Playwright via a Playwright MCP, Cypress/pytest/Maestro via

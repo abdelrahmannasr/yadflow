@@ -1882,6 +1882,7 @@ test('E164: OpenPencil is a design connector — vetted, pinned exactly, one ins
 
 // ---- E165: `yad toolbox connect` — the agent connects a tool after one yes ---------------------------
 const { RECIPES, recipeProblems } = await import('./toolbox-connect.mjs');
+const { RULES } = await import('./agent-rules.mjs');
 // A `claude mcp add` step as this platform runs it: native Windows starts the server through `cmd /c`.
 const mcpRun = (run) => (process.platform === 'win32' ? run.replace(' -- ', ' -- cmd /c ') : run);
 // The command with a PATH of the test's own: this machine's programs must not decide what is "found".
@@ -2054,9 +2055,12 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
   assert.match(read('yad-ui'), /out of scope for Shape, except the one connect offer/, 'the Shape rule does not forbid the offer');
   // Review 2: a server just added is loaded only when the agent starts — restart, never "unavailable".
   for (const skill of ['yad-spec', 'yad-implement']) assert.match(read(skill), /restart the agent and run\s+this step again/, `${skill} says a new server needs a restart`);
+  for (const skill of ['yad-ui', 'yad-test-cases']) assert.ok(!/with\s+`action: refresh`(?! and the same `tool`)/.test(read(skill)), `${skill}: every refresh names the same tool`);
+  // Review 6: the rule itself keeps the refresh, with the same tool.
+  assert.match(RULES.find((r) => r.id === 'connect-tool').text, /its connect skill with `action: refresh` and the same `tool` first/);
   // Review 4: after the restart, refresh first — `--verify` records the tool, never its server.
   for (const [skill, connect] of [['yad-ui', 'yad-connect-design'], ['yad-test-cases', 'yad-connect-testing']]) {
-    assert.match(read(skill), new RegExp(`restart the agent, run\\s+\`${connect}\` with \`action: refresh\`, and then run this step again`), skill);
+    assert.match(read(skill), new RegExp(`restart the agent, run\\s+\`${connect}\` with \`action: refresh\` and the same \`tool\`, and then run\\s+this step again`), skill);
   }
   for (const skill of ['yad-ui', 'yad-test-cases']) assert.match(read(skill), /first check that you can reach the tool[\s\S]*do not\s+refresh — it would record the tool as unavailable[\s\S]*If you can, run `yad-connect-/, `${skill}: the check comes before the refresh`);
   assert.match(read('yad-ui'), /or for OpenPencil its CLI on PATH/, 'the CLI path needs no restart');
@@ -2064,6 +2068,8 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
   // Review 4: the restart branch writes nothing — it skips the degrade and Step 2.
   for (const skill of ['yad-connect-design', 'yad-connect-testing']) {
     assert.match(read(skill), /When `--verify` passes, detect again[\s\S]*\*\*If you can\*\*, go on to Step 2 and record what you found\. \*\*If you cannot\*\*[\s\S]*do \*\*not\*\* write the file:\s+skip the degrade below and Step 2[\s\S]*restart the agent and run this skill\s+again with `action: refresh`/, skill);
+    // Review 6: the refresh names the tool just connected, or it would check the default tool.
+    assert.ok(!/with\s+`action: refresh`(?! and the same `tool`)/.test(read(skill)), `${skill}: every refresh names the same tool`);
     // Review 5: the report says only what is true before the restart.
     assert.match(read(skill), /### Step 3[\s\S]*\*\*Right after a `--verify` that passed but could not reach the\s+tool yet:\*\* report only/, skill);
     assert.match(read(skill), /\*\*Graceful degradation\*\* \(never right after a `--verify` that passed — see above\)/, skill);

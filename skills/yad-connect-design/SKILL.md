@@ -100,7 +100,7 @@ it any other way. When `--verify` passes, detect again — you can reach the too
 its MCP server in your session (in Claude Code, `/mcp`), or for OpenPencil its CLI on PATH. **If you can**, go on to Step 2 and record what you found. **If you cannot**, the server is
 most likely just added: a new MCP server is loaded when the agent starts. Then do **not** write the file:
 skip the degrade below and Step 2, and in Step 3 tell the person to restart the agent and run this skill
-again with `action: refresh`. On a no, or when a step fails, degrade:
+again with `action: refresh` and the same `tool`. On a no, or when a step fails, degrade:
 
 **Graceful degradation** (never right after a `--verify` that passed — see above)**:** if no design-tool MCP is available (for OpenPencil: neither its CLI on PATH nor
 its MCP), record `source: "unavailable"` and report
@@ -133,7 +133,7 @@ Report the connected `tool`, its `provider`, whether the MCP is available (or th
 to markdown-only), the `project_url`, and that **`yad-ui` will now generate/link the design here**.
 Nothing auto-advances; this is setup. **Right after a `--verify` that passed but could not reach the
 tool yet:** report only that it is installed and recorded as the team's tool, that its server loads when the
-agent starts, and that the person restarts the agent and runs this skill again with `action: refresh` —
+agent starts, and that the person restarts the agent and runs this skill again with `action: refresh` and the same `tool` —
 not what `yad-ui` will do, which that refresh decides.
 
 ## Other actions
