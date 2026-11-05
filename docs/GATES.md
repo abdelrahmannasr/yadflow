@@ -569,6 +569,10 @@ is the same).
 - **The Product** (`--profile product`): a pull request from a `review/EP-*` branch is a Shape review,
   so its title must be `review: <artifact> (EP-<slug>)`, which `yad gate open` writes. Any other branch
   is a change to the Product's own tooling, so it uses the code rule.
+- **A GitLab draft** (#451): GitLab marks a draft merge request with a title prefix, `Draft:`, `[Draft]`
+  or `(Draft)` in any case, and removes it when the MR is marked ready. In GitLab CI the gate ignores that
+  prefix, says so in a `note`, and checks the rest. On GitHub a draft is a setting, not part of the
+  title, so a title that starts with `Draft:` is checked as written.
 
 **Exemptions:** a Product pull request that changes only step owner files
 (`epics/<epic>/.sdlc/owners/*.json` or `foundation/.sdlc/owners/*.json`) may come from any branch.
@@ -580,6 +584,7 @@ is the same).
 | `'<title>' is not '<type>(<scope>)?!?: <description>' …` / `must not end with a period.` | Edit the title. The check runs again when the title changes. |
 | `'<title>' is not a Product review title 'review: <artifact> (EP-<slug>)'.` | Edit the title to that shape. |
 | `head '<branch>' changes Shape artifacts (epics/** or foundation/**) but is not a review/EP-* branch …` | Move the `epics/` or `foundation/` changes to a `review/<epic>/<artifact>` branch (`review/EP-foundation/foundation` for the Foundation) and run `yad open-pr` from it: it pushes the branch and opens the review pull request. Or drop those changes from this one. The message says both. `<artifact>` is the artifact's name without `.md`, as the message's example shows. `architecture` also carries `contract.md` and `.sdlc/contract-lock.json`, and all stories are one artifact (a branch like `review/EP-<slug>/stories-S01` opens the stories review). Each review's approvals count only for the stories at its own head, so when several per-story reviews merge, the gate passes once one approved review's head holds exactly the stories on the default branch. A last review of `stories/` as it stands does that: `git fetch --prune origin`, then reset the branch `review/<epic>/stories` to the default branch (`git switch -C`), add a commit (an empty one is enough: `git commit --allow-empty`), push it with `--force-with-lease`, then run `yad gate open <epic> stories/`. The gate prints these commands (#366). Use one review branch per artifact: that is how `yad gate open` works, though no gate checks it. Ledger files under `.sdlc/` count as Shape changes too; only step owner files (`.sdlc/owners/`) may come from any branch. On a verified Product, [ledger-guard](#ledger-guard) also refuses hand edits to the gate-state files (such as `state.json` and `approvals.json`; its section has the full list) on a review branch, except a new epic's first ledger. Rewrite each of your own commits that ledger-guard lists so those files match `<base>` (`git rebase -i <base>`), then force-push: ledger-guard checks each commit, so a later commit that undoes them does not pass. |
+| `the title is only the GitLab draft marker '<marker>' …` | Write the title after the marker. |
 | `empty title …` / `unknown --profile …` | A wiring problem in the CI job. |
 
 ## pr-template
