@@ -83,8 +83,8 @@ yad-gate-sync:
     # the job holds SDLC_GATE_TOKEN, which can push the default branch, and each tool runs beside it.
     # Each hash is copied from the release's own published checksum file (glab: checksums.txt,
     # jq: sha256sum.txt, git-lfs: sha256sums.asc) — a version bump must change its hash in the same edit.
-    # One command per line, not an `&&` chain — `set -e` does not stop on a failure inside a chain,
-    # so a bad checksum would fall through to the install.
+    # One command per line, not an `&&` chain — `set -e` does not stop on a failure inside a chain, so
+    # after a bad checksum the job would skip the install and carry on with the next step.
     # Pinned glab (the node image has no glab). The official glab image was not used: this job needs Node.
     - |
       GLAB_VERSION=1.55.0

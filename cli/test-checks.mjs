@@ -5984,7 +5984,7 @@ const runToolBlock = (first, { badSum } = {}) => {
     const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
     stub('curl', `echo "curl $*" >> "${mark}"`);
     stub('sha256sum', `IFS= read -r line; echo "sha256sum $* $line" >> "${mark}"${badSum ? '; exit 1' : ''}`);
-    for (const t of ['dpkg', 'install', 'chmod']) stub(t, `echo "${t} $*" >> "${mark}"`);
+    for (const t of ['dpkg', 'install']) stub(t, `echo "${t} $*" >> "${mark}"`);
     // `set -e`, as GitLab runs every script: a failed checksum must stop the job.
     const r = spawnSync('/bin/sh', ['-c', `set -e\n${toolBlock(first)}`], { cwd: T, env: { PATH: bin }, stdio: 'pipe' });
     return { status: r.status, did: fs.existsSync(mark) ? fs.readFileSync(mark, 'utf8') : '' };
@@ -6017,6 +6017,11 @@ test('#431 gate-sync on GitLab: glab and jq are checked against a pinned SHA-256
   }
   // Every download in the file — a future one too — is checked before anything else touches it.
   const code = text.split('\n').filter((l) => !/^\s*#/.test(l));
+  // Any curl or wget not written as `curl … -o <file>` is refused here, so a download piped to a shell or
+  // saved another way cannot slip past the check below.
+  for (const l of code.filter((x) => /\b(curl|wget)\b/.test(x))) {
+    assert.match(l, /\bcurl -fsSL "[^"]+" -o \/tmp\/\S+$/, `a download is saved to /tmp with -o, then checked: ${l.trim()}`);
+  }
   const downloads = code.map((l, i) => [l.match(/\bcurl\b.*\s-o\s+(\S+)/), i]).filter(([m]) => m);
   assert.equal(downloads.length, 3, 'glab, jq and git-lfs');
   for (const [[, out], i] of downloads) {
