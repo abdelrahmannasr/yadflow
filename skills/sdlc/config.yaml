@@ -261,7 +261,7 @@ code_context:
 # at setup; the per-epic screen->frame map (design-links.json) is written by yad-ui per epic.
 design:
   registry: "{project-root}/.sdlc/design.json"       # project-wide design connection (NOT per-epic)
-  tools: [figma, pencil, openpencil]                           # supported adapters; an unknown tool falls back to `primary`
+  tools: [figma, pencil, openpencil]                  # supported adapters; an unknown tool falls back to `primary`
   primary: figma                                      # the default/named provider
   degrade: markdown-only                              # no tool / no MCP => yad-ui authors ui-design.md + DESIGN.md only
   links: "{project-root}/epics/EP-<slug>/.sdlc/design-links.json"   # per-epic screen->frame map (yad-ui)

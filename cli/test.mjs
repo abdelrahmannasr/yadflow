@@ -6149,11 +6149,11 @@ test('registerDesign: an unknown tool falls back to the primary; `none` is markd
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('E164: registerDesign records openpencil, a repo path as its file; doctor accepts it', async () => {
+test('E164: registerDesign records openpencil with no project URL (each epic keeps its file in design/)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-design-op-'));
   try {
-    const d = registerDesign(T, { tool: 'openpencil', project_url: 'design/app.fig', today: '2026-11-05' });
-    assert.deepEqual([d.tool, d.project_url, d.auth, d.source], ['openpencil', 'design/app.fig', 'user', null]);
+    const d = registerDesign(T, { tool: 'openpencil', today: '2026-11-05' });
+    assert.deepEqual([d.tool, d.project_url, d.auth, d.source], ['openpencil', null, 'user', null]);
     const { DESIGN_TOOLS } = await import('./manifest.mjs');
     assert.deepEqual(DESIGN_TOOLS, ['figma', 'pencil', 'openpencil'], 'today\'s order, OpenPencil last');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }

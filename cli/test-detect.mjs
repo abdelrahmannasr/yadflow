@@ -1850,13 +1850,16 @@ test('E85 review 3: tools are looked for at the deepest of checkout, registered 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E164: OpenPencil is a design connector — vetted, pinned exactly, found by its MCP server or its programs', () => {
+test('E164: OpenPencil is a design connector — vetted, pinned exactly, one install route, found by its CLI or its MCP server', () => {
   const op = TOOLBOX.find((t) => t.id === 'openpencil');
   assert.ok(op, 'in the toolbox');
   assert.deepEqual([op.tier, op.licence, op.fallback], ['connector', 'MIT', 'markdown-only: yad-ui writes ui-design.md and DESIGN.md only']);
   assert.deepEqual(op.vetted.packages.map((p) => `${p.name}@${p.version}`), ['@open-pencil/mcp@0.16.0', '@open-pencil/cli@0.16.0']);
-  assert.match(op.install[0].command, /^npm install -g @open-pencil\/mcp@0\.16\.0 @open-pencil\/cli@0\.16\.0$/, 'both packages, each at the vetted version');
-  assert.equal(op.install[1].command, 'claude mcp add --scope user open-pencil -- openpencil-mcp');
+  assert.equal(op.install.length, 1, 'one route: the MCP connection does nothing without the packages');
+  assert.equal(op.install[0].command, 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0, then claude mcp add --scope user open-pencil -- openpencil-mcp');
+  assert.match(op.note, /no app open/);
+  assert.match(op.note, /only forwards to the running desktop app/);
+  assert.match(op.note, /the home folder on Windows/);
   for (const p of op.vetted.packages) assert.ok(op.install[0].command.includes(`${p.name}@${p.version}`), `${p.name}: the install line names the vetted version`);
   assert.deepEqual(toolProblems(op), [], 'a well-formed entry');
   const none = () => false;

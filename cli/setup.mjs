@@ -645,9 +645,9 @@ export async function runSetup(root, opts = {}) {
   const learningPath = path.join(root, PROJECT_FILES.learningConfig);
   if (configureTools) {
     // Connect a design tool (Figma-first, pluggable; the UI step materializes the design here)
-    S('Connect a design tool (Figma / pencil / openpencil / none)');
+    S(`Connect a design tool (${[...DESIGN_TOOLS, 'none'].join(' / ')})`);
     guide([
-      'Where yad-ui materializes real screens. figma (confirm the MCP later) or none for markdown-only.',
+      'Where yad-ui materializes real screens: figma, pencil or openpencil (confirm its MCP or CLI later), or none for markdown-only.',
       'Skipping is safe — the UI step degrades to ui-design.md.',
     ]);
     if (exists(designPath) && !(opts.reconfigure ?? await askYesNo('design.json exists — reconfigure?', false))) {
@@ -659,7 +659,7 @@ export async function runSetup(root, opts = {}) {
         tool = DESIGN_PRIMARY;
       }
       // A tool named by flag takes its URL by flag too (blank when not given): no prompt.
-      const project_url = tool === 'none' ? null : (has_(opts.design) ? opts.designUrl : await ask('  project/file URL (blank to set later)', '')) || null;
+      const project_url = tool === 'none' ? null : (has_(opts.design) ? opts.designUrl : await ask(tool === 'openpencil' ? '  project URL (blank: each epic keeps its design file in its own design/ folder)' : '  project/file URL (blank to set later)', '')) || null;
       registerDesign(root, { tool, project_url, today: opts.today ?? null });
       ok(tool === 'none'
         ? `wrote ${PROJECT_FILES.designConfig} (markdown-only)`

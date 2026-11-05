@@ -149,9 +149,9 @@ Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decid
   author the Markdown artifacts only and record `design: none` in the frontmatter with a one-line note
   (mirrors the `impeccable: not-installed` degrade). Skip to Step 4.
 - **A tool is connected and its MCP is available:** adopt the `ux-designer` lens and, using the provider
-  recorded in `design.json` (Figma via a Figma/html.to.design MCP, `pencil` via its MCP, `openpencil` via the `open-pencil` MCP —
-  it writes the frames into the design file in the repo and saves it, and that file is committed with the
-  epic — etc.):
+  recorded in `design.json` (Figma via a Figma/html.to.design MCP, `pencil` via its MCP, `openpencil` through its CLI —
+  `openpencil eval <file> --stdin --write` on the epic's design file, `epics/EP-<slug>/design/<name>.fig`,
+  with no app open (or its MCP while the desktop app is open on the file) — etc.):
   - **Generate** — when the provider is write-capable, produce one frame per screen the design covers,
     for the platforms in `epic.repos` (mobile and/or web), reusing the code-maps (Step 2b) and
     `DESIGN.md` tokens so screens match built components rather than inventing parallel ones.
@@ -217,6 +217,10 @@ When Step 3b generated or linked a design, write the machine-readable screen→f
 }
 ```
 
+For OpenPencil, `fileUrl` is the design file's path from the Product root
+(`epics/EP-<slug>/design/<name>.fig`), each screen's `url` is `null` (a file on disk has no link to one
+frame), and `source` is `openpencil-cli` or `openpencil-mcp`.
+
 Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. When Step 3b degraded
 (`design: none`), do **not** write `design-links.json`.
 
@@ -236,7 +240,10 @@ any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
 is pushed around the gate. Commit the artifact set — **`ui-design.md`, `DESIGN.md`, and, when a
 design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) — with `yad fold EP-<slug> ui-design`,
-which takes exactly these and leaves the ledger to CI — then hand off to
+which takes exactly these and leaves the ledger to CI. An OpenPencil design file in `epics/EP-<slug>/design/`
+is not taken by `yad fold` yet, and the review's fingerprint does not cover it yet (both come in E164's
+second PR): commit that folder on the same review branch with `git add epics/EP-<slug>/design && git
+commit`, and tell the reviewers it is part of the review — then hand off to
 `yad-review-gate`.
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**

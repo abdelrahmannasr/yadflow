@@ -40,8 +40,8 @@ Tell the person which tools you used and which fallbacks, and why.
 - The integration is **Figma-first but pluggable** (`config.yaml` `design.tools`): a design-tool
   *adapter*, like the GitHub/GitLab platform adapter. Figma is the primary provider; `pencil`
   (the `.pen` web/mobile editor) is a second, write-capable provider; `openpencil` (OpenPencil, an
-  open-source editor that works on a design file in the repo, with no account and no app open, E164) is a
-  third; `none` → markdown-only.
+  open-source editor whose CLI writes a design file in the repo with no account and no app open, E164)
+  is a third; `none` → markdown-only.
 - **The design tool is reached through its MCP** (a harness MCP server), NOT a subprocess CLI — the same
   shape as Impeccable's slash-commands, not Repomix's `npx`. The skill detects the MCP and degrades when
   it is absent; it never installs an MCP server.
@@ -69,16 +69,20 @@ Determine which tool is being connected from `tool` (default `figma`); reject a 
 
 - **figma** → a Figma MCP server (Dev Mode MCP for read/link; html.to.design for HTML→Figma *generate*).
 - **pencil** → the `pencil` MCP (`batch_design` writes `.pen` web/mobile screens — generate-capable).
-- **openpencil** → the `open-pencil` MCP (`openpencil-mcp`): it creates pages and frames in a design file
-  on disk and saves it — generate-capable. It reads only files inside `OPENPENCIL_MCP_ROOT` (the folder the
-  server starts in, by default), so the file goes in the repo, and `files` holds its repo path (for
-  example `design/app.fig`), never a URL. No account: `auth` stays `"user"` and there is nothing to sign in to.
+- **openpencil** → its **CLI** first (`openpencil`, found on PATH): `openpencil eval <file> --code … --write`
+  runs Figma Plugin API code on the design file and saves it, with no app open — generate-capable. Its MCP
+  server (`open-pencil`, `openpencil-mcp`) is only a bridge to the running desktop app, so it is used only
+  when the app is open with the file; it reads only files inside `OPENPENCIL_MCP_ROOT` (the folder it
+  starts in by default; the home folder on Windows). Each epic keeps its design file in its own folder,
+  `epics/EP-<slug>/design/` (for example `epics/EP-<slug>/design/screens.fig`), so `project_url` may stay
+  empty. No account: `auth` stays `"user"` and there is nothing to sign in to. Record `provider`
+  `openpencil-cli` when the CLI is found, `openpencil-mcp` when only the MCP is.
 - another adapter → its named MCP.
 
 Record `provider` (the concrete MCP) and whether it is available. For Figma, say which server it is,
 because a UI task checks it before it starts (#358): `figma-desktop` (the Dev Mode MCP server inside the
 running desktop app — the app must be open), `figma` (Figma's hosted server — a sign-in, no app), or
-`html-to-design` (writes screens only, cannot read a frame). For Pencil, `pencil-mcp`. For OpenPencil, `openpencil-mcp`. The older value
+`html-to-design` (writes screens only, cannot read a frame). For Pencil, `pencil-mcp`. For OpenPencil, `openpencil-cli` (or `openpencil-mcp`, above). The older value
 `figma-mcp` does not say which Figma server it is: on a refresh, record the exact one. **Auth is the local user's own** — the user's authenticated MCP session. The skill
 **stores no tokens**; `project_url`/`files` are plain references, never credentials.
 
