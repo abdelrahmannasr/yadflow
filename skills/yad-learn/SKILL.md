@@ -29,6 +29,10 @@ approvals ledger, or the contract lock. It writes only the local learning ledger
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
 beside it.
 
+Before you fall back because a tool the team uses is not on this machine (not turned off, not removed
+by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the
+connect-tool rule. On a no, or when a step fails, use the fallback.
+
 Tell the person which tools you used and which fallbacks, and why.
 
 - **DeepTutor** (`deeptutor`, a connector). Used when `.sdlc/learning.json` connects it. yad-connect-learning writes that file; follow it, not yad's toolbox answer.

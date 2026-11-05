@@ -2052,3 +2052,20 @@ test('E165 PR 2: a tool found outside its known-good versions is offered its pin
   const ok = connectPlan('repomix', { list, items: items('2.1.0'), has: () => false, platform: 'linux' });
   assert.deepEqual([ok.inRange, ok.steps], [true, []]);
 });
+
+test('E165 PR 2: the flow offers the connect step — yad-ui and the test step before they degrade, spec and implement on a failed probe, every fallback section', () => {
+  const read = (skill) => fs.readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
+  for (const skill of ['yad-ui', 'yad-test-cases']) {
+    const text = read(skill);
+    assert.ok(text.includes('yad toolbox connect <tool> --json') && text.includes('yad toolbox connect <tool> --verify --json'), `${skill} asks, then verifies`);
+    assert.match(text, /A tool is named, but it is not on this machine[\s\S]*connect-tool rule[\s\S]*On a no, or when a step fails, degrade/, `${skill} offers before it degrades`);
+  }
+  for (const skill of ['yad-spec', 'yad-implement']) {
+    const text = read(skill);
+    assert.match(text, /not on this machine at all[\s\S]*not a\s+closed app[\s\S]*`preflight\.connect`[\s\S]*connect-tool rule/, `${skill} offers only when the tool is absent, never for a closed app`);
+  }
+  // The generated section says it once, in every skill that has one.
+  const section = skillFallbackSection('yad-ui');
+  assert.match(section, /offer to connect it, once: run `yad toolbox connect <id> --json` and follow the\nconnect-tool rule\. On a no, or when a step fails, use the fallback\./);
+  assert.match(section, /not turned off, not removed\nby the team/, 'a plugin turned off, or a tool the team removed, is never offered');
+});

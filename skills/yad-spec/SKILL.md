@@ -39,6 +39,10 @@ there are found.
 - **When yad cannot answer** (yad is not installed here, or the command fails), use the check in the
   steps below.
 
+Before you fall back because a tool the team uses is not on this machine (not turned off, not removed
+by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the
+connect-tool rule. On a no, or when a step fails, use the fallback.
+
 Tell the person which tools you used and which fallbacks, and why.
 
 - **Spec Kit** (`spec-kit`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove spec-kit`) — use the fallback.
@@ -130,6 +134,10 @@ answer carries `preflight`. When `preflight.reachable` is `check`, make the MCP 
 describes, now, before the ceremony starts. Some design tools (Pencil, Figma's desktop server) are read
 through the running app, so a closed app or the wrong file open is found here and not half way through.
 - **It answers, with the right file open:** go on.
+- **It fails because the tool is not on this machine at all** (no such MCP server in your session — not a
+  closed app, the wrong file or a sign-in): offer `preflight.connect` first, under the connect-tool rule
+  (show its `ask`, ask once, run only its `agent` steps, hand over the rest, verify). Once it is found,
+  probe again. On a no, or when a step fails, treat it as the next bullet.
 - **It fails, or another file is open: STOP.** Print `preflight.stop` word for word and wait. Go on
   without the design tool only when the person says so, and record that in `spec.md`'s
   `## Clarifications` as `- Q: design tool not reachable → A: continue without it, from the frame links`

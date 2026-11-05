@@ -876,7 +876,13 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
       '',
     );
   }
-  lines.push('Tell the person which tools you used and which fallbacks, and why.', '');
+  lines.push(
+    // E165: one offer before a fallback, for a tool the team uses that this machine lacks.
+    'Before you fall back because a tool the team uses is not on this machine (not turned off, not removed',
+    'by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the',
+    'connect-tool rule. On a no, or when a step fails, use the fallback.',
+    '',
+    'Tell the person which tools you used and which fallbacks, and why.', '');
   for (const t of core) {
     lines.push(`- **${t.name}** (\`${t.id}\`). Use it when its entry has \`used: true\` and \`status.state\` is \`installed\` or \`available\`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (\`yad toolbox remove ${t.id}\`) — use the fallback.`);
     lines.push(`  - Fallback — ${t.fallback}.`);

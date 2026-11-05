@@ -24,6 +24,10 @@ explains the concept. The learning layer is **purely opt-in and never blocks a g
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
 beside it.
 
+Before you fall back because a tool the team uses is not on this machine (not turned off, not removed
+by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the
+connect-tool rule. On a no, or when a step fails, use the fallback.
+
 Tell the person which tools you used and which fallbacks, and why.
 
 - **DeepTutor** (`deeptutor`, a connector). This skill connects it, by writing `.sdlc/learning.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.

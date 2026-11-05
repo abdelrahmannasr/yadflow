@@ -41,6 +41,10 @@ there are found.
 - **When yad cannot answer** (yad is not installed here, or the command fails), use the check in the
   steps below.
 
+Before you fall back because a tool the team uses is not on this machine (not turned off, not removed
+by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the
+connect-tool rule. On a no, or when a step fails, use the fallback.
+
 Tell the person which tools you used and which fallbacks, and why.
 
 - **Impeccable** (`impeccable`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove impeccable`) — use the fallback.
@@ -145,9 +149,16 @@ installation is out of scope for Shape.
 ### Step 3b — Materialize the design in the connected tool (generate or link)
 Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decide the path:
 
-- **No tool / `tool: "none"` / `source: "unavailable"`** (or the file is absent): **degrade** —
+- **No tool / `tool: "none"`** (or the file is absent): **degrade** —
   author the Markdown artifacts only and record `design: none` in the frontmatter with a one-line note
-  (mirrors the `impeccable: not-installed` degrade). Skip to Step 4.
+  (mirrors the `impeccable: not-installed` degrade). Skip to Step 4. (Choosing a design tool for the team
+  is the `yad-connect-design` skill's step, which offers to connect one.)
+- **A tool is named, but it is not on this machine** (`source: "unavailable"`, or its MCP server or CLI is
+  not found): **Offer to connect it first (E165):** run `yad toolbox connect <tool> --json` and follow the
+  connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent` steps, hand
+  over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
+  with `--replace` only when its question said which tool it replaces). Never install it any other way.
+  When it is found, go on with the next bullet. On a no, or when a step fails, degrade as in the bullet above.
 - **A tool is connected and its provider is available** (`source` is not `unavailable`): adopt the `ux-designer` lens and, using the provider
   recorded in `design.json` (Figma via a Figma/html.to.design MCP, `pencil` via its MCP, `openpencil` through its CLI —
   `openpencil eval <file> --stdin --write` on the epic's design file, `epics/EP-<slug>/design/<name>.fig`,

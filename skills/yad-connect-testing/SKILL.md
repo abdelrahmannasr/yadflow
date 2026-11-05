@@ -23,6 +23,10 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
 beside it.
 
+Before you fall back because a tool the team uses is not on this machine (not turned off, not removed
+by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the
+connect-tool rule. On a no, or when a step fails, use the fallback.
+
 Tell the person which tools you used and which fallbacks, and why.
 
 - **Playwright MCP** (`playwright`, a connector). This skill connects it, by writing `.sdlc/testing.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.

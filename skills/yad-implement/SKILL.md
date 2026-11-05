@@ -116,7 +116,10 @@ read them from their `url` otherwise. Never pick a frame by its look or its name
 find is an open question for the batch below, not a guess.
 
 **Before any code for a task with UI, check the design tool can be reached (#358).** When that answer's
-`preflight.reachable` is `check`, make the MCP call `preflight.probe` describes. If it fails, or another
+`preflight.reachable` is `check`, make the MCP call `preflight.probe` describes. If it fails because the
+tool is not on this machine at all (no such MCP server in your session — not a closed app, the wrong file
+or a sign-in), offer `preflight.connect` first, under the connect-tool rule, and probe again once it is
+found. If it still fails, or another
 file is open, **STOP**: print `preflight.stop` word for word and wait. Go on without the design tool, from
 the frame links only, only when the person says so, and record that in the commit's `Decisions:`
 paragraph (Step 6) as `design tool not reachable: continued from the frame links, on <person>'s word`.
