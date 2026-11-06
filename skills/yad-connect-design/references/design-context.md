@@ -39,8 +39,14 @@ tool, covering the screens/states `ui-design.md` enumerates and the user flows t
   `openpencil import <seed.html> -o epics/EP-<slug>/design/<name>.fig` (a small HTML page, such as the first
   screen), then add each frame with `openpencil eval <file> --stdin --write` (Figma
   Plugin API code, run on the file with no app open). With the desktop app open on the file, the
-  `open-pencil` MCP may be used instead. Until E164's second PR, `yad fold` does not take the `design/` folder: commit it on the review
-  branch with `git`, as `yad-ui` says.
+  `open-pencil` MCP may be used instead. **Give each frame yad's own ID:** OpenPencil numbers nodes in the
+  order it loads them, so its own node IDs change when the file is reopened after a frame is deleted or
+  added — and an old ID can then name another frame. Store a plain, unique ID on each frame with
+  `frame.setSharedPluginData('yad', 'nodeId', '<id>')` (for example `checkout-mobile`), and record that as
+  the screen's `nodeId`. Every read finds the frame by it:
+  `figma.root.findAll((n) => n.getSharedPluginData('yad', 'nodeId') === '<id>')`. `yad fold` commits the
+  `design/` folder with the UI review, and the review covers it: a change to the design file after
+  approval needs a fresh review.
 
 Reuse what already exists: load the connected code repos' code-maps (`yad-ui` Step 2b) and any
 Impeccable `DESIGN.md` tokens so generated screens match built components, not invented ones.
@@ -67,8 +73,10 @@ purely additive.
 
 ## Reachable before Build (#358)
 
-A design tool read through its running desktop app — Pencil, or Figma's `figma-desktop` server — cannot be
-read while the app is closed or the design file is not open. So before a UI task, `yad-spec` and
+A design tool read through its running desktop app — Pencil, Figma's `figma-desktop` server, or
+OpenPencil's MCP server — cannot be read while the app is closed or the design file is not open; a
+hosted server needs a sign-in; and a CLI that works on the file (OpenPencil's) needs the file and the
+program. So before a UI task, `yad-spec` and
 `yad-implement` check it first, and stop early when it fails. yad itself cannot call an MCP server (it
 belongs to the agent's session), so `yad story frames <story> --json` returns a `preflight` block that says
 how to check and what to tell the person; the text for each tool is the toolbox entry's `reach` field.
@@ -80,7 +88,9 @@ how to check and what to tell the person; the text for each tool is the toolbox 
 | `figma`, provider `figma` (hosted) | `get_metadata` on one recorded frame | sign in to Figma in your agent; no app is needed |
 | `figma`, provider `figma-mcp` (older value), any other name, or none | `get_metadata` on one recorded frame | either of the two above — yad cannot tell which server it is |
 | `figma`, provider `html-to-design` | nothing: it writes screens and cannot read a frame | not checked; build from the frame links |
-| `openpencil` | not checked yet: yad has no reach rule for it (E164's second PR adds one) | build from the frame links |
+| `openpencil`, provider `openpencil-cli` | the design file is in the Product checkout, `openpencil --version` runs, and `openpencil eval` on the file finds the frame whose shared plugin data `yad`/`nodeId` is the recorded ID. No app, no sign-in | pull the Product so the file is there with the frame in it, and make sure `openpencil` runs |
+| `openpencil`, provider `openpencil-mcp` | the MCP's `eval` tool finds the frame by its stored `yad`/`nodeId` | open the OpenPencil desktop app with the file loaded (inside `OPENPENCIL_MCP_ROOT`) |
+| `openpencil`, no provider or another name | the CLI check above, and the MCP check when that does not find the frame | either of the two above |
 
 Also not checked (build from the frame links): no `design.json`, tool `none`, source `unavailable`; no
 `design-links.json`, one that cannot be read, or one recorded for another tool (re-run the UI step); and a
@@ -90,7 +100,8 @@ When the check fails because the tool is not on this machine at all (no such MCP
 session), the skill first offers `preflight.connect` — `yad toolbox connect <tool> --json`, under the
 connect-tool rule — and checks again once it is found (E165). A closed app, the wrong file or a sign-in
 is never offered: those are the person's. Nor is Figma's `figma-desktop` provider: it is the desktop app's
-own server, and Figma's connect step sets up the hosted one, so the person opens the app instead. An
+own server, and Figma's connect step sets up the hosted one, so the person opens the app instead
+(OpenPencil's MCP server is offered: its connect step adds it). An
 older `design.json` that names no provider (or `figma-mcp`) is still offered the hosted one: the question
 names what it installs, so a person who uses the desktop app says no. A server just added is seen only
 after the agent restarts (check `/mcp`); until then the skill says so and stops.

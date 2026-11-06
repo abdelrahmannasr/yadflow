@@ -10922,6 +10922,115 @@ test('artifactHashAt: line-ending conversion on checkout gives the same fingerpr
   } finally { fs.rmSync(R, { recursive: true, force: true }); }
 });
 
+test('E164: the UI review covers design/ — no design file keeps the old fingerprint; a design change revokes; a commit agrees with the disk', async () => {
+  const { artifactHash, acceptedHashes, isStaleHash, artifactHashAt, artifactPaths, reviewedSha } = await import('./epic-state.mjs');
+  assert.deepEqual(artifactPaths('ui-design'), ['ui-design.md', 'design']);
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-uid-'));
+  try {
+    git(R, 'init', '-q');
+    git(R, 'config', 'user.email', 'a@b.c');
+    git(R, 'config', 'user.name', 'x');
+    fs.writeFileSync(path.join(R, '.gitattributes'), '*.md text eol=crlf\n');
+    const ep = path.join(R, 'epics/EP-a');
+    fs.mkdirSync(ep, { recursive: true });
+    const doc = path.join(ep, 'ui-design.md');
+    fs.writeFileSync(doc, '---\nid: EP-a\nstatus: draft\n---\n# UI\n');
+    const docOnly = reviewedSha(doc);
+    assert.equal(artifactHash(ep, 'ui-design.md'), docOnly, 'no design/: the fingerprint every earlier release recorded');
+    fs.mkdirSync(path.join(ep, 'design'));
+    assert.equal(artifactHash(ep, 'ui-design.md'), docOnly, 'an empty design/ is no design file');
+    // A design file is binary: a NUL, and a CRLF that must never be converted.
+    fs.writeFileSync(path.join(ep, 'design/screens.fig'), Buffer.from([0x66, 0x69, 0x67, 0x00, 0x0d, 0x0a, 0xff]));
+    const withFile = artifactHash(ep, 'ui-design.md');
+    assert.notEqual(withFile, docOnly, 'the design file is covered');
+    assert.deepEqual(acceptedHashes(ep, 'ui-design.md').slice(0, 1), [withFile], 'what is written is the new form');
+    assert.equal(isStaleHash(docOnly, acceptedHashes(ep, 'ui-design.md')), true, 'review 1: adding a design file after approval needs a fresh review too');
+    setFrontmatterStatus(doc, 'approved');
+    assert.equal(artifactHash(ep, 'ui-design.md'), withFile, 'the gate\'s status flip is not an edit');
+    fs.writeFileSync(path.join(ep, 'design/screens.fig'), Buffer.from([0x66, 0x69, 0x67, 0x00, 0x01]));
+    const edited = artifactHash(ep, 'ui-design.md');
+    assert.notEqual(edited, withFile);
+    assert.equal(isStaleHash(withFile, acceptedHashes(ep, 'ui-design.md')), true, 'a design change after approval needs a fresh review');
+    fs.mkdirSync(path.join(ep, 'design/assets'));
+    fs.writeFileSync(path.join(ep, 'design/assets/logo.png'), 'png');
+    const nested = artifactHash(ep, 'ui-design.md');
+    assert.notEqual(nested, edited, 'a file in a folder under design/ is covered too');
+    if (process.platform !== 'win32') {
+      fs.symlinkSync(doc, path.join(ep, 'design/link.md'));
+      assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'a link is not a design file — a commit copy skips it too');
+      fs.rmSync(path.join(ep, 'design/link.md'));
+    }
+    // Review 1: what the system or an editor drops there (often not ignored by git) is not a design file,
+    // and neither is a nested repository — the disk must agree with the approved commit.
+    for (const junk of ['.DS_Store', 'screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/._logo.png', '.~lock.screens.fig#']) fs.writeFileSync(path.join(ep, 'design', junk), 'junk');
+    fs.mkdirSync(path.join(ep, 'design/vendor'));
+    fs.writeFileSync(path.join(ep, 'design/vendor/.git'), 'gitdir: elsewhere\n');
+    fs.writeFileSync(path.join(ep, 'design/vendor/kit.fig'), 'kit');
+    assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'junk files and a nested repository are left out');
+    // Review 3: a file git ignores is in no commit, so it is not counted on disk either; a tracked one is.
+    fs.writeFileSync(path.join(R, '.gitignore'), 'epics/*/design/exports/\n');
+    fs.mkdirSync(path.join(ep, 'design/exports'));
+    fs.writeFileSync(path.join(ep, 'design/exports/home.png'), 'png');
+    assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'an ignored export is left out');
+    // Review 4: git is found from the folder, never through a GIT_DIR a hook or a script set…
+    const keep = process.env.GIT_DIR;
+    process.env.GIT_DIR = path.join(R, '.git');
+    try { assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'GIT_DIR in the environment changes nothing'); } finally { if (keep === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = keep; }
+    // …and a scratch copy of a commit is never judged by git's rules (it holds only committed files).
+    assert.notEqual(artifactHash(ep, 'ui-design.md', reviewedSha, { askGit: false }), nested, 'askGit: false counts every file');
+    fs.rmSync(path.join(ep, 'design/exports'), { recursive: true });
+    // Review 2: any other name is a design file, a dot-name included.
+    fs.writeFileSync(path.join(ep, 'design/.exports.fig'), 'export');
+    assert.notEqual(artifactHash(ep, 'ui-design.md'), nested, 'a dot-name that is not junk is covered');
+    fs.rmSync(path.join(ep, 'design/.exports.fig'));
+    // Junk committed to git is copied out of the commit and skipped there by the same walk (one stays).
+    for (const junk of ['screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/._logo.png', '.~lock.screens.fig#']) fs.rmSync(path.join(ep, 'design', junk));
+    fs.rmSync(path.join(ep, 'design/vendor'), { recursive: true });
+    git(R, 'add', '-A');
+    git(R, 'commit', '-qm', 'ui');
+    fs.rmSync(path.join(R, 'epics'), { recursive: true });
+    git(R, 'checkout', '--', '.');
+    assert.match(fs.readFileSync(doc, 'utf8'), /\r\n/, 'the doc is checked out with CRLF');
+    const at = artifactHashAt(R, ep, 'ui-design.md', git(R, 'rev-parse', 'HEAD').toString().trim());
+    assert.equal(at.ok, true, at.reason);
+    assert.equal(at.copied, 4, 'ui-design.md, both design files, and the committed .DS_Store'); 
+    assert.equal(at.hash, artifactHash(ep, 'ui-design.md'), 'the approved commit and the disk give one fingerprint');
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
+});
+
+test('E164 review 1: a Git LFS pointer and the file it stands for give one fingerprint; a linked design folder is no folder', async () => {
+  const { artifactHash, reviewedSha } = await import('./epic-state.mjs');
+  const { createHash } = await import('node:crypto');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-lfs-'));
+  try {
+    const real = path.join(T, 'real'); const ptr = path.join(T, 'ptr');
+    for (const d of [real, ptr]) { fs.mkdirSync(path.join(d, 'design'), { recursive: true }); fs.writeFileSync(path.join(d, 'ui-design.md'), '# UI\n'); }
+    const content = Buffer.from([0x66, 0x69, 0x67, 0x00, 0x01, 0x02]);
+    fs.writeFileSync(path.join(real, 'design/screens.fig'), content);
+    const oid = createHash('sha256').update(content).digest('hex');
+    // What a checkout without LFS leaves on disk (CI's actions/checkout does not fetch LFS by default).
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`);
+    assert.equal(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'the pointer names the same SHA-256 as the file');
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `version https://git-lfs.github.com/spec/v1\noid sha256:${'0'.repeat(64)}\nsize 6\n`);
+    assert.notEqual(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'another object is another design');
+    // Review 2: only the exact pointer format counts; a pointer-shaped file with more text is hashed whole.
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`;
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), pointer.replace(/\n/g, '\r\n'));
+    assert.equal(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'CRLF line ends are still a pointer');
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `version https://git-lfs.github.com/spec/v1\next-0-foo sha256:${'1'.repeat(64)}\noid sha256:${oid}\nsize 6\n`);
+    assert.equal(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'an ext- line is part of the format');
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `${pointer}notes an agent reads\n`);
+    assert.notEqual(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'extra text is never hidden behind an oid');
+    if (process.platform !== 'win32') {
+      const linked = path.join(T, 'linked');
+      fs.mkdirSync(linked);
+      fs.writeFileSync(path.join(linked, 'ui-design.md'), '# UI\n');
+      fs.symlinkSync(path.join(real, 'design'), path.join(linked, 'design'));
+      assert.equal(artifactHash(linked, 'ui-design.md'), reviewedSha(path.join(linked, 'ui-design.md')), 'a design folder that is a link is held as a link by a commit, so it counts as no folder');
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('artifactHashAt: the fingerprint at a commit is artifactHash of the same files, for every kind of artifact (issue #366)', async () => {
   const { artifactHashAt, artifactHash: hashNow } = await import('./epic-state.mjs');
   const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-at-'));
@@ -26821,6 +26930,23 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   assert.deepEqual([stories.step, stories.other], [['epics/EP-x/stories/EP-x-S01.md'], ['epics/EP-x/stories-old.md']]);
   const ui = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/.sdlc/design-links.json' }, { xy: '??', path: 'epics/EP-x/DESIGN.md' }, { xy: ' M', path: 'epics/EP-x/.sdlc/test-links.json' }], { epic: 'EP-x', step: 'ui-design', verified: true });
   assert.deepEqual([ui.step, ui.ci, ui.other], [['epics/EP-x/.sdlc/design-links.json', 'epics/EP-x/DESIGN.md'], [], ['epics/EP-x/.sdlc/test-links.json']], 'the skill\'s artifact set, never left for CI');
+  // E164: the epic's design file is the UI step's too; a look-alike name beside it is not.
+  const design = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/screens.fig' }, { xy: '??', path: 'epics/EP-x/design-old.fig' }, { xy: '??', path: 'epics/EP-x/design/.DS_Store' }, { xy: '??', path: 'epics/EP-x/design/a/x.fig~' }], { epic: 'EP-x', step: 'ui-design', verified: true });
+  assert.deepEqual([design.step, design.other], [['epics/EP-x/design/screens.fig'], ['epics/EP-x/design-old.fig', 'epics/EP-x/design/.DS_Store', 'epics/EP-x/design/a/x.fig~']], 'review 1: junk the fingerprint leaves out is not folded');
+  const kit = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/kit/' }, { xy: '??', path: 'epics/EP-x/stories/EP-x-S01.md' }], { epic: 'EP-x', step: 'ui-design', verified: true });
+  assert.deepEqual(kit.step, [], 'review 2: a nested repository, listed by git as a folder, is never folded');
+  const sub = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/design/kit' }, { xy: ' M', path: 'epics/EP-x/design/a.fig' }], { epic: 'EP-x', step: 'ui-design', verified: true, isRepo: (p) => p === 'epics/EP-x/design/kit' });
+  assert.deepEqual(sub.step, ['epics/EP-x/design/a.fig'], 'review 3: a committed submodule (a folder holding .git) is never folded either');
+  // Review 4: a submodule never initialised here has no .git — the index's gitlink says what it is.
+  const G = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-gl-'));
+  try {
+    git(G, 'init', '-q');
+    git(G, 'update-index', '--add', '--cacheinfo', `160000,${'a'.repeat(40)},epics/EP-x/design/kit`);
+    fs.mkdirSync(path.join(G, 'epics/EP-x/design/kit'), { recursive: true });
+    fs.writeFileSync(path.join(G, 'epics/EP-x/design/a.fig'), 'x');
+    const isRepo = fold.repoAt(G);
+    assert.deepEqual([isRepo('epics/EP-x/design/kit'), isRepo('epics/EP-x/design/a.fig'), isRepo('epics/EP-x/design/k')], [true, false, false]);
+  } finally { fs.rmSync(G, { recursive: true, force: true }); }
   const found = fold.sortChanges([{ xy: '??', path: 'foundation/purpose.md' }], { epic: 'EP-foundation', step: 'foundation', verified: false });
   assert.deepEqual(found.step, ['foundation/purpose.md']);
   assert.equal(fold.authorStepOf('stories-S02'), 'stories');

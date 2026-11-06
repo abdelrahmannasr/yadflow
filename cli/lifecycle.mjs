@@ -57,6 +57,11 @@ export function loadDefault(n = DEFAULT_VERSION) {
 //
 // Read when the validator first needs it, not when this module loads: every `yad` command imports this
 // module, and only the validator needs the older defaults.
+// E164: folders the engine commits with a yadflow step that no default lists, because `extraPaths` takes
+// files, never a folder, and a shipped default never changes. The UI design's `design/` (the epic's design
+// file) is the one: `artifactPaths('ui-design')` in cli/epic-state.mjs names it, and a test ties the two.
+// Its name is reserved for that step, and every file inside it is that step's review, like a folder artifact.
+export const ENGINE_FOLDERS = { 'ui-design': ['design/'] };
 let claims = null;
 export function yadflowClaims() {
   if (claims) return claims;
@@ -73,6 +78,7 @@ export function yadflowClaims() {
       for (const f of [art?.path, ...extras]) if (f) byKey.set(artifactKey(f), o);
     }
   }
+  for (const [o, dirs] of Object.entries(ENGINE_FOLDERS)) for (const d of dirs) byKey.set(artifactKey(d), o);
   claims = { byOrigin, byKey };
   return claims;
 }
@@ -437,6 +443,7 @@ export function lifecycleProblems(raw) {
       claimsList.push({ step: s.id, where, path: claimed, key, level: stepLevel, member, productSet });
     }
     if (n.artifact?.type === 'folder' && artPath) folders.push({ step: s.id, level: stepLevel, prefix: artPath.replace(/\/?$/, '/').toLowerCase() });
+    for (const d of origin !== null && Object.hasOwn(ENGINE_FOLDERS, origin) ? ENGINE_FOLDERS[origin] : []) folders.push({ step: s.id, level: stepLevel, prefix: d.toLowerCase() });
     allPaths.push(...[artPath, ...extras].filter((x) => typeof x === 'string').map((x) => ({ step: s.id, level: stepLevel, path: x })));
 
     // Behaviours.

@@ -176,6 +176,13 @@ Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decid
   - **Link** — when the user points at an existing design file (or the provider is read-only), reference
     it and **read the frames back** so `ui-design.md` reflects the real design.
 
+  **OpenPencil: give each frame yad's own ID.** Its own node IDs change when the file is reopened after a
+  frame is deleted or added, and an old one can then name another frame. So store a plain, unique ID on
+  each frame — `frame.setSharedPluginData('yad', 'nodeId', '<id>')`, for example `checkout-mobile` — and
+  record that ID as the screen's `nodeId`. Find a frame by it, never by OpenPencil's ID:
+  `figma.root.findAll((n) => n.getSharedPluginData('yad', 'nodeId') === '<id>')`. A linked OpenPencil file
+  whose frames carry no such ID gets one per frame, written back with `--write`.
+
   Capture each screen's `name`, `platform`, `nodeId`, and `url`. Record which direction was used
   (`generated | linked`). Honest-capability rule: a read-only MCP supports **link** only — never claim a
   screen was generated that the provider cannot produce. See
@@ -236,8 +243,9 @@ When Step 3b generated or linked a design, write the machine-readable screen→f
 ```
 
 For OpenPencil, `fileUrl` is the design file's path from the Product root
-(`epics/EP-<slug>/design/<name>.fig`), each screen's `url` is `null` (a file on disk has no link to one
-frame), and `source` is `openpencil-cli` or `openpencil-mcp`.
+(`epics/EP-<slug>/design/<name>.fig`), each screen's `nodeId` is the ID yad stored on its frame (above),
+its `url` is `null` (a file on disk has no link to one frame), and `source` is `openpencil-cli` or
+`openpencil-mcp`.
 
 Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. When Step 3b degraded
 (`design: none`), do **not** write `design-links.json`.
@@ -259,12 +267,8 @@ fails the gate if it rides the review PR, and desynchronises the ledger CI is ab
 is pushed around the gate. Commit the artifact set — **`ui-design.md`, `DESIGN.md`, and, when a
 design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) — with `yad fold EP-<slug> ui-design`,
 which takes exactly these and leaves the ledger to CI. An OpenPencil design file in `epics/EP-<slug>/design/`
-is not taken by `yad fold` yet, and the review's fingerprint does not cover it yet (both come in E164's
-second PR): commit that folder on the same review branch with `git add epics/EP-<slug>/design && git
-commit -m "docs(ep-<slug>): add the ui-design design file"` (the scope is the epic ID in lowercase, as the
-commit-message gate wants), and tell the reviewers it is part of the review. `yad fold` will say the folder
-is "changed but not ui-design's, left on disk" — that is expected — then hand off to
-`yad-review-gate`.
+is part of the same set: `yad fold` takes that folder too, and the review's fingerprint covers it, so a
+change to the design file after approval needs a fresh review. Then hand off to `yad-review-gate`.
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
 `yad gate open <epic> ui-design.md` marks `ui-design-review` `in_review`, closes `ui-design` as `done`, and moves `currentStep` to the gate

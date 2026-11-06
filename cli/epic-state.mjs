@@ -440,6 +440,8 @@ export function artifactFromBase(base) {
 // The files (relative to the epic dir) a review of this artifact covers — what `gate open` commits
 // on the review branch (the owner's artifact), and what CI re-reads to bind the approval at merge.
 // Architecture mirrors artifactHash(): the approval is bound to the locked contract surface too.
+// E164: the folder beside ui-design.md that holds the epic's design file.
+export const UI_DESIGN_DIR = 'design';
 export function artifactPaths(base) {
   if (base === 'architecture') return ['architecture.md', 'contract.md', '.sdlc/contract-lock.json'];
   if (base === 'stories') return ['stories'];
@@ -447,6 +449,10 @@ export function artifactPaths(base) {
   // Every section, optional ones included: this names what a Foundation review COVERS, and a section
   // that is absent today is still one a reviewer may be asked to look at tomorrow.
   if (base === 'foundation') return [...FOUNDATION_FILES];
+  // E164: the UI step's design file lives in the epic's `design/` folder (an OpenPencil file in the repo),
+  // so the UI review covers it: `yad fold` commits it, and a change to it after approval needs a fresh
+  // review. A folder, so `fold` and `artifactHashAt` take everything under it.
+  if (base === 'ui-design') return ['ui-design.md', UI_DESIGN_DIR];
   return [`${base}.md`];
 }
 
@@ -593,6 +599,85 @@ export function storiesHash(epicDir, sha = reviewedSha) {
     .map((f) => `${f}:${sha(path.join(dir, f))}`);
   if (!parts.length) return null;
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
+}
+
+// E164: the UI design's fingerprint. With no file under `design/`, it is the fingerprint of ui-design.md
+// alone — byte for byte what every release before E164 recorded, so no approval of a Figma or Pencil
+// design moves. With design files, it covers them too: ui-design.md as reviewed (`sha`), then each design
+// file (`designSha`, never with a status line left out), sorted by path.
+//
+// Which files count is decided here, and the copy `artifactHashAt` makes of a commit is read by the same
+// walk, so the disk and the approved commit agree:
+//   - regular files only (a link is skipped; so is a `design` folder that is itself a link — a commit
+//     holds it as a link, not a folder);
+//   - never a file the system or an editor drops beside a design (`isDesignJunk`: `.DS_Store`, macOS's
+//     `._<name>` copies, a `.~lock.<name>#` lock file, a name ending in `~`, `Thumbs.db`, `desktop.ini`)
+//     — git often does not ignore those, and counting one would make every approval look changed on that
+//     machine only. Any other name, a dot-name included, is a design file;
+//   - never inside a folder holding `.git` (a submodule or a nested repository: a commit holds it as one
+//     entry, not its files).
+const DESIGN_JUNK = /^(?:\.ds_store|\._.*|\.~lock\..*|.*~|thumbs\.db|desktop\.ini)$/i;
+export const isDesignJunk = (rel) => rel.split('/').some((seg) => DESIGN_JUNK.test(seg));
+function designFiles(dir, rel = '') {
+  if (rel === '') {
+    try { if (!fs.lstatSync(dir).isDirectory()) return []; } catch { return []; }
+  }
+  let entries;
+  try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return []; }
+  if (entries.some((e) => e.name === '.git')) return [];
+  const out = [];
+  for (const e of entries) {
+    if (DESIGN_JUNK.test(e.name)) continue;
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...designFiles(dir, r));
+    else if (e.isFile()) out.push(r);
+  }
+  return out;
+}
+// One design file's fingerprint: the SHA-256 of its content. A Git LFS pointer (the small text file a
+// checkout without LFS leaves in place of a large file) names that same SHA-256 as its `oid`, so the
+// pointer and the real file give one fingerprint — CI checks out pointers, `artifactHashAt` may read
+// the real file through the LFS filter, and the two must agree.
+// Only the exact pointer format git-lfs writes counts — its version line, any `ext-` lines, the oid, the
+// size and nothing else — so no other text can ride in a file whose fingerprint is its oid alone.
+const LFS_POINTER = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\r?\n(?:ext-[^\r\n]*\r?\n)*oid sha256:([0-9a-f]{64})\r?\nsize \d+\r?\n?$/;
+function designSha(p) {
+  const bytes = fs.readFileSync(p);
+  if (bytes.length < 1024) {
+    const oid = bytes.toString('utf8').match(LFS_POINTER);
+    if (oid) return `sha256:${oid[1]}`;
+  }
+  return shaOf(bytes);
+}
+// The files under `design/` that git ignores here (an exports folder in .gitignore, an editor's settings
+// folder): no commit holds them, so counting them would make the approval look changed on this machine
+// only. Never asked for the scratch copy `artifactHashAt` makes (`askGit: false`): it holds only committed
+// files, and a temporary folder inside some checkout would be judged by that checkout's rules. A tracked
+// file is never reported, even when a pattern matches it. The variables that point git at another
+// repository (set inside a git hook, or by a script) are dropped, so git finds the Product's checkout from
+// the folder itself — the same list hook.mjs drops. Names are compared in one Unicode form, because git
+// on macOS may print a name precomposed that it was given decomposed.
+const REPO_ENV = /^GIT_(DIR|WORK_TREE|PREFIX|INDEX_FILE|COMMON_DIR|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/;
+function ignoredByGit(dir, files) {
+  if (!files.length) return new Set();
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !REPO_ENV.test(k))), GIT_OPTIONAL_LOCKS: '0' };
+  const r = spawnSync('git', ['check-ignore', '-z', '--stdin'], { cwd: dir, input: files.map((f) => `${f}\0`).join(''), env, maxBuffer: 64 * 1024 * 1024 });
+  return r.status === 0 ? new Set(r.stdout.toString('utf8').split('\0').filter(Boolean).map((f) => f.normalize('NFC'))) : new Set();
+}
+// The design files' part of the fingerprint, read once: `acceptedHashes` combines it with each form of
+// ui-design.md, so a large design file is not read again for every form.
+function designParts(epicDir, { askGit = true } = {}) {
+  const dir = path.join(epicDir, UI_DESIGN_DIR);
+  const all = designFiles(dir);
+  const ignored = askGit ? ignoredByGit(dir, all) : new Set();
+  return all.filter((f) => !ignored.has(f.normalize('NFC'))).sort().map((f) => `${UI_DESIGN_DIR}/${f}:${designSha(path.join(dir, ...f.split('/')))}`);
+}
+export function uiDesignHash(epicDir, sha = reviewedSha, parts = null, { askGit = true } = {}) {
+  const doc = sha(path.join(epicDir, 'ui-design.md'));
+  if (doc === null) return null;
+  parts ??= designParts(epicDir, { askGit });
+  if (!parts.length) return doc;
+  return 'sha256:' + createHash('sha256').update([`ui-design.md:${doc}`, ...parts].join('\n')).digest('hex');
 }
 
 // The reserved id of the Product level in its OLD spelling ("epic zero", `epics/EP-discovery/`), written
@@ -940,12 +1025,14 @@ export function discoveryHash(epicDir, sha = reviewedSha) {
 // the whole discovery file set; for every other artifact it is the file. Every file is fingerprinted
 // without its frontmatter `status:` line (see `reviewedSha`). `sha` swaps that for a legacy form —
 // only `acceptedHashes` passes one.
-export function artifactHash(epicDir, artifact, sha = reviewedSha) {
+// `askGit: false` is for a scratch copy of a commit (`artifactHashAt`): see `ignoredByGit`.
+export function artifactHash(epicDir, artifact, sha = reviewedSha, { askGit = true } = {}) {
   const b = artifactBase(artifact);
   if (b === 'architecture') return contractSurfaceHash(epicDir);
   if (b === 'stories') return storiesHash(epicDir, sha);
   if (b === 'discovery') return discoveryHash(epicDir, sha);
   if (b === 'foundation') return foundationHash(epicDir, FOUNDATION_SECTIONS, sha);
+  if (b === 'ui-design') return uiDesignHash(epicDir, sha, null, { askGit });
   return sha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
@@ -953,9 +1040,12 @@ export function artifactHash(epicDir, artifact, sha = reviewedSha) {
 // legacy forms (see LEGACY_FORMS). Empty when there is nothing to fingerprint — the same "no claim"
 // answer a null `artifactHash` gives. What is WRITTEN is always `artifactHash`; this is for reading.
 export function acceptedHashes(epicDir, artifact) {
-  const current = artifactHash(epicDir, artifact);
+  // The UI design's files are read once and combined with each form of ui-design.md (E164).
+  const parts = artifactBase(artifact) === 'ui-design' ? designParts(epicDir) : null;
+  const hashWith = parts ? (sha) => uiDesignHash(epicDir, sha, parts) : (sha) => artifactHash(epicDir, artifact, sha);
+  const current = hashWith(reviewedSha);
   if (current === null) return [];
-  return [...new Set([current, ...LEGACY_FORMS.map((sha) => artifactHash(epicDir, artifact, sha))].filter(Boolean))];
+  return [...new Set([current, ...LEGACY_FORMS.map(hashWith)].filter(Boolean))];
 }
 
 // Is a recorded fingerprint stale against the accepted ones? Never when nothing was recorded (a manual
@@ -1017,7 +1107,7 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
         copied++;
       }
     } catch (e) { return { ok: false, reason: `the files at ${rev.slice(0, 12)} could not be copied (${e.code || e.message})` }; }
-    return { ok: true, hash: artifactHash(dir, artifact), copied };
+    return { ok: true, hash: artifactHash(dir, artifact, reviewedSha, { askGit: false }), copied };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

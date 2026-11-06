@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
-import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot, isValidEpicId } from './epic-state.mjs';
+import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot, isValidEpicId, isDesignJunk, UI_DESIGN_DIR } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
 import { resolveDefaultBranch, preflightGuardReadiness } from './productcommit.mjs';
 
@@ -53,7 +53,32 @@ export function stepPaths(epic, stepId) {
   if (!step) return null;
   return [...artifactPaths(artifactBase(step.artifact)), ...(STEP_EXTRAS[stepId] || [])].map((p) => `${epicRel(epic)}/${p}`);
 }
-const covers = (paths, p) => paths.some((s) => p === s || p.startsWith(`${s}/`));
+// A file the system or an editor drops in the UI design's `design/` folder (`.DS_Store`, `x.fig~`) is not
+// the step's: the fingerprint leaves it out (`isDesignJunk`), so a fold that committed it would put a file
+// in the review that no approval covers. It is left on disk like any other file. So is a nested repository
+// there — git lists an untracked one as a folder (`design/kit/`) and a committed submodule by its folder
+// name (`design/kit`), and `isRepo` (a folder holding `.git`) tells the second: `git add` would record a
+// link to another repository, and the fingerprint skips it.
+const covers = (paths, p, isRepo = null) => paths.some((s) => p === s
+  || (p.startsWith(`${s}/`) && !(s.endsWith(`/${UI_DESIGN_DIR}`) && (isDesignJunk(p.slice(s.length + 1)) || p.endsWith('/') || !!isRepo?.(p)))));
+// Is this Product-relative path a nested repository or a submodule — a folder holding `.git`, or a gitlink
+// in the index (a submodule never initialised here has no `.git`)? The index's gitlinks are read once, on
+// the first path that needs them, so many changed design files cost one git call. `GIT_LITERAL_PATHSPECS`
+// is cleared so git reads the `:(glob)` pattern as a pattern.
+export const repoAt = (root, env = process.env) => {
+  let gitlinks = null;
+  const links = () => {
+    if (gitlinks) return gitlinks;
+    const rest = Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'GIT_LITERAL_PATHSPECS'));
+    const r = gitIn(root, rest, { GIT_OPTIONAL_LOCKS: '0' })(['ls-files', '-s', '-z', '--', `:(glob)**/${UI_DESIGN_DIR}/**`]);
+    gitlinks = new Set(r.ok ? r.out.split('\0').filter((e) => e.startsWith('160000 ')).map((e) => e.slice(e.indexOf('\t') + 1)) : []);
+    return gitlinks;
+  };
+  return (p) => {
+    const bare = p.replace(/\/$/, '');
+    return fs.existsSync(path.join(root, ...bare.split('/'), '.git')) || links().has(bare);
+  };
+};
 
 // The scope is the epic ID in lowercase (#413): the commit-message gate takes a lowercase scope
 // (`[a-z0-9._-]`), so `docs(EP-x)` failed every review PR. The exact ID stays in the Yad-Epic trailer.
@@ -73,7 +98,7 @@ export const foldMessage = ({ epic, step, folded }) =>
 //             only while its state.json is off the base ref (#162))
 //   ci      — ledger changes left for CI (verified mode, every other case)
 //   other   — the epic's other changed artifacts, left on disk
-export function sortChanges(entries, { epic, step, verified, seeding = false }) {
+export function sortChanges(entries, { epic, step, verified, seeding = false, isRepo = null }) {
   const own = stepPaths(epic, step) || [];
   const dir = `${epicRel(epic)}/`;
   const out = { step: [], seed: [], ledger: [], ci: [], other: [] };
@@ -83,7 +108,7 @@ export function sortChanges(entries, { epic, step, verified, seeding = false }) 
     // `??` is untracked, `A` in the first column is added to the index: both are a file being created.
     // ` A` is a file marked with `git add -N` (intent to add): new too.
     const creating = xy === '??' || xy[0] === 'A' || xy === ' A';
-    if (covers(own, p)) out.step.push(p);
+    if (covers(own, p, isRepo)) out.step.push(p);
     // A step owner file (E47) is never folded: an assignment is not authoring, and a fold that carried one
     // alone would be a "docs: author <step>" commit with nothing authored. It is committed on its own.
     else if (isOwnerPath(p)) out.other.push(p);
@@ -108,7 +133,7 @@ export function unfoldedPaths(root, epic, base, env = process.env) {
   const own = stepPaths(epic, authorStepOf(base)) || [];
   // A per-story branch (`stories-S01`) reviews that one story: another story's edit is not its business.
   const story = /^stories-S\d+$/i.test(base) ? base.toLowerCase() : null;
-  return entries.map((e) => e.path).filter((p) => covers(own, p) && (!story || artifactBase(p).toLowerCase() === story));
+  return entries.map((e) => e.path).filter((p) => covers(own, p, repoAt(root, env)) && (!story || artifactBase(p).toLowerCase() === story));
 }
 
 // `yad fold <epic> <step>`. Returns a plain object (E1 turns it into the `--json` answer); a refusal
@@ -170,7 +195,7 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const seededAt = (e) => git(['cat-file', '-e', `HEAD:./${epicRel(e)}/.sdlc/state.json`]).ok;
   const productLevel = epic === FOUNDATION_EPIC || epic === DISCOVERY_EPIC;
   const seeding = productLevel ? !seededAt(FOUNDATION_EPIC) && !seededAt(DISCOVERY_EPIC) : !seededAt(epic);
-  const sorted = sortChanges(entries, { epic, step, verified, seeding });
+  const sorted = sortChanges(entries, { epic, step, verified, seeding, isRepo: repoAt(root, env) });
   // What `git add` can take: a path on disk or in the index. A deletion already staged (`D `, from `git rm`
   // or the old half of a `git mv`) is in neither, and `git add` would refuse it — but it is in HEAD, so
   // `commit --only` commits the deletion. A path added and then deleted (`AD`) is in none of the three and

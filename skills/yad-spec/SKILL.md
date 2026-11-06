@@ -130,12 +130,13 @@ prints (an ID it cannot find, say) is a warning: copy it into that section as an
 not guess a frame. `recorded: false` or an empty list means no frames: write no section.
 
 **Check the design tool can be reached (#358), before anything else for a story with frames.** The same
-answer carries `preflight`. When `preflight.reachable` is `check`, make the MCP call `preflight.probe`
-describes, now, before the ceremony starts. Some design tools (Pencil, Figma's desktop server) are read
+answer carries `preflight`. When `preflight.reachable` is `check`, make the check `preflight.probe`
+describes (an MCP call, or for a tool's CLI — `preflight.local` is true — a command in your terminal),
+now, before the ceremony starts. Some design tools (Pencil, Figma's desktop server) are read
 through the running app, so a closed app or the wrong file open is found here and not half way through.
 - **It answers, with the right file open:** go on.
-- **It fails because the tool is not on this machine at all** (no such MCP server in your session — not a
-  closed app, the wrong file or a sign-in), and the answer has `preflight.connect`: offer it first, under the connect-tool rule
+- **It fails because the tool is not on this machine at all** (no such MCP server in your session, or for a
+  CLI no such program — not a closed app, the wrong file or a sign-in), and the answer has `preflight.connect`: offer it first, under the connect-tool rule
   (show its `ask`, ask once, run only its `agent` steps, hand over the rest, verify). Once it is found,
   probe again. A new MCP server is loaded when the agent starts: if your session does not see it yet
   (in Claude Code, `/mcp`), STOP and tell the person to restart the agent and run this step again —

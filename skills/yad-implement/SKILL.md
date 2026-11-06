@@ -116,9 +116,10 @@ read them from their `url` otherwise. Never pick a frame by its look or its name
 find is an open question for the batch below, not a guess.
 
 **Before any code for a task with UI, check the design tool can be reached (#358).** When that answer's
-`preflight.reachable` is `check`, make the MCP call `preflight.probe` describes. If it fails because the
-tool is not on this machine at all (no such MCP server in your session — not a closed app, the wrong file
-or a sign-in) and the answer has `preflight.connect`, offer it first, under the connect-tool rule, and probe again once it is
+`preflight.reachable` is `check`, make the check `preflight.probe` describes (an MCP call, or for a tool's
+CLI — `preflight.local` is true — a command in your terminal). If it fails because the
+tool is not on this machine at all (no such MCP server in your session, or for a CLI no such
+program — not a closed app, the wrong file or a sign-in) and the answer has `preflight.connect`, offer it first, under the connect-tool rule, and probe again once it is
 found. A new MCP server is loaded when the agent starts: if your session does not see it yet (in Claude
 Code, `/mcp`), **STOP** and tell the person to restart the agent and run this step again — they may
 still choose to go on from the frame links, recorded as below. On a no, when a step fails, if it still fails, or if another
