@@ -79,6 +79,7 @@ try {
   // Every call runs in the work folder, with the code on stdin (no shell quoting on any system).
   const op = (args, code) => {
     const r = spawnSync(process.execPath, [bin, ...args], { cwd: workDir, input: code, encoding: 'utf8', timeout: TIMEOUT, env: SAFE_ENV });
+    if (r.signal === 'SIGINT') fail(2, 'stopped');
     if (r.status !== 0) fail(2, `openpencil ${args.join(' ')} failed: ${r.error?.message ?? ''}\n${r.stderr || r.stdout || ''}`);
     return r.stdout;
   };
