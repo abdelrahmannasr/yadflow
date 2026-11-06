@@ -10944,7 +10944,7 @@ test('E164: the UI review covers design/ — no design file keeps the old finger
     const withFile = artifactHash(ep, 'ui-design.md');
     assert.notEqual(withFile, docOnly, 'the design file is covered');
     assert.deepEqual(acceptedHashes(ep, 'ui-design.md').slice(0, 1), [withFile], 'what is written is the new form');
-    assert.equal(isStaleHash(docOnly, acceptedHashes(ep, 'ui-design.md')), false, 'an approval from before design/ was covered still counts');
+    assert.equal(isStaleHash(docOnly, acceptedHashes(ep, 'ui-design.md')), true, 'review 1: adding a design file after approval needs a fresh review too');
     setFrontmatterStatus(doc, 'approved');
     assert.equal(artifactHash(ep, 'ui-design.md'), withFile, 'the gate\'s status flip is not an edit');
     fs.writeFileSync(path.join(ep, 'design/screens.fig'), Buffer.from([0x66, 0x69, 0x67, 0x00, 0x01]));
@@ -10960,6 +10960,15 @@ test('E164: the UI review covers design/ — no design file keeps the old finger
       assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'a link is not a design file — a commit copy skips it too');
       fs.rmSync(path.join(ep, 'design/link.md'));
     }
+    // Review 1: what the system or an editor drops there (often not ignored by git) is not a design file,
+    // and neither is a nested repository — the disk must agree with the approved commit.
+    for (const junk of ['.DS_Store', 'screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/.hidden']) fs.writeFileSync(path.join(ep, 'design', junk), 'junk');
+    fs.mkdirSync(path.join(ep, 'design/vendor'));
+    fs.writeFileSync(path.join(ep, 'design/vendor/.git'), 'gitdir: elsewhere\n');
+    fs.writeFileSync(path.join(ep, 'design/vendor/kit.fig'), 'kit');
+    assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'junk files and a nested repository are left out');
+    for (const junk of ['.DS_Store', 'screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/.hidden']) fs.rmSync(path.join(ep, 'design', junk));
+    fs.rmSync(path.join(ep, 'design/vendor'), { recursive: true });
     git(R, 'add', '-A');
     git(R, 'commit', '-qm', 'ui');
     fs.rmSync(path.join(R, 'epics'), { recursive: true });
@@ -10970,6 +10979,31 @@ test('E164: the UI review covers design/ — no design file keeps the old finger
     assert.equal(at.copied, 3, 'ui-design.md and both design files');
     assert.equal(at.hash, artifactHash(ep, 'ui-design.md'), 'the approved commit and the disk give one fingerprint');
   } finally { fs.rmSync(R, { recursive: true, force: true }); }
+});
+
+test('E164 review 1: a Git LFS pointer and the file it stands for give one fingerprint; a linked design folder is no folder', async () => {
+  const { artifactHash, reviewedSha } = await import('./epic-state.mjs');
+  const { createHash } = await import('node:crypto');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-lfs-'));
+  try {
+    const real = path.join(T, 'real'); const ptr = path.join(T, 'ptr');
+    for (const d of [real, ptr]) { fs.mkdirSync(path.join(d, 'design'), { recursive: true }); fs.writeFileSync(path.join(d, 'ui-design.md'), '# UI\n'); }
+    const content = Buffer.from([0x66, 0x69, 0x67, 0x00, 0x01, 0x02]);
+    fs.writeFileSync(path.join(real, 'design/screens.fig'), content);
+    const oid = createHash('sha256').update(content).digest('hex');
+    // What a checkout without LFS leaves on disk (CI's actions/checkout does not fetch LFS by default).
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`);
+    assert.equal(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'the pointer names the same SHA-256 as the file');
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `version https://git-lfs.github.com/spec/v1\noid sha256:${'0'.repeat(64)}\nsize 6\n`);
+    assert.notEqual(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'another object is another design');
+    if (process.platform !== 'win32') {
+      const linked = path.join(T, 'linked');
+      fs.mkdirSync(linked);
+      fs.writeFileSync(path.join(linked, 'ui-design.md'), '# UI\n');
+      fs.symlinkSync(path.join(real, 'design'), path.join(linked, 'design'));
+      assert.equal(artifactHash(linked, 'ui-design.md'), reviewedSha(path.join(linked, 'ui-design.md')), 'a design folder that is a link is held as a link by a commit, so it counts as no folder');
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('artifactHashAt: the fingerprint at a commit is artifactHash of the same files, for every kind of artifact (issue #366)', async () => {
@@ -26872,8 +26906,8 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   const ui = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/.sdlc/design-links.json' }, { xy: '??', path: 'epics/EP-x/DESIGN.md' }, { xy: ' M', path: 'epics/EP-x/.sdlc/test-links.json' }], { epic: 'EP-x', step: 'ui-design', verified: true });
   assert.deepEqual([ui.step, ui.ci, ui.other], [['epics/EP-x/.sdlc/design-links.json', 'epics/EP-x/DESIGN.md'], [], ['epics/EP-x/.sdlc/test-links.json']], 'the skill\'s artifact set, never left for CI');
   // E164: the epic's design file is the UI step's too; a look-alike name beside it is not.
-  const design = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/screens.fig' }, { xy: '??', path: 'epics/EP-x/design-old.fig' }], { epic: 'EP-x', step: 'ui-design', verified: true });
-  assert.deepEqual([design.step, design.other], [['epics/EP-x/design/screens.fig'], ['epics/EP-x/design-old.fig']]);
+  const design = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/screens.fig' }, { xy: '??', path: 'epics/EP-x/design-old.fig' }, { xy: '??', path: 'epics/EP-x/design/.DS_Store' }, { xy: '??', path: 'epics/EP-x/design/a/x.fig~' }], { epic: 'EP-x', step: 'ui-design', verified: true });
+  assert.deepEqual([design.step, design.other], [['epics/EP-x/design/screens.fig'], ['epics/EP-x/design-old.fig', 'epics/EP-x/design/.DS_Store', 'epics/EP-x/design/a/x.fig~']], 'review 1: junk the fingerprint leaves out is not folded');
   const found = fold.sortChanges([{ xy: '??', path: 'foundation/purpose.md' }], { epic: 'EP-foundation', step: 'foundation', verified: false });
   assert.deepEqual(found.step, ['foundation/purpose.md']);
   assert.equal(fold.authorStepOf('stories-S02'), 'stories');

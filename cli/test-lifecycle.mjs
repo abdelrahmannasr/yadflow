@@ -26,7 +26,7 @@ const {
   ARTIFACT_TYPES, DRIVERS, BEHAVIOURS, DEFAULT_LIFECYCLE, DEFAULT_VERSION, KNOWN_KEYS, PARTS, PHASE_LEVELS,
   PHASE_RUNS, SENTINELS, STEP_KINDS, applyConfigRegions, configRegions, expandRoutes, expandSteps, featurePhases,
   artifactKey, laneAuthorSteps, laneOrder, lifecycleProblems, loadDefault, normalizeLifecycle, productPhases, routeKind,
-  shippedDefaults, yadflowClaims,
+  shippedDefaults, yadflowClaims, ENGINE_FOLDERS,
 } = await import('./lifecycle.mjs');
 const { stepPaths } = await import('./fold.mjs');
 const { DRIVER_FROM_ASSISTANCE } = await import('./manifest.mjs');
@@ -277,6 +277,13 @@ const CASES = [
   ['a file inside the stories folder', (d) => {
     d.steps.push({ id: 'extra', name: 'Extra', phase: 'plan', kind: 'author', artifact: { type: 'file', path: 'stories/extra.md' }, gate: { riskTags: [] } });
   }, /"stories\/extra.md" is inside step stories's folder/],
+  // E164: the UI design's design/ folder is that step's, though no default lists it.
+  ['a file inside the UI design\'s design/ folder', (d) => {
+    d.steps.push({ id: 'mock', name: 'Mock', phase: 'design', kind: 'author', artifact: { type: 'file', path: 'design/mock.md' }, gate: { riskTags: [] } });
+  }, /"design\/mock.md" is inside step ui-design's folder "design\/"/],
+  ['a team folder named design/', (d) => {
+    d.steps.push({ id: 'mocks', name: 'Mocks', phase: 'design', kind: 'author', artifact: { type: 'folder', path: 'design/' }, gate: { riskTags: [] } });
+  }, /"design\/" is a file of yadflow's "ui-design" step/],
   ['a team folder holding another step\'s file', (d) => {
     step(d, 'analysis').artifact.path = 'research/analysis.md';
     d.steps.push({ id: 'research', name: 'Research', phase: 'discover', kind: 'author', artifact: { type: 'folder', path: 'research/' }, gate: { riskTags: [] } });
@@ -496,10 +503,10 @@ test('yadflow\'s claimed files are exactly what the engine commits for each step
   // The claims rule reads the shipped defaults; this ties those defaults to the engine, per artifact type,
   // so a later default cannot list files the engine does not commit, or leave out one it does.
   const rel = (p) => p.replace(/^epics\/EP-x\//, '');
-  // E164: the one folder the engine commits that no default claims. ui-design's `design/` (the epic's
-  // design file) cannot be an `extraPaths` entry — that list takes files, never a folder — and a shipped
-  // default never changes. A later default may claim it once a folder is allowed there.
-  const ENGINE_ONLY = { 'ui-design': ['design'] };
+  // E164: the folders the engine commits that no default claims (ENGINE_FOLDERS: ui-design's `design/`,
+  // which `extraPaths` cannot hold — it takes files — and a shipped default never changes).
+  const ENGINE_ONLY = Object.fromEntries(Object.entries(ENGINE_FOLDERS).map(([k, v]) => [k, v.map((d) => d.replace(/\/$/, ''))]));
+  assert.deepEqual(ENGINE_ONLY, { 'ui-design': [ES.UI_DESIGN_DIR] }, 'the validator\'s folder is the one the engine covers');
   let checked = 0;
   for (const st of DEFAULT_LIFECYCLE.steps.filter((x) => x.artifact)) {
     const engine = stepPaths('EP-x', st.id).map(rel).filter((p) => !(ENGINE_ONLY[st.id] || []).includes(p));

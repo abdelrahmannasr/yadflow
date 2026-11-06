@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ok, info, warn, fail, hand, readJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger } from './manifest.mjs';
-import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot, isValidEpicId } from './epic-state.mjs';
+import { STEPS, FOUNDATION_EPIC, FOUNDATION_DIR, DISCOVERY_EPIC, artifactBase, artifactPaths, epicRoot, isValidEpicId, isDesignJunk, UI_DESIGN_DIR } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, statusEntries, wipName, wipBranch, runCapture } from './capture.mjs';
 import { resolveDefaultBranch, preflightGuardReadiness } from './productcommit.mjs';
 
@@ -53,7 +53,11 @@ export function stepPaths(epic, stepId) {
   if (!step) return null;
   return [...artifactPaths(artifactBase(step.artifact)), ...(STEP_EXTRAS[stepId] || [])].map((p) => `${epicRel(epic)}/${p}`);
 }
-const covers = (paths, p) => paths.some((s) => p === s || p.startsWith(`${s}/`));
+// A file the system or an editor drops in the UI design's `design/` folder (`.DS_Store`, `x.fig~`) is not
+// the step's: the fingerprint leaves it out (`isDesignJunk`), so a fold that committed it would put a file
+// in the review that no approval covers. It is left on disk like any other file.
+const covers = (paths, p) => paths.some((s) => p === s
+  || (p.startsWith(`${s}/`) && !(s.endsWith(`/${UI_DESIGN_DIR}`) && isDesignJunk(p.slice(s.length + 1)))));
 
 // The scope is the epic ID in lowercase (#413): the commit-message gate takes a lowercase scope
 // (`[a-z0-9._-]`), so `docs(EP-x)` failed every review PR. The exact ID stays in the Yad-Epic trailer.

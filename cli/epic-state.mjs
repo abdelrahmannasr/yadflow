@@ -603,26 +603,60 @@ export function storiesHash(epicDir, sha = reviewedSha) {
 
 // E164: the UI design's fingerprint. With no file under `design/`, it is the fingerprint of ui-design.md
 // alone — byte for byte what every release before E164 recorded, so no approval of a Figma or Pencil
-// design moves. With design files, it covers them too: ui-design.md as reviewed (`sha`), then each file
-// under `design/` as its raw bytes (a design file has no status line), sorted by path. Only regular files
-// count, the same as `artifactHashAt`, which copies only those out of a commit.
+// design moves. With design files, it covers them too: ui-design.md as reviewed (`sha`), then each design
+// file (`designSha`, never with a status line left out), sorted by path.
+//
+// Which files count is decided here, and the copy `artifactHashAt` makes of a commit is read by the same
+// walk, so the disk and the approved commit agree:
+//   - regular files only (a link is skipped; so is a `design` folder that is itself a link — a commit
+//     holds it as a link, not a folder);
+//   - never a file the system or an editor drops beside a design (`isDesignJunk`: a name starting with a
+//     dot such as `.DS_Store`, one ending in `~`, `Thumbs.db`, `desktop.ini`) — git often does not
+//     ignore those, and counting one would make every approval look changed on that machine only;
+//   - never inside a folder holding `.git` (a submodule or a nested repository: a commit holds it as one
+//     entry, not its files).
+const DESIGN_JUNK = /^(?:\..*|.*~|thumbs\.db|desktop\.ini)$/i;
+export const isDesignJunk = (rel) => rel.split('/').some((seg) => DESIGN_JUNK.test(seg));
 function designFiles(dir, rel = '') {
+  if (rel === '') {
+    try { if (!fs.lstatSync(dir).isDirectory()) return []; } catch { return []; }
+  }
   let entries;
   try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return []; }
+  if (entries.some((e) => e.name === '.git')) return [];
   const out = [];
   for (const e of entries) {
+    if (DESIGN_JUNK.test(e.name)) continue;
     const r = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) out.push(...designFiles(dir, r));
     else if (e.isFile()) out.push(r);
   }
   return out;
 }
-export function uiDesignHash(epicDir, sha = reviewedSha) {
+// One design file's fingerprint: the SHA-256 of its content. A Git LFS pointer (the small text file a
+// checkout without LFS leaves in place of a large file) names that same SHA-256 as its `oid`, so the
+// pointer and the real file give one fingerprint — CI checks out pointers, `artifactHashAt` may read
+// the real file through the LFS filter, and the two must agree.
+const LFS_SPEC = 'version https://git-lfs.github.com/spec/v1';
+function designSha(p) {
+  const bytes = fs.readFileSync(p);
+  if (bytes.length < 1024) {
+    const text = bytes.toString('utf8');
+    const oid = text.startsWith(LFS_SPEC) ? text.match(/^oid sha256:([0-9a-f]{64})\r?$/m) : null;
+    if (oid) return `sha256:${oid[1]}`;
+  }
+  return shaOf(bytes);
+}
+// The design files' part of the fingerprint, read once: `acceptedHashes` combines it with each form of
+// ui-design.md, so a large design file is not read again for every form.
+function designParts(epicDir) {
+  const dir = path.join(epicDir, UI_DESIGN_DIR);
+  return designFiles(dir).sort().map((f) => `${UI_DESIGN_DIR}/${f}:${designSha(path.join(dir, ...f.split('/')))}`);
+}
+export function uiDesignHash(epicDir, sha = reviewedSha, parts = designParts(epicDir)) {
   const doc = sha(path.join(epicDir, 'ui-design.md'));
-  const files = designFiles(path.join(epicDir, UI_DESIGN_DIR)).sort();
-  if (!files.length || doc === null) return doc;
-  const parts = [`ui-design.md:${doc}`, ...files.map((f) => `${UI_DESIGN_DIR}/${f}:${fileSha(path.join(epicDir, UI_DESIGN_DIR, ...f.split('/')))}`)];
-  return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
+  if (!parts.length || doc === null) return doc;
+  return 'sha256:' + createHash('sha256').update([`ui-design.md:${doc}`, ...parts].join('\n')).digest('hex');
 }
 
 // The reserved id of the Product level in its OLD spelling ("epic zero", `epics/EP-discovery/`), written
@@ -984,13 +1018,12 @@ export function artifactHash(epicDir, artifact, sha = reviewedSha) {
 // legacy forms (see LEGACY_FORMS). Empty when there is nothing to fingerprint — the same "no claim"
 // answer a null `artifactHash` gives. What is WRITTEN is always `artifactHash`; this is for reading.
 export function acceptedHashes(epicDir, artifact) {
-  const current = artifactHash(epicDir, artifact);
+  // The UI design's files are read once and combined with each form of ui-design.md (E164).
+  const parts = artifactBase(artifact) === 'ui-design' ? designParts(epicDir) : null;
+  const hashWith = parts ? (sha) => uiDesignHash(epicDir, sha, parts) : (sha) => artifactHash(epicDir, artifact, sha);
+  const current = hashWith(reviewedSha);
   if (current === null) return [];
-  // E164: an approval recorded before the UI review covered `design/` was bound to ui-design.md alone —
-  // under PR 1 a person committed the folder by hand — so that form, and its legacy forms, still count.
-  const docOnly = artifactBase(artifact) === 'ui-design'
-    ? [reviewedSha, ...LEGACY_FORMS].map((sha) => sha(path.join(epicDir, 'ui-design.md'))) : [];
-  return [...new Set([current, ...LEGACY_FORMS.map((sha) => artifactHash(epicDir, artifact, sha)), ...docOnly].filter(Boolean))];
+  return [...new Set([current, ...LEGACY_FORMS.map(hashWith)].filter(Boolean))];
 }
 
 // Is a recorded fingerprint stale against the accepted ones? Never when nothing was recorded (a manual
