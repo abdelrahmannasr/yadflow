@@ -271,6 +271,27 @@ test('#358: designPreflight — Pencil is read through the app; Figma only throu
     assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider } }, links, frames).reachable, 'not-checkable', provider);
   }
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma' } }, { ...links, tool: 'Figma' }, frames).reachable, 'check', 'the same tool in other letters is not a switch');
+  for (const r of [pencil, desk, cloud, old]) assert.equal(r.local, false, 'only a provider in reach.local is local');
+});
+
+test('E164: designPreflight — OpenPencil\'s CLI needs no app and no sign-in; its MCP server needs the app', () => {
+  const frames = [{ id: 'login-mobile', found: true }];
+  const links = { state: 'ok', tool: 'openpencil', fileUrl: 'epics/EP-shop/design/screens.fig', screens: [] };
+  const cli = designPreflight({ state: 'ok', data: { tool: 'openpencil', provider: 'openpencil-cli' } }, links, frames);
+  assert.deepEqual([cli.reachable, cli.appBound, cli.local, cli.frame], ['check', false, true, 'login-mobile']);
+  assert.match(cli.probe, /^check that `epics\/EP-shop\/design\/screens\.fig` is in the Product checkout and that `openpencil --version` runs/);
+  assert.match(cli.probe, /shared plugin data `yad`\/`nodeId` is `login-mobile`/, 'the frame is found by the ID yad stored on it');
+  assert.match(cli.stop, /^Pull the Product so that `epics\/EP-shop\/design\/screens\.fig` is there with frame `login-mobile` in it/);
+  for (const text of [cli.probe, cli.stop]) assert.doesNotMatch(text, /desktop app|sign in/i, 'the CLI path never asks for an app or a sign-in');
+  assert.equal(cli.connect, 'yad toolbox connect openpencil --json');
+  const mcp = designPreflight({ state: 'ok', data: { tool: 'openpencil', provider: 'openpencil-mcp' } }, links, frames);
+  assert.deepEqual([mcp.appBound, mcp.local], [true, false]);
+  assert.match(mcp.probe, /OpenPencil MCP: its eval tool/);
+  assert.match(mcp.stop, /^Open the OpenPencil desktop app with `epics\/EP-shop\/design\/screens\.fig` loaded \(the file must be inside OPENPENCIL_MCP_ROOT\)/);
+  assert.equal(mcp.connect, 'yad toolbox connect openpencil --json', 'OpenPencil\'s recipe adds its MCP server, so it is offered');
+  const unknown = designPreflight({ state: 'ok', data: { tool: 'openpencil' } }, links, frames);
+  assert.deepEqual([unknown.appBound, unknown.local, /runs in your terminal \(the CLI\), or open the OpenPencil desktop app/.test(unknown.stop)], [null, false, true], 'no provider: both ways');
+  assert.equal(designPreflight({ state: 'ok', data: { tool: 'openpencil', provider: 'OpenPencil_CLI' } }, links, frames).local, true, 'names are compared on letters and digits');
 });
 
 test('#358: designPreflight — nothing to probe is not-checkable, and no frame means no preflight', () => {
@@ -282,9 +303,6 @@ test('#358: designPreflight — nothing to probe is not-checkable, and no frame 
     assert.equal(r.connect, undefined, 'nothing to probe, nothing to connect: connecting the team\'s tool is yad-connect-design\'s');
   }
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'pencil' } }, links, []), null);
-  // E164: OpenPencil has no reach rule until its second PR — not checkable, said plainly.
-  assert.deepEqual(designPreflight({ state: 'ok', data: { tool: 'openpencil', provider: 'openpencil-mcp' } }, links, frames),
-    { tool: 'openpencil', reachable: 'not-checkable', why: 'yad has no reachability check for openpencil' });
   const writer = designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'html-to-design' } }, links, frames);
   assert.deepEqual([writer.reachable, /cannot read a frame/.test(writer.why)], ['not-checkable', true]);
   const gone = designPreflight({ state: 'ok', data: { tool: 'pencil' } }, { state: 'missing' }, [{ id: '9:9', found: false }]);
@@ -303,7 +321,13 @@ test('#358: designPreflight — nothing to probe is not-checkable, and no frame 
 test('#358: readDesignConfig, the reach data, and preflight through the command', () => {
   for (const t of TOOLBOX.filter((x) => x.reach)) assert.deepEqual(toolProblems(t), [], t.id);
   const figma = TOOLBOX.find((x) => x.id === 'figma');
-  assert.deepEqual(toolProblems({ ...figma, reach: { app: 'F', probe: 'p', open: 'o', readers: true, appBound: ['x'] } }), ['reach.signIn and reach.either say what to do when the provider needs no app, or yad cannot tell']);
+  assert.deepEqual(toolProblems({ ...figma, reach: { app: 'F', probe: 'p', open: 'o', readers: true, appBound: ['x'] } }), ['reach.either says what to do when yad cannot tell whether the provider needs the app']);
+  assert.deepEqual(toolProblems({ ...figma, reach: { app: 'F', probe: 'p', open: 'o', appBound: ['x'], either: 'e', signInOnly: ['y'] } }), ['reach.signIn says what to do for a provider in signInOnly']);
+  // E164: a local provider (a CLI on the file) carries its own probe and stop text.
+  const op = TOOLBOX.find((x) => x.id === 'openpencil');
+  assert.deepEqual(toolProblems({ ...op, reach: { ...op.reach, localStop: undefined } }), ['reach.localProbe and reach.localStop say how to check a provider in local, and what to do when that fails']);
+  assert.deepEqual(toolProblems({ ...op, reach: { ...op.reach, local: 'openpencil-cli' } }), ['reach.local is absent or a list of providers']);
+  assert.deepEqual(toolProblems({ ...figma, reach: { ...figma.reach, ownServer: [1] } }), ['reach.ownServer is absent or a list of providers']);
   assert.ok(toolProblems({ ...figma, reach: { readers: true, appBound: true } }).includes('reach has app, probe and open'));
   assert.ok(toolProblems({ ...figma, reach: null }).length > 0);
   assert.ok(toolProblems({ ...figma, reach: { ...figma.reach, appBound: false } }).includes('reach.appBound is true, or the providers read through the app'));
@@ -324,6 +348,12 @@ test('#358: readDesignConfig, the reach data, and preflight through the command'
     const desk = yad(T, 'story', 'frames', 'EP-shop-S01');
     assert.match(desk.stdout, /before UI work: .* if that fails, stop: .*Figma desktop app/);
     assert.doesNotMatch(desk.stdout, /offer to connect/);
+    // E164: OpenPencil's CLI — the local probe and stop, and the connect offer.
+    put(path.join(T, '.sdlc', 'design.json'), { tool: 'openpencil', provider: 'openpencil-cli', source: 'openpencil-cli', auth: 'user' });
+    put(path.join(T, 'epics', 'EP-shop', '.sdlc', 'design-links.json'), { ...LINKS, tool: 'openpencil', source: 'openpencil-cli' });
+    const opj = JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S01', '--json').stdout).preflight;
+    assert.deepEqual([opj.reachable, opj.appBound, opj.local, opj.connect], ['check', false, true, 'yad toolbox connect openpencil --json']);
+    assert.match(yad(T, 'story', 'frames', 'EP-shop-S01').stdout, /before UI work: check that .* `openpencil --version` runs.* if that fails, stop: Pull the Product[\s\S]*offer to connect it first: `yad toolbox connect openpencil --json`/);
     assert.equal(JSON.parse(yad(T, 'story', 'frames', 'EP-shop-S02', '--json').stdout).preflight, null, 'no screens, no probe');
   } finally { done(T); }
 });

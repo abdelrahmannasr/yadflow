@@ -152,7 +152,8 @@ export function readDesignConfig(root) {
 // when the answer is no; the yad-spec and yad-implement skills make the call and stop on a failure.
 // null when the story names no frame (no UI task, nothing to check). `reachable` is `check` (probe, and
 // stop when it fails) or `not-checkable` (nothing to probe: go on with the links). `appBound` is true (read
-// through the running app), false (a hosted server: sign in) or null (yad cannot tell: `stop` names both).
+// through the running app), false (no app: a hosted server, so sign in — or, with `local` true, a CLI that
+// works on the design file on disk, E164) or null (yad cannot tell: `stop` names both).
 export function designPreflight(design, links, frames) {
   if (!frames.length) return null;
   const d = design.state === 'ok' ? design.data : null;
@@ -184,19 +185,21 @@ export function designPreflight(design, links, frames) {
   // Every recorded ID is unresolved: the bad IDs are the problem (the warnings name them), not the app.
   const found = frames.find((f) => f.found);
   if (!found) return notCheckable('no recorded frame is in design-links.json — fix the frame IDs first');
-  const appBound = reach.appBound === true || listed(reach.appBound) ? true : listed(reach.signInOnly) ? false : null;
+  const local = listed(reach.local);
+  const appBound = local ? false : reach.appBound === true || listed(reach.appBound) ? true : listed(reach.signInOnly) ? false : null;
   // design.json's project_url is a project, not a file, so it is never compared against.
   const file = links.fileUrl;
   const fill = (s) => s.replace(/<file>/g, file ? `\`${forTerminal(file)}\`` : 'the design file').replace(/<frame>/g, `\`${forTerminal(found.id)}\``);
   return {
-    tool, provider, reachable: 'check', appBound, file, frame: found.id,
-    probe: fill(reach.probe),
-    stop: fill(appBound === true ? reach.open : appBound === false ? reach.signIn : reach.either),
+    tool, provider, reachable: 'check', appBound, local, file, frame: found.id,
+    probe: fill(local ? reach.localProbe : reach.probe),
+    stop: fill(local ? reach.localStop : appBound === true ? reach.open : appBound === false ? reach.signIn : reach.either),
     // E165: when the probe fails because the tool is not on this machine at all (not a closed app or a
     // sign-in), the agent offers this first, under the connect-tool rule. A tool with a reach rule is shipped.
-    // Not for a provider that is one app's own server (Figma's figma-desktop): the tool's recipe connects its
-    // other server, so the person opens the app instead, as `stop` says.
-    ...(Array.isArray(reach.appBound) && listed(reach.appBound) ? {} : { connect: `yad toolbox connect ${tool} --json` }),
+    // Not for a provider that is one app's own server (`reach.ownServer`: Figma's figma-desktop): the tool's
+    // recipe connects its other server, so the person opens the app instead, as `stop` says. OpenPencil's
+    // MCP server is not one: its recipe adds it.
+    ...(listed(reach.ownServer) ? {} : { connect: `yad toolbox connect ${tool} --json` }),
   };
 }
 

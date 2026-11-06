@@ -260,7 +260,7 @@ export const TOOLBOX = Object.freeze([
     // `html-to-design` only writes (import-html) and cannot read a frame. Any other provider name — the
     // MCP id is free text — is probed, with the message that names both servers.
     reach: {
-      app: 'Figma', writers: ['html-to-design'], appBound: ['figma-desktop'], signInOnly: ['figma'],
+      app: 'Figma', writers: ['html-to-design'], appBound: ['figma-desktop'], signInOnly: ['figma'], ownServer: ['figma-desktop'],
       probe: 'read frame <frame> through the Figma MCP (get_metadata, with that node ID)',
       open: 'Open the Figma desktop app with <file> loaded and its Dev Mode MCP server on, then continue',
       signIn: 'Sign in to Figma in your agent (its Figma MCP server), check that you can open <file>, then continue',
@@ -297,7 +297,10 @@ export const TOOLBOX = Object.freeze([
   // bridge to the running desktop app, used only when the app is open with the file. Beside Figma and Pencil,
   // never in place of them: it reads local `.fig` copies only (never Figma's cloud), and opens `.pen` files
   // only partly. Both packages are pinned to an exact version while it is before 1.0, and each bump is vetted
-  // again. No `reach` block yet: the design preflight (#358) answers `not-checkable` until E164's second PR.
+  // again. OpenPencil's own node IDs are NOT stable: it numbers nodes in the order it loads them, so after a
+  // frame is deleted or added another frame can take an old ID (checked by hand on 0.16.0, E164 PR 2). So
+  // yad-ui stores yad's own ID on each frame (shared plugin data `yad`/`nodeId`) and records that, and every
+  // read finds the frame by it.
   {
     id: 'openpencil', name: 'OpenPencil', tier: 'connector', role: 'design tool: yad-ui writes screens into a design file in the repo through its CLI, with no account and no app open',
     licence: 'MIT', source: 'https://github.com/open-pencil/open-pencil', checked: '2026-11-05',
@@ -320,6 +323,17 @@ export const TOOLBOX = Object.freeze([
     fallback: 'markdown-only: yad-ui writes ui-design.md and DESIGN.md only',
     records: null,
     note: 'The CLI (openpencil) works on the file with no app open. The MCP server only forwards to the running desktop app, and reads and writes only files inside OPENPENCIL_MCP_ROOT (the folder it starts in by default; the home folder on Windows). It opens local .fig copies, never Figma\'s cloud, and a round trip may lose detail; .pen support is partial.',
+    // #358 + E164: the CLI (`openpencil-cli`) works on the design file in the Product with no app and no
+    // sign-in; the MCP server (`openpencil-mcp`) is a bridge to the running desktop app. Both find a frame by
+    // the ID yad stored on it, never by OpenPencil's own node ID, which changes when the file is reopened.
+    reach: {
+      app: 'OpenPencil', appBound: ['openpencil-mcp'], local: ['openpencil-cli'],
+      probe: 'find frame <frame> in <file> through the OpenPencil MCP: its eval tool, looking for the node whose shared plugin data `yad`/`nodeId` is <frame> (figma.root.findAll with getSharedPluginData)',
+      open: 'Open the OpenPencil desktop app with <file> loaded (the file must be inside OPENPENCIL_MCP_ROOT), then continue',
+      localProbe: 'check that <file> is in the Product checkout and that `openpencil --version` runs, then find frame <frame> with `openpencil eval` on that file: the node whose shared plugin data `yad`/`nodeId` is <frame> (figma.root.findAll with getSharedPluginData)',
+      localStop: 'Pull the Product so that <file> is there with frame <frame> in it, and make sure `openpencil` runs in your terminal, then continue',
+      either: 'Make sure <file> is in your Product checkout and `openpencil` runs in your terminal (the CLI), or open the OpenPencil desktop app with <file> loaded (its MCP server), then continue',
+    },
     usedBy: ['yad-connect-design', 'yad-ui'],
   },
   {
@@ -456,8 +470,12 @@ export function toolProblems(t) {
   need(t?.tier !== 'connector' || !isStringList(t?.usedBy) || connectorFile(t) !== null, 'a connector names the yad-connect-* skill that connects it');
   // #358 reach: `appBound` is `true` (every provider) or a list of providers; `writers` (optional) lists the
   // providers that cannot read a frame. Provider names are compared in lower case. A tool whose
-  // providers need no app writes `appBound: []`; then `signIn` (a provider in `signInOnly`) and `either`
-  // (a provider in neither list, so yad cannot tell) say what to do instead.
+  // providers need no app writes `appBound: []`; then `either` says what to do when the provider is in no
+  // list, so yad cannot tell. Two more kinds of provider need no app: `signInOnly` (a hosted server — the
+  // person signs in, said by `signIn`) and, E164, `local` (a CLI that works on the design file on disk —
+  // no app and no sign-in: `localProbe` and `localStop` replace `probe` and the stop text). `ownServer`
+  // (optional) lists the providers that are an app's own server, which the tool's recipe does not install,
+  // so the preflight offers no connect step for them (E165).
   const r = t?.reach;
   if (r !== undefined) {
     const text = (v) => typeof v === 'string' && v.length > 0;
@@ -465,7 +483,11 @@ export function toolProblems(t) {
     need(r?.writers === undefined || isStringList(r?.writers), 'reach.writers is absent or the providers that cannot read a frame');
     need(r?.appBound === true || isStringList(r?.appBound), 'reach.appBound is true, or the providers read through the app');
     need(r?.signInOnly === undefined || isStringList(r?.signInOnly), 'reach.signInOnly is absent or a list of providers');
-    need(r?.appBound === true || (text(r?.signIn) && text(r?.either)), 'reach.signIn and reach.either say what to do when the provider needs no app, or yad cannot tell');
+    need(r?.signInOnly === undefined || text(r?.signIn), 'reach.signIn says what to do for a provider in signInOnly');
+    need(r?.local === undefined || isStringList(r?.local), 'reach.local is absent or a list of providers');
+    need(r?.local === undefined || (text(r?.localProbe) && text(r?.localStop)), 'reach.localProbe and reach.localStop say how to check a provider in local, and what to do when that fails');
+    need(r?.ownServer === undefined || isStringList(r?.ownServer), 'reach.ownServer is absent or a list of providers');
+    need(r?.appBound === true || text(r?.either), 'reach.either says what to do when yad cannot tell whether the provider needs the app');
   }
   return out;
 }

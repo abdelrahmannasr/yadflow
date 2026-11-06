@@ -1877,7 +1877,7 @@ test('E164: OpenPencil is a design connector — vetted, pinned exactly, one ins
   assert.equal(toolStatus(op, [{ kind: 'mcp', name: 'open-pencil', where: '~/.claude.json', version: null }], { has: none }).state, 'installed');
   assert.equal(toolStatus(op, [], { has: (b) => b === 'openpencil' }).state, 'installed');
   assert.equal(toolStatus(op, [], { has: none }).state, 'missing');
-  assert.equal(op.reach, undefined, 'no reach rule until E164\'s second PR');
+  assert.deepEqual([op.reach.local, op.reach.appBound, op.reach.ownServer], [['openpencil-cli'], ['openpencil-mcp'], undefined], 'E164 PR 2: the CLI is local, the MCP server needs the app');
 });
 
 // ---- E165: `yad toolbox connect` — the agent connects a tool after one yes ---------------------------
