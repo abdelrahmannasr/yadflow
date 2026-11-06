@@ -23,6 +23,13 @@ import { checkCodeowners, codeownersFindings, unguardedHint, unguardedWords } fr
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, shown } from './protection.mjs';
 import { readTokenPlacement, tokenLine, readExpiringProductTokens, TOKEN_NAME } from './product-token.mjs';
+
+// The design, testing and learning rows (E165 follow-up). A refresh with no `tool` checks the skill's
+// default tool, not the team's, so every hint names it — and, for a tool not found here, the connect step
+// the agent can offer under the connect-tool rule. The tool is one of DESIGN_TOOLS / TESTING_TOOLS /
+// LEARNING_TOOLS by the time these run, each with a connect recipe.
+const connectThenRefresh = (skill, tool) => `connect it — your agent can run \`yad toolbox connect ${tool} --json\` (it asks you once) — then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``;
+const confirmByRefresh = (skill, tool) => `run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\` in your AI agent to detect it`;
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { pagesWorkflowPath, pagesWorkflowFailsOnBuild, wiredPagesPlatform } from './docs.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
@@ -468,8 +475,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     else if (design.tool === 'none') check(checks, 'design', 'project', 'ok', 'design: markdown-only');
     else if (!DESIGN_TOOLS.includes(design.tool)) check(checks, 'design', 'project', 'fail', `${PROJECT_FILES.designConfig}: unknown or missing design tool '${design.tool}' [YAD-CFG-002]`, `expected one of ${DESIGN_TOOLS.join(', ')}, or none`);
     else if (design.source && design.source !== 'unavailable') check(checks, 'design', 'project', 'ok', `design: ${design.tool} (${design.source})`);
-    else if (design.source === 'unavailable') check(checks, 'design', 'project', 'warn', `design: ${design.tool} MCP unavailable — yad-ui runs markdown-only`, 'connect the MCP, then run `yad-connect-design` (action: refresh)');
-    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-design` in your AI agent to detect the MCP');
+    else if (design.source === 'unavailable') check(checks, 'design', 'project', 'warn', `design: ${design.tool} not found on this machine — yad-ui runs markdown-only`, connectThenRefresh('yad-connect-design', design.tool));
+    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but not confirmed on this machine`, confirmByRefresh('yad-connect-design', design.tool));
   }
 
   // testing.json: parse + shape + tool + MCP confirmation (absent is the normal artifacts-only default —
@@ -488,8 +495,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     else if (testing.tool === 'none') check(checks, 'testing', 'project', 'ok', 'testing: artifacts-only');
     else if (!TESTING_TOOLS.includes(testing.tool)) check(checks, 'testing', 'project', 'fail', `${PROJECT_FILES.testingConfig}: unknown or missing testing tool '${testing.tool}' [YAD-CFG-003]`, `expected one of ${TESTING_TOOLS.join(', ')}, or none`);
     else if (testing.source && testing.source !== 'unavailable') check(checks, 'testing', 'project', 'ok', `testing: ${testing.tool} (${testing.source})`);
-    else if (testing.source === 'unavailable') check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} MCP unavailable — yad-test-cases runs artifacts-only`, 'connect the MCP, then run `yad-connect-testing` (action: refresh)');
-    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-testing` in your AI agent to detect the MCP');
+    else if (testing.source === 'unavailable') check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} not found on this machine — yad-test-cases runs artifacts-only`, connectThenRefresh('yad-connect-testing', testing.tool));
+    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but not confirmed on this machine`, confirmByRefresh('yad-connect-testing', testing.tool));
   }
 
   // learning.json: parse + shape + tool + CLI confirmation (absent is the normal harness-native default —
@@ -509,8 +516,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     else if (learning.tool === 'none') check(checks, 'learning', 'project', 'ok', 'learning: harness-native');
     else if (!LEARNING_TOOLS.includes(learning.tool)) check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown or missing learning tool '${learning.tool}' [YAD-CFG-004]`, `expected one of ${LEARNING_TOOLS.join(', ')}, or none`);
     else if (learning.source === 'deeptutor-cli') check(checks, 'learning', 'project', 'ok', `learning: ${learning.tool} (${learning.source})`);
-    else if (learning.source === 'harness-native') check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} CLI unavailable — yad-learn tutors harness-native`, 'install the deeptutor CLI, then run `yad-connect-learning` (action: refresh)');
-    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but the CLI is not confirmed`, 'run `yad-connect-learning` in your AI agent to detect the CLI');
+    else if (learning.source === 'harness-native') check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} not found on this machine — yad-learn tutors harness-native`, connectThenRefresh('yad-connect-learning', learning.tool));
+    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but not confirmed on this machine`, confirmByRefresh('yad-connect-learning', learning.tool));
     else check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown source '${learning.source}' [YAD-STATE-002]`, 'expected deeptutor-cli, harness-native, or null');
   }
 

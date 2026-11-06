@@ -12816,6 +12816,35 @@ test('doctor: design.json recorded but MCP unconfirmed warns (points at yad-conn
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('doctor: every design, testing and learning hint names the tool — a refresh with no tool checks the default one (E165 follow-up)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const cases = [
+    ['design.json', 'design', { tool: 'openpencil', source: 'unavailable' }, 'yad-connect-design', 'openpencil', /design: openpencil not found on this machine — yad-ui runs markdown-only/],
+    ['testing.json', 'testing', { tool: 'cypress', source: 'unavailable' }, 'yad-connect-testing', 'cypress', /testing: cypress not found on this machine/],
+    ['learning.json', 'learning', { tool: 'deeptutor', source: 'harness-native' }, 'yad-connect-learning', 'deeptutor', /learning: deeptutor not found on this machine/],
+  ];
+  try {
+    for (const [file, id, data, skill, tool, label] of cases) {
+      fs.writeFileSync(path.join(T, '.sdlc', file), JSON.stringify(data));
+      let row = (await doctorOn(T)).checks.find((x) => x.id === id && x.status === 'warn');
+      assert.match(row.message, label, id);
+      assert.equal(row.hint, `connect it — your agent can run \`yad toolbox connect ${tool} --json\` (it asks you once) — then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``, id);
+      assert.doesNotMatch(row.message, /MCP/, `${id}: "not found" is true for a CLI tool too`);
+      fs.writeFileSync(path.join(T, '.sdlc', file), JSON.stringify({ tool, source: null }));
+      row = (await doctorOn(T)).checks.find((x) => x.id === id && x.status === 'warn');
+      assert.equal(row.hint, `run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\` in your AI agent to detect it`, id);
+      fs.rmSync(path.join(T, '.sdlc', file));
+    }
+    // No refresh hint anywhere in doctor, or in a connect skill's references, leaves the tool out.
+    const doctorSrc = fs.readFileSync(path.join(ROOT, 'cli/doctor.mjs'), 'utf8');
+    assert.ok(!/action: refresh\)/.test(doctorSrc), 'doctor: no "(action: refresh)" without a tool');
+    for (const ref of ['skills/yad-connect-design/references/design-context.md', 'skills/yad-connect-testing/references/testing-context.md']) {
+      assert.ok(!/`yad-connect-\w+` action: refresh/.test(fs.readFileSync(path.join(ROOT, ref), 'utf8')), ref);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('doctor: Product settings with a platform but no git_url warns YAD-CFG-005 (not a misleading YAD-ENV-002)', async () => {
   const { T } = scaffold();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
