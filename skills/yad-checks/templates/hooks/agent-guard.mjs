@@ -84,33 +84,63 @@ function runYad(yad, args, options) {
 }
 // ---- end yad-resolve ---------------------------------------------------------------------------------
 
+// Read all of stdin. `fs.readFileSync(0)` throws EAGAIN when stdin is a pipe in non-blocking mode whose
+// data has not arrived yet — seen on macOS — and the hook then read nothing and allowed. So this reads in a
+// loop and, on EAGAIN, waits 5 ms and tries again, for up to `limitMs`; after that the error goes to the
+// caller, which fails open as before. A read of 0 bytes (or Windows' EOF error) is the end.
+function readStdin(limitMs = 5000) {
+  const chunks = [];
+  const buf = Buffer.alloc(64 * 1024);
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  const until = Date.now() + limitMs;
+  for (;;) {
+    let n;
+    try { n = fs.readSync(0, buf, 0, buf.length, null); } catch (e) {
+      if (e?.code === 'EAGAIN' && Date.now() < until) { Atomics.wait(nap, 0, 0, 5); continue; }
+      if (e?.code === 'EOF') break;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, n)));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 // The payload is read here, so the protocol can be chosen even when `yad` cannot be reached.
 let input = '';
-try { input = process.stdin.isTTY ? '' : fs.readFileSync(0, 'utf8'); } catch { input = ''; }
+try { input = process.stdin.isTTY ? '' : readStdin(); } catch { input = ''; }
 let payload = null;
 try { payload = JSON.parse(input); } catch { payload = null; }
 const cursor = payload?.hook_event_name === 'beforeShellExecution' || typeof payload?.cursor_version === 'string';
 const ALLOW = '{"permission":"allow"}';
+// Exit with `code` once `text` is written. stdout to a pipe is asynchronous on macOS, so a `process.exit`
+// straight after `process.stdout.write` can lose the verdict — and Cursor reads an empty answer as a block.
+// The promise never resolves: `await finish(…)` also stops the code below it.
+const finish = (code, text = '') => new Promise(() => {
+  if (!text) process.exit(code);
+  process.stdout.write(text, () => process.exit(code));
+});
 const allow = (why) => {
   if (why) process.stderr.write(`  • yad hook: ${why} — allowing\n`);
-  if (cursor) process.stdout.write(`${ALLOW}\n`);
-  process.exit(0);
+  return finish(0, cursor ? `${ALLOW}\n` : '');
 };
 
 const yad = resolveYad();
-if (!yad) allow(`no \`yad\` on PATH and none installed in ${PRODUCT_ROOT} (install yadflow to re-arm the agent guard)`);
+if (!yad) await allow(`no \`yad\` on PATH and none installed in ${PRODUCT_ROOT} (install yadflow to re-arm the agent guard)`);
 
 const r = runYad(yad, ['hook', 'agent-guard', '--format', cursor ? 'cursor' : 'exit'], { input, stdio: ['pipe', 'pipe', 'inherit'], encoding: 'utf8' });
 if (cursor) {
   // The verdict is the last non-empty line that names a permission (see ledger-guard-cursor.mjs for why).
   const lines = String(r.stdout || '').split(/\r?\n/).filter((l) => l.trim());
   const verdict = lines.length ? lines[lines.length - 1] : '';
-  if (verdict.includes('"permission"')) { process.stdout.write(`${verdict}\n`); process.exit(0); }
-  allow(r.status === 0 ? '' : `\`yad hook agent-guard\` ${r.error ? r.error.message : `exited ${r.status ?? r.signal}`} (run \`yad doctor\` to check the install)`);
+  if (verdict.includes('"permission"')) await finish(0, `${verdict}\n`);
+  await allow(r.status === 0 ? '' : `\`yad hook agent-guard\` ${r.error ? r.error.message : `exited ${r.status ?? r.signal}`} (run \`yad doctor\` to check the install)`);
 }
 // Only an explicit deny (2) blocks: a yad that cannot run, or one older than this hook (it refuses the
 // unknown action with another code), must not read as a refusal.
-if (r.stdout) process.stdout.write(r.stdout);
-if (r.status === 2) process.exit(2);
-if (r.status !== 0) allow(`\`yad hook agent-guard\` ${r.error ? r.error.message : `exited ${r.status ?? r.signal}`} (run \`yad doctor\` to check the install)`);
-process.exit(0);
+if (r.status === 2) await finish(2, r.stdout || '');
+if (r.status !== 0) {
+  if (r.stdout) process.stdout.write(r.stdout);
+  await allow(`\`yad hook agent-guard\` ${r.error ? r.error.message : `exited ${r.status ?? r.signal}`} (run \`yad doctor\` to check the install)`);
+}
+await finish(0, r.stdout || '');

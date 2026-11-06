@@ -511,12 +511,34 @@ export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), g
   return 2;
 }
 
+// Read all of stdin. `fs.readFileSync(0)` throws EAGAIN when stdin is a pipe in non-blocking mode whose
+// data has not arrived yet — seen on macOS — and the hook then read nothing and allowed. So this reads in a
+// loop and, on EAGAIN, waits 5 ms and tries again, for up to `limitMs`; after that the error goes to the
+// caller, which fails open as before. A read of 0 bytes (or Windows' EOF error) is the end.
+export function readStdin({ fd = 0, readSync = fs.readSync, limitMs = 5000 } = {}) {
+  const chunks = [];
+  const buf = Buffer.alloc(64 * 1024);
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  const until = Date.now() + limitMs;
+  for (;;) {
+    let n;
+    try { n = readSync(fd, buf, 0, buf.length, null); } catch (e) {
+      if (e?.code === 'EAGAIN' && Date.now() < until) { Atomics.wait(nap, 0, 0, 5); continue; }
+      if (e?.code === 'EOF') break;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, n)));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 // Read the harness payload off stdin. Absent, empty, or unparseable all mean "nothing to inspect" —
 // never an error, and never a block.
 function readPayload() {
   try {
     if (process.stdin.isTTY) return null;
-    const raw = fs.readFileSync(0, 'utf8').trim();
+    const raw = readStdin().trim();
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {

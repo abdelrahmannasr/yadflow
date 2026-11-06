@@ -509,25 +509,84 @@ const runGuard = (T, payload, env = {}) => {
 
 test('hooks/agent-guard.mjs: Claude Code reads the exit code, Cursor a JSON verdict, always', () => {
   const T = guardScript();
+  // Every assertion carries the hook's exit code, answer and stderr: the reason it allowed is on stderr,
+  // and without it a failure on CI (macOS, #459 and #460) said nothing.
+  const said = (r) => `hook said ${JSON.stringify(r)}`;
+  const parse = (r) => { try { return JSON.parse(r.out); } catch { assert.fail(`not a JSON verdict — ${said(r)}`); } };
   try {
     const claude = (command) => runGuard(T, { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } });
     const denied = claude('yad gate approve EP-a epic --by me');
-    assert.equal(denied.code, 2);
-    assert.match(denied.err, /the person's to run/);
-    assert.equal(claude('yad status').code, 0);
+    assert.equal(denied.code, 2, said(denied));
+    assert.match(denied.err, /the person's to run/, said(denied));
+    const status = claude('yad status');
+    assert.equal(status.code, 0, said(status));
     const cursor = (command) => runGuard(T, { hook_event_name: 'beforeShellExecution', command });
     const no = cursor('git push --force');
-    assert.equal(no.code, 0);
-    assert.equal(JSON.parse(no.out).permission, 'deny');
-    assert.match(JSON.parse(no.out).agent_message, /force push/);
-    assert.deepEqual(JSON.parse(cursor('ls').out), { permission: 'allow' });
+    assert.equal(no.code, 0, said(no));
+    assert.equal(parse(no).permission, 'deny', said(no));
+    assert.match(parse(no).agent_message, /force push/, said(no));
+    const ls = cursor('ls');
+    assert.deepEqual(parse(ls), { permission: 'allow' }, said(ls));
     // Fail-open: an unreadable payload, a switched-off guard, and no yad at all.
-    assert.equal(runGuard(T, 'not json').code, 0);
-    assert.equal(runGuard(T, { tool_input: { command: 'yad gate advance EP-a epic' } }, { YAD_HOOK_DISABLE: '1' }).code, 0);
+    const junk = runGuard(T, 'not json');
+    assert.equal(junk.code, 0, said(junk));
+    const off = runGuard(T, { tool_input: { command: 'yad gate advance EP-a epic' } }, { YAD_HOOK_DISABLE: '1' });
+    assert.equal(off.code, 0, said(off));
     const none = runGuard(T, { hook_event_name: 'beforeShellExecution', command: 'git push -f' }, { YAD_BIN: '', PATH: '' });
-    assert.deepEqual(JSON.parse(none.out), { permission: 'allow' });
-    assert.match(none.err, /allowing/);
+    assert.deepEqual(parse(none), { permission: 'allow' }, said(none));
+    assert.match(none.err, /allowing/, said(none));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('the hooks read a payload that arrives late or in pieces, retry a pipe that is not ready (EAGAIN), and never lose a verdict at exit', async () => {
+  const { readStdin } = await import('./hook.mjs');
+  // EAGAIN twice, then data in two pieces, then the end: all of it, once.
+  const pieces = [Buffer.from('{"a":'), Buffer.from('1}')];
+  let calls = 0;
+  const fake = (fd, buf) => {
+    calls += 1;
+    if (calls <= 2) throw Object.assign(new Error('try again'), { code: 'EAGAIN' });
+    const next = pieces.shift();
+    if (!next) return 0;
+    next.copy(buf);
+    return next.length;
+  };
+  assert.equal(readStdin({ readSync: fake }), '{"a":1}');
+  // Windows ends a pipe with an EOF error rather than a read of 0.
+  let once = false;
+  assert.equal(readStdin({ readSync: (fd, buf) => { if (once) throw Object.assign(new Error('end'), { code: 'EOF' }); once = true; buf.write('x'); return 1; } }), 'x');
+  // A pipe that never becomes ready gives up after the limit, and the caller fails open.
+  const t0 = Date.now();
+  assert.throws(() => readStdin({ readSync: () => { throw Object.assign(new Error('try again'), { code: 'EAGAIN' }); }, limitMs: 50 }), /try again/);
+  assert.ok(Date.now() - t0 < 2000, 'the limit holds');
+  assert.throws(() => readStdin({ readSync: () => { throw Object.assign(new Error('bad'), { code: 'EBADF' }); } }), /bad/, 'any other error goes to the caller');
+  // The real script, its payload written late and in pieces: the verdict is still right.
+  const T = guardScript();
+  try {
+    const { spawn } = await import('node:child_process');
+    const child = spawn(process.execPath, [path.join(T, 'hooks/agent-guard.mjs')], {
+      cwd: T, stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, YAD_BIN: `"${process.execPath}" "${YAD_MJS}"`, YAD_HOOK_DISABLE: '' },
+    });
+    let out = ''; let err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    const payload = JSON.stringify({ hook_event_name: 'beforeShellExecution', command: 'git push --force' });
+    child.stdin.write(payload.slice(0, 10));
+    const { setTimeout: sleep } = await import('node:timers/promises');
+    await sleep(300);
+    child.stdin.end(payload.slice(10));
+    const code = await new Promise((r) => child.on('close', r));
+    assert.equal(code, 0, err);
+    assert.equal(JSON.parse(out.trim()).permission, 'deny', `out ${JSON.stringify(out)} err ${JSON.stringify(err)}`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // Every write of a verdict in the hook scripts is followed by an exit only once it is written.
+  const dir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'skills/yad-checks/templates/hooks');
+  for (const f of ['agent-guard.mjs', 'ledger-guard-cursor.mjs']) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    assert.ok(!/process\.stdout\.write\([^)]*\);?\s*process\.exit\(/.test(src), `${f}: no exit straight after a stdout write`);
+    assert.match(src, /process\.stdout\.write\(text, \(\) => process\.exit\(code\)\)/, `${f}: the verdict is written, then the exit`);
+  }
 });
 
 test('check --fix wires the agent guard on every Product, beside the team\'s own hooks; a target that leaves takes its entry', () => {
