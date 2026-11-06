@@ -12829,7 +12829,7 @@ test('doctor: every design, testing and learning hint names the tool — a refre
       fs.writeFileSync(path.join(T, '.sdlc', file), JSON.stringify(data));
       let row = (await doctorOn(T)).checks.find((x) => x.id === id && x.status === 'warn');
       assert.match(row.message, label, id);
-      assert.equal(row.hint, `if ${tool} is not on this machine, your agent can connect it: \`yad toolbox connect ${tool} --json\` (it asks you first); if it is, sign in or open its app. Then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``, id);
+      assert.equal(row.hint, `if ${tool} is not on this machine, your agent can connect it: \`yad toolbox connect ${tool} --json\` (it asks you first); if it is, make sure it can be reached (signed in, its app open). Then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``, id);
       assert.doesNotMatch(row.message, /MCP/, `${id}: "not found" is true for a CLI tool too`);
       fs.writeFileSync(path.join(T, '.sdlc', file), JSON.stringify({ tool, source: null }));
       row = (await doctorOn(T)).checks.find((x) => x.id === id && x.status === 'warn');

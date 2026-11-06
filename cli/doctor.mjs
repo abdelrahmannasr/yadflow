@@ -41,7 +41,7 @@ import { previewPattern, PREVIEW_KEY } from './preview.mjs';
 // hint names it. The tool is one of DESIGN_TOOLS / TESTING_TOOLS / LEARNING_TOOLS by the time these run,
 // each with a connect recipe; one that is installed but cannot be reached (signed out, its app closed)
 // needs the person, not a connect step.
-const connectThenRefresh = (skill, tool) => `if ${tool} is not on this machine, your agent can connect it: \`yad toolbox connect ${tool} --json\` (it asks you first); if it is, sign in or open its app. Then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``;
+const connectThenRefresh = (skill, tool) => `if ${tool} is not on this machine, your agent can connect it: \`yad toolbox connect ${tool} --json\` (it asks you first); if it is, make sure it can be reached (signed in, its app open). Then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``;
 const confirmByRefresh = (skill, tool) => `run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\` in your AI agent to check it on this machine`;
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
