@@ -10967,6 +10967,12 @@ test('E164: the UI review covers design/ — no design file keeps the old finger
     fs.writeFileSync(path.join(ep, 'design/vendor/.git'), 'gitdir: elsewhere\n');
     fs.writeFileSync(path.join(ep, 'design/vendor/kit.fig'), 'kit');
     assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'junk files and a nested repository are left out');
+    // Review 3: a file git ignores is in no commit, so it is not counted on disk either; a tracked one is.
+    fs.writeFileSync(path.join(R, '.gitignore'), 'epics/*/design/exports/\n');
+    fs.mkdirSync(path.join(ep, 'design/exports'));
+    fs.writeFileSync(path.join(ep, 'design/exports/home.png'), 'png');
+    assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'an ignored export is left out');
+    fs.rmSync(path.join(ep, 'design/exports'), { recursive: true });
     // Review 2: any other name is a design file, a dot-name included.
     fs.writeFileSync(path.join(ep, 'design/.exports.fig'), 'export');
     assert.notEqual(artifactHash(ep, 'ui-design.md'), nested, 'a dot-name that is not junk is covered');
@@ -26923,6 +26929,8 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   assert.deepEqual([design.step, design.other], [['epics/EP-x/design/screens.fig'], ['epics/EP-x/design-old.fig', 'epics/EP-x/design/.DS_Store', 'epics/EP-x/design/a/x.fig~']], 'review 1: junk the fingerprint leaves out is not folded');
   const kit = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/kit/' }, { xy: '??', path: 'epics/EP-x/stories/EP-x-S01.md' }], { epic: 'EP-x', step: 'ui-design', verified: true });
   assert.deepEqual(kit.step, [], 'review 2: a nested repository, listed by git as a folder, is never folded');
+  const sub = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/design/kit' }, { xy: ' M', path: 'epics/EP-x/design/a.fig' }], { epic: 'EP-x', step: 'ui-design', verified: true, isRepo: (p) => p === 'epics/EP-x/design/kit' });
+  assert.deepEqual(sub.step, ['epics/EP-x/design/a.fig'], 'review 3: a committed submodule (a folder holding .git) is never folded either');
   const found = fold.sortChanges([{ xy: '??', path: 'foundation/purpose.md' }], { epic: 'EP-foundation', step: 'foundation', verified: false });
   assert.deepEqual(found.step, ['foundation/purpose.md']);
   assert.equal(fold.authorStepOf('stories-S02'), 'stories');

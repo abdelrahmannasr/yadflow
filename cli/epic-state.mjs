@@ -649,11 +649,22 @@ function designSha(p) {
   }
   return shaOf(bytes);
 }
+// The files under `design/` that git ignores here (an exports folder in .gitignore, an editor's settings
+// folder): no commit holds them, so counting them would make the approval look changed on this machine
+// only. Asked of git only inside a checkout; the scratch copy `artifactHashAt` makes is in none, and has
+// only committed files anyway. A tracked file is never reported, even when a pattern matches it.
+function ignoredByGit(dir, files) {
+  if (!files.length) return new Set();
+  const r = spawnSync('git', ['check-ignore', '-z', '--stdin'], { cwd: dir, input: files.map((f) => `${f}\0`).join(''), env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, maxBuffer: 64 * 1024 * 1024 });
+  return r.status === 0 ? new Set(r.stdout.toString('utf8').split('\0').filter(Boolean)) : new Set();
+}
 // The design files' part of the fingerprint, read once: `acceptedHashes` combines it with each form of
 // ui-design.md, so a large design file is not read again for every form.
 function designParts(epicDir) {
   const dir = path.join(epicDir, UI_DESIGN_DIR);
-  return designFiles(dir).sort().map((f) => `${UI_DESIGN_DIR}/${f}:${designSha(path.join(dir, ...f.split('/')))}`);
+  const all = designFiles(dir);
+  const ignored = ignoredByGit(dir, all);
+  return all.filter((f) => !ignored.has(f)).sort().map((f) => `${UI_DESIGN_DIR}/${f}:${designSha(path.join(dir, ...f.split('/')))}`);
 }
 export function uiDesignHash(epicDir, sha = reviewedSha, parts = null) {
   const doc = sha(path.join(epicDir, 'ui-design.md'));
