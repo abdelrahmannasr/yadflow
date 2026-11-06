@@ -93,15 +93,18 @@ try {
     const out = op(['eval', file, '--stdin', '--json'], `return JSON.stringify(figma.root.findAll((n) => n.getSharedPluginData('yad', 'nodeId') !== '').map((n) => ({ id: n.id, name: n.name, yad: n.getSharedPluginData('yad', 'nodeId') })))`);
     return JSON.parse(JSON.parse(out.trim()));
   };
-  const tag = (name, id, parent = null) => `{ const f = figma.createFrame(); f.name = ${JSON.stringify(name)}; f.setSharedPluginData('yad', 'nodeId', ${JSON.stringify(id)});${parent ? ` figma.currentPage.children.find((n) => n.name === ${JSON.stringify(parent)}).appendChild(f);` : ''} }`;
-
-  write([tag('Login', 'login'), tag('Home', 'home'), tag('Cart', 'cart'), `{ const box = figma.createFrame(); box.name = 'Flow'; }`, tag('Step', 'step', 'Flow')].join('\n'));
+  // The code OpenPencil runs is fixed text: nothing is pasted into it, so nothing can change what it does.
+  const TAG = `const tag = (name, id, parent) => { const f = figma.createFrame(); f.name = name; f.setSharedPluginData('yad', 'nodeId', id); if (parent) parent.appendChild(f); return f; };`;
+  write(`${TAG}
+tag('Login', 'login'); tag('Home', 'home'); tag('Cart', 'cart');
+const box = figma.createFrame(); box.name = 'Flow';
+tag('Step', 'step', box);`);
   const first = read();
   // The edits a design goes through: a frame deleted, one added at the top, one renamed.
-  write(`figma.currentPage.children.find((n) => n.name === 'div').remove();
+  write(`${TAG}
+figma.currentPage.children.find((n) => n.name === 'div').remove();
 figma.currentPage.children.find((n) => n.name === 'Home').name = 'Home v2';
-${tag('Splash', 'splash')}
-figma.currentPage.insertChild(0, figma.currentPage.children.find((n) => n.name === 'Splash'));`);
+figma.currentPage.insertChild(0, tag('Splash', 'splash'));`);
   const second = read();
   const third = read();
 
