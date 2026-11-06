@@ -10922,6 +10922,56 @@ test('artifactHashAt: line-ending conversion on checkout gives the same fingerpr
   } finally { fs.rmSync(R, { recursive: true, force: true }); }
 });
 
+test('E164: the UI review covers design/ — no design file keeps the old fingerprint; a design change revokes; a commit agrees with the disk', async () => {
+  const { artifactHash, acceptedHashes, isStaleHash, artifactHashAt, artifactPaths, reviewedSha } = await import('./epic-state.mjs');
+  assert.deepEqual(artifactPaths('ui-design'), ['ui-design.md', 'design']);
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-uid-'));
+  try {
+    git(R, 'init', '-q');
+    git(R, 'config', 'user.email', 'a@b.c');
+    git(R, 'config', 'user.name', 'x');
+    fs.writeFileSync(path.join(R, '.gitattributes'), '*.md text eol=crlf\n');
+    const ep = path.join(R, 'epics/EP-a');
+    fs.mkdirSync(ep, { recursive: true });
+    const doc = path.join(ep, 'ui-design.md');
+    fs.writeFileSync(doc, '---\nid: EP-a\nstatus: draft\n---\n# UI\n');
+    const docOnly = reviewedSha(doc);
+    assert.equal(artifactHash(ep, 'ui-design.md'), docOnly, 'no design/: the fingerprint every earlier release recorded');
+    fs.mkdirSync(path.join(ep, 'design'));
+    assert.equal(artifactHash(ep, 'ui-design.md'), docOnly, 'an empty design/ is no design file');
+    // A design file is binary: a NUL, and a CRLF that must never be converted.
+    fs.writeFileSync(path.join(ep, 'design/screens.fig'), Buffer.from([0x66, 0x69, 0x67, 0x00, 0x0d, 0x0a, 0xff]));
+    const withFile = artifactHash(ep, 'ui-design.md');
+    assert.notEqual(withFile, docOnly, 'the design file is covered');
+    assert.deepEqual(acceptedHashes(ep, 'ui-design.md').slice(0, 1), [withFile], 'what is written is the new form');
+    assert.equal(isStaleHash(docOnly, acceptedHashes(ep, 'ui-design.md')), false, 'an approval from before design/ was covered still counts');
+    setFrontmatterStatus(doc, 'approved');
+    assert.equal(artifactHash(ep, 'ui-design.md'), withFile, 'the gate\'s status flip is not an edit');
+    fs.writeFileSync(path.join(ep, 'design/screens.fig'), Buffer.from([0x66, 0x69, 0x67, 0x00, 0x01]));
+    const edited = artifactHash(ep, 'ui-design.md');
+    assert.notEqual(edited, withFile);
+    assert.equal(isStaleHash(withFile, acceptedHashes(ep, 'ui-design.md')), true, 'a design change after approval needs a fresh review');
+    fs.mkdirSync(path.join(ep, 'design/assets'));
+    fs.writeFileSync(path.join(ep, 'design/assets/logo.png'), 'png');
+    const nested = artifactHash(ep, 'ui-design.md');
+    assert.notEqual(nested, edited, 'a file in a folder under design/ is covered too');
+    if (process.platform !== 'win32') {
+      fs.symlinkSync(doc, path.join(ep, 'design/link.md'));
+      assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'a link is not a design file — a commit copy skips it too');
+      fs.rmSync(path.join(ep, 'design/link.md'));
+    }
+    git(R, 'add', '-A');
+    git(R, 'commit', '-qm', 'ui');
+    fs.rmSync(path.join(R, 'epics'), { recursive: true });
+    git(R, 'checkout', '--', '.');
+    assert.match(fs.readFileSync(doc, 'utf8'), /\r\n/, 'the doc is checked out with CRLF');
+    const at = artifactHashAt(R, ep, 'ui-design.md', git(R, 'rev-parse', 'HEAD').toString().trim());
+    assert.equal(at.ok, true, at.reason);
+    assert.equal(at.copied, 3, 'ui-design.md and both design files');
+    assert.equal(at.hash, artifactHash(ep, 'ui-design.md'), 'the approved commit and the disk give one fingerprint');
+  } finally { fs.rmSync(R, { recursive: true, force: true }); }
+});
+
 test('artifactHashAt: the fingerprint at a commit is artifactHash of the same files, for every kind of artifact (issue #366)', async () => {
   const { artifactHashAt, artifactHash: hashNow } = await import('./epic-state.mjs');
   const R = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-at-'));
@@ -26821,6 +26871,9 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   assert.deepEqual([stories.step, stories.other], [['epics/EP-x/stories/EP-x-S01.md'], ['epics/EP-x/stories-old.md']]);
   const ui = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/.sdlc/design-links.json' }, { xy: '??', path: 'epics/EP-x/DESIGN.md' }, { xy: ' M', path: 'epics/EP-x/.sdlc/test-links.json' }], { epic: 'EP-x', step: 'ui-design', verified: true });
   assert.deepEqual([ui.step, ui.ci, ui.other], [['epics/EP-x/.sdlc/design-links.json', 'epics/EP-x/DESIGN.md'], [], ['epics/EP-x/.sdlc/test-links.json']], 'the skill\'s artifact set, never left for CI');
+  // E164: the epic's design file is the UI step's too; a look-alike name beside it is not.
+  const design = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/screens.fig' }, { xy: '??', path: 'epics/EP-x/design-old.fig' }], { epic: 'EP-x', step: 'ui-design', verified: true });
+  assert.deepEqual([design.step, design.other], [['epics/EP-x/design/screens.fig'], ['epics/EP-x/design-old.fig']]);
   const found = fold.sortChanges([{ xy: '??', path: 'foundation/purpose.md' }], { epic: 'EP-foundation', step: 'foundation', verified: false });
   assert.deepEqual(found.step, ['foundation/purpose.md']);
   assert.equal(fold.authorStepOf('stories-S02'), 'stories');

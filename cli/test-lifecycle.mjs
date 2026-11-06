@@ -496,9 +496,13 @@ test('yadflow\'s claimed files are exactly what the engine commits for each step
   // The claims rule reads the shipped defaults; this ties those defaults to the engine, per artifact type,
   // so a later default cannot list files the engine does not commit, or leave out one it does.
   const rel = (p) => p.replace(/^epics\/EP-x\//, '');
+  // E164: the one folder the engine commits that no default claims. ui-design's `design/` (the epic's
+  // design file) cannot be an `extraPaths` entry — that list takes files, never a folder — and a shipped
+  // default never changes. A later default may claim it once a folder is allowed there.
+  const ENGINE_ONLY = { 'ui-design': ['design'] };
   let checked = 0;
   for (const st of DEFAULT_LIFECYCLE.steps.filter((x) => x.artifact)) {
-    const engine = stepPaths('EP-x', st.id).map(rel);
+    const engine = stepPaths('EP-x', st.id).map(rel).filter((p) => !(ENGINE_ONLY[st.id] || []).includes(p));
     const a = st.artifact;
     if (a.type === 'file') assert.deepEqual([...engine].sort(), [a.path, ...st.extraPaths].sort(), st.id);
     else if (a.type === 'folder') {

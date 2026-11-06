@@ -440,6 +440,8 @@ export function artifactFromBase(base) {
 // The files (relative to the epic dir) a review of this artifact covers — what `gate open` commits
 // on the review branch (the owner's artifact), and what CI re-reads to bind the approval at merge.
 // Architecture mirrors artifactHash(): the approval is bound to the locked contract surface too.
+// E164: the folder beside ui-design.md that holds the epic's design file.
+export const UI_DESIGN_DIR = 'design';
 export function artifactPaths(base) {
   if (base === 'architecture') return ['architecture.md', 'contract.md', '.sdlc/contract-lock.json'];
   if (base === 'stories') return ['stories'];
@@ -447,6 +449,10 @@ export function artifactPaths(base) {
   // Every section, optional ones included: this names what a Foundation review COVERS, and a section
   // that is absent today is still one a reviewer may be asked to look at tomorrow.
   if (base === 'foundation') return [...FOUNDATION_FILES];
+  // E164: the UI step's design file lives in the epic's `design/` folder (an OpenPencil file in the repo),
+  // so the UI review covers it: `yad fold` commits it, and a change to it after approval needs a fresh
+  // review. A folder, so `fold` and `artifactHashAt` take everything under it.
+  if (base === 'ui-design') return ['ui-design.md', UI_DESIGN_DIR];
   return [`${base}.md`];
 }
 
@@ -592,6 +598,30 @@ export function storiesHash(epicDir, sha = reviewedSha) {
   const parts = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort()
     .map((f) => `${f}:${sha(path.join(dir, f))}`);
   if (!parts.length) return null;
+  return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
+}
+
+// E164: the UI design's fingerprint. With no file under `design/`, it is the fingerprint of ui-design.md
+// alone — byte for byte what every release before E164 recorded, so no approval of a Figma or Pencil
+// design moves. With design files, it covers them too: ui-design.md as reviewed (`sha`), then each file
+// under `design/` as its raw bytes (a design file has no status line), sorted by path. Only regular files
+// count, the same as `artifactHashAt`, which copies only those out of a commit.
+function designFiles(dir, rel = '') {
+  let entries;
+  try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const e of entries) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...designFiles(dir, r));
+    else if (e.isFile()) out.push(r);
+  }
+  return out;
+}
+export function uiDesignHash(epicDir, sha = reviewedSha) {
+  const doc = sha(path.join(epicDir, 'ui-design.md'));
+  const files = designFiles(path.join(epicDir, UI_DESIGN_DIR)).sort();
+  if (!files.length || doc === null) return doc;
+  const parts = [`ui-design.md:${doc}`, ...files.map((f) => `${UI_DESIGN_DIR}/${f}:${fileSha(path.join(epicDir, UI_DESIGN_DIR, ...f.split('/')))}`)];
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
 
@@ -946,6 +976,7 @@ export function artifactHash(epicDir, artifact, sha = reviewedSha) {
   if (b === 'stories') return storiesHash(epicDir, sha);
   if (b === 'discovery') return discoveryHash(epicDir, sha);
   if (b === 'foundation') return foundationHash(epicDir, FOUNDATION_SECTIONS, sha);
+  if (b === 'ui-design') return uiDesignHash(epicDir, sha);
   return sha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
@@ -955,7 +986,11 @@ export function artifactHash(epicDir, artifact, sha = reviewedSha) {
 export function acceptedHashes(epicDir, artifact) {
   const current = artifactHash(epicDir, artifact);
   if (current === null) return [];
-  return [...new Set([current, ...LEGACY_FORMS.map((sha) => artifactHash(epicDir, artifact, sha))].filter(Boolean))];
+  // E164: an approval recorded before the UI review covered `design/` was bound to ui-design.md alone —
+  // under PR 1 a person committed the folder by hand — so that form, and its legacy forms, still count.
+  const docOnly = artifactBase(artifact) === 'ui-design'
+    ? [reviewedSha, ...LEGACY_FORMS].map((sha) => sha(path.join(epicDir, 'ui-design.md'))) : [];
+  return [...new Set([current, ...LEGACY_FORMS.map((sha) => artifactHash(epicDir, artifact, sha)), ...docOnly].filter(Boolean))];
 }
 
 // Is a recorded fingerprint stale against the accepted ones? Never when nothing was recorded (a manual
