@@ -876,7 +876,13 @@ export function skillFallbackSection(skill, tools = TOOLBOX) {
       '',
     );
   }
-  lines.push('Tell the person which tools you used and which fallbacks, and why.', '');
+  lines.push(
+    // E165: one offer before a fallback, for a tool the team uses that this machine lacks.
+    'Before you fall back because a tool the team uses is not on this machine (not turned off, not removed',
+    'by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the',
+    'connect-tool rule. On a no, or when a step fails, use the fallback.',
+    '',
+    'Tell the person which tools you used and which fallbacks, and why.', '');
   for (const t of core) {
     lines.push(`- **${t.name}** (\`${t.id}\`). Use it when its entry has \`used: true\` and \`status.state\` is \`installed\` or \`available\`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (\`yad toolbox remove ${t.id}\`) — use the fallback.`);
     lines.push(`  - Fallback — ${t.fallback}.`);
@@ -1117,7 +1123,12 @@ export function toolboxCheck(root, productRoot, opts = {}) {
     const s = r.status;
     const problem = s.state === 'missing' ? 'missing' : s.state === 'disabled' ? 'disabled' : s.inRange === false ? 'out-of-range' : null;
     if (!problem) return [];
-    return [{ id: r.id, name: r.name, tier: r.tier, problem, version: s.version, versions: r.versions, install: r.install, manual: r.manual, source: r.source, fallback: r.fallback }];
+    // E165: the command an agent reads to connect it, after one yes — for a shipped tool (each has a recipe)
+    // that is missing. Not for a plugin that is turned off (the person turns it on), nor a team's own tool (yad
+    // has no recipe for it), nor one found outside its range: connecting finds it already here, and --verify
+    // does not check a version (no shipped tool has a range yet).
+    const connect = problem === 'missing' && r.tier !== 'project' && TOOLBOX.some((t) => t.id === r.id) ? `yad toolbox connect ${r.id} --json` : null;
+    return [{ id: r.id, name: r.name, tier: r.tier, problem, version: s.version, versions: r.versions, install: r.install, manual: r.manual, source: r.source, fallback: r.fallback, connect }];
   });
   return { used, findings, problems };
 }
@@ -1170,9 +1181,11 @@ export function offerToolbox(root, productRoot, { canRemove = true, ...opts } = 
   for (const p of res.problems) warn(p);
   for (const line of toolboxCheckLines(res)) log(line);
   if (res.findings.length) {
-    info(canRemove
-      ? 'nothing is installed for you: follow the steps you choose, or, for the whole team, stop using a tool with `yad toolbox remove <id>`'
-      : 'nothing is installed for you: follow the steps you choose');
+    // E165: nothing is installed without a yes — but the agent can connect a shipped tool after one.
+    const viaAgent = res.findings.some((f) => f.connect)
+      ? 'nothing is installed without asking: follow the steps you choose, or ask your agent to connect a tool with `yad toolbox connect <id>` (it asks you once first)'
+      : 'nothing is installed for you: follow the steps you choose';
+    info(canRemove ? `${viaAgent}; or, for the whole team, stop using a tool with \`yad toolbox remove <id>\`` : viaAgent);
   }
   return { used: res.used.map((r) => r.id), findings: res.findings, problems: res.problems };
 }

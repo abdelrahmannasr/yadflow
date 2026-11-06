@@ -934,6 +934,10 @@ export async function runSetup(root, opts = {}) {
   if (learning && learning.tool && learning.tool !== 'none') {
     hand(`confirm the learning tool: run \`yad-connect-learning\` to detect the ${learning.tool} CLI (or it degrades to harness-native)`);
   }
+  // E165: each tool in use that is not ready here, offered under the connect-tool rule — one yes per tool.
+  for (const f of toolbox?.findings ?? []) {
+    if (f.connect) hand(`offer to connect ${f.name}: \`${f.connect}\` (the connect-tool rule: ask once, run only its agent steps)`);
+  }
   log('');
   log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));
   // The --json answer (E1). A --json setup never prompts: every answer comes from a flag, or the run was

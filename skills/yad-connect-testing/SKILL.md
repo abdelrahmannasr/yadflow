@@ -23,6 +23,10 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
 No tool below is required. When one is missing, this skill still finishes, using the fallback written
 beside it.
 
+Before you fall back because a tool the team uses is not on this machine (not turned off, not removed
+by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the
+connect-tool rule. On a no, or when a step fails, use the fallback.
+
 Tell the person which tools you used and which fallbacks, and why.
 
 - **Playwright MCP** (`playwright`, a connector). This skill connects it, by writing `.sdlc/testing.json` as the steps below say. The other skills follow that file, not yad's toolbox answer.
@@ -86,9 +90,13 @@ it is available. **Auth is the local user's own** — the user's authenticated M
 and follow the connect-tool rule: show its `ask` word for word, ask once, and on a yes run only its `agent`
 steps, hand over its `person` steps, then run the `verify` command it gives (`yad toolbox connect <tool> --verify --json`,
 with `--replace` only when its question said which tool it replaces). Never install
-it any other way. On a no, or when a step fails, degrade:
+it any other way. When `--verify` passes, detect again — you can reach the tool when you find
+its MCP server in your session (in Claude Code, `/mcp`). **If you can**, go on to Step 2 and record what you found. **If you cannot**, the server is
+most likely just added: a new MCP server is loaded when the agent starts. Then do **not** write the file:
+skip the degrade below and Step 2, and in Step 3 tell the person to restart the agent and run this skill
+again with `action: refresh` and the same `tool`. On a no, or when a step fails, degrade:
 
-**Graceful degradation:** if no testing-tool MCP is available, record `source: "unavailable"` and report
+**Graceful degradation** (never right after a `--verify` that passed — see above)**:** if no testing-tool MCP is available, record `source: "unavailable"` and report
 that `yad-test-cases` will run **artifacts-only** until an MCP is connected (no error — the testing tool
 is purely additive, exactly like the design tool being absent).
 
@@ -116,7 +124,10 @@ Upsert into `{project-root}/.sdlc/testing.json` (create the file + parent `.sdlc
 ### Step 3 — Report (never auto-advance)
 Report the connected `tool`, its `provider`, whether the MCP is available (or that `yad-test-cases` will
 degrade to artifacts-only), the `project_url`, and that **`yad-test-cases` will now generate/link the
-automation tests here**. Nothing auto-advances; this is setup.
+automation tests here**. Nothing auto-advances; this is setup. **Right after a `--verify` that passed but could not reach the
+tool yet:** report only that it is installed and recorded as the team's tool, that its server loads when the
+agent starts, and that the person restarts the agent and runs this skill again with `action: refresh` and the same `tool` —
+not what `yad-test-cases` will do, which that refresh decides.
 
 ## Other actions
 

@@ -34,6 +34,10 @@ there are found.
 - **When yad cannot answer** (yad is not installed here, or the command fails), use the check in the
   steps below.
 
+Before you fall back because a tool the team uses is not on this machine (not turned off, not removed
+by the team), offer to connect it, once: run `yad toolbox connect <id> --json` and follow the
+connect-tool rule. On a no, or when a step fails, use the fallback.
+
 Tell the person which tools you used and which fallbacks, and why.
 
 - **Repomix** (`repomix`). Use it when its entry has `used: true` and `status.state` is `installed` or `available`. Otherwise — not found, its plugin turned off in Claude Code, or the team chose not to use it (`yad toolbox remove repomix`) — use the fallback.

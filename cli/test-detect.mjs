@@ -1415,6 +1415,13 @@ test('E86: `yad toolbox check` names what the project uses and is not here — a
     ];
     const res = toolboxCheck(p, null, { tools, items, has: () => false });
     assert.deepEqual(res.findings.map((x) => [x.id, x.problem]), [['impeccable', 'out-of-range'], ['repomix', 'disabled']]);
+    // E165 PR 2: the agent's command — for a shipped tool that is missing; not for one out of range (connect
+    // would find it here, and --verify reads no version), a plugin turned off (the person turns it on), nor a
+    // team's own tool (yad has no recipe for it).
+    assert.deepEqual(res.findings.map((x) => [x.id, x.connect]), [['impeccable', null], ['repomix', null]]);
+    assert.equal(f.figma.connect, 'yad toolbox connect figma --json');
+    assert.equal(f['bmad-method'].connect, 'yad toolbox connect bmad-method --json', 'a recipe of person steps is still offered: the command hands them over');
+    assert.equal(f.doclint.connect, null, 'a custom tool has no recipe');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -1736,7 +1743,10 @@ test('E85: `yad setup` offers the tools in use after the tools step — a connec
 
     const human = run(['setup', '--solo', '--greenfield', '--monorepo', '--ide-targets', '.claude']);
     assert.equal(human.status, 0, human.stdout + human.stderr);
-    assert.match(human.stdout, /\[9\/10\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed for you[\s\S]*\[10\/10\] Done/);
+    assert.match(human.stdout, /\[9\/10\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed without asking[\s\S]*`yad toolbox connect <id>` \(it asks you once first\)[\s\S]*\[10\/10\] Done/);
+    // E165 PR 2: the agent is offered each tool to connect, in the AI-only steps, and reads `connect` in the JSON.
+    assert.match(human.stdout, /AI-only steps[\s\S]*offer to connect Playwright MCP: `yad toolbox connect playwright --json` \(the connect-tool rule/);
+    assert.equal(out.toolbox.findings.find((f) => f.id === 'playwright').connect, 'yad toolbox connect playwright --json');
 
     // `yad check` and `yad update` end with the same section, exit 0 with tools missing, and write no choice.
     for (const verb of ['check', 'update']) {
@@ -1744,8 +1754,9 @@ test('E85: `yad setup` offers the tools in use after the tools step — a connec
       assert.equal(j.status, 0, verb + j.stdout + j.stderr);
       const a = JSON.parse(j.stdout);
       assert.ok(a.toolbox.used.includes('playwright') && a.toolbox.findings.length > 0, verb);
+      assert.equal(a.toolbox.findings.find((f) => f.id === 'playwright')?.connect, 'yad toolbox connect playwright --json', verb);
       const h = run([verb]);
-      assert.match(h.stdout, /\nToolbox\n[\s\S]*– Playwright MCP: not found/, verb);
+      assert.match(h.stdout, /\nToolbox\n[\s\S]*– Playwright MCP: not found[\s\S]*`yad toolbox connect <id>`/, verb);
     }
     assert.ok(!fs.existsSync(path.join(p, '.sdlc/toolbox.json')));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1780,7 +1791,7 @@ test('E85 review 1: join\'s offer does not advise removing a tool the team chose
       offerToolbox(p, p, { canRemove: false, items: [], has: () => false });
       offerToolbox(p, p, { items: [], has: () => false });
     } finally { console.log = orig; }
-    const hints = lines.filter((l) => l.includes('nothing is installed for you'));
+    const hints = lines.filter((l) => l.includes('nothing is installed without asking'));
     assert.equal(hints.length, 2);
     assert.ok(!hints[0].includes('yad toolbox remove'), 'join: no remove advice');
     assert.match(hints[1], /for the whole team/);
@@ -1871,6 +1882,7 @@ test('E164: OpenPencil is a design connector — vetted, pinned exactly, one ins
 
 // ---- E165: `yad toolbox connect` — the agent connects a tool after one yes ---------------------------
 const { RECIPES, recipeProblems } = await import('./toolbox-connect.mjs');
+const { RULES } = await import('./agent-rules.mjs');
 // A `claude mcp add` step as this platform runs it: native Windows starts the server through `cmd /c`.
 const mcpRun = (run) => (process.platform === 'win32' ? run.replace(' -- ', ' -- cmd /c ') : run);
 // The command with a PATH of the test's own: this machine's programs must not decide what is "found".
@@ -2029,4 +2041,46 @@ test('E165: on Windows an MCP server started through npx or an npm program gets 
   assert.equal(connectPlan('openpencil', { ...none, platform: 'win32' }).steps[1].run, 'claude mcp add --scope user open-pencil -- cmd /c openpencil-mcp');
   assert.equal(connectPlan('openpencil', { ...none, platform: 'win32' }).steps[0].run, 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0', 'a package install is the same everywhere');
   assert.equal(connectPlan('playwright', { ...none, platform: 'darwin' }).steps[0].run, 'claude mcp add --scope user playwright -- npx @playwright/mcp@0.0.83');
+});
+
+test('E165 PR 2: the flow offers the connect step — yad-ui and the test step before they degrade, spec and implement on a failed probe, every fallback section', () => {
+  const read = (skill) => fs.readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
+  for (const skill of ['yad-ui', 'yad-test-cases']) {
+    const text = read(skill);
+    assert.ok(text.includes('yad toolbox connect <tool> --json') && text.includes('yad toolbox connect <tool> --verify --json'), `${skill} asks, then verifies`);
+    assert.match(text, /A tool is named, but it is not on this machine[\s\S]*connect-tool rule[\s\S]*On a no, or when a step fails, degrade/, `${skill} offers before it degrades`);
+    // Review 1: --verify records the tool, not the server found — the connect skill's refresh writes `source`.
+    assert.match(text, /run `yad-connect-(design|testing)` with\s+`action: refresh`/, `${skill} refreshes the connection before it goes on`);
+  }
+  assert.match(read('yad-ui'), /out of scope for Shape, except the one connect offer/, 'the Shape rule does not forbid the offer');
+  // Review 2: a server just added is loaded only when the agent starts — restart, never "unavailable".
+  for (const skill of ['yad-spec', 'yad-implement']) assert.match(read(skill), /restart the agent and run\s+this step again/, `${skill} says a new server needs a restart`);
+  for (const skill of ['yad-ui', 'yad-test-cases']) assert.ok(!/with\s+`action: refresh`(?! and the same `tool`)/.test(read(skill)), `${skill}: every refresh names the same tool`);
+  // Review 6: the rule itself keeps the refresh, with the same tool.
+  assert.match(RULES.find((r) => r.id === 'connect-tool').text, /its connect skill with `action: refresh` and the same `tool` first/);
+  // Review 4: after the restart, refresh first — `--verify` records the tool, never its server.
+  for (const [skill, connect] of [['yad-ui', 'yad-connect-design'], ['yad-test-cases', 'yad-connect-testing']]) {
+    assert.match(read(skill), new RegExp(`restart the agent, run\\s+\`${connect}\` with \`action: refresh\` and the same \`tool\`, and then run\\s+this step again`), skill);
+  }
+  for (const skill of ['yad-ui', 'yad-test-cases']) assert.match(read(skill), /first check that you can reach the tool[\s\S]*do not\s+refresh — it would record the tool as unavailable[\s\S]*If you can, run `yad-connect-/, `${skill}: the check comes before the refresh`);
+  assert.match(read('yad-ui'), /or for OpenPencil its CLI on PATH/, 'the CLI path needs no restart');
+  // Review 3: the connect skills themselves never write `unavailable` right after a connect.
+  // Review 4: the restart branch writes nothing — it skips the degrade and Step 2.
+  for (const skill of ['yad-connect-design', 'yad-connect-testing']) {
+    assert.match(read(skill), /When `--verify` passes, detect again[\s\S]*\*\*If you can\*\*, go on to Step 2 and record what you found\. \*\*If you cannot\*\*[\s\S]*do \*\*not\*\* write the file:\s+skip the degrade below and Step 2[\s\S]*restart the agent and run this skill\s+again with `action: refresh`/, skill);
+    // Review 6: the refresh names the tool just connected, or it would check the default tool.
+    assert.ok(!/with\s+`action: refresh`(?! and the same `tool`)/.test(read(skill)), `${skill}: every refresh names the same tool`);
+    // Review 5: the report says only what is true before the restart.
+    assert.match(read(skill), /### Step 3[\s\S]*\*\*Right after a `--verify` that passed but could not reach the\s+tool yet:\*\* report only/, skill);
+    assert.match(read(skill), /\*\*Graceful degradation\*\* \(never right after a `--verify` that passed — see above\)/, skill);
+  }
+  assert.match(read('yad-implement'), /On a no, when a step fails, if it still fails, or if another\s+file is open, \*\*STOP\*\*/, 'implement says what a no means');
+  for (const skill of ['yad-spec', 'yad-implement']) {
+    const text = read(skill);
+    assert.match(text, /not on this machine at all[\s\S]*not a\s+closed app[\s\S]*the answer has `preflight\.connect`[\s\S]*connect-tool rule/, `${skill} offers only when the tool is absent, never for a closed app`);
+  }
+  // The generated section says it once, in every skill that has one.
+  const section = skillFallbackSection('yad-ui');
+  assert.match(section, /offer to connect it, once: run `yad toolbox connect <id> --json` and follow the\nconnect-tool rule\. On a no, or when a step fails, use the fallback\./);
+  assert.match(section, /not turned off, not removed\nby the team/, 'a plugin turned off, or a tool the team removed, is never offered');
 });
