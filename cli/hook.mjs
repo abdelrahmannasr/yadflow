@@ -511,10 +511,14 @@ export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), g
   return 2;
 }
 
-// Read all of stdin. `fs.readFileSync(0)` throws EAGAIN when stdin is a pipe in non-blocking mode whose
-// data has not arrived yet — seen on macOS — and the hook then read nothing and allowed. So this reads in a
-// loop and, on EAGAIN, waits 5 ms and tries again, for up to `limitMs`; after that the error goes to the
-// caller, which fails open as before. A read of 0 bytes (or Windows' EOF error) is the end.
+// Read all of stdin. Asking `process.stdin.isTTY` makes Node open stdin as a stream, and on a pipe that
+// switches fd 0 to non-blocking: a read then throws EAGAIN ("no data yet") whenever the payload arrives a
+// moment after the hook starts. `fs.readFileSync(0)` gave up there, the hook read no payload, and it
+// allowed — the macOS CI failures on #459 (a deny allowed) and #460 (no Cursor verdict: with no payload
+// the hook could not tell it was Cursor). So this reads in a loop and, on EAGAIN, waits 5 ms and tries
+// again, for up to `limitMs`; after that the error goes to the caller, which fails open. Keep the loop:
+// the non-blocking mode is also what gives the limit — a blocking read would hang for ever on a parent
+// that never closes stdin. A read of 0 bytes (or Windows' EOF error) is the end.
 export function readStdin({ fd = 0, readSync = fs.readSync, limitMs = 5000 } = {}) {
   const chunks = [];
   const buf = Buffer.alloc(64 * 1024);
@@ -603,10 +607,10 @@ const isReadOnlyCall = (payload) => {
 };
 
 export function runLedgerGuardHook({ paths = [], format = 'exit' } = {}) {
-  // Only read stdin when there is nothing else to go on. `readFileSync(0)` blocks until EOF, and a
-  // caller that passes `--path` (the documented stdin-free alternative) may well have inherited an
-  // open pipe from a long-lived parent — `isTTY` is false there, so the TTY guard does not trip and
-  // the hook would hang forever. A hang is strictly worse for an agent than a block.
+  // Only read stdin when there is nothing else to go on. A caller that passes `--path` (the documented
+  // stdin-free alternative) may well have inherited an open pipe from a long-lived parent — `isTTY` is
+  // false there, so the TTY guard does not trip, and `readStdin` would wait out its whole limit before
+  // going on. Every agent tool call would pay that wait.
   const payload = paths.length ? null : readPayload();
   const all = isReadOnlyCall(payload) ? [...paths] : [...new Set([...payloadPaths(payload), ...paths])];
   const verdict = ledgerGuardDecision(all, {

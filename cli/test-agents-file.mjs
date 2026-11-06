@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // The #280 guard (cli/test.mjs): printed lines go to stderr while the runner owns stdout.
 if (process.env.NODE_TEST_CONTEXT) {
@@ -581,7 +582,7 @@ test('the hooks read a payload that arrives late or in pieces, retry a pipe that
     assert.equal(JSON.parse(out.trim()).permission, 'deny', `out ${JSON.stringify(out)} err ${JSON.stringify(err)}`);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // Every write of a verdict in the hook scripts is followed by an exit only once it is written.
-  const dir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'skills/yad-checks/templates/hooks');
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills/yad-checks/templates/hooks');
   for (const f of ['agent-guard.mjs', 'ledger-guard-cursor.mjs']) {
     const src = fs.readFileSync(path.join(dir, f), 'utf8');
     assert.ok(!/process\.stdout\.write\([^)]*\);?\s*process\.exit\(/.test(src), `${f}: no exit straight after a stdout write`);

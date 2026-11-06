@@ -84,10 +84,14 @@ function runYad(yad, args, options) {
 }
 // ---- end yad-resolve ---------------------------------------------------------------------------------
 
-// Read all of stdin. `fs.readFileSync(0)` throws EAGAIN when stdin is a pipe in non-blocking mode whose
-// data has not arrived yet — seen on macOS — and the hook then read nothing and allowed. So this reads in a
-// loop and, on EAGAIN, waits 5 ms and tries again, for up to `limitMs`; after that the error goes to the
-// caller, which fails open as before. A read of 0 bytes (or Windows' EOF error) is the end.
+// Read all of stdin. Asking `process.stdin.isTTY` makes Node open stdin as a stream, and on a pipe that
+// switches fd 0 to non-blocking: a read then throws EAGAIN ("no data yet") whenever the payload arrives a
+// moment after the hook starts. `fs.readFileSync(0)` gave up there, the hook read no payload, and it
+// allowed — the macOS CI failures on #459 (a deny allowed) and #460 (no Cursor verdict: with no payload
+// the hook could not tell it was Cursor). So this reads in a loop and, on EAGAIN, waits 5 ms and tries
+// again, for up to `limitMs`; after that the error goes to the caller, which fails open. Keep the loop:
+// the non-blocking mode is also what gives the limit — a blocking read would hang for ever on a parent
+// that never closes stdin. A read of 0 bytes (or Windows' EOF error) is the end.
 function readStdin(limitMs = 5000) {
   const chunks = [];
   const buf = Buffer.alloc(64 * 1024);
@@ -140,7 +144,7 @@ if (cursor) {
 // unknown action with another code), must not read as a refusal.
 if (r.status === 2) await finish(2, r.stdout || '');
 if (r.status !== 0) {
-  if (r.stdout) process.stdout.write(r.stdout);
-  await allow(`\`yad hook agent-guard\` ${r.error ? r.error.message : `exited ${r.status ?? r.signal}`} (run \`yad doctor\` to check the install)`);
+  process.stderr.write(`  • yad hook: \`yad hook agent-guard\` ${r.error ? r.error.message : `exited ${r.status ?? r.signal}`} (run \`yad doctor\` to check the install) — allowing\n`);
+  await finish(0, r.stdout || '');
 }
 await finish(0, r.stdout || '');
