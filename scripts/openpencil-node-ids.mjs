@@ -16,7 +16,7 @@
 //
 // It downloads @open-pencil/cli from npm (network needed) into a new temporary folder, with its install
 // scripts off. The package is someone else's code, and its program does run here, on a scratch design
-// file: it gets only a small set of environment variables (no tokens), and the temporary folder is removed
+// file: it gets only a small set of environment variables (no tokens from the environment), and the temporary folder is removed
 // at the end, also on Ctrl-C. On a pass, set `vetted.handCheck.version` in cli/toolbox.mjs to the version
 // checked; the unit suite fails while the CLI pin and that version differ. Only the CLI pin is watched:
 // the IDs live in the file, which the CLI writes; the MCP server forwards to the desktop app.
@@ -53,11 +53,12 @@ process.on('SIGINT', () => fail(2, 'stopped'));
 function npmCommand() {
   const dir = path.dirname(process.execPath);
   for (const cli of [path.join(dir, 'node_modules', 'npm', 'bin', 'npm-cli.js'), path.join(dir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'), process.env.npm_execpath]) {
-    if (cli && cli.endsWith('.js') && fs.existsSync(cli)) return [process.execPath, [cli]];
+    if (cli && path.basename(cli) === 'npm-cli.js' && fs.existsSync(cli)) return [process.execPath, [cli]];
   }
   return process.platform === 'win32' ? null : ['npm', []];
 }
-// What the package's program gets from this process: enough to run, nothing secret.
+// What the package's program gets from this process's environment: enough to run, no tokens. (It can still
+// read the files your user can, such as ~/.npmrc — it is a program you chose to run.)
 const SAFE_ENV = Object.fromEntries(['PATH', 'Path', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'LANG']
   .filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
 
@@ -68,6 +69,7 @@ try {
   if (!npmCmd) fail(2, 'npm was not found next to node — run this with a Node.js that ships npm');
   const npm = spawnSync(npmCmd[0], [...npmCmd[1], 'install', '--prefix', pkgDir, '--ignore-scripts', '--no-audit', '--no-fund', '--no-save', `${PKG}@${version}`],
     { encoding: 'utf8', timeout: TIMEOUT });
+  if (npm.signal === 'SIGINT') fail(2, 'stopped');
   if (npm.status !== 0) fail(2, `npm could not install ${PKG}@${version}: ${npm.error?.message ?? ''}\n${npm.stderr || npm.stdout || ''}`);
   const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'node_modules', ...PKG.split('/'), 'package.json'), 'utf8'));
   const binRel = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.openpencil;
