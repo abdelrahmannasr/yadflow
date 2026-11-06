@@ -336,6 +336,7 @@ export const TOOLBOX = Object.freeze([
       localProbe: 'check that <file> is in the Product checkout and that `openpencil --version` runs, then find frame <frame> with `openpencil eval` on that file: the node whose shared plugin data `yad`/`nodeId` is <frame> (figma.root.findAll with getSharedPluginData)',
       localStop: 'Pull the Product so that <file> is there with frame <frame> in it, and make sure `openpencil` runs in your terminal, then continue',
       either: 'Make sure <file> is in your Product checkout and `openpencil` runs in your terminal (the CLI), or open the OpenPencil desktop app with <file> loaded (its MCP server), then continue',
+      eitherProbe: 'if `openpencil --version` runs, check that <file> is in the Product checkout and find frame <frame> with `openpencil eval` on that file; if it does not, find frame <frame> through the OpenPencil MCP\'s eval tool instead — either way, the node whose shared plugin data `yad`/`nodeId` is <frame> (figma.root.findAll with getSharedPluginData)',
     },
     usedBy: ['yad-connect-design', 'yad-ui'],
   },
@@ -478,7 +479,8 @@ export function toolProblems(t) {
   // person signs in, said by `signIn`) and, E164, `local` (a CLI that works on the design file on disk —
   // no app and no sign-in: `localProbe` and `localStop` replace `probe` and the stop text). `ownServer`
   // (optional) lists the providers that are an app's own server, which the tool's recipe does not install,
-  // so the preflight offers no connect step for them (E165).
+  // so the preflight offers no connect step for them (E165). `eitherProbe` (optional) replaces `probe` when
+  // yad cannot tell the provider, so the check tries every way the `either` text names.
   const r = t?.reach;
   if (r !== undefined) {
     const text = (v) => typeof v === 'string' && v.length > 0;
@@ -490,6 +492,8 @@ export function toolProblems(t) {
     need(r?.local === undefined || isStringList(r?.local), 'reach.local is absent or a list of providers');
     need(r?.local === undefined || (text(r?.localProbe) && text(r?.localStop)), 'reach.localProbe and reach.localStop say how to check a provider in local, and what to do when that fails');
     need(r?.ownServer === undefined || isStringList(r?.ownServer), 'reach.ownServer is absent or a list of providers');
+    need(r?.eitherProbe === undefined || text(r?.eitherProbe), 'reach.eitherProbe is absent or how to check when yad cannot tell the provider');
+    need(!isStringList(r?.local) || !isStringList(r?.appBound) || !r.local.some((p) => r.appBound.includes(p)), 'a provider is in reach.local or reach.appBound, not both');
     need(r?.appBound === true || text(r?.either), 'reach.either says what to do when yad cannot tell whether the provider needs the app');
   }
   return out;

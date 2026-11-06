@@ -192,7 +192,7 @@ export function designPreflight(design, links, frames) {
   const fill = (s) => s.replace(/<file>/g, file ? `\`${forTerminal(file)}\`` : 'the design file').replace(/<frame>/g, `\`${forTerminal(found.id)}\``);
   return {
     tool, provider, reachable: 'check', appBound, local, file, frame: found.id,
-    probe: fill(local ? reach.localProbe : reach.probe),
+    probe: fill(local ? reach.localProbe : appBound === null && reach.eitherProbe ? reach.eitherProbe : reach.probe),
     stop: fill(local ? reach.localStop : appBound === true ? reach.open : appBound === false ? reach.signIn : reach.either),
     // E165: when the probe fails because the tool is not on this machine at all (not a closed app or a
     // sign-in), the agent offers this first, under the connect-tool rule. A tool with a reach rule is shipped.
