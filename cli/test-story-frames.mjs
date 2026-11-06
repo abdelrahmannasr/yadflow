@@ -382,3 +382,23 @@ test('#358: spec and implement probe the design tool first, stop on a failure, a
   const example = connect.slice(connect.indexOf('### Step 2'), connect.indexOf('### Step 3'));
   assert.ok(example.includes('"provider": "figma-desktop"') && !example.includes('figma-mcp'), 'the registry example records a provider the preflight can read');
 });
+
+test('E164 PR 2: the skills give each OpenPencil frame yad\'s own ID, fold takes design/, and the probe may be a CLI command', () => {
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const ui = read('skills/yad-ui/SKILL.md');
+  const ctx = read('skills/yad-connect-design/references/design-context.md');
+  for (const [name, text] of [['yad-ui', ui], ['design-context', ctx]]) {
+    assert.match(text, /setSharedPluginData\('yad', 'nodeId', '<id>'\)/, `${name}: yad stores its own ID on the frame`);
+    assert.match(text, /getSharedPluginData\('yad', 'nodeId'\) === '<id>'/, `${name}: and finds the frame by it`);
+    assert.match(text, /`yad fold` (takes that folder too|commits the\s+`design\/` folder)/, `${name}: fold takes design/`);
+    assert.doesNotMatch(text, /not taken by `yad fold` yet|Until E164's second PR/, `${name}: no note from before PR 2`);
+  }
+  assert.match(ui, /each screen's `nodeId` is the ID yad stored on its frame/);
+  assert.match(ctx, /\| `openpencil`, provider `openpencil-cli` \|/);
+  assert.doesNotMatch(ctx, /not checked yet: yad has no reach rule/);
+  for (const skill of ['yad-spec', 'yad-implement']) {
+    const text = read(`skills/${skill}/SKILL.md`);
+    assert.match(text, /make the check `preflight\.probe`\s+describes \(an MCP call, or for a tool's\s+CLI — `preflight\.local` is true — a command in your terminal\)/, skill);
+    assert.doesNotMatch(text, /make the MCP call/, skill);
+  }
+});
