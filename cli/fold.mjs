@@ -62,14 +62,21 @@ export function stepPaths(epic, stepId) {
 const covers = (paths, p, isRepo = null) => paths.some((s) => p === s
   || (p.startsWith(`${s}/`) && !(s.endsWith(`/${UI_DESIGN_DIR}`) && (isDesignJunk(p.slice(s.length + 1)) || p.endsWith('/') || !!isRepo?.(p)))));
 // Is this Product-relative path a nested repository or a submodule — a folder holding `.git`, or a gitlink
-// in the index (a submodule never initialised here has no `.git`)?
+// in the index (a submodule never initialised here has no `.git`)? The index's gitlinks are read once, on
+// the first path that needs them, so many changed design files cost one git call. `GIT_LITERAL_PATHSPECS`
+// is cleared so git reads the `:(glob)` pattern as a pattern.
 export const repoAt = (root, env = process.env) => {
-  const git = gitIn(root, env, { GIT_OPTIONAL_LOCKS: '0' });
+  let gitlinks = null;
+  const links = () => {
+    if (gitlinks) return gitlinks;
+    const rest = Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'GIT_LITERAL_PATHSPECS'));
+    const r = gitIn(root, rest, { GIT_OPTIONAL_LOCKS: '0' })(['ls-files', '-s', '-z', '--', `:(glob)**/${UI_DESIGN_DIR}/**`]);
+    gitlinks = new Set(r.ok ? r.out.split('\0').filter((e) => e.startsWith('160000 ')).map((e) => e.slice(e.indexOf('\t') + 1)) : []);
+    return gitlinks;
+  };
   return (p) => {
     const bare = p.replace(/\/$/, '');
-    if (fs.existsSync(path.join(root, ...bare.split('/'), '.git'))) return true;
-    const r = git(['ls-files', '-s', '-z', '--', `:(literal)${bare}`]);
-    return r.ok && r.out.split('\0').some((e) => e.startsWith('160000 ') && e.endsWith(`\t${bare}`));
+    return fs.existsSync(path.join(root, ...bare.split('/'), '.git')) || links().has(bare);
   };
 };
 
