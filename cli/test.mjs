@@ -10972,6 +10972,12 @@ test('E164: the UI review covers design/ — no design file keeps the old finger
     fs.mkdirSync(path.join(ep, 'design/exports'));
     fs.writeFileSync(path.join(ep, 'design/exports/home.png'), 'png');
     assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'an ignored export is left out');
+    // Review 4: git is found from the folder, never through a GIT_DIR a hook or a script set…
+    const keep = process.env.GIT_DIR;
+    process.env.GIT_DIR = path.join(R, '.git');
+    try { assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'GIT_DIR in the environment changes nothing'); } finally { if (keep === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = keep; }
+    // …and a scratch copy of a commit is never judged by git's rules (it holds only committed files).
+    assert.notEqual(artifactHash(ep, 'ui-design.md', reviewedSha, { askGit: false }), nested, 'askGit: false counts every file');
     fs.rmSync(path.join(ep, 'design/exports'), { recursive: true });
     // Review 2: any other name is a design file, a dot-name included.
     fs.writeFileSync(path.join(ep, 'design/.exports.fig'), 'export');
@@ -26931,6 +26937,16 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   assert.deepEqual(kit.step, [], 'review 2: a nested repository, listed by git as a folder, is never folded');
   const sub = fold.sortChanges([{ xy: ' M', path: 'epics/EP-x/design/kit' }, { xy: ' M', path: 'epics/EP-x/design/a.fig' }], { epic: 'EP-x', step: 'ui-design', verified: true, isRepo: (p) => p === 'epics/EP-x/design/kit' });
   assert.deepEqual(sub.step, ['epics/EP-x/design/a.fig'], 'review 3: a committed submodule (a folder holding .git) is never folded either');
+  // Review 4: a submodule never initialised here has no .git — the index's gitlink says what it is.
+  const G = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-gl-'));
+  try {
+    git(G, 'init', '-q');
+    git(G, 'update-index', '--add', '--cacheinfo', `160000,${'a'.repeat(40)},epics/EP-x/design/kit`);
+    fs.mkdirSync(path.join(G, 'epics/EP-x/design/kit'), { recursive: true });
+    fs.writeFileSync(path.join(G, 'epics/EP-x/design/a.fig'), 'x');
+    const isRepo = fold.repoAt(G);
+    assert.deepEqual([isRepo('epics/EP-x/design/kit'), isRepo('epics/EP-x/design/a.fig'), isRepo('epics/EP-x/design/k')], [true, false, false]);
+  } finally { fs.rmSync(G, { recursive: true, force: true }); }
   const found = fold.sortChanges([{ xy: '??', path: 'foundation/purpose.md' }], { epic: 'EP-foundation', step: 'foundation', verified: false });
   assert.deepEqual(found.step, ['foundation/purpose.md']);
   assert.equal(fold.authorStepOf('stories-S02'), 'stories');

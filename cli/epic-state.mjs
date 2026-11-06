@@ -651,25 +651,31 @@ function designSha(p) {
 }
 // The files under `design/` that git ignores here (an exports folder in .gitignore, an editor's settings
 // folder): no commit holds them, so counting them would make the approval look changed on this machine
-// only. Asked of git only inside a checkout; the scratch copy `artifactHashAt` makes is in none, and has
-// only committed files anyway. A tracked file is never reported, even when a pattern matches it.
+// only. Never asked for the scratch copy `artifactHashAt` makes (`askGit: false`): it holds only committed
+// files, and a temporary folder inside some checkout would be judged by that checkout's rules. A tracked
+// file is never reported, even when a pattern matches it. The variables that point git at another
+// repository (set inside a git hook, or by a script) are dropped, so git finds the Product's checkout from
+// the folder itself — the same list hook.mjs drops. Names are compared in one Unicode form, because git
+// on macOS may print a name precomposed that it was given decomposed.
+const REPO_ENV = /^GIT_(DIR|WORK_TREE|PREFIX|INDEX_FILE|COMMON_DIR|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/;
 function ignoredByGit(dir, files) {
   if (!files.length) return new Set();
-  const r = spawnSync('git', ['check-ignore', '-z', '--stdin'], { cwd: dir, input: files.map((f) => `${f}\0`).join(''), env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, maxBuffer: 64 * 1024 * 1024 });
-  return r.status === 0 ? new Set(r.stdout.toString('utf8').split('\0').filter(Boolean)) : new Set();
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !REPO_ENV.test(k))), GIT_OPTIONAL_LOCKS: '0' };
+  const r = spawnSync('git', ['check-ignore', '-z', '--stdin'], { cwd: dir, input: files.map((f) => `${f}\0`).join(''), env, maxBuffer: 64 * 1024 * 1024 });
+  return r.status === 0 ? new Set(r.stdout.toString('utf8').split('\0').filter(Boolean).map((f) => f.normalize('NFC'))) : new Set();
 }
 // The design files' part of the fingerprint, read once: `acceptedHashes` combines it with each form of
 // ui-design.md, so a large design file is not read again for every form.
-function designParts(epicDir) {
+function designParts(epicDir, { askGit = true } = {}) {
   const dir = path.join(epicDir, UI_DESIGN_DIR);
   const all = designFiles(dir);
-  const ignored = ignoredByGit(dir, all);
-  return all.filter((f) => !ignored.has(f)).sort().map((f) => `${UI_DESIGN_DIR}/${f}:${designSha(path.join(dir, ...f.split('/')))}`);
+  const ignored = askGit ? ignoredByGit(dir, all) : new Set();
+  return all.filter((f) => !ignored.has(f.normalize('NFC'))).sort().map((f) => `${UI_DESIGN_DIR}/${f}:${designSha(path.join(dir, ...f.split('/')))}`);
 }
-export function uiDesignHash(epicDir, sha = reviewedSha, parts = null) {
+export function uiDesignHash(epicDir, sha = reviewedSha, parts = null, { askGit = true } = {}) {
   const doc = sha(path.join(epicDir, 'ui-design.md'));
   if (doc === null) return null;
-  parts ??= designParts(epicDir);
+  parts ??= designParts(epicDir, { askGit });
   if (!parts.length) return doc;
   return 'sha256:' + createHash('sha256').update([`ui-design.md:${doc}`, ...parts].join('\n')).digest('hex');
 }
@@ -1019,13 +1025,14 @@ export function discoveryHash(epicDir, sha = reviewedSha) {
 // the whole discovery file set; for every other artifact it is the file. Every file is fingerprinted
 // without its frontmatter `status:` line (see `reviewedSha`). `sha` swaps that for a legacy form —
 // only `acceptedHashes` passes one.
-export function artifactHash(epicDir, artifact, sha = reviewedSha) {
+// `askGit: false` is for a scratch copy of a commit (`artifactHashAt`): see `ignoredByGit`.
+export function artifactHash(epicDir, artifact, sha = reviewedSha, { askGit = true } = {}) {
   const b = artifactBase(artifact);
   if (b === 'architecture') return contractSurfaceHash(epicDir);
   if (b === 'stories') return storiesHash(epicDir, sha);
   if (b === 'discovery') return discoveryHash(epicDir, sha);
   if (b === 'foundation') return foundationHash(epicDir, FOUNDATION_SECTIONS, sha);
-  if (b === 'ui-design') return uiDesignHash(epicDir, sha);
+  if (b === 'ui-design') return uiDesignHash(epicDir, sha, null, { askGit });
   return sha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
@@ -1100,7 +1107,7 @@ export function artifactHashAt(root, epicDir, artifact, rev) {
         copied++;
       }
     } catch (e) { return { ok: false, reason: `the files at ${rev.slice(0, 12)} could not be copied (${e.code || e.message})` }; }
-    return { ok: true, hash: artifactHash(dir, artifact), copied };
+    return { ok: true, hash: artifactHash(dir, artifact, reviewedSha, { askGit: false }), copied };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

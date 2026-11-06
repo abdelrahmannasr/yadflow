@@ -61,8 +61,17 @@ export function stepPaths(epic, stepId) {
 // link to another repository, and the fingerprint skips it.
 const covers = (paths, p, isRepo = null) => paths.some((s) => p === s
   || (p.startsWith(`${s}/`) && !(s.endsWith(`/${UI_DESIGN_DIR}`) && (isDesignJunk(p.slice(s.length + 1)) || p.endsWith('/') || !!isRepo?.(p)))));
-// Is this Product-relative path a folder holding `.git` (a nested repository or a submodule)?
-const repoAt = (root) => (p) => fs.existsSync(path.join(root, ...p.replace(/\/$/, '').split('/'), '.git'));
+// Is this Product-relative path a nested repository or a submodule — a folder holding `.git`, or a gitlink
+// in the index (a submodule never initialised here has no `.git`)?
+export const repoAt = (root, env = process.env) => {
+  const git = gitIn(root, env, { GIT_OPTIONAL_LOCKS: '0' });
+  return (p) => {
+    const bare = p.replace(/\/$/, '');
+    if (fs.existsSync(path.join(root, ...bare.split('/'), '.git'))) return true;
+    const r = git(['ls-files', '-s', '-z', '--', `:(literal)${bare}`]);
+    return r.ok && r.out.split('\0').some((e) => e.startsWith('160000 ') && e.endsWith(`\t${bare}`));
+  };
+};
 
 // The scope is the epic ID in lowercase (#413): the commit-message gate takes a lowercase scope
 // (`[a-z0-9._-]`), so `docs(EP-x)` failed every review PR. The exact ID stays in the Yad-Epic trailer.
@@ -117,7 +126,7 @@ export function unfoldedPaths(root, epic, base, env = process.env) {
   const own = stepPaths(epic, authorStepOf(base)) || [];
   // A per-story branch (`stories-S01`) reviews that one story: another story's edit is not its business.
   const story = /^stories-S\d+$/i.test(base) ? base.toLowerCase() : null;
-  return entries.map((e) => e.path).filter((p) => covers(own, p, repoAt(root)) && (!story || artifactBase(p).toLowerCase() === story));
+  return entries.map((e) => e.path).filter((p) => covers(own, p, repoAt(root, env)) && (!story || artifactBase(p).toLowerCase() === story));
 }
 
 // `yad fold <epic> <step>`. Returns a plain object (E1 turns it into the `--json` answer); a refusal
@@ -179,7 +188,7 @@ export async function runFold(root, { epic, step, env = process.env, capture = r
   const seededAt = (e) => git(['cat-file', '-e', `HEAD:./${epicRel(e)}/.sdlc/state.json`]).ok;
   const productLevel = epic === FOUNDATION_EPIC || epic === DISCOVERY_EPIC;
   const seeding = productLevel ? !seededAt(FOUNDATION_EPIC) && !seededAt(DISCOVERY_EPIC) : !seededAt(epic);
-  const sorted = sortChanges(entries, { epic, step, verified, seeding, isRepo: repoAt(root) });
+  const sorted = sortChanges(entries, { epic, step, verified, seeding, isRepo: repoAt(root, env) });
   // What `git add` can take: a path on disk or in the index. A deletion already staged (`D `, from `git rm`
   // or the old half of a `git mv`) is in neither, and `git add` would refuse it — but it is in HEAD, so
   // `commit --only` commits the deletion. A path added and then deleted (`AD`) is in none of the three and
