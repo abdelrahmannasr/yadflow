@@ -188,7 +188,7 @@ This table lists the codes that most often appear after a 3.x → 4.x upgrade.
 | `epic:<epic>:<step>:stale` | F | A step is done, but its files changed **after** they were approved. | Run `git log -- <path to that epic's artifact>` to see what changed. If the change is real, open a new review PR so the current version gets approved. |
 | `mode:suggest-team` "could not be counted" | F | yadflow could not count the people on the project. The reason is in brackets (for example a `build-log.json` with no `ships` list). | Check the named file or repo. This only affects a suggestion, never a gate. |
 | `mode:suggest-team` (with a count) | F | You are in solo mode, but more than one person seems to work here. | `yad mode team` if that is true. Otherwise leave it. |
-| `learning` "CLI is not confirmed" | F | A learning tool is recorded, but its program is not confirmed. | Run the `yad-connect-learning` skill in your AI agent, or ignore it if you do not use the tool. |
+| `learning` "recorded but not confirmed" | F | A learning tool is recorded, but its program is not confirmed. | Run the `yad-connect-learning` skill with `action: refresh` and `tool: <the tool>` in your AI agent, or ignore it if you do not use the tool. |
 | `codeowners:<repo>`, `protection:<repo>` | F | yadflow cannot tell whether a repo is on GitHub or GitLab, so it cannot check it. | Set `platform` with `yad repo connect` (code repo) or `yad setup` (Product). |
 
 If a code is not in this table, read its hint. The full list of codes is in

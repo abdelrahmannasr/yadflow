@@ -23,13 +23,6 @@ import { checkCodeowners, codeownersFindings, unguardedHint, unguardedWords } fr
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, shown } from './protection.mjs';
 import { readTokenPlacement, tokenLine, readExpiringProductTokens, TOKEN_NAME } from './product-token.mjs';
-
-// The design, testing and learning rows (E165 follow-up). A refresh with no `tool` checks the skill's
-// default tool, not the team's, so every hint names it — and, for a tool not found here, the connect step
-// the agent can offer under the connect-tool rule. The tool is one of DESIGN_TOOLS / TESTING_TOOLS /
-// LEARNING_TOOLS by the time these run, each with a connect recipe.
-const connectThenRefresh = (skill, tool) => `connect it — your agent can run \`yad toolbox connect ${tool} --json\` (it asks you once) — then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``;
-const confirmByRefresh = (skill, tool) => `run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\` in your AI agent to detect it`;
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { pagesWorkflowPath, pagesWorkflowFailsOnBuild, wiredPagesPlatform } from './docs.mjs';
 import { indexFreshness, INDEX_FILE } from './product-index.mjs';
@@ -41,6 +34,15 @@ import { signingDoctorLine } from './signing.mjs';
 import { nodePins, satisfies, nodeFix, dockerReasons, dockerState, glabConfigs } from './machine.mjs';
 import { allStoryFrames, FRAMES_KEY } from './story-frames.mjs';
 import { previewPattern, PREVIEW_KEY } from './preview.mjs';
+
+// The design, testing and learning rows (E165 follow-up). The files are the team's, committed: `source` says
+// what was found on the machine of whoever refreshed last, so a row says what was RECORDED, and the refresh
+// checks this machine. A refresh with no `tool` checks the skill's default tool, not the team's, so every
+// hint names it. The tool is one of DESIGN_TOOLS / TESTING_TOOLS / LEARNING_TOOLS by the time these run,
+// each with a connect recipe; one that is installed but cannot be reached (signed out, its app closed)
+// needs the person, not a connect step.
+const connectThenRefresh = (skill, tool) => `if ${tool} is not on this machine, your agent can connect it: \`yad toolbox connect ${tool} --json\` (it asks you first); if it is, sign in or open its app. Then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``;
+const confirmByRefresh = (skill, tool) => `run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\` in your AI agent to check it on this machine`;
 
 // A registered path doctor may run git in (E81): a checkout the judgement accepts — never a refused
 // entry (git run in a folder the Product shaped as a repo reads its `config`, which can run a command),
@@ -475,8 +477,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     else if (design.tool === 'none') check(checks, 'design', 'project', 'ok', 'design: markdown-only');
     else if (!DESIGN_TOOLS.includes(design.tool)) check(checks, 'design', 'project', 'fail', `${PROJECT_FILES.designConfig}: unknown or missing design tool '${design.tool}' [YAD-CFG-002]`, `expected one of ${DESIGN_TOOLS.join(', ')}, or none`);
     else if (design.source && design.source !== 'unavailable') check(checks, 'design', 'project', 'ok', `design: ${design.tool} (${design.source})`);
-    else if (design.source === 'unavailable') check(checks, 'design', 'project', 'warn', `design: ${design.tool} not found on this machine — yad-ui runs markdown-only`, connectThenRefresh('yad-connect-design', design.tool));
-    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but not confirmed on this machine`, confirmByRefresh('yad-connect-design', design.tool));
+    else if (design.source === 'unavailable') check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded as not found when last checked — yad-ui runs markdown-only`, connectThenRefresh('yad-connect-design', design.tool));
+    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but not confirmed`, confirmByRefresh('yad-connect-design', design.tool));
   }
 
   // testing.json: parse + shape + tool + MCP confirmation (absent is the normal artifacts-only default —
@@ -495,8 +497,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     else if (testing.tool === 'none') check(checks, 'testing', 'project', 'ok', 'testing: artifacts-only');
     else if (!TESTING_TOOLS.includes(testing.tool)) check(checks, 'testing', 'project', 'fail', `${PROJECT_FILES.testingConfig}: unknown or missing testing tool '${testing.tool}' [YAD-CFG-003]`, `expected one of ${TESTING_TOOLS.join(', ')}, or none`);
     else if (testing.source && testing.source !== 'unavailable') check(checks, 'testing', 'project', 'ok', `testing: ${testing.tool} (${testing.source})`);
-    else if (testing.source === 'unavailable') check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} not found on this machine — yad-test-cases runs artifacts-only`, connectThenRefresh('yad-connect-testing', testing.tool));
-    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but not confirmed on this machine`, confirmByRefresh('yad-connect-testing', testing.tool));
+    else if (testing.source === 'unavailable') check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded as not found when last checked — yad-test-cases runs artifacts-only`, connectThenRefresh('yad-connect-testing', testing.tool));
+    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but not confirmed`, confirmByRefresh('yad-connect-testing', testing.tool));
   }
 
   // learning.json: parse + shape + tool + CLI confirmation (absent is the normal harness-native default —
@@ -516,8 +518,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     else if (learning.tool === 'none') check(checks, 'learning', 'project', 'ok', 'learning: harness-native');
     else if (!LEARNING_TOOLS.includes(learning.tool)) check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown or missing learning tool '${learning.tool}' [YAD-CFG-004]`, `expected one of ${LEARNING_TOOLS.join(', ')}, or none`);
     else if (learning.source === 'deeptutor-cli') check(checks, 'learning', 'project', 'ok', `learning: ${learning.tool} (${learning.source})`);
-    else if (learning.source === 'harness-native') check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} not found on this machine — yad-learn tutors harness-native`, connectThenRefresh('yad-connect-learning', learning.tool));
-    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but not confirmed on this machine`, confirmByRefresh('yad-connect-learning', learning.tool));
+    else if (learning.source === 'harness-native') check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded as not found when last checked — yad-learn tutors harness-native`, connectThenRefresh('yad-connect-learning', learning.tool));
+    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but not confirmed`, confirmByRefresh('yad-connect-learning', learning.tool));
     else check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown source '${learning.source}' [YAD-STATE-002]`, 'expected deeptutor-cli, harness-native, or null');
   }
 

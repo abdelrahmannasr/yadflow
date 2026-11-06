@@ -12820,20 +12820,21 @@ test('doctor: every design, testing and learning hint names the tool — a refre
   const { T } = scaffold();
   await reconcile(T, { fix: true });
   const cases = [
-    ['design.json', 'design', { tool: 'openpencil', source: 'unavailable' }, 'yad-connect-design', 'openpencil', /design: openpencil not found on this machine — yad-ui runs markdown-only/],
-    ['testing.json', 'testing', { tool: 'cypress', source: 'unavailable' }, 'yad-connect-testing', 'cypress', /testing: cypress not found on this machine/],
-    ['learning.json', 'learning', { tool: 'deeptutor', source: 'harness-native' }, 'yad-connect-learning', 'deeptutor', /learning: deeptutor not found on this machine/],
+    ['design.json', 'design', { tool: 'openpencil', source: 'unavailable' }, 'yad-connect-design', 'openpencil', /design: openpencil recorded as not found when last checked — yad-ui runs markdown-only/],
+    ['testing.json', 'testing', { tool: 'cypress', source: 'unavailable' }, 'yad-connect-testing', 'cypress', /testing: cypress recorded as not found when last checked/],
+    ['learning.json', 'learning', { tool: 'deeptutor', source: 'harness-native' }, 'yad-connect-learning', 'deeptutor', /learning: deeptutor recorded as not found when last checked/],
   ];
   try {
     for (const [file, id, data, skill, tool, label] of cases) {
       fs.writeFileSync(path.join(T, '.sdlc', file), JSON.stringify(data));
       let row = (await doctorOn(T)).checks.find((x) => x.id === id && x.status === 'warn');
       assert.match(row.message, label, id);
-      assert.equal(row.hint, `connect it — your agent can run \`yad toolbox connect ${tool} --json\` (it asks you once) — then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``, id);
+      assert.equal(row.hint, `if ${tool} is not on this machine, your agent can connect it: \`yad toolbox connect ${tool} --json\` (it asks you first); if it is, sign in or open its app. Then run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\``, id);
       assert.doesNotMatch(row.message, /MCP/, `${id}: "not found" is true for a CLI tool too`);
       fs.writeFileSync(path.join(T, '.sdlc', file), JSON.stringify({ tool, source: null }));
       row = (await doctorOn(T)).checks.find((x) => x.id === id && x.status === 'warn');
-      assert.equal(row.hint, `run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\` in your AI agent to detect it`, id);
+      assert.equal(row.hint, `run \`${skill}\` with \`action: refresh\` and \`tool: ${tool}\` in your AI agent to check it on this machine`, id);
+      assert.doesNotMatch(row.message, /this machine/, `${id}: the file is the team's, so the row says what was recorded`);
       fs.rmSync(path.join(T, '.sdlc', file));
     }
     // No refresh hint anywhere in doctor, or in a connect skill's references, leaves the tool out.
