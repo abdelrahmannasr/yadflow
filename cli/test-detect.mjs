@@ -539,6 +539,22 @@ test('E88: every shipped toolbox entry carries a complete vetting record', () =>
   }
 });
 
+test('E164: a check run by hand on a pinned version — moving the pin fails until it is run again', () => {
+  const op = TOOLBOX.find((t) => t.id === 'openpencil');
+  assert.deepEqual(op.vetted.handCheck, { script: 'scripts/openpencil-node-ids.mjs', package: '@open-pencil/cli', version: '0.16.0' });
+  assert.ok(fs.existsSync(path.join(ROOT, op.vetted.handCheck.script)), 'the script it names is shipped');
+  assert.deepEqual(vettingProblems(op), []);
+  const bumped = { ...op, vetted: { ...op.vetted, packages: op.vetted.packages.map((p) => ({ ...p, version: '0.17.0' })) } };
+  assert.deepEqual(vettingProblems(bumped), ['run scripts/openpencil-node-ids.mjs again: it last passed on @open-pencil/cli@0.16.0, and the pinned version is 0.17.0 — then set vetted.handCheck.version']);
+  for (const handCheck of [null, { script: 'x.mjs', package: '@open-pencil/cli', version: '0.16.0' }, { script: 'scripts/openpencil-node-ids.mjs', package: '@other/pkg', version: '0.16.0' }]) {
+    assert.deepEqual(vettingProblems({ ...op, vetted: { ...op.vetted, handCheck } }), ['vetted.handCheck names its script (scripts/<name>.mjs) and one of vetted.packages'], JSON.stringify(handCheck));
+  }
+  // The release check reads it through vet-check, which fails on any vetting problem. A fixed day, so the
+  // age rule never turns this test red by itself.
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/vet-check.mjs'), '--today', op.vetted.on], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+});
+
 test('E88: vettingProblems names each way a record is incomplete; a team\'s own tool needs none', () => {
   const good = TOOLBOX.find((t) => t.id === 'repomix');
   const bad = (vetted, extra = {}) => vettingProblems({ ...good, ...extra, vetted });

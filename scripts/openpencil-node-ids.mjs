@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+/* global console, process */
+// Does the ID yad stores on an OpenPencil frame survive save, reopen and edits? (E164 PR 2)
+//
+// The #354 `design-frames` key and `design-links.json` name each screen by an ID. OpenPencil's own node
+// IDs cannot be that ID: its CLI numbers nodes in the order it loads them (`0:4`, `0:5`…) each time it
+// opens the file, so after a frame is deleted or added, another frame can take an old ID. Checked by hand
+// on 0.16.0 (2026-11-06): after one delete and one insert, the old `0:6` ('Login') pointed to 'Home'.
+// So yad-ui stores yad's own ID on each frame — shared plugin data, namespace `yad`, key `nodeId` — and
+// every read finds the frame by it. This script checks that this still holds for a pinned version.
+//
+//   node scripts/openpencil-node-ids.mjs              the version pinned in cli/toolbox.mjs
+//   node scripts/openpencil-node-ids.mjs 0.17.0       another version, before moving the pin
+//
+// It downloads @open-pencil/cli from npm (network needed) into a new temporary folder, with its install
+// scripts off, and runs it there on a scratch design file. The package is someone else's code: nothing
+// here runs from inside that folder, and the folder is removed at the end. On a pass, set
+// `vetted.handCheck.version` in cli/toolbox.mjs to the version checked; the unit suite fails while the
+// pin and that version differ. Exit 0: the stored IDs held. 1: one was lost or moved. 2: it could not run.
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { TOOLBOX } from '../cli/toolbox.mjs';
+
+const PKG = '@open-pencil/cli';
+const pinned = TOOLBOX.find((t) => t.id === 'openpencil')?.vetted?.packages?.find((p) => p.name === PKG)?.version;
+const version = process.argv[2] ?? pinned;
+if (!/^\d+\.\d+\.\d+$/.test(version || '')) {
+  console.error('usage: node scripts/openpencil-node-ids.mjs [<version, such as 0.16.0>]');
+  process.exit(2);
+}
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-openpencil-'));
+const pkgDir = path.join(tmp, 'pkg');
+const workDir = path.join(tmp, 'work');
+const fail = (code, msg) => { console.error(msg); fs.rmSync(tmp, { recursive: true, force: true }); process.exit(code); };
+try {
+  fs.mkdirSync(pkgDir);
+  fs.mkdirSync(workDir);
+  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm',
+    ['install', '--prefix', pkgDir, '--ignore-scripts', '--no-audit', '--no-fund', '--no-save', `${PKG}@${version}`],
+    { encoding: 'utf8', shell: process.platform === 'win32' });
+  if (npm.status !== 0) fail(2, `npm could not install ${PKG}@${version}:\n${npm.stderr || npm.stdout}`);
+  const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'node_modules', ...PKG.split('/'), 'package.json'), 'utf8'));
+  const binRel = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.openpencil;
+  if (!binRel) fail(2, `${PKG}@${version} names no openpencil program`);
+  const bin = path.join(pkgDir, 'node_modules', ...PKG.split('/'), binRel);
+
+  // Every call runs in the work folder, with the code on stdin (no shell quoting on any system).
+  const op = (args, code) => {
+    const r = spawnSync(process.execPath, [bin, ...args], { cwd: workDir, input: code, encoding: 'utf8' });
+    if (r.status !== 0) fail(2, `openpencil ${args.join(' ')} failed:\n${r.stderr || r.stdout}`);
+    return r.stdout;
+  };
+  const file = 'screens.fig';
+  fs.writeFileSync(path.join(workDir, 'seed.html'), '<div>seed</div>\n');
+  op(['import', 'seed.html', '-o', file]);
+  const write = (code) => op(['eval', file, '--stdin', '--write', '--quiet'], code);
+  // A read returns one JSON string (the frames as text), so nothing else on stdout can be mistaken for it.
+  const read = () => {
+    const out = op(['eval', file, '--stdin', '--json'], `return JSON.stringify(figma.currentPage.children.map((n) => ({ id: n.id, name: n.name, yad: n.getSharedPluginData('yad', 'nodeId') })))`);
+    return JSON.parse(JSON.parse(out.trim()));
+  };
+  const tag = (name, id) => `{ const f = figma.createFrame(); f.name = ${JSON.stringify(name)}; f.setSharedPluginData('yad', 'nodeId', ${JSON.stringify(id)}); }`;
+
+  write([tag('Login', 'login'), tag('Home', 'home'), tag('Cart', 'cart')].join('\n'));
+  const first = read();
+  // The edits a design goes through: a frame deleted, one added at the top, one renamed.
+  write(`figma.currentPage.children.find((n) => n.name === 'div').remove();
+figma.currentPage.children.find((n) => n.name === 'Home').name = 'Home v2';
+${tag('Splash', 'splash')}
+figma.currentPage.insertChild(0, figma.currentPage.children.find((n) => n.name === 'Splash'));`);
+  const second = read();
+  const third = read();
+
+  const byYad = (list) => new Map(list.filter((n) => n.yad).map((n) => [n.yad, n]));
+  const problems = [];
+  const expect = { login: 'Login', home: 'Home v2', cart: 'Cart', splash: 'Splash' };
+  for (const [id, name] of Object.entries(expect)) {
+    const hits = second.filter((n) => n.yad === id);
+    if (hits.length !== 1) problems.push(`the stored ID '${id}' is on ${hits.length} frames after the edits (expected 1)`);
+    else if (hits[0].name !== name) problems.push(`the stored ID '${id}' now names '${hits[0].name}', not '${name}'`);
+  }
+  if (JSON.stringify(second) !== JSON.stringify(third)) problems.push('a second reopen with no edit gave different frames');
+  for (const id of ['login', 'home', 'cart']) if (!byYad(first).has(id)) problems.push(`the stored ID '${id}' was lost on the first save`);
+
+  // For information: whether OpenPencil's own IDs moved (they did on 0.16.0). Never a failure.
+  const before = new Map(first.map((n) => [n.yad, n.id]));
+  const moved = second.filter((n) => n.yad && before.has(n.yad) && before.get(n.yad) !== n.id).map((n) => `${n.yad}: ${before.get(n.yad)} → ${n.id}`);
+  console.log(`${PKG}@${version}: OpenPencil's own node IDs ${moved.length ? `moved on reopen (${moved.join(', ')})` : 'did not move this time'} — yad never records them.`);
+  if (problems.length) fail(1, `FAIL: yad's stored frame IDs did not hold:\n  - ${problems.join('\n  - ')}`);
+  console.log(`PASS: every frame ID yad stored held through save, reopen, a delete, an insert and a rename. Set vetted.handCheck.version to ${version} in cli/toolbox.mjs if it is not already.`);
+  fs.rmSync(tmp, { recursive: true, force: true });
+} catch (e) {
+  fail(2, `the check could not run: ${e?.message ?? e}`);
+}

@@ -300,7 +300,8 @@ export const TOOLBOX = Object.freeze([
   // again. OpenPencil's own node IDs are NOT stable: it numbers nodes in the order it loads them, so after a
   // frame is deleted or added another frame can take an old ID (checked by hand on 0.16.0, E164 PR 2). So
   // yad-ui stores yad's own ID on each frame (shared plugin data `yad`/`nodeId`) and records that, and every
-  // read finds the frame by it.
+  // read finds the frame by it. `vetted.handCheck` is the CLI version scripts/openpencil-node-ids.mjs last
+  // passed on; moving the pin fails until it is run again.
   {
     id: 'openpencil', name: 'OpenPencil', tier: 'connector', role: 'design tool: yad-ui writes screens into a design file in the repo through its CLI, with no account and no app open',
     licence: 'MIT', source: 'https://github.com/open-pencil/open-pencil', checked: '2026-11-05',
@@ -312,6 +313,8 @@ export const TOOLBOX = Object.freeze([
         { registry: 'npm', name: '@open-pencil/cli', version: '0.16.0' },
       ],
       note: 'Before 1.0, and its own README says "active development … some rough edges": vet each version bump again.',
+      // OpenPencil's own node IDs move on reopen; yad's ID stored on each frame must not (E164 PR 2).
+      handCheck: { script: 'scripts/openpencil-node-ids.mjs', package: '@open-pencil/cli', version: '0.16.0' },
     },
     // One route: the MCP connection does nothing without the packages (a route is an alternative — E84).
     install: [{ type: 'npm', command: 'npm install -g @open-pencil/mcp@0.16.0 @open-pencil/cli@0.16.0, then claude mcp add --scope user open-pencil -- openpencil-mcp' }],
@@ -511,6 +514,16 @@ export function vettingProblems(t) {
     need(parseVersion(p?.version)?.full === true, 'a vetted package has the full version that was vetted (1.2.3)');
   }
   need(v.note === null || (typeof v.note === 'string' && v.note.length > 0), 'vetted.note is null or a sentence');
+  // E164: a check run by hand on one package's pinned version (OpenPencil's node IDs). It names the script,
+  // the package and the version it last passed on; moving that package's pin without running it again fails
+  // here, in the unit suite and the release check, never by itself on a quiet main.
+  if (v.handCheck !== undefined) {
+    const h = v.handCheck;
+    const pkg = Array.isArray(v.packages) ? v.packages.find((p) => p?.name === h?.package) : undefined;
+    need(h && typeof h === 'object' && typeof h.script === 'string' && /^scripts\/[\w.-]+\.mjs$/.test(h.script) && pkg !== undefined,
+      'vetted.handCheck names its script (scripts/<name>.mjs) and one of vetted.packages');
+    if (pkg) need(h.version === pkg.version, `run ${h.script} again: it last passed on ${h.package}@${h.version}, and the pinned version is ${pkg.version} — then set vetted.handCheck.version`);
+  }
   // A closed tool has no LICENSE file to read, so its proof must be the vendor's terms, not a repo file.
   need(t.licence !== 'proprietary' || !isRepoLicenceFile(v.licenceFrom), 'a proprietary tool\'s licence proof is its terms page');
   return out;
