@@ -10962,12 +10962,17 @@ test('E164: the UI review covers design/ — no design file keeps the old finger
     }
     // Review 1: what the system or an editor drops there (often not ignored by git) is not a design file,
     // and neither is a nested repository — the disk must agree with the approved commit.
-    for (const junk of ['.DS_Store', 'screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/.hidden']) fs.writeFileSync(path.join(ep, 'design', junk), 'junk');
+    for (const junk of ['.DS_Store', 'screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/._logo.png', '.~lock.screens.fig#']) fs.writeFileSync(path.join(ep, 'design', junk), 'junk');
     fs.mkdirSync(path.join(ep, 'design/vendor'));
     fs.writeFileSync(path.join(ep, 'design/vendor/.git'), 'gitdir: elsewhere\n');
     fs.writeFileSync(path.join(ep, 'design/vendor/kit.fig'), 'kit');
     assert.equal(artifactHash(ep, 'ui-design.md'), nested, 'junk files and a nested repository are left out');
-    for (const junk of ['.DS_Store', 'screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/.hidden']) fs.rmSync(path.join(ep, 'design', junk));
+    // Review 2: any other name is a design file, a dot-name included.
+    fs.writeFileSync(path.join(ep, 'design/.exports.fig'), 'export');
+    assert.notEqual(artifactHash(ep, 'ui-design.md'), nested, 'a dot-name that is not junk is covered');
+    fs.rmSync(path.join(ep, 'design/.exports.fig'));
+    // Junk committed to git is copied out of the commit and skipped there by the same walk (one stays).
+    for (const junk of ['screens.fig~', 'Thumbs.db', 'desktop.ini', 'assets/._logo.png', '.~lock.screens.fig#']) fs.rmSync(path.join(ep, 'design', junk));
     fs.rmSync(path.join(ep, 'design/vendor'), { recursive: true });
     git(R, 'add', '-A');
     git(R, 'commit', '-qm', 'ui');
@@ -10976,7 +10981,7 @@ test('E164: the UI review covers design/ — no design file keeps the old finger
     assert.match(fs.readFileSync(doc, 'utf8'), /\r\n/, 'the doc is checked out with CRLF');
     const at = artifactHashAt(R, ep, 'ui-design.md', git(R, 'rev-parse', 'HEAD').toString().trim());
     assert.equal(at.ok, true, at.reason);
-    assert.equal(at.copied, 3, 'ui-design.md and both design files');
+    assert.equal(at.copied, 4, 'ui-design.md, both design files, and the committed .DS_Store'); 
     assert.equal(at.hash, artifactHash(ep, 'ui-design.md'), 'the approved commit and the disk give one fingerprint');
   } finally { fs.rmSync(R, { recursive: true, force: true }); }
 });
@@ -10996,6 +11001,14 @@ test('E164 review 1: a Git LFS pointer and the file it stands for give one finge
     assert.equal(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'the pointer names the same SHA-256 as the file');
     fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `version https://git-lfs.github.com/spec/v1\noid sha256:${'0'.repeat(64)}\nsize 6\n`);
     assert.notEqual(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'another object is another design');
+    // Review 2: only the exact pointer format counts; a pointer-shaped file with more text is hashed whole.
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`;
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), pointer.replace(/\n/g, '\r\n'));
+    assert.equal(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'CRLF line ends are still a pointer');
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `version https://git-lfs.github.com/spec/v1\next-0-foo sha256:${'1'.repeat(64)}\noid sha256:${oid}\nsize 6\n`);
+    assert.equal(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'an ext- line is part of the format');
+    fs.writeFileSync(path.join(ptr, 'design/screens.fig'), `${pointer}notes an agent reads\n`);
+    assert.notEqual(artifactHash(ptr, 'ui-design.md'), artifactHash(real, 'ui-design.md'), 'extra text is never hidden behind an oid');
     if (process.platform !== 'win32') {
       const linked = path.join(T, 'linked');
       fs.mkdirSync(linked);
@@ -26908,6 +26921,8 @@ test('E44 sortChanges: the step\'s files, the ledger by mode (verified takes onl
   // E164: the epic's design file is the UI step's too; a look-alike name beside it is not.
   const design = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/screens.fig' }, { xy: '??', path: 'epics/EP-x/design-old.fig' }, { xy: '??', path: 'epics/EP-x/design/.DS_Store' }, { xy: '??', path: 'epics/EP-x/design/a/x.fig~' }], { epic: 'EP-x', step: 'ui-design', verified: true });
   assert.deepEqual([design.step, design.other], [['epics/EP-x/design/screens.fig'], ['epics/EP-x/design-old.fig', 'epics/EP-x/design/.DS_Store', 'epics/EP-x/design/a/x.fig~']], 'review 1: junk the fingerprint leaves out is not folded');
+  const kit = fold.sortChanges([{ xy: '??', path: 'epics/EP-x/design/kit/' }, { xy: '??', path: 'epics/EP-x/stories/EP-x-S01.md' }], { epic: 'EP-x', step: 'ui-design', verified: true });
+  assert.deepEqual(kit.step, [], 'review 2: a nested repository, listed by git as a folder, is never folded');
   const found = fold.sortChanges([{ xy: '??', path: 'foundation/purpose.md' }], { epic: 'EP-foundation', step: 'foundation', verified: false });
   assert.deepEqual(found.step, ['foundation/purpose.md']);
   assert.equal(fold.authorStepOf('stories-S02'), 'stories');

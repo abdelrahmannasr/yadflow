@@ -55,9 +55,11 @@ export function stepPaths(epic, stepId) {
 }
 // A file the system or an editor drops in the UI design's `design/` folder (`.DS_Store`, `x.fig~`) is not
 // the step's: the fingerprint leaves it out (`isDesignJunk`), so a fold that committed it would put a file
-// in the review that no approval covers. It is left on disk like any other file.
+// in the review that no approval covers. It is left on disk like any other file. So is a nested repository
+// there, which git lists as one folder (`design/kit/`): `git add` would record it as a link to another
+// repository, and the fingerprint skips it.
 const covers = (paths, p) => paths.some((s) => p === s
-  || (p.startsWith(`${s}/`) && !(s.endsWith(`/${UI_DESIGN_DIR}`) && isDesignJunk(p.slice(s.length + 1)))));
+  || (p.startsWith(`${s}/`) && !(s.endsWith(`/${UI_DESIGN_DIR}`) && (isDesignJunk(p.slice(s.length + 1)) || p.endsWith('/')))));
 
 // The scope is the epic ID in lowercase (#413): the commit-message gate takes a lowercase scope
 // (`[a-z0-9._-]`), so `docs(EP-x)` failed every review PR. The exact ID stays in the Yad-Epic trailer.

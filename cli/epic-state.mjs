@@ -610,12 +610,13 @@ export function storiesHash(epicDir, sha = reviewedSha) {
 // walk, so the disk and the approved commit agree:
 //   - regular files only (a link is skipped; so is a `design` folder that is itself a link — a commit
 //     holds it as a link, not a folder);
-//   - never a file the system or an editor drops beside a design (`isDesignJunk`: a name starting with a
-//     dot such as `.DS_Store`, one ending in `~`, `Thumbs.db`, `desktop.ini`) — git often does not
-//     ignore those, and counting one would make every approval look changed on that machine only;
+//   - never a file the system or an editor drops beside a design (`isDesignJunk`: `.DS_Store`, macOS's
+//     `._<name>` copies, a `.~lock.<name>#` lock file, a name ending in `~`, `Thumbs.db`, `desktop.ini`)
+//     — git often does not ignore those, and counting one would make every approval look changed on that
+//     machine only. Any other name, a dot-name included, is a design file;
 //   - never inside a folder holding `.git` (a submodule or a nested repository: a commit holds it as one
 //     entry, not its files).
-const DESIGN_JUNK = /^(?:\..*|.*~|thumbs\.db|desktop\.ini)$/i;
+const DESIGN_JUNK = /^(?:\.ds_store|\._.*|\.~lock\..*|.*~|thumbs\.db|desktop\.ini)$/i;
 export const isDesignJunk = (rel) => rel.split('/').some((seg) => DESIGN_JUNK.test(seg));
 function designFiles(dir, rel = '') {
   if (rel === '') {
@@ -637,12 +638,13 @@ function designFiles(dir, rel = '') {
 // checkout without LFS leaves in place of a large file) names that same SHA-256 as its `oid`, so the
 // pointer and the real file give one fingerprint — CI checks out pointers, `artifactHashAt` may read
 // the real file through the LFS filter, and the two must agree.
-const LFS_SPEC = 'version https://git-lfs.github.com/spec/v1';
+// Only the exact pointer format git-lfs writes counts — its version line, any `ext-` lines, the oid, the
+// size and nothing else — so no other text can ride in a file whose fingerprint is its oid alone.
+const LFS_POINTER = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\r?\n(?:ext-[^\r\n]*\r?\n)*oid sha256:([0-9a-f]{64})\r?\nsize \d+\r?\n?$/;
 function designSha(p) {
   const bytes = fs.readFileSync(p);
   if (bytes.length < 1024) {
-    const text = bytes.toString('utf8');
-    const oid = text.startsWith(LFS_SPEC) ? text.match(/^oid sha256:([0-9a-f]{64})\r?$/m) : null;
+    const oid = bytes.toString('utf8').match(LFS_POINTER);
     if (oid) return `sha256:${oid[1]}`;
   }
   return shaOf(bytes);
@@ -653,9 +655,11 @@ function designParts(epicDir) {
   const dir = path.join(epicDir, UI_DESIGN_DIR);
   return designFiles(dir).sort().map((f) => `${UI_DESIGN_DIR}/${f}:${designSha(path.join(dir, ...f.split('/')))}`);
 }
-export function uiDesignHash(epicDir, sha = reviewedSha, parts = designParts(epicDir)) {
+export function uiDesignHash(epicDir, sha = reviewedSha, parts = null) {
   const doc = sha(path.join(epicDir, 'ui-design.md'));
-  if (!parts.length || doc === null) return doc;
+  if (doc === null) return null;
+  parts ??= designParts(epicDir);
+  if (!parts.length) return doc;
   return 'sha256:' + createHash('sha256').update([`ui-design.md:${doc}`, ...parts].join('\n')).digest('hex');
 }
 
