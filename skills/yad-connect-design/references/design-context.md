@@ -90,7 +90,7 @@ how to check and what to tell the person; the text for each tool is the toolbox 
 | `figma`, provider `html-to-design` | nothing: it writes screens and cannot read a frame | not checked; build from the frame links |
 | `openpencil`, provider `openpencil-cli` | the design file is in the Product checkout, `openpencil --version` runs, and `openpencil eval` on the file finds the frame whose shared plugin data `yad`/`nodeId` is the recorded ID. No app, no sign-in | pull the Product so the file is there with the frame in it, and make sure `openpencil` runs |
 | `openpencil`, provider `openpencil-mcp` | the MCP's `eval` tool finds the frame by its stored `yad`/`nodeId` | open the OpenPencil desktop app with the file loaded (inside `OPENPENCIL_MCP_ROOT`) |
-| `openpencil`, no provider or another name | the CLI check above when `openpencil --version` runs, else the MCP check | either of the two above |
+| `openpencil`, no provider or another name | the CLI check above, and the MCP check when that does not find the frame | either of the two above |
 
 Also not checked (build from the frame links): no `design.json`, tool `none`, source `unavailable`; no
 `design-links.json`, one that cannot be read, or one recorded for another tool (re-run the UI step); and a

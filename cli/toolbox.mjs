@@ -336,7 +336,7 @@ export const TOOLBOX = Object.freeze([
       localProbe: 'check that <file> is in the Product checkout and that `openpencil --version` runs, then find frame <frame> with `openpencil eval` on that file: the node whose shared plugin data `yad`/`nodeId` is <frame> (figma.root.findAll with getSharedPluginData)',
       localStop: 'Pull the Product so that <file> is there with frame <frame> in it, and make sure `openpencil` runs in your terminal, then continue',
       either: 'Make sure <file> is in your Product checkout and `openpencil` runs in your terminal (the CLI), or open the OpenPencil desktop app with <file> loaded (its MCP server), then continue',
-      eitherProbe: 'if `openpencil --version` runs, check that <file> is in the Product checkout and find frame <frame> with `openpencil eval` on that file; if it does not, find frame <frame> through the OpenPencil MCP\'s eval tool instead — either way, the node whose shared plugin data `yad`/`nodeId` is <frame> (figma.root.findAll with getSharedPluginData)',
+      eitherProbe: 'try the CLI first: if `openpencil --version` runs and <file> is in the Product checkout, find frame <frame> with `openpencil eval` on that file; if that does not find it, find frame <frame> through the OpenPencil MCP\'s eval tool (the desktop app open with <file>) — either way, the node whose shared plugin data `yad`/`nodeId` is <frame> (figma.root.findAll with getSharedPluginData). It fails only when neither finds it',
     },
     usedBy: ['yad-connect-design', 'yad-ui'],
   },
@@ -493,7 +493,9 @@ export function toolProblems(t) {
     need(r?.local === undefined || (text(r?.localProbe) && text(r?.localStop)), 'reach.localProbe and reach.localStop say how to check a provider in local, and what to do when that fails');
     need(r?.ownServer === undefined || isStringList(r?.ownServer), 'reach.ownServer is absent or a list of providers');
     need(r?.eitherProbe === undefined || text(r?.eitherProbe), 'reach.eitherProbe is absent or how to check when yad cannot tell the provider');
-    need(!isStringList(r?.local) || !isStringList(r?.appBound) || !r.local.some((p) => r.appBound.includes(p)), 'a provider is in reach.local or reach.appBound, not both');
+    // Names folded the way the preflight compares them (letters and digits only).
+    const fold = (p) => String(p).toLowerCase().replace(/[^a-z0-9]/g, '');
+    need(!isStringList(r?.local) || !isStringList(r?.appBound) || !r.local.some((p) => r.appBound.map(fold).includes(fold(p))), 'a provider is in reach.local or reach.appBound, not both');
     need(r?.appBound === true || text(r?.either), 'reach.either says what to do when yad cannot tell whether the provider needs the app');
   }
   return out;

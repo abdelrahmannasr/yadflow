@@ -291,7 +291,7 @@ test('E164: designPreflight — OpenPencil\'s CLI needs no app and no sign-in; i
   assert.equal(mcp.connect, 'yad toolbox connect openpencil --json', 'OpenPencil\'s recipe adds its MCP server, so it is offered');
   const unknown = designPreflight({ state: 'ok', data: { tool: 'openpencil' } }, links, frames);
   assert.deepEqual([unknown.appBound, unknown.local, /runs in your terminal \(the CLI\), or open the OpenPencil desktop app/.test(unknown.stop)], [null, false, true], 'no provider: both ways');
-  assert.match(unknown.probe, /^if `openpencil --version` runs, .*`openpencil eval`.*through the OpenPencil MCP's eval tool instead/, 'review 1: the check tries both ways the stop text names');
+  assert.match(unknown.probe, /^try the CLI first: .*`openpencil eval`.* if that does not find it, find frame .* through the OpenPencil MCP's eval tool.*It fails only when neither finds it/, 'reviews 1-2: the check tries both ways the stop text names, the MCP whenever the CLI does not find the frame');
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'figma', provider: 'figma-mcp' } }, { ...links, tool: 'figma' }, frames).probe.includes('get_metadata'), true, 'a tool with no eitherProbe keeps its probe');
   assert.equal(designPreflight({ state: 'ok', data: { tool: 'openpencil', provider: 'OpenPencil_CLI' } }, links, frames).local, true, 'names are compared on letters and digits');
 });
@@ -332,6 +332,7 @@ test('#358: readDesignConfig, the reach data, and preflight through the command'
   assert.deepEqual(toolProblems({ ...figma, reach: { ...figma.reach, ownServer: [1] } }), ['reach.ownServer is absent or a list of providers']);
   assert.deepEqual(toolProblems({ ...op, reach: { ...op.reach, eitherProbe: '' } }), ['reach.eitherProbe is absent or how to check when yad cannot tell the provider']);
   assert.deepEqual(toolProblems({ ...op, reach: { ...op.reach, local: ['openpencil-mcp'] } }), ['a provider is in reach.local or reach.appBound, not both']);
+  assert.deepEqual(toolProblems({ ...op, reach: { ...op.reach, local: ['OpenPencil_MCP'] } }), ['a provider is in reach.local or reach.appBound, not both'], 'review 2: compared as the preflight compares them');
   assert.ok(toolProblems({ ...figma, reach: { readers: true, appBound: true } }).includes('reach has app, probe and open'));
   assert.ok(toolProblems({ ...figma, reach: null }).length > 0);
   assert.ok(toolProblems({ ...figma, reach: { ...figma.reach, appBound: false } }).includes('reach.appBound is true, or the providers read through the app'));
