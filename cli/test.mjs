@@ -1488,8 +1488,6 @@ const GITLAB_IMAGE_FRAGMENTS = [
   'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml',
 ];
 
-// Every GitLab fragment that runs a docker-image job must carry `tags: [$YAD_RUNNER_TAGS]` so a
-// tag-locked instance can route it (issue #50). Guards against a future revert dropping the tag.
 // #434: GIT_DEPTH "0" is set on the yad jobs only. A top-level `variables:` in an included fragment merges into the
 // HOST pipeline's globals (every host job cloned the full history), and a host's own top-level value replaced
 // ours (the gates got a shallow clone). Every job in every shipped GitLab fragment gets it from its own block
@@ -1513,7 +1511,11 @@ test('#434: GitLab fragments set GIT_DEPTH "0" on every yad job, never at the to
         if (!b || n > 5) return null;
         const own = b.match(/^ {2}variables:\n(?:(?: {4}.*| *#.*|)\n)*? {4}GIT_DEPTH: ("[^"]*")/m);
         if (own) return own[1];
-        for (const [, a] of b.matchAll(/^ {2}<<: \*([\w-]+)$/gm)) { const v = depth(anchors.get(a), n + 1); if (v) return v; }
+        // A YAML merge is shallow: a job's own `variables:` replaces the merged one whole, so follow `<<:`
+        // only when the job has none. `extends:` deep-merges `variables:`, so it is always followed.
+        if (!/^ {2}variables:/m.test(b)) {
+          for (const [, a] of b.matchAll(/^ {2}<<: \*([\w-]+)$/gm)) { const v = depth(anchors.get(a), n + 1); if (v) return v; }
+        }
         const ext = b.match(/^ {2}extends: (\S+)$/m);
         return ext ? depth(ext[1], n + 1) : null;
       };
@@ -1534,6 +1536,8 @@ test('#434: the old standalone GitLab template is not shipped', () => {
   assert.ok(fs.existsSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/gitlab-ci.include-root.yml')));
 });
 
+// Every GitLab fragment that runs a docker-image job must carry `tags: [$YAD_RUNNER_TAGS]` so a
+// tag-locked instance can route it (issue #50). Guards against a future revert dropping the tag.
 test('gitlab fragments declare tags: [$YAD_RUNNER_TAGS] on their docker jobs', () => {
   for (const rel of GITLAB_IMAGE_FRAGMENTS) {
     const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');

@@ -134,13 +134,14 @@ jobs:
           echo "yad-gate-sync: running yadflow@${YAD_PKG}"
           # <<< yad-pin
           echo "YAD_PKG=${YAD_PKG}" >> "$GITHUB_ENV"
-      # Keep npm's download cache between runs (#434): npx fetched the whole CLI on every run. The key is the
-      # resolved pin, so a new pin starts a new cache. Only runs on the default branch read or write it.
+      # Keep npm's download cache between runs (#434): npx fetched the whole CLI on every run. Only the
+      # downloads (_cacache, each file checked against the registry's checksum before use) — never npx's
+      # installed tree (_npx), which runs unchecked in a job that can push. The key is the resolved pin,
+      # with no restore-keys, so a new pin starts a new cache and never loads another key's entry.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.npm
+          path: ~/.npm/_cacache
           key: yad-npx-${{ runner.os }}-${{ env.YAD_PKG }}
-          restore-keys: yad-npx-${{ runner.os }}-
       - name: Advance the gate on merge
         # The head ref reaches the shell through `env:`, never through `${{ }}` inside `run:`. A
         # branch name may legally contain `$`, backticks and parentheses, so a PR opened from
@@ -225,19 +226,21 @@ jobs:
           echo "yad-gate-sync: running yadflow@${YAD_PKG}"
           # <<< yad-pin
           echo "YAD_PKG=${YAD_PKG}" >> "$GITHUB_ENV"
-      # Keep npm's download cache between runs (#434): npx fetched the whole CLI on every run. The key is the
-      # resolved pin, so a new pin starts a new cache. Only runs on the default branch read or write it.
+      # Keep npm's download cache between runs (#434): npx fetched the whole CLI on every run. Only the
+      # downloads (_cacache, each file checked against the registry's checksum before use) — never npx's
+      # installed tree (_npx), which runs unchecked in a job that can push. The key is the resolved pin,
+      # with no restore-keys, so a new pin starts a new cache and never loads another key's entry.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.npm
+          path: ~/.npm/_cacache
           key: yad-npx-${{ runner.os }}-${{ env.YAD_PKG }}
-          restore-keys: yad-npx-${{ runner.os }}-
       - name: Reconcile recently-merged review PRs
         run: |
           git config user.name  "yad-gate-sync[bot]"
           git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
           # A stuck merged review is always recent; window generously and let `gate ci` no-op the rest.
-          # Page the search fully (no fixed result cap) so a stuck PR is never missed for volume. One
+          # Page the search fully (GitHub's search stops at 1000 results; 7 days stays far below that) so a
+          # stuck PR is never missed for volume. One
           # paginated GraphQL search returns each PR's number AND branch (#434: it was one `gh pr view`
           # call per merged PR). Aggregate failures and exit nonzero so a persistent API/push failure
           # surfaces (red run) instead of silently stranding a merged gate behind a green safety-net.

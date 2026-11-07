@@ -5960,6 +5960,12 @@ test('#434 gate-sync reconcile: one paginated search gives number + branch; only
       'npx -y -p yadflow@4.9.0 yad gate ci --branch review/EP-pay-arch --pr 14 --merged',
     ]);
     assert.ok(!ok.calls.some((c) => c.includes('pr view')), 'no per-PR lookup');
+    // The --jq filter itself, on one page of a real-shaped answer (a node that is not a PR comes back empty).
+    const jqArg = reconcileStep().match(/--jq '([^']+)'/)?.[1];
+    assert.ok(jqArg, 'the search has a --jq filter');
+    const page = JSON.stringify({ data: { search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ number: 12, headRefName: 'review/EP-a' }, {}, { number: 13, headRefName: 'feat/x' }] } } });
+    const jq = spawnSync('jq', ['-r', jqArg], { input: page, encoding: 'utf8' });
+    if (jq.error?.code !== 'ENOENT') assert.equal(jq.stdout, '12 review/EP-a\n13 feat/x\n', jq.stderr);
     // A failed search, or a failed advance, still turns the run red — after the other PRs are tried.
     assert.equal(run({ GH_OUT: '', GH_RC: '1' }).status, 1, 'search failed');
     const bad = run({ GH_OUT: '12 review/EP-cart-ui\n14 review/EP-pay-arch', NPX_RC: '1' });
@@ -5972,11 +5978,14 @@ test('#434 gate-sync reconcile: one paginated search gives number + branch; only
 // job resolved (set in GITHUB_ENV by the step before); the GitLab job keeps it in the clone, keyed on the pin file.
 test('#434 gate-sync: npm download cache on every job, keyed on the pin', () => {
   const gh = fs.readFileSync(GATE_SYNC_GITHUB, 'utf8');
-  const steps = [...gh.matchAll(/echo "YAD_PKG=\$\{YAD_PKG\}" >> "\$GITHUB_ENV"\n(?: {6}#.*\n)* {6}- uses: actions\/cache@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}path: ~\/\.npm\n {10}key: yad-npx-\$\{\{ runner\.os \}\}-\$\{\{ env\.YAD_PKG \}\}\n/g)];
+  // Only the checked downloads (_cacache), never npx's installed tree, and no restore-keys: a job that can push
+  // must not run code from a cache entry another key wrote.
+  const steps = [...gh.matchAll(/echo "YAD_PKG=\$\{YAD_PKG\}" >> "\$GITHUB_ENV"\n(?: {6}#.*\n)* {6}- uses: actions\/cache@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}path: ~\/\.npm\/_cacache\n {10}key: yad-npx-\$\{\{ runner\.os \}\}-\$\{\{ env\.YAD_PKG \}\}\n(?! {10})/g)];
   assert.equal(steps.length, 2, 'mergesync + reconcile restore the cache right after the pin');
+  assert.doesNotMatch(gh, /^\s+restore-keys:/m, 'no fallback key');
   const gl = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8');
   assert.match(gl, /\n {4}npm_config_cache: \$CI_PROJECT_DIR\/\.npm\n/);
-  assert.match(gl, /\n {2}cache:\n {4}key:\n {6}files: \[\.sdlc\/cli-version\.json\]\n {4}paths: \[\.npm\/\]\n/);
+  assert.match(gl, /\n {2}cache:\n {4}key:\n {6}files: \[\.sdlc\/cli-version\.json\]\n {4}paths: \[\.npm\/_cacache\/\]\n/);
 });
 
 // Issue #327: on GitLab the runner installs LFS git hooks into an LFS Product's clone, and node:20 has
