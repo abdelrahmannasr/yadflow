@@ -55,6 +55,8 @@ to many repos from an organization. Set these on the default branch:
 | Required approvals | **1 or more** for a team. **0** in solo mode | A team needs someone other than the author to approve. In solo mode a required approval blocks your own merge, because GitHub does not let an author approve their own pull request |
 | Dismiss stale pull request approvals when new commits are pushed | on | Safe with yad: its CI never pushes to a review branch, so an approval is reset only by a new push to that branch — someone's commit, `yad fold`, or merging the default branch in. A reviewed file that changed needs a new look |
 | Require status checks to pass | on, with the checks listed below | Makes yad's checks block a merge instead of only reporting |
+| Require branches to be up to date before merging | suggested on | The checks run again when the default branch moves. The gates that read the base's state (the contract lock, the open epics, the risk map) then judge the base the pull request really merges into. `yad ci check` suggests it (`up-to-date`) |
+| Require merge queue | **off** | yad's checks start on `pull_request` only, so a queued pull request waits for checks that never come. Even with them, a queue entry holds the pull requests ahead of it, and the gates would judge those as this one's (#433). Support is planned as E166. `yad ci check` reports it as a gap (`merge-queue`) |
 | Block force pushes | on | A force-push can rewrite the ledger's history |
 | Restrict deletions | on | |
 | Require signed commits | **off** on the Product; your choice on a code repo | On the Product, yad's CI writes the ledger in unsigned commits, so this rule would refuse them (#432) |
@@ -135,6 +137,10 @@ retries every 15 minutes and fails the same way until the token is there.
 | Allowed to force push | off | |
 | Pipelines must succeed (Settings → Merge requests) | on | Makes yad's checks block a merge — only the jobs the root `.gitlab-ci.yml` includes run |
 | Skipped pipelines are considered successful (Settings → Merge requests) | off | When on, a skipped pipeline lets a merge through without yad's checks |
+| Merged results pipelines (Settings → Merge requests → Merge options) | your choice | Supported. The pipeline checks a merge of the merge request into the target, which GitLab makes; the gates judge only the merge request's own commits (#433). `yad ci check` reports it (`merged-results`) |
+| Merge trains (Settings → Merge requests → Merge options) | **off** | A train's pipeline also holds the merge requests ahead of it, and the gates would judge those as this one's (#433). Support is planned as E166. `yad ci check` reports it as a gap (`merge-trains`) |
+| Prevent approval by author (Settings → Merge requests → Approval settings) | on for a team | An approval should come from someone other than the author. **Premium and Ultimate only.** `yad ci check` suggests it (`author-approval`) |
+| Prevent approvals by users who add commits (Settings → Merge requests → Approval settings) | on for a team | Someone who added commits is an author too. **Premium and Ultimate only.** `yad ci check` suggests it (`committer-approval`) |
 | Auto-cancel redundant pipelines (Settings → CI/CD → General pipelines) | your choice — on saves runner time | When on, a newer push to a merge request cancels the older pipeline's yad jobs, which are marked `interruptible` (#428). GitLab cancels a pipeline only while none of its jobs that are not interruptible has started, so a job of your own can keep the older pipeline running. It also applies to the default branch: see the note below the table |
 | All threads must be resolved (Settings → Merge requests) | your choice | Suggested: a reviewer's open question is not merged past |
 | Reject unsigned commits (Settings → Repository → Push rules) | **off** on the Product; your choice on a code repo | As on GitHub (#432). Push rules are GitLab Premium |
@@ -165,6 +171,11 @@ default-branch pipelines your list stopped until now, your own jobs included). T
 older self-managed GitLab treats an unknown key as an error that stops every pipeline: check the file in
 the pipeline editor before you commit it (Build → Pipeline editor, or CI/CD → Editor on older versions; it
 validates the file).
+
+**Duplicate pipelines.** A push to a branch with an open merge request can start two pipelines: a branch
+pipeline and a merge request pipeline. yad's jobs run only in the merge request one. To stop the branch
+pipeline, add a `workflow:rules` list to your own root `.gitlab-ci.yml` (yad's fragments carry none), with
+the same care as the snippet above: GitLab uses the first rule that matches.
 
 The checks run as jobs in the merge request pipeline: on the Product `yad-product-commit-message`,
 `yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard`, `yad-product-member-check` and, when that file is there,
@@ -236,7 +247,14 @@ else. (A pull request from a fork gets no secrets.)
 the target** makes it (`git merge-tree --write-tree`, git 2.38+). That is exactly what lands for:
 
 - a **merge commit** and a **squash** merge (GitHub and GitLab);
-- GitLab **fast-forward** and **semi-linear** merges, whose pipeline runs on the rebased branch.
+- GitLab **fast-forward** and **semi-linear** merges, whose pipeline runs on the rebased branch;
+- a GitLab **merged results** pipeline, and every GitHub `pull_request` run: both check a merge of the
+  branch into the target that the platform made. The per-commit gates skip that merge commit, and
+  `verified-commits` waives its missing signature while it adds no content of its own (#433).
+
+**Not supported yet:** a GitHub **merge queue** and GitLab **merge trains** (E166). Their pipeline runs on
+the changes queued ahead too, while the gates judge the range from the target branch, so they would
+judge other pull requests' commits as this one's. Keep both off; `yad ci check` reports each as a gap.
 
 A GitHub **"Rebase and merge"** replays each commit instead. `contract-check` covers it for the contract
 surface: a slice file any of the branch's own commits touches needs `Contract-Change: yes` even when the
