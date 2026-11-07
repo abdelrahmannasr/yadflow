@@ -1,7 +1,8 @@
 version: 2
 updates:
   # The package and both docs sites (#429): each has its own lockfile. Minor and patch updates come as one
-  # PR per folder; a major update still gets a PR of its own, since it may need code changes.
+  # PR per folder; a major update gets a PR of its own, since it may need code changes, unless its package
+  # belongs to a group below that must move together.
   - package-ecosystem: "npm"
     directories:
       - "/"
@@ -14,13 +15,41 @@ updates:
     commit-message:
       prefix: "chore(deps):"
     open-pull-requests-limit: 10
+    # A group takes a dependency when its patterns match, and the first group listed wins. Packages that need
+    # each other's matching version must move in one PR, or `npm ci` refuses the half-done pair (ERESOLVE):
+    # @eslint/js 10 needs eslint 10 (#468); vite 8 alone fails, because the locked @vitejs/plugin-react 5
+    # accepts vite up to 7 (#469), and plugin-react 6 needs vite 8. @tailwindcss/vite needs the exact
+    # tailwindcss of its own version. These groups take every update of their packages,
+    # majors included (globals rides with eslint, whose config reads it); the rest go to npm-minor-patch,
+    # or alone.
     groups:
+      eslint:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "eslint-plugin-*"
+          - "typescript-eslint"
+          - "globals"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
       npm-minor-patch:
         patterns:
           - "*"
         update-types:
           - "minor"
           - "patch"
+    # typescript-eslint 8 accepts TypeScript up to 6.0 only, so a later TypeScript cannot install (#470).
+    # Remove this once a typescript-eslint release accepts it; then move typescript into the eslint group.
+    ignore:
+      - dependency-name: "typescript"
+        versions:
+          - ">= 6.1.0"
 
   - package-ecosystem: "github-actions"
     directory: "/"
