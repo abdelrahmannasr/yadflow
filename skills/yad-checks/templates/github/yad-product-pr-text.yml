@@ -22,6 +22,12 @@ on:
     types: [opened, synchronize, reopened, edited]
     branches: ["**"]
 
+# A newer push to the same pull request, or an edit of its text, cancels this workflow's older run (#428):
+# both checks read the PR's current title and body, so the newest run is the one that counts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 # Read-only: no check here writes to the repo.
 permissions:
   contents: read

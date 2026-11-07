@@ -81,6 +81,11 @@ counts a skipped job as passed, so an edit could turn a failed gate green. A gat
 hand is kept by `yad update` and may still start on an edit: `yad doctor` warns about it
 (`checks:edit-run`).
 
+**Older runs are cancelled (#428).** Each gate file cancels its own older run on the same pull request when
+a newer one starts: a push, or for the PR-text files an edit. The cancelled run belongs to an older commit
+or to older PR text, and a merge waits only on the newest run's checks. `yad-update-guard` never cancels a
+run: each run checks only the commits of its own push, so a cancelled run would leave them unchecked.
+
 Before 4.0 the Product's workflow file was `.github/workflows/yad-hub-checks.yml`, with `name:
 yad-hub-checks`; `yad update` renames it `yad-product-checks`. The job names above did not change, so
 the required checks stay as they are. A workflow of your own that starts on `workflow_run:` of
@@ -127,6 +132,7 @@ retries every 15 minutes and fails the same way until the token is there.
 | Allowed to force push | off | |
 | Pipelines must succeed (Settings → Merge requests) | on | Makes yad's checks block a merge — only the jobs the root `.gitlab-ci.yml` includes run |
 | Skipped pipelines are considered successful (Settings → Merge requests) | off | When on, a skipped pipeline lets a merge through without yad's checks |
+| Auto-cancel redundant pipelines (Settings → CI/CD → General pipelines) | on (the default) | A newer push to a merge request then cancels the older pipeline's yad jobs, which are marked `interruptible` (#428). GitLab cancels only while no job that is not interruptible has started, so a job of your own can keep the older pipeline running. `yad-update-guard` and `yad-gate-sync` are never interruptible |
 | All threads must be resolved (Settings → Merge requests) | your choice | Suggested: a reviewer's open question is not merged past |
 | Reject unsigned commits (Settings → Repository → Push rules) | **off** on the Product; your choice on a code repo | As on GitHub (#432). Push rules are GitLab Premium |
 | Merge request approval rules (Settings → Merge requests) | 1 or more approvals for a team, 0 in solo mode | **Premium and Ultimate only.** On GitLab Free an approval never blocks a merge |
