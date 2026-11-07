@@ -1,0 +1,23 @@
+# action pins — this workflow never runs. It exists so Dependabot keeps the CI templates current (#429).
+#
+# Dependabot reads only .github/workflows/, but the CI files yad installs in teams' repos live under
+# skills/*/templates/github/. A test (cli/test.mjs) requires every action a template uses to have the same
+# pin as this repo's workflows. An action that only a template uses is listed here, so that Dependabot
+# opens a PR to bump it; the test then fails until the templates get the same pin.
+name: action pins (for Dependabot)
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  pins:
+    if: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      # yad-checks.yml, build-test-lint: the dependency cache.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: unused
+          key: unused
