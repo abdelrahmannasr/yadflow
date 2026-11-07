@@ -127,3 +127,15 @@ test('E161: the error catalogue, docs/CLI.md and the docs site list the same YAD
   assert.deepEqual(site, env);
 });
 
+
+test('#427: npm run coverage runs exactly the test files npm test runs — CI skips npm test on the coverage leg', () => {
+  // ci.yml's test (ubuntu-latest, node 24) job and release-check.sh run only `npm run coverage`. A test file
+  // listed in `test` but not in `coverage` would never run there, so the two lists must stay the same.
+  const { scripts } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const files = (s) => s.split(/\s+/).filter((w) => /^cli\/test[^ ]*\.(mjs|js)$/.test(w));
+  assert.ok(files(scripts.test).length > 10, scripts.test);
+  assert.deepEqual(files(scripts.coverage), files(scripts.test));
+  const ci = fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8');
+  assert.match(ci, /- name: Test\n {8}if: \$\{\{ !\(matrix\.os == 'ubuntu-latest' && matrix\.node-version == 24\) \}\}\n {8}run: npm test\n/);
+  assert.match(ci, /\n {8}if: matrix\.os == 'ubuntu-latest' && matrix\.node-version == 24\n {8}run: npm run coverage\n/);
+});
