@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
@@ -168,7 +168,7 @@ jobs:
       NX_HEAD: ${{ github.event.pull_request.head.sha }}
       COREPACK_HOME: ${{ github.workspace }}/.corepack-cache # pinned-manager downloads, cached below
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # No `filter: blob:none` (#426): the next step reads the base's checks/, which a
@@ -207,16 +207,19 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.YAD_NODE_VERSION }}
+          # Off: setup-node v5+ caches npm by itself when package.json names a packageManager; the next step
+          # already caches npm, pnpm and Corepack, so a second cache would only cost time (#429).
+          package-manager-cache: false
       # Dependency cache for either manager: npm's ~/.npm, pnpm's content-addressable store, and the
       # Corepack home where `corepack prepare` keeps the pinned manager (otherwise re-downloaded from
       # the registry on every job, even when the dependency cache hits). Keyed on the lockfiles AND
       # package.json, since a packageManager bump changes no lockfile. setup-node's own `cache:` must
       # name the manager up front (and needs pnpm on PATH before it runs), which package.json only
       # decides later — so cache the directories directly.
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.npm
@@ -235,7 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
@@ -279,7 +282,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
@@ -323,7 +326,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
@@ -369,7 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
@@ -414,7 +417,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }} # read-only: gh api commits/<sha> for the Verified badge
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
