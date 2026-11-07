@@ -70,6 +70,14 @@ yad-gate-sync:
     # ignores `image:` — Node must then be on the runner host's PATH, and this value has no effect.
     YAD_NODE_VERSION: "22"
     GIT_DEPTH: "0" # full history: gate ci pushes the advance to the default branch (on this job only, #434)
+    # npm's download cache lives in the clone, where GitLab's cache can keep it (#434): npx fetched the
+    # whole CLI on every run. gate ci stages only its own ledger paths, so this folder is never committed.
+    npm_config_cache: $CI_PROJECT_DIR/.npm
+  # Keyed on the pin file, so a new pin starts a new cache.
+  cache:
+    key:
+      files: [.sdlc/cli-version.json]
+    paths: [.npm/]
   rules:
     # Merge path: branch pipeline on the default branch whose merge commit names a review branch.
     # Squash/fast-forward merges may omit the branch name — those advance on the next scheduled sweep.

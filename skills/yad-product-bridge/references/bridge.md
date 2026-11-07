@@ -239,6 +239,17 @@ in it at all, and the value is interpolated into `npx -p "yadflow@$V"` on a runn
 so anything that is not an exact release of this major is skipped, loudly, in favour of the next source.
 `YAD_VERSION` is exempt: it is a human's deliberate act, and it is the only way to cross a major.
 
+**The download is cached (#434).** `npx` fetched the whole CLI on every run. npm's download cache is now
+kept between runs: on GitHub each job restores `~/.npm` right after it resolves the pin, under the key
+`yad-npx-<os>-<pin>`; on GitLab the job keeps `$CI_PROJECT_DIR/.npm` (`npm_config_cache`), keyed on
+`.sdlc/cli-version.json`. A new pin starts a new cache. The folder is never committed: `gate ci` stages only
+its own ledger paths.
+
+**The sweep lists merged PRs in one search (#434).** On GitHub the reconcile job asks one paginated GraphQL
+search for every PR merged in the last 7 days, with its number and branch, and runs `gate ci` only for the
+`review/EP-*` ones (it used to make one `gh pr view` call per merged PR). GitLab's sweep already listed
+the merged MRs with their branches in one paginated call.
+
 **A new major moves both files at once.** `yad update` rewrites the fragment from the release's template
 and re-stamps `.sdlc/cli-version.json` in the same run, so a Product that updates to 4.x gets a fragment
 with `YAD_MAJOR=4` and a `4.x` stamp together. A `gate_sync_version` pin in `product.json` from the old major
