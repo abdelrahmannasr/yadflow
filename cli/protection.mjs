@@ -753,11 +753,13 @@ export function readCiSettings(target, { runner: ask = run, env = process.env, a
     }
     // #433: a merge queue can be turned on by a ruleset or by classic branch protection, and the classic answer
     // does not show it. GraphQL names the queue whatever turned it on: an object when on, null when off.
-    // The names go in as variables, never into the query text. Anything else is not known (null).
+    // The names go in as variables, never into the query text, and with -f, as plain strings: -F would turn
+    // `123` or `true` into a number or a boolean, and read a file for a value that starts with `@`.
+    // Anything else is not known (null).
     const [owner, name] = repo.split('/');
     const q = runner('gh', ['api', '--hostname', host, 'graphql',
       '-f', 'query=query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id } } }',
-      '-F', `owner=${owner}`, '-F', `branch=${branch}`, '-F', `name=${name}`], { timeout: TIMEOUT });
+      '-f', `owner=${owner}`, '-f', `branch=${branch}`, '-f', `name=${name}`], { timeout: TIMEOUT });
     let mergeQueue = null;
     if (q.ok) {
       try {

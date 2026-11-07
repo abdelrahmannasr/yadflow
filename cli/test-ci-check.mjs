@@ -997,6 +997,14 @@ test('#433 GitHub: a merge queue is a gap; "up to date" off is a suggestion; a r
       assert.equal(row.status, 'unknown', JSON.stringify(queue));
     }
     assert.equal(byId(run(rules([{ type: 'merge_queue' }]), { queue: [502, { message: 'x' }] }), 'app')['merge-queue'].status, 'gap');
+    // The names are sent with -f, as plain strings, never with -F, which would type a name like `123` or `true`.
+    const { asked } = check(w, [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: rules() })]);
+    const graphqlCalls = asked.filter((x) => / graphql /.test(x));
+    assert.ok(graphqlCalls.length >= 1, 'the queue is asked');
+    for (const call of graphqlCalls) {
+      assert.match(call, / -f owner=acme -f branch=main -f name=\S+$/, call);
+      assert.doesNotMatch(call, / -F /, call);
+    }
     const loose = byId(run(rules([], false)), 'app');
     assert.equal(loose['merge-queue'].status, 'ok');
     assert.equal(loose['up-to-date'].status, 'suggest');

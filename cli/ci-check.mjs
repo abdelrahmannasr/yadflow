@@ -314,7 +314,7 @@ function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, p
     const queueStep = `Turn off "Require merge queue" for ${branch}, in the branch ruleset or in classic branch protection (${web}/settings/branches): yad's checks do not run in a merge queue yet.`;
     if (queue === true) add('merge-queue', 'gap', `the merge queue is on for ${branch}: yad's checks do not run in it, so a queued pull request is dropped from the queue when its checks time out — or, once they run there, is judged together with the pull requests ahead of it`, settings(rulesPage, [queueStep]));
     else if (queue === false) add('merge-queue', 'ok', `no merge queue is on for ${branch}`);
-    else add('merge-queue', 'unknown', 'not known whether a merge queue is on (GitHub\'s GraphQL API did not answer)', settings(rulesPage, [queueStep]));
+    else add('merge-queue', 'unknown', 'not known whether a merge queue is on (it could not be read through GitHub\'s GraphQL API)', settings(rulesPage, [queueStep]));
 
     // #433: "Require branches to be up to date" runs the checks again when the base moves, so the gates that read
     // the base's state (the contract lock, the open epics, the risk map) judge the base the PR merges into.
