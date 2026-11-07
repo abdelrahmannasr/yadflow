@@ -330,8 +330,9 @@ signature-checked parent, so there is nothing to protect. This unblocks **self-h
 does not sign UI-created merge commits (the signature API returns 404) — without it every routine merge
 would red the branch. A merge that *does* introduce content of its own still requires a verified
 signature (fail-closed), so an evil merge pushed direct-to-default cannot smuggle in unverified changes.
-This matters for the push-on-default `yad-update-guard` (§9), which — unlike this PR-triggered gate —
-sees merge commits.
+This matters for the push-on-default `yad-update-guard` (§9), and for this PR-triggered gate too: a
+GitHub `pull_request` run and a GitLab merged-results pipeline check a merge the platform made, which is
+unsigned and content-free (#433).
 
 Degradation is explicit, never silent: no GitHub/GitLab remote SKIPs the signature check (the badge is a
 platform concept — this keeps local runs and tests meaningful); an unreachable platform API **fails

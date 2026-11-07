@@ -167,8 +167,8 @@ while IFS= read -r sha; do
   # A merge commit (2+ parents) whose content is all in its parents may go unsigned — see
   # merge_introduces_no_content. Every other commit, merges with content of their own included, needs
   # the signature: a platform merge commit is Verified, so a locally-forged merge pushed
-  # direct-to-default cannot dodge the check. This matters for the push-on-default yad-update-guard,
-  # which (unlike the PR-triggered gates) sees merge commits.
+  # direct-to-default cannot dodge the check. The PR-triggered gates see one too: a GitHub pull_request run
+  # and a GitLab merged-results pipeline check a merge the platform made, unsigned and content-free (#433).
   is_merge=0
   [ "$(git log -1 --format=%P "$sha" | wc -w | tr -d '[:space:]')" -ge 2 ] && is_merge=1
 

@@ -223,10 +223,12 @@ function rowIds(t, platform, solo) {
   return [
     'protected',
     ...(t.ciRuns ? ['required-checks'] : []),
-    ...(platform === 'gitlab' && t.ciRuns ? ['skipped-pipelines'] : []),
+    ...(platform === 'gitlab' && t.ciRuns ? ['skipped-pipelines', 'merge-trains'] : []),
+    ...(platform !== 'gitlab' && t.ciRuns ? ['merge-queue', 'up-to-date'] : []),
     ...(platform === 'gitlab' && !(t.kind === 'product' && t.ciRuns) ? ['direct-push'] : []),
     'force-push', 'deletion',
     ...(!solo ? ['stale-approvals'] : []),
+    ...(platform === 'gitlab' && !solo ? ['author-approval', 'committer-approval'] : []),
     ...(platform === 'gitlab' ? ['discussions'] : []),
     ...(t.kind === 'code' || t.ciRuns ? ['signed-commits'] : []),
   ];
@@ -302,6 +304,25 @@ function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, p
     if (!missing.length) add('required-checks', 'ok', `all ${jobs.length} of yad's checks must pass before a merge (who is on a ruleset's bypass list is not read${adminsFree ? '; classic protection lets admins bypass them' : ''})`);
     else if (why) add('required-checks', 'unknown', `not seen as required: ${missing.join(', ')} (${why})`, settings(rulesPage, steps));
     else add('required-checks', 'gap', `not required before a merge: ${missing.join(', ')} — a pull request can merge with these failing`, settings(rulesPage, steps));
+
+    // #433: yad's checks start on pull_request only, and judge the range from the PR's base. A merge queue
+    // waits for checks on its own merge_group runs, which never come, and each queue entry also holds the PRs
+    // ahead of it. Real support is E166. GraphQL answers for a queue set by a ruleset or by classic protection;
+    // a ruleset's merge_queue rule proves one too, when GraphQL could not be read.
+    const byRule = inRules(s, (r) => r?.type === 'merge_queue');
+    const queue = s.mergeQueue === 'on' || byRule === true ? true : s.mergeQueue === 'off' ? false : null;
+    const queueStep = `Turn off "Require merge queue" for ${branch}, in the branch ruleset or in classic branch protection (${web}/settings/branches): yad's checks do not run in a merge queue yet.`;
+    if (queue === true) add('merge-queue', 'gap', `the merge queue is on for ${branch}: yad's checks do not run in it, so a queued pull request is dropped from the queue when its checks time out — or, once they run there, is judged together with the pull requests ahead of it`, settings(rulesPage, [queueStep]));
+    else if (queue === false) add('merge-queue', 'ok', `no merge queue is on for ${branch}`);
+    else add('merge-queue', 'unknown', 'not known whether a merge queue is on (it could not be read through GitHub\'s GraphQL API)', settings(rulesPage, [queueStep]));
+
+    // #433: "Require branches to be up to date" runs the checks again when the base moves, so the gates that read
+    // the base's state (the contract lock, the open epics, the risk map) judge the base the PR merges into.
+    const strict = either(inRules(s, (r) => r?.type === 'required_status_checks' && r.parameters?.strict_required_status_checks_policy === true),
+      inClassic(s, (cl) => (isPlainObject(cl.required_status_checks) ? cl.required_status_checks.strict === true : false)));
+    const strictStep = 'In the branch ruleset\'s status checks rule, turn on "Require branches to be up to date before merging".';
+    if (strict === true) add('up-to-date', 'ok', 'a pull request must be up to date with the base before it merges, so the checks judge the base it merges into');
+    else add('up-to-date', 'suggest', strict === false ? 'a pull request can merge without being up to date: the checks that read the base (the contract lock, open epics, the risk map) may have judged an older base' : `not known whether a pull request must be up to date before it merges (${why})`, settings(rulesPage, [strictStep]));
   }
 
   const row = (id, ruleType, classicKey, okText, gapText, unknownText, step) => {
@@ -345,6 +366,19 @@ function gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo }) {
     if (skipped === false) add('skipped-pipelines', 'ok', 'a skipped pipeline does not count as passed');
     else if (skipped === true) add('skipped-pipelines', 'gap', 'a skipped pipeline counts as passed, so a merge can skip yad\'s checks', settings(mrPage, [skipStep]));
     else add('skipped-pipelines', 'unknown', `not known whether a skipped pipeline counts as passed (${unread})`, settings(mrPage, [skipStep]));
+
+    // #433: a merge train's pipeline runs on the MRs ahead of it too, while yad's checks judge the range from the
+    // target branch, so they would judge those MRs' commits as this one's. Real support is E166. The setting is
+    // GitLab Premium. A train needs merged-results pipelines, so either one reported off proves no train; a
+    // project that reports neither is GitLab Free, or a login that cannot see them: not known.
+    const trains = !pr ? null : bool(pr.merge_trains_enabled) ?? (pr.merge_pipelines_enabled === false ? false : null);
+    const trainStep = 'Merge requests → Merge options → turn off "Enable merge trains" (yad\'s checks do not run in a merge train yet).';
+    if (trains === true) add('merge-trains', 'gap', 'merge trains are on: yad\'s checks would judge the merge requests ahead in the train as part of this one', settings(mrPage, [trainStep]));
+    else if (trains === false) add('merge-trains', 'ok', 'merge trains are off');
+    else add('merge-trains', 'unknown', `not known whether merge trains are on (${pr ? 'the project does not report the setting: it needs GitLab Premium, or your login cannot see it' : unread})`, settings(mrPage, [trainStep]));
+    // Merged-results pipelines run on a merge commit GitLab makes, which the gates judge like a normal run.
+    const merged = pr ? bool(pr.merge_pipelines_enabled) : null;
+    if (merged !== null) add('merged-results', 'ok', merged ? 'merged-results pipelines are on: yad\'s checks support them' : 'merged-results pipelines are off (yad\'s checks support them if you turn them on)');
   }
 
   // The project's protected-branch entries for this branch. In a person's own namespace they are the whole
@@ -391,6 +425,16 @@ function gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo }) {
     const step = 'Merge request approvals → turn on "Remove all approvals when commits are added to the source branch".';
     if (reset === true) add('stale-approvals', 'ok', 'approvals are removed when new commits are added');
     else add('stale-approvals', 'suggest', reset === false ? 'approvals stay when new commits are added' : 'not known whether approvals are removed on a new push (the approval settings need GitLab Premium, or could not be read)', settings(mrPage, [step]));
+    // #433: an approval counts toward the rule only when it comes from someone other than who wrote the change.
+    const premium = 'the approval settings need GitLab Premium, or could not be read';
+    const author = bool(s.approvals?.merge_requests_author_approval);
+    const authorStep = 'Merge request approvals → Approval settings → turn on "Prevent approval by author" (named "Prevent approval by merge request creator" on some GitLab versions).';
+    if (author === false) add('author-approval', 'ok', 'the author of a merge request cannot approve it');
+    else add('author-approval', 'suggest', author === true ? 'the author of a merge request can approve it' : `not known whether the author can approve their own merge request (${premium})`, settings(mrPage, [authorStep]));
+    const committer = bool(s.approvals?.merge_requests_disable_committers_approval);
+    const committerStep = 'Merge request approvals → Approval settings → turn on "Prevent approvals by users who add commits".';
+    if (committer === true) add('committer-approval', 'ok', 'someone who added commits to a merge request cannot approve it');
+    else add('committer-approval', 'suggest', committer === false ? 'someone who added commits to a merge request can approve it' : `not known whether someone who added commits can approve (${premium})`, settings(mrPage, [committerStep]));
   }
   const disc = bool(pr?.only_allow_merge_if_all_discussions_are_resolved);
   const discStep = 'Merge checks → turn on "All threads must be resolved".';
