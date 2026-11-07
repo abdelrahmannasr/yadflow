@@ -239,6 +239,34 @@ in it at all, and the value is interpolated into `npx -p "yadflow@$V"` on a runn
 so anything that is not an exact release of this major is skipped, loudly, in favour of the next source.
 `YAD_VERSION` is exempt: it is a human's deliberate act, and it is the only way to cross a major.
 
+**The download is cached (#434).** `npx` fetched the whole CLI on every run. npm's download cache is now
+kept between runs. On GitHub the scheduled reconcile job restores `~/.npm/_cacache` right after it resolves
+the pin, under the key `yad-npx-<os>-<pin>` with no fallback key. On GitLab the job sets `npm_config_cache`
+to `$CI_PROJECT_DIR/.npm` and keeps `.npm/_cacache/`, keyed on every current pin source (`YAD_VERSION` as the
+key's prefix, plus `.sdlc/cli-version.json` and `.sdlc/product.json`). A new pin starts a new cache. Only the
+downloads are kept (npm checks each one's integrity hash), never the tree `npx` installed (`_npx`), which it
+would run as it is in a job that can push.
+
+What keeps a planted entry out is that the cached job never loads an entry a pull request's run wrote:
+
+- **GitHub:** a scheduled run sees only the default branch's caches, and there is no fallback key. The merge
+  job keeps no cache: it runs in the PR's own cache scope, which that PR's runs can write, and it runs once
+  per merge, so a cache would save it little. A Product workflow of your own that runs PR code with
+  `pull_request_target` writes the default branch's caches too — do not add one.
+- **GitLab:** the push path runs only on the default branch; set the pipeline schedule on the default branch
+  too. Keep the default branch protected, and keep the default "separate caches for protected branches"
+  setting on, so an entry written on an unprotected branch never reaches it.
+
+The folder is never committed: `gate ci` stages only its own ledger paths. A Product that floats on the bare
+major (no pin resolves) keeps one key. On GitHub a key is never saved twice, so the cached copy goes stale and
+a newer release is downloaded each run, as before; GitLab saves the cache again after each job, so it
+downloads each new release once.
+
+**The sweep lists merged PRs in one search (#434).** On GitHub the reconcile job asks one paginated GraphQL
+search for every PR merged in the last 7 days, with its number and branch, and runs `gate ci` only for the
+`review/EP-*` ones (it used to make one `gh pr view` call per merged PR). GitLab's sweep already listed
+the merged MRs with their branches in one paginated call.
+
 **A new major moves both files at once.** `yad update` rewrites the fragment from the release's template
 and re-stamps `.sdlc/cli-version.json` in the same run, so a Product that updates to 4.x gets a fragment
 with `YAD_MAJOR=4` and a `4.x` stamp together. A `gate_sync_version` pin in `product.json` from the old major

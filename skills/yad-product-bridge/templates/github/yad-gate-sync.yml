@@ -77,7 +77,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write # push the merge-advance ledger commit to the default branch
-      pull-requests: read # gh pr view + reviewThreads GraphQL
+      pull-requests: read # PR reads + reviewThreads GraphQL
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -162,7 +162,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write # push the merge-advance ledger commit to the default branch
-      pull-requests: read # gh pr view + reviewThreads GraphQL
+      pull-requests: read # PR reads + reviewThreads GraphQL
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -218,23 +218,35 @@ jobs:
           echo "yad-gate-sync: running yadflow@${YAD_PKG}"
           # <<< yad-pin
           echo "YAD_PKG=${YAD_PKG}" >> "$GITHUB_ENV"
+      # Keep npm's download cache between runs (#434): npx fetched the whole CLI on every run (every 15
+      # minutes). Only the downloads (_cacache; npm checks each one's integrity hash) — never npx's installed
+      # tree (_npx), which it runs as it is in a job that can push. The key is the resolved pin, with no
+      # restore-keys: a new pin starts a new cache. A scheduled run reads only the default branch's caches,
+      # so no entry a PR's run wrote is ever loaded. The merge job keeps no cache: it runs once per merge,
+      # in the PR's own cache scope, which that PR's runs can write.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm/_cacache
+          key: yad-npx-${{ runner.os }}-${{ env.YAD_PKG }}
       - name: Reconcile recently-merged review PRs
         run: |
           git config user.name  "yad-gate-sync[bot]"
           git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
           # A stuck merged review is always recent; window generously and let `gate ci` no-op the rest.
-          # Page the search API fully (no fixed result cap) so a stuck PR is never missed for volume.
-          # Aggregate failures and exit nonzero so a persistent API/push failure surfaces (red run)
-          # instead of silently stranding a merged gate behind a green safety-net. Read from a file,
-          # not a pipe, so the failure flag survives (a piped `while` runs in a subshell).
+          # Page the search fully (GitHub's search stops at 1000 results; 7 days stays far below that) so
+          # a stuck PR is never missed for volume. One paginated GraphQL search returns each PR's number
+          # AND branch (#434: it was one `gh pr view` call per merged PR).
+          # Aggregate failures and exit nonzero so a persistent API/push failure
+          # surfaces (red run) instead of silently stranding a merged gate behind a green safety-net.
+          # Read from a file, not a pipe, so the failure flag survives (a piped `while` runs in a subshell).
           SINCE="$(date -u -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-7d +%Y-%m-%d)"
           rc=0
-          gh api --paginate -X GET search/issues \
-            --raw-field q="repo:${GITHUB_REPOSITORY} type:pr is:merged merged:>=${SINCE}" \
-            --jq '.items[].number' > /tmp/yad-merged-prs || rc=1
-          while read -r N; do
+          gh api graphql --paginate \
+            -f query='query($q: String!, $endCursor: String) { search(query: $q, type: ISSUE, first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { number headRefName } } } }' \
+            -f q="repo:${GITHUB_REPOSITORY} type:pr is:merged merged:>=${SINCE}" \
+            --jq '.data.search.nodes[] | select(.number != null) | "\(.number) \(.headRefName)"' > /tmp/yad-merged-prs || rc=1
+          while read -r N REF; do
             [ -n "$N" ] || continue
-            REF="$(gh pr view "$N" --json headRefName --jq '.headRefName' 2>/dev/null)" || rc=1
             case "$REF" in
               review/EP-*) npx -y -p "yadflow@${YAD_PKG}" yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
             esac

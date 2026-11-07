@@ -153,9 +153,6 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     it uses the same installer, honors a project/group `YAD_NODE_VERSION` CI/CD variable, and exports
     the MR's exact `NX_BASE`/`NX_HEAD`.
   - `templates/gitlab/gitlab-ci.include-root.yml` → minimal root written only when no root `.gitlab-ci.yml` exists
-  - `templates/gitlab/.gitlab-ci.yml` → legacy standalone root (greenfield single-file option), kept
-    semantically aligned with the includable fragment's Node version, Nx range, dependency install,
-    and test-worker cap
 - The gates depend on the conventions from earlier steps: the `Task:`/`Contract-Change:` commit
   trailers (`yad-implement`), the `specs/<story>/link.md` + `contracts/` slice (`yad-spec`), and the
   locked `contract.md` (`yad-architecture`).
@@ -210,8 +207,8 @@ Copy from this skill's `templates/`:
     `- local: '.gitlab/ci/yad-update-guard.yml'` to the root `include:` the same additive, idempotent way.
   - If the existing YAML cannot be parsed safely → **STOP** and print the exact include snippet for the
     human to paste (graceful degradation — never guess-edit a pipeline you cannot parse).
-  - The legacy standalone `templates/gitlab/.gitlab-ci.yml` is retained only for a clean greenfield repo
-    that prefers a single self-contained file; the include path above is the default.
+  - A greenfield repo with no root `.gitlab-ci.yml` gets `gitlab-ci.include-root.yml` (above) plus the
+    fragments — there is no single-file template (the old one, with 4 of the 11 gates, was removed in #434).
   - **CI/CD variables, tokens and branch protection are the person's (E158).** An AI agent gives them
     the steps below, never sets one itself, and confirms by reading once they say it is done.
     `yad doctor` reads branch protection and where `YAD_PRODUCT_TOKEN` is set; it cannot read the

@@ -5924,6 +5924,77 @@ test('gate-sync pin: every wired fragment carries the same resolver, and none fl
   }
 });
 
+// #434: the GitHub reconcile job lists the merged PRs with their branches in ONE paginated GraphQL search
+// (it made one `gh pr view` call per PR), and advances only the review/EP-* ones. This runs the real step
+// with a stand-in gh and npx on the PATH.
+const reconcileStep = () => {
+  const lines = fs.readFileSync(GATE_SYNC_GITHUB, 'utf8').split('\n');
+  const at = lines.findIndex((l) => l.includes('- name: Reconcile recently-merged review PRs'));
+  assert.ok(at > 0 && /^\s+run: \|$/.test(lines[at + 1]), 'the reconcile step has a `run: |` block');
+  const body = [];
+  for (const l of lines.slice(at + 2)) { if (l.trim() && !/^ {10}/.test(l)) break; body.push(l.slice(10)); }
+  return body.join('\n');
+};
+test('#434 gate-sync reconcile: one paginated search gives number + branch; only review/EP-* PRs advance', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-reconcile-'));
+  try {
+    const bin = path.join(T, 'bin');
+    fs.mkdirSync(bin);
+    const log = path.join(T, 'calls');
+    // gh applies --jq itself, so the stand-in prints what the jq filter would.
+    fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nprintf 'gh %s\\n' "$*" >> "${log}"\ncase "$*" in\n  *"pr view"*) exit 3 ;;\n  "api graphql --paginate"*) printf '%s\\n' "\${GH_OUT}"; exit "\${GH_RC:-0}" ;;\nesac\nexit 4\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\nprintf 'npx %s\\n' "$*" >> "${log}"\nexit "\${NPX_RC:-0}"\n`, { mode: 0o755 });
+    execFileSync('git', ['init', '-q', T]);
+    fs.writeFileSync(path.join(T, 'step.sh'), reconcileStep());
+    const run = (env) => {
+      fs.rmSync(log, { force: true });
+      const r = spawnSync('bash', ['step.sh'], { cwd: T, encoding: 'utf8', env: { ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: 'acme/product', YAD_PKG: '4.9.0', ...env } });
+      return { status: r.status, calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [] };
+    };
+    const ok = run({ GH_OUT: '12 review/EP-cart-ui\n13 feat/x\n14 review/EP-pay-arch' });
+    assert.equal(ok.status, 0);
+    assert.equal(ok.calls.length, 3, ok.calls.join('\n'));
+    assert.match(ok.calls[0], /^gh api graphql --paginate -f query=query\(\$q: String!, \$endCursor: String\) \{ search\(query: \$q, type: ISSUE, first: 100, after: \$endCursor\) \{ pageInfo \{ hasNextPage endCursor \} nodes \{ \.\.\. on PullRequest \{ number headRefName \} \} \} \} -f q=repo:acme\/product type:pr is:merged merged:>=\d{4}-\d\d-\d\d --jq /);
+    assert.deepEqual(ok.calls.slice(1), [
+      'npx -y -p yadflow@4.9.0 yad gate ci --branch review/EP-cart-ui --pr 12 --merged',
+      'npx -y -p yadflow@4.9.0 yad gate ci --branch review/EP-pay-arch --pr 14 --merged',
+    ]);
+    assert.ok(!ok.calls.some((c) => c.includes('pr view')), 'no per-PR lookup');
+    // The --jq filter itself, on one page of a real-shaped answer (a node that is not a PR comes back empty).
+    const jqArg = reconcileStep().match(/--jq '([^']+)'/)?.[1];
+    assert.ok(jqArg, 'the search has a --jq filter');
+    const page = JSON.stringify({ data: { search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ number: 12, headRefName: 'review/EP-a' }, {}, { number: 13, headRefName: 'feat/x' }] } } });
+    const jq = spawnSync('jq', ['-r', jqArg], { input: page, encoding: 'utf8' });
+    if (jq.error?.code !== 'ENOENT') assert.equal(jq.stdout, '12 review/EP-a\n13 feat/x\n', jq.stderr);
+    // A failed search, or a failed advance, still turns the run red — after the other PRs are tried.
+    assert.equal(run({ GH_OUT: '', GH_RC: '1' }).status, 1, 'search failed');
+    const bad = run({ GH_OUT: '12 review/EP-cart-ui\n14 review/EP-pay-arch', NPX_RC: '1' });
+    assert.equal(bad.status, 1);
+    assert.equal(bad.calls.filter((c) => c.startsWith('npx')).length, 2, 'every PR is still tried');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #434: npx fetched the whole CLI on every gate-sync run. The GitHub reconcile job keeps ~/.npm/_cacache, keyed
+// on the pin the job resolved (set in GITHUB_ENV by the step before); the GitLab job keeps it in the clone, keyed on
+// every pin source (YAD_VERSION and the two pin files).
+test('#434 gate-sync: npm download cache on the reconcile job and the GitLab job, keyed on the pin', () => {
+  const gh = fs.readFileSync(GATE_SYNC_GITHUB, 'utf8');
+  // Only the checked downloads (_cacache), never npx's installed tree, and no restore-keys: a job that can push
+  // must not run code from a cache entry another key wrote.
+  const steps = [...gh.matchAll(/echo "YAD_PKG=\$\{YAD_PKG\}" >> "\$GITHUB_ENV"\n(?: {6}#.*\n)* {6}- uses: actions\/cache@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}path: ~\/\.npm\/_cacache\n {10}key: yad-npx-\$\{\{ runner\.os \}\}-\$\{\{ env\.YAD_PKG \}\}\n(?! {10})/g)];
+  assert.equal(steps.length, 1, 'reconcile restores the cache right after the pin');
+  // The merge job runs in the PR's own cache scope, which that PR's runs can write: it keeps no cache.
+  const merge = gh.slice(gh.indexOf('\n  mergesync:\n'), gh.indexOf('\n  reconcile:\n'));
+  assert.ok(merge.includes('Advance the gate on merge'), 'mergesync job found');
+  assert.doesNotMatch(merge, /uses: actions\/cache@/, 'mergesync keeps no cache');
+  assert.ok(gh.indexOf(steps[0][0]) > gh.indexOf('\n  reconcile:\n'), 'the cache step is in reconcile');
+  assert.doesNotMatch(gh, /^\s+restore-keys:/m, 'no fallback key');
+  const gl = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8');
+  assert.match(gl, /\n {4}npm_config_cache: \$CI_PROJECT_DIR\/\.npm\n/);
+  assert.doesNotMatch(gl, /^\s+fallback_keys:/m, 'no fallback key on GitLab either');
+  assert.match(gl, /\n {2}cache:\n {4}key:\n {6}prefix: yad-npx-\$YAD_VERSION\n {6}files: \[\.sdlc\/cli-version\.json, \.sdlc\/product\.json\]\n {4}paths: \[\.npm\/_cacache\/\]\n/);
+});
+
 // Issue #327: on GitLab the runner installs LFS git hooks into an LFS Product's clone, and node:20 has
 // no git-lfs, so the job's own `git checkout` (and the push of the advance) failed. The job now fetches
 // a pinned git-lfs first — only for a Product that uses LFS. This runs the real block from the fragment,
