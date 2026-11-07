@@ -5,12 +5,18 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Nightly, and by hand (#434): the macOS legs run on these and on pushes to main, not on pull requests. The
+  # nightly run repeats every job, so `npm audit` also catches an advisory published since the last merge.
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
 
 # A newer push to the same pull request cancels its older run (#428). A push to main never cancels or waits:
-# each merge's run is the record that main was green at that commit, so its group is the commit itself (a
-# shared group would still cancel a run left waiting in it, even without cancel-in-progress).
+# each merge's run is the record that main was green at that commit, so its group is its event and commit (a
+# shared group would still cancel a run left waiting in it, even without cancel-in-progress); with the event in
+# it, a nightly or by-hand run of the same commit never waits behind its push run (#434).
 concurrency:
-  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -29,10 +35,11 @@ jobs:
         # leave in yadflow 5, which needs Node 22 (E161).
         node-version: [18, 20, 22, 24]
         # One macOS leg (Node 24) confirms the bash gates + git plumbing behave on the
-        # other POSIX target without paying for a full os×node cross-product.
-        include:
-          - os: macos-latest
-            node-version: 24
+        # other POSIX target without paying for a full os×node cross-product. It is the slowest leg
+        # (about 11 minutes), so it runs after a merge to main, nightly and by hand, not on a pull request
+        # (#434). The cost: a macOS-only bug (like #462) is found right after the merge, not before it.
+        # It is not a required check, so its name may change freely.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[]' || '[{"os":"macos-latest","node-version":24}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false } # #426: no job here pushes; the tests must not find a token in .git/config
@@ -41,6 +48,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
+          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -95,6 +103,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
+          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -108,7 +117,9 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS: after a merge, nightly and by hand only, as in the test job (#434). `e2e (ubuntu-latest)`
+        # is a required check: keep that name.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false } # #426: no job here pushes; the tests must not find a token in .git/config
@@ -117,6 +128,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+          # No `cache: npm` here: this job never runs npm ci, so it would save a near-empty cache under the
+          # key the test and audit jobs share — and, finishing first, block their full one (#434).
 
       # Packs the real tarball, installs it into a throwaway prefix, and drives the installed
       # binary through setup -> check -> gate open/sync -> commit -> check gates (pass + fail).
@@ -141,15 +154,21 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 22 # the deploy's line: yad-docs.yml is built by `yad docs sync --wire`, which pins 22
+          cache: npm # #434: one cache for both sites, keyed on both lockfiles
+          cache-dependency-path: |
+            docs/sdlc-site/package-lock.json
+            docs/tutorial-site/package-lock.json
 
-      - name: Build the overview site
+      # Lint as well (#434): the sites' eslint runs nowhere else, so a lint-breaking dependency bump
+      # (#485, eslint 10) was found only by hand.
+      - name: Lint + build the overview site
         working-directory: docs/sdlc-site
-        run: npm ci && npm run build
+        run: npm ci && npm run lint && npm run build
 
-      - name: Build the tutorial site
+      - name: Lint + build the tutorial site
         working-directory: docs/tutorial-site
-        run: npm ci && npm run build
+        run: npm ci && npm run lint && npm run build
 
   audit:
     name: audit (dependencies)
@@ -159,10 +178,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false } # #426: no job here pushes; the tests must not find a token in .git/config
 
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
+          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
 
       - name: Install dependencies
         run: npm ci
