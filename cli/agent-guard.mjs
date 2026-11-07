@@ -527,12 +527,12 @@ export const isCursorPayload = (payload) => payload?.hook_event_name === 'before
 // named here. What it lists is printed by `yad setup` and given to agents by `yad guide --json`.
 export const PREAPPROVED = Object.freeze({
   api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, variables, tokens, keys, hooks or e-mails in the path',
-  git: 'git log, status, diff, show, rev-parse, ls-files, blame (no git option before them; no --output, --ext-diff, --textconv, --no-index, --contents, --show-signature or a shortening of one; git still runs what its own config names, such as an external diff or fsmonitor)',
+  git: 'git log, status, diff, show, rev-parse, ls-files, blame (no git option before them; no --output, --ext-diff, --textconv, --no-index, --contents, --show-signature or a shortening of one, no %G in a format, git diff paths inside the project; git still runs what its own config names, such as an external diff or fsmonitor)',
   jq: 'jq (a filter on the line, never from a file; no env, $ENV, import or include in it; files inside the project)',
   filters: 'head, tail, wc, grep (not -R), cut, uniq, tr, cat (files inside the project)',
   yad: 'the read-only yad commands of the settings allow list',
   gates: 'the read-only gates in checks/ (spec-link, contract-check, commit-message, lineage-check, epic-open, reconcile-debt-check, risk-map-check, verified-commits, ledger-guard, member-check), only while the file is the copy this yadflow ships',
-  never: 'secrets, tokens, variables, keys, webhooks, GraphQL, API writes, file writes, $ (variables) outside single quotes, braces, globs, ~, $(…), bash -c, env prefixes',
+  never: 'secrets, tokens, variables, keys, webhooks, GraphQL, API writes, file writes, $ (variables) outside single quotes, brace lists, globs, ( ), a word starting with ~ or =, $(…), bash -c, env prefixes',
 });
 export const PREAPPROVED_GATES = Object.freeze(['spec-link.sh', 'contract-check.sh', 'commit-message.sh', 'lineage-check.sh', 'epic-open.sh',
   'reconcile-debt-check.sh', 'risk-map-check.sh', 'verified-commits.sh', 'ledger-guard.sh', 'member-check.mjs']);
@@ -542,9 +542,14 @@ const SHIPPED_CHECKS = fileURLToPath(new URL('../skills/yad-checks/templates/che
 // or null when it has any other: a `>` to a file writes it, a `<` (a file, a heredoc, a here-string) or a
 // process substitution feeds text from somewhere this does not judge. Quotes are respected, so the `>` in
 // `jq '.a > 1'` is text. Null too for anything the shell EXPANDS before the program sees it, because the words
-// judged here would not be the words run: a `$` outside single quotes (`"$GH_TOKEN"`, `${HOME}`, `$((…))`), and,
-// unquoted, a brace (`{~/.ssh/id_rsa,x}`), a glob (`*`, `?`, `[`, which can reach a link out of the project) or a
-// `~` that starts a word.
+// judged here would not be the words run: a `$` outside single quotes (`"$GH_TOKEN"`, `${HOME}`, `$((…))`).
+// Unquoted text is held to an ALLOW list of characters — letters, digits, `_ . / : @ % + , ^ ~ = -`, spaces and
+// the separators — because bash and zsh each expand more than any list of bad ones names: a brace list
+// (`{~/.ssh/id_rsa,x}`), a glob (`*`, `?`, `[`, which can reach a link out of the project), zsh's glob
+// qualifiers (`file(e:cmd:)` runs cmd) and `=(cmd)` / `=ls`. So also: no `=` or `~` starting a word. Two forms are
+// let through because neither shell expands them: a brace around one plain word (`{owner}` in a gh path,
+// `@{u}`), and a `#` that starts a comment (its text is never run).
+const UNQUOTED_SAFE = /[A-Za-z0-9_./:@%+,^~=-]/;
 function blankHarmlessRedirects(line) {
   let out = '';
   let quote = null;
@@ -559,9 +564,16 @@ function blankHarmlessRedirects(line) {
     }
     if (ch === '\\') { out += ch + (line[i + 1] ?? ''); i++; continue; }
     if (ch === '\'' || ch === '"') { quote = ch; out += ch; continue; }
-    if (ch === '$' || ch === '{' || ch === '}' || ch === '*' || ch === '?' || ch === '[') return null;
-    if (ch === '~' && (i === 0 || /[\s=:;|&(]/.test(line[i - 1]))) return null;
+    const wordStart = i === 0 || /[\s;|&]/.test(line[i - 1]);
+    if ((ch === '~' || ch === '=') && (wordStart || /[=:]/.test(line[i - 1]))) return null;
+    if (ch === '{') {
+      const m = /^\{[A-Za-z0-9_]*\}/.exec(line.slice(i));
+      if (!m) return null;
+      out += m[0]; i += m[0].length - 1; continue;
+    }
+    if (ch === '#' && wordStart) { const eol = line.indexOf('\n', i); const end = eol < 0 ? line.length : eol; out += line.slice(i, end); i = end - 1; continue; }
     if (ch === '<') return null;
+    if (ch !== '>' && !UNQUOTED_SAFE.test(ch) && !/[\s;|&]/.test(ch)) return null;
     if (ch !== '>') { out += ch; continue; }
     // The fd before it (`2>`) or `&>`: blanked with it.
     let start = out.length;
@@ -591,9 +603,10 @@ function blankHarmlessRedirects(line) {
 function insideProject(word, at) {
   if (word === '-') return true;
   if (!word || /^~|\$/.test(word)) return false;
-  let root;
-  try { root = fs.realpathSync(at.root); } catch { return false; }
-  let full = path.resolve(at.cwd, word);
+  let root, cwd;
+  // Both through realpath, so a link in either (macOS's /var is /private/var) does not make a file look outside.
+  try { root = fs.realpathSync(at.root); cwd = fs.realpathSync(at.cwd); } catch { return false; }
+  let full = path.resolve(cwd, word);
   try { full = fs.realpathSync(full); } catch { /* not there yet (or a glob): judged by its spelling */ }
   const rel = path.relative(root, full);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
@@ -712,14 +725,26 @@ const GIT_READS = new Set(['log', 'status', 'diff', 'show', 'rev-parse', 'ls-fil
 // ls-files' `-X <file>`, diff's `-O<file>`, in any cluster.
 const GIT_RISKY = ['--output', '--output-directory', '--ext-diff', '--textconv', '--no-index', '--contents', '--open-files-in-pager', '--ignore-revs-file',
   '--exclude-from', '--exclude-per-directory', '--pathspec-from-file', '--orderfile', '--show-signature', '--rotate-to', '--skip-to'];
-function gitPart(args) {
+// Real options that happen to begin a risky one: allowed as written.
+const GIT_EXACT_SAFE = new Set(['--text', '--ignore-rev', '--output-indicator-new', '--output-indicator-old', '--output-indicator-context']);
+// The short options that read a file, by command: blame's `-S <file>`, ls-files' `-X <file>`, `-O<file>` (diff's
+// order file). `git log -S <text>` is a search, not a file, so it stays.
+const GIT_RISKY_SHORT = { blame: 'S', 'ls-files': 'X', diff: 'O', log: 'O', show: 'O' };
+function gitPart(args, at) {
   if (!GIT_READS.has(args[0])) return false;
+  const shortRisk = GIT_RISKY_SHORT[args[0]] ?? '';
+  let afterDashes = false;
   for (const a of args.slice(1)) {
-    if (a === '--') break;
-    if (a.startsWith('--')) {
+    if (a === '--') { afterDashes = true; continue; }
+    // `%G…` in a format makes git check signatures, which runs gpg.
+    if (/%G/.test(a)) return false;
+    if (!afterDashes && a.startsWith('--')) {
       const name = a.split('=')[0];
-      if (name.length > 2 && GIT_RISKY.some((r) => r.startsWith(name))) return false;
-    } else if (/^-[A-Za-z]*[SXO]/.test(a)) return false;
+      if (!GIT_EXACT_SAFE.has(name) && name.length > 2 && GIT_RISKY.some((r) => r.startsWith(name))) return false;
+    } else if (!afterDashes && a.startsWith('-') && shortRisk && new RegExp(`^-[A-Za-z]*[${shortRisk}]`).test(a)) return false;
+    // `git diff` turns to --no-index by itself when a path is outside the repo, and prints both files: every path
+    // it is given must be inside the project. A ref (`main`, `origin/main`, `HEAD~1`) reads as one inside.
+    else if (args[0] === 'diff' && (afterDashes || !a.startsWith('-')) && !insideProject(a, at)) return false;
   }
   return true;
 }
@@ -755,7 +780,7 @@ function readKind(words, at) {
   // A bare program name: no path (a script that shares a name), no `VAR=value`, no prefix (`env`, `sudo`, …).
   if (!/^[a-z][a-z0-9_-]*$/.test(prog) || PREFIXES.has(prog)) return null;
   if ((prog === 'gh' || prog === 'glab') && args[0] === 'api') return apiPart(prog, args.slice(1)) ? `${prog} api GET` : null;
-  if (prog === 'git') return gitPart(args) ? `git ${args[0]}` : null;
+  if (prog === 'git') return gitPart(args, at) ? `git ${args[0]}` : null;
   if (prog === 'jq') return jqPart(args, at) ? 'jq' : null;
   if (prog === 'yad') return yadPart(args) ? 'a read-only yad command' : null;
   if (prog === 'bash' || prog === 'sh' || prog === 'node') return gatePart(prog, args, at) ? `the ${args[0].replace(/^\.\/|^checks\//g, '')} gate` : null;

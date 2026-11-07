@@ -1075,6 +1075,9 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'jq . a.json', "jq -r '.a > 1' a.json", "jq --arg x y -n '$x'", "git log -- '*.mjs'", 'git log -n5 -p', 'git blame -L 1,2 a.json',
       'cat a.json', 'head -5 a.json', 'tail -n 2 a.json', 'wc -l a.json', 'grep -rn foo src/', 'grep -e foo a.json', 'git log | cut -d" " -f1 | uniq -c | tr a-z A-Z',
       'yad status --json | jq .x', 'yad gate status EP-a', 'yad doctor && git status',
+      // Review 2: forms the allow list of characters keeps.
+      'gh api repos/{owner}/{repo}/pulls', 'git rev-parse @{u}', 'git log -S foo', 'git diff --text', 'git diff HEAD~1', 'git diff HEAD^ -- a.json', 'git diff main...HEAD -- src',
+      'git log --format=%H -3', "git log --oneline # a note (with parens) and $x", "grep -n 'a.*b' a.json", 'git blame --ignore-rev abc a.json',
     ]) yes(line);
     for (const line of [
       // API writes, GraphQL, other hosts, and the human-only area.
@@ -1099,6 +1102,10 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'gh api user/emails', 'git blame --conten=/etc/hosts a.json', 'git blame --contents=/etc/hosts a.json', 'git blame -S revs a.json', 'git ls-files -X ex',
       'git diff -O/etc/order', 'git log --show-signature', 'git log --show-sig', 'git log --outp=x', 'git diff --no-ind /etc/a b', 'cat a.json 2>/dev/null"x"',
       'yad check --fix', 'yad dial EP-a implement --to auto',
+      // Review 2: zsh glob qualifiers and =(…) run commands; =ls reads a program's file; git diff reads files outside.
+      'cat a.json(e:touch\\ PWNED:)', 'cat a.json(e:"touch PWNED":)', 'head -c 100 a.json(e:id:)', 'cat =(id)', 'cat =ls', 'cat x =ls', 'git log --x=~/y',
+      'git diff /dev/null /etc/hosts', 'git diff --stat a.json /etc/passwd', 'git diff -- /etc/hosts /etc/passwd', 'git diff ../../x a.json', 'git log --format=%GS -1',
+      'git log --pretty=format:%G?', 'git blame -S revs a.json', 'git diff -Oorder', 'gh api repos/{a,b}', 'cat a!b', 'git log #(x)\nrm -rf src', 'git log a#b',
     ]) no(line);
     // A refusal always wins: a refused line is never pre-approved.
     assert.equal(agentGuardDecision('git log && gh pr merge 5').allow, false);
