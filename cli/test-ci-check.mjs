@@ -915,12 +915,14 @@ test('#426 step: one file from a base with no checks/ is "1 file"', () => {
 // never cancels: the update guard checks `before..HEAD` of one push, so a cancelled run leaves those commits
 // unchecked; gate-sync pushes the ledger.
 test('#428: the PR gate files cancel their older run; the update guard, gate-sync and a push to main never do', () => {
-  const GH_GROUP = '\nconcurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n  cancel-in-progress: true\n';
+  // The PR-text files start on an edit too; their group also names the commit, so an older commit's late edit
+  // run cannot cancel a newer push's run.
+  const group = (name) => `\nconcurrency:\n  group: \${{ github.workflow }}-\${{ github.event.pull_request.number }}${/pr-text/.test(name) ? '-${{ github.event.pull_request.head.sha }}' : ''}\n  cancel-in-progress: true\n`;
   let gh = 0, gl = 0;
   for (const { name, text, gitlab } of GATE_TEMPLATES) {
     if (!gitlab) {
       gh++;
-      assert.ok(text.includes(GH_GROUP), `${name}: no per-PR concurrency group that cancels`);
+      assert.ok(text.includes(group(name)), `${name}: no per-PR concurrency group that cancels`);
       // The group is keyed on the PR number, so the file must start on pull_request only (no empty number).
       const on = text.slice(text.search(/^on:$/m), text.search(/^concurrency:$/m));
       assert.deepEqual(on.match(/^ {2}[a-z_]+:/gm), ['  pull_request:'], `${name}: starts on more than pull_request`);
@@ -932,16 +934,21 @@ test('#428: the PR gate files cancel their older run; the update guard, gate-syn
       const m = b.match(/^['"]?([^\s#'"-][^:'"]*)['"]?:/);
       if (m) blocks.set(m[1], b);
     }
-    for (const [key, b] of blocks) {
+    for (const key of blocks.keys()) {
       if (key.startsWith('.') || ['variables', 'include', 'stages', 'default', 'workflow'].includes(key)) continue;
       gl++;
-      const ext = b.match(/^ {2}extends: (\S+)$/m);
-      const own = /^ {2}interruptible: true$/m.test(b) || (ext && /^ {2}interruptible: true$/m.test(blocks.get(ext[1]) || ''));
-      assert.ok(own, `${name}: job ${key} is not interruptible`);
+      const interruptible = (k, depth = 0) => {
+        const blk = blocks.get(k);
+        if (!blk || depth > 5) return false;
+        if (/^ {2}interruptible: true$/m.test(blk)) return true;
+        const ext = blk.match(/^ {2}extends: (\S+)$/m);
+        return Boolean(ext && interruptible(ext[1], depth + 1));
+      };
+      assert.ok(interruptible(key), `${name}: job ${key} is not interruptible`);
     }
   }
   assert.equal(gh, 6, 'GitHub gate files read');
-  assert.ok(gl >= 20, `read only ${gl} GitLab gate jobs`);
+  assert.equal(gl, 21, 'GitLab gate jobs read');
   for (const f of ['skills/yad-checks/templates/github/yad-update-guard.yml', 'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml',
     'skills/yad-product-bridge/templates/github/yad-gate-sync.yml', 'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml']) {
     const text = noComments(fs.readFileSync(path.join(ROOT, f), 'utf8'));
