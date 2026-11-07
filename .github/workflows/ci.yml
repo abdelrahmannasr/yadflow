@@ -150,13 +150,15 @@ jobs:
             docs/sdlc-site/package-lock.json
             docs/tutorial-site/package-lock.json
 
-      - name: Build the overview site
+      # Lint as well (#434): the sites' eslint runs nowhere else, so a lint-breaking dependency bump
+      # (#485, eslint 10) was found only by hand.
+      - name: Lint + build the overview site
         working-directory: docs/sdlc-site
-        run: npm ci && npm run build
+        run: npm ci && npm run lint && npm run build
 
-      - name: Build the tutorial site
+      - name: Lint + build the tutorial site
         working-directory: docs/tutorial-site
-        run: npm ci && npm run build
+        run: npm ci && npm run lint && npm run build
 
   audit:
     name: audit (dependencies)
