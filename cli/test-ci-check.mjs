@@ -939,7 +939,7 @@ test('#428: the PR gate files cancel their older run; the update guard, gate-syn
       gl++;
       const interruptible = (k, depth = 0) => {
         const blk = blocks.get(k);
-        if (!blk || depth > 5) return false;
+        if (!blk || depth > 5 || /^ {2}interruptible: false$/m.test(blk)) return false; // a job's own false wins
         if (/^ {2}interruptible: true$/m.test(blk)) return true;
         const ext = blk.match(/^ {2}extends: (\S+)$/m);
         return Boolean(ext && interruptible(ext[1], depth + 1));

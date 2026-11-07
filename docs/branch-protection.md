@@ -82,12 +82,12 @@ hand is kept by `yad update` and may still start on an edit: `yad doctor` warns 
 (`checks:edit-run`).
 
 **Older runs are cancelled (#428).** Each gate file cancels its own older run on the same pull request when
-a newer one starts: a push, or for the PR-text files an edit. The cancelled run belongs to an older commit
-or to older PR text, and a merge waits only on the newest run's checks. The PR-text files cancel only a run of
-the same commit. In the rare case where GitHub delivers two pushes out of order, the older commit's run can
-cancel the newer one; the cancelled check then blocks the merge (it never passes it) until you re-run it from
-the Checks tab or push again. `yad-update-guard` never cancels a run: each run checks only the commits of its
-own push, so a cancelled run would leave them unchecked.
+a newer one starts. For the PR-text files, that is an edit or a reopen on the same commit; for the other gate
+files, it is any newer push. The cancelled run belongs to an older commit or to older PR text, and a merge
+waits only on the newest run's checks. In the rare case where GitHub delivers two pushes out of order, the
+other gate files' older-commit run can cancel the newer one; the cancelled check then blocks the merge (it
+never passes it) until you re-run it from the Checks tab or push again. `yad-update-guard` never cancels a
+run: each run checks only the commits of its own push, so a cancelled run would leave them unchecked.
 
 Before 4.0 the Product's workflow file was `.github/workflows/yad-hub-checks.yml`, with `name:
 yad-hub-checks`; `yad update` renames it `yad-product-checks`. The job names above did not change, so
@@ -158,8 +158,11 @@ workflow:
     - when: always
 ```
 
-A `workflow:rules` list of your own already decides which pipelines run: add the `auto_cancel` lines to its
-default-branch rule instead, and keep the rest as it is.
+If your root file already has a `workflow:rules` list, do not add a second one. GitLab uses the first rule
+that matches, so add the `auto_cancel` lines to the rule that matches default-branch pipelines today. If no
+rule matches them yet, put the snippet's first rule at the top of your list. These keys are recent, and an
+older self-managed GitLab treats an unknown key as an error that stops every pipeline: check the file in
+the pipeline editor (Build → Pipeline editor, which validates it) before you commit it.
 
 The checks run as jobs in the merge request pipeline: on the Product `yad-product-commit-message`,
 `yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard`, `yad-product-member-check` and, when that file is there,
