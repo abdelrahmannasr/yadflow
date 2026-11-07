@@ -24,7 +24,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ALLOW = '{"permission":"allow"}';
-const allow = () => { process.stdout.write(`${ALLOW}\n`); process.exit(0); };
+// Exit with `code` once `text` is written. stdout to a pipe is asynchronous on macOS, so a `process.exit`
+// straight after `process.stdout.write` can lose the verdict — and Cursor reads an empty answer as a block.
+// The promise never resolves: `await finish(…)` also stops the code below it.
+const finish = (code, text = '') => new Promise(() => {
+  if (!text) process.exit(code);
+  process.stdout.write(text, () => process.exit(code));
+});
+const allow = () => finish(0, `${ALLOW}\n`);
 
 // ---- yad-resolve (the same block in every hooks/*.mjs; a test keeps the copies identical) ----------
 // The Product root is this script's grandparent — `<product>/hooks/<script>.mjs` — found from the
@@ -93,7 +100,7 @@ function runYad(yad, args, options) {
 const yad = resolveYad();
 if (!yad) {
   process.stderr.write(`  • yad hook: no \`yad\` on PATH and none installed in ${PRODUCT_ROOT} — allowing (install yadflow to re-arm the ledger guard)\n`);
-  allow();
+  await allow();
 }
 
 // stdout is CAPTURED (the JSON verdict); stdin (the tool-call payload) and stderr (Cursor's log) are
@@ -107,7 +114,7 @@ const r = runYad(yad, ['hook', 'ledger-guard', '--format', 'cursor'], { stdio: [
 // care what order the JSON's properties are in.
 const lines = String(r.stdout || '').split(/\r?\n/).filter((l) => l.trim());
 const verdict = lines.length ? lines[lines.length - 1] : '';
-if (verdict.includes('"permission"')) { process.stdout.write(`${verdict}\n`); process.exit(0); }
+if (verdict.includes('"permission"')) await finish(0, `${verdict}\n`);
 
 // EXIT 2 IS A DENY, even with nothing on stdout — and this branch is reached in a real, ordinary case.
 // The Product's own `node_modules/yadflow` comes BEFORE `PATH`, so a project pinned to a yadflow older
@@ -115,16 +122,15 @@ if (verdict.includes('"permission"')) { process.stdout.write(`${verdict}\n`); pr
 // The message is FIXED: the reason the older `yad` printed has already gone to stderr, where Cursor
 // logs it.
 if (r.status === 2) {
-  process.stdout.write(`${JSON.stringify({
+  await finish(0, `${JSON.stringify({
     permission: 'deny',
     user_message: 'yad: this edit touches CI-owned gate state.',
     agent_message: 'This edit touches CI-owned gate state, which CI is the sole writer of. Do not edit the ledger by hand: use `yad gate open` for the transition, and commit only the artifact. The installed yadflow is older than this hook, so the full reason is in the hook log rather than here — `yad doctor` will name the version gap.',
   })}\n`);
-  process.exit(0);
 }
 
 if (r.status !== 0) {
   const why = r.error ? r.error.message : `exited ${r.status ?? r.signal}`;
   process.stderr.write(`  • yad hook: \`yad hook ledger-guard\` ${why} — allowing (run \`yad doctor\` to check the install)\n`);
 }
-allow();
+await allow();

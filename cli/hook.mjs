@@ -511,12 +511,38 @@ export function runStagedLedgerGuard({ env = process.env, cwd = process.cwd(), g
   return 2;
 }
 
+// Read all of stdin. Asking `process.stdin.isTTY` makes Node open stdin as a stream, and on a pipe that
+// switches fd 0 to non-blocking: a read then throws EAGAIN ("no data yet") whenever the payload arrives a
+// moment after the hook starts. `fs.readFileSync(0)` gave up there, the hook read no payload, and it
+// allowed — the macOS CI failures on #459 (a deny allowed) and #460 (no Cursor verdict: with no payload
+// the hook could not tell it was Cursor). So this reads in a loop and, on EAGAIN, waits 5 ms and tries
+// again, for up to `limitMs`; after that the error goes to the caller, which fails open. Keep the loop:
+// the non-blocking mode is also what gives the limit — a blocking read would hang for ever on a parent
+// that never closes stdin. A read of 0 bytes (or Windows' EOF error) is the end.
+export function readStdin({ fd = 0, readSync = fs.readSync, limitMs = 5000 } = {}) {
+  const chunks = [];
+  const buf = Buffer.alloc(64 * 1024);
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  const until = Date.now() + limitMs;
+  for (;;) {
+    let n;
+    try { n = readSync(fd, buf, 0, buf.length, null); } catch (e) {
+      if (e?.code === 'EAGAIN' && Date.now() < until) { Atomics.wait(nap, 0, 0, 5); continue; }
+      if (e?.code === 'EOF') break;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, n)));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 // Read the harness payload off stdin. Absent, empty, or unparseable all mean "nothing to inspect" —
 // never an error, and never a block.
 function readPayload() {
   try {
     if (process.stdin.isTTY) return null;
-    const raw = fs.readFileSync(0, 'utf8').trim();
+    const raw = readStdin().trim();
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
@@ -581,10 +607,10 @@ const isReadOnlyCall = (payload) => {
 };
 
 export function runLedgerGuardHook({ paths = [], format = 'exit' } = {}) {
-  // Only read stdin when there is nothing else to go on. `readFileSync(0)` blocks until EOF, and a
-  // caller that passes `--path` (the documented stdin-free alternative) may well have inherited an
-  // open pipe from a long-lived parent — `isTTY` is false there, so the TTY guard does not trip and
-  // the hook would hang forever. A hang is strictly worse for an agent than a block.
+  // Only read stdin when there is nothing else to go on. A caller that passes `--path` (the documented
+  // stdin-free alternative) may well have inherited an open pipe from a long-lived parent — `isTTY` is
+  // false there, so the TTY guard does not trip, and `readStdin` would wait out its whole limit before
+  // going on. Every agent tool call would pay that wait.
   const payload = paths.length ? null : readPayload();
   const all = isReadOnlyCall(payload) ? [...paths] : [...new Set([...payloadPaths(payload), ...paths])];
   const verdict = ledgerGuardDecision(all, {
