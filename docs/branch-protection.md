@@ -160,9 +160,11 @@ workflow:
 
 If your root file already has a `workflow:rules` list, do not add a second one. GitLab uses the first rule
 that matches, so add the `auto_cancel` lines to the rule that matches default-branch pipelines today. If no
-rule matches them yet, put the snippet's first rule at the top of your list. These keys are recent, and an
+rule matches them yet, put the snippet's first rule at the top of your list (this also starts the
+default-branch pipelines your list stopped until now, your own jobs included). These keys are recent, and an
 older self-managed GitLab treats an unknown key as an error that stops every pipeline: check the file in
-the pipeline editor (Build → Pipeline editor, which validates it) before you commit it.
+the pipeline editor before you commit it (Build → Pipeline editor, or CI/CD → Editor on older versions; it
+validates the file).
 
 The checks run as jobs in the merge request pipeline: on the Product `yad-product-commit-message`,
 `yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard`, `yad-product-member-check` and, when that file is there,
