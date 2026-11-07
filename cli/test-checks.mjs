@@ -7520,3 +7520,48 @@ test('docs/GATES.md names every gate script a CI template runs (#351)', () => {
   assert.ok(wired.size >= 15, `found only ${[...wired]}`);
   for (const script of wired) assert.ok(page.includes(`\`${script}\``), `docs/GATES.md does not name ${script}`);
 });
+
+// #433: a GitLab merged-results pipeline (and every GitHub pull_request run, which checks out refs/pull/N/merge)
+// checks a merge commit the platform made: the MR merged into the target's tip, unsigned, by the platform's own
+// identity. BASE is still the target branch. The gates must judge the MR's own commits only — never the merge,
+// never a commit the target gained meanwhile. (verified-commits waives a content-free merge: see the issue #138
+// test in cli/test.mjs.) A merge train or merge queue is a different shape, not supported yet (E166).
+test('#433 merged results: the gates judge only the MR\'s own commits when HEAD is a merge the platform made', () => {
+  const build = (featureMsg) => {
+    const T = scaffoldRepo(); // on `feature`
+    commit(T, featureMsg, { 'src/thing.js': 'x', 'specs/EP-demo-S01/link.md': 'story: EP-demo-S01\nepic: EP-demo\n' });
+    const own = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
+    // The target moved on meanwhile, with a commit no gate here would pass.
+    git(T, 'checkout', '-q', 'main');
+    commit(T, 'not a conventional subject', { 'other.txt': 'y' });
+    const theirs = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
+    // GitLab checks out a detached merge of the MR into the target's tip.
+    git(T, 'checkout', '-q', '--detach', 'main');
+    git(T, '-c', 'user.email=gitlab@example.com', '-c', 'user.name=GitLab', 'merge', '-q', '--no-ff', '-m', "Merge branch 'feature' into 'main'", 'feature');
+    return { T, own, theirs, merge: git(T, 'rev-parse', '--short', 'HEAD').toString().trim() };
+  };
+  const ok = build('feat: add thing\n\nTask: EP-demo-S01-T01');
+  try {
+    for (const gate of [SPEC_LINK, COMMIT_MSG, CONTRACT, LINEAGE, DEBT, EPIC_OPEN]) {
+      const r = runGate(gate, ok.T);
+      const name = path.basename(gate);
+      assert.doesNotMatch(r.out, new RegExp(`\\b(${ok.merge}|${ok.theirs})\\b`), `${name} must not judge the merge or the target's own commit:\n${r.out}`);
+      // epic-open needs the Product to be named, which this repo does not: it fails on the MR's commit, and only on it.
+      if (gate === EPIC_OPEN) assert.match(r.out, new RegExp(`FAIL \\[epic-open\\]: ${ok.own} `), r.out);
+      else assert.equal(r.code, 0, `${name}:\n${r.out}`);
+    }
+    assert.match(runGate(SPEC_LINK, ok.T).out, new RegExp(`PASS \\[spec-link\\]: ${ok.own} EP-demo-S01-T01`));
+    assert.match(runGate(COMMIT_MSG, ok.T).out, new RegExp(`PASS \\[commit-message\\]: ${ok.own} 'feat: add thing'`));
+  } finally { fs.rmSync(ok.T, { recursive: true, force: true }); }
+  // The MR's own bad commit still fails: the merge does not hide it.
+  const bad = build('add thing without a type');
+  try {
+    const link = runGate(SPEC_LINK, bad.T);
+    assert.equal(link.code, 1, link.out);
+    assert.match(link.out, new RegExp(`${bad.own} .*has no 'Task:' trailer`), link.out);
+    const msg = runGate(COMMIT_MSG, bad.T);
+    assert.equal(msg.code, 1, msg.out);
+    assert.match(msg.out, new RegExp(bad.own), msg.out);
+    assert.doesNotMatch(msg.out, new RegExp(`\\b(${bad.merge}|${bad.theirs})\\b`), msg.out);
+  } finally { fs.rmSync(bad.T, { recursive: true, force: true }); }
+});
