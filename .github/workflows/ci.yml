@@ -41,6 +41,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
+          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -95,6 +96,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
+          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -117,6 +119,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
 
       # Packs the real tarball, installs it into a throwaway prefix, and drives the installed
       # binary through setup -> check -> gate open/sync -> commit -> check gates (pass + fail).
@@ -141,7 +144,11 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 22 # the deploy's line: yad-docs.yml is built by `yad docs sync --wire`, which pins 22
+          cache: npm # #434: one cache for both sites, keyed on both lockfiles
+          cache-dependency-path: |
+            docs/sdlc-site/package-lock.json
+            docs/tutorial-site/package-lock.json
 
       - name: Build the overview site
         working-directory: docs/sdlc-site
@@ -159,10 +166,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false } # #426: no job here pushes; the tests must not find a token in .git/config
 
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
+          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
 
       - name: Install dependencies
         run: npm ci
