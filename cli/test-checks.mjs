@@ -5977,7 +5977,7 @@ test('#434 gate-sync reconcile: one paginated search gives number + branch; only
 // #434: npx fetched the whole CLI on every gate-sync run. The GitHub reconcile job keeps ~/.npm/_cacache, keyed
 // on the pin the job resolved (set in GITHUB_ENV by the step before); the GitLab job keeps it in the clone, keyed on
 // every pin source (YAD_VERSION and the two pin files).
-test('#434 gate-sync: npm download cache on every job, keyed on the pin', () => {
+test('#434 gate-sync: npm download cache on the reconcile job and the GitLab job, keyed on the pin', () => {
   const gh = fs.readFileSync(GATE_SYNC_GITHUB, 'utf8');
   // Only the checked downloads (_cacache), never npx's installed tree, and no restore-keys: a job that can push
   // must not run code from a cache entry another key wrote.
