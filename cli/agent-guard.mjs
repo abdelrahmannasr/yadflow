@@ -546,9 +546,11 @@ const SHIPPED_CHECKS = fileURLToPath(new URL('../skills/yad-checks/templates/che
 // Unquoted text is held to an ALLOW list of characters — letters, digits, `_ . / : @ % + , ^ ~ = -`, spaces and
 // the separators — because bash and zsh each expand more than any list of bad ones names: a brace list
 // (`{~/.ssh/id_rsa,x}`), a glob (`*`, `?`, `[`, which can reach a link out of the project), zsh's glob
-// qualifiers (`file(e:cmd:)` runs cmd) and `=(cmd)` / `=ls`. So also: no `=` or `~` starting a word. Two forms are
-// let through because neither shell expands them: a brace around one plain word (`{owner}` in a gh path,
-// `@{u}`), and a `#` that starts a comment (its text is never run).
+// qualifiers (`file(e:cmd:)` runs cmd) and `=(cmd)` / `=ls`. So also: no `=` or `~` starting a word. One form is
+// let through because neither shell expands it: a brace around one plain word (`{owner}` in a gh path, `@{u}`).
+// Only a space, a tab and a newline break words: `\r`, `\v`, a no-break space are word characters to the shell,
+// and a guard that read them as breaks would judge different words than the shell runs. No `#` either: where a
+// comment starts depends on that same reading (a `\`-newline joins words), so a `#` gets the prompt.
 const UNQUOTED_SAFE = /[A-Za-z0-9_./:@%+,^~=-]/;
 function blankHarmlessRedirects(line) {
   let out = '';
@@ -564,16 +566,15 @@ function blankHarmlessRedirects(line) {
     }
     if (ch === '\\') { out += ch + (line[i + 1] ?? ''); i++; continue; }
     if (ch === '\'' || ch === '"') { quote = ch; out += ch; continue; }
-    const wordStart = i === 0 || /[\s;|&]/.test(line[i - 1]);
+    const wordStart = i === 0 || /[ \t\n;|&]/.test(line[i - 1]);
     if ((ch === '~' || ch === '=') && (wordStart || /[=:]/.test(line[i - 1]))) return null;
     if (ch === '{') {
       const m = /^\{[A-Za-z0-9_]*\}/.exec(line.slice(i));
       if (!m) return null;
       out += m[0]; i += m[0].length - 1; continue;
     }
-    if (ch === '#' && wordStart) { const eol = line.indexOf('\n', i); const end = eol < 0 ? line.length : eol; out += line.slice(i, end); i = end - 1; continue; }
     if (ch === '<') return null;
-    if (ch !== '>' && !UNQUOTED_SAFE.test(ch) && !/[\s;|&]/.test(ch)) return null;
+    if (ch !== '>' && !UNQUOTED_SAFE.test(ch) && !/[ \t\n;|&]/.test(ch)) return null;
     if (ch !== '>') { out += ch; continue; }
     // The fd before it (`2>`) or `&>`: blanked with it.
     let start = out.length;

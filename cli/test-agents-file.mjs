@@ -1077,7 +1077,7 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'yad status --json | jq .x', 'yad gate status EP-a', 'yad doctor && git status',
       // Review 2: forms the allow list of characters keeps.
       'gh api repos/{owner}/{repo}/pulls', 'git rev-parse @{u}', 'git log -S foo', 'git diff --text', 'git diff HEAD~1', 'git diff HEAD^ -- a.json', 'git diff main...HEAD -- src',
-      'git log --format=%H -3', "git log --oneline # a note (with parens) and $x", "grep -n 'a.*b' a.json", 'git blame --ignore-rev abc a.json',
+      'git log --format=%H -3', "grep -n 'a.*b' a.json", 'git blame --ignore-rev abc a.json', 'git log\t--oneline -2', 'git log \\\n  --oneline',
     ]) yes(line);
     for (const line of [
       // API writes, GraphQL, other hosts, and the human-only area.
@@ -1106,6 +1106,9 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'cat a.json(e:touch\\ PWNED:)', 'cat a.json(e:"touch PWNED":)', 'head -c 100 a.json(e:id:)', 'cat =(id)', 'cat =ls', 'cat x =ls', 'git log --x=~/y',
       'git diff /dev/null /etc/hosts', 'git diff --stat a.json /etc/passwd', 'git diff -- /etc/hosts /etc/passwd', 'git diff ../../x a.json', 'git log --format=%GS -1',
       'git log --pretty=format:%G?', 'git blame -S revs a.json', 'git diff -Oorder', 'gh api repos/{a,b}', 'cat a!b', 'git log #(x)\nrm -rf src', 'git log a#b',
+      // Review 3: a "comment" the shell reads as part of a word, after a \-newline, a \r, or a character JavaScript calls a space.
+      'git log -1 --format=x\\\n#$GH_TOKEN', 'git log -1 --format=x\r#$GH_TOKEN', 'git log -1 --format=x\u00a0#$GH_TOKEN', 'git log -1 --format=x\v#$GH_TOKEN',
+      'git log -1 --format=x\f#$GH_TOKEN', 'git log -1 --format=x\u2028#$GH_TOKEN', 'git rev-parse --sq-quote x\\\n#${GH_TOKEN}', 'git log --oneline # a note', 'git status\r',
     ]) no(line);
     // A refusal always wins: a refused line is never pre-approved.
     assert.equal(agentGuardDecision('git log && gh pr merge 5').allow, false);
