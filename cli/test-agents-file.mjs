@@ -280,6 +280,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     'cat <<< "x"\nyad gate approve EP-x epic',
     'echo $((1<<2))\nyad gate approve EP-x epic',
     'cat <<EOF\r\nx\r\nEOF\r\nyad gate approve EP-x epic',
+    // E167 review 4: \ + CR + LF does not join lines, and `EOF\r` does not end a heredoc, in bash or zsh.
+    'git log \\\r\ngh pr merge 5', 'git status \\\r\ngit push --force', 'git log \\\r\ngit commit --no-verify -m x',
+    'cat <<EOF\nEOF\r\ncat <<Y\nEOF\ngh pr merge 5\nY\n',
     '# <<x\nyad gate approve EP-x epic',
     'env -i yad gate approve EP-x epic',
     'sudo -u me yad gate approve EP-x epic',
@@ -1076,7 +1079,7 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'cat a.json', 'head -5 a.json', 'tail -n 2 a.json', 'wc -l a.json', 'grep -rn foo src/', 'grep -e foo a.json', 'git log | cut -d" " -f1 | uniq -c | tr a-z A-Z',
       'yad status --json | jq .x', 'yad gate status EP-a', 'yad doctor && git status',
       // Review 2: forms the allow list of characters keeps.
-      'gh api repos/{owner}/{repo}/pulls', 'git rev-parse @{u}', 'git log -S foo', 'git diff --text', 'git diff HEAD~1', 'git diff HEAD^ -- a.json', 'git diff main...HEAD -- src',
+      'gh api repos/{owner}/{repo}/pulls', 'git rev-parse @{u}', 'git log -S foo', 'git diff --text', 'git diff HEAD~1', "git diff 'HEAD^' -- a.json", 'git diff main...HEAD -- src',
       'git log --format=%H -3', "grep -n 'a.*b' a.json", 'git blame --ignore-rev abc a.json', 'git log\t--oneline -2', 'git log \\\n  --oneline',
     ]) yes(line);
     for (const line of [
@@ -1109,6 +1112,9 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       // Review 3: a "comment" the shell reads as part of a word, after a \-newline, a \r, or a character JavaScript calls a space.
       'git log -1 --format=x\\\n#$GH_TOKEN', 'git log -1 --format=x\r#$GH_TOKEN', 'git log -1 --format=x\u00a0#$GH_TOKEN', 'git log -1 --format=x\v#$GH_TOKEN',
       'git log -1 --format=x\f#$GH_TOKEN', 'git log -1 --format=x\u2028#$GH_TOKEN', 'git rev-parse --sq-quote x\\\n#${GH_TOKEN}', 'git log --oneline # a note', 'git status\r',
+      // Review 4: \ + CR + LF runs the next line; a zsh extendedglob ^; $ ENV; paths that return secrets.
+      'git log \\\r\ntouch PWNED', 'cat a.json \\\r\ntouch X', 'cat ^a.json', 'git log HEAD^', "jq -n '$ ENV.HOME'", "gh api --jq '$ ENV' user",
+      'glab api projects/1/triggers', 'glab api projects/1/integrations/slack', 'gh api repos/o/r/actions/runs/1/logs', 'glab api projects/1/jobs/2/trace',
     ]) no(line);
     // A refusal always wins: a refused line is never pre-approved.
     assert.equal(agentGuardDecision('git log && gh pr merge 5').allow, false);

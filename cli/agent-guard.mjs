@@ -58,9 +58,11 @@ export function shellParts(line) {
       for (;;) {
         if (at > line.length) return -1;
         const eol = line.indexOf('\n', at);
-        const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
+        const text = line.slice(at, eol < 0 ? line.length : eol);
         const lineStart = at;
         at = eol < 0 ? line.length + 1 : eol + 1;
+        // The end line exactly: `EOF\r` does not end a heredoc in bash or zsh, so it does not here either (a CRLF
+        // heredoc never ends, and the lines after it are read as commands: more is judged, never less).
         if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) { if (!h.quoted) bodies.push(line.slice(start, lineStart)); break; }
       }
     }
@@ -86,7 +88,8 @@ export function shellParts(line) {
     }
     if (ch === '\'' || ch === '"') { quote = ch; inWord = true; continue; }
     if (ch === '\\' && line[i + 1] === '\n') { i++; continue; }
-    if (ch === '\\' && line[i + 1] === '\r' && line[i + 2] === '\n') { i += 2; continue; }
+    // `\` + CR + LF is NOT a line join: bash and zsh read an escaped CR, then run the next line as its own
+    // command. So it falls through to the escape below (the CR is a character of the word), and the LF ends the part.
     if (ch === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
     if (ch === '#' && !inWord) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); i += 2; continue; }
@@ -138,7 +141,7 @@ function substitutionEnd(line, from) {
         for (;;) {
           if (at > line.length) { found = false; break; }
           const eol = line.indexOf('\n', at);
-          const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
+          const text = line.slice(at, eol < 0 ? line.length : eol);
           at = eol < 0 ? line.length + 1 : eol + 1;
           if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) break;
         }
@@ -526,7 +529,7 @@ export const isCursorPayload = (payload) => payload?.hook_event_name === 'before
 // file written or a file read from outside the project, a `$(…)`, a `bash -c`, an env prefix, and any program not
 // named here. What it lists is printed by `yad setup` and given to agents by `yad guide --json`.
 export const PREAPPROVED = Object.freeze({
-  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, variables, tokens, keys, hooks or e-mails in the path',
+  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, variables, tokens, keys, hooks, e-mails, triggers, integrations, services, credentials or CI logs in the path',
   git: 'git log, status, diff, show, rev-parse, ls-files, blame (no git option before them; no --output, --ext-diff, --textconv, --no-index, --contents, --show-signature or a shortening of one, no %G in a format, git diff paths inside the project; git still runs what its own config names, such as an external diff or fsmonitor)',
   jq: 'jq (a filter on the line, never from a file; no env, $ENV, import or include in it; files inside the project)',
   filters: 'head, tail, wc, grep (not -R), cut, uniq, tr, cat (files inside the project)',
@@ -551,7 +554,8 @@ const SHIPPED_CHECKS = fileURLToPath(new URL('../skills/yad-checks/templates/che
 // Only a space, a tab and a newline break words: `\r`, `\v`, a no-break space are word characters to the shell,
 // and a guard that read them as breaks would judge different words than the shell runs. No `#` either: where a
 // comment starts depends on that same reading (a `\`-newline joins words), so a `#` gets the prompt.
-const UNQUOTED_SAFE = /[A-Za-z0-9_./:@%+,^~=-]/;
+// Not `^`: zsh's `extendedglob` (on in setups such as Prezto) makes it a glob.
+const UNQUOTED_SAFE = /[A-Za-z0-9_./:@%+,~=-]/;
 function blankHarmlessRedirects(line) {
   let out = '';
   let quote = null;
@@ -564,7 +568,8 @@ function blankHarmlessRedirects(line) {
       out += ch;
       continue;
     }
-    if (ch === '\\') { out += ch + (line[i + 1] ?? ''); i++; continue; }
+    // An escaped character is literal, except a CR, which the guard's reader and the shell do not split alike.
+    if (ch === '\\') { if (line[i + 1] === '\r') return null; out += ch + (line[i + 1] ?? ''); i++; continue; }
     if (ch === '\'' || ch === '"') { quote = ch; out += ch; continue; }
     const wordStart = i === 0 || /[ \t\n;|&]/.test(line[i - 1]);
     if ((ch === '~' || ch === '=') && (wordStart || /[=:]/.test(line[i - 1]))) return null;
@@ -688,7 +693,7 @@ const JQ_SPEC = { bool: ['-r', '-j', '-c', '-n', '-s', '-e', '-a', '-S', '-C', '
 value: ['--indent'], pairs: ['--arg', '--argjson', '--slurpfile', '--rawfile'] };
 // `env` and `$ENV` print the environment, where the platform tokens live; `import` and `include` read a file
 // from any path. A filter that only names a field `.env` is caught too: it gets the prompt, which is safe.
-const READS_ENV = /\benv\b|\$ENV\b|\$__prog_args\b|\bimport\b|\binclude\b/;
+const READS_ENV = /\benv\b|\bENV\b|\$__prog_args\b|\bimport\b|\binclude\b/;
 function jqPart(args, at) {
   const r = operandsOf(args, JQ_SPEC);
   if (!r) return false;
@@ -702,8 +707,9 @@ function jqPart(args, at) {
 const API_SPEC = { bool: ['--paginate', '--slurp', '-i', '--include', '--silent', '--verbose'], value: ['-X', '--method', '-H', '--header', '-q', '--jq', '-t', '--template', '-p', '--preview'] };
 // (Not --cache: it writes gh's cache files, outside the project.)
 // Any path segment that names a secret, token, variable, key or hook (`gpg_keys`, `webhooks`, `access_tokens`),
-// or a person's e-mail addresses.
-const NEVER_PATH = /secret|token|variable|key|hook|email/i;
+// a person's e-mail addresses, a pipeline trigger (its token), an integration or service (a webhook URL), a
+// credential, or CI logs and traces (masking there is best effort).
+const NEVER_PATH = /secret|token|variable|key|hook|email|trigger|integration|service|credential|^logs$|^trace$/i;
 function apiPart(prog, args) {
   const r = operandsOf(args, API_SPEC);
   if (!r || r.ops.length !== 1) return false;
