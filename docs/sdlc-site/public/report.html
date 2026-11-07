@@ -849,7 +849,7 @@ yad repo sync backend    # just one repo</code></pre>
     <div class="row"><span class="lbl lbl-how">How</span> Run it in the Product, once per project:</div>
 <pre><code>yad-connect-design action: connect tool: figma project_url: https://figma.com/files/project/…
 yad-connect-design action: list                  # show the connection + whether the MCP is available
-yad-connect-design action: refresh               # re-detect the MCP (after authenticating a session)
+yad-connect-design action: refresh tool: figma   # re-detect it — name the team's tool
 yad-connect-design action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> During one-time setup (the wizard records it), and again any time you switch design tools. <strong>No design tool? Skip it</strong> — <code>yad-ui</code> simply authors the Markdown, exactly as before.</div>
   </div>
@@ -860,7 +860,7 @@ yad-connect-design action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-how">How</span> Run it in the Product, once per project:</div>
 <pre><code>yad-connect-testing action: connect tool: playwright project_url: tests/playwright.config.ts
 yad-connect-testing action: list                 # show the connection + whether the MCP is available
-yad-connect-testing action: refresh              # re-detect the MCP (after authenticating a session)
+yad-connect-testing action: refresh tool: playwright  # re-detect it — name the team's tool
 yad-connect-testing action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> During one-time setup (the wizard records it), and again any time you switch testing tools. <strong>No testing tool? Skip it</strong> — <code>yad-test-cases</code> simply authors the test cases, exactly as before.</div>
   </div>
@@ -871,7 +871,7 @@ yad-connect-testing action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-how">How</span> Run it in the Product, once per project:</div>
 <pre><code>yad-connect-learning action: connect tool: deeptutor
 yad-connect-learning action: list                # show the connection + whether the CLI is available
-yad-connect-learning action: refresh             # re-detect the CLI + rebuild the knowledge base
+yad-connect-learning action: refresh tool: deeptutor  # re-detect the CLI + rebuild the knowledge base
 yad-connect-learning action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> During one-time setup (the wizard records it), and again any time you switch learning tools. <strong>No DeepTutor? Skip it</strong> — <code>yad-learn</code> still tutors using the harness model reading your artifacts.</div>
   </div>

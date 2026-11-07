@@ -67,6 +67,6 @@ purely additive.
 ## Staleness / refresh
 
 A re-generated or hand-edited suite is like a moved code repo: `yad-test-cases` **flags** a divergence
-and lets a human decide (re-run the step, or `yad-connect-testing` action: refresh). It never silently
+and lets a human decide (re-run the step, or `yad-connect-testing` with `action: refresh` and the same `tool`). It never silently
 overwrites a hand-written suite — refreshing the automation is a human decision, the same discipline as
 `code_context.refresh: human`.
