@@ -86,13 +86,15 @@ const CHECKS_RULE = (contexts, strict = true) => ({ type: 'required_status_check
 const ALL_RULES = (jobs) => [PR_RULE(), CHECKS_RULE(jobs), { type: 'non_fast_forward' }, { type: 'deletion' }];
 const NOT_PROTECTED = [404, { message: 'Branch not protected' }];
 // `rules` is the list of rules; `rulesFail` a refused answer instead, as [status, body].
-function gh(repo, { rules, rulesFail = null, classic = NOT_PROTECTED, prot = true } = {}) {
+// `queue` is GraphQL's answer for the branch's merge queue (null: none), asked with the repo's name last.
+function gh(repo, { rules, rulesFail = null, classic = NOT_PROTECTED, prot = true, queue = [200, { data: { repository: { mergeQueue: null } } }] } = {}) {
   const at = `repos/acme/${repo}`;
   return [
     [new RegExp(`^${at}$`), 200, { default_branch: 'main' }],
     [new RegExp(`^${at}/branches/main$`), 200, { protected: prot }],
     [new RegExp(`^${at}/rules/branches/main`), ...(rulesFail ?? [200, rules])],
     [new RegExp(`^${at}/branches/main/protection$`), ...classic],
+    [new RegExp(`^name=${repo}$`), ...queue],
   ];
 }
 const productJobs = [...REQUIRED_CHECKS.github.product, ...REQUIRED_CHECKS.github.productVerified];
@@ -177,7 +179,7 @@ const NO_ONE = { name: 'main', allow_force_push: false, push_access_levels: [{ a
 function gl(repo, { project = {}, prot = true, protectedBranches = [NO_ONE], branchesFail = null, approvals = [200, { reset_approvals_on_push: true, merge_requests_author_approval: false, merge_requests_disable_committers_approval: true }], pushRule = [404, { message: '404 Not found' }] } = {}) {
   const at = `projects/acme%2F${repo}`;
   return [
-    [new RegExp(`^${at}$`), 200, { default_branch: 'main', namespace: { kind: 'user' }, ci_config_path: '', only_allow_merge_if_pipeline_succeeds: true, allow_merge_on_skipped_pipeline: false, only_allow_merge_if_all_discussions_are_resolved: true, ...project }],
+    [new RegExp(`^${at}$`), 200, { default_branch: 'main', namespace: { kind: 'user' }, ci_config_path: '', only_allow_merge_if_pipeline_succeeds: true, allow_merge_on_skipped_pipeline: false, only_allow_merge_if_all_discussions_are_resolved: true, merge_trains_enabled: false, merge_pipelines_enabled: false, ...project }],
     [new RegExp(`^${at}/repository/branches/main$`), 200, { protected: prot }],
     [new RegExp(`^${at}/protected_branches`), ...(branchesFail ?? [200, protectedBranches])],
     [new RegExp(`^${at}/approval_rules`), 200, [{ name: 'All', rule_type: 'any_approver', approvals_required: 1, protected_branches: [] }]],
@@ -237,6 +239,14 @@ test('E160b case 6: no login, no CLI, reads off, or no platform — the platform
     // Read nothing: every row the repo would have is unknown, the suggestions too.
     const off = byId(check(w, allSet(), { env: { ...ON, YAD_PLATFORM_READ: '0' } }).r, 'Product');
     for (const id of ['protected', 'required-checks', 'force-push', 'deletion', 'stale-approvals', 'signed-commits']) assert.equal(off[id].status, 'unknown', id);
+    for (const id of ['merge-queue', 'up-to-date']) assert.equal(off[id]?.status, 'unknown', `#433: ${id} is listed, unknown`);
+    // GitLab: its merge rows too.
+    const glw = workspace({ platform: 'gitlab' });
+    try {
+      const gloff = byId(check(glw, [], { env: { ...ON, YAD_PLATFORM_READ: '0' } }).r, 'app');
+      for (const id of ['merge-trains', 'author-approval', 'committer-approval']) assert.equal(gloff[id]?.status, 'unknown', `#433: ${id} is listed, unknown`);
+      assert.equal(gloff['merge-queue'], undefined, 'no GitHub row on GitLab');
+    } finally { done(glw); }
     // No platform at all: nothing holds a merge there — one `platform` row, unknown, never a quiet ok.
     const none = workspace({ product: { platform: null, git_url: null }, repos: [] });
     try {
@@ -321,14 +331,17 @@ test('E160b case 9: REQUIRED_CHECKS equals the jobs in yad\'s workflow templates
   for (const j of [...REQUIRED_CHECKS.gitlab.product, ...REQUIRED_CHECKS.gitlab.productVerified, ...REQUIRED_CHECKS.gitlab.code]) assert.ok(glText.includes(`\`${j}\``), j);
 });
 
-test('E160b case 10: never writes — the folders are unchanged, and every platform call is a GET', () => {
+test('E160b case 10: never writes — the folders are unchanged, and every platform call is a GET or a GraphQL query', () => {
   const w = workspace();
   try {
     const snap = (dir) => execFileSync('find', [dir, '-type', 'f', '-not', '-path', '*/.git/*', '-exec', 'shasum', '{}', '+'], { encoding: 'utf8' }).split('\n').sort().join('\n');
     const before = snap(path.dirname(w.root));
     const { asked } = check(w, allSet());
     assert.equal(snap(path.dirname(w.root)), before);
-    for (const call of asked) assert.doesNotMatch(call, /(-X|--method)\s+(?!GET)|--field|-f |--input/, call);
+    // #433: the merge queue is read through GraphQL, which gh sends as a POST: a read-only query, never a mutation.
+    const graphql = (call) => / graphql -f query=query\(/.test(call) && !/mutation/.test(call) && !/(-X|--method|--input)/.test(call);
+    assert.ok(asked.some(graphql), 'the merge queue is asked');
+    for (const call of asked) if (!graphql(call)) assert.doesNotMatch(call, /(-X|--method)\s+(?!GET)|--field|-f |--input/, call);
     assert.ok(asked.some((x) => x.includes('rules/branches/main')));
   } finally { done(w); }
 });
@@ -970,22 +983,30 @@ test('#433 GitHub: a merge queue is a gap; "up to date" off is a suggestion; a r
     const queued = run(rules([{ type: 'merge_queue', parameters: {} }]));
     const q = byId(queued, 'app')['merge-queue'];
     assert.equal(q.status, 'gap');
-    assert.match(q.message, /waits forever/);
-    assert.match(q.fix.steps.join(' '), /turn off "Require merge queue"/);
+    assert.match(q.message, /dropped from the queue when its checks time out/);
+    assert.match(q.fix.steps.join(' '), /Turn off "Require merge queue"/);
     assert.equal(q.fix.url, 'https://github.com/acme/app/settings/rules');
     assert.ok(queued.summary.gaps >= 1, 'a gap fails the run');
+    // GraphQL sees a queue that classic branch protection turned on, which no ruleset shows.
+    const classicQueue = byId(run(rules(), { queue: [200, { data: { repository: { mergeQueue: { id: 'MQ_1' } } } }] }), 'app')['merge-queue'];
+    assert.equal(classicQueue.status, 'gap');
+    assert.match(classicQueue.fix.steps.join(' '), /classic branch protection \(https:\/\/github\.com\/acme\/app\/settings\/branches\)/);
+    // GraphQL not answered, or answered with errors: unknown — unless a ruleset's rule proves the queue.
+    for (const queue of [[502, { message: 'Bad Gateway' }], [200, { errors: [{ message: 'x' }], data: null }], [200, { data: { repository: null } }]]) {
+      const row = byId(run(rules(), { queue }), 'app')['merge-queue'];
+      assert.equal(row.status, 'unknown', JSON.stringify(queue));
+    }
+    assert.equal(byId(run(rules([{ type: 'merge_queue' }]), { queue: [502, { message: 'x' }] }), 'app')['merge-queue'].status, 'gap');
     const loose = byId(run(rules([], false)), 'app');
     assert.equal(loose['merge-queue'].status, 'ok');
-    assert.match(loose['merge-queue'].message, /classic branch protection is not read/);
     assert.equal(loose['up-to-date'].status, 'suggest');
     assert.match(loose['up-to-date'].message, /older base/);
     assert.match(loose['up-to-date'].fix.steps.join(' '), /Require branches to be up to date/);
     // Classic protection alone can turn "up to date" on.
     const classic = [200, { required_status_checks: { strict: true, contexts: [] } }];
     assert.equal(byId(run(rules([], false), { classic }), 'app')['up-to-date'].status, 'ok');
-    // The rules not read: the queue is unknown, never ok; "up to date" stays a suggestion that says why.
+    // The rules not read: "up to date" stays a suggestion that says why (the queue comes from GraphQL).
     const unread = byId(run(null, { rulesFail: [500, { message: 'boom' }] }), 'app');
-    assert.equal(unread['merge-queue'].status, 'unknown');
     assert.equal(unread['up-to-date'].status, 'suggest');
     assert.match(unread['up-to-date'].message, /^not known/);
   } finally { done(w); }
@@ -1004,10 +1025,13 @@ test('#433 GitLab: merge trains are a gap, merged-results pipelines are supporte
     const off = app({ project: { merge_trains_enabled: false, merge_pipelines_enabled: false } });
     assert.equal(off['merge-trains'].status, 'ok');
     assert.match(off['merged-results'].message, /are off/);
-    // GitLab Free does not report the setting, and cannot run trains; merged-results gets no row then.
-    const free = app({});
-    assert.equal(free['merge-trains'].status, 'ok');
+    // Neither setting reported (GitLab Free, or a login that cannot see them): not known, never ok.
+    const free = app({ project: { merge_trains_enabled: undefined, merge_pipelines_enabled: undefined } });
+    assert.equal(free['merge-trains'].status, 'unknown');
+    assert.match(free['merge-trains'].message, /Premium, or your login cannot see it/);
     assert.equal(free['merged-results'], undefined);
+    // Merged-results pipelines off proves no train: a train needs them.
+    assert.equal(app({ project: { merge_trains_enabled: undefined, merge_pipelines_enabled: false } })['merge-trains'].status, 'ok');
     // Who may approve: the author, or someone who added commits, is a suggestion; unread says Premium.
     const self = app({ approvals: [200, { reset_approvals_on_push: true, merge_requests_author_approval: true, merge_requests_disable_committers_approval: false }] });
     assert.equal(self['author-approval'].status, 'suggest');

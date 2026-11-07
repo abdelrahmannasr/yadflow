@@ -716,14 +716,15 @@ function unknownHint(r) {
 }
 
 // E160b — what `yad ci check` reads beyond protection and approvals: the rules that make yad's checks hold a
-// merge. Read-only, the same calls `readProtection` makes plus a few GETs, and the same trap: a failed call is
+// merge. Read-only, the same calls `readProtection` makes plus a few GETs and one GraphQL query, and the same trap: a failed call is
 // never "none". `readProtection` runs first, so a repo that cannot be read (no platform, reads turned off,
 // no login…) comes back with only `protection`, and every platform row is "not known" with its reason.
 //   GitHub — `rules`: the active rules on the branch (null when not read; `full` when a whole page came
 //            back, which proves nothing about what is past it). `classic`: classic branch protection, the
 //            string 'none' when PROVEN absent (the branch reads `protected: false`, or GitHub answers 404 with
 //            exactly "Branch not protected"), or null — GitHub answers a bare 404 to anyone who is not an
-//            admin, even on a protected branch.
+//            admin, even on a protected branch. `mergeQueue` (#433): 'on' / 'off' from one GraphQL query (a read),
+//            null when it was not answered.
 //   GitLab — the project's merge settings, the protected-branch entries that match the branch (null when not
 //            read), the approval settings (Premium) and the push rule (Premium; a 404 is "no push rule").
 export function readCiSettings(target, { runner: ask = run, env = process.env, authCache = new Map() } = {}) {
@@ -750,7 +751,22 @@ export function readCiSettings(target, { runner: ask = run, env = process.env, a
       if (c.ok && c.body && typeof c.body === 'object' && !Array.isArray(c.body)) classic = c.body;
       else if (c.status === 404 && c.body?.message === 'Branch not protected') classic = 'none';
     }
-    return { protection, rules, rulesFull: !!rules && rules.length >= PAGE, classic };
+    // #433: a merge queue can be turned on by a ruleset or by classic branch protection, and the classic answer
+    // does not show it. GraphQL names the queue whatever turned it on: an object when on, null when off.
+    // The names go in as variables, never into the query text. Anything else is not known (null).
+    const [owner, name] = repo.split('/');
+    const q = runner('gh', ['api', '--hostname', host, 'graphql',
+      '-f', 'query=query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id } } }',
+      '-F', `owner=${owner}`, '-F', `branch=${branch}`, '-F', `name=${name}`], { timeout: TIMEOUT });
+    let mergeQueue = null;
+    if (q.ok) {
+      try {
+        const body = JSON.parse(q.stdout);
+        const repoNode = body?.data?.repository;
+        if (!body?.errors && repoNode && typeof repoNode === 'object' && 'mergeQueue' in repoNode) mergeQueue = repoNode.mergeQueue ? 'on' : 'off';
+      } catch { /* not JSON: not known */ }
+    }
+    return { protection, rules, rulesFull: !!rules && rules.length >= PAGE, classic, mergeQueue };
   }
   const at = `projects/${encodeURIComponent(repo)}`;
   const obj = (res) => (res.ok && res.body && typeof res.body === 'object' && !Array.isArray(res.body) ? res.body : null);

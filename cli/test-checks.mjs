@@ -7546,6 +7546,8 @@ test('#433 merged results: the gates judge only the MR\'s own commits when HEAD 
       const r = runGate(gate, ok.T);
       const name = path.basename(gate);
       assert.doesNotMatch(r.out, new RegExp(`\\b(${ok.merge}|${ok.theirs})\\b`), `${name} must not judge the merge or the target's own commit:\n${r.out}`);
+      // By subject too, in case a gate ever prints a full hash, which a short one is not a word of.
+      assert.doesNotMatch(r.out, /not a conventional subject|Merge branch 'feature'/, `${name}:\n${r.out}`);
       // epic-open needs the Product to be named, which this repo does not: it fails on the MR's commit, and only on it.
       if (gate === EPIC_OPEN) assert.match(r.out, new RegExp(`FAIL \\[epic-open\\]: ${ok.own} `), r.out);
       else assert.equal(r.code, 0, `${name}:\n${r.out}`);
