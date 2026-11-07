@@ -46,9 +46,6 @@
 # To override it, set a CI/CD variable YAD_VERSION (e.g. `4.0.0`) in project Settings → CI/CD →
 # Variables — the same place SDLC_GATE_TOKEN lives, and deliberately NOT in this file, which `yad` owns
 # and rewrites byte-for-byte from its template on every sync.
-variables:
-  GIT_DEPTH: "0" # full history: gate ci pushes the advance to the default branch
-
 yad-gate-sync:
   needs: []
   # Serialize every advance: the merge-push pipeline and the scheduled sweep both commit the ledger
@@ -72,6 +69,7 @@ yad-gate-sync:
     # settings without editing the managed fragment (a current 22 or 24 line). A shell-executor runner
     # ignores `image:` — Node must then be on the runner host's PATH, and this value has no effect.
     YAD_NODE_VERSION: "22"
+    GIT_DEPTH: "0" # full history: gate ci pushes the advance to the default branch (on this job only, #434)
   rules:
     # Merge path: branch pipeline on the default branch whose merge commit names a review branch.
     # Squash/fast-forward merges may omit the branch name — those advance on the next scheduled sweep.

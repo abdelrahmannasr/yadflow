@@ -714,9 +714,11 @@ The gates run identically under either CI; the config just invokes the scripts w
   and `$CI_MERGE_REQUEST_DESCRIPTION`. The quality job uses the same package-manager-aware installer;
   `NX_BASE=$CI_MERGE_REQUEST_DIFF_BASE_SHA` and `NX_HEAD=$CI_COMMIT_SHA` provide the equivalent Nx
   range. Its `node:${YAD_NODE_VERSION}` image defaults to `22` and a project/group CI/CD variable may
-  override it without editing the managed fragment. Those three variables sit on the `.sdlc_mr_only`
-  anchor, not the fragment's top-level `variables:` — an included top-level block merges into the host
-  pipeline's globals, where `NX_BASE`/`NX_HEAD` could collide with a host's own Nx setup. All `--profile code`.
+  override it without editing the managed fragment. Those three variables and `GIT_DEPTH` sit on the
+  `.sdlc_mr_only` anchor, not a top-level `variables:` — an included top-level block merges into the host
+  pipeline's globals, where `NX_BASE`/`NX_HEAD` could collide with a host's own Nx setup, and where
+  `GIT_DEPTH: 0` made every host job clone the full history while a host's own `GIT_DEPTH` replaced it
+  (#434). No yad GitLab fragment has a top-level `variables:`. All `--profile code`.
 
 ### Checking the Product out in CI (E120)
 

@@ -688,14 +688,11 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.doesNotMatch(gitlab, /^\s*- npm ci/m, 'GitLab must use the same package-manager-aware installer');
 
   // The includable fragment's top-level `variables:` merges into the HOST pipeline's globals, so the
-  // gate jobs' own variables live on the .sdlc_mr_only anchor, not there. Only GIT_DEPTH is global.
-  const topLevelVars = gitlab.match(/^variables:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
-  assert.match(topLevelVars, /GIT_DEPTH/);
-  for (const name of ['YAD_NODE_VERSION', 'NX_BASE', 'NX_HEAD']) {
-    assert.doesNotMatch(topLevelVars, new RegExp(name), `${name} must not leak into the host pipeline's globals`);
-  }
+  // gate jobs' own variables live on the .sdlc_mr_only anchor, not there — GIT_DEPTH too, since #434.
+  assert.doesNotMatch(gitlab, /^variables:/m, 'no top-level variables: they would leak into the host pipeline');
   const anchor = gitlab.match(/^\.sdlc_mr_only:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
   assert.match(anchor, /variables:\n\s+(?:#.*\n\s+)*YAD_NODE_VERSION:\s*["']22["']/);
+  assert.match(anchor, /\n {4}GIT_DEPTH: "0"/);
   assert.match(anchor, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
 });
 
@@ -1493,6 +1490,43 @@ const GITLAB_IMAGE_FRAGMENTS = [
 
 // Every GitLab fragment that runs a docker-image job must carry `tags: [$YAD_RUNNER_TAGS]` so a
 // tag-locked instance can route it (issue #50). Guards against a future revert dropping the tag.
+// #434: GIT_DEPTH "0" is set on the yad jobs only. A top-level `variables:` in an included fragment merges into the
+// HOST pipeline's globals (every host job cloned the full history), and a host's own top-level value replaced
+// ours (the gates got a shallow clone). Every job in every shipped GitLab fragment gets it from its own block
+// or from the hidden job it extends; no fragment has a top-level `variables:`.
+test('#434: GitLab fragments set GIT_DEPTH "0" on every yad job, never at the top level', () => {
+  const dirs = ['skills/yad-checks/templates/gitlab', 'skills/yad-product-bridge/templates/gitlab'];
+  let jobs = 0;
+  for (const dir of dirs) {
+    for (const f of fs.readdirSync(path.join(ROOT, dir))) {
+      if (!/\.ya?ml$/.test(f) || f.startsWith('gitlab-ci.include-root')) continue;
+      const text = fs.readFileSync(path.join(ROOT, dir, f), 'utf8');
+      assert.doesNotMatch(text, /^variables:/m, `${f}: a top-level variables: block`);
+      const blocks = new Map(), anchors = new Map();
+      for (const b of text.split(/^(?=[A-Za-z.][\w.-]*:)/m)) {
+        const m = b.match(/^([A-Za-z.][\w.-]*):(?: &([\w-]+))?/);
+        if (m) { blocks.set(m[1], b); if (m[2]) anchors.set(m[2], m[1]); }
+      }
+      // A job takes GIT_DEPTH from its own variables, a YAML merge (`<<: *anchor`) or `extends:`.
+      const depth = (k, n = 0) => {
+        const b = blocks.get(k);
+        if (!b || n > 5) return null;
+        const own = b.match(/^ {2}variables:\n(?:(?: {4}.*| *#.*|)\n)*? {4}GIT_DEPTH: ("[^"]*")/m);
+        if (own) return own[1];
+        for (const [, a] of b.matchAll(/^ {2}<<: \*([\w-]+)$/gm)) { const v = depth(anchors.get(a), n + 1); if (v) return v; }
+        const ext = b.match(/^ {2}extends: (\S+)$/m);
+        return ext ? depth(ext[1], n + 1) : null;
+      };
+      for (const k of blocks.keys()) {
+        if (k.startsWith('.') || ['include', 'stages', 'default', 'workflow'].includes(k)) continue;
+        jobs++;
+        assert.equal(depth(k), '"0"', `${f}: job ${k} has no GIT_DEPTH "0"`);
+      }
+    }
+  }
+  assert.ok(jobs >= 19, `jobs read: ${jobs}`);
+});
+
 // #434: the old standalone root `.gitlab-ci.yml` (4 of the 11 gates, installed by nothing) is gone. A new GitLab
 // repo gets gitlab-ci.include-root.yml plus the fragments, which carry every gate.
 test('#434: the old standalone GitLab template is not shipped', () => {
