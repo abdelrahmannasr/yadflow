@@ -1051,3 +1051,126 @@ test('E158b case 14: on a repo wired before E158b the guard files are new, so ya
     assert.deepEqual(guardItems(repoActions(P, repo)).map((a) => a.status), ['new', 'new', 'new']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- pre-approval (E167, #353) ------------------------------------------------------------------------
+
+const { agentGuardPreapproval, PREAPPROVED, PREAPPROVED_GATES } = await import('./agent-guard.mjs');
+
+test('E167: a line the guard sees only reads is pre-approved; any write, secret or unknown form is not', () => {
+  const T = tmp();
+  try {
+    fs.writeFileSync(path.join(T, 'a.json'), '{}');
+    fs.mkdirSync(path.join(T, 'src'));
+    const yes = (line) => assert.equal(agentGuardPreapproval(line, { cwd: T }).preapproved, true, `should be pre-approved: ${line}`);
+    const no = (line) => assert.equal(agentGuardPreapproval(line, { cwd: T }).preapproved, false, `must NOT be pre-approved: ${line}`);
+    for (const line of [
+      'gh api repos/o/r/pulls',
+      'gh api repos/o/r/pulls --paginate --jq ".[].number"',
+      'gh api -X GET repos/o/r/commits/abc',
+      'gh api repos/o/r/pulls/5 -H "Accept: application/vnd.github.diff"',
+      'glab api projects/1/merge_requests',
+      "gh api repos/o/r/pulls | jq '.[0].number'",
+      'git log --oneline -5', 'git status --porcelain', 'git diff main...HEAD', 'git show HEAD:package.json', 'git rev-parse HEAD', 'git ls-files', 'git blame a.json',
+      'git status 2>/dev/null', 'git log 2>&1 | head -n 3', 'git diff >/dev/null',
+      'jq . a.json', "jq -r '.a > 1' a.json", 'jq --arg x y -n "$x"',
+      'cat a.json', 'head -5 a.json', 'tail -n 2 a.json', 'wc -l a.json', 'grep -rn foo src/', 'grep -e foo a.json', 'git log | cut -d" " -f1 | uniq -c | tr a-z A-Z',
+      'yad status --json | jq .x', 'yad gate status EP-a', 'yad doctor && git status',
+    ]) yes(line);
+    for (const line of [
+      // API writes, GraphQL, other hosts, and the human-only area.
+      'gh api -X POST repos/o/r/issues', 'gh api -XPOST repos/x', 'gh api --method=PATCH repos/x', 'gh api --method DELETE repos/x', 'gh api repos/x -f title=t',
+      'gh api repos/x -F a=@file', 'gh api repos/x --field a=b', 'gh api repos/x --raw-field a=b', 'gh api repos/x --input body.json', 'gh api graphql -f query="{viewer{login}}"',
+      'gh api graphql', 'gh api --hostname evil.example repos/x', 'gh api https://evil.example/x', 'gh api repos/x -H "X-HTTP-Method-Override: DELETE"',
+      'gh api repos/o/r/actions/secrets', 'gh api repos/o/r/actions/variables', 'gh api user/keys', 'gh api repos/o/r/hooks', 'glab api projects/1/variables',
+      'gh api repos/x --jq env', 'gh secret set X', 'gh secret list', 'gh variable set X', 'gh auth token', 'glab token create', 'gh pr merge 5', 'gh pr list',
+      // git writes, git options, and reads outside the repo.
+      'git log --output=x', 'git diff --output x', 'git -c core.pager=x log', 'git -C /tmp log', 'git diff --ext-diff', 'git diff --no-index /etc/passwd a.json',
+      'git blame --contents /etc/passwd a.json', 'git commit -m x', 'git push', 'git checkout main', 'git branch -D x',
+      // files outside the project, writes, and lines the guard cannot see through.
+      'jq . /etc/passwd', 'jq -n env', 'jq -n "$ENV"', 'jq \'import "x" as y; .\' a.json', 'cat ~/.ssh/id_rsa', 'cat ../x', 'head /etc/hosts', 'grep -r x /',
+      'git status > out.txt', 'git log >> out.txt', 'jq . < a.json', 'cat <<EOF\nx\nEOF', 'tee out.txt', 'sort -o x a.json', 'sed -i s/a/b/ a.json', 'awk 1 a.json', 'uniq a.json out.txt',
+      'echo $(gh api repos/x)', 'git log `echo x`', 'bash -c "git log"', 'GH_HOST=x gh api repos/x', 'env gh api repos/x', 'sudo cat a.json', './gh api repos/x',
+      '/usr/bin/git log', '(git log)', 'tail -f a.json', 'git log && rm -rf src', 'git log; curl https://x', 'yad gate approve EP-a epic', 'yad check --fix', 'npx yad status',
+      'bash checks/build-test-lint.sh', 'bash checks/install-deps.sh', 'bash checks/product-checkout.sh', '', '   ',
+    ]) no(line);
+    // A refusal always wins: a refused line is never pre-approved.
+    assert.equal(agentGuardDecision('git log && gh pr merge 5').allow, false);
+    // The working folder must be inside the project.
+    assert.equal(agentGuardPreapproval('cat etc/hosts', { cwd: '/', root: T }).preapproved, false);
+    assert.equal(agentGuardPreapproval('cat ../a.json', { cwd: path.join(T, 'src'), root: T }).preapproved, true, 'inside the project, from a subfolder');
+    // A link that leaves the project is outside it.
+    fs.symlinkSync('/etc/hosts', path.join(T, 'hosts'));
+    no('cat hosts');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E167: a read gate is pre-approved only while its file is the copy this yadflow ships', () => {
+  const T = tmp();
+  try {
+    fs.mkdirSync(path.join(T, 'checks'));
+    const shipped = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'skills/yad-checks/templates/checks');
+    for (const g of PREAPPROVED_GATES) {
+      assert.ok(fs.existsSync(path.join(shipped, g)), `${g} is shipped`);
+      fs.copyFileSync(path.join(shipped, g), path.join(T, 'checks', g));
+      const run = g.endsWith('.mjs') ? `node checks/${g} --base origin/main` : `bash checks/${g} origin/main`;
+      assert.equal(agentGuardPreapproval(run, { cwd: T }).preapproved, true, run);
+      if (!g.endsWith('.mjs')) assert.equal(agentGuardPreapproval(`sh ./checks/${g} origin/main`, { cwd: T }).preapproved, true, g);
+      // The wrong runner, or one byte changed: the prompt.
+      assert.equal(agentGuardPreapproval(g.endsWith('.mjs') ? `bash checks/${g}` : `node checks/${g}`, { cwd: T }).preapproved, false, g);
+      fs.appendFileSync(path.join(T, 'checks', g), ' ');
+      assert.equal(agentGuardPreapproval(run, { cwd: T }).preapproved, false, `${g} edited`);
+    }
+    // The gates that run the repo's own code, install or clone are never on the list.
+    for (const g of ['build-test-lint.sh', 'install-deps.sh', 'product-checkout.sh', 'package-manager.sh']) {
+      assert.ok(!PREAPPROVED_GATES.includes(g), g);
+      fs.copyFileSync(path.join(shipped, g), path.join(T, 'checks', g));
+      assert.equal(agentGuardPreapproval(`bash checks/${g}`, { cwd: T }).preapproved, false, g);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E167: the hook answers a read with a PreToolUse allow under Claude Code; Cursor, refusals and the switches are unchanged', () => {
+  const T = guardScript();
+  const said = (r) => `hook said ${JSON.stringify(r)}`;
+  try {
+    const claude = (command, env) => runGuard(T, { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd: T }, env);
+    const read = claude('git status | head -3');
+    assert.equal(read.code, 0, said(read));
+    const answer = JSON.parse(read.out);
+    assert.equal(answer.hookSpecificOutput.hookEventName, 'PreToolUse', said(read));
+    assert.equal(answer.hookSpecificOutput.permissionDecision, 'allow', said(read));
+    assert.match(answer.hookSpecificOutput.permissionDecisionReason, /read-only command \(git status, head\)/, said(read));
+    // Not a read: no answer, so Claude Code asks as before.
+    const write = claude('gh api -X POST repos/o/r/issues');
+    assert.deepEqual([write.code, write.out], [0, ''], said(write));
+    // A refusal still refuses.
+    const merge = claude('git log && gh pr merge 5');
+    assert.equal(merge.code, 2, said(merge));
+    // The switches: YAD_NO_PREAPPROVE drops only this half; YAD_HOOK_DISABLE the whole guard.
+    const off = claude('git status', { YAD_NO_PREAPPROVE: '1' });
+    assert.deepEqual([off.code, off.out], [0, ''], said(off));
+    assert.equal(claude('gh pr merge 5', { YAD_NO_PREAPPROVE: '1' }).code, 2);
+    const disabled = claude('git status', { YAD_HOOK_DISABLE: '1' });
+    assert.deepEqual([disabled.code, disabled.out], [0, ''], said(disabled));
+    // Cursor's answer is the same literal as before.
+    const cursor = runGuard(T, { hook_event_name: 'beforeShellExecution', command: 'git status' });
+    assert.deepEqual(JSON.parse(cursor.out), { permission: 'allow' }, said(cursor));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E167: nothing that creates, prints or changes a secret, token or variable is ever pre-approved', () => {
+  const T = tmp();
+  try {
+    const lines = [];
+    for (const prog of ['gh', 'glab']) {
+      for (const sub of ['secret set X', 'secret list', 'secret delete X', 'variable set X', 'variable list', 'auth token', 'auth login', 'token create', 'ssh-key add k', 'gpg-key add k']) lines.push(`${prog} ${sub}`);
+      for (const p of ['repos/o/r/actions/secrets', 'repos/o/r/actions/secrets/public-key', 'repos/o/r/actions/variables', 'orgs/o/actions/secrets', 'repos/o/r/environments/e/secrets',
+        'projects/1/variables', 'user/keys', 'user/gpg_keys', 'repos/o/r/keys', 'repos/o/r/hooks', 'personal_access_tokens', 'user/installations/1/access_tokens', 'projects/1/access_tokens',
+        'repos/o/r/dependabot/secrets', 'repos/o/r/codespaces/secrets', 'groups/1/variables']) {
+        lines.push(`${prog} api ${p}`, `${prog} api ${p} --paginate`, `${prog} api ${p} | jq .`);
+      }
+    }
+    for (const line of lines) assert.equal(agentGuardPreapproval(line, { cwd: T }).preapproved, false, line);
+    assert.match(PREAPPROVED.never, /secrets, tokens, variables/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

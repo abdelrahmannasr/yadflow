@@ -16,7 +16,10 @@
 // ledger guard). The rules in AGENTS.md are what the agent follows; this catches the plain mistake.
 //
 // FAIL-OPEN, like the ledger guard: a payload it cannot read, or no command in it, is allowed.
-import { classify } from './agent-rules.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { classify, readAllowList } from './agent-rules.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
 
 // A heredoc's `<<` and its end word: bare (`EOF`), quoted (`'EOF'`, `"EOF"`, `E"OF"`) or escaped (`\EOF`). Any
@@ -509,3 +512,254 @@ export function payloadCommand(payload) {
 
 // Cursor's payload names its event; Claude Code's says `PreToolUse`.
 export const isCursorPayload = (payload) => payload?.hook_event_name === 'beforeShellExecution' || typeof payload?.cursor_version === 'string';
+
+// ---------------------------------------------------------------------------------------------------------------
+// PRE-APPROVAL (E167, issue #353). The other half of the guard: a command line it can SEE only reads runs with no
+// permission prompt. Claude Code's allow rules match the start of a command, so `Bash(gh api:*)` would also pass
+// `gh api -X DELETE …`; this reads each word instead. It answers "allow" only when EVERY part of the line is one of
+// the reads below, written in a form it knows; anything else gets no answer, which is the prompt the person had
+// before. So a mistake here, or a hook that fails, costs a prompt, never a write. A team's own `deny` and `ask`
+// rules still win over a hook's "allow" (Claude Code's rule), and `YAD_NO_PREAPPROVE=1` turns this half off.
+//
+// Never pre-approved, whatever the form: a secret, token, variable, key or webhook (the person's, HUMAN_ONLY_ACTS
+// in cli/agent-rules.mjs), GraphQL (a mutation rides the same call as a query), any API call that is not a GET, a
+// file written or a file read from outside the project, a `$(…)`, a `bash -c`, an env prefix, and any program not
+// named here. What it lists is printed by `yad setup` and given to agents by `yad guide --json`.
+export const PREAPPROVED = Object.freeze({
+  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, no --hostname, only an Accept header), not graphql, and no secrets, variables, tokens, keys or hooks in the path',
+  git: 'git log, status, diff, show, rev-parse, ls-files, blame (no -c or other git options before them, no --output, --ext-diff, --textconv, --no-index or --contents)',
+  jq: 'jq (no env or $ENV in the filter; files inside the project)',
+  filters: 'head, tail, wc, grep, cut, uniq, tr, cat (files inside the project)',
+  yad: 'the read-only yad commands of the settings allow list',
+  gates: 'the read-only gates in checks/ (spec-link, contract-check, commit-message, lineage-check, epic-open, reconcile-debt-check, risk-map-check, verified-commits, ledger-guard, member-check), only while the file is the copy this yadflow ships',
+  never: 'secrets, tokens, variables, keys, webhooks, GraphQL, API writes, file writes, $(…), bash -c, env prefixes',
+});
+export const PREAPPROVED_GATES = Object.freeze(['spec-link.sh', 'contract-check.sh', 'commit-message.sh', 'lineage-check.sh', 'epic-open.sh',
+  'reconcile-debt-check.sh', 'risk-map-check.sh', 'verified-commits.sh', 'ledger-guard.sh', 'member-check.mjs']);
+const SHIPPED_CHECKS = fileURLToPath(new URL('../skills/yad-checks/templates/checks/', import.meta.url));
+
+// The line with its harmless redirects blanked out (`2>/dev/null`, `>/dev/null`, `&>/dev/null`, `2>&1`, `>&2`),
+// or null when it has any other: a `>` to a file writes it, a `<` (a file, a heredoc, a here-string) or a
+// process substitution feeds text from somewhere this does not judge. Quotes are respected, so the `>` in
+// `jq '.a > 1'` is text.
+function blankHarmlessRedirects(line) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (ch === '\\' && quote === '"') { out += ch + (line[i + 1] ?? ''); i++; continue; }
+      out += ch;
+      continue;
+    }
+    if (ch === '\\') { out += ch + (line[i + 1] ?? ''); i++; continue; }
+    if (ch === '\'' || ch === '"') { quote = ch; out += ch; continue; }
+    if (ch === '<') return null;
+    if (ch !== '>') { out += ch; continue; }
+    // The fd before it (`2>`) or `&>`: blanked with it.
+    let start = out.length;
+    while (start > 0 && /[0-9&]/.test(out[start - 1])) start--;
+    if (start > 0 && !/[\s;|&]/.test(out[start - 1])) return null;
+    let j = i + 1;
+    if (line[j] === '(') return null;
+    let dup = false;
+    if (line[j] === '>') j++;
+    else if (line[j] === '&') { dup = true; j++; } else if (line[j] === '|') return null;
+    while (line[j] === ' ' || line[j] === '\t') j++;
+    let k = j;
+    while (k < line.length && !/[\s;|&<>()'"`$\\]/.test(line[k])) k++;
+    const target = line.slice(j, k);
+    if (!(dup ? /^[0-9]+$/.test(target) : target === '/dev/null')) return null;
+    out = `${out.slice(0, start)}${' '.repeat(i - start)}${' '.repeat(k - i)}`;
+    i = k - 1;
+  }
+  return quote ? null : out;
+}
+
+// A file named on a command line, read inside the project only: no `~`, no `$`, nothing that resolves (through a
+// link too) outside the project. `at` is `{ cwd, root }`: the word resolves from `cwd` and must land in `root`.
+// `-` is standard input.
+function insideProject(word, at) {
+  if (word === '-') return true;
+  if (!word || /^~|\$/.test(word)) return false;
+  let root;
+  try { root = fs.realpathSync(at.root); } catch { return false; }
+  let full = path.resolve(at.cwd, word);
+  try { full = fs.realpathSync(full); } catch { /* not there yet (or a glob): judged by its spelling */ }
+  const rel = path.relative(root, full);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+// Read a program's arguments against its options: `bool` takes no value, `value` takes one (`-n 5`, `-n5`,
+// `--lines=5`, `--lines 5`), `pairs` takes two (`--arg name value`). Short options may be clustered (`-in`) while
+// they take no value. `numeric` allows `-5` (head, tail). Returns the plain operands, or null for an option it
+// does not know: an unknown option is never guessed at.
+function operandsOf(args, { bool = [], value = [], pairs = [], numeric = false } = {}) {
+  const B = new Set(bool), V = new Set(value), P = new Set(pairs);
+  const ops = [];
+  const values = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') { ops.push(...args.slice(i + 1)); break; }
+    if (a === '-' || !a.startsWith('-')) { ops.push(a); continue; }
+    if (a.startsWith('--')) {
+      const [name, eq] = [a.split('=')[0], a.includes('=')];
+      if (B.has(name) && !eq) continue;
+      if (V.has(name)) { (values[name] ??= []).push(eq ? a.slice(a.indexOf('=') + 1) : args[++i]); if (!eq && i >= args.length) return null; continue; }
+      if (P.has(name) && !eq) { (values[name] ??= []).push([args[i + 1], args[i + 2]]); i += 2; if (i >= args.length) return null; continue; }
+      return null;
+    }
+    if (numeric && /^-[0-9]+$/.test(a)) continue;
+    // A short option or a cluster of them.
+    for (let c = 1; c < a.length; c++) {
+      const o = `-${a[c]}`;
+      if (B.has(o)) continue;
+      if (V.has(o)) {
+        const rest = a.slice(c + 1);
+        (values[o] ??= []).push(rest || args[++i]);
+        if (!rest && i >= args.length) return null;
+        break;
+      }
+      return null;
+    }
+  }
+  return { ops, values };
+}
+
+// The tools a part may run, each judged on its own words (the program name first, bare: `./gh` is a script).
+const FILTERS = {
+  head: { bool: ['-q', '-v', '--quiet', '--silent', '--verbose'], value: ['-n', '-c', '--lines', '--bytes'], numeric: true },
+  tail: { bool: ['-q', '-v', '-r', '--quiet', '--silent', '--verbose'], value: ['-n', '-c', '--lines', '--bytes'], numeric: true },
+  wc: { bool: ['-l', '-w', '-c', '-m', '-L', '--lines', '--words', '--bytes', '--chars', '--max-line-length'] },
+  cut: { bool: ['-s', '-n', '--only-delimited', '--complement'], value: ['-d', '-f', '-c', '-b', '--delimiter', '--fields', '--characters', '--bytes', '--output-delimiter'] },
+  cat: { bool: ['-n', '-b', '-s', '-v', '-e', '-t', '-A', '-E', '-T', '-u', '--number', '--number-nonblank', '--squeeze-blank', '--show-all'] },
+  grep: { bool: ['-i', '-v', '-c', '-n', '-E', '-F', '-G', '-o', '-q', '-w', '-x', '-l', '-L', '-h', '-H', '-s', '-r', '-R', '-z', '-a', '-I',
+    '--ignore-case', '--invert-match', '--count', '--line-number', '--extended-regexp', '--fixed-strings', '--only-matching', '--quiet', '--silent',
+    '--word-regexp', '--line-regexp', '--files-with-matches', '--files-without-match', '--no-filename', '--with-filename', '--recursive', '--color', '--no-messages'],
+  value: ['-e', '-m', '-A', '-B', '-C', '--regexp', '--max-count', '--after-context', '--before-context', '--context', '--include', '--exclude', '--exclude-dir'] },
+};
+function filterPart(prog, args, at) {
+  if (prog === 'uniq') {
+    const r = operandsOf(args, { bool: ['-c', '-d', '-u', '-i', '--count', '--repeated', '--unique', '--ignore-case'] });
+    // A second operand is the file uniq WRITES.
+    return Boolean(r && r.ops.length <= 1 && r.ops.every((f) => insideProject(f, at)));
+  }
+  if (prog === 'tr') {
+    const r = operandsOf(args, { bool: ['-d', '-s', '-c', '-C', '--delete', '--squeeze-repeats', '--complement'] });
+    return Boolean(r && r.ops.length >= 1 && r.ops.length <= 2);
+  }
+  const spec = FILTERS[prog];
+  if (!spec) return false;
+  const r = operandsOf(args, spec);
+  if (!r) return false;
+  // grep's first operand is its pattern, unless one came with -e.
+  const files = prog === 'grep' && !r.values['-e'] && !r.values['--regexp'] ? r.ops.slice(1) : r.ops;
+  if (prog === 'grep' && !r.values['-e'] && !r.values['--regexp'] && !r.ops.length) return false;
+  return files.every((f) => insideProject(f, at));
+}
+
+const JQ_SPEC = { bool: ['-r', '-j', '-c', '-n', '-s', '-e', '-a', '-S', '-C', '-M', '--raw-output', '--join-output', '--compact-output', '--null-input',
+  '--slurp', '--exit-status', '--ascii-output', '--sort-keys', '--color-output', '--monochrome-output', '--tab', '--seq', '--stream', '--raw-output0', '--raw-input', '-R'],
+value: ['--indent', '-f', '--from-file'], pairs: ['--arg', '--argjson', '--slurpfile', '--rawfile'] };
+// `env` and `$ENV` print the environment, where the platform tokens live; `import` and `include` read a file
+// from any path. A filter that only names a field `.env` is caught too: it gets the prompt, which is safe.
+const READS_ENV = /\benv\b|\$ENV\b|\$__prog_args\b|\bimport\b|\binclude\b/;
+function jqPart(args, at) {
+  const r = operandsOf(args, JQ_SPEC);
+  if (!r) return false;
+  const fromFile = [...(r.values['-f'] ?? []), ...(r.values['--from-file'] ?? [])];
+  const filter = fromFile.length ? null : r.ops[0];
+  if (!fromFile.length && filter === undefined) return false;
+  if (filter !== null && READS_ENV.test(filter)) return false;
+  for (const f of fromFile) if (!insideProject(f, at)) return false;
+  for (const [, f] of [...(r.values['--slurpfile'] ?? []), ...(r.values['--rawfile'] ?? [])]) if (!insideProject(f, at)) return false;
+  return (fromFile.length ? r.ops : r.ops.slice(1)).every((f) => insideProject(f, at));
+}
+
+// `gh api` / `glab api`: a GET of a REST path, with only the options that keep it one.
+const API_SPEC = { bool: ['--paginate', '--slurp', '-i', '--include', '--silent', '--verbose'], value: ['-X', '--method', '-H', '--header', '-q', '--jq', '-t', '--template', '--cache', '-p', '--preview'] };
+// Any path segment that names a secret, token, variable, key or hook (`gpg_keys`, `webhooks`, `access_tokens`).
+const NEVER_PATH = /secret|token|variable|key|hook/i;
+function apiPart(prog, args) {
+  const r = operandsOf(args, API_SPEC);
+  if (!r || r.ops.length !== 1) return false;
+  const methods = [...(r.values['-X'] ?? []), ...(r.values['--method'] ?? [])];
+  if (methods.some((m) => String(m).toUpperCase() !== 'GET')) return false;
+  if ([...(r.values['-H'] ?? []), ...(r.values['--header'] ?? [])].some((h) => !/^accept\s*:/i.test(String(h)))) return false;
+  if ([...(r.values['-q'] ?? []), ...(r.values['--jq'] ?? [])].some((q) => READS_ENV.test(String(q)))) return false;
+  const endpoint = r.ops[0];
+  if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(endpoint) || /\$/.test(endpoint)) return false;
+  const bare = endpoint.split(/[?#]/)[0];
+  if (bare.replace(/^\/+/, '') === 'graphql') return false;
+  if (bare.split('/').some((seg) => NEVER_PATH.test(decodeURIComponent(seg)))) return false;
+  return apiMethod([prog, 'api', ...args]) === 'GET';
+}
+
+const GIT_READS = new Set(['log', 'status', 'diff', 'show', 'rev-parse', 'ls-files', 'blame']);
+function gitPart(args) {
+  if (!GIT_READS.has(args[0])) return false;
+  return !args.slice(1).some((a) => /^(--output|--ext-diff|--textconv|--no-index|--contents|--open-files-in-pager)(=|$)/.test(a) || /^-O/.test(a));
+}
+
+// A read gate run from checks/, unchanged from the copy this yadflow ships.
+function gatePart(prog, args, at) {
+  const file = args[0] ?? '';
+  const name = file.replace(/^\.\//, '');
+  const m = /^checks\/([A-Za-z0-9._-]+)$/.exec(name);
+  if (!m || !PREAPPROVED_GATES.includes(m[1])) return false;
+  if (m[1].endsWith('.mjs') ? prog !== 'node' : !(prog === 'bash' || prog === 'sh')) return false;
+  if (!insideProject(name, at)) return false;
+  try {
+    return fs.readFileSync(path.resolve(at.cwd, name)).equals(fs.readFileSync(path.join(SHIPPED_CHECKS, m[1])));
+  } catch { return false; }
+}
+
+function yadPart(args) {
+  const { words } = yadWords(args);
+  const key = words.join(' ');
+  return readAllowList().some((rule) => {
+    const k = rule.slice('Bash(yad '.length, -':*)'.length);
+    return key === k || key.startsWith(`${k} `);
+  });
+}
+
+// What one part of the line is, when it is a read this pre-approves; else null.
+function readKind(words, at) {
+  if (!words.length) return null;
+  const [prog, ...args] = words;
+  // A bare program name: no path (a script that shares a name), no `VAR=value`, no prefix (`env`, `sudo`, …).
+  if (!/^[a-z][a-z0-9_-]*$/.test(prog) || PREFIXES.has(prog)) return null;
+  if ((prog === 'gh' || prog === 'glab') && args[0] === 'api') return apiPart(prog, args.slice(1)) ? `${prog} api GET` : null;
+  if (prog === 'git') return gitPart(args) ? `git ${args[0]}` : null;
+  if (prog === 'jq') return jqPart(args, at) ? 'jq' : null;
+  if (prog === 'yad') return yadPart(args) ? 'a read-only yad command' : null;
+  if (prog === 'bash' || prog === 'sh' || prog === 'node') return gatePart(prog, args, at) ? `the ${args[0].replace(/^\.\/|^checks\//g, '')} gate` : null;
+  return filterPart(prog, args, at) ? prog : null;
+}
+
+// `{ preapproved: true, reason }` when every part of the line is a read named above, else `{ preapproved: false }`.
+// It never judges a refusal: the caller asks `agentGuardDecision` first, and a refused line is never pre-approved.
+// `cwd` is where the line runs (files resolve from it); `root` is the project, and `cwd` must be inside it — an
+// agent that changed to `/` would otherwise make every file "inside".
+export function agentGuardPreapproval(line, { cwd = process.cwd(), root = cwd } = {}) {
+  const no = { preapproved: false };
+  try {
+    if (typeof line !== 'string' || !line.trim() || !agentGuardDecision(line).allow) return no;
+    const at = { cwd: path.resolve(root, cwd), root };
+    if (!insideProject('.', at)) return no;
+    const clean = blankHarmlessRedirects(line);
+    if (clean === null) return no;
+    const parts = shellParts(clean);
+    if (!parts.length || parts.subs.length || clean.includes('`') || /\$\(/.test(clean)) return no;
+    const kinds = [];
+    for (const words of parts) {
+      const kind = readKind(words, at);
+      if (!kind) return no;
+      if (!kinds.includes(kind)) kinds.push(kind);
+    }
+    return { preapproved: true, reason: kinds.join(', ') };
+  } catch {
+    return no;
+  }
+}

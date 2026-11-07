@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { note, readJSON, run } from './lib.mjs';
 import { isVerifiedLedger, mirrorDrift, productConfigPath, HOOK_PROJECT_DIR_ENVS, PROJECT_FILES } from './manifest.mjs';
 import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
-import { agentGuardDecision, payloadCommand, isCursorPayload } from './agent-guard.mjs';
+import { agentGuardDecision, agentGuardPreapproval, payloadCommand, isCursorPayload } from './agent-guard.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -644,6 +644,11 @@ export function runLedgerGuardHook({ paths = [], format = 'exit' } = {}) {
 // `agentGuardDecision`, answered in the protocol the payload names (Cursor's `beforeShellExecution` wants a
 // JSON verdict; Claude Code reads the exit code) unless `--format` says which. `YAD_HOOK_DISABLE` turns it
 // off, as it does the ledger guard. Fail-open: no payload, or no command in it, is allowed.
+//
+// Pre-approval (E167, #353): under Claude Code, a line `agentGuardPreapproval` sees only reads is answered with
+// a PreToolUse "allow" on stdout, so it runs with no permission prompt; any other allowed line gets no answer
+// (exit 0, nothing printed), which leaves the prompt to Claude Code as before. `YAD_NO_PREAPPROVE=1` keeps the
+// refusals and drops this half. Cursor's answer is unchanged.
 export function runAgentGuardHook({ format = null } = {}) {
   const payload = readPayload();
   const cursor = format ? format === 'cursor' : isCursorPayload(payload);
@@ -656,8 +661,20 @@ export function runAgentGuardHook({ format = null } = {}) {
     if (!verdict.allow) console.error(verdict.message);
     return 0;
   }
-  if (verdict.allow) return 0;
+  if (verdict.allow) {
+    if (!process.env.YAD_HOOK_DISABLE && !process.env.YAD_NO_PREAPPROVE) {
+      // Claude Code names the project in CLAUDE_PROJECT_DIR and where the command runs in the payload's `cwd`.
+      const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+      const pre = agentGuardPreapproval(payloadCommand(payload), { root, cwd: typeof payload?.cwd === 'string' && payload.cwd ? payload.cwd : root });
+      if (pre.preapproved) process.stdout.write(`${claudePreapproval(pre.reason)}\n`);
+    }
+    return 0;
+  }
   console.error(verdict.message);
   process.exitCode = 2;
   return 2;
 }
+
+// Claude Code's PreToolUse answer that skips the permission prompt. A team's own `deny` or `ask` rule still wins.
+export const claudePreapproval = (reason) => JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow',
+  permissionDecisionReason: `yad agent guard: a read-only command (${reason}), pre-approved (E167; YAD_NO_PREAPPROVE=1 turns this off)` } });
