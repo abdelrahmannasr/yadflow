@@ -526,13 +526,13 @@ export const isCursorPayload = (payload) => payload?.hook_event_name === 'before
 // file written or a file read from outside the project, a `$(…)`, a `bash -c`, an env prefix, and any program not
 // named here. What it lists is printed by `yad setup` and given to agents by `yad guide --json`.
 export const PREAPPROVED = Object.freeze({
-  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, no --hostname, only an Accept header), not graphql, and no secrets, variables, tokens, keys or hooks in the path',
-  git: 'git log, status, diff, show, rev-parse, ls-files, blame (no -c or other git options before them, no --output, --ext-diff, --textconv, --no-index or --contents)',
-  jq: 'jq (no env or $ENV in the filter; files inside the project)',
-  filters: 'head, tail, wc, grep, cut, uniq, tr, cat (files inside the project)',
+  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, variables, tokens, keys, hooks or e-mails in the path',
+  git: 'git log, status, diff, show, rev-parse, ls-files, blame (no git option before them; no --output, --ext-diff, --textconv, --no-index, --contents, --show-signature or a shortening of one; git still runs what its own config names, such as an external diff or fsmonitor)',
+  jq: 'jq (a filter on the line, never from a file; no env, $ENV, import or include in it; files inside the project)',
+  filters: 'head, tail, wc, grep (not -R), cut, uniq, tr, cat (files inside the project)',
   yad: 'the read-only yad commands of the settings allow list',
   gates: 'the read-only gates in checks/ (spec-link, contract-check, commit-message, lineage-check, epic-open, reconcile-debt-check, risk-map-check, verified-commits, ledger-guard, member-check), only while the file is the copy this yadflow ships',
-  never: 'secrets, tokens, variables, keys, webhooks, GraphQL, API writes, file writes, $(…), bash -c, env prefixes',
+  never: 'secrets, tokens, variables, keys, webhooks, GraphQL, API writes, file writes, $ (variables) outside single quotes, braces, globs, ~, $(…), bash -c, env prefixes',
 });
 export const PREAPPROVED_GATES = Object.freeze(['spec-link.sh', 'contract-check.sh', 'commit-message.sh', 'lineage-check.sh', 'epic-open.sh',
   'reconcile-debt-check.sh', 'risk-map-check.sh', 'verified-commits.sh', 'ledger-guard.sh', 'member-check.mjs']);
@@ -541,7 +541,10 @@ const SHIPPED_CHECKS = fileURLToPath(new URL('../skills/yad-checks/templates/che
 // The line with its harmless redirects blanked out (`2>/dev/null`, `>/dev/null`, `&>/dev/null`, `2>&1`, `>&2`),
 // or null when it has any other: a `>` to a file writes it, a `<` (a file, a heredoc, a here-string) or a
 // process substitution feeds text from somewhere this does not judge. Quotes are respected, so the `>` in
-// `jq '.a > 1'` is text.
+// `jq '.a > 1'` is text. Null too for anything the shell EXPANDS before the program sees it, because the words
+// judged here would not be the words run: a `$` outside single quotes (`"$GH_TOKEN"`, `${HOME}`, `$((…))`), and,
+// unquoted, a brace (`{~/.ssh/id_rsa,x}`), a glob (`*`, `?`, `[`, which can reach a link out of the project) or a
+// `~` that starts a word.
 function blankHarmlessRedirects(line) {
   let out = '';
   let quote = null;
@@ -549,12 +552,15 @@ function blankHarmlessRedirects(line) {
     const ch = line[i];
     if (quote) {
       if (ch === quote) quote = null;
+      else if (quote === '"' && (ch === '$' || ch === '`')) return null;
       else if (ch === '\\' && quote === '"') { out += ch + (line[i + 1] ?? ''); i++; continue; }
       out += ch;
       continue;
     }
     if (ch === '\\') { out += ch + (line[i + 1] ?? ''); i++; continue; }
     if (ch === '\'' || ch === '"') { quote = ch; out += ch; continue; }
+    if (ch === '$' || ch === '{' || ch === '}' || ch === '*' || ch === '?' || ch === '[') return null;
+    if (ch === '~' && (i === 0 || /[\s=:;|&(]/.test(line[i - 1]))) return null;
     if (ch === '<') return null;
     if (ch !== '>') { out += ch; continue; }
     // The fd before it (`2>`) or `&>`: blanked with it.
@@ -571,6 +577,8 @@ function blankHarmlessRedirects(line) {
     while (k < line.length && !/[\s;|&<>()'"`$\\]/.test(line[k])) k++;
     const target = line.slice(j, k);
     if (!(dup ? /^[0-9]+$/.test(target) : target === '/dev/null')) return null;
+    // The target ends the word: `2>/dev/null"x"` writes to `/dev/nullx`.
+    if (k < line.length && !/[\s;|&)]/.test(line[k])) return null;
     out = `${out.slice(0, start)}${' '.repeat(i - start)}${' '.repeat(k - i)}`;
     i = k - 1;
   }
@@ -634,9 +642,10 @@ const FILTERS = {
   wc: { bool: ['-l', '-w', '-c', '-m', '-L', '--lines', '--words', '--bytes', '--chars', '--max-line-length'] },
   cut: { bool: ['-s', '-n', '--only-delimited', '--complement'], value: ['-d', '-f', '-c', '-b', '--delimiter', '--fields', '--characters', '--bytes', '--output-delimiter'] },
   cat: { bool: ['-n', '-b', '-s', '-v', '-e', '-t', '-A', '-E', '-T', '-u', '--number', '--number-nonblank', '--squeeze-blank', '--show-all'] },
-  grep: { bool: ['-i', '-v', '-c', '-n', '-E', '-F', '-G', '-o', '-q', '-w', '-x', '-l', '-L', '-h', '-H', '-s', '-r', '-R', '-z', '-a', '-I',
+  grep: { bool: ['-i', '-v', '-c', '-n', '-E', '-F', '-G', '-o', '-q', '-w', '-x', '-l', '-L', '-h', '-H', '-s', '-r', '-z', '-a', '-I',
     '--ignore-case', '--invert-match', '--count', '--line-number', '--extended-regexp', '--fixed-strings', '--only-matching', '--quiet', '--silent',
     '--word-regexp', '--line-regexp', '--files-with-matches', '--files-without-match', '--no-filename', '--with-filename', '--recursive', '--color', '--no-messages'],
+  // Not -R / --dereference-recursive: it follows every link under the folder, out of the project too.
   value: ['-e', '-m', '-A', '-B', '-C', '--regexp', '--max-count', '--after-context', '--before-context', '--context', '--include', '--exclude', '--exclude-dir'] },
 };
 function filterPart(prog, args, at) {
@@ -661,26 +670,26 @@ function filterPart(prog, args, at) {
 
 const JQ_SPEC = { bool: ['-r', '-j', '-c', '-n', '-s', '-e', '-a', '-S', '-C', '-M', '--raw-output', '--join-output', '--compact-output', '--null-input',
   '--slurp', '--exit-status', '--ascii-output', '--sort-keys', '--color-output', '--monochrome-output', '--tab', '--seq', '--stream', '--raw-output0', '--raw-input', '-R'],
-value: ['--indent', '-f', '--from-file'], pairs: ['--arg', '--argjson', '--slurpfile', '--rawfile'] };
+// Not -f / --from-file: the filter would come from a file this does not read (it could hold `env`); not -L.
+value: ['--indent'], pairs: ['--arg', '--argjson', '--slurpfile', '--rawfile'] };
 // `env` and `$ENV` print the environment, where the platform tokens live; `import` and `include` read a file
 // from any path. A filter that only names a field `.env` is caught too: it gets the prompt, which is safe.
 const READS_ENV = /\benv\b|\$ENV\b|\$__prog_args\b|\bimport\b|\binclude\b/;
 function jqPart(args, at) {
   const r = operandsOf(args, JQ_SPEC);
   if (!r) return false;
-  const fromFile = [...(r.values['-f'] ?? []), ...(r.values['--from-file'] ?? [])];
-  const filter = fromFile.length ? null : r.ops[0];
-  if (!fromFile.length && filter === undefined) return false;
-  if (filter !== null && READS_ENV.test(filter)) return false;
-  for (const f of fromFile) if (!insideProject(f, at)) return false;
+  const filter = r.ops[0];
+  if (filter === undefined || READS_ENV.test(filter)) return false;
   for (const [, f] of [...(r.values['--slurpfile'] ?? []), ...(r.values['--rawfile'] ?? [])]) if (!insideProject(f, at)) return false;
-  return (fromFile.length ? r.ops : r.ops.slice(1)).every((f) => insideProject(f, at));
+  return r.ops.slice(1).every((f) => insideProject(f, at));
 }
 
 // `gh api` / `glab api`: a GET of a REST path, with only the options that keep it one.
-const API_SPEC = { bool: ['--paginate', '--slurp', '-i', '--include', '--silent', '--verbose'], value: ['-X', '--method', '-H', '--header', '-q', '--jq', '-t', '--template', '--cache', '-p', '--preview'] };
-// Any path segment that names a secret, token, variable, key or hook (`gpg_keys`, `webhooks`, `access_tokens`).
-const NEVER_PATH = /secret|token|variable|key|hook/i;
+const API_SPEC = { bool: ['--paginate', '--slurp', '-i', '--include', '--silent', '--verbose'], value: ['-X', '--method', '-H', '--header', '-q', '--jq', '-t', '--template', '-p', '--preview'] };
+// (Not --cache: it writes gh's cache files, outside the project.)
+// Any path segment that names a secret, token, variable, key or hook (`gpg_keys`, `webhooks`, `access_tokens`),
+// or a person's e-mail addresses.
+const NEVER_PATH = /secret|token|variable|key|hook|email/i;
 function apiPart(prog, args) {
   const r = operandsOf(args, API_SPEC);
   if (!r || r.ops.length !== 1) return false;
@@ -697,9 +706,22 @@ function apiPart(prog, args) {
 }
 
 const GIT_READS = new Set(['log', 'status', 'diff', 'show', 'rev-parse', 'ls-files', 'blame']);
+// The options that write a file, read one from anywhere, or run a program. git accepts any unique shortening of a
+// long option in some commands (`git blame --conten=/etc/hosts` is `--contents`), so a long option is refused
+// when it is a prefix of one of these, not only when it equals one. The short ones: blame's `-S <file>`,
+// ls-files' `-X <file>`, diff's `-O<file>`, in any cluster.
+const GIT_RISKY = ['--output', '--output-directory', '--ext-diff', '--textconv', '--no-index', '--contents', '--open-files-in-pager', '--ignore-revs-file',
+  '--exclude-from', '--exclude-per-directory', '--pathspec-from-file', '--orderfile', '--show-signature', '--rotate-to', '--skip-to'];
 function gitPart(args) {
   if (!GIT_READS.has(args[0])) return false;
-  return !args.slice(1).some((a) => /^(--output|--ext-diff|--textconv|--no-index|--contents|--open-files-in-pager)(=|$)/.test(a) || /^-O/.test(a));
+  for (const a of args.slice(1)) {
+    if (a === '--') break;
+    if (a.startsWith('--')) {
+      const name = a.split('=')[0];
+      if (name.length > 2 && GIT_RISKY.some((r) => r.startsWith(name))) return false;
+    } else if (/^-[A-Za-z]*[SXO]/.test(a)) return false;
+  }
+  return true;
 }
 
 // A read gate run from checks/, unchanged from the copy this yadflow ships.
@@ -716,7 +738,9 @@ function gatePart(prog, args, at) {
 }
 
 function yadPart(args) {
-  const { words } = yadWords(args);
+  const { words, flags } = yadWords(args);
+  // yad's own reading of the words and flags must be a read too (`check --fix` is not, whatever the prefix).
+  if (classify(words, flags) !== 'read') return false;
   const key = words.join(' ');
   return readAllowList().some((rule) => {
     const k = rule.slice('Bash(yad '.length, -':*)'.length);

@@ -1072,7 +1072,7 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       "gh api repos/o/r/pulls | jq '.[0].number'",
       'git log --oneline -5', 'git status --porcelain', 'git diff main...HEAD', 'git show HEAD:package.json', 'git rev-parse HEAD', 'git ls-files', 'git blame a.json',
       'git status 2>/dev/null', 'git log 2>&1 | head -n 3', 'git diff >/dev/null',
-      'jq . a.json', "jq -r '.a > 1' a.json", 'jq --arg x y -n "$x"',
+      'jq . a.json', "jq -r '.a > 1' a.json", "jq --arg x y -n '$x'", "git log -- '*.mjs'", 'git log -n5 -p', 'git blame -L 1,2 a.json',
       'cat a.json', 'head -5 a.json', 'tail -n 2 a.json', 'wc -l a.json', 'grep -rn foo src/', 'grep -e foo a.json', 'git log | cut -d" " -f1 | uniq -c | tr a-z A-Z',
       'yad status --json | jq .x', 'yad gate status EP-a', 'yad doctor && git status',
     ]) yes(line);
@@ -1092,6 +1092,13 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'echo $(gh api repos/x)', 'git log `echo x`', 'bash -c "git log"', 'GH_HOST=x gh api repos/x', 'env gh api repos/x', 'sudo cat a.json', './gh api repos/x',
       '/usr/bin/git log', '(git log)', 'tail -f a.json', 'git log && rm -rf src', 'git log; curl https://x', 'yad gate approve EP-a epic', 'yad check --fix', 'npx yad status',
       'bash checks/build-test-lint.sh', 'bash checks/install-deps.sh', 'bash checks/product-checkout.sh', '', '   ',
+      // Review 1: what the shell expands before the program runs is never judged as written.
+      'cat {~/.ssh/id_rsa,a.json}', 'cat {/etc/passwd,a.json}', 'grep -r x {/etc,.}', 'jq -n --arg t "$GH_TOKEN" \'$t\'', 'jq --arg x y -n "$x"',
+      'jq -n "\\"${HOME}\\""', 'gh api user --jq "\\"$GH_TOKEN\\""', 'head -n "$X" a.json', 'head -n $X a.json', 'cut -d "$X" -f1 a.json', 'cat ~/x', 'cat x ~/y',
+      'cat a.*', 'cat a.jso?', 'cat [a]', 'grep -R x .', 'grep --dereference-recursive x .', 'jq -nf x.jq', 'jq --from-file x.jq a.json', 'gh api user --cache 1h',
+      'gh api user/emails', 'git blame --conten=/etc/hosts a.json', 'git blame --contents=/etc/hosts a.json', 'git blame -S revs a.json', 'git ls-files -X ex',
+      'git diff -O/etc/order', 'git log --show-signature', 'git log --show-sig', 'git log --outp=x', 'git diff --no-ind /etc/a b', 'cat a.json 2>/dev/null"x"',
+      'yad check --fix', 'yad dial EP-a implement --to auto',
     ]) no(line);
     // A refusal always wins: a refused line is never pre-approved.
     assert.equal(agentGuardDecision('git log && gh pr merge 5').allow, false);
@@ -1101,6 +1108,7 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
     // A link that leaves the project is outside it.
     fs.symlinkSync('/etc/hosts', path.join(T, 'hosts'));
     no('cat hosts');
+    no('cat host*'); no('cat host?');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
