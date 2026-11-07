@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# A newer push to the same pull request cancels its older run (#428). A push to main never cancels or waits:
+# each merge's run is the record that main was green at that commit, so its group is the commit itself (a
+# shared group would still cancel a run left waiting in it, even without cancel-in-progress).
+concurrency:
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
