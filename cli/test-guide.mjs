@@ -1265,3 +1265,10 @@ test('E158b cases 8 and 10 through yad itself: --push stages the script, never t
     assert.equal(after.hooks?.PreToolUse, undefined);
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
+
+test('E167 (#353): yad guide --json hands agents what the agent guard pre-approves', async () => {
+  const { PREAPPROVED } = await import('./agent-guard.mjs');
+  const g = buildGuide(null, { cwd: os.tmpdir() });
+  assert.deepEqual(g.preapproved, PREAPPROVED);
+  assert.match(g.preapproved.never, /secrets, tokens/);
+});

@@ -32,6 +32,7 @@ import { RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor, reaches } from './agen
 import { seededSlugs } from './hook.mjs';
 import { setupQuestions } from './setup.mjs';
 import { reposBeside, insideGitRepo, PRODUCT_DIR } from './workspace.mjs';
+import { PREAPPROVED } from './agent-guard.mjs';
 
 export const GUIDE_VERSION = 1;
 
@@ -422,7 +423,8 @@ const thenFor = (person, epic) => (person.some((p) => p.verify)
 // Build the guide. `root` is the Product, or null when there is none here. `cwd` is where the agent is.
 // `productElsewhere`: no Product here, but one is a `cd` away (bin/yad.mjs finds it).
 export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), runner, productElsewhere = null } = {}) {
-  const base = { guideVersion: GUIDE_VERSION, rules: RULES, humanOnly: HUMAN_ONLY_ACTS, never: NEVER };
+  // `preapproved` (E167): what the agent guard lets run with no permission prompt, and what it never does.
+  const base = { guideVersion: GUIDE_VERSION, rules: RULES, humanOnly: HUMAN_ONLY_ACTS, never: NEVER, preapproved: PREAPPROVED };
   if (!root && productElsewhere) {
     const where = clean(productElsewhere);
     const q = shellPath(where);
