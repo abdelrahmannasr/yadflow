@@ -73,11 +73,13 @@ yad-gate-sync:
     # npm's download cache lives in the clone, where GitLab's cache can keep it (#434): npx fetched the
     # whole CLI on every run. gate ci stages only its own ledger paths, so this folder is never committed.
     npm_config_cache: $CI_PROJECT_DIR/.npm
-  # Keyed on the pin file, so a new pin starts a new cache. Only the downloads (_cacache, each file checked
-  # against the registry's checksum before use), never npx's installed tree (_npx), which runs unchecked.
+  # Keyed on every pin source (YAD_VERSION, and the two pin files), so a new pin starts a new cache. Only
+  # the downloads (_cacache; npm checks each one's integrity hash), never npx's installed tree (_npx),
+  # which it runs as it is. (A Product with only the older hub.json shares the key until that file goes.)
   cache:
     key:
-      files: [.sdlc/cli-version.json]
+      prefix: yad-npx-$YAD_VERSION
+      files: [.sdlc/cli-version.json, .sdlc/product.json]
     paths: [.npm/_cacache/]
   rules:
     # Merge path: branch pipeline on the default branch whose merge commit names a review branch.

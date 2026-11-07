@@ -135,9 +135,9 @@ jobs:
           # <<< yad-pin
           echo "YAD_PKG=${YAD_PKG}" >> "$GITHUB_ENV"
       # Keep npm's download cache between runs (#434): npx fetched the whole CLI on every run. Only the
-      # downloads (_cacache, each file checked against the registry's checksum before use) — never npx's
-      # installed tree (_npx), which runs unchecked in a job that can push. The key is the resolved pin,
-      # with no restore-keys, so a new pin starts a new cache and never loads another key's entry.
+      # downloads (_cacache; npm checks each one's integrity hash) — never npx's installed tree (_npx),
+      # which it runs as it is in a job that can push. The key is the resolved pin, with no restore-keys:
+      # a new pin starts a new cache, and no entry another key or branch wrote is ever loaded.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.npm/_cacache
@@ -227,9 +227,9 @@ jobs:
           # <<< yad-pin
           echo "YAD_PKG=${YAD_PKG}" >> "$GITHUB_ENV"
       # Keep npm's download cache between runs (#434): npx fetched the whole CLI on every run. Only the
-      # downloads (_cacache, each file checked against the registry's checksum before use) — never npx's
-      # installed tree (_npx), which runs unchecked in a job that can push. The key is the resolved pin,
-      # with no restore-keys, so a new pin starts a new cache and never loads another key's entry.
+      # downloads (_cacache; npm checks each one's integrity hash) — never npx's installed tree (_npx),
+      # which it runs as it is in a job that can push. The key is the resolved pin, with no restore-keys:
+      # a new pin starts a new cache, and no entry another key or branch wrote is ever loaded.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.npm/_cacache
@@ -239,10 +239,9 @@ jobs:
           git config user.name  "yad-gate-sync[bot]"
           git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
           # A stuck merged review is always recent; window generously and let `gate ci` no-op the rest.
-          # Page the search fully (GitHub's search stops at 1000 results; 7 days stays far below that) so a
-          # stuck PR is never missed for volume. One
-          # paginated GraphQL search returns each PR's number AND branch (#434: it was one `gh pr view`
-          # call per merged PR). Aggregate failures and exit nonzero so a persistent API/push failure
+          # Page the search fully (GitHub's search stops at 1000 results; 7 days stays far below that) so
+          # a stuck PR is never missed for volume. One paginated GraphQL search returns each PR's number
+          # AND branch (#434: it was one `gh pr view` call per merged PR). Aggregate failures and exit nonzero so a persistent API/push failure
           # surfaces (red run) instead of silently stranding a merged gate behind a green safety-net.
           # Read from a file, not a pipe, so the failure flag survives (a piped `while` runs in a subshell).
           SINCE="$(date -u -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-7d +%Y-%m-%d)"

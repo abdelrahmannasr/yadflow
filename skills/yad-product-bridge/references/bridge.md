@@ -242,11 +242,15 @@ so anything that is not an exact release of this major is skipped, loudly, in fa
 **The download is cached (#434).** `npx` fetched the whole CLI on every run. npm's download cache is now
 kept between runs: on GitHub each job restores `~/.npm/_cacache` right after it resolves the pin, under the
 key `yad-npx-<os>-<pin>` with no fallback key; on GitLab the job sets `npm_config_cache` to
-`$CI_PROJECT_DIR/.npm` and keeps `.npm/_cacache/`, keyed on `.sdlc/cli-version.json`. A new pin starts a new
-cache. Only the downloads are kept — npm checks each against the registry's checksum before use — never the
-tree `npx` installed (`_npx`), which it would run unchecked in a job that can push. The folder is never
+`$CI_PROJECT_DIR/.npm` and keeps `.npm/_cacache/`, keyed on every pin source (`YAD_VERSION` as the key's
+prefix, plus `.sdlc/cli-version.json` and `.sdlc/product.json`). A new pin starts a new cache. Only the
+downloads are kept (npm checks each one's integrity hash), never the tree `npx` installed (`_npx`), which it
+would run as it is in a job that can push. What keeps a planted entry out is that no other key or branch's
+entry is ever loaded: GitHub keeps each branch's cache apart and there is no fallback key; on GitLab keep the
+default "separate caches for protected branches" setting on. The folder is never
 committed: `gate ci` stages only its own ledger paths. A Product that floats on the bare major (no pin
-resolves) keeps one key, so a newer release is downloaded each run, as before.
+resolves) keeps one key, and GitHub never re-saves a key it already holds, so the cached copy goes stale and a
+newer release is downloaded each run, as before.
 
 **The sweep lists merged PRs in one search (#434).** On GitHub the reconcile job asks one paginated GraphQL
 search for every PR merged in the last 7 days, with its number and branch, and runs `gate ci` only for the

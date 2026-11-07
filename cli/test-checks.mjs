@@ -5974,8 +5974,9 @@ test('#434 gate-sync reconcile: one paginated search gives number + branch; only
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-// #434: npx fetched the whole CLI on every gate-sync run. Both GitHub jobs keep ~/.npm, keyed on the pin the
-// job resolved (set in GITHUB_ENV by the step before); the GitLab job keeps it in the clone, keyed on the pin file.
+// #434: npx fetched the whole CLI on every gate-sync run. Both GitHub jobs keep ~/.npm/_cacache, keyed on the
+// pin the job resolved (set in GITHUB_ENV by the step before); the GitLab job keeps it in the clone, keyed on
+// every pin source (YAD_VERSION and the two pin files).
 test('#434 gate-sync: npm download cache on every job, keyed on the pin', () => {
   const gh = fs.readFileSync(GATE_SYNC_GITHUB, 'utf8');
   // Only the checked downloads (_cacache), never npx's installed tree, and no restore-keys: a job that can push
@@ -5985,7 +5986,7 @@ test('#434 gate-sync: npm download cache on every job, keyed on the pin', () => 
   assert.doesNotMatch(gh, /^\s+restore-keys:/m, 'no fallback key');
   const gl = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8');
   assert.match(gl, /\n {4}npm_config_cache: \$CI_PROJECT_DIR\/\.npm\n/);
-  assert.match(gl, /\n {2}cache:\n {4}key:\n {6}files: \[\.sdlc\/cli-version\.json\]\n {4}paths: \[\.npm\/_cacache\/\]\n/);
+  assert.match(gl, /\n {2}cache:\n {4}key:\n {6}prefix: yad-npx-\$YAD_VERSION\n {6}files: \[\.sdlc\/cli-version\.json, \.sdlc\/product\.json\]\n {4}paths: \[\.npm\/_cacache\/\]\n/);
 });
 
 // Issue #327: on GitLab the runner installs LFS git hooks into an LFS Product's clone, and node:20 has
