@@ -672,7 +672,8 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.match(github, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(github, /run:\s*npm ci/, 'GitHub must not override the consumer package manager');
   // Dependency caching survived the move off setup-node's npm-only `cache:` and now covers pnpm too.
-  const cacheStep = github.match(/uses: actions\/cache@[0-9a-f]{40} # v4\.3\.0\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
+  const cacheStep = github.match(/uses: actions\/cache@[0-9a-f]{40} # v\d+(?:\.\d+)*\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
+  assert.ok(cacheStep, 'found the actions/cache step');
   assert.match(cacheStep, /~\/\.npm/, 'npm cache dir');
   assert.match(cacheStep, /pnpm\/store/, 'pnpm store dir');
   assert.match(cacheStep, /\$\{\{ env\.COREPACK_HOME \}\}/, 'corepack home cached too');
@@ -13309,7 +13310,7 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
   // the repo moved to v7). Dependabot bumps only .github/workflows, so this is what makes a bump there fail
   // until the templates and pagesWorkflow get the same pin.
   const pins = new Map();
-  const usedBy = new Map(); // action → the files that use it
+  const usedBy = new Map(); // action → the set of files that use it
   for (const [name, text] of files) {
     // The block runs to the next line that starts at column 0 (a blank line inside it does not end it).
     const top = text.match(/^permissions:(.*)(\n(?:[ \t].*|)(?=\n|$))*/m);
@@ -13321,7 +13322,7 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
       assert.ok(m, `${name}: ${ref} is pinned by hash with a version comment`);
       const key = m[1];
       if (!pins.has(key)) pins.set(key, [m[2], name]);
-      usedBy.set(key, [...(usedBy.get(key) || []), name]);
+      usedBy.set(key, (usedBy.get(key) || new Set()).add(name));
       assert.equal(m[2], pins.get(key)[0], `${name}: ${key} has the same pin as ${pins.get(key)[1]}`);
     }
     // Each job, from the `jobs:` block only; a key line may carry quotes or a trailing comment.
@@ -13346,19 +13347,23 @@ test('every GitHub workflow yadflow ships or runs pins actions by hash and sets 
   // also used in .github/workflows. One no workflow here runs belongs in action-pins.yml, which never runs.
   const repo = (n) => n.startsWith('.github/workflows/');
   for (const [action, names] of usedBy) {
-    assert.ok(names.some(repo), `${action} (used by ${names.join(', ')}) is in no .github/workflows file — add it to .github/workflows/action-pins.yml`);
+    assert.ok([...names].some(repo), `${action} (used by ${[...names].join(', ')}) is in no .github/workflows file — add it to .github/workflows/action-pins.yml`);
   }
+  // The pins file is needed only while some action is used by a template alone: delete it when it empties.
   const PINS = '.github/workflows/action-pins.yml';
-  const pinned = [...usedBy].filter(([, names]) => names.includes(PINS)).map(([a]) => a);
-  assert.ok(pinned.length >= 1, `${PINS} lists the template-only actions`);
-  for (const action of pinned) {
-    assert.ok(usedBy.get(action).some((n) => !repo(n)), `${PINS}: ${action} is used by no template — remove it`);
-    assert.ok(usedBy.get(action).filter(repo).length === 1, `${PINS}: ${action} is used by another workflow here already — remove it`);
+  if (fs.existsSync(path.join(ROOT, PINS))) {
+    const pinned = [...usedBy].filter(([, names]) => names.has(PINS)).map(([a]) => a);
+    assert.ok(pinned.length >= 1, `${PINS} lists no action — delete the file`);
+    for (const action of pinned) {
+      const names = [...usedBy.get(action)];
+      assert.ok(names.some((n) => !repo(n)), `${PINS}: ${action} is used by no template — remove it`);
+      assert.equal(names.filter(repo).length, 1, `${PINS}: ${action} is used by another workflow here already — remove it`);
+    }
+    // The pins file can never run, and holds no token.
+    const pinsText = fs.readFileSync(path.join(ROOT, PINS), 'utf8');
+    assert.match(pinsText, /^on:\n {2}workflow_dispatch:\n\npermissions: \{\}\n/m, `${PINS}: manual trigger only, no token`);
+    assert.match(pinsText, /^ {4}if: false$/m, `${PINS}: its job never runs`);
   }
-  // The pins file can never run, and holds no token.
-  const pinsText = fs.readFileSync(path.join(ROOT, PINS), 'utf8');
-  assert.match(pinsText, /^on:\n {2}workflow_dispatch:\n\npermissions: \{\}\n/m, `${PINS}: manual trigger only, no token`);
-  assert.match(pinsText, /^ {4}if: false$/m, `${PINS}: its job never runs`);
   // This repo's own installed copy of a template is the template, byte for byte.
   assert.equal(fs.readFileSync(path.join(ROOT, '.github/workflows/yad-verified-commits.yml'), 'utf8'),
     fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-verified-commits.yml'), 'utf8'), 'the installed yad-verified-commits.yml is its template');
