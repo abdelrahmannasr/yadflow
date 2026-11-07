@@ -716,9 +716,7 @@ The gates run identically under either CI; the config just invokes the scripts w
   range. Its `node:${YAD_NODE_VERSION}` image defaults to `22` and a project/group CI/CD variable may
   override it without editing the managed fragment. Those three variables sit on the `.sdlc_mr_only`
   anchor, not the fragment's top-level `variables:` — an included top-level block merges into the host
-  pipeline's globals, where `NX_BASE`/`NX_HEAD` could collide with a host's own Nx setup. The retained greenfield standalone template
-  (`templates/gitlab/.gitlab-ci.yml`) carries the same Node default, exact Nx range, and dependency
-  installer and test-worker-cap semantics. All `--profile code`.
+  pipeline's globals, where `NX_BASE`/`NX_HEAD` could collide with a host's own Nx setup. All `--profile code`.
 
 ### Checking the Product out in CI (E120)
 

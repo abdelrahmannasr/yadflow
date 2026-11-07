@@ -660,7 +660,6 @@ test('#425 doctor: a gate workflow that still starts on `edited` is checks:edit-
 test('yad-checks CI: dependency install follows package.json and Nx receives the exact PR range', () => {
   const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
-  const gitlabStandalone = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/.gitlab-ci.yml'), 'utf8');
   // #426: no partial clone — the base-copy step reads the base's checks/, which a blob-less clone leaves out
   // when the PR changed them, and no credentials are kept to fetch them later.
   assert.doesNotMatch(github.replace(/^\s*#.*$/gm, ''), /filter:\s*blob:none/, 'no partial clone of the PR');
@@ -687,14 +686,6 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.doesNotMatch(gitlab, /image:\s*node:20/, 'GitLab build-test-lint must not hard-pin Node 20');
   assert.match(gitlab, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
   assert.doesNotMatch(gitlab, /^\s*- npm ci/m, 'GitLab must use the same package-manager-aware installer');
-  assert.match(gitlabStandalone, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
-  assert.match(gitlabStandalone, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
-  assert.match(gitlabStandalone, /YAD_NODE_VERSION:\s*["']22["']/);
-  assert.match(gitlabStandalone, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
-  assert.doesNotMatch(gitlabStandalone, /image:\s*node:20/, 'standalone GitLab must not hard-pin Node 20');
-  assert.match(gitlabStandalone, /bash "\$YAD_CHECKS\/install-deps\.sh"/);
-  assert.doesNotMatch(gitlabStandalone, /^\s*- npm ci/m, 'standalone GitLab must use the package-manager-aware installer');
-  assert.match(gitlabStandalone, /YAD_TEST_MAX_WORKERS:\s*["']2["']/);
 
   // The includable fragment's top-level `variables:` merges into the HOST pipeline's globals, so the
   // gate jobs' own variables live on the .sdlc_mr_only anchor, not there. Only GIT_DEPTH is global.
@@ -1497,12 +1488,18 @@ const GITLAB_IMAGE_FRAGMENTS = [
   'skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml',
   'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml',
   'skills/yad-checks/templates/gitlab/yad-product-checks.gitlab-ci.yml',
-  'skills/yad-checks/templates/gitlab/.gitlab-ci.yml',
   'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml',
 ];
 
 // Every GitLab fragment that runs a docker-image job must carry `tags: [$YAD_RUNNER_TAGS]` so a
 // tag-locked instance can route it (issue #50). Guards against a future revert dropping the tag.
+// #434: the old standalone root `.gitlab-ci.yml` (4 of the 11 gates, installed by nothing) is gone. A new GitLab
+// repo gets gitlab-ci.include-root.yml plus the fragments, which carry every gate.
+test('#434: the old standalone GitLab template is not shipped', () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/.gitlab-ci.yml')));
+  assert.ok(fs.existsSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/gitlab-ci.include-root.yml')));
+});
+
 test('gitlab fragments declare tags: [$YAD_RUNNER_TAGS] on their docker jobs', () => {
   for (const rel of GITLAB_IMAGE_FRAGMENTS) {
     const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');

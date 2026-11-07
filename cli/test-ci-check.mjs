@@ -698,7 +698,7 @@ const GATE_TEMPLATES = [
   ...['yad-checks.yml', 'yad-pr-text.yml', 'yad-product-checks.yml', 'yad-product-pr-text.yml', 'yad-verified-commits.yml']
     .map((f) => ({ name: `skills/yad-checks/templates/github/${f}`, gitlab: false })),
   { name: '.github/workflows/yad-verified-commits.yml', gitlab: false },
-  ...['yad-checks.gitlab-ci.yml', 'yad-product-checks.gitlab-ci.yml', 'yad-verified-commits.gitlab-ci.yml', '.gitlab-ci.yml']
+  ...['yad-checks.gitlab-ci.yml', 'yad-product-checks.gitlab-ci.yml', 'yad-verified-commits.gitlab-ci.yml']
     .map((f) => ({ name: `skills/yad-checks/templates/gitlab/${f}`, gitlab: true })),
 ].map((f) => ({ ...f, text: fs.readFileSync(path.join(ROOT, f.name), 'utf8') }));
 const noComments = (t) => t.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
@@ -859,7 +859,7 @@ test('#426 step: a base with no checks/ runs the PR\'s copies with one note; an 
 test('#426 step (GitLab): the script\'s first line exports YAD_CHECKS to the rest of it, with the same rules', () => {
   const { T, P, done } = stepRepo();
   try {
-    for (const f of ['yad-checks.gitlab-ci.yml', 'yad-product-checks.gitlab-ci.yml', 'yad-verified-commits.gitlab-ci.yml', '.gitlab-ci.yml']) {
+    for (const f of ['yad-checks.gitlab-ci.yml', 'yad-product-checks.gitlab-ci.yml', 'yad-verified-commits.gitlab-ci.yml']) {
       const step = gitlabStep(fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab', f), 'utf8'));
       // GitLab runs a job's script lines in one shell, with errexit on.
       const r = spawnSync('bash', ['-c', `set -eo pipefail\n${step}\nbash "$YAD_CHECKS/a.sh"; bash "$YAD_CHECKS/b c.sh"`], { cwd: P, encoding: 'utf8', env: env({ CI_MERGE_REQUEST_TARGET_BRANCH_NAME: 'main', TMPDIR: T }) });
@@ -961,7 +961,7 @@ test('#428: the PR gate files cancel their older run; the update guard, gate-syn
     }
   }
   assert.equal(gh, 6, 'GitHub gate files read');
-  assert.equal(gl, 21, 'GitLab gate jobs read');
+  assert.equal(gl, 17, 'GitLab gate jobs read'); // 21 before #434 removed the old standalone template's 4
   for (const f of ['skills/yad-checks/templates/github/yad-update-guard.yml', 'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml',
     'skills/yad-product-bridge/templates/github/yad-gate-sync.yml', 'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml']) {
     const text = noComments(fs.readFileSync(path.join(ROOT, f), 'utf8'));
